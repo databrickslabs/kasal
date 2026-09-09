@@ -8,15 +8,14 @@ import os
 from datetime import datetime
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.config.settings import settings
-from src.dependencies.providers import GroupContextDep, LocalSessionDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
-from src.core.permissions import check_role_in_context
 from src.dependencies.admin_auth import require_system_admin
+from src.dependencies.providers import GroupContextDep, LocalSessionDep, SessionDep
 from src.schemas.database_management import (
     DatabaseInfoResponse,
     ExportRequest,
@@ -393,7 +392,7 @@ async def debug_permissions(
                 manage_users = []
                 for acl_entry in response_data.get("access_control_list", []):
                     user_name = acl_entry.get("user_name")
-                    group_name = acl_entry.get("group_name")
+                    acl_entry.get("group_name")
                     permissions = acl_entry.get("all_permissions", [])
 
                     if user_name:

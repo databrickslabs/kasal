@@ -5,7 +5,7 @@ Targets uncovered lines (68% → 85%+).
 """
 
 import os
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -358,7 +358,7 @@ class TestLookupKasalAgentUUID:
         with (
             patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
-            patch("src.utils.user_context.GroupContext") as mock_gc,
+            patch("src.utils.user_context.GroupContext"),
         ):
 
             mock_session = AsyncMock()

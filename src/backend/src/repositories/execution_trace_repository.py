@@ -5,11 +5,10 @@ This module provides functions for CRUD operations on execution traces.
 """
 
 import json
-import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import Text, and_, case, cast, delete, func, or_, update
+from sqlalchemy import Text, and_, case, cast, delete, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select

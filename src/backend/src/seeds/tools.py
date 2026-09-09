@@ -2,13 +2,11 @@
 Seed the tools table with default tool data.
 """
 
-import json
 import logging
 from datetime import datetime
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import async_session_factory
 from src.models.group_tool import GroupTool

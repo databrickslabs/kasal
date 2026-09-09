@@ -6,9 +6,6 @@ including field validation, properties, defaults, and constraints.
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from src.models.hitl_approval import (
     HITLApproval,
@@ -634,7 +631,6 @@ class TestHITLApprovalRelationships:
     def test_relationship_configuration(self):
         """Test that relationship is correctly configured."""
         from sqlalchemy.inspection import inspect
-        from sqlalchemy.orm import relationship as orm_relationship
 
         mapper = inspect(HITLApproval)
         relationships = mapper.relationships
@@ -777,7 +773,7 @@ class TestHITLWebhookEdgeCases:
 
     def test_updated_at_initially_none(self):
         """Test that updated_at can be None initially."""
-        webhook = HITLWebhook(
+        HITLWebhook(
             group_id="group_abc", name="Test Webhook", url="https://example.com/webhook"
         )
         # updated_at may be None or set by column default

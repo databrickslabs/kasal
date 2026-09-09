@@ -5,10 +5,7 @@ Tests the functionality of the User database model
 including field validation, relationships, and data integrity.
 """
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
-
-import pytest
+from datetime import datetime, timezone
 
 from src.models.enums import UserRole as UserRoleEnum
 from src.models.enums import UserStatus

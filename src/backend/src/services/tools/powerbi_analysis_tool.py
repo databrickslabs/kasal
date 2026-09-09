@@ -12,7 +12,6 @@ Date: 2026
 """
 
 import asyncio
-import base64
 import contextvars
 import json
 import logging
@@ -21,7 +20,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Any, Dict, List, Optional, Type
 
-import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
@@ -277,8 +275,6 @@ class PowerBIAnalysisTool(
             r"^https://your-",
             r"^https://.*-url\.com$",
         ]
-
-        import re
 
         value_lower = value.lower()
         for pattern in placeholder_patterns:

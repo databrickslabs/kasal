@@ -5,10 +5,7 @@ Tests SQLAlchemy model attributes, enum values, utility functions, and methods.
 """
 
 from datetime import datetime
-from unittest.mock import Mock, patch
 from uuid import UUID
-
-import pytest
 
 from src.db.base import Base
 from src.models.memory_backend import (

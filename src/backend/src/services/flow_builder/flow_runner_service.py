@@ -5,12 +5,9 @@ This file contains the FlowRunnerService which handles running flow executions i
 It uses the BackendFlow class (from backend_flow.py) to interact with the CrewAI Flow engine.
 """
 
-import asyncio
-import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,19 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
-from src.repositories.agent_repository import AgentRepository
-from src.repositories.crew_repository import CrewRepository
-from src.repositories.execution_history_repository import ExecutionHistoryRepository
-from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.repositories.flow_repository import FlowRepository
-from src.repositories.task_repository import TaskRepository
-from src.repositories.tool_repository import ToolRepository
 from src.schemas.flow_execution import (
-    FlowExecutionCreate,
     FlowExecutionStatus,
-    FlowExecutionUpdate,
-    FlowNodeExecutionCreate,
-    FlowNodeExecutionUpdate,
 )
 from src.services.flow_builder.backend_flow import BackendFlow
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
@@ -267,7 +254,7 @@ class FlowRunnerService:
 
             # Different execution paths based on whether we have nodes in config
             nodes = config.get("nodes", [])
-            edges = config.get("edges", [])
+            config.get("edges", [])
 
             # Authorize saved definitions even when an earlier layer supplied nodes.
             # Canvas flows may carry a new UUID before their first save.
@@ -286,7 +273,7 @@ class FlowRunnerService:
 
                 if not nodes and flow is not None:
                     config["nodes"] = nodes = flow.nodes
-                    config["edges"] = edges = flow.edges
+                    config["edges"] = flow.edges
                     config["flow_config"] = flow.flow_config
 
             # Validate nodes if this is a dynamic flow (no flow_id) or we have nodes in config
@@ -519,7 +506,6 @@ class FlowRunnerService:
                     # Continue with execution, as keys might be available through other means
 
                 # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
-                from src.repositories.agent_repository import AgentRepository
                 from src.services.flow_builder.backend_flow import BackendFlow
                 from src.services.flow_builder.data_access import (
                     build_flow_data_access,
@@ -985,82 +971,12 @@ class FlowRunnerService:
                         f"[_run_flow_execution] flow_config keys from frontend: {list(config.get('flow_config', {}).keys())}"
                     )
 
-                # If this flow has no nodes/edges in the config, try to load them from the database
-                if "nodes" not in config or not config.get("nodes"):
-                    logger.info(
-                        f"No nodes in config for flow {flow_id}, trying to load from database"
+                if not config.get("nodes"):
+                    from src.services.flow_builder.saved_flow_config import (
+                        hydrate_saved_flow,
                     )
-                    try:
-                        # Load flow data using the BackendFlow instance, passing the repository
-                        flow_data = await backend_flow.load_flow(repository=flow_repo)
-                        logger.info(f"Loaded flow data for flow {flow_id}")
 
-                        # Update config with flow data from DB
-                        if "nodes" in flow_data and flow_data["nodes"]:
-                            config["nodes"] = flow_data["nodes"]
-                            logger.info(
-                                f"Loaded {len(flow_data['nodes'])} nodes from flow data for flow {flow_id}"
-                            )
-                        if "edges" in flow_data and flow_data["edges"]:
-                            config["edges"] = flow_data["edges"]
-                            logger.info(
-                                f"Loaded {len(flow_data['edges'])} edges from flow data for flow {flow_id}"
-                            )
-                        if "flow_config" in flow_data and flow_data["flow_config"]:
-                            # Merge flow_config from DB with any flow_config from frontend
-                            db_flow_config = flow_data["flow_config"]
-                            frontend_flow_config = config.get("flow_config", {})
-
-                            # Prioritize frontend flow_config if it has startingPoints
-                            # but MERGE listeners from database if they exist
-                            if "startingPoints" in frontend_flow_config:
-                                logger.info(
-                                    "Using flow_config from frontend (has startingPoints)"
-                                )
-                                config["flow_config"] = frontend_flow_config
-
-                                # CRITICAL: Merge listeners from database if frontend doesn't have them
-                                if "listeners" in db_flow_config and db_flow_config.get(
-                                    "listeners"
-                                ):
-                                    if "listeners" not in config[
-                                        "flow_config"
-                                    ] or not config["flow_config"].get("listeners"):
-                                        config["flow_config"]["listeners"] = (
-                                            db_flow_config["listeners"]
-                                        )
-                                        logger.info(
-                                            f"Merged {len(db_flow_config['listeners'])} listeners from database into flow_config"
-                                        )
-                            else:
-                                logger.info("Using flow_config from database")
-                                config["flow_config"] = db_flow_config
-
-                        # If we still don't have nodes, try direct database access as fallback
-                        if "nodes" not in config or not config.get("nodes"):
-                            logger.warning(
-                                f"Failed to load nodes from BackendFlow for flow {flow_id}, trying direct database access"
-                            )
-                            # Get the flow from the database using repository
-                            flow = flow_repo.find_by_id(flow_id)
-                            if flow:
-                                if flow.nodes:
-                                    config["nodes"] = flow.nodes
-                                    logger.info(
-                                        f"Loaded {len(flow.nodes)} nodes from database for flow {flow_id}"
-                                    )
-                                if flow.edges:
-                                    config["edges"] = flow.edges
-                                    logger.info(
-                                        f"Loaded {len(flow.edges)} edges from database for flow {flow_id}"
-                                    )
-                                if flow.flow_config:
-                                    config["flow_config"] = flow.flow_config
-                                    logger.info(
-                                        f"Loaded flow_config from database for flow {flow_id}"
-                                    )
-                    except Exception as e:
-                        logger.error(f"Error loading flow data: {e}", exc_info=True)
+                    await hydrate_saved_flow(backend_flow, config)
 
                 # CRITICAL: Ensure flow_config has startingPoints before execution
                 # If flow_config is missing startingPoints, build them from nodes/edges

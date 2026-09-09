@@ -4,7 +4,7 @@ Unit tests for services/lakebase_migration_service.py
 Auto-generated test template. TODO: Add comprehensive test coverage.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -726,7 +726,6 @@ class TestResetSequencesSync:
     def test_rollback_failure_is_swallowed(self, service):
         """If rollback itself fails after a sequence error, it should be swallowed."""
         mock_conn = MagicMock()
-        call_count = [0]
 
         def execute_side_effect(stmt):
             sql = stmt.text if hasattr(stmt, "text") else str(stmt)

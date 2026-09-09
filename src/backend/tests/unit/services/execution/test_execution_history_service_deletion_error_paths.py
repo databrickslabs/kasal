@@ -11,7 +11,7 @@ get_execution_groups_with_counts.
 import uuid
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -53,9 +53,9 @@ def make_service(session=None, history_repo=None, logs_repo=None):
 
     s = session or AsyncMock()
     h = history_repo or AsyncMock()
-    l = logs_repo or AsyncMock()
+    item_value = logs_repo or AsyncMock()
     return ExecutionHistoryService(
-        session=s, execution_history_repository=h, execution_logs_repository=l
+        session=s, execution_history_repository=h, execution_logs_repository=item_value
     )
 
 
@@ -314,8 +314,7 @@ async def test_get_debug_outputs_db_error():
 # Helpers for patching local imports in execution_history_service
 # ---------------------------------------------------------------------------
 
-import contextlib
-import sys
+import contextlib  # noqa: E402 - import follows module initialization
 
 
 @contextlib.contextmanager

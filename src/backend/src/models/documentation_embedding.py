@@ -1,7 +1,6 @@
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
-from sqlalchemy.types import TypeDecorator, UserDefinedType
+from sqlalchemy.types import UserDefinedType
 
 from src.db.base import Base
 
@@ -55,7 +54,7 @@ class Vector(UserDefinedType):
                         import json
 
                         return json.loads(value)
-                    except:
+                    except Exception:
                         return value
             return value
 

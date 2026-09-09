@@ -4,7 +4,6 @@ Unit tests for Databricks URL Utils.
 Tests utility functions for normalizing and constructing Databricks URLs.
 """
 
-import logging
 import os
 from unittest.mock import Mock, patch
 

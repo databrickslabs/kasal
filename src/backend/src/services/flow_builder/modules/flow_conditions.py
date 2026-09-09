@@ -27,7 +27,6 @@ emits unchanged.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections import deque
@@ -56,6 +55,7 @@ MISSING: Final = _Missing()
 _SKIP_KEYS: Final = frozenset(
     {
         "kasal_crew_identities",
+        "kasal_completed_crews",
         "previous_output",
         "messages",
         "id",

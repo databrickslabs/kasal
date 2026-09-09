@@ -6,9 +6,9 @@ between different formats (YAML, DAX, SQL, UC Metrics, Power BI).
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from src.dependencies.providers import GroupContextDep
 from src.schemas.kpi_conversion import (

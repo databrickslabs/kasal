@@ -13,7 +13,6 @@ MCP servers are only loaded when explicitly configured on agents or tasks.
 No global/automatic loading occurs.
 """
 
-import logging
 import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -549,9 +548,9 @@ class MCPIntegration:
                         logger.error(mcp_err.detail)
                         MCPIntegration.add_warning(mcp_err.detail)
                         return []
-                    server_params["headers"]["Authorization"] = (
-                        f"Bearer {auth_context.token}"
-                    )
+                    server_params["headers"][
+                        "Authorization"
+                    ] = f"Bearer {auth_context.token}"
                     # Override auth_type so the adapter knows SPN fallback is available
                     server_params["auth_type"] = "databricks_spn"
                     logger.info(
@@ -568,9 +567,9 @@ class MCPIntegration:
                     return []
             elif auth_type == "api_key" and server.get("api_key"):
                 # Non-Databricks MCP servers with their own API key
-                server_params["headers"]["Authorization"] = (
-                    f"Bearer {server['api_key']}"
-                )
+                server_params["headers"][
+                    "Authorization"
+                ] = f"Bearer {server['api_key']}"
                 logger.info(f"MCP server '{server_name}': Using api_key authentication")
 
             # Get or create MCP adapter

@@ -4,7 +4,6 @@ Repository for execution logs data access.
 This module provides database operations for execution logs.
 """
 
-import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 

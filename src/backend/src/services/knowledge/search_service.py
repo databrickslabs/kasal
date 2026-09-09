@@ -5,7 +5,6 @@ Handles searching knowledge files in vector storage.
 Separated from DatabricksKnowledgeService for clean architecture.
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -64,9 +63,6 @@ class KnowledgeSearchService:
         logger.info(f"File paths parameter: {file_paths}")
 
         try:
-            from src.services.knowledge.documentation_embedding import (
-                DocumentationEmbeddingService,
-            )
 
             # Generate the query embedding with the SAME embedder used at ingest
             # time (resolved through the shared resolver: Databricks in prod, local

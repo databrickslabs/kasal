@@ -8,15 +8,13 @@ All external dependencies (AadService, PowerBIAdminScanner, MQueryLLMConverter)
 are mocked.
 """
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from src.services.converters.formats.mquery.connector import MQueryConnector
 from src.services.converters.formats.mquery.models import (
     ColumnDataType,
-    ConversionResult,
     ExpressionType,
     MQueryConversionConfig,
     MQueryExpression,
@@ -124,9 +122,7 @@ def test_connect_sets_connected_state():
     cfg = _make_config(access_token="tok")  # skip real auth
 
     with (
-        patch(
-            "src.services.converters.formats.mquery.connector.AadService"
-        ) as MockAuth,
+        patch("src.services.converters.formats.mquery.connector.AadService"),
         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
     ):
         conn = MQueryConnector(cfg)
@@ -333,7 +329,11 @@ def test_get_relationships_truncates_long_constraint_name():
     # constraint_name is embedded in fk sql; check the part before FOREIGN KEY
     fk_sql = rels[0]["uc_fk_sql"]
     # Grab constraint name line
-    constraint_line = [l for l in fk_sql.splitlines() if "ADD CONSTRAINT" in l][0]
+    constraint_line = [
+        item_value
+        for item_value in fk_sql.splitlines()
+        if "ADD CONSTRAINT" in item_value
+    ][0]
     parts = constraint_line.split()
     constraint_name_in_sql = parts[-1]
     assert len(constraint_name_in_sql) <= 128

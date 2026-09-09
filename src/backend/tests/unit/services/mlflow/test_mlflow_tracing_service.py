@@ -2,11 +2,8 @@
 Comprehensive unit tests for services/mlflow_tracing_service.py
 """
 
-import asyncio
-import gc
-import logging
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -106,7 +103,7 @@ class TestStartRootTrace:
         mock_mlflow.start_trace = fake_start_trace
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
-            with start_root_trace("test") as span:
+            with start_root_trace("test"):
                 pass  # No exception means inputs defaulted to {}
 
     def test_start_trace_in_tracing_module(self):
@@ -141,7 +138,7 @@ class TestStartRootTrace:
         mock_mlflow.tracing = None
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
-            with start_root_trace("test", inputs={"a": 1}) as span:
+            with start_root_trace("test", inputs={"a": 1}):
                 pass
 
         mock_span.set_inputs.assert_called_once_with({"a": 1})
@@ -160,7 +157,7 @@ class TestStartRootTrace:
         mock_mlflow.tracing = None
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
-            with start_root_trace("test", inputs={"a": 1}) as span:
+            with start_root_trace("test", inputs={"a": 1}):
                 pass  # Should not raise
 
 

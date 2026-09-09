@@ -263,7 +263,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   }, []);
 
   // Handle edge configuration save
-  const handleEdgeSave = useCallback((edgeId: string, config: EdgeConfig) => {
+  const handleEdgeSave = useCallback((edgeId: string, { outputContract, ...config }: EdgeConfig) => {
     console.log('FlowCanvas: handleEdgeSave called', {
       edgeId,
       configLogicType: config.logicType,
@@ -277,6 +277,13 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
     const edgeIndex = edges.findIndex(e => e.id === edgeId);
     if (edgeIndex !== -1) {
       const currentEdge = edges[edgeIndex];
+      const source = nodes.find(node => node.id === currentEdge.source);
+      if (source && outputContract !== undefined) {
+        onNodesChange([
+          { id: source.id, type: 'remove' },
+          { item: { ...source, data: { ...source.data, outputContract } }, type: 'add' },
+        ]);
+      }
 
       // Check if this edge is part of a merge group
       const mergeGroupId = currentEdge.data?.mergeGroupId;
@@ -329,7 +336,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         showTemporaryNotification(`Edge configured: ${config.logicType}`);
       }
     }
-  }, [edges, onEdgesChange, showTemporaryNotification]);
+  }, [edges, nodes, onNodesChange, onEdgesChange, showTemporaryNotification]);
 
   // Handle adding a crew to the canvas
   const handleAddCrewToCanvas = useCallback(async (crew: CrewResponse) => {
@@ -822,21 +829,6 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
             {controlsVisible && <FlowCanvasControls onClearCanvas={handleClearCanvas} />}
           </ReactFlow>
         )}
-
-        {/* Shortcuts info */}
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: 10,
-            left: 10,
-            fontSize: '0.75rem',
-            color: 'text.secondary',
-            opacity: 0.7,
-            pointerEvents: 'none',
-          }}
-        >
-          Tip: Press &quot;del&quot; to delete selected items, &quot;lf&quot; to toggle crew palette
-        </Box>
 
         {/* Notification */}
         <Snackbar

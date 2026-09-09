@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
@@ -37,6 +36,8 @@ import { SchemaService } from '../../../../api/workflow/SchemaService';
 import { TaskService } from '../../../../api/workflow/TaskService';
 import { Schema } from '../../../../types/workflow/schema';
 
+import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
+import FlowOutputSchema, { type FlowOutputContract } from './FlowOutputSchema';
 import FlowStateSection from './FlowStateSection';
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
 
@@ -73,13 +74,14 @@ export interface HITLConfig {
   message: string;                          // Message shown to approvers
   timeout_seconds: number;                  // Timeout before automatic action
   timeout_action: 'auto_reject' | 'fail';   // Action on timeout
-  require_comment: boolean;                 // Require comment for approval/rejection
+  require_comment: boolean;                 // Require a comment to approve
 }
 
 export interface EdgeConfig {
   logicType: FlowLogicType;
   routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
   isDefaultRoute?: boolean;       // The "otherwise" branch: taken when no other route matched
+  outputContract?: FlowOutputContract | null;
   routerSchema?: string;          // Name of the output schema the router routes on (set on source crew's final task)
   description?: string;
   listenToTaskIds?: string[];     // Tasks from source crew to wait for
@@ -87,7 +89,7 @@ export interface EdgeConfig {
   // State management (aligned with CrewAI Flow state)
   stateMappings?: StateMapping[]; // Extract task outputs → state variables (with sourceTaskId)
   checkpoint?: boolean;           // Enable @persist - checkpoint after this step for resume capability
-  // HITL (Human in the Loop) - requires checkpoint to be enabled
+  // Human approval enables any required flow persistence automatically.
   hitl?: HITLConfig;
 }
 
@@ -109,11 +111,11 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   // Router schema-driven routing
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [routerSchema, setRouterSchema] = useState<string>('');
+  const [outputContract, setOutputContract] = useState<FlowOutputContract | null>(null);
   const [schemaCreateOpen, setSchemaCreateOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // State management
-  const [checkpoint, setCheckpoint] = useState(false);
 
   // HITL configuration
   const [hitlEnabled, setHitlEnabled] = useState(false);
@@ -170,10 +172,11 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setTargetTaskIds(edge.data.targetTaskIds || []);
 
       // Load router schema selection
-      setRouterSchema(edge.data.routerSchema || '');
+      const contract = sourceNode?.data?.outputContract as FlowOutputContract | undefined;
+      setOutputContract(contract || null);
+      setRouterSchema(contract?.name || edge.data.routerSchema || '');
       setSaveError(null);
       // Use explicit boolean check to handle false values correctly
-      setCheckpoint(edge.data.checkpoint === true);
 
       // Load HITL configuration
       if (edge.data.hitl) {
@@ -200,7 +203,6 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setTargetTaskIds([]);
       setRouterSchema('');
       setSaveError(null);
-      setCheckpoint(false);
       // Reset HITL
       setHitlEnabled(false);
       setHitlMessage('Please review and approve to continue');
@@ -208,7 +210,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setHitlTimeoutAction('auto_reject');
       setHitlRequireComment(false);
     }
-  }, [edge]);
+  }, [edge, sourceNode?.data?.outputContract]);
 
   // Auto-include all source/target tasks — task selection was removed from the UI.
   // The edge endpoints already define source → target, so we listen to every source
@@ -246,10 +248,8 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     || sourceNode?.data?.label
     || 'the source crew';
 
-  // Resolve the selected schema's fields → router condition variables.
-  // Only scalar fields (string / number / integer / boolean) are routable, since
-  // the condition operators compare single values; arrays/objects are excluded.
-  const selectedSchema = schemas.find(s => s.name === routerSchema);
+  const localSchema = outputContract?.name === routerSchema ? outputContract : null;
+  const selectedSchema = localSchema || schemas.find(s => s.name === routerSchema);
   // Every value the schema can be routed on, including those nested in an
   // object or repeated across a list. This used to be the schema's TOP-LEVEL
   // scalar properties only, which meant a schema shaped like real model output
@@ -283,6 +283,10 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     if (!edge) return;
     setSaveError(null);
 
+    if (localSchema && routerConditions.some(group => group.terms.some(term => !schemaFields.some(field => field.path === (group.subject ? `${group.subject}[].${term.field}` : term.field))))) {
+      setSaveError('A routing field was removed. Update the conditions before saving.');
+      return;
+    }
     const routerConditionStr = groupsToPython(routerConditions);
 
     const config: EdgeConfig = {
@@ -290,21 +294,14 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       description,
       listenToTaskIds,
       targetTaskIds,
-      // Always include checkpoint (explicit true/false)
-      checkpoint: checkpoint,
-      // Always include HITL config (when checkpoint enabled, use settings; when disabled, explicitly disable)
-      hitl: checkpoint ? {
+      // Preserve legacy persistence for saved flows. Recovery checkpoints are automatic.
+      checkpoint: edge.data?.checkpoint === true || hitlEnabled,
+      hitl: {
         enabled: hitlEnabled,
         message: hitlMessage,
         timeout_seconds: hitlTimeoutSeconds,
         timeout_action: hitlTimeoutAction,
         require_comment: hitlRequireComment,
-      } : {
-        enabled: false,
-        message: 'Please review and approve to continue',
-        timeout_seconds: 86400,
-        timeout_action: 'auto_reject' as const,
-        require_comment: false,
       },
     };
 
@@ -314,11 +311,13 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       // condition of its own.
       if (routerConditionStr && !isDefaultRoute) config.routerCondition = routerConditionStr;
       if (routerSchema) config.routerSchema = routerSchema;
+      config.outputContract = localSchema;
+      if (localSchema) config.stateMappings = []; // Flow contracts expose their fields directly.
 
       // Apply the chosen schema to the source crew's final task so it produces the
       // structured output the router evaluates. Fetch-then-update preserves the
       // task's other config fields.
-      if (routerSchema && finalSourceTask) {
+      if (routerSchema && finalSourceTask && !localSchema) {
         try {
           const fullTask = await TaskService.getTask(finalSourceTask.id);
           if (fullTask && fullTask.config?.output_pydantic !== routerSchema) {
@@ -343,15 +342,9 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   };
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleCancel}
-      maxWidth="md"
-      fullWidth
-      PaperProps={{
-        sx: { height: '80vh', maxHeight: '700px' }
-      }}
-    >
+    <BuilderNodeEditor open={open} kind="connection" nodeId={edge?.id || 'connection'}
+      label={`${sourceNode?.data?.crewName || 'Source'} → ${targetNode?.data?.crewName || 'Target'}`} onClose={handleCancel}>
+
       <DialogTitle sx={{ pb: 1 }}>
         Configure Connection Logic
       </DialogTitle>
@@ -359,7 +352,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       <DialogContent sx={{ pt: 1 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {/* Task Selection Section - Two Column Layout */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 2 }}>
             {/* Source Tasks Selection */}
             <Box>
               <FormLabel component="legend" sx={{ fontSize: '0.875rem', fontWeight: 600, mb: 0.5 }}>
@@ -390,7 +383,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                     <Box key={group.crewName} sx={{ mb: 1.5 }}>
                       <Typography
                         variant="caption"
-                        sx={{ color: 'primary.main', fontWeight: 600, fontSize: '0.7rem', display: 'block', mb: 0.5 }}
+                        sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.7rem', display: 'block', mb: 0.5 }}
                       >
                         {group.crewName}
                       </Typography>
@@ -535,7 +528,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
 
           {logicType === 'ROUTER' && !isDefaultRoute && (
             <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
-              <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'primary.main' }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'text.primary' }}>
                 Router Configuration
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
@@ -573,15 +566,17 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                   <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
                     <em>Select a schema…</em>
                   </MenuItem>
-                  {schemas.map((s) => (
+                  {outputContract && <MenuItem value={outputContract.name}>{outputContract.name} · This flow</MenuItem>}
+                  {schemas.filter(s => s.name !== outputContract?.name).map((s) => (
                     <MenuItem key={s.id} value={s.name} sx={{ fontSize: '0.85rem' }}>{s.name}</MenuItem>
                   ))}
-                  <MenuItem value="__create__" sx={{ color: 'primary.main', fontSize: '0.85rem' }}>
+                  <MenuItem value="__create__" sx={{ color: 'text.primary', fontSize: '0.85rem' }}>
                     <AddIcon fontSize="small" sx={{ mr: 1 }} /> Add new schema…
                   </MenuItem>
                 </Select>
               </FormControl>
 
+              {localSchema && <FlowOutputSchema key={`${edge?.id}:${localSchema.task_id}`} contract={localSchema} onChange={setOutputContract} />}
               {/* Step 2: Condition on a schema variable */}
               {!routerSchema ? (
                 <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5 }}>
@@ -616,65 +611,28 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
             </Box>
           )}
 
-          {/* Checkpoint - Simple inline checkbox */}
-          <FormControlLabel
-            control={
-              <Checkbox
-                size="small"
-                checked={checkpoint}
-                onChange={(e) => {
-                  setCheckpoint(e.target.checked);
-                  // Disable HITL if checkpoint is disabled
-                  if (!e.target.checked) {
-                    setHitlEnabled(false);
-                  }
-                }}
-              />
-            }
-            label={
-              <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
-                Enable Checkpoint <Typography component="span" variant="caption" color="text.secondary">— Resume flow from here if interrupted</Typography>
-              </Typography>
-            }
-            sx={{ mt: 1, ml: 0 }}
-          />
-
-          {/* HITL (Human in the Loop) Configuration - visible always, enabled only when checkpoint is enabled */}
-          <Box sx={{
-            mt: 2,
-            p: 2,
-            bgcolor: checkpoint ? 'warning.light' : 'action.disabledBackground',
-            borderRadius: 1,
-            border: '1px solid',
-            borderColor: checkpoint ? 'warning.main' : 'divider',
-            opacity: checkpoint ? 1 : 0.7,
-          }}>
+          <Box sx={{ mt: 2 }}>
             <FormControlLabel
               control={
                 <Checkbox
                   size="small"
                   checked={hitlEnabled}
                   onChange={(e) => setHitlEnabled(e.target.checked)}
-                  disabled={!checkpoint}
                 />
               }
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <PanToolIcon sx={{ fontSize: 18, color: checkpoint ? 'warning.dark' : 'text.disabled' }} />
-                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 600, color: checkpoint ? 'text.primary' : 'text.disabled' }}>
-                    Require Human Approval (HITL)
+                  <PanToolIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 600, color: 'text.primary' }}>
+                    Require human approval
                   </Typography>
-                  {!checkpoint && (
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
-                      — Enable checkpoint first
-                    </Typography>
-                  )}
+
                 </Box>
               }
-              sx={{ ml: 0, mb: (hitlEnabled && checkpoint) ? 2 : 0 }}
+              sx={{ ml: 0, mb: hitlEnabled ? 2 : 0 }}
             />
 
-            {hitlEnabled && checkpoint && (
+            {hitlEnabled && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pl: 4 }}>
                 <TextField
                   fullWidth
@@ -728,7 +686,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                   }
                   label={
                     <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                      Require comment for approval/rejection
+                      Require a comment to approve
                     </Typography>
                   }
                   sx={{ ml: 0 }}
@@ -737,12 +695,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
             )}
           </Box>
 
-          {/* Flow-level state, hosted here because it is only useful WITH the
-              checkpoint above: a conversation needs somewhere to live and
-              something to write it, and separating the two controls is how a
-              flow ends up with one of them. Writes straight to the flow's
-              declaration, so it is saved with the FLOW rather than with this
-              edge — Cancel below does not undo it. */}
+          {/* Flow state is saved independently of this connection. */}
           <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
             <FlowStateSection />
           </Box>
@@ -787,7 +740,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
           setSchemaCreateOpen(false);
         }}
       />
-    </Dialog>
+    </BuilderNodeEditor>
   );
 };
 

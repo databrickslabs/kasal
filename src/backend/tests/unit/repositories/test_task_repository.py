@@ -6,13 +6,11 @@ CRUD operations, config synchronization, and error handling.
 """
 
 from datetime import datetime
-from typing import List
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
@@ -88,26 +86,9 @@ def mock_async_session():
 
 
 @pytest.fixture
-def mock_sync_session():
-    """Create a mock sync database session."""
-    session = MagicMock(spec=Session)
-    session.query.return_value = session
-    session.filter.return_value = session
-    session.first.return_value = None
-    session.all.return_value = []
-    return session
-
-
-@pytest.fixture
 def task_repository(mock_async_session):
     """Create a task repository with async session."""
     return TaskRepository(session=mock_async_session)
-
-
-@pytest.fixture
-def sync_task_repository(mock_sync_session):
-    """Create a sync task repository with sync session."""
-    return SyncTaskRepository(db=mock_sync_session)
 
 
 @pytest.fixture
@@ -235,7 +216,7 @@ class TestTaskRepositoryCreate:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             # Verify config fields were synced to root level
             call_args = mock_task_class.call_args[1]
@@ -265,7 +246,7 @@ class TestTaskRepositoryCreate:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             # Verify root fields were synced to config
             call_args = mock_task_class.call_args[1]
@@ -275,7 +256,7 @@ class TestTaskRepositoryCreate:
             assert config["output_file"] == "result.txt"
             assert config["callback"] == "my_callback"
             assert config["guardrail"] == "safety_check"
-            assert config["markdown"] == True
+            assert config["markdown"]
 
     @pytest.mark.asyncio
     async def test_create_markdown_bidirectional_sync(
@@ -293,10 +274,10 @@ class TestTaskRepositoryCreate:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data_config_to_root)
+            await task_repository.create(task_data_config_to_root)
 
             call_args = mock_task_class.call_args[1]
-            assert call_args["markdown"] == True
+            assert call_args["markdown"]
 
     @pytest.mark.asyncio
     async def test_create_empty_config_handling(
@@ -310,7 +291,7 @@ class TestTaskRepositoryCreate:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             # Verify config was created and field was synced
             call_args = mock_task_class.call_args[1]
@@ -334,7 +315,7 @@ class TestTaskRepositoryCreate:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             # Verify None agent_id is preserved (for PostgreSQL foreign key constraints)
             call_args = mock_task_class.call_args[1]
@@ -580,7 +561,7 @@ class TestTaskRepositoryConfigSynchronization:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             call_args = mock_task_class.call_args[1]
             assert call_args["output_pydantic"] == "FullModel"
@@ -588,7 +569,7 @@ class TestTaskRepositoryConfigSynchronization:
             assert call_args["output_file"] == "full.txt"
             assert call_args["callback"] == "full_callback"
             assert call_args["guardrail"] == "full_guard"
-            assert call_args["markdown"] == True
+            assert call_args["markdown"]
 
     @pytest.mark.asyncio
     async def test_all_root_fields_sync_to_config(
@@ -610,7 +591,7 @@ class TestTaskRepositoryConfigSynchronization:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             call_args = mock_task_class.call_args[1]
             config = call_args["config"]
@@ -619,7 +600,7 @@ class TestTaskRepositoryConfigSynchronization:
             assert config["output_file"] == "root.txt"
             assert config["callback"] == "root_callback"
             assert config["guardrail"] == "root_guard"
-            assert config["markdown"] == False
+            assert not config["markdown"]
 
     @pytest.mark.asyncio
     async def test_partial_sync_with_existing_config(
@@ -637,7 +618,7 @@ class TestTaskRepositoryConfigSynchronization:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             call_args = mock_task_class.call_args[1]
             config = call_args["config"]
@@ -664,7 +645,7 @@ class TestTaskRepositoryConfigSynchronization:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             # Empty strings should not trigger sync, only truthy values
             call_args = mock_task_class.call_args[1]
@@ -768,125 +749,6 @@ class TestTaskRepositoryErrorHandling:
             mock_async_session.rollback.assert_called_once()
 
 
-@pytest.mark.skip(reason="SyncTaskRepository removed; async-only architecture")
-class TestSyncTaskRepository:
-    """Test cases for SyncTaskRepository."""
-
-    def test_init_success(self):
-        """Test successful initialization."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        assert repository.db == mock_session
-
-    def test_find_by_id_success(self):
-        """Test successful find by ID."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        task = MockTask(id=1, name="Test Task")
-        mock_session.query.return_value.filter.return_value.first.return_value = task
-
-        result = repository.find_by_id(1)
-
-        assert result == task
-        mock_session.query.assert_called_once_with(Task)
-        mock_session.query.return_value.filter.assert_called_once()
-        mock_session.query.return_value.filter.return_value.first.assert_called_once()
-
-    def test_find_by_id_not_found(self):
-        """Test find by ID when task not found."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        result = repository.find_by_id(999)
-
-        assert result is None
-
-    def test_find_by_name_success(self):
-        """Test successful find by name."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        task = MockTask(name="Test Task")
-        mock_session.query.return_value.filter.return_value.first.return_value = task
-
-        result = repository.find_by_name("Test Task")
-
-        assert result == task
-        mock_session.query.assert_called_once_with(Task)
-
-    def test_find_by_name_not_found(self):
-        """Test find by name when task not found."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        result = repository.find_by_name("Nonexistent Task")
-
-        assert result is None
-
-    def test_find_by_agent_id_success(self, sample_tasks):
-        """Test successful find by agent ID."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        agent_tasks = [sample_tasks[0], sample_tasks[2]]
-        mock_session.query.return_value.filter.return_value.all.return_value = (
-            agent_tasks
-        )
-
-        result = repository.find_by_agent_id(1)
-
-        assert result == agent_tasks
-        mock_session.query.assert_called_once_with(Task)
-
-    def test_find_by_agent_id_empty(self):
-        """Test find by agent ID when no tasks found."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        mock_session.query.return_value.filter.return_value.all.return_value = []
-
-        result = repository.find_by_agent_id(999)
-
-        assert result == []
-
-    def test_find_all_success(self, sample_tasks):
-        """Test successful find all tasks."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        mock_session.query.return_value.all.return_value = sample_tasks
-
-        result = repository.find_all()
-
-        assert result == sample_tasks
-        mock_session.query.assert_called_once_with(Task)
-
-    def test_find_all_empty(self):
-        """Test find all when no tasks exist."""
-        mock_session = MagicMock(spec=Session)
-        repository = SyncTaskRepository(db=mock_session)
-        mock_session.query.return_value.all.return_value = []
-
-        result = repository.find_all()
-
-        assert result == []
-
-
-@pytest.mark.skip(reason="Sync task repository factory removed; use async repos")
-class TestGetSyncTaskRepository:
-    """Test cases for get_sync_task_repository factory function."""
-
-    @patch("src.repositories.task_repository.SessionLocal")
-    def test_get_sync_task_repository_success(self, mock_session_local):
-        """Test successful creation of sync repository."""
-        mock_session = MagicMock()
-        mock_session_local.return_value = mock_session
-
-        result = get_sync_task_repository()
-
-        assert isinstance(result, SyncTaskRepository)
-        assert result.db == mock_session
-        mock_session_local.assert_called_once()
-
-
 class TestTaskRepositoryUpdateConfigSynchronization:
     """Test cases for update method config synchronization."""
 
@@ -969,7 +831,7 @@ class TestTaskRepositoryMissingCoverage:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             call_args = mock_task_class.call_args[1]
             assert "config" in call_args
@@ -991,7 +853,7 @@ class TestTaskRepositoryMissingCoverage:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data_output_json)
+            await task_repository.create(task_data_output_json)
 
             call_args = mock_task_class.call_args[1]
             config = call_args["config"]
@@ -1013,10 +875,10 @@ class TestTaskRepositoryMissingCoverage:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             call_args = mock_task_class.call_args[1]
-            assert call_args["config"]["markdown"] == True
+            assert call_args["config"]["markdown"]
 
     @pytest.mark.asyncio
     async def test_update_missing_config_key(self, task_repository, mock_async_session):
@@ -1143,7 +1005,7 @@ class TestTaskRepositoryMissingCoverage:
         with patch.object(task_repository, "model") as mock_task_class:
             mock_task_class.return_value = created_task
 
-            result = await task_repository.create(task_data)
+            await task_repository.create(task_data)
 
             call_args = mock_task_class.call_args[1]
             assert call_args["config"]["output_pydantic"] == "TestModel"

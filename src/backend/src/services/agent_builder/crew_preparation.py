@@ -5,16 +5,12 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 """
 
 import asyncio
-import logging
 import os
-import re
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 from src.services.agent_builder.agent_adapter import create_agent
-from src.services.agent_builder.task_adapter import create_task, is_data_missing
+from src.services.agent_builder.task_adapter import is_data_missing
 from src.services.execution.config.crew_config_builder import CrewConfigBuilder
 from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
 from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
@@ -472,7 +468,7 @@ class CrewPreparation:
             # into the crew completion paths in execution_runner) — the same
             # implementation the light-agent path and the exported app use. The old
             # ui_emission prompt-injection was retired so there is ONE A2UI path.
-            total_tasks = len(tasks)
+            len(tasks)
 
             # Create a dictionary to store tasks by ID for reference
             task_dict = {}

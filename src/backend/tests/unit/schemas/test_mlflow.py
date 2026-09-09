@@ -321,12 +321,12 @@ class TestMLflowSchemaInteroperability:
         # Test MLflowConfigUpdate fields
         update_fields = MLflowConfigUpdate.model_fields
         assert "enabled" in update_fields
-        assert update_fields["enabled"].annotation == bool
+        assert update_fields["enabled"].annotation is bool
 
         # Test MLflowEvaluateRequest fields
         request_fields = MLflowEvaluateRequest.model_fields
         assert "job_id" in request_fields
-        assert request_fields["job_id"].annotation == str
+        assert request_fields["job_id"].annotation is str
 
         # Test MLflowEvaluateResponse fields
         response_fields = MLflowEvaluateResponse.model_fields

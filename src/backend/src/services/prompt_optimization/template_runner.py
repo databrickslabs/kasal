@@ -6,30 +6,17 @@ movement: every method still reads ``self`` exactly as it did in the single
 """
 
 import asyncio
-import hashlib
 import logging
 import os
-import re
-import threading
-import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError
+from src.core.llm.robust_json import robust_json_parser
 from src.services.prompt_optimization.config import TEMPLATE_TASKS
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
-    _CATEGORICAL_GRADES,
-    JUDGE_SPREAD_WARN,
     VALID_INTENTS,
-    _checklist_grade,
-    _grade_judge_verdict,
     _intent_format_score,
-    _job_name_score,
     _json_keys_score,
-    _judge_value_to_grade,
-    _median_sample,
-    _parse_grade_from_text,
     _to_float,
 )
 from src.services.prompt_optimization.gepa.reflection import (
@@ -37,9 +24,7 @@ from src.services.prompt_optimization.gepa.reflection import (
     _JUDGE_SYSTEM,
     _install_gepa_reflection_bridge,
     _make_reflection_fn,
-    _sync_llm_completion,
 )
-from src.core.llm.robust_json import robust_json_parser
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

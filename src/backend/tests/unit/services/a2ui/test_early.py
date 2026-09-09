@@ -5,13 +5,11 @@ request, so the gating matters as much as the output: a shell shipped for a turn
 that answers in prose is an empty deck frame stranded in the transcript.
 """
 
-import asyncio
 from typing import Any, Dict, List
 
 import pytest
 
 from src.services.a2ui import early
-from src.services.a2ui.stream import SURFACE_ID, apply_messages
 
 
 def _sink(out: List[Dict[str, Any]]):

@@ -1,7 +1,6 @@
 import logging
 from typing import Any, Dict, List, Optional, Type
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService

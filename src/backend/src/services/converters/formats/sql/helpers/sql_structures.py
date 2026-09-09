@@ -5,7 +5,7 @@ Handles SQL equivalent of SAP BW structures and time intelligence in SQL
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from ....base.models import KPI, KPIDefinition, Structure
 from ....common.transformers.formula import KBIDependencyResolver, KbiFormulaParser

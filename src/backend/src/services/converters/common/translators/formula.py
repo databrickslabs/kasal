@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List
+from typing import Dict
 
 from ...base.models import KPI, KPIDefinition
 

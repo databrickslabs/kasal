@@ -79,7 +79,7 @@ async def test_export_no_user_token_warning():
     )
     ctx = Ctx(is_system_admin=True)
 
-    with patch("src.utils.user_context.UserContext") as MockUC:
+    with patch("src.utils.user_context.UserContext"):
         out = await export_database(ExportRequest(), service=svc, group_context=ctx)
     assert out.success is True
 

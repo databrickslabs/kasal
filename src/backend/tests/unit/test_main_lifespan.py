@@ -7,9 +7,8 @@ touching a real database or scheduler, exercising the branches we care about.
 """
 
 import json
-import os
 from contextlib import ExitStack
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -661,14 +660,10 @@ class TestLifespanStartup:
 class TestMainGuard:
     def test_uvicorn_called_when_main(self):
         """Running as __main__ calls uvicorn.run."""
-        import importlib
-        import runpy
 
-        with patch("uvicorn.run") as mock_uvicorn:
+        with patch("uvicorn.run"):
             # Simulate the __main__ block execution
             # Just test uvicorn.run is importable and callable
             import uvicorn
-
-            import src.main as m
 
             assert callable(uvicorn.run)

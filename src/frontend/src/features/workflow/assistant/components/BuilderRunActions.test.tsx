@@ -18,6 +18,27 @@ import { BuilderPreviewContext } from './BuilderPreviewContext';
 const run = { job_id: 'older-run', status: 'completed', run_name: 'News', agents_yaml: '', inputs: { agents_yaml: { a: { memory: true } } } } as Run;
 beforeEach(() => { vi.clearAllMocks(); getRun.mockResolvedValue(run); getTraces.mockResolvedValue({ data: { traces: [] } }); usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true, userRole: 'admin' }); });
 describe('Builder completed-run actions', () => {
+  it.each(['crew', 'flow'])('opens checkpoints beside the %s conversation for its historical execution', async execution_type => {
+    getRun.mockResolvedValue({ ...run, execution_type, tasks_yaml: 'first: {}\nsecond: {}' });
+    const openCheckpoints = vi.fn();
+    render(<BuilderPreviewContext.Provider value={{ openMemory: vi.fn(), openStep: vi.fn(), openCheckpoints }}><BuilderRunActions jobId="older-run" /></BuilderPreviewContext.Provider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Checkpoints' }));
+    expect(openCheckpoints).toHaveBeenCalledWith('older-run', expect.any(Function));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+  it('offers checkpoint recovery for a failed multi-task execution without completed-run actions', async () => {
+    getRun.mockResolvedValue({ ...run, status: 'failed', tasks_yaml: 'first: {}\nsecond: {}' });
+    render(<BuilderPreviewContext.Provider value={{ openMemory: vi.fn(), openStep: vi.fn(), openCheckpoints: vi.fn() }}><BuilderRunActions jobId="failed-run" /></BuilderPreviewContext.Provider>);
+    expect(await screen.findByRole('button', { name: 'Checkpoints' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Schedule' })).not.toBeInTheDocument();
+  });
+  it.each(['single-task', 'operator'])('hides checkpoints for %s', async reason => {
+    getRun.mockResolvedValue({ ...run, tasks_yaml: reason === 'single-task' ? 'first: {}' : 'first: {}\nsecond: {}' });
+    if (reason === 'operator') usePermissionStore.setState({ userRole: 'operator' });
+    render(<BuilderPreviewContext.Provider value={{ openMemory: vi.fn(), openStep: vi.fn(), openCheckpoints: vi.fn() }}><BuilderRunActions jobId="older-run" /></BuilderPreviewContext.Provider>);
+    await screen.findByRole('button', { name: 'Schedule' });
+    expect(screen.queryByRole('button', { name: 'Checkpoints' })).not.toBeInTheDocument();
+  });
   it('uses the adjacent builder preview for the selected historical run', async () => {
     const open = vi.fn();
     render(<BuilderPreviewContext.Provider value={{ openMemory: open, openStep: vi.fn() }}><BuilderRunActions jobId="older-run" /></BuilderPreviewContext.Provider>);

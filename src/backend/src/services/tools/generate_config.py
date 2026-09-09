@@ -123,7 +123,9 @@ def main():
     print("\n[2/4] Extracting from Power BI APIs...")
 
     print("  API 1: INFO.VIEW.RELATIONSHIPS()...")
-    relationships = _config.extract_relationships(token, args.workspace_id, args.dataset_id)
+    relationships = _config.extract_relationships(
+        token, args.workspace_id, args.dataset_id
+    )
     print(f"    → {len(relationships)} relationships")
 
     print("  API 2: $SYSTEM.MDSCHEMA_MEASURES...")

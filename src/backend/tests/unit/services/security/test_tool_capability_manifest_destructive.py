@@ -4,9 +4,6 @@ added to tool_capability_manifest in Phase 4.
 """
 
 import logging
-from unittest.mock import patch
-
-import pytest
 
 from src.services.security.tool_capability_manifest import (
     TOOL_CAPABILITIES,

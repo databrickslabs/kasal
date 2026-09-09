@@ -1,3 +1,4 @@
+import { kasalNodePalette, kasalNodeSurface } from '../../../../theme/kasalSurfaces';
 import React, { useState } from 'react';
 import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
 import { Box, Typography, IconButton, Tooltip, useTheme, CircularProgress } from '@mui/material';
@@ -32,6 +33,8 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const { crewName, selectedTasks = [] } = data;
   const [isHovered, setIsHovered] = useState(false);
   const theme = useTheme();
+  const palette = kasalNodePalette(theme.palette.mode === 'dark', 'flow');
+  const nodeSurface = kasalNodeSurface(theme.palette.mode === 'dark', 'flow');
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
 
   // Get execution state for this crew node
@@ -156,14 +159,10 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
           flexDirection: 'column',
           justifyContent: 'center',
           alignItems: 'center',
-          borderRadius: '8px',
-          border: `1px solid ${statusStyles.borderColor || (selected ? theme.palette.primary.main : theme.palette.grey[300])}`,
-          background: statusStyles.background || (selected
-            ? `${theme.palette.primary.light}20`
-            : theme.palette.background.paper),
-          boxShadow: (selected
-            ? `0 0 0 2px ${theme.palette.primary.main}`
-            : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`),
+          borderRadius: '16px',
+          border: `1px solid ${statusStyles.borderColor || (selected ? palette.accent : 'transparent')}`,
+          background: statusStyles.background || nodeSurface.background,
+          boxShadow: selected ? `0 0 0 2px ${palette.accent}` : nodeSurface.boxShadow,
           position: 'relative',
           transition: 'all 0.2s ease',
           overflow: 'visible',
@@ -257,7 +256,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
               width: 24,
               height: 24,
               borderRadius: '50%',
-              backgroundColor: theme.palette.background.paper,
+              backgroundColor: palette.badge,
               boxShadow: '0 0 4px rgba(0,0,0,0.2)',
               zIndex: 10,
             }}
@@ -309,9 +308,9 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
                 aria-label="Open in the Agent Builder"
                 onClick={handleOpenCrew}
                 sx={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                  backgroundColor: palette.chip,
                   '&:hover': {
-                    backgroundColor: '#e3f2fd',
+                    backgroundColor: palette.badge,
                   },
                   boxShadow: '0 0 4px rgba(0,0,0,0.2)',
                   width: 24,
@@ -326,9 +325,9 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
               aria-label="Delete crew node"
               onClick={handleDelete}
               sx={{
-                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                backgroundColor: palette.chip,
                 '&:hover': {
-                  backgroundColor: '#ffebee', // light red for delete
+                  backgroundColor: palette.badge,
                 },
                 boxShadow: '0 0 4px rgba(0,0,0,0.2)',
                 width: 24,

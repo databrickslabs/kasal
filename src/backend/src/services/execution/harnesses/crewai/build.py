@@ -200,12 +200,22 @@ def build_agent(**kwargs: Any) -> Any:
 
 def build_task(**kwargs: Any) -> Any:
     """A ``crewai.Task`` from the kernel's task kwargs."""
-    from src.services.execution.harnesses.crewai.guardrails import degrade_on_exhausted
+    from src.services.execution.harnesses.crewai.guardrails import (
+        adapt_guardrail,
+        degrade_on_exhausted,
+    )
     from src.services.execution.harnesses.crewai.tools import adapt_tools
 
     kwargs = dict(kwargs)
     if kwargs.get("tools"):
         kwargs["tools"] = adapt_tools(kwargs["tools"])
+
+    for key in ("guardrail", "guardrails"):
+        existing = kwargs.get(key)
+        if isinstance(existing, (list, tuple)):
+            kwargs[key] = [adapt_guardrail(guardrail) for guardrail in existing]
+        elif existing is not None:
+            kwargs[key] = adapt_guardrail(existing)
 
     # "Keep the best attempt, flagged" rather than "abort the task". CrewAI has
     # no equivalent field, so the policy is applied by wrapping the guardrail —

@@ -15,10 +15,9 @@ flow_processors.py targets:
  858-859, 886
 """
 
-import asyncio
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -747,7 +746,7 @@ class TestFlowMethodFactoryCreateHitlGate:
 # flow_processors.py
 # ---------------------------------------------------------------------------
 
-from src.services.flow_builder.modules.flow_processors import (
+from src.services.flow_builder.modules.flow_processors import (  # noqa: E402 - import follows module initialization
     FlowProcessorManager,
     _to_uuid,
 )

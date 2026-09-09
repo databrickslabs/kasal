@@ -6,8 +6,7 @@ Tests all models in flow_execution.py including table structure and initializati
 
 from datetime import datetime
 
-import pytest
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.db.base import Base

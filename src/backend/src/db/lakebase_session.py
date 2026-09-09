@@ -22,13 +22,12 @@ from typing import AsyncGenerator, Optional
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
-from sqlalchemy import event, text
+from sqlalchemy import event
 from sqlalchemy.exc import IllegalStateChangeError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.core.exceptions import KasalError, LakebaseInstanceUnavailableError
 from src.core.logger import LoggerManager
-from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct, get_application_name
 
 logger_manager = LoggerManager.get_instance()

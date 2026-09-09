@@ -13,7 +13,6 @@ import pytest
 # The chat fast path lives in its own module now; sse_manager is a shared
 # singleton, so patching an attribute on it there reaches every caller.
 import src.services.generation.crew.chat_fast_path as _chat_mod
-import src.services.generation.crews as _mod
 from src.services.generation.crews import CrewGenerationService
 
 # ---------------------------------------------------------------------------
@@ -880,22 +879,22 @@ class TestSafeGetAttr:
         assert self.service._safe_get_attr({"k": "v"}, "other") is None
 
     def test_object_existing(self):
-        class O:
+        class OutputStub:
             x = 5
 
-        assert self.service._safe_get_attr(O(), "x") == 5
+        assert self.service._safe_get_attr(OutputStub(), "x") == 5
 
     def test_object_missing_default(self):
-        class O:
+        class OutputStub:
             pass
 
-        assert self.service._safe_get_attr(O(), "y", "d") == "d"
+        assert self.service._safe_get_attr(OutputStub(), "y", "d") == "d"
 
     def test_object_missing_no_default(self):
-        class O:
+        class OutputStub:
             pass
 
-        assert self.service._safe_get_attr(O(), "y") is None
+        assert self.service._safe_get_attr(OutputStub(), "y") is None
 
     def test_none_object(self):
         assert self.service._safe_get_attr(None, "x") is None
@@ -1223,7 +1222,7 @@ class TestCreateCrewComplete:
     async def test_no_group_context_skips_filtering(self):
         req = self._make_request(model="m")
 
-        with _crew_complete_patches(self.service) as m:
+        with _crew_complete_patches(self.service):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1297,7 +1296,7 @@ class TestCreateCrewComplete:
                 "agents": [{"name": "A"}],
                 "tasks": [{"name": "T", "agent": "A"}],
             },
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1314,7 +1313,7 @@ class TestCreateCrewComplete:
                 "agents": [{"name": "A"}],
                 "tasks": [{"name": "T", "assigned_agent": "A"}],
             },
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1328,7 +1327,7 @@ class TestCreateCrewComplete:
         with _crew_complete_patches(
             self.service,
             pcs_return={"agents": [{"name": "A"}], "tasks": [{"name": "T"}]},
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1345,11 +1344,11 @@ class TestCreateCrewComplete:
         with _crew_complete_patches(
             self.service,
             pcs_return={"agents": [mock_agent], "tasks": [{"name": "T", "agent": "A"}]},
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
-            result = await self.service.create_crew_complete(req)
+            await self.service.create_crew_complete(req)
             mock_agent.model_dump.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1362,7 +1361,7 @@ class TestCreateCrewComplete:
                 "agents": [{"name": "A", "role": "r"}],
                 "tasks": [{"name": "T"}],
             },
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1393,7 +1392,7 @@ class TestCreateCrewComplete:
         with _crew_complete_patches(
             self.service,
             pcs_return={"agents": [plain_agent], "tasks": [{"name": "T"}]},
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1412,11 +1411,11 @@ class TestCreateCrewComplete:
         with _crew_complete_patches(
             self.service,
             pcs_return={"agents": [{"name": "A"}], "tasks": [mock_task]},
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
-            result = await self.service.create_crew_complete(req)
+            await self.service.create_crew_complete(req)
             mock_task.model_dump.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1427,7 +1426,6 @@ class TestCreateCrewComplete:
 
         # Use a dict subclass that pretends not to be a dict by removing model_dump
         # but still supports item assignment
-        task_data = {"name": "T", "agent": "A"}
 
         class FakeTask:
             """Not a dict, no model_dump, but supports .get() and item assignment."""
@@ -1449,7 +1447,7 @@ class TestCreateCrewComplete:
         with _crew_complete_patches(
             self.service,
             pcs_return={"agents": [{"name": "A"}], "tasks": [ft]},
-        ) as m:
+        ):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1467,7 +1465,7 @@ class TestCreateCrewComplete:
             "title": "DatabricksKnowledgeSearchTool",
         }
 
-        with _crew_complete_patches(self.service, gtd_return=[dk_tool]) as m:
+        with _crew_complete_patches(self.service, gtd_return=[dk_tool]):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1501,7 +1499,7 @@ class TestCreateCrewComplete:
             "title": "DatabricksKnowledgeSearchTool",
         }
 
-        with _crew_complete_patches(self.service, gtd_return=[dk_tool]) as m:
+        with _crew_complete_patches(self.service, gtd_return=[dk_tool]):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1528,7 +1526,7 @@ class TestCreateCrewComplete:
         gc = Mock()
         gc.primary_group_id = "grp1"
 
-        with _crew_complete_patches(self.service) as m:
+        with _crew_complete_patches(self.service):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1564,7 +1562,7 @@ class TestCreateCrewComplete:
         gc.primary_group_id = "grp1"
         dk_tool = {"title": "DatabricksKnowledgeSearchTool", "id": "dk-id"}
 
-        with _crew_complete_patches(self.service, gtd_return=[dk_tool]) as m:
+        with _crew_complete_patches(self.service, gtd_return=[dk_tool]):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1596,7 +1594,7 @@ class TestCreateCrewComplete:
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
-            result = await self.service.create_crew_complete(req)
+            await self.service.create_crew_complete(req)
             # _get_tool_details should be called with [] (not None)
             m["gtd"].assert_awaited_once()
             first_arg = m["gtd"].call_args[0][0]
@@ -1609,7 +1607,7 @@ class TestCreateCrewComplete:
         gc = Mock()
         gc.primary_group_id = None
 
-        with _crew_complete_patches(self.service) as m:
+        with _crew_complete_patches(self.service):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1625,7 +1623,7 @@ class TestCreateCrewComplete:
         # Tool that is NOT DatabricksKnowledgeSearchTool
         normal_tool = {"name": "NormalTool", "id": "n-id"}
 
-        with _crew_complete_patches(self.service, gtd_return=[normal_tool]) as m:
+        with _crew_complete_patches(self.service, gtd_return=[normal_tool]):
             self.crew_repo.create_crew_entities = AsyncMock(
                 return_value={"agents": [], "tasks": []}
             )
@@ -1660,8 +1658,13 @@ class TestCreateCrewComplete:
 # failed this way, order-dependently). With the chain cached up front, the
 # patched window imports nothing new, so nothing gets evicted.
 import src.services.otel_tracing.mlflow_parent_setup  # noqa: F401,E402
-from src.core.exceptions import BadRequestError, KasalError
-from src.schemas.task_generation import Agent as TaskGenAgent
+from src.core.exceptions import (  # noqa: E402 - import follows module initialization
+    BadRequestError,
+    KasalError,
+)
+from src.schemas.task_generation import (  # noqa: E402 - import follows module initialization
+    Agent as TaskGenAgent,
+)
 
 
 class TestProgressiveGeneration:
@@ -3462,7 +3465,7 @@ class TestProgressiveGeneration:
         request = self._make_progressive_request()
         gen_id = "gen-lakebase-noconf"
 
-        with self._progressive_patches() as m:
+        with self._progressive_patches():
             with patch(
                 "src.db.database_router.is_lakebase_enabled",
                 new_callable=AsyncMock,

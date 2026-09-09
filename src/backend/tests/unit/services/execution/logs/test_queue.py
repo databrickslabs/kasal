@@ -9,8 +9,6 @@ import queue
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.services.execution.logs.queue import (
     JobOutputQueue,
     enqueue_log,

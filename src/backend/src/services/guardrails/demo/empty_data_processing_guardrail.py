@@ -6,7 +6,6 @@ using the repository to count the total records.
 """
 
 import json
-import logging
 import traceback
 from typing import Any, Dict, Union
 

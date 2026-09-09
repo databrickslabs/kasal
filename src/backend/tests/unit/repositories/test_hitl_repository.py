@@ -7,18 +7,15 @@ status updates, filtering, pagination, and webhook management.
 
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.hitl_approval import (
-    HITLApproval,
     HITLApprovalStatus,
     HITLRejectionAction,
     HITLTimeoutAction,
-    HITLWebhook,
 )
 from src.repositories.hitl_repository import (
     HITLApprovalRepository,
@@ -390,7 +387,7 @@ class TestHITLApprovalRepositoryGetPendingForExecution:
         self, hitl_approval_repository, mock_async_session
     ):
         """Test that latest pending approval is returned (ordered by created_at desc)."""
-        older_approval = MockHITLApproval(
+        MockHITLApproval(
             id=1, created_at=datetime.now(timezone.utc) - timedelta(hours=2)
         )
         newer_approval = MockHITLApproval(id=2, created_at=datetime.now(timezone.utc))
@@ -1106,7 +1103,6 @@ class TestHITLWebhookRepositoryUpdate:
         """Test that unknown fields are ignored during update."""
         mock_result = MockResult([sample_webhook])
         mock_async_session.execute.return_value = mock_result
-        original_name = sample_webhook.name
 
         result = await hitl_webhook_repository.update(
             1, {"unknown_field": "value", "name": "New Name"}
@@ -1265,7 +1261,7 @@ class TestHITLWebhookRepositoryEdgeCases:
         webhook = MockHITLWebhook()
         webhook.events = None  # Override to test None handling
 
-        result = await hitl_webhook_repository.create(webhook)
+        await hitl_webhook_repository.create(webhook)
 
         # The mock is returned as-is; real model would have default
         mock_async_session.add.assert_called_once()

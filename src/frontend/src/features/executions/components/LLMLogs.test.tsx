@@ -110,20 +110,32 @@ describe('LLMLogs', () => {
       render(<LLMLogs />);
 
       await waitFor(() => {
-        expect(screen.getByText('generate-crew')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Create crew · gpt-4' })).toBeInTheDocument();
       });
 
-      expect(screen.getByText('gpt-4')).toBeInTheDocument();
-      expect(screen.getByText('1,500')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Model call details' })).toHaveTextContent('gpt-4');
+      expect(screen.getByRole('list', { name: 'Model calls' })).toHaveTextContent('1,500 tokens');
     });
 
     it('displays title', async () => {
       render(<LLMLogs />);
 
       await waitFor(() => {
-        expect(screen.getByText('LLM API Logs')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Model calls' })).toBeInTheDocument();
       });
     });
+  });
+
+  it('shows the selected request, response and metadata without opening another dialog', async () => {
+    render(<LLMLogs />);
+    expect(await screen.findByText('Test response 1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Request', exact: true }));
+    expect(screen.getByText('Test prompt 1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent · gpt-3.5-turbo' }));
+    expect(screen.getByText('API rate limit exceeded')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Metadata', exact: true }));
+    expect(screen.getByRole('region', { name: 'Model call details' })).toHaveTextContent('"key": "value"');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   describe('Refresh Button', () => {
@@ -179,12 +191,19 @@ describe('LLMLogs', () => {
       render(<LLMLogs />);
 
       await waitFor(() => {
-        expect(screen.getByText('No logs available')).toBeInTheDocument();
+        expect(screen.getByText('No model calls yet')).toBeInTheDocument();
       });
     });
   });
 
   describe('Error Handling', () => {
+    it('renders calls when the provider did not report token usage', async () => {
+      mockGetLLMLogs.mockResolvedValue([{ ...mockLogs[0], tokens_used: null }]);
+      render(<LLMLogs />);
+      expect(await screen.findByText('Test response 1')).toBeVisible();
+      expect(screen.getByRole('list', { name: 'Model calls' })).toHaveTextContent('Tokens unavailable');
+    });
+
     it('handles fetch error gracefully', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockGetLLMLogs.mockRejectedValue(new Error('Network error'));

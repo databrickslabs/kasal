@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi, describe, it, expect, beforeEach, afterEach, Mock } from 'vitest';
 import WorkflowChat from './WorkflowChat';
@@ -137,7 +137,7 @@ vi.mock('../../../store/uiLayout', () => ({
     chatPanelCollapsed: false,
     chatPanelWidth: 450,
   }),
-  useUILayoutStore: Object.assign(() => ({ chatPanelSide: 'right', setChatPanelSide: vi.fn() }), { getState: () => ({ setFlowPanelTab: vi.fn(), setAssistantPanelVisible: vi.fn() }) }),
+  useUILayoutStore: Object.assign(() => ({ chatPanelSide: 'right', setChatPanelSide: vi.fn() }), { getState: () => ({ assistantDockHeight: 0, setAssistantDockHeight: vi.fn(), setFlowPanelTab: vi.fn(), setAssistantPanelVisible: vi.fn() }) }),
 }));
 
 vi.mock('./hooks/useChatSession', () => ({
@@ -175,14 +175,6 @@ vi.mock('./hooks/useExecutionMonitoring', () => {
 vi.mock('./components/ChatMessageItem', () => ({
   ChatMessageItem: ({ message }: { message: { content: string } }) => (
     <div data-testid="chat-message">{message.content}</div>
-  ),
-}));
-
-vi.mock('./components/GroupedTraceMessages', () => ({
-  GroupedTraceMessages: ({ messages, running }: { messages: { id: string }[]; running?: boolean }) => (
-    <div data-testid="grouped-trace-messages" data-running={String(Boolean(running))}>
-      {messages.length} trace messages
-    </div>
   ),
 }));
 
@@ -1362,16 +1354,16 @@ describe('Flow Builder conversation', () => {
   });
 });
 
-describe('Stop execution from the composer', () => {
-  beforeEach(() => vi.clearAllMocks());
-  const props = { onNodesGenerated: vi.fn(), onLoadingStateChange: vi.fn() };
+describe('Stop execution through the canvas control', () => {
+  beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+  const props = { onNodesGenerated: vi.fn(), onLoadingStateChange: vi.fn(), layout: 'canvas' as const };
   const execState = async () => ((await import('./hooks/useExecutionMonitoring')) as unknown as {
     __execState: { executingJobId: string | null };
   }).__execState;
 
   afterEach(async () => {
     (await execState()).executingJobId = null;
-    vi.restoreAllMocks();
+    vi.restoreAllMocks(); vi.unstubAllGlobals();
   });
 
   it.each(['crew', 'flow'] as const)('stops the active %s run, preventing duplicate requests', async builderMode => {
@@ -1381,13 +1373,13 @@ describe('Stop execution from the composer', () => {
     const stopped = vi.fn();
     window.addEventListener('jobStopped', stopped);
     (await execState()).executingJobId = 'job-stop';
-    render(<WorkflowChat {...props} builderMode={builderMode} />);
-    const stop = screen.getByRole('button', { name: 'Stop execution' });
-    expect(stop).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
-    fireEvent.click(stop);
-    fireEvent.click(stop);
-    expect(screen.getByRole('button', { name: 'Stopping execution' })).toBeDisabled();
+    render(<><div id="builder-assistant-composer-host" /><WorkflowChat {...props} builderMode={builderMode} /></>);
+    const { useBuilderExecutionControls } = await import('../../../store/builderExecutionControls');
+    const stop = useBuilderExecutionControls.getState()[builderMode]!.stop;
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
+    act(() => { void stop(); void stop(); });
+    expect(useBuilderExecutionControls.getState()[builderMode]?.stopping).toBe(true);
     expect(post).toHaveBeenCalledTimes(1);
     expect(post).toHaveBeenCalledWith('/executions/job-stop/stop', {
       stop_type: 'graceful', reason: 'Stopped by user', preserve_partial_results: true,
@@ -1405,9 +1397,10 @@ describe('Stop execution from the composer', () => {
     const error = vi.spyOn(toast, 'error');
     (await execState()).executingJobId = 'job-retry';
     render(<WorkflowChat {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Stop execution' }));
+    const { useBuilderExecutionControls } = await import('../../../store/builderExecutionControls');
+    await act(() => useBuilderExecutionControls.getState().crew!.stop());
     await waitFor(() => expect(error).toHaveBeenCalledWith('Could not stop execution. Please try again.'));
-    expect(screen.getByRole('button', { name: 'Stop execution' })).toBeEnabled();
+    expect(useBuilderExecutionControls.getState().crew?.stopping).toBe(false);
     expect((await execState()).executingJobId).toBe('job-retry');
   });
 });

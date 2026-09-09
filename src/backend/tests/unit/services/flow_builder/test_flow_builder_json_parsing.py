@@ -16,9 +16,7 @@ FlowBuilder interface indirectly.
 """
 
 import json
-from typing import Any, Dict, List
-
-import pytest
+from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
 # Replicated helpers -- identical logic to flow_builder.py lines 899-912

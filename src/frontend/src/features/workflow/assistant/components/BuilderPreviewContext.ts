@@ -4,8 +4,12 @@ import type { PreviewContent } from '../../../chat/types/preview';
 
 /** Opens a run's memory beside the builder conversation, across its portals. */
 export const BuilderPreviewContext = createContext<{
+  openSchedule?: (executionId: string, defaultName: string, onCreated: (name: string) => void) => void;
+  openOptimize?: (crewId: string, crewName: string) => void;
+  openCheckpoints?: (jobId: string, onResumed: (newJobId: string) => void) => void;
   openMemory: (jobId: string) => void;
   openStep: (jobId: string, step: RunStep) => void;
+  openApproval?: (jobId: string, approvalId: number, onDecision: () => void) => void;
   openResult?: (content: PreviewContent) => void;
   previewMessageId?: string;
   closePreview?: () => void;

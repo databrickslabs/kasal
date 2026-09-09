@@ -3,9 +3,8 @@ from typing import Annotated, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.dependencies.providers import GroupContextDep, SessionDep
-from src.core.exceptions import ForbiddenError
 from src.core.permissions import is_workspace_admin
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.powerbi_config import (
     DAXQueryRequest,
     DAXQueryResponse,

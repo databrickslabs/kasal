@@ -7,8 +7,7 @@ broadcasting, and event stream generation.
 
 import asyncio
 import json
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -333,7 +332,7 @@ class TestReplayBuffer:
     async def test_broadcast_assigns_sequential_event_ids(self):
         """Broadcast assigns monotonically increasing event IDs."""
         manager = SSEConnectionManager()
-        queue = manager.create_event_queue("job-1")
+        manager.create_event_queue("job-1")
 
         e1 = SSEEvent(data={"seq": 1})
         e2 = SSEEvent(data={"seq": 2})

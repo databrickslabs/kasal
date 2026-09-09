@@ -6,7 +6,6 @@ CRUD operations, name-based queries, and encryption handling.
 """
 
 from datetime import datetime
-from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

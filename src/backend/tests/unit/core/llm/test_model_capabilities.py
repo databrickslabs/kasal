@@ -107,7 +107,10 @@ class TestAllowedEfforts:
             ("databricks-grok-4-6", ("low", "medium", "high", "xhigh")),
             ("databricks-glm-5-3", ("low", "high", "max")),
             ("databricks-kimi-k3", ("none", "low", "high", "max")),
-            ("databricks-inkling", ("minimal", "low", "medium", "high", "xhigh", "max")),
+            (
+                "databricks-inkling",
+                ("minimal", "low", "medium", "high", "xhigh", "max"),
+            ),
         ],
     )
     def test_scale(self, model, expected):

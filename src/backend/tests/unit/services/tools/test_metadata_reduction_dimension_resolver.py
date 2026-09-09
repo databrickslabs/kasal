@@ -1,7 +1,5 @@
 """Unit tests for DimensionResolver in metadata_reduction package."""
 
-import pytest
-
 from src.services.tools.metadata_reduction.dimension_resolver import (
     DimensionBinding,
     DimensionResolver,

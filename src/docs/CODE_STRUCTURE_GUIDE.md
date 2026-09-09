@@ -162,7 +162,7 @@ The flat ESLint configuration enforces the boundaries already established.
 deduplicated database-outage toast; the transport does not import UI libraries.
 
 Crew representations are separate: `types/workflow/crew.ts` holds API contracts,
-`crewPayload.ts` serialized inputs, `crewSummary.ts` execution summaries and
+`crewPayload.ts` serialized inputs and
 `canvas.ts` canvas data. UI props live with the canvas and crew features.
 
 Chat view models retain `Date` values and camelCase fields; persistence wire

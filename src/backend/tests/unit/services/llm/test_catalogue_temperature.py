@@ -71,9 +71,7 @@ async def _built_kwargs(model_config, temperature):
         ),
         patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
         patch("src.services.llm.manager.LLM") as MockLLM,
-        patch(
-            "src.services.llm.manager.DatabricksRetryLLM"
-        ) as MockDatabricksRetryLLM,
+        patch("src.services.llm.manager.DatabricksRetryLLM") as MockDatabricksRetryLLM,
     ):
         await LLMManager.configure_kasal_llm(
             model_config["name"], "group-1", temperature

@@ -15,7 +15,7 @@ export interface UILayoutState {
 
   // Right sidebar
   rightSidebarVisible: boolean;
-  rightSidebarWidth: number;       // Fixed width (48px)
+  rightSidebarWidth: number;       // Reserved width; zero when the sidebar is absent
 
   // Chat panel
   assistantPanelVisible?: boolean;

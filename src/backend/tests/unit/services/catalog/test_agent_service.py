@@ -7,7 +7,6 @@ CRUD operations with group isolation.
 
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,10 +29,18 @@ def _patch_isolated_session(mock_session):
     return patch("src.db.session.get_isolated_db_session", _cm)
 
 
-from src.models.agent import Agent
-from src.repositories.agent_repository import AgentRepository
-from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
-from src.utils.user_context import GroupContext
+from src.models.agent import Agent  # noqa: E402 - import follows module initialization
+from src.repositories.agent_repository import (  # noqa: E402 - import follows module initialization
+    AgentRepository,
+)
+from src.schemas.agent import (  # noqa: E402 - import follows module initialization
+    AgentCreate,
+    AgentLimitedUpdate,
+    AgentUpdate,
+)
+from src.utils.user_context import (  # noqa: E402 - import follows module initialization
+    GroupContext,
+)
 
 
 # Mock agent model

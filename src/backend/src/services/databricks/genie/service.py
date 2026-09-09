@@ -6,7 +6,7 @@ Coordinates between router and repository layers.
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from src.repositories.genie_repository import GenieRepository
 from src.schemas.genie import (

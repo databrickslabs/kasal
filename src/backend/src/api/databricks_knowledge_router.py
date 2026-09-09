@@ -7,10 +7,9 @@ import logging
 from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
 logger = logging.getLogger(__name__)
@@ -225,7 +224,7 @@ async def delete_knowledge_file(
         Deletion confirmation
     """
     # Delete file
-    result = await service.delete_knowledge_file(
+    await service.delete_knowledge_file(
         execution_id=execution_id,
         group_id=(
             group_context.group_ids[0]
@@ -267,7 +266,7 @@ async def select_volume_file(
         # Extract user token for OBO authentication
         from src.utils.databricks_auth import extract_user_token_from_request
 
-        user_token = extract_user_token_from_request(request)
+        extract_user_token_from_request(request)
 
         # Parse selected agents
         agents = json.loads(selected_agents) if selected_agents else []

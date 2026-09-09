@@ -55,7 +55,7 @@ _BLOCKED_METADATA_HOSTS = {
 def _normalize_host(host: Optional[str]) -> str:
     if not host or not isinstance(host, str):
         return ""
-    return host.strip().rstrip(".").lower().split(":")[0]
+    return host.strip().rstrip(".").lower()
 
 
 def _extract_hostname(host_or_url: Optional[str]) -> str:

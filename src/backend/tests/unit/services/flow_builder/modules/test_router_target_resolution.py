@@ -13,28 +13,11 @@ tuples the naming actually came from, so it cannot drift from it.
 
 import pytest
 
-
-def build_crew_to_method(listener_crews, starting_points, frontend_starting_points):
-    """Mirrors the map built in flow_builder._create_dynamic_flow.
-
-    Kept in the test rather than imported because the production copy is inline
-    in a 1,400-line function; the point of these tests is the RULE, and the rule
-    is short enough to state twice and long enough to be worth pinning.
-    """
-    crew_to_method = {}
-    for info in listener_crews:
-        method_name, crew_id = info[0], info[1]
-        if crew_id:
-            crew_to_method.setdefault(str(crew_id), method_name)
-    for method_name, task_ids, _objs, _name, _data in starting_points:
-        ids = {str(t) for t in task_ids}
-        for config in frontend_starting_points:
-            if str(config.get("taskId")) in ids:
-                crew_id = config.get("crewId")
-                if crew_id:
-                    crew_to_method.setdefault(str(crew_id), method_name)
-                break
-    return crew_to_method
+from src.services.flow_builder.modules.router_dependencies import (
+    build_crew_to_method,
+    resolve_router_upstream,
+    validate_router_upstreams,
+)
 
 
 class TestCrewToMethod:
@@ -93,7 +76,7 @@ class TestCrewToMethod:
     def test_a_crew_without_an_id_is_skipped_rather_than_keyed_on_nothing(
         self, missing
     ):
-        listeners = [(f"listener_0", missing, [], [], "C", [], "OR")]
+        listeners = [("listener_0", missing, [], [], "C", [], "OR")]
 
         assert build_crew_to_method(listeners, [], {}) == {}
 
@@ -105,3 +88,336 @@ class TestCrewToMethod:
         ]
 
         assert build_crew_to_method(listeners, [], {}) == {"crew-a": "listener_0"}
+
+
+class TestConditionalCrewDependencies:
+    def test_unknown_explicit_crew_does_not_fall_back_to_start(self):
+        with pytest.raises(ValueError, match="no executable method"):
+            resolve_router_upstream(
+                {"listenToCrewId": "missing"}, {}, "starting_point_0"
+            )
+
+    def test_a_route_without_runnable_tasks_is_not_a_dependency(self):
+        routers = [{"routes": {"number": [{"id": "deleted-task", "crewId": "number"}]}}]
+        assert build_crew_to_method([], [], [], routers, {}) == {}
+
+    def test_legacy_router_without_crew_uses_start(self):
+        assert resolve_router_upstream({}, {}, "starting_point_0") == "starting_point_0"
+
+    def test_missing_generated_method_fails_before_execution(self):
+        with pytest.raises(ValueError, match="missing flow method"):
+            validate_router_upstreams({"router_number": "route_black_number_1"}, {})
+
+
+@pytest.mark.asyncio
+async def test_router_without_any_starting_point_is_rejected():
+    from src.services.flow_builder.modules.flow_builder import FlowBuilder
+
+    with pytest.raises(ValueError, match="missing flow method 'starting_point_0'"):
+        await FlowBuilder._create_dynamic_flow(
+            [], [], [{"name": "no_start", "routes": {"a": []}}], {}, {}, flow_config={}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse_routers", [False, True])
+@pytest.mark.parametrize(
+    "number,expected",
+    [(100, ["black", "number", "green"]), (101, ["black", "number", "white"])],
+)
+async def test_real_flow_runs_the_branch_after_number_finishes(
+    reverse_routers, number, expected
+):
+    """Exercise the real scheduler for run 415, with deterministic crew outputs."""
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from src.services.flow_builder.modules.flow_builder import FlowBuilder
+    from src.services.flow_builder.runtime import start
+
+    calls = []
+    agent = SimpleNamespace(role="Worker", llm=SimpleNamespace(model="example-model"))
+    tasks = {
+        name: SimpleNamespace(description=name, expected_output="JSON", agent=agent)
+        for name in ("black", "number", "green", "white")
+    }
+
+    def starting_method(**kwargs):
+        @start()
+        async def starting_point_0(self):
+            calls.append("black")
+            output = '{"word":"black"}'
+            self.state["starting_point_0"] = output
+            return output
+
+        return starting_point_0
+
+    def build_crew(**kwargs):
+        async def kickoff_async(inputs):
+            name = kwargs["name"]
+            calls.append(name)
+            if name in ("green", "white"):
+                assert json.loads(inputs["previous_output"]) == {"number": number}
+            return SimpleNamespace(
+                raw=json.dumps(
+                    {"number": number} if name == "number" else {"word": name}
+                )
+            )
+
+        return SimpleNamespace(kickoff_async=kickoff_async)
+
+    harness = SimpleNamespace(
+        build_task=lambda **kw: SimpleNamespace(**kw),
+        build_crew=build_crew,
+        process=lambda value: value,
+    )
+    routers = [
+        {
+            "name": "black",
+            "listenToCrewId": "black",
+            "routes": {
+                "to_number": [
+                    {"id": "number", "crewId": "number", "crewName": "number"}
+                ]
+            },
+            "routeConditions": {"to_number": "state.get('word') == 'black'"},
+        },
+        {
+            "name": "number",
+            "listenToCrewId": "number",
+            "routes": {
+                "to_green": [{"id": "green", "crewId": "green", "crewName": "green"}],
+                "to_white": [{"id": "white", "crewId": "white", "crewName": "white"}],
+            },
+            "routeConditions": {
+                "to_green": "state.get('number', '') == 100",
+                "to_white": "state.get('number', '') > 100",
+            },
+        },
+    ]
+    if reverse_routers:
+        routers.reverse()
+    module = "src.services.flow_builder.modules.flow_builder"
+    with (
+        patch(
+            f"{module}.FlowMethodFactory.create_starting_point_crew_method",
+            side_effect=starting_method,
+        ),
+        patch(
+            "src.services.flow_builder.modules.route_listener.active_harness",
+            return_value=harness,
+        ),
+        patch(
+            "src.services.flow_builder.modules.route_listener.get_model_context_limits",
+            new=AsyncMock(return_value=(10000, 1000)),
+        ),
+        patch(
+            "src.services.security.tool_capability_manifest.run_crew_security_checks"
+        ),
+    ):
+        flow = await FlowBuilder._create_dynamic_flow(
+            [("starting_point_0", ["black"], [tasks["black"]], "black", {})],
+            [],
+            routers,
+            {},
+            tasks,
+            flow_config={
+                "startingPoints": [
+                    {"taskId": "black", "crewId": "black", "crewName": "black"}
+                ]
+            },
+        )
+        await flow.kickoff_async()
+    assert calls == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [True, False])
+@pytest.mark.parametrize("approved", [True, False])
+async def test_selected_branch_waits_for_human(selected, approved):
+    import json
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace as NS
+    from unittest.mock import AsyncMock, patch
+
+    from src.models.hitl_approval import HITLApprovalStatus
+    from src.services.flow_builder.exceptions import FlowPausedForApprovalException
+    from src.services.flow_builder.modules.flow_builder import FlowBuilder
+    from src.services.flow_builder.runtime import start
+
+    calls, requests = [], []
+    agent = NS(role="worker", llm=NS(model="test"))
+    tasks = {
+        name: NS(description=name, agent=agent, expected_output="JSON", output=None)
+        for name in ("black", "number")
+    }
+
+    def starting(**_):
+        @start()
+        async def start_black(self):
+            calls.append("black")
+            self.state["start_black"] = '{"word":"black"}'
+            return self.state["start_black"]
+
+        return start_black
+
+    def crew(**kw):
+        async def kickoff_async(inputs):
+            calls.append(kw["name"])
+            assert json.loads(inputs["previous_output"]) == {"word": "black"}
+            return NS(raw='{"number":100}')
+
+        return NS(kickoff_async=kickoff_async)
+
+    gate = NS(
+        id=1,
+        gate_node_id="black-number",
+        status=HITLApprovalStatus.APPROVED,
+        responded_by="reviewer",
+        responded_at=None,
+    )
+
+    async def create(**kw):
+        requests.append(kw)
+        return NS(id=1, expires_at=None)
+
+    service = NS(
+        get_approvals_for_execution=AsyncMock(return_value=[gate] if approved else []),
+        create_approval_request=create,
+    )
+
+    @asynccontextmanager
+    async def session():
+        yield NS(commit=AsyncMock())
+
+    config = {
+        "startingPoints": [{"taskId": "black", "crewId": "black", "crewName": "black"}],
+        "nodes": [
+            {"id": "source", "data": {"crewId": "black"}},
+            {"id": "target", "data": {"crewId": "number"}},
+        ],
+        "edges": [
+            {
+                "id": "black-number",
+                "source": "source",
+                "target": "target",
+                "data": {
+                    "targetTaskIds": ["number"],
+                    "hitl": {"enabled": True},
+                    "checkpoint": False,
+                },
+            }
+        ],
+    }
+    routers = [
+        {
+            "name": "choice",
+            "listenToCrewId": "black",
+            "routes": {
+                "chosen": [{"id": "number", "crewId": "number", "crewName": "number"}]
+            },
+            "routeConditions": {
+                "chosen": (
+                    "state.get('word') == 'black'"
+                    if selected
+                    else "state.get('word') == 'white'"
+                )
+            },
+        }
+    ]
+    harness = NS(build_crew=crew, process=lambda value: value)
+    with (
+        patch(
+            "src.services.flow_builder.modules.flow_builder.FlowMethodFactory.create_starting_point_crew_method",
+            side_effect=starting,
+        ),
+        patch(
+            "src.services.flow_builder.modules.route_listener.active_harness",
+            return_value=harness,
+        ),
+        patch(
+            "src.services.flow_builder.modules.route_listener.get_model_context_limits",
+            new=AsyncMock(return_value=(10000, 1000)),
+        ),
+        patch(
+            "src.services.security.tool_capability_manifest.run_crew_security_checks"
+        ),
+        patch("src.db.session.get_isolated_db_session", session),
+        patch("src.services.hitl.service.HITLService", return_value=service),
+        patch(
+            "src.services.hitl.webhook.HITLWebhookService",
+            return_value=NS(send_gate_reached_notification=AsyncMock()),
+        ),
+        patch(
+            "src.services.execution.service.ExecutionService",
+            return_value=NS(get_run_by_job_id=AsyncMock(return_value=None)),
+        ),
+    ):
+        flow = await FlowBuilder._create_dynamic_flow(
+            [("start_black", ["black"], [tasks["black"]], "black", {})],
+            [],
+            routers,
+            {},
+            tasks,
+            callbacks={"job_id": "approval-test", "flow_id": "flow-test"},
+            group_context=NS(primary_group_id="test-group"),
+            flow_config=config,
+        )
+        if selected and not approved:
+            with pytest.raises(FlowPausedForApprovalException):
+                await flow.kickoff_async()
+            assert requests[0]["gate_node_id"] == "black-number"
+            assert requests[0]["previous_crew_output"] == '{"word":"black"}'
+            assert calls == ["black"]
+        else:
+            await flow.kickoff_async()
+            assert calls == (["black", "number"] if selected else ["black"])
+            assert requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", [False, True])
+async def test_gate_resume_sequence_follows_execution_not_declaration_order(typed):
+    from types import SimpleNamespace
+
+    from src.services.flow_builder.modules.crew_completion import (
+        completed_sequence,
+        track_completion,
+    )
+
+    async def work(self):
+        return "done"
+
+    from src.services.flow_builder.conversation.state_model import DictLikeState
+
+    flow = SimpleNamespace(state=DictLikeState() if typed else {})
+    for name in ("black", "number", "green"):
+        await track_completion(work, name)(flow)
+    assert completed_sequence(flow, "number", 99) == 2
+    await track_completion(work, "black")(flow)
+    assert completed_sequence(flow, "number", 99) == 2
+    if typed:
+        restored = SimpleNamespace(
+            state=DictLikeState.model_validate(flow.state.model_dump())
+        )
+        assert completed_sequence(restored, "number", 99) == 2
+
+
+@pytest.mark.asyncio
+async def test_resumed_completed_route_replays_without_running_or_asking_again():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.services.flow_builder.modules.route_listener import route_listener_factory
+
+    gate = SimpleNamespace(
+        _meth=AsyncMock(side_effect=AssertionError("Already completed"))
+    )
+    method = route_listener_factory(
+        [], "number", {}, None, "selected", "Number", "black", [gate], '{"number":100}'
+    )
+    flow = SimpleNamespace(state={"black": '{"word":"black"}'})
+    assert await method(flow, "selected") == '{"number":100}'
+    assert flow.state["number"] == '{"number":100}'
+    gate._meth.assert_not_called()

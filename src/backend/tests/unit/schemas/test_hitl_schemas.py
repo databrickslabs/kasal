@@ -6,7 +6,6 @@ including validation, serialization, enum values, and field constraints.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict
 
 import pytest
 from pydantic import ValidationError

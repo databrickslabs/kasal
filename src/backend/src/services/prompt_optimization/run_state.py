@@ -9,17 +9,9 @@ split live runs from the code that cancels and reports them.
 Durable state lives in the ``prompt_optimization_runs`` table; the helpers here
 are the mapping between the two."""
 
-import asyncio
-import hashlib
 import logging
-import os
-import re
-import threading
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from src.core.exceptions import BadRequestError
 from src.repositories.prompt_optimization_run_repository import (
     PromptOptimizationRunRepository,
 )

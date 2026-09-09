@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Configuration from './Configuration';
+import { useEventTriggersStore } from '../../../store/eventTriggers';
 import { usePermissionStore } from '../../../store/permissions';
 import { useGroupStore } from '../../../store/groups';
 import { switchSettingsTeamspace } from '../lib/settingsNavigation';
@@ -11,9 +12,11 @@ vi.mock('./GeneralSettings', () => ({ default: () => <div>Personal preferences c
 vi.mock('./WorkspaceOverview', () => ({ default: () => <div>Teamspace overview content</div> }));
 vi.mock('./Models', () => ({ default: ({ mode }: { mode: string }) => <div>Models scope: {mode}</div> }));
 vi.mock('./APIKeys/APIKeys', () => ({ default: () => <div>Credential settings content</div> }));
+vi.mock('../../triggers/components/TriggersPanel', () => ({ default: ({ embedded }: { embedded?: boolean }) => <div>Event trigger controls {embedded ? 'embedded' : 'standalone'}</div> }));
 vi.mock('./Prompts', () => ({ default: () => <div>Prompt settings content</div> }));
 
 beforeEach(() => {
+  useEventTriggersStore.setState({ enabled: false, load: vi.fn() });
   usePermissionStore.setState({ userRole: 'admin', isLoading: false, isSystemAdmin: true, isPersonalWorkspaceManager: false, loadPermissions: vi.fn() });
   useGroupStore.setState({ fetchMyGroups: vi.fn(), currentGroupId: 'team-design', groups: [{ id: 'team-design', name: 'Design team', status: 'active', created_at: '', updated_at: '' }] });
 });
@@ -63,4 +66,14 @@ it('lists other administered teamspaces and switches from Settings for', () => {
   fireEvent.click(screen.getByRole('option', { name: 'Research team' }));
   expect(switchSettingsTeamspace).toHaveBeenCalledWith('Research team', 'overview');
   expect(screen.getByText('Switching teamspace…')).toBeVisible();
+});
+
+it('shows enabled event triggers as an embedded teamspace settings section', async () => {
+  render(<Configuration />);
+  expect(screen.queryByRole('button', { name: 'Event triggers', exact: true })).not.toBeInTheDocument();
+  act(() => useEventTriggersStore.setState({ enabled: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Event triggers', exact: true }));
+  expect(await screen.findByText('Event trigger controls embedded')).toBeVisible();
+  act(() => useEventTriggersStore.setState({ enabled: false }));
+  await waitFor(() => expect(screen.queryByText('Event trigger controls embedded')).not.toBeInTheDocument());
 });

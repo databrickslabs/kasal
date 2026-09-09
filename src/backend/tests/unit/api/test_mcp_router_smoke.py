@@ -98,7 +98,7 @@ async def test_get_mcp_servers_non_admin_enabled_only_true():
 @pytest.mark.asyncio
 async def test_get_databricks_mcp_options_forbidden_for_non_admin():
     """Regression: Databricks MCP catalog is admin-only."""
-    svc = AsyncMock()
+    AsyncMock()
     with pytest.raises(ForbiddenError) as ei:
         await get_databricks_mcp_options(
             request=None, session=None, group_context=Ctx(user_role="user")

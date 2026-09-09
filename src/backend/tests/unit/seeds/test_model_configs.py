@@ -4,7 +4,7 @@ Unit tests for model configs seed module.
 Tests the DEFAULT_MODELS data structure, data integrity, and seed functions.
 """
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

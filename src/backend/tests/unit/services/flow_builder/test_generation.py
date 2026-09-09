@@ -463,3 +463,229 @@ async def test_malformed_intent_is_retried_without_defaulting_to_one_crew():
         with pytest.raises(ValueError, match="Could not identify"):
             await analyze_flow_intent("Research and create slides", "test-model")
     assert complete.await_count == 2
+
+
+def news_contract():
+    return {
+        "crew_id": "a",
+        "task_id": "task-a",
+        "name": "News relevance",
+        "schema_definition": {
+            "type": "object",
+            "required": ["articles"],
+            "properties": {
+                "articles": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["headline", "category", "importance"],
+                        "properties": {
+                            "headline": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": ["policy", "sport"],
+                                "description": "Classify the article topic from its evidence",
+                            },
+                            "importance": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10,
+                                "description": "Importance to the team on a zero to ten scale",
+                            },
+                        },
+                    },
+                }
+            },
+        },
+    }
+
+
+def routed_news_plan():
+    return FlowPlanningStep(
+        name="Relevant news",
+        explanation="Send important policy news to the team; otherwise stop.",
+        crew_ids=["a", "b"],
+        output_contracts=[news_contract()],
+        stage_assignments={"stage_1": "a", "stage_2": "b"},
+        links=[
+            {
+                "source": "a",
+                "target": "b",
+                "condition_groups": [
+                    {
+                        "subject": "articles",
+                        "terms": [
+                            {"field": "category", "operator": "==", "value": "policy"},
+                            {"field": "importance", "operator": ">=", "value": 7},
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+
+
+def test_generated_schema_routes_same_article_and_survives_serialization():
+    from src.schemas.flow_generation import FlowGenerationResponse
+    from src.services.flow_builder.modules.flow_conditions import (
+        ConditionState,
+        make_where,
+    )
+    from src.utils.safe_eval import safe_eval
+
+    original = catalog()
+    snapshot = json.dumps(original)
+    response = build_flow(routed_news_plan(), original)
+    restored = FlowGenerationResponse.model_validate_json(response.model_dump_json())
+    assert restored.nodes[0].data.model_dump()["outputContract"] == news_contract()
+    assert json.dumps(original) == snapshot  # No catalog mutation.
+    condition = restored.edges[0].data["routerCondition"]
+
+    def matches(articles):
+        state = ConditionState({"articles": articles})
+        return bool(
+            safe_eval(
+                condition,
+                {"state": state, "where": make_where(state)},
+                allowed_call_names=frozenset({"where"}),
+            )
+        )
+
+    assert matches([{"category": "policy", "importance": 8}])
+    assert not matches(
+        [
+            {"category": "policy", "importance": 2},
+            {"category": "sport", "importance": 9},
+        ]
+    )
+    assert not matches([])
+    assert len(restored.edges) == 1  # No invented fallback crew.
+
+
+@pytest.mark.parametrize(
+    "change", ["crew", "task", "field", "value", "reference", "duplicate"]
+)
+def test_bad_output_contracts_and_routes_are_rejected(change):
+    data = routed_news_plan().model_dump()
+    if change == "crew":
+        data["output_contracts"][0]["crew_id"] = "other-team"
+    elif change == "task":
+        data["output_contracts"][0]["task_id"] = "task-b"
+    elif change == "field":
+        data["links"][0]["condition_groups"][0]["terms"][0]["field"] = "invented"
+    elif change == "value":
+        data["links"][0]["condition_groups"][0]["terms"][1]["value"] = "urgent"
+    elif change == "reference":
+        data["output_contracts"][0]["schema_definition"][
+            "$ref"
+        ] = "https://example.com/schema"
+    else:
+        data["output_contracts"].append(news_contract())
+    with pytest.raises(ValueError):
+        build_flow(FlowPlanningStep.model_validate(data), catalog())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness_name", ["kasal", "crewai"])
+async def test_flow_contract_reaches_real_task_schema_on_both_harnesses(harness_name):
+    from pydantic import ValidationError
+
+    from src.services.execution.harnesses import active_harness
+    from src.services.execution.harnesses.selection import bind
+    from src.services.execution.kernel.task_builder import build_task_args
+    from src.services.flow_builder.modules.task_adapter import TaskConfig
+    from src.services.flow_builder.output_contracts import apply_flow_output_contract
+
+    flow = json.loads(build_flow(routed_news_plan(), catalog()).model_dump_json())
+    task_data = SimpleNamespace(
+        id="task-a",
+        name="News",
+        description="Research news",
+        expected_output="A complete news report",
+        config={},
+    )
+    spec = apply_flow_output_contract(
+        TaskConfig._task_data_to_spec(task_data), task_data.id, flow
+    )
+    assert task_data.config == {}
+    assert "complete news report" in spec["expected_output"]
+    with bind(harness_name):
+        args = await build_task_args(spec, None, [])
+        task = active_harness().build_task(**args)
+        assert task.output_json is not None
+        task.output_json.model_validate(
+            {"articles": [{"headline": "News", "category": "policy", "importance": 8}]}
+        )
+        with pytest.raises(ValidationError):
+            task.output_json.model_validate(
+                {
+                    "articles": [
+                        {"headline": "News", "category": "policy", "importance": 99}
+                    ]
+                }
+            )
+        with pytest.raises(ValidationError):
+            task.output_json.model_validate({"articles": [{"headline": "News"}]})
+    untouched = apply_flow_output_contract(
+        {"expected_output": "Original"}, "task-b", flow
+    )
+    assert untouched == {"expected_output": "Original"}
+
+
+@pytest.mark.asyncio
+async def test_generation_creates_contract_after_bounded_source_detail_request():
+    service = generation_service()
+    detail = FlowPlanningStep(
+        name="Check source", explanation="Inspect source output", detail_crew_ids=["a"]
+    )
+    with patch(
+        "src.services.flow_builder.generation.LLMManager.completion",
+        new_callable=AsyncMock,
+    ) as complete:
+        complete.side_effect = [
+            detail.model_dump_json(),
+            routed_news_plan().model_dump_json(),
+        ]
+        response = await service.generate(
+            FlowGenerationRequest(prompt="Send important policy news to our team"),
+            SimpleNamespace(group_ids=["team"]),
+        )
+    assert len(response.nodes) == 2
+    assert response.nodes[0].data.model_dump()["outputContract"]["task_id"] == "task-a"
+    assert complete.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_id", [1, "1", "", None, "task-b"])
+async def test_generation_binds_final_task_instead_of_retrying_model_task_ids(task_id):
+    service = generation_service()
+    data = routed_news_plan().model_dump()
+    data["output_contracts"][0]["task_id"] = task_id
+    with patch(
+        "src.services.flow_builder.generation.LLMManager.completion",
+        new_callable=AsyncMock,
+    ) as complete:
+        complete.return_value = json.dumps(data)
+        result = await service.generate(
+            FlowGenerationRequest(prompt="Route important news"),
+            SimpleNamespace(group_ids=["team"]),
+        )
+    assert result.nodes[0].data.model_dump()["outputContract"]["task_id"] == "task-a"
+    assert len(result.nodes) == 2
+    complete.assert_awaited_once()
+
+
+def test_generation_binding_does_not_authorize_an_unselected_or_unknown_crew():
+    data = routed_news_plan().model_dump()
+    data["output_contracts"][0]["crew_id"] = "other-team"
+    with pytest.raises(ValueError, match="selected crew"):
+        draft = FlowPlanningStep.model_validate(data, context={"catalog": catalog()})
+        build_flow(draft, catalog())
+
+
+def test_generation_binding_handles_missing_task_id_without_mutating_answer():
+    data = routed_news_plan().model_dump()
+    del data["output_contracts"][0]["task_id"]
+    draft = FlowPlanningStep.model_validate(data, context={"catalog": catalog()})
+    assert draft.output_contracts[0].task_id == "task-a"
+    assert "task_id" not in data["output_contracts"][0]

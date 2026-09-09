@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { Menu, MenuItem, Typography } from '@mui/material';
 import { WandSparkles } from 'lucide-react';
 import type { Node } from 'reactflow';
 import type { Run } from '../../../../types/execution/run';
 import { FlowService } from '../../../../api/workflow/FlowService';
 import { usePermissionStore } from '../../../../store/permissions';
+import { BuilderPreviewContext } from './BuilderPreviewContext';
 import CrewOptimizeDialog from '../../crews/components/CrewOptimizeDialog';
 import { runConfiguration } from '../utils/runConfiguration';
 
@@ -17,6 +18,11 @@ function flowCrews(nodes: Node[]): CrewChoice[] {
 
 /** Optimize the saved definition used by this run, never an unrelated canvas. */
 export default function BuilderOptimizeAction({ run }: { run: Run }) {
+  const preview = useContext(BuilderPreviewContext);
+  const choose = (crew: CrewChoice) => {
+    if (preview?.openOptimize) preview.openOptimize(crew.id, crew.name);
+    else setSelected(crew);
+  };
   const canEdit = usePermissionStore(state => state.allowAgentBuilder && state.userRole !== 'operator');
   const [selected, setSelected] = useState<CrewChoice | null>(null);
   const [choices, setChoices] = useState<CrewChoice[]>([]);
@@ -31,12 +37,12 @@ export default function BuilderOptimizeAction({ run }: { run: Run }) {
   if (!canEdit) return null;
   const open = async (target: HTMLElement) => {
     setError('');
-    if (!flow && run.crew_id) { setSelected({ id: run.crew_id, name: run.run_name }); return; }
+    if (!flow && run.crew_id) { choose({ id: run.crew_id, name: run.run_name }); return; }
     setLoading(true);
     try {
       let crews = flowCrews(nodes);
       if (!crews.length && savedFlowId) crews = flowCrews((await FlowService.getFlow(savedFlowId))?.nodes || []);
-      if (crews.length === 1) setSelected(crews[0]);
+      if (crews.length === 1) choose(crews[0]);
       else if (crews.length > 1) { setChoices(crews); setAnchor(target); }
       else setError('This flow has no saved crews available to optimize.');
     } catch { setError('Could not load this flow’s crews. Please try again.'); }
@@ -51,7 +57,7 @@ export default function BuilderOptimizeAction({ run }: { run: Run }) {
     </button>
     {error && <Typography role="alert" variant="caption" color="text.secondary">{error}</Typography>}
     <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)} PaperProps={{ sx: { borderRadius: 3 } }}>
-      {choices.map(crew => <MenuItem key={crew.id} onClick={() => { setSelected(crew); setAnchor(null); }}>{crew.name}</MenuItem>)}
+      {choices.map(crew => <MenuItem key={crew.id} onClick={() => { choose(crew); setAnchor(null); }}>{crew.name}</MenuItem>)}
     </Menu>
     {selected && <CrewOptimizeDialog open crewId={selected.id} crewName={selected.name} onClose={() => setSelected(null)} />}
   </>;

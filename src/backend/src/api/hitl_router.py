@@ -9,14 +9,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import (
+    BadRequestError,
     ConflictError,
     ForbiddenError,
     GoneError,
     KasalError,
     NotFoundError,
 )
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.hitl import (
     ExecutionHITLStatus,
     HITLActionResponse,
@@ -33,6 +34,7 @@ from src.services.hitl.service import (
     HITLApprovalAlreadyProcessedError,
     HITLApprovalExpiredError,
     HITLApprovalNotFoundError,
+    HITLApprovalValidationError,
     HITLPermissionDeniedError,
     HITLService,
     HITLServiceError,
@@ -244,6 +246,8 @@ async def approve_gate(
         raise ConflictError(str(e))
     except HITLApprovalExpiredError as e:
         raise GoneError(str(e))
+    except HITLApprovalValidationError as e:
+        raise BadRequestError(str(e))
     except HITLPermissionDeniedError as e:
         raise ForbiddenError(str(e))
     except HITLServiceError as e:

@@ -35,6 +35,11 @@ async def _ensure_chat_sessions_table(conn) -> None:
     await ensure_table(conn, "src.models.chat_session", "ChatSession")
 
 
+async def _ensure_model_billing_rates_table(conn) -> None:
+    """Teamspace model prices used for usage estimates."""
+    await ensure_table(conn, "src.models.model_billing_rate", "ModelBillingRate")
+
+
 async def _ensure_chat_assets_table(conn) -> None:
     """Images attached in the chat, kept whole so they can be shown."""
     await ensure_table(conn, "src.models.chat_asset", "ChatAsset")

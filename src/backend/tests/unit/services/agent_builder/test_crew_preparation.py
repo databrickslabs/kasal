@@ -1,6 +1,4 @@
-import unittest.mock
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -488,7 +486,7 @@ class TestCrewPreparation:
 
         with (
             patch(
-                "src.services.agent_builder.crew_preparation.create_task",
+                "src.services.agent_builder.task_adapter.create_task",
                 side_effect=Exception("Test error"),
             ),
             patch(
@@ -971,7 +969,7 @@ class TestCrewPreparation:
                 "src.services.llm.manager.LLMManager.get_llm",
                 side_effect=ImportError("Module not found"),
             ),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
@@ -1002,7 +1000,7 @@ class TestCrewPreparation:
                 "src.services.llm.manager.LLMManager.get_llm",
                 side_effect=Exception("LLM error"),
             ),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
@@ -1038,7 +1036,7 @@ class TestCrewPreparation:
                 "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
                 return_value=None,
             ),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
@@ -1146,7 +1144,7 @@ class TestCrewPreparation:
                 "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
                 return_value="test-key",
             ),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
@@ -1244,7 +1242,7 @@ class TestCrewPreparation:
                 "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
                 side_effect=Exception("API error"),
             ),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,

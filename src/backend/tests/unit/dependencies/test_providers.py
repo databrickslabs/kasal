@@ -287,7 +287,9 @@ class TestGetGroupContext:
         # Ensure request.state has no _group_context_cache so cache logic is bypassed
         mock_request.state = MagicMock(spec=[])
 
-        with patch("src.dependencies.providers.GroupContext") as mock_group_context_class:
+        with patch(
+            "src.dependencies.providers.GroupContext"
+        ) as mock_group_context_class:
             mock_empty_context = MagicMock(spec=GroupContext)
             mock_group_context_class.return_value = mock_empty_context
 

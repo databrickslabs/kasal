@@ -5,14 +5,12 @@ Includes regression test for critical bug fix where crew_kwargs was replaced wit
 """
 
 import os
-import sys
-from unittest.mock import MagicMock
 
 # Set database type to sqlite for testing
 os.environ.setdefault("DATABASE_TYPE", "sqlite")
 os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 # NOTE: this file used to stub `crewai.*` AND `kasal_engine.*` into sys.modules
 # around the import below, from when crewai was an absent third-party dep.

@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
-from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import BadRequestError
+from src.dependencies.providers import GroupContextDep
 from src.utils.databricks_auth import extract_user_token_from_request
 
 from .dependencies import MemoryBackendServiceDep, logger
@@ -113,7 +113,7 @@ async def list_memory_records(
     configuration. Records are filtered by the caller's group (tenant).
     """
     group_id = group_context.primary_group_id
-    user_token = extract_user_token_from_request(request) if request else None
+    extract_user_token_from_request(request) if request else None
 
     active = await service.get_active_config(group_id)
     backend_type = (
@@ -191,7 +191,7 @@ async def delete_memory_records(
     ``kasal_default_<group_id>``.
     """
     group_id = group_context.primary_group_id
-    user_token = extract_user_token_from_request(request) if request else None
+    extract_user_token_from_request(request) if request else None
 
     active = await service.get_active_config(group_id)
     backend_type = (

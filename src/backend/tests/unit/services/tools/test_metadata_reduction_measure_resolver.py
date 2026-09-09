@@ -1,7 +1,5 @@
 """Unit tests for MeasureResolver in metadata_reduction package."""
 
-import pytest
-
 from src.services.tools.metadata_reduction.measure_resolver import (
     ExpressionFlags,
     MeasureResolver,

@@ -1,7 +1,5 @@
 import json
-import traceback
-from typing import Any, Dict
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -226,7 +224,7 @@ class TestEmptyDataProcessingGuardrail:
 
         with patch(
             "src.services.guardrails.demo.empty_data_processing_guardrail.logger"
-        ) as mock_logger:
+        ):
             guardrail = EmptyDataProcessingGuardrail({})
             guardrail.validate("test_output")
 
@@ -277,7 +275,7 @@ class TestEmptyDataProcessingGuardrail:
 
         with patch(
             "src.services.guardrails.demo.empty_data_processing_guardrail.logger"
-        ) as mock_logger:
+        ):
             guardrail = EmptyDataProcessingGuardrail({})
             result = guardrail.validate("test_output")
 

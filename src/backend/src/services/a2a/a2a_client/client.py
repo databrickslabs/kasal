@@ -23,6 +23,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from src.services.external.state import ExternalTaskState
+from src.utils.safe_http import PublicHTTPTransport
 from src.utils.url_security import UnsafeUrlError, assert_safe_outbound_url
 
 logger = logging.getLogger(__name__)
@@ -139,7 +140,12 @@ async def _request(
         raise RemoteAgentError(f"Refusing to call {url}: {exc}") from exc
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            transport=PublicHTTPTransport(),
+            trust_env=False,
+        ) as client:
             response = await client.request(
                 method, url, headers=_headers(api_key, token), json=json_body
             )

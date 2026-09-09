@@ -76,7 +76,10 @@ async def test_backend_config_wires_unified_memory():
         "backend_type": "lakebase",
         "lakebase_config": {"memory_table": "crew_memory"},
     }
-    callable_embedder = lambda texts: [[0.1] for _ in texts]
+
+    def callable_embedder(texts):
+        return [[0.1] for _ in texts]
+
     configured_kwargs = {"memory": MagicMock(name="Memory")}
 
     with (

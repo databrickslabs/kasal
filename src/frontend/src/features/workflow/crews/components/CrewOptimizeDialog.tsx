@@ -21,8 +21,6 @@ import {
   Tooltip,
   Typography,
   FormHelperText,
-  useTheme,
-  useMediaQuery,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
@@ -44,11 +42,12 @@ import {
   PromptOptimizationRun,
   PromptOptimizationService,
 } from '../../../../api/config/PromptOptimizationService';
-import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
+import CrewOptimizeFrame from './CrewOptimizeFrame';
 import { ModelService } from '../../../../api/config/ModelService';
 
 interface CrewOptimizeDialogProps {
   open: boolean;
+  embedded?: boolean;
   crewId: string | null;
   crewName?: string;
   onClose: () => void;
@@ -122,12 +121,11 @@ const SectionHeader: React.FC<{ title: string; hint?: string }> = ({ title, hint
  */
 const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   open,
+  embedded = false,
   crewId,
   crewName,
   onClose,
 }) => {
-  const theme = useTheme();
-  const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const titleId = useId();
   const optimizerLabelId = useId();
   const judgeLabelId = useId();
@@ -504,15 +502,14 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" fullScreen={compact} aria-labelledby={titleId}
-      PaperProps={{ sx: { ...kasalStageSurface(theme.palette.mode === 'dark'), borderRadius: compact ? 0 : 4, maxHeight: compact ? '100%' : '90vh', border: 0, '& .MuiPaper-outlined': { border: 0, borderRadius: 3, bgcolor: 'action.hover', backgroundImage: 'none' }, '& .MuiOutlinedInput-root': { borderRadius: 2.5, bgcolor: 'action.hover' }, '& .MuiOutlinedInput-notchedOutline': { border: 0 }, '& .MuiOutlinedInput-root.Mui-focused': { boxShadow: '0 0 0 2px var(--text-muted, #8D99A4)' }, '& .MuiChip-outlined': { border: 0, bgcolor: 'action.hover', color: 'text.secondary' }, '& .MuiButton-outlined': { border: 0, color: 'text.secondary' } } }}>
+    <CrewOptimizeFrame open={open} onClose={onClose} titleId={titleId} embedded={embedded}>
       <DialogTitle id={`${titleId}-header`} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, px: 3, pt: 3, pb: 1.5 }}>
         <AutoFixHighIcon sx={{ fontSize: 23, color: 'text.secondary', mt: 0.5 }} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography id={titleId} variant="h6" component="h2" sx={{ fontWeight: 600 }}>Optimize crew</Typography>
           {crewName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{crewName}</Typography>}
         </Box>
-        <IconButton aria-label="Close optimization" onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>
+        {!embedded && <IconButton aria-label="Close optimization" onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>}
       </DialogTitle>
       <DialogContent sx={{ px: 3, pb: 3 }}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 760 }}>
@@ -535,7 +532,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
 
         {/* Run configuration */}
         <Box>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: embedded ? '1fr' : { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5 }}>
             <FormControl fullWidth size="small">
               <Typography id={optimizerLabelId} variant="body2" sx={{ mb: 1, fontWeight: 600 }}>Optimizer model</Typography>
               <Select value={model} displayEmpty labelId={optimizerLabelId} onChange={event => setModel(event.target.value)} sx={ELLIPSIS_SELECT_SX}>
@@ -552,7 +549,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
 
           </Box>
           <SectionHeader title="Evaluation" hint="The built-in quality check is included. Add criteria only when you need more specific scoring." />
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5, alignItems: 'start' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: embedded ? '1fr' : { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5, alignItems: 'start' }}>
             <FormControl fullWidth size="small">
               <Typography id={judgeLabelId} variant="body2" sx={{ mb: 1, fontWeight: 600 }}>Judge model</Typography>
               <Select value={runJudgeModel} displayEmpty labelId={judgeLabelId} onChange={event => setRunJudgeModel(event.target.value)} sx={ELLIPSIS_SELECT_SX}>
@@ -1262,7 +1259,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
-    </Dialog>
+    </CrewOptimizeFrame>
   );
 };
 

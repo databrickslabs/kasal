@@ -735,19 +735,27 @@ def test_mcp_service_parent_requires_a_three_part_name():
 async def test_heal_external_mcp_urls_updates_only_confirmed_rows_in_scope():
     rows = [
         SimpleNamespace(
-            id=1, name="kasal.agents.websearch", group_id=None,
+            id=1,
+            name="kasal.agents.websearch",
+            group_id=None,
             server_url="https://ws/api/2.0/mcp/external/websearch_connection",
         ),
         SimpleNamespace(
-            id=2, name="kasal.agents.websearch", group_id="team-1",
+            id=2,
+            name="kasal.agents.websearch",
+            group_id="team-1",
             server_url="https://ws/api/2.0/mcp/external/websearch_connection",
         ),
         SimpleNamespace(
-            id=3, name="kasal.agents.websearch", group_id="team-2",
+            id=3,
+            name="kasal.agents.websearch",
+            group_id="team-2",
             server_url="https://ws/api/2.0/mcp/external/websearch_connection",
         ),
         SimpleNamespace(
-            id=4, name="kasal.agents.websearch", group_id="team-1",
+            id=4,
+            name="kasal.agents.websearch",
+            group_id="team-1",
             server_url="https://custom.example.com/mcp",
         ),
     ]

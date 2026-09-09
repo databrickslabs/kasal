@@ -4,9 +4,8 @@ Unit tests for encryption_utils module.
 
 import base64
 import os
-import tempfile
 from pathlib import Path
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from cryptography.fernet import Fernet
@@ -317,7 +316,7 @@ class TestEncryptionUtils:
         with (
             patch.object(
                 EncryptionUtils, "encrypt_with_ssh", side_effect=Exception("SSH error")
-            ) as mock_ssh_encrypt,
+            ),
             patch.object(EncryptionUtils, "get_encryption_key") as mock_get_key,
             patch("src.utils.encryption_utils.Fernet") as mock_fernet_class,
         ):
@@ -340,9 +339,7 @@ class TestEncryptionUtils:
         expected_result = "decrypted_value"
 
         with (
-            patch.object(
-                EncryptionUtils, "is_ssh_encrypted", return_value=True
-            ) as mock_is_ssh,
+            patch.object(EncryptionUtils, "is_ssh_encrypted", return_value=True),
             patch.object(
                 EncryptionUtils, "decrypt_with_ssh", return_value=expected_result
             ) as mock_ssh_decrypt,
@@ -359,9 +356,7 @@ class TestEncryptionUtils:
         expected_result = "decrypted_value"
 
         with (
-            patch.object(
-                EncryptionUtils, "is_ssh_encrypted", return_value=False
-            ) as mock_is_ssh,
+            patch.object(EncryptionUtils, "is_ssh_encrypted", return_value=False),
             patch.object(EncryptionUtils, "get_encryption_key") as mock_get_key,
             patch("src.utils.encryption_utils.Fernet") as mock_fernet_class,
         ):

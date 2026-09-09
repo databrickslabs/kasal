@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +269,7 @@ class MeasureResolver:
         Example: "Completeness Score" → base="Score", filter_value="Completeness"
         if "Completeness" exists as a value in some column.
         """
-        name_lower = name.lower()
+        name.lower()
         words = name.split()
 
         if len(words) < 2:

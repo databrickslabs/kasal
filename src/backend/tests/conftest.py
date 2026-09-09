@@ -41,10 +41,9 @@ os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 _ARTIFACTS = os.path.join(os.path.dirname(__file__), ".artifacts")
 os.environ.setdefault("LOG_DIR", os.path.join(_ARTIFACTS, "logs"))
 os.environ.setdefault("KASAL_MEMORY_DIR", os.path.join(_ARTIFACTS, "memory"))
-# LITELLM_CACHE_TYPE is deliberately NOT overridden: the disk cache derives its
-# directory from LOG_DIR, so it already lands inside .artifacts/. Forcing
-# "local" here would also contradict the test asserting "disk" is the product
-# default.
+# Do not load a developer's CLI credentials during a unit test. Tests requiring
+# SDK authentication supply credentials or patch the SDK explicitly.
+os.environ["DATABRICKS_CONFIG_FILE"] = os.devnull
 
 # Import numpy (and its lazy submodules) to completion BEFORE pytest collection
 # imports any test module. During collection, a half-finished numpy import
@@ -606,6 +605,7 @@ def pytest_configure(config):
     _pollution_snapshot = _tree_snapshot(BACKEND_ROOT)
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_sessionfinish(session, exitstatus):
     """Fail the run if it wrote anything outside tests/.artifacts/.
 
@@ -626,7 +626,9 @@ def pytest_sessionfinish(session, exitstatus):
 
     created = sorted(_tree_snapshot(BACKEND_ROOT) - _pollution_snapshot)
     if created:
-        raise pytest.UsageError(
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        reporter = session.config.pluginmanager.getplugin("terminalreporter")
+        message = (
             "the test run created files outside tests/.artifacts/:\n  "
             + "\n  ".join(created)
             + "\n\nPoint whatever wrote them at tests/.artifacts (see the env vars "
@@ -642,3 +644,7 @@ def pytest_sessionfinish(session, exitstatus):
             "the server has been run locally — check the size and table count "
             "before removing anything (an empty stray is ~4KB with 0 tables)."
         )
+        if reporter is not None:
+            reporter.write_line(message, red=True)
+        else:
+            print(message, file=sys.stderr)

@@ -1,8 +1,6 @@
 """Tests for LakebaseSessionFactory._refresh_token and get_connection_string autoscaling fallback."""
 
 import os
-import sys
-import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

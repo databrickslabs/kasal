@@ -50,7 +50,7 @@ export const getAssistantResponse = (result: DispatchResult): string => {
         }
       }
 
-      response += "\nClick the **▶ Play** button on the right sidebar to run the crew.";
+      response += "\nClick the **▶ Play** control on the canvas to run the crew.";
       return response;
     }
     case 'generate_plan': {
@@ -82,7 +82,7 @@ export const getAssistantResponse = (result: DispatchResult): string => {
         }
       }
 
-      response += "\nClick the **▶ Play** button on the right sidebar to run the crew.";
+      response += "\nClick the **▶ Play** control on the canvas to run the crew.";
       return response;
     }
     case 'catalog_list': {

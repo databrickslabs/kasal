@@ -22,7 +22,6 @@ from src.models.enums import (
 from src.models.group import Group, GroupUser
 from src.models.user import User
 from src.repositories.group_repository import GroupRepository, GroupUserRepository
-from src.utils.user_context import GroupContext  # Will be updated from TenantContext
 
 logger = LoggerManager.get_instance().system
 

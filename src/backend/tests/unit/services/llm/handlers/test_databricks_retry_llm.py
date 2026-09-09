@@ -5,7 +5,6 @@ Covers the retry/backoff and fallback behaviour plus the Databricks message
 sanitization DatabricksRetryLLM applies before every call.
 """
 
-import json
 import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -871,7 +870,6 @@ class TestGetRetryTracerExceptionPath:
 
     def test_returns_none_when_otel_raises(self):
         """_get_retry_tracer returns None when opentelemetry raises on import."""
-        import sys
 
         from src.services.llm.handlers.databricks_retry_llm import _get_retry_tracer
 
@@ -953,7 +951,6 @@ class TestDatabricksRetryLLMProperties:
             ):
                 result = DatabricksRetryLLM._get_crew_logger(llm_obj)
         # Falls back to module logger
-        import logging
 
         assert isinstance(result, logging.Logger)
 
@@ -977,8 +974,7 @@ class TestTryRefreshToken:
 
         with patch(
             "src.utils.databricks_auth.get_auth_context", return_value=MagicMock()
-        ) as mock_gac:
-            import asyncio
+        ):
 
             async def fake_auth(user_token=None):
                 return mock_auth

@@ -28,20 +28,16 @@ from .dax_translator import DaxTranslator
 from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
 from .metadata_generator import MetadataGenerator
-from .mquery_parser import MQueryParser
 from .pbi_parameter_resolver import PbiParameterResolver
-from .relationships_loader import RelationshipsLoader
 from .report_emitter import build_proposal, emit_migration_report
-from .scan_data_parser import ScanDataParser
 from .sql_emitter import emit_deploy_sql
 from .sql_post_processor import SqlPostProcessor
 from .table_processor import (
     _ARTIFACT_SKIP_KEYWORDS,
     TableProcessorContext,
-    expand_calculation_groups,
     process_table,
 )
-from .utils import col_to_readable, to_snake_case
+from .utils import to_snake_case
 from .yaml_emitter import emit_yaml
 
 logger = logging.getLogger(__name__)

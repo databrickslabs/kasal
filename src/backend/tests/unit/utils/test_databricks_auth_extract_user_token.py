@@ -1,7 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
-
 from src.utils.databricks_auth import extract_user_token_from_request
 
 

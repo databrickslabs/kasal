@@ -10,9 +10,9 @@ import logging
 
 from fastapi import APIRouter
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.prompt_optimization import (
     CrewOptimizationRequest,
     PromptOptimizationApplyResponse,

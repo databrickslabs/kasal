@@ -4,12 +4,6 @@ NOTE: The knowledge source approach has been replaced with DatabricksKnowledgeSe
 This file is kept for reference but tests are disabled.
 """
 
-import os
-import sys
-from unittest.mock import AsyncMock, MagicMock, call, patch
-
-import pytest
-
 # Add the backend src directory to the path
 
 # NOTE: process_knowledge_sources removed - using DatabricksKnowledgeSearchTool instead

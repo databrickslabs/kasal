@@ -53,6 +53,8 @@ import { CrewOutputRenderer } from './CrewOutputRenderer';
 interface HITLApprovalDialogProps {
   /** Whether the dialog is open */
   open: boolean;
+  embedded?: boolean;
+  approvalId?: number;
   /** The execution ID to fetch approval for */
   executionId: string;
   /** Callback when dialog is closed */
@@ -70,6 +72,8 @@ interface HITLApprovalDialogProps {
 
 const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   open,
+  embedded = false,
+  approvalId,
   executionId,
   onClose,
   onActionComplete,
@@ -100,6 +104,9 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   // Tool-call gates: denying just lets the agent continue without the tool, so
   // a reason is optional context. For task_review (and flow gates) the reason
   // feeds back to the agent as the retry prompt, so it stays required.
+  const requiresComment = approval?.gate_config?.require_comment === true;
+  const approvalDisabled = actionLoading || outputLoading || approval?.is_expired || (requiresComment && !comment.trim());
+
   const rejectReasonOptional =
     (approval?.gate_config as { kind?: string } | undefined)?.kind === 'tool_call';
 
@@ -116,8 +123,11 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
     try {
       const status = await HITLService.getExecutionHITLStatus(executionId);
-      if (status.pending_approval) {
-        const pending = status.pending_approval;
+      const selected = approvalId
+        ? [...status.approval_history, ...(status.pending_approval ? [status.pending_approval] : [])].find(item => item.id === approvalId && item.status === 'pending')
+        : status.pending_approval;
+      if (selected) {
+        const pending = selected;
         // Render the gate shell immediately (status omits the heavy output).
         setApproval(pending);
 
@@ -134,19 +144,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                   ? { ...prev, previous_crew_output: full.previous_crew_output }
                   : prev
               );
-              // Pre-persist UCMV output so the Validator can find it even if the
-              // user approves immediately without editing.
-              if (full.previous_crew_output) {
-                try {
-                  const parsed = JSON.parse(full.previous_crew_output);
-                  if (isUCMVResult(parsed)) {
-                    runService.updateExecutionResult(
-                      full.execution_id,
-                      parsed as unknown as Record<string, unknown>
-                    ).catch(() => { /* non-blocking */ });
-                  }
-                } catch { /* not UCMV, skip */ }
-              }
+
             })
             .catch(() => { /* leave output empty; gate still actionable */ })
             .finally(() => setOutputLoading(false));
@@ -168,7 +166,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     // onClose, so putting the handlers in here would give fetchApproval a new
     // identity every render and the "fetch on open" effect would re-fire in a
     // loop. The ref above always holds the latest handler.
-  }, [executionId]);
+  }, [executionId, approvalId]);
 
   // Fetch on open
   useEffect(() => {
@@ -245,7 +243,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       // The HITL gate reads this and passes it as previous_output to the next crew
       await runService.updateExecutionResult(approval.execution_id, editedGenieConfig as unknown as Record<string, unknown>);
       await HITLService.approveGate(approval.id, {
-        comment: 'Genie Space config reviewed and edited',
+        comment: comment.trim() || 'Genie Space config reviewed and edited',
       });
       onActionComplete?.('approve');
       onClose();
@@ -266,7 +264,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       await runService.updateExecutionResult(approval.execution_id, editedUCMV as unknown as Record<string, unknown>);
       // Approve the gate
       await HITLService.approveGate(approval.id, {
-        comment: 'UCMV output reviewed and edited via UCMV Viewer',
+        comment: comment.trim() || 'UCMV output reviewed and edited via UCMV Viewer',
       });
       onActionComplete?.('approve');
       onClose();
@@ -668,7 +666,8 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             Inline and single-line here: available without costing a click,
             and small enough not to compete with the decision itself. */}
         <TextField
-          label="Comment (optional)"
+          label={requiresComment ? 'Comment required to approve' : 'Comment (optional)'}
+          required={requiresComment}
           fullWidth
           size="small"
           value={comment}
@@ -770,7 +769,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             color="success"
             startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
             onClick={handleSaveAndApproveUCMV}
-            disabled={actionLoading || approval.is_expired}
+            disabled={approvalDisabled}
           >
             Save &amp; Approve
           </Button>
@@ -780,7 +779,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             color="success"
             startIcon={actionLoading ? <CircularProgress size={16} /> : <SaveIcon />}
             onClick={handleSaveAndApproveGenieConfig}
-            disabled={actionLoading || approval.is_expired}
+            disabled={approvalDisabled}
           >
             Save Config &amp; Approve
           </Button>
@@ -790,7 +789,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             color="success"
             startIcon={actionLoading ? <CircularProgress size={16} /> : <ApproveIcon />}
             onClick={handleApprove}
-            disabled={actionLoading || approval.is_expired}
+            disabled={approvalDisabled}
           >
             Approve
           </Button>
@@ -806,6 +805,14 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
       return isUCMVResult(JSON.parse(approval.previous_crew_output));
     } catch { return false; }
   }, [approval?.previous_crew_output]);
+
+  if (embedded) return <Box sx={{ height: '100%', width: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', color: 'text.primary', bgcolor: 'transparent',
+    '& .MuiButton-root': { textTransform: 'none', borderRadius: '12px', color: 'text.primary', borderColor: 'divider', boxShadow: 'none' },
+    '& .MuiButton-contained': { bgcolor: 'action.selected', '&:hover': { bgcolor: 'action.hover' } },
+  }}>
+    <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2.5 }}>{renderContent()}</Box>
+    <Box sx={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 1, p: 2, pr: 7, pb: { xs: 8, sm: 2 }, flexShrink: 0 }}>{renderActions()}</Box>
+  </Box>;
 
   return (
     <Dialog

@@ -78,11 +78,10 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
-import pickle
 import signal
 import traceback
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
@@ -137,10 +136,8 @@ def run_flow_in_process(
         - CREWAI_VERBOSE: Controls CrewAI output verbosity
     """
     # Import necessary modules at the beginning
-    import logging
     import os
     import sys
-    import traceback
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ["FLOW_SUBPROCESS_MODE"] = "true"
@@ -1131,7 +1128,7 @@ def run_flow_in_process(
                 # Ignore cleanup errors, just log them
                 try:
                     async_logger.debug(f"Async cleanup note: {cleanup_err}")
-                except:
+                except Exception:
                     pass
             finally:
                 # Suppress litellm's RuntimeWarning about unawaited coroutines during loop cleanup
@@ -1204,7 +1201,7 @@ def run_flow_in_process(
             # Log any errors in stdout capture (shouldn't happen normally)
             try:
                 async_logger.error(f"Error capturing stdout: {capture_error}")
-            except:
+            except Exception:
                 pass
 
         # Restore stdout/stderr before process ends
@@ -1373,7 +1370,6 @@ class ProcessFlowExecutor:
 
             # Force exit the subprocess
             import os
-            import sys
 
             # Log that we're exiting (might not be written if handlers already closed)
             try:
@@ -1381,7 +1377,7 @@ class ProcessFlowExecutor:
                 logger.info(
                     f"[SUBPROCESS EXIT] Process {os.getpid()} exiting for execution {execution_id}"
                 )
-            except:
+            except Exception:
                 pass
 
             # CRITICAL: Use os._exit(0) instead of sys.exit(0)
@@ -1420,7 +1416,7 @@ class ProcessFlowExecutor:
         self._metrics["total_executions"] += 1
         self._metrics["active_executions"] += 1
 
-        start_time = datetime.now()
+        datetime.now()
 
         # Use multiprocessing.Queue to get results from the subprocess
         result_queue = self._ctx.Queue()
@@ -1979,6 +1975,7 @@ class ProcessFlowExecutor:
 
         try:
             from pathlib import Path
+
             from src.services.execution.logs.file_ingestion import ingest_execution_log
 
             await ingest_execution_log(

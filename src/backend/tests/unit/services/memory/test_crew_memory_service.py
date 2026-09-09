@@ -90,8 +90,12 @@ _crewai_mock.utilities.paths.db_storage_path = MagicMock(
 # earlier test in this file had already imported it, which made the class fail
 # whenever it was run on its own. Loading it here makes that explicit.
 import src.services.memory.storage.adapter  # noqa: E402,F401
-from src.schemas.memory_backend import MemoryBackendType
-from src.services.memory.run.crew_memory import CrewMemoryService
+from src.schemas.memory_backend import (  # noqa: E402 - import follows module initialization
+    MemoryBackendType,
+)
+from src.services.memory.run.crew_memory import (  # noqa: E402 - import follows module initialization
+    CrewMemoryService,
+)
 
 for _mod_name, _original in _originals.items():
     if _original is None:
@@ -501,7 +505,7 @@ class TestCreateMemoryBackends:
             new_callable=AsyncMock,
             return_value=None,  # DEFAULT backend returns None
         ) as mock_factory:
-            result = await service.create_memory_backends(
+            await service.create_memory_backends(
                 memory_backend_config=memory_backend_config,
                 crew_id="crew_1",
                 embedder=None,

@@ -5,13 +5,13 @@ This module provides API endpoints for retrieving, creating, and managing
 execution traces.
 """
 
-from typing import Annotated, List, Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.execution_trace import (
     DeleteTraceResponse,
     ExecutionTraceItem,
@@ -182,7 +182,6 @@ async def get_current_crew_node_states(
 
     # Process traces to determine current crew node states
     # Track crew execution based on task events grouped by crew
-    current_crew = None
     crew_task_counts = {}  # Track total tasks per crew
     crew_completed_tasks = {}  # Track completed tasks per crew
     crew_failed = set()  # Track failed crews

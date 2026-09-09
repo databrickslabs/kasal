@@ -15,15 +15,12 @@ Targets uncovered lines:
   592-598 set_search_path_sync
 """
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import text
 
 from src.services.databricks.lakebase.schema import (
     LakebaseSchemaService,
-    _quote_pg_role,
-    _validate_identifier,
 )
 
 # ---------------------------------------------------------------------------
@@ -730,7 +727,7 @@ class TestCreateTablesSyncStreamDetailed:
             patch.object(service, "_create_without_vector_sync") as doc_mock,
         ):
             mock_base.metadata.sorted_tables = tables
-            events = list(service.create_tables_sync_stream(engine))
+            list(service.create_tables_sync_stream(engine))
             doc_mock.assert_called_once_with(engine, "documentation_embeddings")
 
     def test_small_wave_single_table_success(self, service):

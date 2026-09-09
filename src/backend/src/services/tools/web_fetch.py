@@ -11,19 +11,13 @@ import http.client
 import ipaddress
 import json
 import logging
-import os
-import re
 import socket
 import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
-from typing import Any, Literal, TypedDict
-
-from pydantic import BaseModel, Field
-
-from .base import BaseTool, EnvVar
+from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 

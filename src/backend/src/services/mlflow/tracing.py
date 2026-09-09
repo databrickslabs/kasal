@@ -7,7 +7,6 @@ cleanup, and utility functions independent of any specific engine.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Optional

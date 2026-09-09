@@ -175,15 +175,22 @@ class TestSpSingleAuth:
         assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
         assert os.environ["DATABRICKS_TOKEN"] == "stale-pat"
 
-    def test_noop_when_bearer_cannot_be_derived(self, monkeypatch):
+    @pytest.mark.parametrize("has_pat", [False, True])
+    def test_fallback_when_bearer_cannot_be_derived(self, monkeypatch, has_pat):
         from src.services.mlflow import sp_auth
 
         monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
         monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
         monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
+        # Exercise both fallback paths independently of the developer's credentials.
+        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+        if has_pat:
+            monkeypatch.setenv("DATABRICKS_TOKEN", "test-pat")
         monkeypatch.setattr(sp_auth, "derive_sp_bearer", lambda *a: None)
         with sp_auth.sp_single_auth() as active:
-            assert active is False
+            assert active is has_pat
+            if has_pat:
+                assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
 
 
 class TestGrantHint:

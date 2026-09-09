@@ -3,13 +3,11 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, Column, DateTime
-from sqlalchemy import Enum
 from sqlalchemy import Enum as SQLAlchemyEnum
-from sqlalchemy import ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import String
 
 from src.db.base import Base
-from src.models.enums import IdentityProviderType, UserRole, UserStatus
+from src.models.enums import UserRole, UserStatus
 
 
 def generate_uuid():

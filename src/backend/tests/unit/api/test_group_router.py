@@ -13,13 +13,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.group_router import router
-from src.dependencies.providers import get_db
 from src.dependencies.admin_auth import (
     get_admin_user,
     get_authenticated_user,
     get_system_admin_user,
     require_authenticated_user,
 )
+from src.dependencies.providers import get_db
 from src.models.enums import (
     GroupStatus,
     GroupUserRole,

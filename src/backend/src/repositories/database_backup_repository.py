@@ -560,7 +560,6 @@ class DatabaseBackupRepository:
             # Create safety backup if requested and current database exists
             if create_safety_backup and os.path.exists(target_path):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                safety_backup = f"{target_path}.backup_{timestamp}"
 
                 with open(target_path, "rb") as f:
                     current_db = f.read()
@@ -966,7 +965,7 @@ class DatabaseBackupRepository:
                     try:
                         timestamp_str = filename.replace(prefix, "").split(".")[0]
                         created_time = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-                    except:
+                    except Exception:
                         # Use modification time if available
                         mod_time = file_info.get("modification_time")
                         created_time = (

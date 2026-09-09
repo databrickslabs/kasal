@@ -11,7 +11,7 @@ Tests for LakebasePermissionService methods:
 - grant_all_permissions_sync
 """
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

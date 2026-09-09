@@ -8,6 +8,9 @@ Tests authorization requirements for critical operations:
 These are integration tests that verify the actual authorization flow.
 """
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 import pytest_asyncio
 from fastapi import status
@@ -15,13 +18,33 @@ from httpx import ASGITransport, AsyncClient
 
 from src.main import app
 
+pytestmark = pytest.mark.usefixtures("allocated_test_identities")
+
 
 @pytest_asyncio.fixture
 async def async_client():
     """Create async HTTP client for testing."""
+    from src.api.group_router import get_group_service
+    from src.api.models_router import get_model_config_service
+
+    models = AsyncMock()
+    models.find_all_for_group.return_value = []
+    groups = AsyncMock()
+    groups.get_group_by_id.side_effect = lambda group_id: SimpleNamespace(id=group_id)
+    groups.get_user_group_membership.side_effect = lambda user_id, group_id: (
+        SimpleNamespace(role="operator")
+        if user_id == "member_not_admin@example.com"
+        else None
+    )
+    app.dependency_overrides[get_model_config_service] = lambda: models
+    app.dependency_overrides[get_group_service] = lambda: groups
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
+        try:
+            yield client
+        finally:
+            app.dependency_overrides.pop(get_model_config_service, None)
+            app.dependency_overrides.pop(get_group_service, None)
 
 
 class TestDatabaseManagementSecurity:
@@ -280,101 +303,21 @@ class TestMemoryBackendSecurity:
     """
 
     @pytest.mark.asyncio
-    async def test_one_click_setup_requires_admin(self, async_client: AsyncClient):
-        """Test that regular users cannot perform one-click Databricks setup."""
-        # Regular user should get 403
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/lakebase/test-connection",
+            "/lakebase/initialize-tables",
+            "/lakebase/save-config",
+            "/default/save-config",
+        ],
+    )
+    async def test_current_memory_mutations_require_admin(self, async_client, endpoint):
         response = await async_client.post(
-            "/api/v1/memory-backend/databricks/one-click-setup",
-            json={
-                "workspace_url": "https://example.databricks.com",
-                "catalog": "test",
-                "schema": "test",
-                "embedding_dimension": 1024,
-            },
+            f"/api/v1/memory-backend{endpoint}",
+            json={},
             headers={"X-Forwarded-Email": "regular_user@example.com"},
         )
-
-        # Should be forbidden (403) for non-admin
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert "admin" in response.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_create_index_requires_admin(self, async_client: AsyncClient):
-        """Test that regular users cannot create Databricks indexes."""
-        # Regular user should get 403
-        response = await async_client.post(
-            "/api/v1/memory-backend/databricks/create-index",
-            json={
-                "config": {
-                    "endpoint_name": "test-endpoint",
-                    "embedding_dimension": 1024,
-                },
-                "index_type": "short_term",
-                "catalog": "test",
-                "schema": "test",
-                "table_name": "test_table",
-            },
-            headers={"X-Forwarded-Email": "regular_user@example.com"},
-        )
-
-        # Should be forbidden (403) for non-admin
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert "admin" in response.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_delete_index_requires_admin(self, async_client: AsyncClient):
-        """Test that regular users cannot delete Databricks indexes."""
-        # Regular user should get 403
-        response = await async_client.request(
-            "DELETE",
-            "/api/v1/memory-backend/databricks/index",
-            json={
-                "workspace_url": "https://example.databricks.com",
-                "index_name": "test.test.index",
-                "endpoint_name": "test-endpoint",
-            },
-            headers={"X-Forwarded-Email": "regular_user@example.com"},
-        )
-
-        # Should be forbidden (403) for non-admin
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert "admin" in response.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_delete_endpoint_requires_admin(self, async_client: AsyncClient):
-        """Test that regular users cannot delete Databricks endpoints."""
-        # Regular user should get 403
-        response = await async_client.request(
-            "DELETE",
-            "/api/v1/memory-backend/databricks/endpoint",
-            json={
-                "workspace_url": "https://example.databricks.com",
-                "endpoint_name": "test-endpoint",
-            },
-            headers={"X-Forwarded-Email": "regular_user@example.com"},
-        )
-
-        # Should be forbidden (403) for non-admin
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert "admin" in response.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_empty_index_requires_admin(self, async_client: AsyncClient):
-        """Test that regular users cannot empty Databricks indexes."""
-        # Regular user should get 403
-        response = await async_client.post(
-            "/api/v1/memory-backend/databricks/empty-index",
-            json={
-                "workspace_url": "https://example.databricks.com",
-                "index_name": "test.test.index",
-                "endpoint_name": "test-endpoint",
-                "index_type": "short_term",
-                "embedding_dimension": 1024,
-            },
-            headers={"X-Forwarded-Email": "regular_user@example.com"},
-        )
-
-        # Should be forbidden (403) for non-admin
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "admin" in response.json()["detail"].lower()
 

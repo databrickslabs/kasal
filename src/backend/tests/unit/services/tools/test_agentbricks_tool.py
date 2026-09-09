@@ -241,7 +241,7 @@ class TestAgentBricksToolAsyncMethods:
         ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_context
 
-            with patch("src.utils.user_context.UserContext") as mock_user_context:
+            with patch("src.utils.user_context.UserContext"):
                 with patch("src.utils.user_context.GroupContext") as mock_group_context:
                     await tool._get_auth_headers()
 

@@ -2,9 +2,6 @@
 Unit tests for base exporter class.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import patch
-
 import pytest
 
 from src.services.export.base_exporter import BaseExporter

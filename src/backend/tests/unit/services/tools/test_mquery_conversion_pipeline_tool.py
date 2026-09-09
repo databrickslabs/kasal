@@ -1,6 +1,5 @@
 """Unit tests for MqueryConversionPipelineTool (Tool 74)."""
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -245,9 +244,11 @@ class TestOutputStructure:
 # NEW COMPREHENSIVE TESTS — added to increase coverage
 # ---------------------------------------------------------------------------
 
-import asyncio
+import asyncio  # noqa: E402 - import follows module initialization
 
-from src.services.tools.mquery_conversion_pipeline_tool import run_sync
+from src.services.tools.mquery_conversion_pipeline_tool import (  # noqa: E402 - import follows module initialization
+    run_sync,
+)
 
 # ===========================================================================
 # run_sync helper
@@ -2366,7 +2367,7 @@ class TestExecuteWithValidation:
 # Durable raw M-Query persistence (conversion_history / Lakebase)
 # ===========================================================================
 
-from types import SimpleNamespace
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
 
 
 class TestBuildRawMqueryExtract:

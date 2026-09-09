@@ -1,7 +1,5 @@
 """Unit tests for ValueNormalizer in metadata_reduction package."""
 
-import pytest
-
 from src.services.tools.metadata_reduction.value_normalizer import (
     ValueNormalizer,
 )

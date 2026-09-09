@@ -9,16 +9,12 @@ both need it, and duplicating a bridge that owns shared module state
 (``_GEPA_REFLECTION_STATE``) would give the two runners different bridges."""
 
 import asyncio
-import hashlib
 import logging
 import os
-import re
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

@@ -1,11 +1,9 @@
 /**
- * "Load from Catalog" (the "+" tab menu) must match the active canvas:
+ * "Load from Catalog" (the session sidebar) must match the active canvas:
  * flow canvas -> Flows tab, crew canvas -> Crews tab. Previously it always
  * opened the Crews tab regardless of which canvas you were on.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import {
   catalogTabForCanvas,
   openCatalogForCanvas,
@@ -49,12 +47,5 @@ describe('openCatalogForCanvas', () => {
     expect(setters.setInitialTab).toHaveBeenCalledWith(CATALOG_CREWS_TAB);
     expect(setters.setShowOnlyTab).toHaveBeenCalledWith(CATALOG_CREWS_TAB);
     expect(setters.setOpen).toHaveBeenCalledWith(true);
-  });
-});
-
-describe('WorkflowDesigner wires Load from Catalog to the canvas (wiring)', () => {
-  it('routes onLoadCrew through openCatalogForCanvas(areFlowsVisible, ...)', () => {
-    const src = readFileSync(resolve(__dirname, 'WorkflowDesigner.tsx'), 'utf-8');
-    expect(src).toContain('openCatalogForCanvas(areFlowsVisible');
   });
 });

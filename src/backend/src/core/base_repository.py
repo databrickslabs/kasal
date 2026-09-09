@@ -56,7 +56,7 @@ class BaseRepository(Generic[ModelType]):
             query = select(self.model).where(self.model.id == id)
             result = await self.session.execute(query)
             return result.scalars().first()
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -75,7 +75,7 @@ class BaseRepository(Generic[ModelType]):
             query = select(self.model).offset(skip).limit(limit)
             result = await self.session.execute(query)
             return list(result.scalars().all())
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 

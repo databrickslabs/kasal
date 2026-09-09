@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, List, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -453,7 +453,7 @@ class SchedulerService:
                     )
 
             # Delete schedule
-            deleted = await self.repository.delete(schedule_id)
+            await self.repository.delete(schedule_id)
             return {"message": "Schedule deleted successfully"}
         except KasalError:
             raise
@@ -627,7 +627,7 @@ class SchedulerService:
                 # Kasal no longer models planning, so it keeps its column default.
                 # commit=True: this session is the scheduler's own and the row must
                 # be visible to the run we are about to spawn.
-                db_run = await ExecutionService.create_run_record(
+                await ExecutionService.create_run_record(
                     session,
                     job_id=job_id,
                     run_name=run_name,

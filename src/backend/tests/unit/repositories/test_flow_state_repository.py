@@ -123,7 +123,7 @@ class TestTenantScope:
     async def test_history_and_fork_reads_are_scoped_too(self, session):
         # Every read path, not just the one a resume happens to use.
         repo = FlowStateRepository(session)
-        row = await repo.add_state("uuid-1", "m0", "{}", group_id="group-a")
+        await repo.add_state("uuid-1", "m0", "{}", group_id="group-a")
         await session.commit()
 
         assert await repo.get_history("uuid-1", group_id="group-b") == []

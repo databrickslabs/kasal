@@ -9,14 +9,13 @@ import asyncio
 import uuid
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.services.execution.kasal_service import (
-    JobStatus,
     KasalExecutionService,
     executions,
 )
@@ -465,7 +464,7 @@ async def test_prepare_and_run_crew_tasks_yaml_db_exception_fallback():
     ):
         # Run - it may succeed or fail; the important thing is no unhandled crash
         try:
-            result = await svc.prepare_and_run_crew(exec_id, config)
+            await svc.prepare_and_run_crew(exec_id, config)
         except Exception:
             pass
 
@@ -801,7 +800,7 @@ async def test_run_flow_execution_with_group_context():
 
     import src.utils.user_context as user_ctx_mod
 
-    orig_set_group = getattr(user_ctx_mod.UserContext, "set_group_context", None)
+    getattr(user_ctx_mod.UserContext, "set_group_context", None)
 
     with (
         patch(
@@ -929,7 +928,7 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
                 return_value=mock_flow_svc,
             ),
         ):
-            result = await svc.run_flow_execution(flow_id=flow_id, job_id="j4")
+            await svc.run_flow_execution(flow_id=flow_id, job_id="j4")
     finally:
         flow_svc_mod.FlowService = orig_flow_repo
 

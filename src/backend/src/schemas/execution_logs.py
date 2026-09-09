@@ -5,8 +5,7 @@ This module defines schemas used for structuring and validating
 API messages related to execution logs.
 """
 
-from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic import BaseModel, Field
 

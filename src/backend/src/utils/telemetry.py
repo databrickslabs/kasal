@@ -184,7 +184,7 @@ async def send_logfood_telemetry(
             return
 
         # Generate execution ID if not provided
-        exec_id = execution_id or str(uuid.uuid4())
+        execution_id or str(uuid.uuid4())
 
         # Build telemetry headers with token usage
         telemetry_headers = {
@@ -273,7 +273,7 @@ def send_logfood_telemetry_sync(
             return
 
         # Generate execution ID if not provided
-        exec_id = execution_id or str(uuid.uuid4())
+        execution_id or str(uuid.uuid4())
 
         # Ensure workspace URL has https://
         if not workspace_url.startswith("http"):

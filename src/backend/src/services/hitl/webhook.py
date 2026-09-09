@@ -10,7 +10,7 @@ import hmac
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,6 +30,7 @@ from src.schemas.hitl import (
     HITLWebhookResponse,
     HITLWebhookUpdate,
 )
+from src.utils.safe_http import PublicHTTPTransport
 from src.utils.url_security import UnsafeUrlError, assert_safe_outbound_url
 
 logger = logging.getLogger(__name__)
@@ -462,7 +463,10 @@ class HITLWebhookService:
             # Send request. Do not follow redirects (a 30x could redirect to an
             # internal target that bypassed the pre-flight check).
             async with httpx.AsyncClient(
-                timeout=WEBHOOK_TIMEOUT_SECONDS, follow_redirects=False
+                transport=PublicHTTPTransport(),
+                trust_env=False,
+                timeout=WEBHOOK_TIMEOUT_SECONDS,
+                follow_redirects=False,
             ) as client:
                 response = await client.post(
                     webhook.url, content=payload_json, headers=headers

@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 
 from src.api.memory_backend import router
 from src.api.memory_backend.dependencies import get_memory_backend_service
-from src.dependencies.providers import get_group_context
 from src.db.database_router import get_smart_db_session
+from src.dependencies.providers import get_group_context
 from src.schemas.memory_backend import MemoryBackendType
 from src.utils.user_context import GroupContext
 from tests.unit.api.conftest import register_exception_handlers

@@ -14,7 +14,6 @@ from src.models.documentation_embedding import DocumentationEmbedding
 from src.repositories.documentation_embedding_repository import (
     DocumentationEmbeddingRepository,
 )
-from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 
 # ---- helpers ----
 

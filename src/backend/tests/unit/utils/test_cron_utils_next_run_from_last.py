@@ -7,7 +7,6 @@ Tests ensure_utc, calculate_next_run, and calculate_next_run_from_last functions
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
-import croniter
 import pytest
 
 from src.utils.cron_utils import (
@@ -326,7 +325,7 @@ class TestCronUtilsIntegration:
         """Test timezone handling is consistent across functions."""
         # All functions should return timezone-naive datetimes for database storage
         naive_dt = datetime(2023, 1, 1, 12, 0, 0)
-        utc_dt = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
         # ensure_utc should return timezone-aware
         result1 = ensure_utc(naive_dt)

@@ -46,6 +46,7 @@ interface CheckpointUnitPickerProps {
   /** Wording for a unit option. Callers phrase this differently on purpose. */
   renderUnitLabel: (unit: PickableUnit) => string;
   previewLength?: number;
+  hideDefault?: boolean;
 }
 
 /**
@@ -63,9 +64,10 @@ const CheckpointUnitPicker: React.FC<CheckpointUnitPickerProps> = ({
   defaultOptionLabel,
   renderUnitLabel,
   previewLength = 60,
+  hideDefault = false,
 }) => (
   <RadioGroup value={value} onChange={(e) => onChange(e.target.value)}>
-    <FormControlLabel
+    {!hideDefault && <FormControlLabel
       value=""
       control={<Radio size="small" />}
       label={
@@ -75,20 +77,21 @@ const CheckpointUnitPicker: React.FC<CheckpointUnitPickerProps> = ({
           defaultOptionLabel
         )
       }
-    />
-    {units.map((unit) => (
+    />}
+    {units.map((unit, index) => (
       <FormControlLabel
         key={unit.key}
         value={unit.key}
-        control={<Radio size="small" />}
+        sx={{ mx: 0, my: 0.5, p: 1, borderRadius: 3, alignItems: 'flex-start', bgcolor: value === unit.key ? 'action.selected' : 'transparent', '& .MuiFormControlLabel-label': { flex: 1, minWidth: 0 } }}
+        control={<Radio size="small" sx={{ color: 'text.secondary', '&.Mui-checked': { color: 'text.primary' } }} />}
         label={
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, py: 0.75 }}>
             {unit.willRestore === false ? (
               <Tooltip title="This unit changed since the run, or comes after one that did — it will re-run">
                 <ChangeCircleIcon color="warning" sx={{ fontSize: 16 }} />
               </Tooltip>
             ) : (
-              <CheckCircleIcon color="success" sx={{ fontSize: 16 }} />
+              <CheckCircleIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
             )}
             <Typography
               variant="body2"
@@ -106,7 +109,7 @@ const CheckpointUnitPicker: React.FC<CheckpointUnitPickerProps> = ({
               />
             )}
             <Chip
-              label={`#${unit.key}`}
+              label={`${index + 1}`}
               size="small"
               variant="outlined"
               sx={{ height: 20, fontSize: '0.7rem' }}
@@ -122,7 +125,8 @@ const CheckpointUnitPicker: React.FC<CheckpointUnitPickerProps> = ({
                   variant="caption"
                   color="text.secondary"
                   sx={{
-                    maxWidth: 220,
+                    width: '100%',
+                    minWidth: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',

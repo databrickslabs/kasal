@@ -185,10 +185,14 @@ class TestLocalSseQueryContext:
             GroupContext, "from_email", new_callable=AsyncMock, return_value=expected
         ) as from_email:
             result = await get_group_context(
-                request=request, x_forwarded_email=None,
-                x_forwarded_access_token=None, x_auth_request_email=None,
-                x_auth_request_user=None, x_auth_request_access_token=None,
-                x_group_id=None, x_group_domain=None,
+                request=request,
+                x_forwarded_email=None,
+                x_forwarded_access_token=None,
+                x_auth_request_email=None,
+                x_auth_request_user=None,
+                x_auth_request_access_token=None,
+                x_group_id=None,
+                x_group_domain=None,
             )
 
         assert result is expected
@@ -206,10 +210,14 @@ class TestLocalSseQueryContext:
         request.query_params = {"_sse_email": "spoof@example.com"}
 
         result = await get_group_context(
-            request=request, x_forwarded_email=None,
-            x_forwarded_access_token=None, x_auth_request_email=None,
-            x_auth_request_user=None, x_auth_request_access_token=None,
-            x_group_id=None, x_group_domain=None,
+            request=request,
+            x_forwarded_email=None,
+            x_forwarded_access_token=None,
+            x_auth_request_email=None,
+            x_auth_request_user=None,
+            x_auth_request_access_token=None,
+            x_group_id=None,
+            x_group_domain=None,
         )
 
         assert result.group_ids is None

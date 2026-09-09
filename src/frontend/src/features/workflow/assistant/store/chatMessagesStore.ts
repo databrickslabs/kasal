@@ -15,6 +15,7 @@ interface ChatMessagesState {
   addMessages: (sessionId: string, messages: ChatMessage[]) => void;
   setMessages: (sessionId: string, messages: ChatMessage[]) => void;
   appendToMessage: (sessionId: string, messageId: string, additionalContent: string) => void;
+  updateMessage: (sessionId: string, messageId: string, updates: Partial<ChatMessage>) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   clearSession: (sessionId: string) => void;
   clearAllSessions: () => void;
@@ -127,6 +128,14 @@ export const useChatMessagesStore = create<ChatMessagesState>()(
           },
         };
       });
+    },
+
+    updateMessage: (sessionId, messageId, updates) => {
+      set(state => ({ messagesBySession: {
+        ...state.messagesBySession,
+        [sessionId]: (state.messagesBySession[sessionId] || []).map(message =>
+          message.id === messageId ? { ...message, ...updates } : message),
+      } }));
     },
 
     removeMessage: (sessionId: string, messageId: string) => {

@@ -6,14 +6,11 @@ Covers:
 - AgentConfig._create_tools_from_ids passes tool_config_override to create_tool
 """
 
-import importlib
-import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.services.flow_builder.modules.agent_adapter import AgentConfig
 from src.services.flow_builder.modules.task_adapter import (
     TaskConfig,
     _resolve_tool_override,
@@ -105,7 +102,7 @@ class TestResolveToolOverride:
 class TestTaskConfigToolOverride:
     """Test that _configure_task_tools passes tool_config_override to create_tool.
 
-    _configure_task_tools creates a ToolFactory internally via a local import.
+    _configure_task_tools uses its module-level ToolFactory dependency.
     The ``async with routed_scoped_session()`` will fail in stubs, so the code
     falls back to ``ToolFactory(factory_config)`` → ``tool_factory.initialize()``.
     We make that fallback return our controlled factory mock by having
@@ -117,7 +114,7 @@ class TestTaskConfigToolOverride:
 
         Returns (tf_mod, db_mod, orig_tf, orig_rss) for cleanup.
         """
-        tf_mod = sys.modules["src.services.tools.tool_factory"]
+        tf_mod = sys.modules["src.services.flow_builder.modules.task_adapter"]
         db_mod = sys.modules["src.db.session"]
         orig_tf = getattr(tf_mod, "ToolFactory", None)
         orig_rss = getattr(db_mod, "routed_scoped_session", None)

@@ -2,8 +2,8 @@
 
 import asyncio
 import time
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from typing import Any, Dict
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -1029,7 +1029,6 @@ class TestIsHttpAuthError:
 
     def test_response_status_code_403(self):
         """Returns True for exc with .response.status_code == 403."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Forbidden")
         mock_response = Mock()
@@ -1040,7 +1039,6 @@ class TestIsHttpAuthError:
 
     def test_response_status_code_401(self):
         """Returns True for exc with .response.status_code == 401."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Unauthorized")
         mock_response = Mock()
@@ -1051,7 +1049,6 @@ class TestIsHttpAuthError:
 
     def test_response_status_code_500_returns_false(self):
         """Returns False for .response.status_code == 500."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Server Error")
         mock_response = Mock()
@@ -1062,7 +1059,6 @@ class TestIsHttpAuthError:
 
     def test_status_attribute_403(self):
         """Returns True for exc with .status == 403."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Forbidden")
         # Ensure no .response attribute so .status branch is reached
@@ -1076,28 +1072,24 @@ class TestIsHttpAuthError:
 
     def test_string_contains_403(self):
         """Returns True when '403' in str(exc)."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Client error 403 Forbidden")
         assert _is_http_auth_error(exc) is True
 
     def test_string_contains_401(self):
         """Returns True when '401' in str(exc)."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Client error 401 Unauthorized")
         assert _is_http_auth_error(exc) is True
 
     def test_non_auth_error_returns_false(self):
         """Returns False for non-auth errors."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Connection timed out")
         assert _is_http_auth_error(exc) is False
 
     def test_exception_group_with_auth_sub_exception(self):
         """Recurses into ExceptionGroup with one auth sub-exception."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         sub_auth = Exception("Forbidden")
         mock_response = Mock()
@@ -1113,7 +1105,6 @@ class TestIsHttpAuthError:
 
     def test_exception_group_with_no_auth_sub_exceptions(self):
         """Returns False for ExceptionGroup with no auth sub-exceptions."""
-        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         sub1 = Exception("Connection reset")
         sub2 = Exception("DNS resolution failed")
@@ -1545,7 +1536,7 @@ class TestSPNHeadersReuse:
             new_callable=AsyncMock,
             return_value=mock_result,
         ) as mock_exec:
-            result = await adapter.execute_tool("test_tool", {"query": "test"})
+            await adapter.execute_tool("test_tool", {"query": "test"})
 
         # Verify the clean_headers passed to _execute_with_transport use SPN token
         call_args = mock_exec.call_args

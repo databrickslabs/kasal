@@ -636,7 +636,7 @@ class TestNoneAttributeFilter:
             args=None,
             exc_info=None,
         )
-        original_keys = set(record.__dict__.keys())
+        set(record.__dict__.keys())
 
         filt.filter(record)
 
@@ -791,13 +791,13 @@ class TestLoggerManager:
 
     def test_logger_properties_auto_initialize(self):
         """Test that logger properties auto-initialize when accessed."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory():
             # Arrange
             manager = LoggerManager()
 
             with patch.object(manager, "initialize") as mock_init:
                 # Act
-                crew_logger = manager.crew
+                _ = manager.crew
 
                 # Assert
                 mock_init.assert_called_once()
@@ -906,7 +906,7 @@ class TestLoggerManager:
             mock_get_logger.side_effect = get_logger_side_effect
 
             # Act
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Assert
             # Verify uvicorn loggers were configured
@@ -924,7 +924,7 @@ class TestLoggerManager:
             assert not log_dir.exists()
 
             # Act
-            manager = LoggerManager.get_instance(str(log_dir))
+            LoggerManager.get_instance(str(log_dir))
 
             # Assert
             assert log_dir.exists()
@@ -994,7 +994,7 @@ class TestLoggerManager:
         """Test access log filter routes API requests correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record for API request
             import logging
@@ -1027,7 +1027,7 @@ class TestLoggerManager:
         """Test access log filter routes non-API requests correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record for non-API request
             import logging
@@ -1060,7 +1060,7 @@ class TestLoggerManager:
         """Test access log filter handles empty request lines."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record with empty request line
             import logging
@@ -1093,7 +1093,7 @@ class TestLoggerManager:
         """Test access log filter handles exceptions gracefully."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record without required attributes to cause an exception
             import logging
@@ -1127,7 +1127,7 @@ class TestLoggerManager:
             nested_log_dir = Path(temp_dir) / "deep" / "nested" / "logs"
 
             # Act
-            manager = LoggerManager.get_instance(str(nested_log_dir))
+            LoggerManager.get_instance(str(nested_log_dir))
 
             # Assert
             assert nested_log_dir.exists()
@@ -1169,7 +1169,7 @@ class TestLoggerManager:
         """Test AccessLogHandler when record missing attributes to cover lines 260-277."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record missing required attributes
             import logging
@@ -1204,7 +1204,7 @@ class TestLoggerManager:
         """Test APIRequestFilter when request_line is missing to cover lines 295, 302, 309, 316, 323, 330."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record with missing request_line attribute
             import logging
@@ -1271,7 +1271,7 @@ class TestLoggerManager:
             record.request_line = "POST /api/users HTTP/1.1"
 
             # Get the access logger and find the AccessLogHandler
-            access_logger = manager.access
+            _ = manager.access
             uvicorn_access_logger = logging.getLogger("uvicorn.access")
 
             # The handler should be added during initialization
@@ -1436,7 +1436,7 @@ class TestLoggerManager:
         """Test AccessLogHandler handles exceptions gracefully."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record without required attributes
             import logging
@@ -1475,11 +1475,11 @@ class TestLoggerManager:
         """Test APIRequestFilter routes API requests correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create mock loggers
-            api_logger = MagicMock()
-            access_logger = MagicMock()
+            MagicMock()
+            MagicMock()
 
             # Create the filter directly
             # We need to access the inner class, but it's defined within a method
@@ -1549,7 +1549,7 @@ class TestLoggerManager:
             manager = LoggerManager.get_instance(temp_dir)
 
             # Act
-            scheduler_logger = manager.scheduler
+            _ = manager.scheduler
 
             # Assert
             # Check that scheduler sub-loggers are configured
@@ -1574,7 +1574,7 @@ class TestLoggerManager:
             manager = LoggerManager.get_instance(temp_dir)
 
             # Act
-            api_logger = manager.api
+            _ = manager.api
 
             # Assert
             # Check that API sub-loggers are configured
@@ -1597,7 +1597,7 @@ class TestLoggerManager:
         """Test UvicornAccessHandler emit method."""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Arrange
-            manager = LoggerManager.get_instance(temp_dir)
+            LoggerManager.get_instance(temp_dir)
 
             # Create a mock log record
             import logging

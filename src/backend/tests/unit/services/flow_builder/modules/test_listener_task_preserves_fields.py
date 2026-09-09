@@ -1,39 +1,53 @@
-"""Guard: the flow listener's runtime Task rebuild must preserve execution config.
+"""Context injection must preserve the task policies on both execution engines."""
 
-flow_methods rebuilds each listener task at runtime to inject previous-step
-context. The original code constructed `Task(description=, agent=, expected_output=)`
-only — silently dropping tools, output_pydantic, output_json and converter_cls.
-That made @listen crews lose their tools (no MCP/tool calls) and their structured
-schema (no .pydantic → flaky routing). This guards against regressing to the
-field-dropping reconstruction.
+import pytest
+from pydantic import BaseModel
 
-Asserted via source because the rebuild lives inside a runtime closure that needs
-a fully-built flow to exercise.
-"""
-
-from pathlib import Path
+from src.services.flow_builder.modules.task_context import task_with_context
 
 
-def _flow_methods_source() -> str:
-    # Walk up to src/backend rather than counting parents: a parent count breaks
-    # silently the moment this test file changes depth, and it did.
-    here = Path(__file__).resolve()
-    backend = next(a for a in here.parents if (a / "src" / "services").is_dir())
-    return (
-        backend / "src" / "services" / "flow_builder" / "modules" / "flow_methods.py"
-    ).read_text()
+@pytest.mark.parametrize("engine", ["kasal", "crewai"])
+def test_context_preserves_human_review_schema_and_identity(engine):
+    if engine == "kasal":
+        from src.services.execution.runtime import Task
+    else:
+        from crewai import Task
+
+    class Output(BaseModel):
+        value: str
+
+    def review(output):
+        return True, output
+
+    task = Task(
+        description="Original",
+        expected_output="JSON",
+        guardrail=review,
+        output_pydantic=Output,
+        guardrail_max_retries=4,
+    )
+    task._kasal_task_id = "catalog-task"
+    updated = task_with_context(task, "\nSource output")
+    assert updated.description == "Original\nSource output"
+    assert task.description == "Original"
+    assert updated is not task
+    assert updated.guardrail is task.guardrail
+    assert updated.output_pydantic is Output
+    assert updated.guardrail_max_retries == 4
+    assert updated._kasal_task_id == "catalog-task"
+    assert updated.id == task.id
 
 
-def test_listener_runtime_task_carries_tools_and_structured_output():
-    # Quote-normalized: black rewrites '...' to "..." — the guard is about the
-    # fields being forwarded, not the quote style.
-    src = _flow_methods_source().replace("'", '"')
-    # The runtime Task() reconstruction must forward these fields from the
-    # original task; otherwise listener crews lose tools + structured output.
-    for field in (
-        'tools=getattr(task, "tools"',
-        'output_pydantic=getattr(task, "output_pydantic"',
-        'output_json=getattr(task, "output_json"',
-        'converter_cls=getattr(task, "converter_cls"',
-    ):
-        assert field in src, f"listener Task rebuild dropped: {field}"
+def test_retry_feedback_only_changes_the_reviewed_crew():
+    from types import SimpleNamespace
+
+    from src.services.flow_builder.modules.task_context import tasks_for_review
+
+    task = SimpleNamespace(description="Research", output=None)
+    callbacks = {
+        "review_feedback": {"method": "research", "reason": "Use newer sources"}
+    }
+    assert tasks_for_review([task], "other", callbacks)[0] is task
+    reviewed = tasks_for_review([task], "research", callbacks)[0]
+    assert "Use newer sources" in reviewed.description
+    assert task.description == "Research"

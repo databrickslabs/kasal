@@ -6,9 +6,9 @@ from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from src.core.exceptions import KasalError
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from src.core.exceptions import KasalError
 from src.utils.user_context import GroupContext
 
 
@@ -302,8 +302,9 @@ def test_gmail_factory_uses_authenticated_allocation_not_tool_override(
     configured_personal_id,
 ):
     from unittest.mock import MagicMock
-    from src.services.tools.tool_factory import ToolFactory
+
     from src.services.tools.gmail_tool import GmailTool
+    from src.services.tools.tool_factory import ToolFactory
 
     context = caller()
     factory = ToolFactory(

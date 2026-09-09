@@ -4,9 +4,6 @@ Comprehensive unit tests for DatabricksConfig SQLAlchemy model.
 Tests all aspects of the DatabricksConfig model including table structure and configuration fields.
 """
 
-from datetime import datetime, timezone
-
-import pytest
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 
 from src.db.base import Base

@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 router_module = importlib.import_module("src.api.prompt_optimization_router")
-from src.api.prompt_optimization_router import (
+from src.api.prompt_optimization_router import (  # noqa: E402 - import follows module initialization
     add_eval_feedback,
     align_judge,
     apply_run,
@@ -28,8 +28,8 @@ from src.api.prompt_optimization_router import (
     create_judge,
     delete_judge,
     get_run,
-    list_crew_evals,
     judge_registry_info,
+    list_crew_evals,
     list_judges,
     list_runs,
     revert_run,
@@ -38,8 +38,11 @@ from src.api.prompt_optimization_router import (
     start_optimization,
     update_judge,
 )
-from src.core.exceptions import BadRequestError, NotFoundError
-from src.schemas.prompt_optimization import (
+from src.core.exceptions import (  # noqa: E402 - import follows module initialization
+    BadRequestError,
+    NotFoundError,
+)
+from src.schemas.prompt_optimization import (  # noqa: E402 - import follows module initialization
     CrewOptimizationRequest,
     PromptOptimizationRequest,
 )

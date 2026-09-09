@@ -6,9 +6,8 @@ the data_processing table in the database.
 """
 
 import json
-import logging
 import traceback
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 from src.core.logger import LoggerManager
 from src.db.session import sync_session_factory

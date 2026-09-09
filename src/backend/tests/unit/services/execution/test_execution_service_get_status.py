@@ -3,9 +3,6 @@ Coverage-focused unit tests for ExecutionService.
 Targets the uncovered lines to push coverage to 85%+.
 """
 
-import asyncio
-import copy
-import json
 import uuid
 from datetime import datetime
 from types import SimpleNamespace
@@ -137,7 +134,7 @@ class TestExecuteFlow:
         svc.kasal_execution_service.run_flow_execution = AsyncMock(
             return_value={"ok": True}
         )
-        result = await svc.execute_flow(job_id="my-job")
+        await svc.execute_flow(job_id="my-job")
         svc.kasal_execution_service.run_flow_execution.assert_called_once()
         call_kwargs = svc.kasal_execution_service.run_flow_execution.call_args[1]
         assert call_kwargs["job_id"] == "my-job"
@@ -1105,7 +1102,7 @@ class TestStopExecution:
         svc = make_service()
         ExecutionService.executions["r-exec"] = {"status": "RUNNING"}
         db = self._make_db()
-        result = await svc.stop_execution("r-exec", "graceful", db=db)
+        await svc.stop_execution("r-exec", "graceful", db=db)
         assert "r-exec" not in ExecutionService.executions
         ExecutionService.executions.clear()
 
@@ -1296,7 +1293,7 @@ class TestCreateExecution:
             "src.services.execution.status.ExecutionStatusService.create_execution",
             new=AsyncMock(return_value=True),
         ):
-            with patch("src.utils.user_context.UserContext") as uc:
+            with patch("src.utils.user_context.UserContext"):
                 background_tasks = MagicMock()
                 background_tasks.add_task = MagicMock()
                 result = await svc.create_execution(
@@ -1403,7 +1400,7 @@ class TestCheckForRunningJobs:
 
                 import src.services.execution.service as svc_mod
 
-                orig_rss = getattr(svc_mod, "routed_scoped_session", None)
+                getattr(svc_mod, "routed_scoped_session", None)
                 # Patch locally
                 with patch("src.db.session.routed_scoped_session") as rss_mock:
                     rss_mock.return_value.__aenter__ = AsyncMock(return_value=mock_db)

@@ -1,8 +1,7 @@
 import asyncio
-import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from src.services.tools.a2a_agent_tool import A2AAgentTool
 from src.services.tools.async_bridge import run_async_with_context
@@ -245,11 +244,18 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 # Import request-scoped session helper
-from src.db.session import routed_scoped_session
-from src.schemas.tool import ToolUpdate
-from src.services.settings.api_keys import ApiKeysService
-from src.services.tools.tool_service import ToolService
-from src.utils.encryption_utils import EncryptionUtils
+from src.db.session import (  # noqa: E402 - import follows module initialization
+    routed_scoped_session,
+)
+from src.schemas.tool import (  # noqa: E402 - import follows module initialization
+    ToolUpdate,
+)
+from src.services.tools.tool_service import (  # noqa: E402 - import follows module initialization
+    ToolService,
+)
+from src.utils.encryption_utils import (  # noqa: E402 - import follows module initialization
+    EncryptionUtils,
+)
 
 
 class ToolFactory:
@@ -912,8 +918,6 @@ class ToolFactory:
     ):
         """Async implementation of tool config update"""
         # Get services using session factory
-        from src.db.session import routed_scoped_session
-        from src.services.tools.tool_service import ToolService
 
         async with routed_scoped_session() as session:
             # Create tool service with session
@@ -937,7 +941,7 @@ class ToolFactory:
                 update_data = ToolUpdate(config=updated_config)
 
                 # Update the tool using the service instance
-                result = await tool_service.update_tool(tool_id, update_data)
+                await tool_service.update_tool(tool_id, update_data)
                 logger.info(f"Updated tool {tool_id} configuration via ToolService")
 
                 # Refresh available tools
@@ -947,7 +951,7 @@ class ToolFactory:
                 # Update by title
                 title = tool_info.title
                 # Update the tool using the service instance
-                result = await tool_service.update_tool_configuration_by_title(
+                await tool_service.update_tool_configuration_by_title(
                     title, config_update
                 )
                 logger.info(f"Updated tool '{title}' configuration via ToolService")
@@ -1313,7 +1317,7 @@ class ToolFactory:
                         )
                         try:
                             # Check if we're already in an event loop
-                            current_loop = asyncio.get_running_loop()
+                            asyncio.get_running_loop()
                             # We're in an async context, use ThreadPoolExecutor
                             import concurrent.futures
 
@@ -1413,7 +1417,7 @@ class ToolFactory:
                         )
                         try:
                             # Check if we're already in an event loop
-                            current_loop = asyncio.get_running_loop()
+                            asyncio.get_running_loop()
                             # We're in an async context, use ThreadPoolExecutor
                             import concurrent.futures
 
@@ -1788,7 +1792,7 @@ class ToolFactory:
                             logger.warning("DATABRICKS_API_KEY not found via service")
                             try:
                                 # Check if we're already in an event loop
-                                current_loop = asyncio.get_running_loop()
+                                asyncio.get_running_loop()
                                 # We're in an async context, use ThreadPoolExecutor
                                 import concurrent.futures
 
@@ -2675,7 +2679,7 @@ class ToolFactory:
             # Check if we're already in an event loop
             try:
                 # We're in an event loop, need to run cleanup carefully
-                running_loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 logger.info("Running cleanup in existing event loop")
 
                 # Run cleanup in a way that won't block the current event loop

@@ -25,7 +25,6 @@ from src.services.execution.harnesses.binding import Capability, HarnessName
 from .base_exporter import BaseExporter
 from .runtime_vendor import kasal_runtime_files, rewrite_import_root
 from .secret_hints import SECRET_KEY_HINTS as _SECRET_KEY_HINTS
-
 from .yaml_generator import YAMLGenerator
 
 #: The CrewAI version a CrewAI bundle pins, EXACTLY as the platform pins it in

@@ -4,14 +4,12 @@ Tests the actual API of ExecutionService including execute_flow, list_executions
 get_execution_status, create_execution, and stop_execution.
 """
 
-import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.schemas.execution import ExecutionStatus
 from src.services.execution.service import ExecutionService
 from src.utils.user_context import GroupContext
 
@@ -260,7 +258,7 @@ class TestExecuteFlow:
             return_value=mock_result
         )
 
-        result = await execution_service.execute_flow(flow_id=flow_id)
+        await execution_service.execute_flow(flow_id=flow_id)
 
         call_args = (
             execution_service.kasal_execution_service.run_flow_execution.call_args

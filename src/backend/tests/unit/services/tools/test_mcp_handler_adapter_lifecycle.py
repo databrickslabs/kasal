@@ -2,9 +2,8 @@
 Coverage tests for src/services/tools/mcp_handler.py
 """
 
-import asyncio
 import sys
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -54,7 +53,7 @@ async def test_get_or_create_mcp_adapter_creates_new():
 
     params = {"url": "http://example.com", "auth_type": "token"}
     with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
-        result = await mcp_handler.get_or_create_mcp_adapter(params, adapter_id="my-id")
+        await mcp_handler.get_or_create_mcp_adapter(params, adapter_id="my-id")
 
     assert "my-id" in mcp_handler._active_mcp_adapters
 
@@ -152,7 +151,7 @@ async def test_get_or_create_mcp_adapter_stdio_key():
 
     params = {"transport": "stdio", "command": ["python", "server.py"]}
     with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
-        result = await mcp_handler.get_or_create_mcp_adapter(params)
+        await mcp_handler.get_or_create_mcp_adapter(params)
 
     pool_key = "stdio_python server.py"
     assert pool_key in mcp_handler._mcp_connection_pool
@@ -165,7 +164,7 @@ async def test_get_or_create_mcp_adapter_stdio_string_command():
 
     params = {"transport": "stdio", "command": "python server.py"}
     with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
-        result = await mcp_handler.get_or_create_mcp_adapter(params)
+        await mcp_handler.get_or_create_mcp_adapter(params)
 
     pool_key = "stdio_python server.py"
     assert pool_key in mcp_handler._mcp_connection_pool
@@ -178,9 +177,7 @@ async def test_get_or_create_mcp_adapter_registers_with_id():
 
     params = {"url": "http://example.com", "auth_type": "none"}
     with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
-        result = await mcp_handler.get_or_create_mcp_adapter(
-            params, adapter_id="adapter-42"
-        )
+        await mcp_handler.get_or_create_mcp_adapter(params, adapter_id="adapter-42")
 
     assert "adapter-42" in mcp_handler._active_mcp_adapters
 
@@ -203,9 +200,7 @@ async def test_stop_all_adapters_stops_pooled_and_tracked():
     mcp_handler._mcp_connection_pool["key1"] = mock_adapter
     mcp_handler._active_mcp_adapters["id1"] = mock_adapter
 
-    with patch(
-        "src.services.tools.mcp_handler.stop_mcp_adapter", new=AsyncMock()
-    ) as mock_stop:
+    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", new=AsyncMock()):
         await mcp_handler.stop_all_adapters()
 
     assert len(mcp_handler._active_mcp_adapters) == 0

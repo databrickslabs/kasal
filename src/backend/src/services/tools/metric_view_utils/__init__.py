@@ -83,3 +83,18 @@ __all__ = [
     "extract_parameter_defaults",
     "resolve_via_let_evaluation",
 ]
+
+__all__ += [
+    "RE_AGG_COL",
+    "RE_CALC_COL",
+    "RE_CASE_AGG",
+    "RE_COALESCE_AGG",
+    "RE_DAX_DIM_REF",
+    "RE_FROM_CLAUSE",
+    "RE_GROUP_BY",
+    "RE_LEFT_JOIN",
+    "load_mapping",
+    "spark_sql_compat",
+    "to_snake_case",
+    "yaml_scalar",
+]

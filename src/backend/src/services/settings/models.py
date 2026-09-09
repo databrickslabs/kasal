@@ -9,7 +9,6 @@ invalidation on mutations. See src/core/cache.py for cache implementation.
 """
 
 import asyncio
-import logging
 import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse

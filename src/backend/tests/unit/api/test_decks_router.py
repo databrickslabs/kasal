@@ -5,8 +5,8 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from src.api.decks_router import router
-from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.core.exceptions import KasalError
+from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.services.decks.slide_refine import SlideRefineService
 from src.utils.user_context import GroupContext
 

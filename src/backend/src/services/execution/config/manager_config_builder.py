@@ -4,7 +4,6 @@ Manager configuration builder for hierarchical crew processes.
 Handles manager LLM and manager agent configuration for hierarchical processes.
 """
 
-import logging
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager

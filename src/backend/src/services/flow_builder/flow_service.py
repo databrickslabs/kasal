@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import (
@@ -16,7 +15,7 @@ from src.core.exceptions import (
 )
 from src.models.flow import Flow
 from src.repositories.flow_repository import FlowRepository
-from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
+from src.schemas.flow import FlowCreate, FlowUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -287,9 +286,6 @@ class FlowService:
         """
         if not group_context or not group_context.group_ids:
             return
-
-        from sqlalchemy import delete as sql_delete
-        from sqlalchemy import or_, select
 
         # First delete execution history for these flows
         flows = await self.get_all_flows_for_group(group_context)

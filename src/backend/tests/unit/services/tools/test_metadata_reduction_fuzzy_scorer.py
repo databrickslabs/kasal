@@ -1,7 +1,5 @@
 """Unit tests for FuzzyScorer in metadata_reduction package."""
 
-import pytest
-
 from src.services.tools.metadata_reduction.fuzzy_scorer import (
     FuzzyScorer,
     _fuzzy_score,

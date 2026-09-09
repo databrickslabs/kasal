@@ -74,7 +74,10 @@ def detect_self_division(sql: str) -> bool:
     if not parts:
         return False
     num, den = parts
-    _norm = lambda s: re.sub(r"\s+", "", s)
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", "", s)
+
     return bool(num) and _norm(num) == _norm(den)
 
 
@@ -239,9 +242,14 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
             # Compare the two sides of the top-level division.
             sides = re.split(r"/\s*NULLIF|/", sql, maxsplit=1)
             if len(sides) == 2:
-                norm = lambda s: re.sub(
-                    r"[^a-z0-9<>=]", "", s.lower().replace("nullif", "").rstrip(", 0)")
-                )
+
+                def norm(s: str) -> str:
+                    return re.sub(
+                        r"[^a-z0-9<>=]",
+                        "",
+                        s.lower().replace("nullif", "").rstrip(", 0)"),
+                    )
+
                 if norm(sides[0]) and norm(sides[0]) == norm(sides[1]):
                     return (
                         "share-of-total collapsed — DAX removes filter context with "

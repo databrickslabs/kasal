@@ -4,7 +4,7 @@ Unit tests for DatabaseConfigRepository.
 Tests get_by_key, upsert, and delete_by_key operations with mocked AsyncSession.
 """
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

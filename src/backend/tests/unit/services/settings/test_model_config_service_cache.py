@@ -9,7 +9,7 @@ Tests the TTL cache integration including:
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -151,7 +151,7 @@ class TestFindAllForGroupCaching:
         # Empty group context
         gc = GroupContext()
 
-        result = await svc.find_all_for_group(gc)
+        await svc.find_all_for_group(gc)
         assert repo.find_all.call_count == 1
 
         # Second call should hit cache

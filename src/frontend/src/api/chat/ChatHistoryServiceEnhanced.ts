@@ -59,6 +59,10 @@ async function withRetry<T>(
 }
 
 export class ChatHistoryServiceEnhanced {
+  static async updateMessageContent(messageId: string, content: string): Promise<void> {
+    await withRetry(() => chatHistoryClient.put(`/chat-history/messages/${encodeURIComponent(messageId)}`, { content }), 'updateMessageContent');
+  }
+
   /**
    * Save a chat message to the backend with retry logic
    */

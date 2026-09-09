@@ -7,9 +7,6 @@ database models including field validation, relationships, and data integrity.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.models.billing import (
     BillingAlert,
@@ -141,7 +138,7 @@ class TestLLMUsageBilling:
     def test_llm_usage_billing_defaults(self):
         """Test LLMUsageBilling model with default values."""
         # Arrange & Act
-        billing = LLMUsageBilling(
+        LLMUsageBilling(
             execution_id="exec-123",
             execution_type="crew",
             model_name="gpt-4",

@@ -10,9 +10,8 @@ rather than a simple string, which requires special handling for CrewAI integrat
 
 import asyncio
 import concurrent.futures
-import re
 import time as _time_mod
-from typing import Any, ClassVar, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, Optional
 
 import litellm
 

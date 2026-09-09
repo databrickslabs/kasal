@@ -13,11 +13,11 @@ The system falls back to DEFAULT when no active backend is configured.
 import pytest
 
 from src.schemas.memory_backend import (
-    MemoryTuningConfig,
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
     MemoryBackendConfig,
     MemoryBackendType,
+    MemoryTuningConfig,
 )
 
 

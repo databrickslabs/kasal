@@ -1,7 +1,5 @@
 """Tests for metric_view_validation_utils.constants."""
 
-import pytest
-
 from src.services.tools.metric_view_validation_utils.constants import (
     AGGREGATION_FUNCTIONS,
     COMPLEXITY_COMPLEX,

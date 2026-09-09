@@ -3,11 +3,9 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError, KasalError
+from src.core.exceptions import BadRequestError
 from src.schemas.crew import (
     CrewGenerationRequest,
-    CrewGenerationResponse,
-    CrewStreamingRequest,
 )
 from src.utils.user_context import GroupContext
 

@@ -6,7 +6,6 @@ active configuration management, deactivation operations, and configuration crea
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -256,9 +255,7 @@ class TestDatabricksConfigRepositoryCreateConfig:
             created_config = MockDatabricksConfig(**complex_config_data)
             mock_config_class.return_value = created_config
 
-            with patch.object(
-                databricks_config_repository, "deactivate_all"
-            ) as mock_deactivate:
+            with patch.object(databricks_config_repository, "deactivate_all"):
                 result = await databricks_config_repository.create_config(
                     complex_config_data
                 )
@@ -330,7 +327,7 @@ class TestDatabricksConfigRepositoryCreateConfig:
                     await databricks_config_repository.create_config(sample_config_data)
 
     @pytest.mark.asyncio
-    async def test_create_config_flush_error(
+    async def test_create_config_flush_errorAdditionalCases(
         self, databricks_config_repository, mock_async_session, sample_config_data
     ):
         """Test create config when commit fails."""

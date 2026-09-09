@@ -12,9 +12,7 @@ because it is reachable without an agent now (crew generation researching
 before it plans, a chat turn answering from an attached file).
 """
 
-import asyncio
-from concurrent.futures import TimeoutError as FuturesTimeoutError
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -226,7 +224,7 @@ class TestRun:
         with patch.object(
             tool,
             "_search_in_thread",
-            side_effect=lambda q, l, paths: seen.append(paths) or "",
+            side_effect=lambda q, item_value, paths: seen.append(paths) or "",
         ):
             tool._run("query", limit=5, file_paths=["c.pdf"])
 
@@ -239,7 +237,7 @@ class TestRun:
         with patch.object(
             tool,
             "_search_in_thread",
-            side_effect=lambda q, l, paths: seen.append(paths) or "",
+            side_effect=lambda q, item_value, paths: seen.append(paths) or "",
         ):
             tool._run("query")
 
@@ -255,9 +253,9 @@ class TestRun:
         with patch.object(
             tool,
             "_search_in_thread",
-            side_effect=lambda q, l, paths: calls.append(q) or "twenty chunks",
+            side_effect=lambda q, item_value, paths: calls.append(q) or "twenty chunks",
         ):
-            first = tool._run("expense policy")
+            tool._run("expense policy")
             second = tool._run("expense policy")
 
         assert calls == ["expense policy"], "the second search never ran"

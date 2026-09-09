@@ -9,7 +9,7 @@ Targets uncovered lines:
 """
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -132,7 +132,7 @@ class TestInitCallbacks:
         group_ctx = MagicMock()
         bf.config = {"group_context": group_ctx}
 
-        with patch("src.utils.user_context.UserContext") as MockUC:
+        with patch("src.utils.user_context.UserContext"):
             bf._init_callbacks()
         assert "callbacks" in bf.config
         assert bf.config["callbacks"]["job_id"] == "job-1"
@@ -470,7 +470,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
-            result = await bf.kickoff_async()
+            await bf.kickoff_async()
 
         # Should have passed id=resume-uuid as input
         mock_crewai_flow.kickoff_async.assert_called_once_with(
@@ -538,7 +538,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
-            result = await bf.kickoff_async()
+            await bf.kickoff_async()
 
         assert bf._flow_data is not None
 
@@ -762,7 +762,7 @@ class TestKickoff:
             patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
             patch("src.db.session._request_session"),
         ):
-            result = await bf.kickoff()
+            await bf.kickoff()
 
         # Should pass inputs with id=resume-x
         mock_crewai_flow.kickoff_async.assert_called_once_with(
@@ -854,7 +854,7 @@ class TestKickoff:
             patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
             patch("src.db.session._request_session"),
         ):
-            result = await bf.kickoff()
+            await bf.kickoff()
 
         assert bf._flow_data is not None
 
@@ -896,7 +896,7 @@ class TestKickoff:
             patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
             patch("src.db.session._request_session"),
         ):
-            result = await bf.kickoff()
+            await bf.kickoff()
 
         # flow_data should have been updated from config
         assert bf._flow_data["flow_config"] == {"startingPoints": [{"nodeId": "sp1"}]}

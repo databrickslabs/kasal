@@ -6,7 +6,7 @@ Avoids spawning real child processes by mocking mp.Process and queues.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -77,7 +77,7 @@ class TestProcessCrewExecutorInitExtra:
         with patch(
             "src.services.agent_builder.process_executor.mp.get_context"
         ) as mock_ctx:
-            ex = ProcessCrewExecutor()
+            ProcessCrewExecutor()
             mock_ctx.assert_called_once_with("spawn")
 
 
@@ -179,7 +179,7 @@ class TestRunCrewIsolatedGroupContext:
         # Patch the relay task and the waiting logic
         with (
             patch("asyncio.create_task"),
-            patch("asyncio.get_event_loop") as mock_loop,
+            patch("asyncio.get_event_loop"),
             patch(
                 "asyncio.sleep",
                 new_callable=lambda: lambda *_: asyncio.coroutine(lambda: None)(),
@@ -206,7 +206,7 @@ class TestRunCrewIsolatedGroupContext:
                         new=AsyncMock(return_value=False),
                     ):
                         try:
-                            result = await executor.run_crew_isolated(
+                            await executor.run_crew_isolated(
                                 execution_id="exec-gc",
                                 crew_config=crew_config,
                                 group_context=gc,

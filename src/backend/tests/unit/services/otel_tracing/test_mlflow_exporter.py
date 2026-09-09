@@ -2,10 +2,8 @@
 Comprehensive unit tests for services/otel_tracing/mlflow_exporter.py
 """
 
-import threading
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
@@ -20,7 +18,6 @@ from src.services.otel_tracing.mlflow_exporter import (
     _extract_span_attrs,
     _extract_span_outputs,
     _extract_task_name,
-    _InstantSpan,
     _PairedSpan,
     _span_type_for,
 )

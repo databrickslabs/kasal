@@ -3,7 +3,6 @@
 import pytest
 
 from src.services.tools.metric_view_validation_utils.dax_expression_parser import (
-    _MAX_VAR_SUBSTITUTION_ITERATIONS,
     DAXExpressionParser,
 )
 

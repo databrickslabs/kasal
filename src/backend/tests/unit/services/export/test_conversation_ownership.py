@@ -15,7 +15,7 @@ from tests.unit.services.export.conftest import purge_agent_server_modules
 async def test_expired_conversation_cannot_restore_previous_owners_cache(
     app_bundle, monkeypatch
 ):
-    from agent_server import ownership, state_store, conversation
+    from agent_server import conversation, ownership, state_store
 
     state_store._backend = state_store._MemoryBackend()
     state_store._writes_since_prune = 0

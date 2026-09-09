@@ -7,12 +7,9 @@ engine service instances.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional, Type
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, Optional, Type
 
 from src.services.execution.base import BaseEngineService
-from src.services.execution.engine_service import KasalEngineService
 
 logger = logging.getLogger(__name__)
 

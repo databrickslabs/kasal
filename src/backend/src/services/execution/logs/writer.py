@@ -6,18 +6,16 @@ from the database, and managing the background log writer task.
 """
 
 import asyncio
-import json
 from datetime import datetime
 from queue import Empty
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
-from src.models.execution_logs import ExecutionLog
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
-from src.schemas.execution_logs import ExecutionLogResponse, LogMessage
-from src.services.execution.logs.queue import enqueue_log, get_job_output_queue
+from src.schemas.execution_logs import ExecutionLogResponse
+from src.services.execution.logs.queue import get_job_output_queue
 from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
@@ -69,7 +67,7 @@ class ExecutionLogsService:
             )
 
             # Use the repository to create the log with injected session
-            log = await self.repository.create_log(
+            await self.repository.create_log(
                 execution_id=execution_id,
                 content=content,
                 timestamp=timestamp or datetime.now(),

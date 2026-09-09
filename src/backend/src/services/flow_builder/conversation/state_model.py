@@ -250,7 +250,7 @@ def build_state_model(
     fields.setdefault("id", (str, ""))
 
     # A field the base already declares must not be redeclared with a weaker
-    # type: `messages` arriving as an untyped property would otherwise turn
+    # annotation: `messages` arriving as an untyped property would otherwise turn
     # ConversationState's list channel into `Any` and lose its default.
     for inherited in base.model_fields:
         if inherited in fields and inherited != "id":

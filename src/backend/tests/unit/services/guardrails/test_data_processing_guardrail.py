@@ -1,6 +1,5 @@
 import json
-from typing import Any, Dict
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -133,7 +132,7 @@ class TestDataProcessingGuardrail:
         mock_repo_class.return_value = mock_repo
 
         guardrail = DataProcessingGuardrail({})
-        result = guardrail.validate("test_output")
+        guardrail.validate("test_output")
 
         # Should create test data
         mock_repo.create_record_sync.assert_any_call(
@@ -157,7 +156,7 @@ class TestDataProcessingGuardrail:
         mock_repo_class.return_value = mock_repo
 
         guardrail = DataProcessingGuardrail({})
-        result = guardrail.validate("test_output")
+        guardrail.validate("test_output")
 
         # Should create table and test data
         mock_repo.create_table_if_not_exists_sync.assert_called_once()

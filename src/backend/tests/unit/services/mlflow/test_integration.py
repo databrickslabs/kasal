@@ -15,9 +15,6 @@ def test_get_mlflow_available():
     from src.services.mlflow.integration import _get_mlflow
 
     with patch.dict("sys.modules", {"mlflow": MagicMock()}):
-        import importlib
-
-        import src.services.mlflow.integration as mod
 
         # Direct test
         result = _get_mlflow()
@@ -34,7 +31,7 @@ def test_get_mlflow_unavailable():
     original = sys.modules.get("mlflow")
     try:
         sys.modules["mlflow"] = None
-        result = _get_mlflow()
+        _get_mlflow()
         # None or mlflow depending on how the mock works
     except Exception:
         pass

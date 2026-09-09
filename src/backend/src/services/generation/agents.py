@@ -12,11 +12,11 @@ import os
 import traceback
 from typing import Any, Dict, List, Optional
 
+from src.core.llm.robust_json import robust_json_parser
 from src.repositories.log_repository import LLMLogRepository
 from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
-from src.core.llm.robust_json import robust_json_parser
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 

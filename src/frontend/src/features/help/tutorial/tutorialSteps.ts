@@ -22,7 +22,7 @@ export function getTutorialSteps(mode: AppMode, access = { crew: true, flow: tru
   ];
   const activityStep = step('[data-tour="workspace-activity"]', 'Find your runs in Activity',
     'Open Activity in the left sidebar to review execution results, traces, and memory. Choose This session for linked runs, or All teamspace runs for the wider history, including scheduled and API runs.'
-    + (access.crew || access.flow ? ' Schedules and Assistant logs are also here.' : ''));
+    + (access.crew || access.flow ? ' Schedules and Model calls are also here.' : ''));
   const accountSteps = [
     step('[data-tour="workspace-account-actions"]', 'Your teamspace and appearance', 'The bottom row brings your teamspace, appearance, and settings together. Select the profile or teamspace name to switch teamspaces. The sun or moon changes the appearance across every mode.'),
     step('[data-tour="configuration-button"]', 'Configure Kasal', 'The gear in the same bottom row opens Configuration. It shows the settings available to you, including models, tools, and memory.'),
@@ -52,17 +52,14 @@ export function getTutorialSteps(mode: AppMode, access = { crew: true, flow: tru
     step('[data-tour="canvas-tools"]', 'Control the canvas here', 'Fit the nodes into view, zoom in or out, change the layout orientation, or clear the canvas using these controls on the canvas itself.'),
     step('[data-tour="workspace-panel-tabs"]', 'Make room for your work', 'The controls at the top of this pane swap the conversation and canvas between left and right, expand the conversation, or close the pane. Drag the divider to resize. In full screen, the input stays below the conversation; Back to canvas returns to the split view.'),
     step('[data-tour="play-execution"]', isFlow ? 'Run the flow' : 'Run the crew', isFlow
-      ? 'Use Play after reviewing the flow and its connections. Follow live calls and answers in the conversation. While it runs, stop it from either the input or the Play control, which becomes Stop.'
-      : 'Use Play when your crew is ready. Follow live calls and answers in the conversation, and select trace entries to inspect the details beside it. While it runs, stop it from either the input or the Play control, which becomes Stop.'),
-    step('[data-tour="save-context"]', isFlow ? 'Save your flow' : 'Save your crew', isFlow
-      ? 'Save the flow for reuse using this control. Save to catalog also appears in the conversation once a generated plan is complete.'
-      : 'Save the crew for reuse using this control. Save to catalog also appears in the conversation once a generated plan is complete.'),
+      ? 'Use Play in the canvas controls after reviewing the flow and its connections. Follow live calls and answers in the conversation. While it runs, use the dedicated Stop control beside the viewport controls at the bottom-right of the canvas.'
+      : 'Use Play in the canvas controls when your crew is ready. Follow live calls and answers in the conversation, and select trace entries to inspect the details beside it. While it runs, use the dedicated Stop control beside the viewport controls at the bottom-right of the canvas.'),
     step('[data-tour="builder-catalog"]', isFlow ? 'Open the flow catalog' : 'Open the crew catalog', isFlow
-      ? 'Flow catalog now lives in the left sidebar. Browse and load saved flows into their own sessions.'
-      : 'Crew catalog now lives in the left sidebar. Browse saved crews, agents, and tasks. Loading a crew opens it in its own session.'),
+      ? 'Flow catalog now lives in the left sidebar. Use Save to catalog in the conversation after a plan finishes generating, then browse and load saved flows into their own sessions.'
+      : 'Crew catalog now lives in the left sidebar. Use Save to catalog in the conversation after a plan finishes generating. Browse saved crews, agents, and tasks here. Each crew has publish and Deploy to Databricks Apps actions. Loading a crew opens it in its own session.'),
     activityStep,
     ...accountSteps,
-    step('[data-tour="help-button"]', 'Return whenever you need', 'The tutorial now lives at the bottom of the right sidebar. Open it again to explore another mode.'),
+    step('[data-tour="help-button"]', 'Return whenever you need', 'Open this tutorial again from the lower-right corner, just like Chat. Event triggers are in Configuration when the preview feature is enabled.'),
   ];
 }
 

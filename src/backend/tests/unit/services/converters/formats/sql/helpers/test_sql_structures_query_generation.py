@@ -15,7 +15,6 @@ import pytest
 from src.services.converters.base.models import (
     KPI,
     KPIDefinition,
-    QueryFilter,
     Structure,
 )
 from src.services.converters.formats.sql.helpers.sql_structures import (
@@ -23,11 +22,8 @@ from src.services.converters.formats.sql.helpers.sql_structures import (
     SQLTimeIntelligenceHelper,
 )
 from src.services.converters.formats.sql.models import (
-    SQLAggregationType,
     SQLDefinition,
     SQLDialect,
-    SQLMeasure,
-    SQLStructure,
     SQLTranslationOptions,
 )
 

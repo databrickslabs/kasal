@@ -9,9 +9,9 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Request, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError
 from src.core.permissions import check_role_in_context, is_system_admin
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.mcp import (
     MCPServerCreate,
     MCPServerListResponse,
@@ -256,9 +256,8 @@ async def _heal_external_mcp_urls(
     repository = MCPServerRepository(session)
     changed = 0
     for server in await repository.list():
-        in_scope = (
-            (group_id is not None and server.group_id == group_id)
-            or (include_base and server.group_id is None)
+        in_scope = (group_id is not None and server.group_id == group_id) or (
+            include_base and server.group_id is None
         )
         new_url = replacements.get(str(server.name).lower())
         if (
@@ -355,7 +354,9 @@ async def get_databricks_mcp_options(
         try:
             from src.repositories.mcp_repository import MCPServerRepository
 
-            registered = await MCPServerRepository(session).list_for_group_scope(group_id)
+            registered = await MCPServerRepository(session).list_for_group_scope(
+                group_id
+            )
             for server in registered:
                 parent = _mcp_service_parent(server.name)
                 if parent:

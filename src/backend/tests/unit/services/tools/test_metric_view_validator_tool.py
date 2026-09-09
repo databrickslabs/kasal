@@ -261,7 +261,9 @@ class TestOutputStructure:
 # Helpers
 # ---------------------------------------------------------------------------
 
-from contextlib import contextmanager
+from contextlib import (  # noqa: E402 - import follows module initialization
+    contextmanager,
+)
 
 
 @contextmanager

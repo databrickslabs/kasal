@@ -8,11 +8,10 @@ Tests cover:
 """
 
 import asyncio
-import queue
 from datetime import datetime
 from queue import Empty, Full
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -866,7 +865,7 @@ class TestLogsWriterLoop:
         # Make get_smart_db_session raise before yielding
         async def _broken_session():
             raise RuntimeError("session error")
-            yield  # noqa: make it an async generator
+            yield  # Make this an async generator.
 
         with (
             patch(
@@ -1049,7 +1048,7 @@ class TestStopLogsWriter:
                 "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
-            patch(_SLEEP_PATCH, new_callable=AsyncMock) as mock_sleep,
+            patch(_SLEEP_PATCH, new_callable=AsyncMock),
         ):
             # Start the loop (not yet shutting down)
             task = asyncio.create_task(logs_writer_loop(shutdown))
@@ -1200,9 +1199,7 @@ class TestEdgeCases:
     async def test_get_logs_by_group_with_group_context_no_group_ids(self):
         """GroupContext with group_ids=None and primary_group_id=None."""
         mock_session = AsyncMock()
-        with patch(
-            "src.services.execution.logs.writer.ExecutionLogsRepository"
-        ) as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository"):
             service = ExecutionLogsService(mock_session)
 
         gc = GroupContext(group_ids=None, group_email="a@b.com", email_domain="b.com")
@@ -1335,7 +1332,7 @@ class TestEdgeCases:
 
         async def _broken_smart_session():
             raise RuntimeError("connection refused")
-            yield  # noqa: make it an async generator
+            yield  # Make this an async generator.
 
         with (
             patch(

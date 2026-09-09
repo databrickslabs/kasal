@@ -13,8 +13,6 @@ answering a question nobody asked.
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from src.services.flow_builder.conversation.outcomes import (
     build_registry,
     identity_of,

@@ -5,7 +5,7 @@ Tests SQLAlchemy model attributes, initialization, and methods.
 """
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -123,7 +123,7 @@ class TestDataProcessing:
     def test_data_processing_init_calls_super(self):
         """Test DataProcessing __init__ calls super().__init__."""
         with patch.object(Base, "__init__") as mock_super_init:
-            data_processing = DataProcessing(che_number="CHE123456789")
+            DataProcessing(che_number="CHE123456789")
 
             mock_super_init.assert_called_once_with(che_number="CHE123456789")
 

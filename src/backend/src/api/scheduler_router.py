@@ -1,14 +1,12 @@
 import logging
 from typing import Annotated, Dict, List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Path, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, Path, status
 
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.schedule import (
     ScheduleCreate,
     ScheduleCreateFromExecution,
-    ScheduleListResponse,
     ScheduleResponse,
     ScheduleUpdate,
     ToggleResponse,
@@ -16,11 +14,9 @@ from src.schemas.schedule import (
 from src.schemas.scheduler import (
     SchedulerJobCreate,
     SchedulerJobResponse,
-    SchedulerJobSchema,
     SchedulerJobUpdate,
 )
 from src.services.scheduling.scheduler import SchedulerService
-from src.utils.user_context import GroupContext
 
 # Create router instance
 router = APIRouter(

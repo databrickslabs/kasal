@@ -2,9 +2,9 @@ from typing import Annotated, Dict, List
 
 from fastapi import APIRouter, Depends, Query
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
-from src.core.permissions import check_role_in_context, is_workspace_admin
+from src.core.permissions import is_workspace_admin
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.databricks_config import (
     AIGatewayStatusUpdate,
     DatabricksConfigCreate,

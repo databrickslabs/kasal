@@ -260,3 +260,24 @@ class TestFlowRecorder:
                 total_tokens=0,
             ),
         )
+
+
+def test_resumed_flow_keeps_restored_checkpoint_positions():
+    from src.core.events.types import CrewCheckpointRestoredEvent
+
+    recorder = FlowCrewCheckpointRecorder("job-resumed")
+    persisted = capture(recorder)
+    bus = EventsBus()
+    recorder.register(bus)
+    bus.emit(None, CrewCheckpointRestoredEvent(crew_name="Black", output="black"))
+    bus.emit(None, CrewCheckpointRestoredEvent(crew_name="Black", output="black"))
+    bus.emit(
+        None,
+        CrewKickoffCompletedEvent(
+            crew_name="Number",
+            output=SimpleNamespace(raw="100", json_dict=None),
+            total_tokens=0,
+        ),
+    )
+    recorder.finish()
+    assert [(unit["key"], unit["name"]) for unit in persisted] == [("2", "Number")]

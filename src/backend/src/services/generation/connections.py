@@ -5,18 +5,16 @@ This module provides business logic for analyzing agents and tasks
 and determining optimal connections and dependencies.
 """
 
-import json
 import logging
 import os
 import traceback
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
+from src.core.llm.robust_json import robust_json_parser
 from src.schemas.connection import ConnectionRequest, ConnectionResponse
 from src.services.catalog.templates import TemplateService
 from src.services.llm.manager import LLMManager
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from src.core.llm.robust_json import robust_json_parser
 
 # Configure logging
 logger = logging.getLogger(__name__)

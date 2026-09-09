@@ -2,18 +2,13 @@
 Comprehensive test suite for execution_runner module with 100% coverage.
 """
 
-import asyncio
-import os
-from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from src.models.execution_status import ExecutionStatus
 from src.services.agent_builder.execution_runner import (
     update_execution_status_with_retry,
 )
-from src.utils.user_context import GroupContext
 
 
 @pytest.fixture

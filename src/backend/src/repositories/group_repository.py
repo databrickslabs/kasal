@@ -6,7 +6,7 @@ Handles database operations for group management and user membership.
 
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 

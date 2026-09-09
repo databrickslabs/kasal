@@ -3,18 +3,114 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { CanvasAssistantLayout } from './CanvasAssistantLayout';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
+import BuilderNodeEditor from './BuilderNodeEditor';
 vi.mock('../../../chat/components/Preview/PreviewPanel', () => ({
   default: ({ content, onClose }: { content: { data: string }; onClose: () => void }) => <aside>Memory for {content.data}<button onClick={onClose}>Close preview</button></aside>,
 }));
-vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+const createSchedule = vi.hoisted(() => vi.fn(async () => ({ name: 'Saved schedule' })));
+const resumeCheckpoint = vi.hoisted(() => vi.fn(async () => ({ execution_id: 'resumed-run', status: 'RUNNING', run_name: 'News' })));
+vi.mock('../../../../api/execution/ExecutionCheckpointService', () => ({ default: {
+  getCheckpoint: vi.fn(async () => ({ kind: 'flow', run_name: 'News', completed_count: 2, unit_count: 3, resumable: true,
+    execution_status: 'FAILED', units: [{ key: 'crew-news', name: 'Research', output_preview: 'News stories' }, { key: 'crew-slides', name: 'Presentation' }] })),
+  resume: resumeCheckpoint,
+} }));
+vi.mock('../../../../api/execution/ScheduleService', () => ({ ScheduleService: { createScheduleFromExecution: createSchedule } }));
+vi.mock('../../crews/components/CrewOptimizeDialog', () => ({ default: ({ crewId, embedded }: { crewId: string; embedded?: boolean }) => <div>Optimize {crewId} {embedded ? 'in pane' : 'in dialog'}</div> }));
+vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 const props = {
   composer: <input aria-label="Draft" defaultValue="Keep this draft" />,
   response: <p>A response to review</p>, hasMessages: true, responseKey: 'reply-1', busy: false,
   dark: false, historyOpen: false, onHistory: vi.fn(), onNewChat: vi.fn(),
 };
-const wrapper = ({ children }: { children: React.ReactNode }) => <><div id="builder-assistant-response-host" /><div id="builder-assistant-composer-host" /><div id="builder-assistant-preview-host" />{children}</>;
+const wrapper = ({ children }: { children: React.ReactNode }) => <><div id="builder-assistant-response-host" /><div id="builder-assistant-composer-host" /><div><div data-testid="canvas-content">Canvas nodes</div><div id="builder-assistant-preview-host" /></div>{children}</>;
 beforeEach(() => useUILayoutStore.setState({ assistantResponseFocused: false, assistantPanelSide: 'right', assistantPanelVisible: false, executionHistoryVisible: true }));
 describe('Canvas assistant sidebar', () => {
+  it('keeps checkpoint selection across canvas swaps and resumes the chosen historical run', async () => {
+    const resumed = vi.fn();
+    const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openCheckpoints?.('historical-run', resumed)}>Open checkpoints</button>}</BuilderPreviewContext.Consumer>;
+    render(<CanvasAssistantLayout {...props} response={response} sessionKey="flow:one" />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Open checkpoints' }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Redo from "Presentation"/ }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas' }));
+    expect(screen.getByTestId('canvas-content')).toBeVisible();
+    act(() => useUILayoutStore.getState().setAssistantPanelSide('left'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Checkpoints' }));
+    expect(screen.getByRole('radio', { name: /Redo from "Presentation"/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Run from checkpoint' }));
+    await waitFor(() => expect(resumeCheckpoint).toHaveBeenCalledWith('historical-run', 'crew-slides'));
+    expect(resumed).toHaveBeenCalledWith('resumed-run');
+    expect(screen.queryByRole('tab', { name: 'Checkpoints' })).toBeNull();
+    expect(screen.getByTestId('canvas-content')).toBeVisible();
+  });
+  it('opens tabs on demand and switches between activity, the result and the same mounted canvas', () => {
+    const response = <BuilderPreviewContext.Consumer>{preview => <>
+      <button onClick={() => preview?.openResult?.({ type: 'ui', data: 'Mindmap', sourceMessageId: 'result' })}>Open result</button>
+      <button onClick={() => preview?.openStep('run-one', { label: 'LLM response', detail: 'Reasoning text' })}>Open activity</button>
+    </>}</BuilderPreviewContext.Consumer>;
+    render(<CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />, { wrapper });
+    const canvas = screen.getByTestId('canvas-content');
+    expect(screen.queryByRole('tablist')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open result' }));
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(canvas).not.toBeVisible();
+    expect(canvas.inert).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
+    expect(screen.getByRole('tab', { name: 'Run activity' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('region', { name: 'Result preview' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Result', exact: true }));
+    expect(screen.getByRole('region', { name: 'Result preview' })).toHaveTextContent('Mindmap');
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas', exact: true }));
+    expect(screen.getByTestId('canvas-content')).toBe(canvas);
+    expect(canvas).toBeVisible();
+    expect(canvas.inert).not.toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: 'Run activity' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close Run activity' }));
+    expect(screen.queryByRole('tab', { name: 'Run activity' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Result', exact: true })).toBeInTheDocument();
+  });
+  it('keeps a schedule draft across tabs and schedules the selected historical run', async () => {
+    const created = vi.fn();
+    const response = <BuilderPreviewContext.Consumer>{preview => <>
+      <button onClick={() => preview?.openSchedule?.('historical-run', 'Original name', created)}>Schedule</button>
+      <button onClick={() => preview?.openOptimize?.('saved-crew', 'My crew')}>Optimize</button>
+    </>}</BuilderPreviewContext.Consumer>;
+    render(<CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />, { wrapper });
+    expect(screen.queryByRole('tab', { name: 'Schedule' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule', exact: true }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.change(screen.getByDisplayValue('Original name'), { target: { value: 'My schedule draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Optimize', exact: true }));
+    expect(screen.getByText('Optimize saved-crew in pane')).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule', exact: true }));
+    expect(screen.getByDisplayValue('My schedule draft')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
+    await waitFor(() => expect(created).toHaveBeenCalledWith('Saved schedule'));
+    expect(createSchedule).toHaveBeenCalledWith({ name: 'My schedule draft', execution_id: 'historical-run', cron_expression: '0 9 * * *' });
+    expect(screen.queryByRole('tab', { name: 'Schedule', exact: true })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Canvas', exact: true })).toHaveAttribute('aria-selected', 'true');
+  });
+  it('moves a node editor into its own tab and preserves its form across canvas and activity tabs', async () => {
+    const closed = vi.fn();
+    const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openStep('run', { label: 'Response', detail: 'Details' })}>Open activity</button>}</BuilderPreviewContext.Consumer>;
+    render(<><CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />
+      <BuilderNodeEditor open kind="agent" nodeId="agent-1" label="Researcher" onClose={closed}>
+        <input aria-label="Agent goal" defaultValue="Research news" />
+      </BuilderNodeEditor></>, { wrapper });
+    const tab = await screen.findByRole('tab', { name: 'Agent · Researcher' });
+    expect(tab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const field = screen.getByRole('textbox', { name: 'Agent goal' });
+    fireEvent.change(field, { target: { value: 'Edited goal' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
+    fireEvent.click(tab);
+    expect(screen.getByRole('textbox', { name: 'Agent goal' })).toBe(field);
+    expect(field).toHaveValue('Edited goal');
+    fireEvent.click(screen.getByRole('button', { name: 'Close Agent · Researcher' }));
+    expect(closed).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('tab', { name: 'Agent · Researcher' })).toBeNull();
+  });
   it('opens a rich result beside either side of the conversation and clears it on a session switch', () => {
     const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openResult?.({ type: 'ui', data: 'Surface data', sourceMessageId: 'result-one' })}>Open result</button>}</BuilderPreviewContext.Consumer>;
     const view = render(<CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />, { wrapper });

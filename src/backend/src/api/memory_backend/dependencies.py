@@ -10,8 +10,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from src.dependencies.providers import WriteSessionDep
 from src.core.logger import LoggerManager
+from src.dependencies.providers import WriteSessionDep
 from src.services.memory.config.backend_service import MemoryBackendService
 
 logger = LoggerManager.get_instance().api

@@ -1,13 +1,11 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.repositories.group_tool_repository import GroupToolRepository
 from src.schemas.group_tool import (
-    GroupToolCreate,
     GroupToolListResponse,
     GroupToolResponse,
-    GroupToolUpdate,
 )
 from src.schemas.tool import ToolListResponse, ToolResponse
 from src.utils.user_context import GroupContext

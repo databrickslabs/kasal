@@ -2,8 +2,6 @@
 
 from datetime import datetime
 
-import pytest
-
 from src.models.mcp_settings import MCPSettings
 
 

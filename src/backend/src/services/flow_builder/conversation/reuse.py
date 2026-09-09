@@ -38,7 +38,6 @@ again", and no rule inferred from state can tell that turn from the others.
 """
 
 import logging
-import re
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)

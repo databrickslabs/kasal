@@ -2,8 +2,6 @@
 Unit tests for AgentBricks schemas.
 """
 
-import pytest
-
 from src.schemas.agentbricks import (
     AgentBricksAuthConfig,
     AgentBricksEndpoint,

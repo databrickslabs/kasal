@@ -4,7 +4,6 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.exc import IntegrityError
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import (
     BadRequestError,
     ConflictError,
@@ -12,7 +11,7 @@ from src.core.exceptions import (
     NotFoundError,
 )
 from src.core.permissions import check_role_in_context
-from src.models.agent import Agent
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.agent import Agent as AgentSchema
 from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
 from src.services.catalog.agents import AgentService

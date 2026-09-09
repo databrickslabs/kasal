@@ -235,7 +235,7 @@ class DatabricksSecretsService(BaseService):
                                 secret_value_encoded
                             ).decode("utf-8")
                             return secret_value
-                        except:
+                        except Exception:
                             return secret_value_encoded
                     else:
                         error_text = await response.text()

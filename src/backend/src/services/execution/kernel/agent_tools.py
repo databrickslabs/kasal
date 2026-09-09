@@ -9,10 +9,19 @@ a DB ``tool_service``; flow: ORM objects + the flow graph + a per-agent
 ``ToolFactory``). That difference is expressed through the parameters here —
 the resolution + MCP wiring + agent construction all live in one place.
 """
-from typing import Any, Dict, List, Optional
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    List,
+    Optional,
+)
 
-from src.core.logger import LoggerManager
-from src.services.execution.kernel.agent_builder import build_agent
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.services.execution.kernel.agent_builder import (  # noqa: E402 - import follows module initialization
+    build_agent,
+)
 
 logger = LoggerManager.get_instance().crew
 

@@ -5,7 +5,7 @@ a COMPLETED result with a 'warnings' list, the warnings are surfaced in
 the final_message passed to update_execution_status_with_retry.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

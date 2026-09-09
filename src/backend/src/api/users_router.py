@@ -1,11 +1,10 @@
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.dependencies.admin_auth import AuthenticatedUserDep, SystemAdminUserDep
-from src.models.user import User
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.user import UserInDB, UserPermissionUpdate, UserUpdate
 from src.services.groups.users import UserService
 

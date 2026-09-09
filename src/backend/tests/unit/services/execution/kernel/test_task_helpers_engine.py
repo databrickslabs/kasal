@@ -1,7 +1,4 @@
-import asyncio
-import json
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, call, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 
@@ -559,7 +556,7 @@ class TestCreateTask:
             mock_task_instance = MagicMock()
             mock_task_class.return_value = mock_task_instance
 
-            with patch("builtins.open", mock_open()) as mock_file:
+            with patch("builtins.open", mock_open()):
                 result = await create_task(
                     task_key="test_task",
                     task_config=task_config,
@@ -619,7 +616,7 @@ class TestCreateTask:
             mock_task_instance = MagicMock()
             mock_task_class.return_value = mock_task_instance
 
-            with patch("builtins.open", mock_open()) as mock_file:
+            with patch("builtins.open", mock_open()):
                 result = await create_task(
                     task_key="test_task",
                     task_config=task_config,
@@ -676,7 +673,7 @@ class TestCreateTask:
             mock_task_instance = MagicMock()
             mock_task_class.return_value = mock_task_instance
 
-            with patch("builtins.open", mock_open()) as mock_file:
+            with patch("builtins.open", mock_open()):
                 result = await create_task(
                     task_key="test_task",
                     task_config=task_config,

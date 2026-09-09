@@ -275,6 +275,7 @@ class LocalStorageBackend:
                 # consolidation can compare meaning rather than the blend.
                 record.metadata["semantic"] = round(float(semantic), 4)
                 scored.append((record, score))
+
         def rank_key(pair):
             return pair[1], pair[0].importance
 

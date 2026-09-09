@@ -10,8 +10,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from src.schemas.dispatcher import IntentType
 from src.core.llm.robust_json import robust_json_parser
+from src.schemas.dispatcher import IntentType
 
 logger = logging.getLogger(__name__)
 

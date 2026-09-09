@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 
 from .data_classes import MetricViewSpec
@@ -56,7 +55,6 @@ def emit_migration_report(
     - Recommendations
     """
     lines: list[str] = []
-    cfg = config or {}
 
     # ── Executive Summary ──────────────────────────────────────────────────
 

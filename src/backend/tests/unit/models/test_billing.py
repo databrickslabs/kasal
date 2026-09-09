@@ -4,17 +4,14 @@ Comprehensive unit tests for billing SQLAlchemy models.
 Tests all models in billing.py including table structure and utility functions.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-import pytest
 from sqlalchemy import (
     JSON,
     Column,
     DateTime,
-    ForeignKey,
-    Index,
     Integer,
     Numeric,
     String,

@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, String
 
 from src.db.base import Base
 

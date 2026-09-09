@@ -6,9 +6,6 @@ field validation, relationships, and data integrity.
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.models.chat_history import ChatHistory, generate_uuid
 

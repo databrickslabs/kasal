@@ -431,8 +431,9 @@ def test_incremental_stream_matches_snapshot_messages(surface, chunk_size):
 
 
 def test_incremental_parser_handles_long_escaped_values_once():
-    from src.services.a2ui.incremental_surface import IncrementalSurfaceParser
     from unittest.mock import patch
+
+    from src.services.a2ui.incremental_surface import IncrementalSurfaceParser
 
     surface = dict(DECK, dataModel={"escaped/key~": 'quote" slash\\ brace} ' * 10000})
     raw = json.dumps(surface)

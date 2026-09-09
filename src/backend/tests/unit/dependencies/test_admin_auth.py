@@ -6,7 +6,6 @@ Covers: _create_user_from_forwarded_email, get_current_user_from_email,
         get_system_admin_user
 """
 
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

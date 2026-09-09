@@ -14,10 +14,7 @@ The FlowBuilder class coordinates these modules to construct complete CrewAI flo
 
 from typing import Any, Dict, Final, Optional
 
-from pydantic import BaseModel
-
 from src.core.logger import LoggerManager
-from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
 from src.services.flow_builder.conversation.state_model import (
     DictLikeState,
@@ -27,12 +24,10 @@ from src.services.flow_builder.conversation.turn import (
     ConversationState,
     is_conversational,
 )
-from src.services.flow_builder.exceptions import FlowPausedForApprovalException
-from src.services.flow_builder.modules.agent_adapter import AgentConfig
+from src.services.flow_builder.modules.connection_approval import route_approval_gates
+from src.services.flow_builder.modules.crew_completion import track_completion
 from src.services.flow_builder.modules.flow_conditions import (
-    ConditionState,
     report_no_route,
-    state_snapshot,
 )
 
 # Import new modular components
@@ -43,15 +38,17 @@ from src.services.flow_builder.modules.flow_eval_context import (
 )
 from src.services.flow_builder.modules.flow_methods import (
     FlowMethodFactory,
-    collect_task_agents,
-    crew_inputs_from_state,
-    extract_final_answer,
-    get_model_context_limits,
 )
 from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
-from src.services.flow_builder.modules.task_adapter import TaskConfig
+from src.services.flow_builder.modules.route_listener import route_listener_factory
+from src.services.flow_builder.modules.router_dependencies import (
+    build_crew_to_method,
+    resolve_router_upstream,
+    route_method_name,
+    validate_router_upstreams,
+)
 from src.services.flow_builder.runtime import Flow as CrewAIFlow
-from src.services.flow_builder.runtime import and_, listen, or_, router, start
+from src.services.flow_builder.runtime import and_, or_, router
 from src.utils.safe_eval import safe_eval
 
 # The @persist decorator is available since CrewAI 0.98.0
@@ -91,7 +88,9 @@ def pick_legacy_route(condition_value, route_names):
 #: bare literals here, two of which mean something different.
 DEFAULT_ROUTE: Final[str] = "default"
 
-from src.services.flow_builder.checkpoint_skip import CrewSkipPolicy
+from src.services.flow_builder.checkpoint_skip import (  # noqa: E402 - import follows module initialization
+    CrewSkipPolicy,
+)
 
 _FLOW_CONDITION_CALLS = frozenset(
     {"int", "float", "str", "bool", "len", "abs", "min", "max", "where"}
@@ -217,7 +216,11 @@ class FlowBuilder:
                     "Flow holds a conversation, enabling persistence: its state "
                     "has to survive between turns"
                 )
-            if has_checkpoint_edge or wants_conversation:
+            has_approval = any(
+                (edge.get("data", {}).get("hitl") or {}).get("enabled")
+                for edge in edges
+            )
+            if has_checkpoint_edge or wants_conversation or has_approval:
                 if has_checkpoint_edge:
                     logger.info(
                         "Found edge(s) with checkpoint=true, enabling flow persistence"
@@ -759,7 +762,7 @@ class FlowBuilder:
         for _ri, _router_config in enumerate(routers):
             _r_name = _router_config.get("name", f"router_{_ri}")
             for _route_name, _route_tasks in _router_config.get("routes", {}).items():
-                _route_method = f"route_{_r_name}_{_route_name}_{_ri}"
+                _route_method = route_method_name(_r_name, _route_name, _ri)
                 for _rt in _route_tasks:
                     _tid = _rt.get("id") if isinstance(_rt, dict) else None
                     if _tid is not None:
@@ -1204,32 +1207,14 @@ class FlowBuilder:
 
         logger.info(f"Processed {len(hitl_gates)} HITL gate nodes")
 
-        # crew id -> the method this backend actually generated for it.
-        #
-        # A router says what it waits for, and it used to say it by METHOD NAME,
-        # which meant the frontend had to PREDICT a name only this side knows.
-        # It predicted by indexing its own arrays, which hold one entry per edge
-        # and per task, while methods are named per CREW — so any crew with two
-        # incoming edges shifted every later index and the router named a method
-        # that was never created. It then never fired, and the run reported
-        # COMPLETED having done half its work. Twice, on the same flow.
-        #
-        # So the frontend now sends the crew ID and this resolves it, from the
-        # tuples the naming actually came from rather than from a second copy of
-        # the rule.
-        crew_to_method: Dict[str, str] = {}
-        for listener_info in listener_crews:
-            listener_method_name, listener_crew_id = listener_info[0], listener_info[1]
-            if listener_crew_id:
-                crew_to_method.setdefault(str(listener_crew_id), listener_method_name)
-        for sp_method_name, sp_task_ids, _objs, _name, _data in starting_points:
-            sp_ids = {str(t) for t in sp_task_ids}
-            for sp_config in frontend_starting_points:
-                if str(sp_config.get("taskId")) in sp_ids:
-                    sp_crew_id = sp_config.get("crewId")
-                    if sp_crew_id:
-                        crew_to_method.setdefault(str(sp_crew_id), sp_method_name)
-                    break
+        crew_to_method = build_crew_to_method(
+            listener_crews,
+            starting_points,
+            frontend_starting_points,
+            routers,
+            all_tasks,
+        )
+        router_dependencies: Dict[str, str] = {}
         logger.info(f"Crew -> method map for routers: {crew_to_method}")
 
         # Add router methods for conditional routing
@@ -1251,33 +1236,9 @@ class FlowBuilder:
             default_method = (
                 starting_points[0][0] if starting_points else "starting_point_0"
             )
-            listen_to_method = (
-                crew_to_method.get(str(listen_to_crew_id))
-                if listen_to_crew_id
-                else None
-            ) or default_method
-
-            # A router wired to a method that does not exist never fires and
-            # says NOTHING about it. Resolution from the crew id removes the way
-            # that used to happen, but an unknown crew id (a node deleted from
-            # the canvas, a config hand-edited) would land in the same place, so
-            # the check stays.
-            if listen_to_method not in class_methods:
-                available = sorted(
-                    name
-                    for name in class_methods
-                    if name.startswith(("listener_", "starting_point_", "route_"))
-                )
-                logger.error(
-                    "Router %r waits on crew %r, which resolved to %r — a method "
-                    "this flow does not have. It cannot fire, so its routes will "
-                    "never run. Known crews: %s. Available methods: %s",
-                    router_name,
-                    listen_to_crew_id,
-                    listen_to_method,
-                    sorted(crew_to_method),
-                    available,
-                )
+            listen_to_method = resolve_router_upstream(
+                router_config, crew_to_method, default_method
+            )
 
             # Create router method
             def router_factory(
@@ -1526,6 +1487,7 @@ class FlowBuilder:
                 router_method_name,
             )
             class_methods[router_method_name] = bound_router
+            router_dependencies[router_method_name] = listen_to_method
             logger.info(
                 f"Created router method {router_method_name} with routes: {list(routes.keys())}"
             )
@@ -1548,305 +1510,7 @@ class FlowBuilder:
                 )
 
                 if route_task_objs:
-                    route_listener_name = f"route_{router_name}_{route_name}_{i}"
-
-                    def route_listener_factory(
-                        route_task_list,
-                        route_listener_method_name,
-                        callbacks_param,
-                        group_ctx,
-                        expected_route,
-                        route_crew_name_param,
-                        upstream_method,
-                    ):
-                        @listen(expected_route)
-                        async def route_listener_method(self, previous_output):
-                            logger.info("=" * 80)
-                            logger.info(
-                                f"ROUTE LISTENER METHOD CALLED - {route_listener_method_name}"
-                            )
-                            logger.info(
-                                f"Executing route listener for route: {expected_route}"
-                            )
-
-                            # A @listen(route_name) method is handed the ROUTER'S
-                            # RETURN VALUE, which is the route name — not the
-                            # upstream crew's output. Injecting that verbatim gave
-                            # the routed crew "Context from previous step:
-                            # route_to_politics_presentation" and none of the
-                            # classification it was supposed to work from: the
-                            # branch ran, on nothing.
-                            #
-                            # The real output is in state under the method the
-                            # router listens to, stored as state[<method>] and
-                            # state[<crew name>] when that crew finished.
-                            routed_from = state_snapshot(self.state).get(
-                                upstream_method
-                            )
-                            if routed_from:
-                                logger.info(
-                                    "Route %s: taking upstream output from "
-                                    "state[%r] (%d chars) instead of the router's "
-                                    "return value %r",
-                                    expected_route,
-                                    upstream_method,
-                                    len(str(routed_from)),
-                                    str(previous_output)[:60],
-                                )
-                                previous_output = routed_from
-                            else:
-                                logger.warning(
-                                    "Route %s: state has no %r, so the routed crew "
-                                    "gets only the router's return value. It will "
-                                    "run without the upstream crew's output.",
-                                    expected_route,
-                                    upstream_method,
-                                )
-
-                            # Log and store previous output from router
-                            if previous_output:
-                                logger.info("📥 RECEIVED PREVIOUS OUTPUT FROM ROUTER:")
-                                logger.info(
-                                    f"  Output: {str(previous_output)[:200]}..."
-                                )
-                                # Serialize before storing — @persist JSON-serializes the
-                                # whole state and a raw CrewOutput is not serializable.
-                                self.state["previous_output"] = (
-                                    previous_output.raw
-                                    if hasattr(previous_output, "raw")
-                                    and previous_output.raw
-                                    else (
-                                        str(previous_output)
-                                        if previous_output is not None
-                                        else previous_output
-                                    )
-                                )
-                            else:
-                                logger.info(
-                                    "📭 No previous output received from router"
-                                )
-
-                            logger.info("=" * 80)
-
-                            # Get agents for these tasks
-                            agents = collect_task_agents(route_task_list)
-                            logger.info(
-                                f"Number of agents in route listener: {len(agents)}"
-                            )
-
-                            # CRITICAL FIX: Inject previous output context into task descriptions
-                            # This ensures the agent has access to the data from the previous crew
-                            # Same pattern as create_listener_method in flow_methods.py
-                            runtime_tasks = []
-                            previous_output_context = ""
-
-                            if previous_output:
-                                # Get the first agent to determine context limits
-                                first_agent = (
-                                    route_task_list[0].agent
-                                    if route_task_list
-                                    else None
-                                )
-
-                                # Get model's context window and max output tokens using ModelConfigService
-                                context_window_tokens, max_output_tokens = (
-                                    await get_model_context_limits(
-                                        first_agent, group_ctx
-                                    )
-                                    if first_agent
-                                    else (128000, 16000)
-                                )
-
-                                # Calculate available input budget (subtract output reservation)
-                                available_input_tokens = (
-                                    context_window_tokens - max_output_tokens
-                                )
-
-                                # Allocate 60% of available input for previous output
-                                # This leaves 40% for system prompts, tools, conversation history, and safety buffer
-                                max_context_tokens = int(available_input_tokens * 0.6)
-
-                                # Convert tokens to characters (using 3.5 chars/token for safety)
-                                max_context_length = int(max_context_tokens * 3.5)
-
-                                logger.info(
-                                    f"Model limits: context={context_window_tokens} tokens, max_output={max_output_tokens} tokens"
-                                )
-                                logger.info(
-                                    f"Available input: {available_input_tokens} tokens, allocating {max_context_tokens} tokens ({max_context_length} chars) for previous output"
-                                )
-
-                                # Create a concise context string to inject into task descriptions
-                                # Use extract_final_answer to get only the final answer, not the full thinking process
-                                previous_output_str = extract_final_answer(
-                                    [previous_output]
-                                )
-                                if len(previous_output_str) > max_context_length:
-                                    previous_output_context = f"\n\nContext from previous step:\n{previous_output_str[:max_context_length]}...\n(Output truncated for brevity)"
-                                else:
-                                    previous_output_context = f"\n\nContext from previous step:\n{previous_output_str}"
-                                logger.info(
-                                    f"📤 Injecting previous output context into task descriptions ({len(previous_output_context)} chars)"
-                                )
-
-                            # Create new Task objects with modified descriptions
-                            for task in route_task_list:
-                                # Create new task with injected context
-                                runtime_task = active_harness().build_task(
-                                    description=f"{task.description}{previous_output_context}",
-                                    agent=task.agent,
-                                    expected_output=(
-                                        task.expected_output
-                                        if hasattr(task, "expected_output")
-                                        else "Task completed successfully"
-                                    ),
-                                )
-                                runtime_tasks.append(runtime_task)
-                                logger.info(
-                                    f"Created runtime task with injected context for agent: {task.agent.role}"
-                                )
-
-                            # Use runtime_tasks (with context) instead of original route_task_list
-                            tasks_to_use = runtime_tasks
-
-                            # CrewAI validation: A crew cannot end with more than one async task
-                            # If we have multiple async tasks, auto-create a completion task
-                            async_tasks = [
-                                t
-                                for t in tasks_to_use
-                                if getattr(t, "async_execution", False)
-                            ]
-
-                            if len(async_tasks) > 1:
-                                # Auto-create a lightweight completion task that waits for all async tasks
-                                completion_agent = async_tasks[-1].agent
-                                completion_task = active_harness().build_task(
-                                    description="Aggregate and return results from parallel task executions",
-                                    expected_output="Combined results from all parallel tasks",
-                                    agent=completion_agent,
-                                    context=async_tasks,
-                                    async_execution=False,
-                                )
-                                tasks_to_use.append(completion_task)
-                                logger.info(
-                                    f"Auto-created completion task for route listener to handle {len(async_tasks)} async tasks"
-                                )
-
-                            # Create crew with runtime tasks (with injected context)
-                            logger.info("Creating Crew instance for route listener")
-
-                            # Use provided crew name, fallback to first agent role
-                            route_crew_name = (
-                                route_crew_name_param
-                                if route_crew_name_param
-                                else (
-                                    agents[0].role
-                                    if agents
-                                    and hasattr(agents[0], "role")
-                                    and agents[0].role
-                                    else "Route Crew"
-                                )
-                            )
-                            logger.info(
-                                f"Creating route crew with name: {route_crew_name}"
-                            )
-
-                            engine = active_harness()
-                            crew = engine.build_crew(
-                                name=route_crew_name,  # Set crew name for proper event tracing
-                                agents=agents,
-                                tasks=tasks_to_use,  # Use validated task list
-                                verbose=True,
-                                process=engine.process("sequential"),
-                            )
-                            logger.info(
-                                f"Crew instance '{route_crew_name}' created for route"
-                            )
-
-                            # SECURITY: Same assembly-time checks as all other crew creation paths.
-                            try:
-                                from src.services.security.tool_capability_manifest import (
-                                    run_crew_security_checks as _run_security_checks,
-                                )
-
-                                _run_security_checks(
-                                    crew,
-                                    context=f"flow router crew '{route_crew_name}'",
-                                )
-                            except Exception as _sec_err:
-                                logger.debug(
-                                    "[SECURITY] Flow router crew security checks skipped: %s",
-                                    _sec_err,
-                                )
-
-                            # CRITICAL: Set up execution callbacks like regular crew execution
-                            # Extract job_id directly from callbacks dict
-                            job_id = None
-                            if callbacks_param:
-                                # Get job_id directly from callbacks dict (no longer using JobOutputCallback)
-                                job_id = callbacks_param.get("job_id")
-                                if job_id:
-                                    logger.info(
-                                        f"Extracted job_id from callbacks for route listener: {job_id}"
-                                    )
-
-                            # Create and set synchronous step and task callbacks
-                            if job_id:
-                                try:
-                                    step_callback, task_callback = (
-                                        create_execution_callbacks(
-                                            job_id=job_id,
-                                            config={},
-                                            group_context=group_ctx,
-                                            crew=crew,
-                                        )
-                                    )
-                                    crew.step_callback = step_callback
-                                    crew.task_callback = task_callback
-                                    logger.info(
-                                        f"✅ Set synchronous execution callbacks on route listener crew for job {job_id}"
-                                    )
-                                except Exception as callback_error:
-                                    logger.warning(
-                                        f"Failed to set execution callbacks on route listener: {callback_error}"
-                                    )
-                            else:
-                                logger.warning(
-                                    "No job_id available for route listener, skipping execution callbacks setup"
-                                )
-
-                            # The third crew call site, and the one that was
-                            # still passing nothing. A routed crew whose task
-                            # reads "{topic}" got the literal braces while the
-                            # start and listener crews got the value, so the same
-                            # placeholder resolved or not depending on which
-                            # branch reached it.
-                            crew_inputs = crew_inputs_from_state(self)
-                            if crew_inputs:
-                                logger.info(
-                                    f"Passing {sorted(crew_inputs)} from flow state "
-                                    f"into route listener crew '{route_crew_name_param}'"
-                                )
-                            result = await crew.kickoff_async(inputs=crew_inputs)
-                            logger.info(
-                                f"Route listener kickoff_async completed, result type: {type(result)}"
-                            )
-                            # Return a serializable value (not a raw CrewOutput): downstream
-                            # listeners store this in state, which @persist JSON-serializes.
-                            if hasattr(result, "raw") and result.raw:
-                                return result.raw
-                            return str(result) if result is not None else result
-
-                        route_listener_method.__name__ = route_listener_method_name
-                        route_listener_method.__qualname__ = route_listener_method_name
-                        if hasattr(route_listener_method, "_meth"):
-                            route_listener_method._meth.__name__ = (
-                                route_listener_method_name
-                            )
-                            route_listener_method._meth.__qualname__ = (
-                                route_listener_method_name
-                            )
-                        return route_listener_method
+                    route_listener_name = route_method_name(router_name, route_name, i)
 
                     # Try to get crew name from route tasks configuration
                     route_crew_name = None
@@ -1863,11 +1527,36 @@ class FlowBuilder:
                         route_name,
                         route_crew_name,
                         listen_to_method,
+                        route_approval_gates(
+                            flow_config or {},
+                            router_config,
+                            route_tasks,
+                            route_crew_name,
+                            listen_to_method,
+                            method_to_sequence.get(listen_to_method, 1),
+                            callbacks,
+                            group_context,
+                        ),
+                        (
+                            (checkpoint_outputs or {}).get(route_crew_name)
+                            if same_execution
+                            else None
+                        ),
                     )
                     class_methods[route_listener_name] = bound_route_listener
+                    crew_sequence_counter += 1
+                    method_to_sequence[route_listener_name] = crew_sequence_counter
                     logger.info(
                         f"Created route listener {route_listener_name} for crew '{route_crew_name}' listening to router '{router_method_name}' for route '{route_name}'"
                     )
+
+        # Gate resume points follow completed crews, regardless of router declaration order.
+        crew_methods = {entry[0] for entry in starting_points + listener_crews}
+        crew_methods.update(crew_to_method.values())
+        for name in crew_methods:
+            if name in class_methods:
+                class_methods[name] = track_completion(class_methods[name], name)
+        validate_router_upstreams(router_dependencies, class_methods)
 
         # CRITICAL: Create the DynamicFlow class WITH all methods using type()
         # This allows the FlowMeta metaclass to process @start() and @listen() decorators

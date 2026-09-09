@@ -6,7 +6,6 @@ from the database. Sensitive data (credentials, secrets, tokens) is automaticall
 masked when returning traces to prevent credential leakage.
 """
 
-import logging
 import os
 from typing import Any, Dict, List, Optional
 

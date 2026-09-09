@@ -4,8 +4,8 @@ Unit tests for PowerBISemanticModelCacheRepository.
 Tests cache retrieval, creation, updating, and cleanup operations.
 """
 
-from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import date
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -183,7 +183,7 @@ class TestCreateCache:
     async def test_create_adds_and_commits(self, repo, mock_session):
         metadata = {"measures": [{"name": "Total Sales"}], "schema": {}}
 
-        result = await repo.create_cache(
+        await repo.create_cache(
             group_id="group1",
             dataset_id="ds-1",
             workspace_id="ws-1",

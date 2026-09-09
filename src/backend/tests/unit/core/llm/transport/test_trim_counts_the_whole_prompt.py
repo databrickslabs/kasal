@@ -6,8 +6,6 @@ was ever compacted and the run died on a 400 with 52 tool results (~900,000
 characters) it was allowed to stub and never did.
 """
 
-import pytest
-
 # Importing the manager registers every seeded model's window, which is how the
 # failing model gets its 131,072 — the raw constants dict alone does not show it.
 import src.services.llm.manager  # noqa: F401

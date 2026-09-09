@@ -1,8 +1,6 @@
-from typing import Generic, List, Optional, Type, TypeVar
+from typing import Generic, List, Optional, TypeVar
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.core.base_repository import BaseRepository, ModelType
+from src.core.base_repository import ModelType
 
 # Define type for schema input
 SchemaType = TypeVar("SchemaType")

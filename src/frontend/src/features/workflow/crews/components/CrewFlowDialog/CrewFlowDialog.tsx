@@ -1,12 +1,9 @@
 import { catalogExecutionSettings } from './catalogExecutionSettings';
-import { kasalStageSurface } from '../../../../../theme/kasalSurfaces';
+import CatalogSurface from './CatalogSurface';
 import { getDefaultModel } from '../../../../../config/defaultModel';
 import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
 import { 
-  Dialog, 
-  DialogTitle, 
   DialogContent, 
-  DialogActions, 
   Button, 
   Box, 
   Grid,
@@ -23,8 +20,7 @@ import {
   Tab,
   Divider,
   MenuItem,
-  useTheme,
-  useMediaQuery
+  useTheme
 } from '@mui/material';
 import { CrewService, CrewFeedbackService, CrewFeedbackEntry } from '../../../../../api/workflow/CrewService';
 import { FlowService } from '../../../../../api/workflow/FlowService';
@@ -35,12 +31,11 @@ import { Node as _Node, Edge as _Edge } from 'reactflow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import SearchIcon from '@mui/icons-material/Search';
-import CloseIcon from '@mui/icons-material/Close';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import PersonIcon from '@mui/icons-material/Person';
 import EditIcon from '@mui/icons-material/Edit';
 import UploadIcon from '@mui/icons-material/Upload';
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CrewCatalogActions from './CrewCatalogActions';
 import CrewOptimizeDialog from '../CrewOptimizeDialog';
 import { useMLflowEnabled } from '../../../../../hooks/global/useMLflowEnabled';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
@@ -104,6 +99,7 @@ const ThumbDown: React.FC<{ filled?: boolean }> = ({ filled }) => (
 
 const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   open,
+  embedded = false,
   onClose,
   onCrewSelect,
   onFlowSelect,
@@ -148,7 +144,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const theme = useTheme();
-  const compactCatalog = useMediaQuery(theme.breakpoints.down('sm'));
   const [catalogSort, setCatalogSort] = useState('recent');
   const sortCatalog = (a: { name: string; created_at: string }, b: { name: string; created_at: string }) => catalogSort === 'name'
     ? a.name.localeCompare(b.name)
@@ -1319,35 +1314,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
   return (
     <>
-      <Dialog
-        open={open}
-        onClose={onClose}
-        maxWidth="lg"
-        fullWidth
-        fullScreen={compactCatalog}
-        aria-labelledby={catalogTitleId}
-        TransitionProps={{
-          onEntered: handleDialogEntered,
-        }}
-        PaperProps={{
-          sx: { ...kasalStageSurface(theme.palette.mode === 'dark'), height: compactCatalog ? '100%' : '86vh', maxHeight: compactCatalog ? '100%' : '900px', borderRadius: compactCatalog ? 0 : 4, border: 0 },
-          component: "div", // This allows the dialog to receive focus
-          role: "dialog",
-          tabIndex: -1, // This allows the dialog to be part of the tab sequence
-        }}
-      >
-        <DialogTitle id={`${catalogTitleId}-header`} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, pt: 3, pb: 2 }}>
-          <Box id={catalogTitleId}>
-            {showOnlyTab === 0 ? 'Crew catalog' :
-             showOnlyTab === 1 ? 'Agent catalog' :
-             showOnlyTab === 2 ? 'Task catalog' :
-             showOnlyTab === 3 ? 'Flow catalog' :
-             'Catalog'}
-          </Box>
-          <IconButton aria-label="Close catalog" onClick={onClose}>
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
+      <CatalogSurface open={open} embedded={embedded} onClose={onClose} titleId={catalogTitleId}
+        tab={showOnlyTab ?? (embedded ? initialTab : undefined)} onEntered={handleDialogEntered}>
         <DialogContent onKeyDown={handleDialogKeyDown} data-tour="catalog-dialog" sx={{ px: 3, pb: 3, '& .MuiButton-outlined': { border: 0, color: 'text.secondary', bgcolor: 'action.hover', borderRadius: 2 }, '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTab-root': { minHeight: 40, borderRadius: 2, mx: 0.25, color: 'text.secondary' }, '& .MuiTab-root.Mui-selected': { color: 'text.primary', bgcolor: 'action.selected' } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -1363,8 +1331,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           <Box sx={{ width: '100%' }}>
             {showOnlyTab === undefined ? (
               // Show all tabs when opened from catalog
-              <Box sx={{ borderBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-                <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs">
+              <Box sx={{ borderBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs" variant="scrollable" scrollButtons="auto" sx={{ minWidth: 0, maxWidth: '100%' }}>
                   <Tab icon={<PersonIcon />} iconPosition="start" label="Crews" id="crew-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
                   <Tab icon={<GroupIcon />} iconPosition="start" label="Agents" id="agent-tab-1" aria-controls="tabpanel-1" sx={{ textTransform: 'none' }} />
                   <Tab icon={<AssignmentIcon />} iconPosition="start" label="Tasks" id="task-tab-2" aria-controls="tabpanel-2" sx={{ textTransform: 'none' }} />
@@ -1468,7 +1436,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             {(showOnlyTab === undefined || showOnlyTab === 0) && (
               <TabPanel value={tabValue} index={0}>
                 {showOnlyTab === undefined && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose a crew to open it on a new canvas.</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose a crew to open it in a new session.</Typography>
                 )}
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -1476,7 +1444,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Box>
               ) : crews.length === 0 ? (
                 <Alert severity="info">
-                  No crews found. Create a crew by adding agents and tasks, then click Save Crew.
+                  No crews found. Describe a plan in Agent Builder, then save it to the catalog.
                 </Alert>
               ) : (
                 <Grid container spacing={2}>
@@ -1624,66 +1592,17 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 return Math.max(nodesCount, tasksCount, taskIdsCount);
                               })()}
                             </Typography>
-                            {/* Actions live BELOW the content, not beside the
-                                title: four icons on the title row squeezed the
-                                crew name down to "Swiss Ne…", and the name is
-                                the thing people scan for. */}
-                            <Box
-                              sx={{
-                                display: 'flex',
-                                justifyContent: 'flex-end',
-                                alignItems: 'center',
-                                gap: 0.25,
-                                mt: 1.5,
-                                pt: 1,
-                                borderTop: 0,
-                                borderColor: 'divider',
-                              }}
-                            >
-                                {canEdit && mlflowEnabled && (
-                                  <Tooltip title="Optimize Prompts">
-                                    <IconButton
-                                      size="small"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOptimizeCrew(crew);
-                                      }}
-                                    >
-                                      <AutoFixHighIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                                {canEdit && (
-                                  <PublishButton
-                                    entityType="crew"
-                                    entityId={String(crew.id)}
-                                    entityName={crew.name}
-                                    nodes={crew.nodes}
-                                    published={publishedCrewIds.has(String(crew.id))}
-                                    onChanged={(isPublished) =>
-                                      setPublished('crew', String(crew.id), isPublished)
-                                    }
-                                  />
-                                )}
-                                <Tooltip title="Export Crew">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => handleExportCrew(e, crew)}
-                                  >
-                                    <DownloadIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                {canDelete && (
-                                  <Tooltip title="Delete Crew">
-                                    <IconButton
-                                      size="small"
-                                      onClick={(e) => handleDeleteCrew(e, crew.id)}
-                                    >
-                                      <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                            </Box>
+                            <CrewCatalogActions
+                              crew={crew}
+                              canEdit={canEdit}
+                              canDelete={canDelete}
+                              mlflowEnabled={!!mlflowEnabled}
+                              published={publishedCrewIds.has(String(crew.id))}
+                              onPublished={isPublished => setPublished('crew', String(crew.id), isPublished)}
+                              onOptimize={() => setOptimizeCrew(crew)}
+                              onExport={event => handleExportCrew(event, crew)}
+                              onDelete={event => handleDeleteCrew(event, crew.id)}
+                            />
                           </CardContent>
                         </Card>
                       </Grid>
@@ -1862,7 +1781,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Box>
               ) : flows.length === 0 ? (
                 <Alert severity="info">
-                  No flows found. Create a flow by adding flow components, then save it.
+                  No flows found. Describe a flow in Flow Builder, then save it to the catalog.
                 </Alert>
               ) : (
                 <Grid container spacing={2}>
@@ -1985,12 +1904,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             )}
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose} color="primary">
-            Cancel
-          </Button>
-        </DialogActions>
-      </Dialog>
+      </CatalogSurface>
 
       {/* Edit Flow Dialog */}
       {selectedFlowId && (

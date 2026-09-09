@@ -254,6 +254,8 @@ beforeEach(() => {
 });
 
 describe('ChatContainer — run-activity container (RunProgress)', () => {
+  let runNumber = 0;
+  beforeEach(() => { runNumber += 1; });
   const traceMsg = (id: string, label: string, extra: Record<string, unknown> = {}): ChatMessageType =>
     ({
       id,
@@ -262,7 +264,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
       timestamp: new Date(),
       // The run these traces belong to: the expanded activity is read from the
       // trace API by this id.
-      executionId: 'job-1',
+      executionId: `activity-test-${runNumber}`,
       resultType: 'trace',
       resultData: { label, kind: 'tool_result', durationMs: 100, ...extra },
     } as unknown as ChatMessageType);

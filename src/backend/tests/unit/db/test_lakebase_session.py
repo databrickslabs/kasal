@@ -18,7 +18,7 @@ Tests cover:
 import asyncio
 import os
 import time
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -631,7 +631,7 @@ class TestCreateEngine:
                 with patch(
                     "src.db.lakebase_session.async_sessionmaker", return_value=mock_sf
                 ):
-                    with patch("src.db.lakebase_session.event") as mock_event:
+                    with patch("src.db.lakebase_session.event"):
                         with patch(
                             "src.db.lakebase_session.asyncio.create_task",
                             return_value=mock_task,
@@ -927,7 +927,7 @@ class TestGetSession:
 
         with patch.object(factory, "create_engine", new_callable=AsyncMock) as mock_ce:
             with pytest.raises(Exception, match="authentication failed"):
-                async with factory.get_session() as session:
+                async with factory.get_session():
                     raise Exception("authentication failed for user")
 
             mock_ce.assert_awaited_once()
@@ -951,7 +951,7 @@ class TestGetSession:
 
         with patch.object(factory, "create_engine", new_callable=AsyncMock):
             with pytest.raises(Exception, match="password expired"):
-                async with factory.get_session() as session:
+                async with factory.get_session():
                     raise Exception("password expired")
 
     @pytest.mark.asyncio
@@ -973,7 +973,7 @@ class TestGetSession:
 
         with patch.object(factory, "create_engine", new_callable=AsyncMock) as mock_ce:
             with pytest.raises(ValueError, match="some data error"):
-                async with factory.get_session() as session:
+                async with factory.get_session():
                     raise ValueError("some data error")
 
             mock_ce.assert_not_awaited()
@@ -1002,7 +1002,7 @@ class TestGetSession:
             # We cannot directly raise GeneratorExit inside an async with and catch it
             # outside, so we test indirectly by verifying the except branch exists.
             # Instead, test the normal flow completes without error.
-            async with factory.get_session() as session:
+            async with factory.get_session():
                 pass  # Normal exit - no error
             mock_ce.assert_not_awaited()
 
@@ -1176,7 +1176,7 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = mock_factory
 
             with pytest.raises(ValueError, match="test error"):
-                async with mod.get_lakebase_session() as session:
+                async with mod.get_lakebase_session():
                     raise ValueError("test error")
 
             mock_session.rollback.assert_awaited_once()
@@ -1207,7 +1207,7 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = mock_factory
 
             with pytest.raises(ValueError, match="original error"):
-                async with mod.get_lakebase_session() as session:
+                async with mod.get_lakebase_session():
                     raise ValueError("original error")
         finally:
             mod._lakebase_factory = original
@@ -1234,7 +1234,7 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = mock_factory
 
             # Should not raise despite close failure
-            async with mod.get_lakebase_session() as session:
+            async with mod.get_lakebase_session():
                 pass
 
             mock_session.commit.assert_awaited_once()
@@ -1263,7 +1263,7 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = mock_factory
 
             with pytest.raises(TypeError, match="original"):
-                async with mod.get_lakebase_session() as session:
+                async with mod.get_lakebase_session():
                     raise TypeError("original")
         finally:
             mod._lakebase_factory = original
@@ -1329,9 +1329,7 @@ class TestGetLakebaseSession:
                 )
                 MockFactory.return_value = mock_factory_instance
 
-                async with mod.get_lakebase_session(
-                    instance_name="new-instance"
-                ) as session:
+                async with mod.get_lakebase_session(instance_name="new-instance"):
                     pass
 
                 MockFactory.assert_called_once_with(
@@ -1361,7 +1359,7 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = mock_factory
 
             # user_token is accepted but NOT used for auth — no engine recreation
-            async with mod.get_lakebase_session(user_token="some-token") as session:
+            async with mod.get_lakebase_session(user_token="some-token"):
                 pass
 
             mock_factory.create_engine.assert_not_awaited()
@@ -1389,9 +1387,7 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = mock_factory
 
-            async with mod.get_lakebase_session(
-                user_email="new@example.com"
-            ) as session:
+            async with mod.get_lakebase_session(user_email="new@example.com"):
                 pass
 
             mock_factory.create_engine.assert_awaited_once()
@@ -1420,7 +1416,7 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = mock_factory
 
-            async with mod.get_lakebase_session(user_token="same-token") as session:
+            async with mod.get_lakebase_session(user_token="same-token"):
                 pass
 
             mock_factory.create_engine.assert_not_awaited()
@@ -1453,7 +1449,7 @@ class TestGetLakebaseSession:
                 )
                 MockFactory.return_value = mock_factory_instance
 
-                async with mod.get_lakebase_session() as session:
+                async with mod.get_lakebase_session():
                     pass
 
                 MockFactory.assert_called_once_with(
@@ -1488,7 +1484,7 @@ class TestGetLakebaseSession:
                 )
                 MockFactory.return_value = mock_factory_instance
 
-                async with mod.get_lakebase_session() as session:
+                async with mod.get_lakebase_session():
                     pass
 
                 MockFactory.assert_called_once_with(
@@ -1518,7 +1514,7 @@ class TestGetLakebaseSession:
             mod._lakebase_factory = mock_factory
 
             with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
-                async with mod.get_lakebase_session() as session:
+                async with mod.get_lakebase_session():
                     pass
 
                 # Factory constructor should NOT be called -- existing factory reused
@@ -1972,9 +1968,7 @@ class TestMissingCoverage:
             MockFactory.return_value = mock_factory_instance
 
             with pytest.raises(ValueError, match="boom"):
-                async with mod.get_lakebase_session(
-                    instance_name="crew-inst"
-                ) as session:
+                async with mod.get_lakebase_session(instance_name="crew-inst"):
                     raise ValueError("boom")
 
         mock_session.rollback.assert_awaited_once()

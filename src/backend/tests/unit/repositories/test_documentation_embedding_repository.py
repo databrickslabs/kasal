@@ -6,19 +6,15 @@ CRUD operations, search functionality, and similarity operations.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import desc
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.documentation_embedding import DocumentationEmbedding
 from src.repositories.documentation_embedding_repository import (
     DocumentationEmbeddingRepository,
 )
-from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 
 
 # Mock documentation embedding model

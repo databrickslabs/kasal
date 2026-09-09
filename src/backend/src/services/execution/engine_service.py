@@ -32,38 +32,50 @@ Example:
     ... )
 """
 
-import asyncio
-import logging
-import os
-from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+import asyncio  # noqa: E402 - import follows module initialization
+import os  # noqa: E402 - import follows module initialization
+from datetime import datetime  # noqa: E402 - import follows module initialization
+from typing import Any, Dict  # noqa: E402 - import follows module initialization
 
 # Import logger manager
-from src.core.logger import LoggerManager
-from src.models.execution_status import ExecutionStatus
-from src.schemas.execution import CrewConfig, FlowConfig
-from src.services.agent_builder.crew_preparation import CrewPreparation
-from src.services.agent_builder.execution_runner import (
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.models.execution_status import (  # noqa: E402 - import follows module initialization
+    ExecutionStatus,
+)
+from src.services.agent_builder.execution_runner import (  # noqa: E402 - import follows module initialization
     run_crew_in_process,
     update_execution_status_with_retry,
 )
-from src.services.execution.base import BaseEngineService
-from src.services.execution.config_adapter import (
+from src.services.execution.base import (  # noqa: E402 - import follows module initialization
+    BaseEngineService,
+)
+from src.services.execution.config_adapter import (  # noqa: E402 - import follows module initialization
     normalize_config,
     normalize_flow_config,
 )
-from src.services.execution.harness_choice import (
+from src.services.execution.harness_choice import (  # noqa: E402 - import follows module initialization
     dispatch_session,
     harness_for_execution,
     stamp_on_config,
     subprocess_env,
 )
-from src.services.execution.harnesses import active_harness, bind
+from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
+    active_harness,
+    bind,
+)
 
 # Import helper modules
-from src.services.execution.logs.writer_task import LogWriterTask
-from src.services.flow_builder.flow_execution_runner import run_flow_in_process
-from src.utils.user_context import GroupContext
+from src.services.execution.logs.writer_task import (  # noqa: E402 - import follows module initialization
+    LogWriterTask,
+)
+from src.services.flow_builder.flow_execution_runner import (  # noqa: E402 - import follows module initialization
+    run_flow_in_process,
+)
+from src.utils.user_context import (  # noqa: E402 - import follows module initialization
+    GroupContext,
+)
 
 logger = LoggerManager.get_instance().crew
 
@@ -149,7 +161,6 @@ class KasalEngineService(BaseEngineService):
         await LogWriterTask.ensure_writer_started()
         try:
             # Set up CrewAI library logging via our centralized logger
-            from src.services.execution.logs.capture import execution_log_capture
 
             # Choose logger based on execution type if provided
             execution_type = kwargs.get("execution_type", "crew")
@@ -256,9 +267,9 @@ class KasalEngineService(BaseEngineService):
                 execution_config["user_email"] = group_context.group_email
 
             # Extract crew definition sections from config
-            crew_config = execution_config.get("crew", {})
+            execution_config.get("crew", {})
             agent_configs = execution_config.get("agents", [])
-            task_configs = execution_config.get("tasks", [])
+            execution_config.get("tasks", [])
 
             # Log agent configurations to debug knowledge_sources
             logger.info(
@@ -312,7 +323,6 @@ class KasalEngineService(BaseEngineService):
 
                 # Skip crew preparation in main process - let subprocess handle it
                 # This preserves the original config with knowledge_sources intact
-                crew = None  # No crew object needed in main process for subprocess execution
 
             except Exception as e:
                 logger.error(

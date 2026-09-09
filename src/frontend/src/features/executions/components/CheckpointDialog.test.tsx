@@ -65,6 +65,30 @@ describe('CheckpointDialog', () => {
     expect(await screen.findByText('2 / 3 tasks complete')).toBeInTheDocument();
   });
 
+  it('embeds without a dialog and defaults a completed run to redoing the last unit', async () => {
+    mocked.getCheckpoint.mockResolvedValue(makeCheckpoint({ execution_status: 'COMPLETED' }));
+    mocked.resume.mockResolvedValue({ execution_id: 'new-job', status: 'RUNNING', run_name: 'My Run' });
+    const resumed = vi.fn();
+    render(<CheckpointDialog embedded open jobId="job-1" onClose={vi.fn()} onResumed={resumed} />);
+    expect(await screen.findByRole('radio', { name: /Redo from "write"/ })).toBeChecked();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Execution checkpoints' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Run from checkpoint' }));
+    await waitFor(() => expect(mocked.resume).toHaveBeenCalledWith('job-1', '1'));
+    expect(resumed).toHaveBeenCalledWith('new-job');
+  });
+
+  it('does not show the previous execution when a checkpoint request finishes late', async () => {
+    let finish!: (value: ExecutionCheckpoint) => void;
+    mocked.getCheckpoint.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    mocked.getCheckpoint.mockResolvedValueOnce(makeCheckpoint({ job_id: 'job-2', run_name: 'Current run' }));
+    const view = render(<CheckpointDialog embedded open jobId="job-1" onClose={vi.fn()} />);
+    view.rerender(<CheckpointDialog embedded open jobId="job-2" onClose={vi.fn()} />);
+    await screen.findByText('Checkpoints — Current run');
+    finish(makeCheckpoint({ run_name: 'Wrong run' }));
+    await waitFor(() => expect(screen.queryByText(/Wrong run/)).not.toBeInTheDocument());
+  });
+
   it('calls a flow execution’s units crews, not tasks', async () => {
     mocked.getCheckpoint.mockResolvedValue(
       makeCheckpoint({ kind: 'flow', unit_count: 2, completed_count: 2 }),

@@ -1,10 +1,7 @@
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, Mock, patch
-
-import pytest
+from unittest.mock import Mock, patch
 
 from src.services.execution.service import ExecutionService
 
@@ -64,7 +61,7 @@ class TestExecutionServiceInit:
             with patch(
                 "src.services.execution.service.KasalExecutionService"
             ) as mock_crew_service:
-                service = ExecutionService(mock_session)
+                ExecutionService(mock_session)
 
                 # Verify services were created properly
                 mock_name_service.create.assert_called_once_with(mock_session)
@@ -74,7 +71,7 @@ class TestExecutionServiceInit:
         """Test ExecutionService __init__ uses class attributes"""
         with patch("src.services.execution.service.ExecutionNameService"):
             with patch("src.services.execution.service.KasalExecutionService"):
-                service = ExecutionService()
+                ExecutionService()
 
                 # Should have access to class-level attributes
                 assert hasattr(ExecutionService, "executions")
@@ -313,42 +310,6 @@ class TestExecutionServiceConstants:
         assert hasattr(logger, "info")
         assert hasattr(logger, "error")
         assert hasattr(logger, "warning")
-
-    def test_required_imports(self):
-        """Test that required imports are available"""
-        from src.services.execution.service import (
-            asyncio,
-            concurrent,
-            json,
-            logging,
-            os,
-            sys,
-            traceback,
-            uuid,
-        )
-
-        assert logging is not None
-        assert sys is not None
-        assert traceback is not None
-        assert json is not None
-        assert os is not None
-        assert uuid is not None
-        assert concurrent is not None
-        assert asyncio is not None
-
-    def test_schema_imports(self):
-        """Test schema imports"""
-        from src.services.execution.service import (
-            CrewConfig,
-            ExecutionCreateResponse,
-            ExecutionNameGenerationRequest,
-            ExecutionStatus,
-        )
-
-        assert ExecutionStatus is not None
-        assert CrewConfig is not None
-        assert ExecutionNameGenerationRequest is not None
-        assert ExecutionCreateResponse is not None
 
     def test_service_imports(self):
         """Test service imports"""

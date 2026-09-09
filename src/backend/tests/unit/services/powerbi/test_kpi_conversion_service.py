@@ -2,7 +2,7 @@
 Comprehensive unit tests for services/kpi_conversion_service.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -10,7 +10,6 @@ from src.schemas.kpi_conversion import (
     ConversionFormatsResponse,
     ConversionRequest,
     ConversionResponse,
-    ValidationError,
     ValidationResponse,
 )
 from src.services.converters.base.converter import ConversionFormat

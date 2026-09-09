@@ -4,11 +4,6 @@ Unit tests to achieve 100% coverage for task.__init__ method using actual instan
 Tests the actual execution of Task.__init__ method logic by creating real instances.
 """
 
-from datetime import datetime
-from unittest.mock import patch
-
-import pytest
-
 from src.models.task import Task, generate_uuid
 
 

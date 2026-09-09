@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TranslationResult,

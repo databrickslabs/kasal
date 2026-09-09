@@ -7,9 +7,6 @@ initialization, configuration synchronization, and multi-group support.
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
-
-import pytest
 
 from src.models.task import Task, generate_uuid
 

@@ -51,7 +51,7 @@ describe('uiLayout store — initial state', () => {
     expect(s.executionHistoryHeight).toBe(60);
     expect(s.panelPosition).toBe(50);
     expect(s.layoutOrientation).toBe('horizontal');
-    expect(s.tabBarHeight).toBe(48);
+    expect(s.tabBarHeight).toBe(0);
   });
 
   it('hydrates from persisted values (truthy/defined branches)', async () => {
@@ -243,9 +243,10 @@ describe('uiLayout store — getUILayoutState / useUILayoutState', () => {
     const { useUILayoutStore } = await freshModule();
     const snap = useUILayoutStore.getState().getUILayoutState();
     expect(snap).toMatchObject({
-      tabBarHeight: 48,
+      tabBarHeight: 0,
       leftSidebarBaseWidth: 48,
-      rightSidebarWidth: 48,
+      rightSidebarWidth: 0,
+      rightSidebarVisible: false,
       areFlowsVisible: false,
       layoutOrientation: 'horizontal',
     });
@@ -256,7 +257,7 @@ describe('uiLayout store — getUILayoutState / useUILayoutState', () => {
     const mod = await freshModule();
     const { renderHook } = await import('@testing-library/react');
     const { result } = renderHook(() => mod.useUILayoutState());
-    expect(result.current.tabBarHeight).toBe(48);
+    expect(result.current.tabBarHeight).toBe(0);
   });
 });
 

@@ -7,11 +7,10 @@ CRUD operations, UUID handling, cascading deletes, and error handling.
 
 import uuid
 from datetime import datetime
-from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.flow import Flow
@@ -383,133 +382,6 @@ class TestFlowRepositoryDeleteAll:
         mock_async_session.rollback.assert_called_once()
 
 
-@pytest.mark.skip(reason="SyncFlowRepository removed; async-only architecture")
-class TestSyncFlowRepository:
-    """Test cases for SyncFlowRepository."""
-
-    @pytest.fixture
-    def mock_sync_session(self):
-        """Create a mock sync database session."""
-        session = MagicMock()
-        session.query.return_value = session
-        session.filter.return_value = session
-        session.first.return_value = None
-        session.all.return_value = []
-        session.delete.return_value = None
-        session.commit.return_value = None
-        return session
-
-    @pytest.fixture
-    def sync_flow_repository(self, mock_sync_session):
-        """Create a sync flow repository."""
-        return SyncFlowRepository(db=mock_sync_session)
-
-    def test_sync_init_success(self, mock_sync_session):
-        """Test successful sync repository initialization."""
-        repository = SyncFlowRepository(db=mock_sync_session)
-        assert repository.db == mock_sync_session
-
-    def test_find_by_id_success(self, sync_flow_repository, mock_sync_session):
-        """Test successful find by ID in sync repository."""
-        flow_id = uuid.uuid4()
-        flow = MockFlow(id=flow_id)
-        mock_sync_session.first.return_value = flow
-
-        result = sync_flow_repository.find_by_id(flow_id)
-
-        assert result == flow
-        mock_sync_session.query.assert_called_once_with(Flow)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_by_id_string_uuid(self, sync_flow_repository, mock_sync_session):
-        """Test find by ID with string UUID in sync repository."""
-        flow_id = uuid.uuid4()
-        flow = MockFlow(id=flow_id)
-        mock_sync_session.first.return_value = flow
-
-        result = sync_flow_repository.find_by_id(str(flow_id))
-
-        assert result == flow
-
-    def test_find_by_id_invalid_uuid(self, sync_flow_repository, mock_sync_session):
-        """Test find by ID with invalid UUID string."""
-        result = sync_flow_repository.find_by_id("invalid-uuid")
-
-        assert result is None
-        mock_sync_session.query.assert_not_called()
-
-    def test_find_by_name_sync(self, sync_flow_repository, mock_sync_session):
-        """Test find by name in sync repository."""
-        flow = MockFlow(name="test_flow")
-        mock_sync_session.first.return_value = flow
-
-        result = sync_flow_repository.find_by_name("test_flow")
-
-        assert result == flow
-        mock_sync_session.query.assert_called_once_with(Flow)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_by_crew_id_sync(self, sync_flow_repository, mock_sync_session):
-        """Test find by crew ID in sync repository."""
-        crew_id = uuid.uuid4()
-        flows = [MockFlow(crew_id=crew_id)]
-        mock_sync_session.all.return_value = flows
-
-        result = sync_flow_repository.find_by_crew_id(crew_id)
-
-        assert result == flows
-        mock_sync_session.query.assert_called_once_with(Flow)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_by_crew_id_invalid_uuid_sync(
-        self, sync_flow_repository, mock_sync_session
-    ):
-        """Test find by crew ID with invalid UUID in sync repository."""
-        result = sync_flow_repository.find_by_crew_id("invalid-uuid")
-
-        assert result == []
-        mock_sync_session.query.assert_not_called()
-
-    def test_find_all_sync(self, sync_flow_repository, mock_sync_session):
-        """Test find all in sync repository."""
-        flows = [MockFlow(), MockFlow()]
-        mock_sync_session.all.return_value = flows
-
-        result = sync_flow_repository.find_all()
-
-        assert result == flows
-        mock_sync_session.query.assert_called_once_with(Flow)
-
-    def test_delete_all_sync(self, sync_flow_repository, mock_sync_session):
-        """Test delete all in sync repository."""
-        sync_flow_repository.delete_all()
-
-        mock_sync_session.query.assert_called_once_with(Flow)
-        mock_sync_session.delete.assert_called_once()
-        mock_sync_session.commit.assert_called_once()
-
-
-@pytest.mark.skip(reason="Sync repository factory removed; use async repositories")
-class TestFlowRepositoryFactory:
-    """Test cases for factory function."""
-
-    def test_get_sync_flow_repository_factory(self):
-        """Test the sync repository factory function."""
-        from src.repositories.flow_repository import get_sync_flow_repository
-
-        with patch(
-            "src.repositories.flow_repository.SessionLocal"
-        ) as mock_session_local:
-            mock_session = MagicMock()
-            mock_session_local.return_value = mock_session
-
-            repository = get_sync_flow_repository()
-
-            assert isinstance(repository, SyncFlowRepository)
-            assert repository.db == mock_session
-            mock_session_local.assert_called_once()
-
-
 class TestFlowRepositoryIntegration:
     """Integration test cases testing method interactions."""
 
@@ -665,20 +537,6 @@ class TestFlowRepositoryUUIDHandling:
 
         # Test malformed UUID
         result = await flow_repository.find_by_crew_id("not-a-uuid-at-all")
-        assert result == []
-
-    @pytest.mark.skip(reason="Sync repository removed; no sync UUID tests applicable")
-    def test_sync_uuid_conversion_edge_cases(self):
-        """Test UUID conversion in sync repository."""
-        mock_session = MagicMock()
-        sync_repo = SyncFlowRepository(db=mock_session)
-
-        # Test empty string
-        result = sync_repo.find_by_id("")
-        assert result is None
-
-        # Test malformed UUID
-        result = sync_repo.find_by_crew_id("not-a-uuid")
         assert result == []
 
 

@@ -17,9 +17,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from src.core.exceptions import KasalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import KasalError
 from src.schemas.flow_execution import FlowExecutionStatus
 from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
@@ -35,19 +35,7 @@ class TestFlowRunnerServiceInit:
             "src.services.flow_builder.flow_runner_service.FlowExecutionService"
         ):
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                service = FlowRunnerService(mock_session)
+                service = FlowRunnerService(mock_session)
 
         assert service.db == mock_session
 
@@ -109,23 +97,9 @@ class TestCreateFlowExecution:
             "src.services.flow_builder.flow_runner_service.FlowExecutionService"
         ) as mock_exec_service:
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                svc = FlowRunnerService(mock_session)
-                                svc.flow_execution_service = (
-                                    mock_exec_service.return_value
-                                )
-                                return svc
+                svc = FlowRunnerService(mock_session)
+                svc.flow_execution_service = mock_exec_service.return_value
+                return svc
 
     @pytest.mark.asyncio
     async def test_create_flow_execution_success(self, service):
@@ -237,23 +211,11 @@ class TestRunFlow:
             with patch(
                 "src.services.flow_builder.flow_runner_service.FlowRepository"
             ) as mock_flow_repo:
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                svc = FlowRunnerService(mock_session)
-                                svc.flow_execution_service = mock_exec_svc.return_value
-                                svc.flow_repo = mock_flow_repo.return_value
-                                svc.flow_repo.get = AsyncMock(return_value=None)
-                                return svc
+                svc = FlowRunnerService(mock_session)
+                svc.flow_execution_service = mock_exec_svc.return_value
+                svc.flow_repo = mock_flow_repo.return_value
+                svc.flow_repo.get = AsyncMock(return_value=None)
+                return svc
 
     @pytest.mark.asyncio
     async def test_run_flow_with_config_nodes(self, service):
@@ -306,7 +268,7 @@ class TestRunFlow:
         ) as mock_run:
             mock_run.return_value = {"success": True, "result": {}}
 
-            result = await service.run_flow(
+            await service.run_flow(
                 flow_id=flow_id,
                 job_id="job-123",
                 config={"group_context": SimpleNamespace(group_ids=["group-1"])},
@@ -395,7 +357,7 @@ class TestRunFlow:
         ) as mock_run:
             mock_run.return_value = {"success": True, "result": {}}
 
-            result = await service.run_flow(
+            await service.run_flow(
                 flow_id=None,
                 job_id="job-123",
                 config={
@@ -585,19 +547,7 @@ class TestGetRequiredProviders:
             "src.services.flow_builder.flow_runner_service.FlowExecutionService"
         ):
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                return FlowRunnerService(mock_session)
+                return FlowRunnerService(mock_session)
 
     @pytest.mark.asyncio
     async def test_get_required_providers_from_model(self, service, mock_session):
@@ -883,21 +833,9 @@ class TestGetFlowExecution:
             "src.services.flow_builder.flow_runner_service.FlowExecutionService"
         ) as mock_exec_svc:
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                svc = FlowRunnerService(mock_session)
-                                svc.flow_execution_service = mock_exec_svc.return_value
-                                return svc
+                svc = FlowRunnerService(mock_session)
+                svc.flow_execution_service = mock_exec_svc.return_value
+                return svc
 
     @pytest.mark.asyncio
     async def test_get_flow_execution_found(self, service):
@@ -1000,21 +938,9 @@ class TestGetFlowExecutionsByFlow:
             "src.services.flow_builder.flow_runner_service.FlowExecutionService"
         ) as mock_exec_svc:
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                svc = FlowRunnerService(mock_session)
-                                svc.flow_execution_service = mock_exec_svc.return_value
-                                return svc
+                svc = FlowRunnerService(mock_session)
+                svc.flow_execution_service = mock_exec_svc.return_value
+                return svc
 
     @pytest.mark.asyncio
     async def test_get_flow_executions_success(self, service):
@@ -1130,7 +1056,7 @@ class TestSmartDbSession:
             from src.services.flow_builder.flow_runner_service import _smart_db_session
 
             with pytest.raises(ValueError, match="test error"):
-                async with _smart_db_session() as session:
+                async with _smart_db_session():
                     raise ValueError("test error")
 
     @pytest.mark.asyncio
@@ -1151,21 +1077,9 @@ class TestSmartDbSession:
                 with patch(
                     "src.services.flow_builder.flow_runner_service.FlowRepository"
                 ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.TaskRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.AgentRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.ToolRepository"
-                            ):
-                                with patch(
-                                    "src.services.flow_builder.flow_runner_service.CrewRepository"
-                                ):
-                                    service = FlowRunnerService(MagicMock())
-                                    async with service._safe_session() as session:
-                                        assert session is mock_session
+                    service = FlowRunnerService(MagicMock())
+                    async with service._safe_session() as session:
+                        assert session is mock_session
 
 
 class TestFlowRunnerServiceMethodSignatures:
@@ -1179,19 +1093,7 @@ class TestFlowRunnerServiceMethodSignatures:
             "src.services.flow_builder.flow_runner_service.FlowExecutionService"
         ):
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                return FlowRunnerService(mock_db)
+                return FlowRunnerService(mock_db)
 
     def test_create_flow_execution_is_async(self, service):
         """Test create_flow_execution method is async"""
@@ -1226,3 +1128,42 @@ class TestFlowRunnerServiceMethodSignatures:
         for method_name in required_methods:
             assert hasattr(service, method_name)
             assert callable(getattr(service, method_name))
+
+
+@pytest.mark.asyncio
+async def test_saved_flow_hydrates_with_async_repository_and_preserves_selection():
+    from src.services.flow_builder.saved_flow_config import hydrate_saved_flow
+
+    repository = object()
+    saved = {
+        "nodes": [{"id": "crew-1"}],
+        "edges": [{"id": "edge-1"}],
+        "flow_config": {"startingPoints": ["old"], "listeners": [{"id": "listener"}]},
+    }
+    flow = SimpleNamespace(
+        repositories={"flow": repository}, load_flow=AsyncMock(return_value=saved)
+    )
+    config = {"flow_config": {"startingPoints": ["selected"], "custom": True}}
+    await hydrate_saved_flow(flow, config)
+    flow.load_flow.assert_awaited_once_with(repository=repository)
+    assert config["nodes"] == saved["nodes"]
+    assert config["edges"] == saved["edges"]
+    assert config["flow_config"] == {
+        "startingPoints": ["selected"],
+        "custom": True,
+        "listeners": [{"id": "listener"}],
+    }
+    assert saved["flow_config"]["startingPoints"] == ["old"]
+
+
+@pytest.mark.asyncio
+async def test_saved_flow_missing_nodes_cannot_start_empty_execution():
+    from src.services.flow_builder.saved_flow_config import hydrate_saved_flow
+
+    flow = SimpleNamespace(
+        repositories={"flow": object()}, load_flow=AsyncMock(return_value={"nodes": []})
+    )
+    config = {}
+    with pytest.raises(ValueError, match="no nodes"):
+        await hydrate_saved_flow(flow, config)
+    assert config == {}

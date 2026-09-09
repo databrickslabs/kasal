@@ -5,13 +5,11 @@ Provides endpoints for manual group creation and user assignment.
 This is the admin interface for the simple multi-group foundation.
 """
 
-from typing import Annotated, Any, Dict, List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.schemas.group import GroupContextResponse
 from src.config.settings import settings
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
@@ -20,9 +18,10 @@ from src.dependencies.admin_auth import (
     AuthenticatedUserDep,
     SystemAdminUserDep,
 )
-from src.models.group import Group, GroupUser
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.models.user import User
 from src.schemas.group import (
+    GroupContextResponse,
     GroupCreateRequest,
     GroupResponse,
     GroupStatsResponse,
@@ -34,7 +33,6 @@ from src.schemas.group import (
 )
 from src.services.groups.groups import GroupService
 from src.services.groups.users import UserService
-
 
 logger = LoggerManager.get_instance().api
 

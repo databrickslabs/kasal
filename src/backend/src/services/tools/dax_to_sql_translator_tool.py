@@ -62,7 +62,6 @@ class DaxToSqlTranslatorTool(BaseTool):
 
     def _run(self, **kwargs: Any) -> str:
         from src.services.tools.metric_view_utils.dax_translator import DaxTranslator
-        from src.services.tools.metric_view_utils.utils import to_snake_case
 
         measures_json = kwargs.get("dax_measures_json") or self._default_config.get(
             "dax_measures_json", "[]"

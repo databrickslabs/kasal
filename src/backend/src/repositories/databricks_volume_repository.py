@@ -4,14 +4,11 @@ Repository for interacting with Databricks Unity Catalog Volumes using Workspace
 
 import asyncio
 import io
-import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import (
-    get_databricks_auth_headers,
     get_workspace_client,
     get_workspace_client_with_fallback,
     is_scope_error,

@@ -14,7 +14,6 @@ Test Coverage:
 6. Edge cases: empty string, False values, various format strings
 """
 
-from typing import Any, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -79,9 +78,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -90,7 +87,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -132,9 +129,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -143,7 +138,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -186,9 +181,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -197,7 +190,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -239,9 +232,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -250,7 +241,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -291,9 +282,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -302,7 +291,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -343,9 +332,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -354,7 +341,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=base_agent_config,
                     tools=mock_tools,
@@ -395,9 +382,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -406,7 +391,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=base_agent_config,
                     tools=mock_tools,
@@ -452,9 +437,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -463,7 +446,7 @@ class TestCreateAgentDateAwareness:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -512,9 +495,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -598,9 +579,7 @@ class TestCreateAgentDateFormatVariations:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -609,7 +588,7 @@ class TestCreateAgentDateFormatVariations:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -651,9 +630,7 @@ class TestCreateAgentDateFormatVariations:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -662,7 +639,7 @@ class TestCreateAgentDateFormatVariations:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
@@ -732,9 +709,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -743,7 +718,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=[],
@@ -795,9 +770,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -806,7 +779,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=[],
@@ -861,9 +834,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch(
-                    "src.services.mcp.mcp_client.service.MCPService"
-                ) as mock_mcp_service,
+                patch("src.services.mcp.mcp_client.service.MCPService"),
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -872,7 +843,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                     return_value=[]
                 )
 
-                result = await create_agent(
+                await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=[],

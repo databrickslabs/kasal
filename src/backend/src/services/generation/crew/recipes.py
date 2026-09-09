@@ -6,7 +6,7 @@ after the entities exist. Both are best-effort — generation predates this
 feature and must keep working without it."""
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.utils.user_context import GroupContext
 

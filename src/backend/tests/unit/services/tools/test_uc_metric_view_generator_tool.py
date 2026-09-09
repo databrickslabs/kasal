@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from src.services.tools.uc_metric_view_generator_tool import UCMetricViewGeneratorTool
 
 
@@ -57,10 +55,16 @@ class TestUCMetricViewGeneratorTool:
 # Durable raw DAX persistence (conversion_history / Lakebase)
 # ===========================================================================
 
-import asyncio
-from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio  # noqa: E402 - import follows module initialization
+from contextlib import (  # noqa: E402 - import follows module initialization
+    asynccontextmanager,
+)
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
+from unittest.mock import (  # noqa: E402 - import follows module initialization
+    AsyncMock,
+    MagicMock,
+    patch,
+)
 
 
 class TestBuildRawDaxExtract:
@@ -244,8 +248,6 @@ class TestSaveDaxToConversionHistory:
 # ---------------------------------------------------------------------------
 # Measure DAX fallback (TMDL → SP) for API-mode extraction under a Service Account
 # ---------------------------------------------------------------------------
-
-from unittest.mock import MagicMock, patch
 
 
 class TestTmdlTablesToMeasures:

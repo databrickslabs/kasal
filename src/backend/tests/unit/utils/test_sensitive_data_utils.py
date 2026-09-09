@@ -474,7 +474,6 @@ class TestMaskSensitiveFields:
 
     def test_leaves_empty_sensitive_value_unmasked(self):
         from src.utils.sensitive_data_utils import (
-            REDACTED_PLACEHOLDER,
             mask_sensitive_fields,
         )
 
@@ -518,7 +517,6 @@ class TestMaskSensitiveFields:
 
     def test_non_recursive_skips_nested(self):
         from src.utils.sensitive_data_utils import (
-            REDACTED_PLACEHOLDER,
             mask_sensitive_fields,
         )
 

@@ -10,6 +10,7 @@ import logging
 import traceback
 from typing import Optional
 
+from src.core.llm.robust_json import robust_json_parser
 from src.schemas.template_generation import (
     TemplateGenerationRequest,
     TemplateGenerationResponse,
@@ -18,7 +19,6 @@ from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 from src.services.settings.models import ModelConfigService
-from src.core.llm.robust_json import robust_json_parser
 
 # Configure logging
 logger = logging.getLogger(__name__)

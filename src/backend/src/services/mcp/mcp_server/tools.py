@@ -65,7 +65,6 @@ from src.services.external.invocation import (
     start_run,
 )
 from src.services.external.permissions import (
-    AUTHOR_ROLES,
     RUN_ROLES,
     require_role,
 )

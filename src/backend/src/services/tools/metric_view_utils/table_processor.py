@@ -521,7 +521,11 @@ def process_table(
                     if s.lower().startswith("return "):
                         s = s[7:]
                     expr_lines.append(s)
-                expr = " ".join(l.strip() for l in expr_lines if l.strip())
+                expr = " ".join(
+                    item_value.strip()
+                    for item_value in expr_lines
+                    if item_value.strip()
+                )
                 # Resolve simple var chains
                 expr = resolve_var_chain_fn(expr)
                 # Replace [Ref] with MEASURE(snake_case)

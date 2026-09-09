@@ -9,8 +9,6 @@ formatting are consolidated here for easy maintenance and extension.
 """
 
 import logging
-import re
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..models import SQLAggregationType, SQLDialect

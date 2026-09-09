@@ -1,12 +1,11 @@
 import { kasalNodeSurface, kasalNodePalette } from '../../../../theme/kasalSurfaces';
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
-import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip, CircularProgress } from '@mui/material';
+import { Box, Typography, Tooltip, CircularProgress } from '@mui/material';
 import { ListChecks } from 'lucide-react';
 import DeleteIcon from '@mui/icons-material/Delete';
 import IconButton from '@mui/material/IconButton';
 import EditIcon from '@mui/icons-material/Edit';
-import CloseIcon from '@mui/icons-material/Close';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
@@ -14,6 +13,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { Task, TaskService } from '../../../../api/workflow/TaskService';
 import { ToolService, Tool } from '../../../../api/tools/ToolService';
 import TaskForm from './TaskForm';
+import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
 import QuickToolSelectionDialog from './QuickToolSelectionDialog';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../../../hooks/workflow/useTabDirtyState';
@@ -786,35 +786,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         onDoubleClick={handleRightHandleDoubleClick}
       />
 
-      {/* Edit Task Form Dialog */}
-      <Dialog
-        open={isEditing}
-        onClose={() => setIsEditing(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: {
-            maxHeight: '80vh',
-            position: 'relative'
-          }
-        }}
-      >
-        <DialogTitle>
-          Edit Task
-          <IconButton
-            aria-label="close"
-            onClick={() => setIsEditing(false)}
-            sx={{
-              position: 'absolute',
-              right: 8,
-              top: 8
-            }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
+      <BuilderNodeEditor open={isEditing} kind="task" nodeId={id} label={String(data.label || 'Task')}
+        onClose={() => setIsEditing(false)}>
             <TaskForm
               initialData={handlePrepareTaskData()}
               onCancel={() => setIsEditing(false)}
@@ -868,9 +841,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               tools={availableTools}
               hideTitle
             />
-          </Box>
-        </DialogContent>
-      </Dialog>
+      </BuilderNodeEditor>
 
       {/* Quick Tool & MCP Selection Dialog */}
       <QuickToolSelectionDialog

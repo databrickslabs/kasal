@@ -6,7 +6,6 @@ including validation, serialization, and field constraints.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
 
 import pytest
 from pydantic import ValidationError
@@ -14,7 +13,6 @@ from pydantic import ValidationError
 from src.schemas.chat_history import (
     ChatHistoryBase,
     ChatHistoryCreate,
-    ChatHistoryInDB,
     ChatHistoryInDBBase,
     ChatHistoryListResponse,
     ChatHistoryResponse,

@@ -5,13 +5,7 @@ Tests SQLAlchemy model attributes, Vector type behavior, and database operations
 """
 
 import json
-from datetime import datetime
-from unittest.mock import MagicMock, Mock
-
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.dialects import postgresql, sqlite
-from sqlalchemy.orm import sessionmaker
+from unittest.mock import Mock
 
 from src.db.base import Base
 from src.models.documentation_embedding import DocumentationEmbedding, Vector

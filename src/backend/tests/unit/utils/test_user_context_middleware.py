@@ -9,7 +9,7 @@ Covers:
 - Group context extraction failure handling
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -101,7 +101,7 @@ class TestUserContextMiddlewareCall:
                 "src.utils.user_context.extract_group_context_from_request",
                 new_callable=AsyncMock,
                 return_value=mock_gc,
-            ) as mock_extract,
+            ),
             patch(
                 "src.utils.user_context.extract_user_context_from_request",
                 return_value={},

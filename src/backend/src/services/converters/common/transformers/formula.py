@@ -9,7 +9,7 @@ Mirrors the token extraction pattern from reference KbiComponent.
 import logging
 import re
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set
 
 from ...base.models import KPI
 

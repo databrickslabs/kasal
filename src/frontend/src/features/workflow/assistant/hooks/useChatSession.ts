@@ -42,6 +42,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
   const convertBackendMessage = (msg: BackendChatMessage): ChatMessage => {
     const baseMessage: ChatMessage = {
       id: msg.id,
+      backendId: msg.id,
       type: msg.message_type as ChatMessage['type'],
       content: msg.content || '',
       timestamp: new Date(msg.timestamp),
@@ -143,7 +144,16 @@ export const useChatSession = (providedChatSessionId?: string) => {
         generation_result: generationResult
       };
 
-      await ChatHistoryService.saveMessage(saveRequest);
+      const saved = await ChatHistoryService.saveMessage(saveRequest);
+      if (saved?.id) {
+        const store = useChatMessagesStore.getState();
+        const latest = store.messagesBySession[sessionId]?.find(item => item.id === message.id);
+        store.updateMessage(sessionId, message.id, { backendId: saved.id });
+        // A surface may finish composing while the original text is saving.
+        if (latest && latest.content !== message.content) {
+          await ChatHistoryService.updateMessageContent(saved.id, latest.content);
+        }
+      }
       console.log(`[ChatHistory] Message saved successfully to session ${sessionId}`);
       
       // Reset failure counter on success

@@ -10,7 +10,6 @@ import {
   Alert,
   TextField,
   CircularProgress,
-  Paper,
   List,
   ListItem,
   ListItemText,
@@ -23,16 +22,11 @@ import {
   DialogContentText,
   Chip,
   Grid,
-  Card,
-  CardContent,
   FormControl,
-  Select,
-  FormHelperText,
   Divider,
   FormControlLabel,
   RadioGroup,
   Radio,
-  FormLabel,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -51,6 +45,8 @@ import {
 } from '@mui/icons-material';
 import { apiClient, config } from '../../../shared/api/client';
 import { useDatabaseStore } from '../../../store/databaseStore';
+import DatabaseOverview, { type DatabaseInfo } from './DatabaseOverview';
+import LakebaseSetupOptions from './LakebaseSetupOptions';
 import LakebasePreflightPanel from './LakebasePreflightPanel';
 import { APIKeysService } from '../../../api/config/APIKeysService';
 
@@ -70,21 +66,6 @@ function isErrorWithResponse(error: unknown): error is ErrorWithResponse {
   return typeof error === 'object' && error !== null && 'response' in error;
 }
 
-interface DatabaseInfo {
-  success: boolean;
-  database_path?: string;
-  database_type?: string;
-  size_mb?: number;
-  created_at?: string;
-  modified_at?: string;
-  tables?: Record<string, number>;
-  total_tables?: number;
-  error?: string;
-  lakebase_enabled?: boolean;
-  lakebase_instance?: string;
-  lakebase_endpoint?: string;
-  connection_error?: string;
-}
 
 interface BackupFile {
   filename: string;
@@ -743,384 +724,37 @@ const DatabaseManagement: React.FC = () => {
   }
 
   return (
-    <Box>
+    <Box sx={{ maxWidth: 880, '& > .MuiAccordion-root': { mb: 1 }, '& .MuiAccordionSummary-content': { my: 1 } }}>
       <Typography data-settings-page-title variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
         Database Management
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-        Check database health, manage backups, and configure storage.
-        Open a section to view its settings and maintenance actions.
-      </Typography>
 
-      {/* General — open by default; the others fold away until needed. */}
-      <Accordion defaultExpanded disableGutters variant="outlined" sx={{ borderRadius: 2, '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <StorageIcon fontSize="small" color="primary" />
-            <Typography fontWeight={600}>General</Typography>
-            <Typography variant="caption" color="text.secondary">
-              status, backups &amp; maintenance
-            </Typography>
-          </Box>
-        </AccordionSummary>
-        <AccordionDetails>
-        {loading && !databaseInfo && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4, justifyContent: 'center' }}>
-            <CircularProgress size={24} />
-            <Typography color="text.secondary">Loading database information...</Typography>
-          </Box>
-        )}
-        {databaseInfo && (
-          <Card sx={{ mb: 3 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Database Information
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12}>
-                  <Alert severity={
-                    databaseInfo.database_type === 'lakebase'
-                      ? (databaseInfo.connection_error ? 'error' : 'success')
-                      : 'info'
-                  }>
-                    {/* connection_error means Lakebase is CONFIGURED but the
-                        connection failed, so the app is really serving requests
-                        from the fallback database. Reporting the configured
-                        backend as the current one told the user they were on
-                        Lakebase when they were not — and every read they then
-                        did (crews, agents) came from somewhere else entirely. */}
-                    <Typography variant="body2" fontWeight="bold">
-                      {databaseInfo.connection_error
-                        ? `Current Database Backend: FALLBACK (${databaseInfo.database_type?.toUpperCase()} configured but unreachable)`
-                        : `Current Database Backend: ${databaseInfo.database_type?.toUpperCase()}`}
-                    </Typography>
-                    {databaseInfo.database_type === 'lakebase' && databaseInfo.lakebase_instance && (
-                      <Typography variant="caption" display="block">
-                        {databaseInfo.connection_error
-                          ? `Configured Lakebase instance (NOT in use): ${databaseInfo.lakebase_instance}`
-                          : `Connected to Lakebase instance: ${databaseInfo.lakebase_instance}`}
-                      </Typography>
-                    )}
-                    {databaseInfo.connection_error && (
-                      <Typography variant="caption" display="block" color="warning.dark" sx={{ mt: 0.5 }}>
-                        {databaseInfo.connection_error}
-                      </Typography>
-                    )}
-                  </Alert>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="body2" color="text.secondary">Type</Typography>
-                  <Typography variant="body1">{databaseInfo.database_type}</Typography>
-                </Grid>
+      {/* Success/Error Messages */}
+      {success && (
+        <Alert severity="success" onClose={() => setSuccess(null)} sx={{ mb: 2 }}>
+          {success}
+        </Alert>
+      )}
+      {error && (
+        <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
+          <Typography sx={{ whiteSpace: 'pre-line' }}>{error}</Typography>
+        </Alert>
+      )}
 
-                {/* Lakebase-specific information */}
-                {databaseInfo.database_type === 'lakebase' && databaseInfo.lakebase_endpoint && (
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary">Endpoint</Typography>
-                    <Typography variant="body1" sx={{ wordBreak: 'break-all' }}>
-                      {databaseInfo.lakebase_endpoint}
-                    </Typography>
-                  </Grid>
-                )}
-
-                {/* SQLite/PostgreSQL-specific information */}
-                {databaseInfo.database_type !== 'lakebase' && (
-                  <>
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="body2" color="text.secondary">Size</Typography>
-                      <Typography variant="body1">{formatSize(databaseInfo.size_mb || 0)}</Typography>
-                    </Grid>
-                    {databaseInfo.database_path && (
-                      <Grid item xs={12}>
-                        <Typography variant="body2" color="text.secondary">Path</Typography>
-                        <Typography variant="body1" sx={{ wordBreak: 'break-all' }}>
-                          {databaseInfo.database_path}
-                        </Typography>
-                      </Grid>
-                    )}
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="body2" color="text.secondary">Created</Typography>
-                      <Typography variant="body1">{formatDate(databaseInfo.created_at || '')}</Typography>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="body2" color="text.secondary">Modified</Typography>
-                      <Typography variant="body1">{formatDate(databaseInfo.modified_at || '')}</Typography>
-                    </Grid>
-                  </>
-                )}
-                {databaseInfo.tables && (
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary">
-                      Tables ({databaseInfo.total_tables})
-                    </Typography>
-                    <Box sx={{ mt: 1 }}>
-                      {Object.entries(databaseInfo.tables).map(([table, count]) => (
-                        <Chip
-                          key={table}
-                          label={`${table} (${count} rows)`}
-                          size="small"
-                          sx={{ m: 0.5 }}
-                        />
-                      ))}
-                    </Box>
-                  </Grid>
-                )}
-              </Grid>
-            </CardContent>
-          </Card>
-        )}
-        {/* Data Housekeeping Card */}
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Data Housekeeping
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Delete execution history, traces, logs, and LLM logs older than a specified date.
-              This can reduce database size and speed up migrations.
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-              <TextField
-                type="date"
-                label="Cutoff Date"
-                value={housekeepingDate}
-                onChange={(e) => {
-                  setHousekeepingDate(e.target.value);
-                  setHousekeepingResult(null);
-                }}
-                InputLabelProps={{ shrink: true }}
-                helperText="Records older than this date will be deleted"
-                sx={{ minWidth: 200 }}
-              />
-              <Button
-                variant="outlined"
-                color="warning"
-                startIcon={housekeepingLoading ? <CircularProgress size={18} /> : <DeleteSweepIcon />}
-                onClick={() => setShowHousekeepingConfirm(true)}
-                disabled={housekeepingLoading || !housekeepingDate}
-                sx={{ mt: 1 }}
-              >
-                {housekeepingLoading ? 'Running...' : 'Run Housekeeping'}
-              </Button>
-            </Box>
-            {housekeepingResult && housekeepingResult.success && (
-              <Alert severity="success" sx={{ mt: 2 }}>
-                <Typography variant="body2" fontWeight="bold">
-                  Housekeeping completed — {housekeepingResult.total_deleted} records deleted
-                </Typography>
-                <Box sx={{ mt: 1 }}>
-                  {housekeepingResult.deleted && Object.entries(housekeepingResult.deleted).map(([table, count]) => (
-                    <Chip
-                      key={table}
-                      label={`${table}: ${count}`}
-                      size="small"
-                      sx={{ m: 0.5 }}
-                      color={count > 0 ? 'primary' : 'default'}
-                      variant={count > 0 ? 'filled' : 'outlined'}
-                    />
-                  ))}
-                </Box>
-              </Alert>
-            )}
-            {housekeepingResult && !housekeepingResult.success && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {housekeepingResult.error || 'Housekeeping failed'}
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Housekeeping Confirmation Dialog */}
-        <Dialog open={showHousekeepingConfirm} onClose={() => setShowHousekeepingConfirm(false)}>
-          <DialogTitle>Confirm Data Housekeeping</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              This will permanently delete all records older than <strong>{housekeepingDate}</strong> from the following tables:
-            </DialogContentText>
-            <Box sx={{ mt: 1, ml: 2 }}>
-              <Typography variant="body2">• executionhistory (+ taskstatus, errortrace)</Typography>
-              <Typography variant="body2">• execution_trace</Typography>
-              <Typography variant="body2">• execution_logs</Typography>
-              <Typography variant="body2">• llmlog</Typography>
-            </Box>
-            <DialogContentText sx={{ mt: 2 }}>
-              This action cannot be undone. Are you sure?
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setShowHousekeepingConfirm(false)}>Cancel</Button>
-            <Button
-              color="warning"
-              variant="contained"
-              onClick={async () => {
-                setShowHousekeepingConfirm(false);
-                setHousekeepingLoading(true);
-                setHousekeepingResult(null);
-                try {
-                  const response = await apiClient.post('/database-management/housekeeping', {
-                    cutoff_date: housekeepingDate,
-                  });
-                  setHousekeepingResult(response.data);
-                  // Refresh database info to show updated row counts
-                  loadDatabaseInfo();
-                } catch (err) {
-                  if (isErrorWithResponse(err)) {
-                    setHousekeepingResult({
-                      success: false,
-                      error: err.response?.data?.detail || err.response?.data?.error || err.message || 'Housekeeping failed',
-                    });
-                  } else {
-                    setHousekeepingResult({ success: false, error: 'Housekeeping failed' });
-                  }
-                } finally {
-                  setHousekeepingLoading(false);
-                }
-              }}
-            >
-              Delete Old Data
-            </Button>
-          </DialogActions>
-        </Dialog>
-        </AccordionDetails>
-      </Accordion>
-
-      <Accordion disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <CloudIcon fontSize="small" color="primary" />
-            <Typography fontWeight={600}>Databricks Import / Export</Typography>
-            <Typography variant="caption" color="text.secondary">
-              move the database to and from a volume
-            </Typography>
-          </Box>
-        </AccordionSummary>
-        <AccordionDetails>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Databricks Volume Settings
-            </Typography>
-            <Grid container spacing={2} sx={{ mb: 3 }}>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  label="Catalog"
-                  value={catalog}
-                  onChange={(e) => setCatalog(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  label="Schema"
-                  value={schema}
-                  onChange={(e) => setSchema(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  fullWidth
-                  label="Volume Name"
-                  value={volumeName}
-                  onChange={(e) => setVolumeName(e.target.value)}
-                />
-              </Grid>
-            </Grid>
-
-            <Box sx={{ display: 'flex', gap: 2, mb: 3, flexDirection: 'row', alignItems: 'flex-start' }}>
-              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                <Button
-                  variant="contained"
-                  startIcon={<UploadIcon />}
-                  onClick={() => setExportDialog(true)}
-                  disabled={!hasDatabricksApiKey}
-                >
-                  Export to Volume
-                </Button>
-                {!hasDatabricksApiKey && (
-                  <FormHelperText error sx={{ ml: 1, mt: 0.5 }}>
-                    Please set DATABRICKS_API_KEY in API Keys before exporting
-                  </FormHelperText>
-                )}
-              </Box>
-              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<DownloadIcon />}
-                  onClick={() => {
-                    loadBackups();
-                    setImportDialog(true);
-                  }}
-                  disabled={!hasDatabricksApiKey}
-                >
-                  Import from Volume
-                </Button>
-                {!hasDatabricksApiKey && (
-                  <FormHelperText error sx={{ ml: 1, mt: 0.5 }}>
-                    Please set DATABRICKS_API_KEY in API Keys before importing
-                  </FormHelperText>
-                )}
-              </Box>
-              <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={loadBackups}
-              >
-                List Backups
-              </Button>
-            </Box>
-
-            {backups && backups.backups && backups.backups.length > 0 && (
-              <Box>
-                <Typography variant="subtitle1" gutterBottom>
-                  Available Backups ({backups.total_backups})
-                </Typography>
-                {backups.volume_path && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Volume Path: {backups.volume_path}
-                  </Typography>
-                )}
-                <List>
-                  {backups.backups.map((backup) => (
-                    <ListItem key={backup.filename} divider>
-                      <ListItemText
-                        primary={backup.filename}
-                        secondary={`${formatSize(backup.size_mb)} • ${formatDate(backup.created_at)}`}
-                      />
-                      <ListItemSecondaryAction>
-                        {backup.databricks_url && (
-                          <IconButton
-                            edge="end"
-                            onClick={() => window.open(backup.databricks_url, '_blank')}
-                            title="View in Databricks"
-                          >
-                            <OpenInNewIcon />
-                          </IconButton>
-                        )}
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            )}
-          </CardContent>
-        </Card>
-        </AccordionDetails>
-      </Accordion>
-
+      {databaseInfo && <DatabaseOverview info={databaseInfo} formatSize={formatSize} formatDate={formatDate} />}
       {showLakebase && (
-      <Accordion disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
+      <Accordion defaultExpanded disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <DataObjectIcon fontSize="small" color="primary" />
-            <Typography fontWeight={600}>Lakebase</Typography>
+            <DataObjectIcon fontSize="small" color="action" />
+            <Typography fontWeight={600}>Connection</Typography>
             <Typography variant="caption" color="text.secondary">
-              managed Postgres backend
+              choose where Kasal stores data
             </Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
-        <Paper sx={{ p: 3 }}>
+        <Box>
           {!configLoaded ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4, justifyContent: 'center' }}>
               <CircularProgress size={24} />
@@ -1129,13 +763,8 @@ const DatabaseManagement: React.FC = () => {
           ) : (
           <>
           {/* Radio Button Selection - Same style as Memory Backend */}
-          <FormControl component="fieldset" sx={{ mb: 3 }}>
-            <FormLabel component="legend">
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Database Backend Configuration
-              </Typography>
-            </FormLabel>
-            <RadioGroup
+          <FormControl component="fieldset" fullWidth sx={{ mb: 2 }}>
+            <RadioGroup aria-label="Database backend" row sx={{ gap: 2 }}
               value={lakebaseBackend}
               onChange={(e) => {
                 const newValue = e.target.value as 'disabled' | 'lakebase';
@@ -1158,9 +787,9 @@ const DatabaseManagement: React.FC = () => {
                 control={<Radio />}
                 label={
                   <Box>
-                    <Typography variant="body1">Disabled</Typography>
+                    <Typography variant="body1">Default database</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Use default SQLite/PostgreSQL database
+                      SQLite or PostgreSQL
                     </Typography>
                   </Box>
                 }
@@ -1172,7 +801,7 @@ const DatabaseManagement: React.FC = () => {
                   <Box>
                     <Typography variant="body1">Databricks Lakebase</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Fully-managed PostgreSQL OLTP engine within Databricks
+                      Managed PostgreSQL in Databricks
                     </Typography>
                   </Box>
                 }
@@ -1187,8 +816,8 @@ const DatabaseManagement: React.FC = () => {
 
               {/* Databricks App Setup Prerequisites - only show when not connected */}
               {!(lakebaseConfig.enabled && lakebaseConfig.instance_status === 'READY') && (
-                <Alert severity="info" icon={<InfoIcon />} sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Databricks App Setup</Typography>
+                <Box component="details" sx={{ mb: 2, typography: 'body2', color: 'text.secondary', '& summary': { cursor: 'pointer', py: 0.5, color: 'text.primary' } }}>
+                  <Box component="summary">Before you connect</Box>
                   <Typography variant="body2" component="div">
                     Before connecting, ensure your App&apos;s service principal has Lakebase access:
                     <ol style={{ margin: '4px 0 0 0', paddingLeft: '20px' }}>
@@ -1204,15 +833,11 @@ const DatabaseManagement: React.FC = () => {
                       Databricks Lakebase App docs <OpenInNewIcon sx={{ fontSize: 14, verticalAlign: 'middle', ml: 0.5 }} />
                     </a>
                   </Typography>
-                </Alert>
+                </Box>
               )}
 
               {/* Current Status Section */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="subtitle1" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
-                  <StorageIcon sx={{ mr: 1 }} />
-                  Current Status
-                </Typography>
+              {lakebaseConfig.enabled && <Box sx={{ mb: 2 }}>
 
                 <Grid container spacing={2} alignItems="center">
                   <Grid item>
@@ -1249,7 +874,7 @@ const DatabaseManagement: React.FC = () => {
 
                 {/* View in Databricks Button */}
                 {lakebaseConfig.instance_status === 'READY' && (
-                  <Box sx={{ mt: 2 }}>
+                  <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                     <Button
                       variant="outlined"
                       size="small"
@@ -1284,7 +909,7 @@ const DatabaseManagement: React.FC = () => {
                     )}
                   </Box>
                 )}
-              </Box>
+              </Box>}
 
               {!(lakebaseConfig.enabled && lakebaseConfig.instance_status === 'READY') && (
               <>
@@ -1292,9 +917,9 @@ const DatabaseManagement: React.FC = () => {
 
               {/* Connect to Existing Instance Form */}
               <Box sx={{ mb: 3 }}>
-                  <Paper sx={{ p: 2, backgroundColor: 'background.default' }}>
+                  <Box>
                     <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
-                      Connect to Existing Lakebase Instance
+                      Connect a Lakebase instance
                     </Typography>
                     <Grid container spacing={2}>
                       <Grid item xs={12}>
@@ -1306,7 +931,7 @@ const DatabaseManagement: React.FC = () => {
                             value={lakebaseConfig.instance_name}
                             onChange={(e) => setLakebaseConfig({ ...lakebaseConfig, instance_name: e.target.value })}
                             helperText={
-                              <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Box component="span" sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
                                 Could not load instances. Enter the name manually.
                                 <Button size="small" onClick={() => loadLakebaseInstances('', 1)} sx={{ minWidth: 'auto', p: 0, textTransform: 'none' }}>
                                   Retry
@@ -1422,7 +1047,7 @@ const DatabaseManagement: React.FC = () => {
                                       </>
                                     ),
                                   }}
-                                  helperText="Search and select a Lakebase instance from your workspace"
+                                  helperText="Search instances or enter a name"
                                 />
                               )}
                             />
@@ -1447,71 +1072,14 @@ const DatabaseManagement: React.FC = () => {
                             endpoint: e.target.value,
                             instance_status: e.target.value ? 'READY' : 'NOT_CREATED'
                           })}
-                          helperText="Auto-populated from selected instance, or enter manually"
+                          helperText="Filled from your instance. Override only if needed."
                           placeholder="instance-xxxx.database.cloud.databricks.com"
                         />
                       </Grid>
 
                       {/* Setup Option */}
                       <Grid item xs={12}>
-                        <FormControl component="fieldset">
-                          <FormLabel component="legend" sx={{ mb: 1 }}>
-                            Setup Option
-                          </FormLabel>
-                          <RadioGroup
-                            value={migrationOption}
-                            onChange={(e) => setMigrationOption(e.target.value as 'recreate' | 'use' | 'schema_only' | 'use_expand')}
-                          >
-                            <FormControlLabel
-                              value="recreate"
-                              control={<Radio />}
-                              label={
-                                <Box>
-                                  <Typography variant="body2" fontWeight="bold">Migrate Schema & Data</Typography>
-                                  <Typography variant="caption" color="error">
-                                    Drops the existing Lakebase schema, then copies all data from the current database
-                                  </Typography>
-                                </Box>
-                              }
-                            />
-                            <FormControlLabel
-                              value="schema_only"
-                              control={<Radio />}
-                              label={
-                                <Box>
-                                  <Typography variant="body2" fontWeight="bold">Schema Only</Typography>
-                                  <Typography variant="caption" color="error">
-                                    Drops the existing Lakebase schema and recreates it EMPTY — no data is copied
-                                  </Typography>
-                                </Box>
-                              }
-                            />
-                            <FormControlLabel
-                              value="use"
-                              control={<Radio />}
-                              label={
-                                <Box>
-                                  <Typography variant="body2" fontWeight="bold">Use Existing Data</Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Instance already has Kasal schema and data — just connect
-                                  </Typography>
-                                </Box>
-                              }
-                            />
-                            <FormControlLabel
-                              value="use_expand"
-                              control={<Radio />}
-                              label={
-                                <Box>
-                                  <Typography variant="body2" fontWeight="bold">Use &amp; Expand Existing Schema &amp; Data</Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Connect and add any missing tables/columns — keeps all existing data
-                                  </Typography>
-                                </Box>
-                              }
-                            />
-                          </RadioGroup>
-                        </FormControl>
+                        <LakebaseSetupOptions value={migrationOption} onChange={setMigrationOption} />
                       </Grid>
 
                       <Grid item xs={12}>
@@ -1628,7 +1196,7 @@ const DatabaseManagement: React.FC = () => {
                         </Button>
                       </Grid>
                     </Grid>
-                  </Paper>
+                  </Box>
                 </Box>
               </>
               )}
@@ -1636,10 +1204,248 @@ const DatabaseManagement: React.FC = () => {
           )}
           </>
           )}
-        </Paper>
+        </Box>
         </AccordionDetails>
       </Accordion>
       )}
+
+      <Accordion disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CloudIcon fontSize="small" color="action" />
+            <Typography fontWeight={600}>Backups &amp; restore</Typography>
+            <Typography variant="caption" color="text.secondary">
+              import or export a database snapshot
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+        <Box>
+            <Grid container spacing={2} sx={{ mb: 3 }}>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="Catalog"
+                  value={catalog}
+                  onChange={(e) => setCatalog(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="Schema"
+                  value={schema}
+                  onChange={(e) => setSchema(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField
+                  fullWidth
+                  label="Volume Name"
+                  value={volumeName}
+                  onChange={(e) => setVolumeName(e.target.value)}
+                />
+              </Grid>
+            </Grid>
+
+            {!hasDatabricksApiKey && <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Add a Databricks API key in API Keys to import or export backups.
+            </Typography>}
+            <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Button
+                  variant="contained"
+                  startIcon={<UploadIcon />}
+                  onClick={() => setExportDialog(true)}
+                  disabled={!hasDatabricksApiKey}
+                >
+                  Export to Volume
+                </Button>
+              </Box>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => {
+                    loadBackups();
+                    setImportDialog(true);
+                  }}
+                  disabled={!hasDatabricksApiKey}
+                >
+                  Import from Volume
+                </Button>
+              </Box>
+              <Button
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={loadBackups}
+              >
+                List Backups
+              </Button>
+            </Box>
+
+            {backups && backups.backups && backups.backups.length > 0 && (
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Available Backups ({backups.total_backups})
+                </Typography>
+                {backups.volume_path && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Volume Path: {backups.volume_path}
+                  </Typography>
+                )}
+                <List>
+                  {backups.backups.map((backup) => (
+                    <ListItem key={backup.filename} divider>
+                      <ListItemText
+                        primary={backup.filename}
+                        secondary={`${formatSize(backup.size_mb)} • ${formatDate(backup.created_at)}`}
+                      />
+                      <ListItemSecondaryAction>
+                        {backup.databricks_url && (
+                          <IconButton
+                            edge="end"
+                            onClick={() => window.open(backup.databricks_url, '_blank')}
+                            title="View in Databricks"
+                          >
+                            <OpenInNewIcon />
+                          </IconButton>
+                        )}
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+            )}
+        </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion disableGutters variant="outlined" sx={{ borderRadius: 2, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <DeleteSweepIcon fontSize="small" color="action" />
+            <Typography fontWeight={600}>Data cleanup</Typography>
+            <Typography variant="caption" color="text.secondary">
+              remove older activity
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+        {loading && !databaseInfo && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4, justifyContent: 'center' }}>
+            <CircularProgress size={24} />
+            <Typography color="text.secondary">Loading database information...</Typography>
+          </Box>
+        )}
+        <Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Delete execution history, traces, logs, and LLM logs older than a specified date.
+              This can reduce database size and speed up migrations.
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <TextField
+                type="date"
+                label="Cutoff Date"
+                value={housekeepingDate}
+                onChange={(e) => {
+                  setHousekeepingDate(e.target.value);
+                  setHousekeepingResult(null);
+                }}
+                InputLabelProps={{ shrink: true }}
+                helperText="Records older than this date will be deleted"
+                sx={{ minWidth: 200 }}
+              />
+              <Button
+                variant="outlined"
+                color="warning"
+                startIcon={housekeepingLoading ? <CircularProgress size={18} /> : <DeleteSweepIcon />}
+                onClick={() => setShowHousekeepingConfirm(true)}
+                disabled={housekeepingLoading || !housekeepingDate}
+                sx={{ mt: 1 }}
+              >
+                {housekeepingLoading ? 'Running...' : 'Run Housekeeping'}
+              </Button>
+            </Box>
+            {housekeepingResult && housekeepingResult.success && (
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="body2" fontWeight="bold">
+                  Housekeeping completed — {housekeepingResult.total_deleted} records deleted
+                </Typography>
+                <Box sx={{ mt: 1 }}>
+                  {housekeepingResult.deleted && Object.entries(housekeepingResult.deleted).map(([table, count]) => (
+                    <Chip
+                      key={table}
+                      label={`${table}: ${count}`}
+                      size="small"
+                      sx={{ m: 0.5 }}
+                      color={count > 0 ? 'primary' : 'default'}
+                      variant={count > 0 ? 'filled' : 'outlined'}
+                    />
+                  ))}
+                </Box>
+              </Alert>
+            )}
+            {housekeepingResult && !housekeepingResult.success && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                {housekeepingResult.error || 'Housekeeping failed'}
+              </Alert>
+            )}
+        </Box>
+
+        {/* Housekeeping Confirmation Dialog */}
+        <Dialog open={showHousekeepingConfirm} onClose={() => setShowHousekeepingConfirm(false)}>
+          <DialogTitle>Confirm Data Housekeeping</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              This will permanently delete all records older than <strong>{housekeepingDate}</strong> from the following tables:
+            </DialogContentText>
+            <Box sx={{ mt: 1, ml: 2 }}>
+              <Typography variant="body2">• executionhistory (+ taskstatus, errortrace)</Typography>
+              <Typography variant="body2">• execution_trace</Typography>
+              <Typography variant="body2">• execution_logs</Typography>
+              <Typography variant="body2">• llmlog</Typography>
+            </Box>
+            <DialogContentText sx={{ mt: 2 }}>
+              This action cannot be undone. Are you sure?
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowHousekeepingConfirm(false)}>Cancel</Button>
+            <Button
+              color="warning"
+              variant="contained"
+              onClick={async () => {
+                setShowHousekeepingConfirm(false);
+                setHousekeepingLoading(true);
+                setHousekeepingResult(null);
+                try {
+                  const response = await apiClient.post('/database-management/housekeeping', {
+                    cutoff_date: housekeepingDate,
+                  });
+                  setHousekeepingResult(response.data);
+                  // Refresh database info to show updated row counts
+                  loadDatabaseInfo();
+                } catch (err) {
+                  if (isErrorWithResponse(err)) {
+                    setHousekeepingResult({
+                      success: false,
+                      error: err.response?.data?.detail || err.response?.data?.error || err.message || 'Housekeeping failed',
+                    });
+                  } else {
+                    setHousekeepingResult({ success: false, error: 'Housekeeping failed' });
+                  }
+                } finally {
+                  setHousekeepingLoading(false);
+                }
+              }}
+            >
+              Delete Old Data
+            </Button>
+          </DialogActions>
+        </Dialog>
+        </AccordionDetails>
+      </Accordion>
 
       {/* Export Dialog */}
       <Dialog open={exportDialog} onClose={() => setExportDialog(false)} maxWidth="sm" fullWidth>
@@ -1749,18 +1555,6 @@ const DatabaseManagement: React.FC = () => {
             <Button onClick={() => setExportResult(null)}>Close</Button>
           </DialogActions>
         </Dialog>
-      )}
-
-      {/* Success/Error Messages */}
-      {success && (
-        <Alert severity="success" onClose={() => setSuccess(null)} sx={{ mt: 2 }}>
-          {success}
-        </Alert>
-      )}
-      {error && (
-        <Alert severity="error" onClose={() => setError(null)} sx={{ mt: 2 }}>
-          <Typography sx={{ whiteSpace: 'pre-line' }}>{error}</Typography>
-        </Alert>
       )}
 
       {/* Confirmation Dialog for Disabling Lakebase */}

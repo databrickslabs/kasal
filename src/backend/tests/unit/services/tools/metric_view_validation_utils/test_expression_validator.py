@@ -2,7 +2,6 @@
 
 import json
 import textwrap
-from unittest.mock import MagicMock
 
 import pytest
 

@@ -1,10 +1,5 @@
 """Tests for UserBase.email_validator in src/schemas/user.py."""
 
-import os
-import sys
-
-import pytest
-
 from src.schemas.user import UserBase
 
 

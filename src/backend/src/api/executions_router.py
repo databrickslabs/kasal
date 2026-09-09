@@ -5,10 +5,7 @@ This module provides API endpoints for creating and managing executions
 of crews and flows, as well as utility operations like name generation.
 """
 
-import asyncio
-import logging
 import uuid
-from datetime import UTC, datetime
 from typing import Annotated, Optional
 
 from fastapi import (
@@ -21,17 +18,16 @@ from fastapi import (
 )
 
 from src.config.settings import settings
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.execution import (
     CrewConfig,
     ExecutionCreateResponse,
     ExecutionNameGenerationRequest,
     ExecutionNameGenerationResponse,
     ExecutionResponse,
-    ExecutionStatus,
     ExecutionStatusResponse,
     StopExecutionRequest,
     StopExecutionResponse,

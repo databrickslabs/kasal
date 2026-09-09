@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import Optional
 
 # CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
@@ -11,25 +10,45 @@ from src.config.logging import CentralizedLoggingConfig, configure_early_logging
 
 configure_early_logging()
 
-import asyncio
 
 # Now import everything else
-import logging
-from contextlib import asynccontextmanager
-from datetime import datetime
+import logging  # noqa: E402 - import follows module initialization
+from contextlib import (  # noqa: E402 - import follows module initialization
+    asynccontextmanager,
+)
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from fastapi import (  # noqa: E402 - import follows module initialization
+    FastAPI,
+    Request,
+)
+from fastapi.middleware.cors import (  # noqa: E402 - import follows module initialization
+    CORSMiddleware,
+)
+from fastapi.responses import (  # noqa: E402 - import follows module initialization
+    JSONResponse,
+)
+from sqlalchemy import text  # noqa: E402 - import follows module initialization
 
-from src.api import api_router
-from src.config.settings import settings
-from src.core.logger import LoggerManager
-from src.db.session import async_session_factory, get_db
-from src.services.execution.cleanup import ExecutionCleanupService
-from src.services.scheduling.scheduler import SchedulerService
-from src.utils.databricks_url_utils import DatabricksURLUtils
+from src.api import api_router  # noqa: E402 - import follows module initialization
+from src.config.settings import (  # noqa: E402 - import follows module initialization
+    settings,
+)
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.db.session import (  # noqa: E402 - import follows module initialization
+    async_session_factory,
+    get_db,
+)
+from src.services.execution.cleanup import (  # noqa: E402 - import follows module initialization
+    ExecutionCleanupService,
+)
+from src.services.scheduling.scheduler import (  # noqa: E402 - import follows module initialization
+    SchedulerService,
+)
+from src.utils.databricks_url_utils import (  # noqa: E402 - import follows module initialization
+    DatabricksURLUtils,
+)
 
 # Get logger after configuration
 logger = logging.getLogger(__name__)
@@ -926,14 +945,18 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # root. Mounted without the API prefix for that reason — under /api/v1 no A2A
 # client would ever look for it. The task operations themselves stay on the
 # prefixed api_router.
-from src.api.a2a_router import well_known_router as _a2a_well_known_router
+from src.api.a2a_router import (  # noqa: E402 - import follows module initialization
+    well_known_router as _a2a_well_known_router,
+)
 
 app.include_router(_a2a_well_known_router)
 
 # The MCP Streamable HTTP transport, at the domain root. A client configured
 # with https://host/mcp POSTs JSON-RPC there; under the API prefix it would 404
 # on initialize and never attempt anything else.
-from src.api.mcp_jsonrpc_router import router as _mcp_jsonrpc_router
+from src.api.mcp_jsonrpc_router import (  # noqa: E402 - import follows module initialization
+    router as _mcp_jsonrpc_router,
+)
 
 app.include_router(_mcp_jsonrpc_router)
 

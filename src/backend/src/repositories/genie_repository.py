@@ -10,7 +10,6 @@ Uses unified authentication from get_auth_context() which implements:
 
 import asyncio
 import logging
-import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,12 +17,10 @@ import httpx
 
 from src.schemas.genie import (
     GenieAuthConfig,
-    GenieConversation,
     GenieExecutionRequest,
     GenieExecutionResponse,
     GenieGetMessageStatusRequest,
     GenieGetQueryResultRequest,
-    GenieMessage,
     GenieMessageStatus,
     GenieQueryResult,
     GenieQueryStatus,
@@ -113,7 +110,6 @@ class GenieRepository:
             return self._host
 
         # Use unified auth to get host
-        from src.utils.databricks_auth import get_auth_context
 
         auth = await get_auth_context()
         databricks_host = auth.workspace_url if auth else None
@@ -165,7 +161,6 @@ class GenieRepository:
             Tuple of (headers dict, error message)
         """
         try:
-            from src.utils.databricks_auth import get_auth_context
 
             # Extract user token if available (for OBO)
             user_token = None

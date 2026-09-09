@@ -4,11 +4,7 @@ Comprehensive unit tests for database configuration models.
 Tests the LakebaseConfig SQLAlchemy model.
 """
 
-from datetime import datetime
-
-import pytest
 from sqlalchemy import JSON, Column, DateTime, String
-from sqlalchemy.sql import func
 
 from src.db.base import Base
 from src.models.database_config import LakebaseConfig

@@ -5,7 +5,7 @@ Targets uncovered lines to push coverage to 85%+.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.powerbi_config import PowerBIConfig
@@ -254,7 +253,7 @@ class TestPowerBIConfigRepositoryCreateConfig:
         mock_result = MagicMock()
         mock_async_session.execute.return_value = mock_result
 
-        result = await powerbi_config_repository.create_config(config_data)
+        await powerbi_config_repository.create_config(config_data)
 
         mock_async_session.add.assert_called_once()
         assert mock_async_session.flush.call_count >= 1
@@ -286,7 +285,7 @@ class TestPowerBIConfigRepositoryMultiTenancy:
         """Test that get_active_config properly filters by group."""
         # Mock two different configs for different groups
         group1_config = MockPowerBIConfig(id=1, group_id="group1", is_active=True)
-        group2_config = MockPowerBIConfig(id=2, group_id="group2", is_active=True)
+        MockPowerBIConfig(id=2, group_id="group2", is_active=True)
 
         mock_result = MagicMock()
         mock_scalars = MagicMock()

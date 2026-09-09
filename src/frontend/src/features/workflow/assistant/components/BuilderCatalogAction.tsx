@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Bookmark } from 'lucide-react';
 import { usePermissionStore } from '../../../../store/permissions';
+import { useTabManagerStore } from '../../../../store/tabManager';
 import { useThemeStore } from '../../../../store/theme';
 import { useAppStore } from '../../../chat/store/appStore';
 import { saveCanvasToCatalog } from '../utils/saveCanvasToCatalog';
@@ -9,7 +10,15 @@ import { saveCanvasToCatalog } from '../utils/saveCanvasToCatalog';
 export default function BuilderCatalogAction({ flow, suggestedName = '' }: { flow: boolean; suggestedName?: string }) {
   const dark = useThemeStore(state => state.isDarkMode);
   const [saving, setSaving] = useState(false);
-  const [savedName, setSavedName] = useState('');
+  const tab = useTabManagerStore(state => state.tabs.find(item => item.id === state.activeTabId));
+  const revision = useMemo(() => JSON.stringify({
+    id: tab?.id,
+    nodes: (flow ? tab?.flowNodes : tab?.nodes)?.map(({ id, type, data }) => ({ id, type, data })),
+    edges: (flow ? tab?.flowEdges : tab?.edges)?.map(({ id, source, target, sourceHandle, targetHandle, data }) => ({ id, source, target, sourceHandle, targetHandle, data })),
+    config: tab?.executionConfig,
+  }), [flow, tab]);
+  const [saved, setSaved] = useState<{ name: string; revision: string } | null>(null);
+  const savedName = saved?.revision === revision ? saved.name : '';
   const [error, setError] = useState('');
   const canSaveCrew = usePermissionStore(s => s.allowAgentBuilder && s.userRole !== 'operator');
   const canSaveFlow = usePermissionStore(s => s.allowFlowBuilder && s.userRole !== 'operator');
@@ -19,7 +28,7 @@ export default function BuilderCatalogAction({ flow, suggestedName = '' }: { flo
     setError('');
     try {
       const saved = await saveCanvasToCatalog(flow, suggestedName);
-      setSavedName(saved.name);
+      setSaved({ name: saved.name, revision });
       void useAppStore.getState().loadCatalog();
     } catch (error) {
       const status = (error as { response?: { status?: number } }).response?.status;

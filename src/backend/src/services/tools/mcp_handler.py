@@ -4,16 +4,14 @@ import hashlib
 import json
 import logging
 import os
-import subprocess
 import sys
-import time
 import traceback
 from typing import Optional
 
 import aiohttp
 
 from src.services.tools.mcp_follow import follow_spec_from_config, follow_tool_call
-from src.utils.databricks_auth import get_databricks_auth_headers, get_mcp_auth_headers
+from src.utils.databricks_auth import get_databricks_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +298,7 @@ async def stop_all_adapters():
                 # Still try to remove from tracking
                 try:
                     del _active_mcp_adapters[adapter_id]
-                except:
+                except Exception:
                     pass
 
     # Reset the dictionary
@@ -408,7 +406,7 @@ def create_kasal_tool_from_mcp(mcp_tool_dict):
     Returns:
         CrewAI tool instance
     """
-    from typing import Any, Dict, Type
+    from typing import Type
 
     from pydantic import BaseModel, Field
 
@@ -511,7 +509,7 @@ def create_kasal_tool_from_mcp(mcp_tool_dict):
 
                 # Check if there's already an event loop running
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()
                     # TRIPWIRE: this thread is running an event loop, and the
                     # .result() below BLOCKS it — for a followed Genie call, for
                     # minutes. Every runtime path executes tools on a worker
@@ -812,7 +810,7 @@ asyncio.run(run_tool())
         if script_path:
             try:
                 os.remove(script_path)
-            except:
+            except Exception:
                 pass
 
 

@@ -4,10 +4,9 @@ Models for execution logs.
 This module defines models for storing execution log data.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Index, Integer, String, Text
-from sqlalchemy.orm import relationship
 
 from src.db.base import Base
 

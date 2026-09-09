@@ -6,10 +6,7 @@ field validation, Vector type handling, and data integrity.
 """
 
 import json
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
-
-import pytest
 
 from src.models.documentation_embedding import DocumentationEmbedding, Vector
 

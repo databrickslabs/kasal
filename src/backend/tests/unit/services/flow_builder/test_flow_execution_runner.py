@@ -6,7 +6,6 @@ functions that handle running CrewAI flows and managing the flow execution lifec
 """
 
 import asyncio
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

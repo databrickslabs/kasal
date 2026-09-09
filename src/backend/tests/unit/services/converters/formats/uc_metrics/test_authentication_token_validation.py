@@ -4,7 +4,7 @@ Extended unit tests for converters/formats/uc_metrics/authentication.py
 Targets uncovered lines: 123-126, 246-263
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -54,7 +54,6 @@ class TestDatabricksAuthServiceBasics:
         assert service.logger is not None
 
     def test_init_with_custom_logger(self):
-        import logging
 
         mock_logger = Mock()
         service = DatabricksAuthService(

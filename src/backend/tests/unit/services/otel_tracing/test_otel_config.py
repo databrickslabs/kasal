@@ -10,9 +10,7 @@ All OTel SDK dependencies are mocked to keep tests fast and isolated.
 """
 
 import logging
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

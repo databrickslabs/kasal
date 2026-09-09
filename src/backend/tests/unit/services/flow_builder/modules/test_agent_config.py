@@ -4,7 +4,6 @@ Unit tests for AgentConfig module.
 Tests the functionality of agent configuration for CrewAI flows.
 """
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

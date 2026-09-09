@@ -6,8 +6,6 @@ Tests all enum classes in enums.py including values and inheritance.
 
 from enum import Enum
 
-import pytest
-
 from src.models.enums import (
     GroupStatus,
     GroupUserRole,

@@ -112,13 +112,13 @@ class _FakeOpenAICompletion:
         return True
 
 
-import importlib
-import importlib.util
+import importlib  # noqa: E402 - import follows module initialization
+import importlib.util  # noqa: E402 - import follows module initialization
 
 # Patch the imports before loading the handler module.
 # We must use importlib to load the single file directly, avoiding __init__.py
 # which would trigger heavy dependency chains (litellm, openai, etc.)
-import sys
+import sys  # noqa: E402 - import follows module initialization
 
 # ---------------------------------------------------------------------------
 # Isolated module loading: force-install our mocks so the handler file sees

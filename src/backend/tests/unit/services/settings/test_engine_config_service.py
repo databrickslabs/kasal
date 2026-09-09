@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.settings.engine import EngineConfigService
 from src.core.exceptions import BadRequestError
 from src.services.execution.harnesses import HarnessUnavailableError
+from src.services.settings.engine import EngineConfigService
 
 
 def make_service():
@@ -293,9 +293,11 @@ async def test_set_kasal_flow_enabled():
 # toggle/delete not-found branches, config value updates, kasal flow and
 # OpenTelemetry app-telemetry get/set behavior
 # ==========================================================================
-from types import SimpleNamespace
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
 
-from src.services.settings.engine import EngineConfigService as Svc
+from src.services.settings.engine import (  # noqa: E402 - import follows module initialization
+    EngineConfigService as Svc,
+)
 
 
 class FakeRepo:
@@ -421,7 +423,7 @@ async def test_update_engine_config_success():
     config_data = SimpleNamespace(
         model_dump=lambda exclude_unset=False: {"config_value": "new"}
     )
-    out = await svc.update_engine_config("test", config_data)
+    await svc.update_engine_config("test", config_data)
     assert svc.repository.updated[0] == 1
     assert svc.repository.updated[1]["config_value"] == "new"
 

@@ -3,7 +3,6 @@ Utilities for event loop management and handling asyncio operations across threa
 """
 
 import asyncio
-import logging
 from typing import Any, Callable, Coroutine, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

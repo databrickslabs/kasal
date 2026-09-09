@@ -5,9 +5,9 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.crew_publication import (
     CrewPublicationCreate,
     CrewPublicationResponse,
@@ -20,10 +20,10 @@ from src.schemas.execution_history import (
 )
 from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
 from src.schemas.flow_generation import FlowGenerationRequest, FlowGenerationResponse
-from src.services.flow_builder.generation import FlowGenerationService
 from src.services.execution.checkpointing.service import CheckpointService
 from src.services.execution.history import ExecutionHistoryService
 from src.services.flow_builder.flow_service import FlowService
+from src.services.flow_builder.generation import FlowGenerationService
 from src.services.publications.publication import PublicationService
 
 router = APIRouter(
@@ -267,7 +267,7 @@ async def delete_flow(
 
     try:
         # Always use force delete to avoid foreign key constraint issues
-        result = await service.force_delete_flow_with_executions_with_group_check(
+        await service.force_delete_flow_with_executions_with_group_check(
             flow_id, group_context
         )
 

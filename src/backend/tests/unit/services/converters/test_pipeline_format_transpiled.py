@@ -11,12 +11,10 @@ Focuses on:
 - Error handling
 """
 
-from unittest.mock import MagicMock, PropertyMock, patch
-
 import pytest
 
 from src.services.converters.base.connectors import ConnectorType
-from src.services.converters.base.models import KPI, DAXMeasure, KPIDefinition
+from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.pipeline import (
     ConversionPipeline,
     OutboundFormat,
@@ -413,7 +411,7 @@ class TestConversionPipelineConvertToDAX:
         except AttributeError as e:
             # Expected - dax_measure.table attribute doesn't exist
             assert "table" in str(e)
-        except Exception as e:
+        except Exception:
             # Other errors are acceptable
             pass
 

@@ -73,7 +73,7 @@ def test_get_engine_config_service_creates_instance():
     fake_session = MagicMock()
     with patch("src.api.engine_config_router.EngineConfigService") as MockSvc:
         MockSvc.return_value = MagicMock(spec=EngineConfigService)
-        svc = get_engine_config_service(session=fake_session)
+        get_engine_config_service(session=fake_session)
         MockSvc.assert_called_once_with(fake_session)
 
 

@@ -15,9 +15,8 @@ Also targets:
 """
 
 import asyncio
-import os
 import time
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -133,8 +132,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
         orphan_proc.terminate = MagicMock()
         orphan_proc.wait = MagicMock()
 
-        import psutil as _psutil
-
         # Normal python proc (orphaned ppid=1) for the second loop
         normal_proc = MagicMock()
         normal_proc.info = {
@@ -144,8 +141,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
             "create_time": time.time() - 60,  # 1 minute ago (< 10 min)
         }
         normal_proc.create_time = MagicMock(return_value=time.time() - 60)
-
-        call_count = {"n": 0}
 
         def mock_process_iter(attrs):
             if "cmdline" in attrs:
@@ -161,7 +156,7 @@ class TestRunCrewIsolatedFinallyTerminateError:
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
             patch("psutil.process_iter", side_effect=mock_process_iter),
         ):
-            result = await executor.run_crew_isolated(exec_id, {}, group_ctx)
+            await executor.run_crew_isolated(exec_id, {}, group_ctx)
 
         orphan_proc.terminate.assert_called_once()
 
@@ -217,7 +212,7 @@ class TestRunCrewIsolatedFinallyTerminateError:
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
             patch("psutil.process_iter", side_effect=mock_process_iter),
         ):
-            result = await executor.run_crew_isolated(exec_id, {}, group_ctx)
+            await executor.run_crew_isolated(exec_id, {}, group_ctx)
 
         orphan_proc.kill.assert_called_once()
 
@@ -305,7 +300,7 @@ class TestRunCrewIsolatedFinallyTerminateError:
             patch("subprocess.run", return_value=mock_subprocess_result),
             patch("os.kill") as mock_os_kill,
         ):
-            result = await executor.run_crew_isolated(exec_id, {}, group_ctx)
+            await executor.run_crew_isolated(exec_id, {}, group_ctx)
 
         # os.kill should have been called on the matching process
         mock_os_kill.assert_called()

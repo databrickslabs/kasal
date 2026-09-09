@@ -6,7 +6,6 @@ including CRUD operations, enabled status management, and error handling.
 """
 
 from datetime import UTC, datetime
-from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -595,11 +594,11 @@ class TestMCPRepositoryEdgeCases:
             mcp_settings_repository, "get_settings", return_value=sample_mcp_settings
         ):
             # Test with truthy value
-            result1 = await mcp_settings_repository.update_global_enabled("true")
+            await mcp_settings_repository.update_global_enabled("true")
             assert sample_mcp_settings.global_enabled == "true"  # Should be set as-is
 
             # Test with falsy value
-            result2 = await mcp_settings_repository.update_global_enabled(0)
+            await mcp_settings_repository.update_global_enabled(0)
             assert sample_mcp_settings.global_enabled == 0  # Should be set as-is
 
     @pytest.mark.asyncio

@@ -12,7 +12,6 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.core.sse_manager import (
@@ -21,6 +20,7 @@ from src.core.sse_manager import (
     sse_manager,
 )
 from src.dependencies.admin_auth import SystemAdminUserDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = LoggerManager.get_instance().system

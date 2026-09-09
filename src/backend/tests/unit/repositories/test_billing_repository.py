@@ -1,263 +1,82 @@
-"""Unit tests for BillingRepository, BillingPeriodRepository, BillingAlertRepository."""
+"""Legacy billing retention uses async SQL and follows the parent run's age."""
 
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import delete, insert, select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import src.db.all_models  # noqa: F401 -- register ORM relationships
 from src.models.billing import LLMUsageBilling
+from src.models.execution_history import ExecutionHistory
 from src.repositories.billing_repository import BillingRepository
 
-
-@pytest.fixture
-def mock_session():
-    session = AsyncMock()
-    session.execute = AsyncMock()
-    session.flush = AsyncMock()
-    session.rollback = AsyncMock()
-    session.add = MagicMock()
-    # Sync query interface used by billing repo
-    session.query = MagicMock()
-    return session
+CUTOFF = datetime(2026, 9, 1)
 
 
-class TestBillingRepository:
+@pytest_asyncio.fixture
+async def session():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text("PRAGMA foreign_keys=ON"))
+            for model in (ExecutionHistory, LLMUsageBilling):
+                await connection.run_sync(model.__table__.create)
+        async with async_sessionmaker(engine)() as db:
+            yield db
+    finally:
+        await engine.dispose()
 
-    @pytest.fixture
-    def repo(self, mock_session):
-        return BillingRepository(mock_session)
 
-    @pytest.mark.asyncio
-    async def test_create_usage_record(self, repo, mock_session):
-        usage_data = {
-            "execution_id": "exec-1",
-            "model_name": "gpt-4",
-            "cost_usd": 0.05,
-            "total_tokens": 100,
-        }
-
-        result = await repo.create_usage_record(usage_data)
-
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_get_usage_by_execution(self, repo, mock_session):
-        records = [MagicMock(spec=LLMUsageBilling)]
-        mock_session.query.return_value.filter.return_value.all.return_value = records
-
-        result = await repo.get_usage_by_execution("exec-1")
-
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_usage_by_execution_with_group(self, repo, mock_session):
-        records = [MagicMock(spec=LLMUsageBilling)]
-        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = (
-            records
+async def seed_run(session, job_id, created_at, usage_date):
+    await session.execute(
+        insert(ExecutionHistory).values(job_id=job_id, created_at=created_at)
+    )
+    await session.execute(
+        insert(LLMUsageBilling).values(
+            execution_id=job_id,
+            execution_type="crew",
+            model_name="example-model",
+            model_provider="example-provider",
+            usage_date=usage_date,
         )
-
-        result = await repo.get_usage_by_execution("exec-1", group_id="g-1")
-
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_usage_by_date_range(self, repo, mock_session):
-        records = [MagicMock(spec=LLMUsageBilling)]
-        chain = mock_session.query.return_value.filter.return_value
-        chain.order_by.return_value.all.return_value = records
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_usage_by_date_range(start, end)
-
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_usage_by_date_range_with_filters(self, repo, mock_session):
-        records = []
-        chain = mock_session.query.return_value.filter.return_value
-        chain.filter.return_value.filter.return_value.order_by.return_value.all.return_value = (
-            records
-        )
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_usage_by_date_range(
-            start, end, group_id="g-1", user_email="a@b.com"
-        )
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_monthly_cost_for_group(self, repo, mock_session):
-        mock_session.query.return_value.filter.return_value.scalar.return_value = 42.5
-
-        result = await repo.get_monthly_cost_for_group("g-1", 2024, 6)
-
-        assert result == 42.5
-
-    @pytest.mark.asyncio
-    async def test_get_monthly_cost_returns_zero_when_none(self, repo, mock_session):
-        mock_session.query.return_value.filter.return_value.scalar.return_value = None
-
-        result = await repo.get_monthly_cost_for_group("g-1", 2024, 12)
-
-        assert result == 0.0
+    )
+    await session.commit()
 
 
-# ============================================================================
-# get_cost_summary_by_period / get_cost_by_model / get_cost_by_user
-# ============================================================================
+@pytest.mark.asyncio
+async def test_retention_uses_parent_age_and_preserves_cutoff_boundary(session):
+    old = CUTOFF - timedelta(days=1)
+    recent = CUTOFF + timedelta(days=1)
+    await seed_run(session, "old-run", old, recent)
+    await seed_run(session, "boundary-run", CUTOFF, old)
+    await seed_run(session, "recent-run", recent, old)
+
+    assert await BillingRepository(session).delete_older_than(CUTOFF) == 1
+    retained = await session.scalars(select(LLMUsageBilling.execution_id))
+    assert set(retained) == {"boundary-run", "recent-run"}
+    assert await BillingRepository(session).delete_older_than(CUTOFF) == 0
 
 
-def _make_repo():
-    session = MagicMock()
-    repo = BillingRepository(session)
-    return repo, session
+@pytest.mark.asyncio
+async def test_housekeeping_can_delete_parent_after_billing_cleanup(session):
+    await seed_run(session, "old-run", CUTOFF - timedelta(days=1), CUTOFF)
+    parent_delete = delete(ExecutionHistory).where(ExecutionHistory.job_id == "old-run")
+    with pytest.raises(IntegrityError):
+        await session.execute(parent_delete)
+    await session.rollback()
+
+    assert await BillingRepository(session).delete_older_than(CUTOFF) == 1
+    result = await session.execute(parent_delete)
+    assert result.rowcount == 1
+    await session.commit()
 
 
-def _make_query_chain(results=None):
-    """Create a chained mock query."""
-    chain = MagicMock()
-    chain.filter.return_value = chain
-    chain.group_by.return_value = chain
-    chain.order_by.return_value = chain
-    chain.all.return_value = results or []
-    chain.label.return_value = chain
-    return chain
-
-
-def _make_result_row(**kwargs):
-    row = MagicMock()
-    for k, v in kwargs.items():
-        setattr(row, k, v)
-    return row
-
-
-class TestBillingRepositoryCostReporting:
-
-    @pytest.mark.asyncio
-    async def test_get_cost_summary_by_period_day(self):
-        repo, session = _make_repo()
-        query_chain = _make_query_chain()
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_summary_by_period(start, end, group_by="day")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_cost_summary_by_period_week(self):
-        repo, session = _make_repo()
-        query_chain = _make_query_chain()
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 3, 31)
-        result = await repo.get_cost_summary_by_period(start, end, group_by="week")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_cost_summary_by_period_month(self):
-        repo, session = _make_repo()
-        query_chain = _make_query_chain()
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 12, 31)
-        result = await repo.get_cost_summary_by_period(start, end, group_by="month")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_cost_summary_by_period_unknown(self):
-        repo, session = _make_repo()
-        query_chain = _make_query_chain()
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_summary_by_period(start, end, group_by="unknown")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_cost_summary_with_group_id(self):
-        repo, session = _make_repo()
-        row = _make_result_row(
-            period=datetime(2024, 1, 1),
-            total_cost=10.5,
-            total_tokens=1000,
-            total_prompt_tokens=500,
-            total_completion_tokens=500,
-            total_requests=5,
-        )
-        query_chain = _make_query_chain(results=[row])
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_summary_by_period(
-            start, end, group_id="g1", group_by="day"
-        )
-        assert len(result) == 1
-        assert result[0]["total_cost"] == 10.5
-
-    @pytest.mark.asyncio
-    async def test_get_cost_by_model_no_group(self):
-        repo, session = _make_repo()
-        row = _make_result_row(
-            model_name="gpt-4",
-            model_provider="openai",
-            total_cost=25.0,
-            total_tokens=2000,
-            total_requests=10,
-        )
-        query_chain = _make_query_chain(results=[row])
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_by_model(start, end)
-        assert len(result) == 1
-        assert result[0]["model_name"] == "gpt-4"
-
-    @pytest.mark.asyncio
-    async def test_get_cost_by_model_with_group(self):
-        repo, session = _make_repo()
-        query_chain = _make_query_chain()
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_by_model(start, end, group_id="g1")
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_cost_by_user_no_group(self):
-        repo, session = _make_repo()
-        row = _make_result_row(
-            user_email="user@example.com",
-            total_cost=15.0,
-            total_tokens=1500,
-            total_requests=8,
-        )
-        query_chain = _make_query_chain(results=[row])
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_by_user(start, end)
-        assert len(result) == 1
-        assert result[0]["user_email"] == "user@example.com"
-
-    @pytest.mark.asyncio
-    async def test_get_cost_by_user_with_group(self):
-        repo, session = _make_repo()
-        query_chain = _make_query_chain()
-        session.query.return_value = query_chain
-
-        start = datetime(2024, 1, 1)
-        end = datetime(2024, 1, 31)
-        result = await repo.get_cost_by_user(start, end, group_id="g1")
-        assert result == []
+@pytest.mark.asyncio
+async def test_retention_leaves_transaction_control_with_caller(session):
+    await seed_run(session, "old-run", CUTOFF - timedelta(days=1), CUTOFF)
+    assert await BillingRepository(session).delete_older_than(CUTOFF) == 1
+    await session.rollback()
+    assert await session.scalar(select(LLMUsageBilling.execution_id)) == "old-run"

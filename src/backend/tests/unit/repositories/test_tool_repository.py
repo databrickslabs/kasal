@@ -6,11 +6,10 @@ CRUD operations, enabled/disabled filtering, configuration updates, and error ha
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.tool import Tool

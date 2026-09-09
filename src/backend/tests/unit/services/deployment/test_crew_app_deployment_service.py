@@ -3,6 +3,7 @@ Unit tests for CrewAppDeploymentService (one-click Databricks Apps deploy).
 """
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,7 +16,7 @@ from src.services.deployment.app import (
     CrewAppDeploymentService,
 )
 from src.utils.user_context import GroupContext
-from types import SimpleNamespace
+
 
 @pytest.fixture(autouse=True)
 def clear_registry():

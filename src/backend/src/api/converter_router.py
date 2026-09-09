@@ -6,11 +6,11 @@ FastAPI routes for converter management (history, jobs, saved configurations)
 import logging
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.dependencies.providers import GroupContextDep
 from src.db.session import get_db
+from src.dependencies.providers import GroupContextDep
 from src.schemas.conversion import (  # History; Jobs; Saved Configs
     ConversionHistoryCreate,
     ConversionHistoryFilter,

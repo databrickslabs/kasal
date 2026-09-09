@@ -10,14 +10,18 @@ harness aborts on the other — and it would surface as a research run that simp
 failed, with nothing pointing at the harness setting as the cause.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from src.core.llm.transport.llm import LLM
 from src.services.execution.harnesses import binding_for, reset_for_tests
 from src.services.execution.harnesses.crewai.guardrails import (
     DEGRADED_MARKER,
+    adapt_guardrail,
     degrade_on_exhausted,
 )
+from src.services.execution.kernel.output_contract import apply_output_schema
 
 
 @pytest.fixture(autouse=True)
@@ -120,3 +124,85 @@ class TestItIsWiredIntoTheTask:
         message describing the very annotation it carries.
         """
         assert self._task(guardrail_on_exhausted="degrade").guardrail is not None
+
+
+class TestSchemaGuardrailExecution:
+    """Exercise validation AND CrewAI's source-inspecting trace event (run 401)."""
+
+    def _task(self, harness_name, plural=False, **overrides):
+        harness = binding_for(harness_name)
+        agent = harness.build_agent(
+            role="Colour",
+            goal="Return a colour",
+            backstory="B",
+            llm=LLM(model="gpt-4o"),
+        )
+        args = dict(description="Return black", expected_output="JSON", agent=agent)
+        guardrail = apply_output_schema(
+            args,
+            {
+                "output_schema_name": "ColourOutput",
+                "output_schema": {
+                    "type": "object",
+                    "properties": {"colour": {"type": "string", "enum": ["black"]}},
+                    "required": ["colour"],
+                },
+            },
+            "colour-task",
+        )
+        args["guardrails" if plural else "guardrail"] = (
+            [guardrail, guardrail] if plural else guardrail
+        )
+        return harness.build_task(**{**args, **overrides})
+
+    @pytest.mark.parametrize("plural", [False, True])
+    @pytest.mark.parametrize("raw,valid", [('{"colour":"black"}', True), ("{}", False)])
+    def test_real_crewai_validation_emits_events(self, plural, raw, valid):
+        from crewai.tasks.task_output import TaskOutput
+        from crewai.utilities.guardrail import process_guardrail
+
+        task = self._task("crewai", plural)
+        output = TaskOutput(description="colour", raw=raw, agent="Colour")
+        guards = task.guardrails if plural else [task.guardrail]
+        with patch("crewai.events.event_bus.crewai_event_bus.emit") as emit:
+            for guard in guards:
+                result = process_guardrail(output, guard, 0, from_task=task)
+                assert result.success is valid
+                if valid:
+                    assert result.result == output.raw
+                else:
+                    assert "colour" in result.error
+        events = [call.args[1] for call in emit.call_args_list]
+        assert len(events) == 2 * len(guards)
+        assert events[0].guardrail_name == "SchemaGateGuardrail"
+        assert events[-1].success is valid
+
+    @pytest.mark.parametrize("harness_name", ["kasal", "crewai"])
+    @pytest.mark.parametrize("plural", [False, True])
+    def test_task_executes_schema_validation(self, harness_name, plural):
+        task = self._task(harness_name, plural)
+        with patch.object(
+            type(task.agent), "execute_task", return_value='{"colour":"black"}'
+        ):
+            output = task.execute_sync()
+        assert output.json_dict == {"colour": "black"}
+
+    def test_existing_function_and_description_are_unchanged(self):
+        assert adapt_guardrail(_always_rejects) is _always_rejects
+        assert adapt_guardrail("Check the answer") == "Check the answer"
+
+    @pytest.mark.parametrize("plural", [False, True])
+    def test_rejected_output_is_retried_before_completing(self, plural):
+        task = self._task("crewai", plural, max_retries=1)
+        with patch.object(
+            type(task.agent), "execute_task", side_effect=["{}", '{"colour":"black"}']
+        ) as execute:
+            output = task.execute_sync()
+        assert execute.call_count == 2
+        assert output.json_dict == {"colour": "black"}
+
+    def test_invalid_output_still_fails_when_retries_are_exhausted(self):
+        task = self._task("crewai", max_retries=0)
+        with patch.object(type(task.agent), "execute_task", return_value="{}"):
+            with pytest.raises(Exception, match="guardrail"):
+                task.execute_sync()

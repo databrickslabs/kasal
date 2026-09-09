@@ -3,8 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
 
 

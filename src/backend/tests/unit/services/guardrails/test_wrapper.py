@@ -6,13 +6,10 @@ for function-based guardrails in CrewAI's guardrail event system.
 """
 
 import inspect
-import os
-from datetime import datetime
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import mock_open, patch
 
 import pytest
 
-from src.core.logger import LoggerManager
 from src.services.guardrails.base_guardrail import BaseGuardrail
 from src.services.guardrails.wrapper import GuardrailWrapper
 
@@ -455,7 +452,7 @@ class TestGuardrailWrapperFileOperations:
         guardrail = MockGuardrail()
 
         with patch("os.makedirs") as mock_makedirs:
-            wrapper = GuardrailWrapper(guardrail, "test_task")
+            GuardrailWrapper(guardrail, "test_task")
             mock_makedirs.assert_called()
 
     @patch("builtins.open", mock_open())

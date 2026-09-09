@@ -13,7 +13,6 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
 
 # Standard Python LogRecord attributes that may legitimately be None
 # (e.g. exc_info, exc_text, stack_info) and should never be stripped.

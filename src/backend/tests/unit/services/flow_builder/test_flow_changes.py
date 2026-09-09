@@ -9,7 +9,6 @@ Tests the three specific changes made to the flow execution system:
 """
 
 import asyncio
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -663,7 +662,6 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_basic(self):
         """Test _emit_error_span creates an OTel span with correct attributes."""
-        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 
@@ -700,7 +698,6 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_with_group_email(self):
         """Test _emit_error_span sets group_email attribute when provided."""
-        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 
@@ -733,7 +730,6 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_exception_handling(self):
         """Test _emit_error_span catches and logs exceptions without raising."""
-        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 
@@ -748,7 +744,6 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_no_group_context(self):
         """Test _emit_error_span without group_id or group_email."""
-        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 

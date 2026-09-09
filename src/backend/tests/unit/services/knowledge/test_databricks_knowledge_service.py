@@ -7,7 +7,6 @@ Tests reflect the current implementation with latest features:
 - Support for user tokens (OBO authentication)
 """
 
-from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -490,7 +489,7 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
             result = await self.service.browse_volume_files(volume_path, self.group_id)
 
             assert isinstance(result, dict)
-            assert result.get("success") == True
+            assert result.get("success")
 
     @pytest.mark.asyncio
     async def test_browse_files_handles_exceptions(self):
@@ -506,7 +505,7 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
 
             # Should return error dict on error
             assert isinstance(result, dict)
-            assert result.get("success") == False
+            assert not result.get("success")
             assert "error" in result
 
 

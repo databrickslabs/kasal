@@ -71,9 +71,9 @@ def _no_real_database(monkeypatch):
     monkeypatch.setattr(DatabricksService, "get_databricks_config", _no_config)
 
 
-import pytest
+import pytest  # noqa: E402 - import follows module initialization
 
-from src.services.otel_tracing.mlflow_setup import (
+from src.services.otel_tracing.mlflow_setup import (  # noqa: E402 - import follows module initialization
     configure_mlflow_in_subprocess,
 )
 

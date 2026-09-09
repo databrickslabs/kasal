@@ -9,9 +9,7 @@ Covers:
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from src.services.otel_tracing.event_bridge import (
     OTelEventBridge,

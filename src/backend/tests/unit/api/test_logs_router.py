@@ -163,7 +163,7 @@ class TestLogsRouter:
         )
 
         with pytest.raises(Exception) as exc_info:
-            response = client.get("/llm-logs")
+            client.get("/llm-logs")
 
         assert str(exc_info.value) == "Service error"
         mock_log_service.get_logs_paginated_by_group.assert_called_once()
@@ -174,7 +174,7 @@ class TestLogsRouter:
         mock_log_service.count_logs_by_group.side_effect = Exception("Count error")
 
         with pytest.raises(Exception) as exc_info:
-            response = client.get("/llm-logs/count")
+            client.get("/llm-logs/count")
 
         assert str(exc_info.value) == "Count error"
         mock_log_service.count_logs_by_group.assert_called_once()
@@ -187,7 +187,7 @@ class TestLogsRouter:
         )
 
         with pytest.raises(Exception) as exc_info:
-            response = client.get("/llm-logs/endpoints")
+            client.get("/llm-logs/endpoints")
 
         assert str(exc_info.value) == "Endpoints error"
         mock_log_service.get_unique_endpoints_by_group.assert_called_once()
@@ -198,7 +198,7 @@ class TestLogsRouter:
         mock_log_service.get_log_stats_by_group.side_effect = Exception("Stats error")
 
         with pytest.raises(Exception) as exc_info:
-            response = client.get("/llm-logs/stats")
+            client.get("/llm-logs/stats")
 
         assert str(exc_info.value) == "Stats error"
         mock_log_service.get_log_stats_by_group.assert_called_once()

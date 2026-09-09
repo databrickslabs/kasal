@@ -41,17 +41,8 @@ interface WorkflowPanelsProps {
   selectedModel: string;
   setSelectedModel: (model: string) => void;
   // Dialog props
-  onOpenLogsDialog: () => void;
-  onToggleChat: () => void;
-  isChatOpen: boolean;
-  setIsAgentDialogOpen: (open: boolean) => void;
-  setIsTaskDialogOpen: (open: boolean) => void;
-  setIsCrewDialogOpen: (open: boolean) => void;
   onOpenTutorial?: () => void;
   onOpenConfiguration?: () => void;
-  // Play button handlers
-  onPlayPlan?: () => void;
-  onPlayFlow?: () => void;
 }
 
 const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
@@ -86,16 +77,8 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   setReasoningEnabled,
   selectedModel,
   setSelectedModel,
-  onOpenLogsDialog,
-  onToggleChat,
-  isChatOpen,
-  setIsAgentDialogOpen,
-  setIsTaskDialogOpen,
-  setIsCrewDialogOpen,
   onOpenTutorial,
   onOpenConfiguration,
-  onPlayPlan,
-  onPlayFlow
 }) => {
   const { kasalFlowEnabled } = useFlowConfigStore();
   if (areFlowsVisible && kasalFlowEnabled) {
@@ -178,17 +161,9 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           setReasoningEnabled={setReasoningEnabled}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
-          onOpenLogsDialog={onOpenLogsDialog}
-          onToggleChat={onToggleChat}
-          isChatOpen={isChatOpen}
-          setIsAgentDialogOpen={setIsAgentDialogOpen}
-          setIsTaskDialogOpen={setIsTaskDialogOpen}
-          setIsCrewDialogOpen={setIsCrewDialogOpen}
           showRunHistory={showRunHistory}
           onOpenTutorial={onOpenTutorial}
           onOpenConfiguration={onOpenConfiguration}
-          onPlayPlan={onPlayPlan}
-          onPlayFlow={onPlayFlow}
         />
       </Box>
     </Box>

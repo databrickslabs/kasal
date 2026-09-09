@@ -5,15 +5,12 @@ These test the inner execution code of create_starting_point_crew_method and
 create_listener_method by calling the wrapped method functions directly.
 """
 
-import asyncio
-import uuid
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.services.flow_builder.modules.flow_methods import (
     FlowMethodFactory,
-    extract_final_answer,
 )
 from tests.unit.helpers.harness_double import patch_build
 
@@ -137,7 +134,7 @@ class TestStartingPointMethodBody:
             mock_wait.return_value = mock_result
 
             inner = method._meth
-            result = await inner(mock_flow)
+            await inner(mock_flow)
 
         assert crew_kwargs_captured.get("memory") is False
 
@@ -807,7 +804,7 @@ class TestListenerMethodBody:
             mock_wait.return_value = mock_result
 
             inner = method._meth
-            result = await inner(mock_flow)
+            await inner(mock_flow)
 
         assert crew_kwargs_captured.get("memory") is False
 
@@ -1068,7 +1065,7 @@ class TestListenerMethodBody:
             mock_wait.return_value = mock_result
 
             inner = method._meth
-            result = await inner(mock_flow, pipeline_config)
+            await inner(mock_flow, pipeline_config)
 
         # config_json should have been injected
         assert mock_tool._default_config.get("config_json") == pipeline_config

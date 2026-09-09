@@ -6,7 +6,7 @@ authentication, Service Account authentication, token validation, and credential
 """
 
 import os
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 

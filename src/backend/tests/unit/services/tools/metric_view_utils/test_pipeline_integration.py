@@ -7,7 +7,6 @@ import re
 import pytest
 import yaml
 
-from src.services.tools.metric_view_utils.data_classes import TranslationResult
 from src.services.tools.metric_view_utils.mquery_parser import MQueryParser
 from src.services.tools.metric_view_utils.pipeline import MetricViewPipeline
 

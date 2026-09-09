@@ -7,7 +7,6 @@ including schema permissions, default privileges, and error handling.
 
 import logging
 import re
-from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection

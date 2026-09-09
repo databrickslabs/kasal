@@ -5,16 +5,12 @@ Tests the functionality of schema repository including
 CRUD operations, JSON handling, keyword/tool searching, and error handling.
 """
 
-import json
 from datetime import datetime
-from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import func, or_, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.expression import cast
 
 from src.models.schema import Schema
 from src.repositories.schema_repository import SchemaRepository

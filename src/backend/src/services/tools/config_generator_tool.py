@@ -151,7 +151,7 @@ class ConfigGeneratorTool(BaseTool):
                         )
                         # Extract measures from cached metadata
                         cached_measures = cached.get("measures", [])
-                        cached_tables = cached.get("tables", [])
+                        cached.get("tables", [])
                         cached_relationships = cached.get("relationships", [])
 
                         if cached_measures:
@@ -240,7 +240,7 @@ class ConfigGeneratorTool(BaseTool):
                     # Parse: source.FK = alias.PK
                     on_match = re.search(r"(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)", join_on)
                     if on_match:
-                        dim_alias = on_match.group(3)
+                        on_match.group(3)
                         dim_key = on_match.group(4)
                         dim_name = alias.replace("dim_", "").capitalize()
                         # Get dim columns from mquery

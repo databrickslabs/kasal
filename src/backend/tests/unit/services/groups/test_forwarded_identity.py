@@ -4,6 +4,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from src.models.enums import UserRole
 
 
@@ -48,10 +49,10 @@ class TestCreateUserFromForwardedEmail:
     @pytest.mark.asyncio
     async def test_returns_existing_user_when_found(self):
         """Test that existing user is returned directly with updated last_login."""
+        from src.models.user import User
         from src.services.groups.forwarded_identity import (
             get_or_create_forwarded_user as _create_user_from_forwarded_email,
         )
-        from src.models.user import User
 
         # Use a real User instance (no hashed_password needed since it's not in the model)
         mock_session = AsyncMock()

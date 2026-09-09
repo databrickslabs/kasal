@@ -453,7 +453,9 @@ class TestMeasureUsageSurfacing:
 
 # ─── _check_dangerous_sql Tests ─────────────────────────────────────────────
 
-from src.services.tools.metric_view_utils.yaml_emitter import _check_dangerous_sql
+from src.services.tools.metric_view_utils.yaml_emitter import (  # noqa: E402 - import follows module initialization
+    _check_dangerous_sql,
+)
 
 
 class TestCheckDangerousSql:
@@ -575,7 +577,9 @@ class TestCheckDangerousSql:
 
 # ─── _check_metadata_limits Tests ───────────────────────────────────────────
 
-from src.services.tools.metric_view_utils.yaml_emitter import _check_metadata_limits
+from src.services.tools.metric_view_utils.yaml_emitter import (  # noqa: E402 - import follows module initialization
+    _check_metadata_limits,
+)
 
 
 class TestCheckMetadataLimits:
@@ -642,7 +646,7 @@ class TestCheckMetadataLimits:
 
 # ─── YAML formatting helper tests ───────────────────────────────────────────
 
-from src.services.tools.metric_view_utils.yaml_emitter import (
+from src.services.tools.metric_view_utils.yaml_emitter import (  # noqa: E402 - import follows module initialization
     _clean_filter_prefixes,
     _yaml_needs_quoting,
     _yaml_scalar,

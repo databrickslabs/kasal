@@ -2,7 +2,7 @@
 Unit tests for AgentBricks service.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,10 +12,8 @@ from src.schemas.agentbricks import (
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
     AgentBricksEndpointState,
-    AgentBricksExecutionRequest,
     AgentBricksExecutionResponse,
     AgentBricksMessage,
-    AgentBricksQueryRequest,
     AgentBricksQueryResponse,
     AgentBricksQueryStatus,
 )
@@ -387,7 +385,7 @@ class TestExecuteQuery:
         ) as mock_exec:
             mock_exec.return_value = mock_response
 
-            result = await service.execute_query(
+            await service.execute_query(
                 endpoint_name="test-endpoint",
                 question="Hello",
                 custom_inputs={"key": "value"},

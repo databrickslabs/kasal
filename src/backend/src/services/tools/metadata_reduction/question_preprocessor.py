@@ -512,7 +512,7 @@ Return JSON:
 
         # Run async in sync context
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             import concurrent.futures
             import contextvars
 

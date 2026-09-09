@@ -72,7 +72,6 @@ class LightAgentService:
         Returns:
             ``{"execution_id", "status"[, "error"]}``.
         """
-        import re
         from datetime import UTC, datetime
 
         # ROUTED. Chat is the only path that runs IN-PROCESS, in a FastAPI
@@ -1599,8 +1598,6 @@ class LightAgentService:
             import logging as _logging
 
             import mlflow
-
-            from src.db.session import routed_scoped_session
 
             # Load the workspace's Databricks config (same source crew/flow use).
             # The provider ROUTES: chat runs IN-PROCESS, where the raw factory is a

@@ -1310,7 +1310,7 @@ class TestDispatchWithMlflow:
             },
         ):
             request = DispatcherRequest(message="ec", model="m")
-            result = await svc.dispatch(request)
+            await svc.dispatch(request)
 
         outputs_arg = mock_trace.set_outputs.call_args[0][0]
         assert "generation_summary" in outputs_arg
@@ -1491,7 +1491,7 @@ class TestDispatchWithMlflow:
             },
         ):
             request = DispatcherRequest(message="hello", model="m")
-            result = await svc.dispatch(request)
+            await svc.dispatch(request)
 
         mock_trace.set_outputs.assert_called_once()
 
@@ -1673,8 +1673,6 @@ class TestEdgeCases:
         svc._log_llm_interaction = AsyncMock()
         svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
 
-        captured_request = {}
-
         def capture_create_task(coro):
             # The coroutine has already been constructed with the streaming request
             coro.close()  # Clean up the coroutine
@@ -1749,8 +1747,6 @@ class TestEdgeCases:
         )
         svc._log_llm_interaction = AsyncMock()
         svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
-
-        captured_coro_args = []
 
         def capture_create_task(coro):
             # create_crew_progressive was called with (streaming_req, group_context, generation_id)
@@ -3533,7 +3529,7 @@ class TestDispatchStreamingCrewAndToolResolution:
 
             mock_create_task.assert_called_once()
             # The argument to create_task should be the coroutine from create_crew_progressive
-            call_args = mock_create_task.call_args[0][0]
+            mock_create_task.call_args[0][0]
             # Verify create_crew_progressive was called (the coroutine was created)
             svc.crew_service.create_crew_progressive.assert_called_once()
             progressive_call = svc.crew_service.create_crew_progressive.call_args

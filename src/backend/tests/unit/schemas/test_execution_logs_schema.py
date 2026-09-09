@@ -5,8 +5,6 @@ Tests the functionality of Pydantic schemas for execution log operations
 including validation, serialization, and field constraints.
 """
 
-from datetime import datetime
-
 import pytest
 from pydantic import ValidationError
 

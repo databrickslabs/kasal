@@ -414,7 +414,7 @@ class LakebaseMigrationService(BaseService):
                             converted_dict[col] = datetime.strptime(
                                 value.split(".")[0], "%Y-%m-%d %H:%M:%S"
                             )
-                        except:
+                        except Exception:
                             converted_dict[col] = value  # Keep as-is if parsing fails
                 else:
                     converted_dict[col] = value

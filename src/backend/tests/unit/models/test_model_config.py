@@ -4,10 +4,6 @@ Unit tests for ModelConfig model class.
 Tests the SQLAlchemy model attributes, defaults, table name, and column definitions.
 """
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
-
-import pytest
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
 
 from src.db.base import Base

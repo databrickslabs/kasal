@@ -264,7 +264,7 @@ class UCMetricsGenerator:
 
         # Get variable definitions
         variables = yaml_metadata.get("default_variables", {})
-        query_filters = yaml_metadata.get("filters", {}).get("query_filter", {})
+        yaml_metadata.get("filters", {}).get("query_filter", {})
 
         # Parse common filters into a set
         common_filter_set = set()

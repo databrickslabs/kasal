@@ -18,17 +18,36 @@ The security preamble is injected by the CALLER
 returns, so each path keeps its own ``[SECURITY]`` log line while the injection
 itself stays shared (Phase 1).
 """
-import os
-import re
-from typing import Any, Dict, List, Optional
+import os  # noqa: E402 - import follows module initialization
+import re  # noqa: E402 - import follows module initialization
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    List,
+    Optional,
+)
 
-from src.core.llm.output_cap import output_cap
-from src.core.logger import LoggerManager
-from src.services.execution.harnesses import active_harness
-from src.services.execution.harnesses.binding import Capability
-from src.services.execution.kernel.agent_plan import add_plan_tool
-from src.services.execution.kernel.agent_security import inject_security_preamble
-from src.services.execution.kernel.agent_skills import inject_skills
+from src.core.llm.output_cap import (  # noqa: E402 - import follows module initialization
+    output_cap,
+)
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
+    active_harness,
+)
+from src.services.execution.harnesses.binding import (  # noqa: E402 - import follows module initialization
+    Capability,
+)
+from src.services.execution.kernel.agent_plan import (  # noqa: E402 - import follows module initialization
+    add_plan_tool,
+)
+from src.services.execution.kernel.agent_security import (  # noqa: E402 - import follows module initialization
+    inject_security_preamble,
+)
+from src.services.execution.kernel.agent_skills import (  # noqa: E402 - import follows module initialization
+    inject_skills,
+)
 
 logger = LoggerManager.get_instance().crew
 

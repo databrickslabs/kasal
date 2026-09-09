@@ -9,7 +9,7 @@ Targets uncovered lines:
 import json
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -95,9 +95,6 @@ def _make_task_data(**kwargs):
 def _make_agent():
     """Create a real CrewAI Agent that passes pydantic validation."""
     from unittest.mock import patch
-
-    from src.core.llm.transport import LLM
-    from src.services.execution.runtime import Agent
 
     with patch("crewai.agent.Agent._setup_agent_executor"):
         with patch("crewai.utilities.rpm_controller.RPMController", MagicMock()):
@@ -216,7 +213,7 @@ class TestConfigureTask:
                 return_value=task,
             ),
         ):
-            result = await TaskConfig.configure_task(
+            await TaskConfig.configure_task(
                 task_data, agent=agent, task_output_callback=callback
             )
 
@@ -241,7 +238,7 @@ class TestConfigureTask:
                 side_effect=mock_task_ctor,
             ),
         ):
-            result = await TaskConfig.configure_task(task_data, agent=agent)
+            await TaskConfig.configure_task(task_data, agent=agent)
 
         # Unified to the crew path's wording ("markdown syntax").
         assert "markdown" in captured_kwargs.get("description", "").lower()
@@ -843,7 +840,6 @@ class TestResolveAgentForTask:
 
 def _make_mock_session_ctx():
     """Helper to create a mock session context manager."""
-    from contextlib import asynccontextmanager
 
     mock_session = AsyncMock()
     mock_session_ctx = MagicMock()
@@ -865,7 +861,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
@@ -890,7 +888,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -913,7 +913,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -932,7 +934,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
@@ -950,7 +954,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
@@ -974,7 +980,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -998,7 +1006,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -1019,7 +1029,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             mock_tf = AsyncMock()
             MockTF.create = AsyncMock(return_value=mock_tf)
@@ -1040,8 +1052,6 @@ class TestConfigureTaskTools:
         _, agent = _make_real_task_with_mock_agent()
         agent.tools = []
 
-        from contextlib import asynccontextmanager
-
         fail_ctx = MagicMock()
         fail_ctx.__aenter__ = AsyncMock(side_effect=Exception("session fail"))
         fail_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -1055,7 +1065,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=fail_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.return_value = mock_factory
 
@@ -1092,7 +1104,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=mock_factory)
 
@@ -1112,7 +1126,9 @@ class TestConfigureTaskTools:
         with (
             patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
-            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.ToolFactory"
+            ) as MockTF,
         ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 

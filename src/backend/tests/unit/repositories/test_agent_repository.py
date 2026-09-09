@@ -6,8 +6,7 @@ async and sync CRUD operations, custom queries, and error handling.
 """
 
 from datetime import datetime
-from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import delete, select

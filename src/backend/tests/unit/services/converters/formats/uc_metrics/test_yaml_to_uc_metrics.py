@@ -652,7 +652,7 @@ class TestUCMetricsGenerator:
     # ========== Constant Selection Tests (using generate_uc_metric directly) ==========
 
     @pytest.fixture
-    def simple_definition(self):
+    def inventory_definition(self):
         """Simple KPI definition for generate_uc_metric"""
         return KPIDefinition(
             description="Inventory Metrics",

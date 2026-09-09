@@ -29,13 +29,13 @@ from src.services.a2ui.compose import (
     resolve_directives,
     wants_rich_surface,
 )
+from src.services.a2ui.stream import DATA_COMPONENTS as _DATA_COMPONENTS
 from src.services.a2ui.stream import (
     SURFACE_ID,
     SurfaceStreamer,
     delete_surface_msg,
     surface_to_messages,
 )
-from src.services.a2ui.stream import DATA_COMPONENTS as _DATA_COMPONENTS
 from src.services.a2ui.structured_text import render_research_envelope
 
 logger = logging.getLogger(__name__)
@@ -267,6 +267,7 @@ async def _resolve_config(
 # requested rich kinds like quiz/mindmap). These are only worth an
 # envelope when they carry real data — see `compose_surface`.
 _DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})
+
 
 # The deliverable-component set now lives in ``stream`` — the STREAM gate needs
 # the same list (a dashboard may not start streaming until it has proven it

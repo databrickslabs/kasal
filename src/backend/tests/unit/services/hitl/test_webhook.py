@@ -4,9 +4,8 @@ Comprehensive unit tests for services/hitl_webhook_service.py
 
 import hashlib
 import hmac
-import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -18,7 +17,6 @@ from src.schemas.hitl import (
     HITLWebhookUpdate,
 )
 from src.services.hitl.webhook import (
-    WEBHOOK_TIMEOUT_SECONDS,
     HITLWebhookNotFoundError,
     HITLWebhookService,
     HITLWebhookServiceError,
@@ -111,7 +109,7 @@ class TestHITLWebhookServiceInit:
     def test_creates_webhook_repo_if_none(self, mock_session):
         with patch("src.services.hitl.webhook.HITLWebhookRepository") as MockRepo:
             with patch("src.services.hitl.webhook.HITLApprovalRepository"):
-                svc = HITLWebhookService(session=mock_session)
+                HITLWebhookService(session=mock_session)
         MockRepo.assert_called_once_with(mock_session)
 
     def test_uses_provided_repos(
@@ -566,7 +564,7 @@ class TestNotificationPublicMethods:
         with patch.object(
             service, "_send_notification", new_callable=AsyncMock, return_value=True
         ) as mock_notify:
-            result = await service.send_gate_approved_notification(approval)
+            await service.send_gate_approved_notification(approval)
 
         mock_notify.assert_called_once_with(
             approval=approval,
@@ -579,7 +577,7 @@ class TestNotificationPublicMethods:
         with patch.object(
             service, "_send_notification", new_callable=AsyncMock, return_value=False
         ) as mock_notify:
-            result = await service.send_gate_rejected_notification(approval)
+            await service.send_gate_rejected_notification(approval)
 
         mock_notify.assert_called_once_with(
             approval=approval,

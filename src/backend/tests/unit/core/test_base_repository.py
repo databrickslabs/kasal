@@ -6,7 +6,6 @@ CRUD operations, error handling, and transaction management.
 """
 
 import uuid
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -172,7 +171,7 @@ class TestBaseRepository:
         expected_instance.id = uuid.uuid4()
 
         with patch.object(MockModel, "__new__", return_value=expected_instance):
-            result = await base_repository.create(test_data)
+            await base_repository.create(test_data)
 
             mock_session.add.assert_called_once()
             mock_session.flush.assert_called_once()
@@ -397,7 +396,7 @@ class TestBaseRepository:
                 with patch.object(MockModel, "__call__", return_value=mock_instance):
                     try:
                         await base_repository.create(test_data)
-                    except:
+                    except Exception:
                         pass  # We're just testing logging, not the full operation
 
             # Verify logging was called

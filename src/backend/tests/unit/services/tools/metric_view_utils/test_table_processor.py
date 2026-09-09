@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.services.tools.metric_view_utils.data_classes import (
-    MetricViewSpec,
     TableInfo,
     TranslationResult,
 )
@@ -707,7 +704,7 @@ class TestProcessTableStaticFilters:
         )
         filter_warnings = []
         ctx = _make_context(filter_warnings=filter_warnings)
-        spec = _run_process_table("fact_test", ti, [], ctx)
+        _run_process_table("fact_test", ti, [], ctx)
         assert any("CTE artifact" in w for w in ctx.filter_warnings)
 
     def test_unknown_source_column_dropped(self):
@@ -718,7 +715,7 @@ class TestProcessTableStaticFilters:
         )
         filter_warnings = []
         ctx = _make_context(filter_warnings=filter_warnings)
-        spec = _run_process_table("fact_test", ti, [], ctx)
+        _run_process_table("fact_test", ti, [], ctx)
         assert any("unknown column" in w for w in ctx.filter_warnings)
 
 
@@ -965,7 +962,7 @@ class TestProcessTableScanData:
         ti = _make_table_info()
         limitations = {}
         ctx = _make_context(scan_data={"fact_test": scan_info}, limitations=limitations)
-        spec = _run_process_table("fact_test", ti, [], ctx)
+        _run_process_table("fact_test", ti, [], ctx)
         assert "aggregation_warnings" in ctx.limitations
 
     def test_scan_data_with_raw_transpiled_sql(self):
@@ -998,7 +995,7 @@ class TestProcessTableFilterConsistency:
         ti = _make_table_info()
         filter_warnings = []
         ctx = _make_context(filter_warnings=filter_warnings)
-        spec = process_table(
+        process_table(
             "fact_test",
             ti,
             [],
@@ -1018,7 +1015,7 @@ class TestProcessTableFilterConsistency:
 class TestProcessTableLlmFallback:
     def test_llm_fallback_called_when_configured(self):
         """Lines 452-477 — LLM fallback path executed."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         ti = _make_table_info()
 
@@ -1268,7 +1265,7 @@ class TestProcessTableCleanUnresolvedVars:
                 "original_name": "Total",
             }
         ]
-        spec = process_table(
+        process_table(
             "fact_test",
             ti,
             dax,
@@ -1446,7 +1443,7 @@ class TestProcessTableCrossTableTranslated:
                 "original_name": "Cross",
             }
         ]
-        spec = _run_process_table("fact_test", ti, dax, ctx)
+        _run_process_table("fact_test", ti, dax, ctx)
         assert any(m.category == "cross_table" for m in ctx.cross_table_measures)
 
 
@@ -1511,7 +1508,7 @@ class TestProcessTablePass2Specific:
         ti = _make_table_info(
             aggregate_columns=[{"name": "revenue", "source_col": "revenue"}]
         )
-        ctx = _make_context()
+        _make_context()
         # Use F_Start (without _date) to match the expr_lines loop regex
         # Pre-clean regex needs F_Start_date; expr_lines loop regex needs F_Start
         # Also ensure the DAX doesn't produce a non-revenue measure_ref

@@ -10,8 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from uuid import UUID
 
-from sqlalchemy import delete, desc, distinct, func, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import delete, distinct, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -1187,7 +1186,6 @@ class ExecutionHistoryRepository:
                 # Also write to /tmp so the Validator subprocess can read the
                 # user's edits (subprocess can't connect to DB in deployed env).
                 try:
-                    import os as _os
 
                     _tmp_path = "/tmp/ucmv_user_edits.json"
                     with open(_tmp_path, "w") as _f:

@@ -9,7 +9,6 @@ chatter off the terminal. Its only callers are the crew and flow runners.
 import logging
 import os
 import sys
-from typing import Optional
 
 from src.services.execution.logs.context import (
     ExecutionContextFormatter,
@@ -30,7 +29,6 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         execution_id: The execution ID to include in logs
         process_type: Type of process ("crew" or "flow") - defaults to "crew" for backward compatibility
     """
-    import os  # Import at the top of the function
 
     # Set execution context
     set_execution_context(execution_id)
@@ -151,7 +149,6 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         exec_logger.addHandler(console_handler)
 
     # Check if debug logging is enabled via environment variables
-    import os
 
     # Determine which environment variable to check based on process_type
     env_var_name = f"KASAL_LOG_{process_type.upper()}"

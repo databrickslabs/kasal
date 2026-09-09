@@ -9,17 +9,14 @@ import json
 import logging
 import traceback
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import KasalError
 from src.models.agent import Agent
 from src.models.task import Task
-from src.repositories.agent_repository import AgentRepository
 from src.repositories.task_repository import TaskRepository
-from src.schemas.agent import AgentCreate
-from src.schemas.task import TaskCreate
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -478,12 +475,12 @@ class CrewGeneratorRepository:
 
         # Create maps for easy lookup
         task_name_to_db_task = {task.name: task for task in created_tasks}
-        task_id_to_db_task = {task.id: task for task in created_tasks}
+        {task.id: task for task in created_tasks}
 
         logger.info(f"Task name map created with {len(task_name_to_db_task)} entries.")
 
         # Use the existing session instead of creating a new one
-        task_repo = TaskRepository(self.session)
+        TaskRepository(self.session)
         tasks_to_update = []
 
         for task_data in tasks_data:

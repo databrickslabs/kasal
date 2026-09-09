@@ -7,14 +7,13 @@ and triggering flow resume.
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.execution_status import ExecutionStatus
 from src.models.hitl_approval import (
-    HITLApproval,
     HITLApprovalStatus,
     HITLRejectionAction,
     HITLTimeoutAction,
@@ -1397,3 +1396,19 @@ class TestEdgeCases:
             )
 
             assert result.success is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("comment", [None, "", "   "])
+async def test_required_comment_rejected_before_deciding(
+    hitl_service, mock_approval, comment
+):
+    from src.services.hitl.service import HITLApprovalValidationError
+
+    mock_approval.gate_config["require_comment"] = True
+    hitl_service.approval_repo.get_by_id.return_value = mock_approval
+    with pytest.raises(HITLApprovalValidationError, match="comment is required"):
+        await hitl_service.approve(
+            mock_approval.id, "reviewer@example.com", "group-1", comment=comment
+        )
+    hitl_service.approval_repo.update_status.assert_not_awaited()

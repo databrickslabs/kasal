@@ -23,7 +23,6 @@ import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
 from typing import Any, Dict, List, Optional, Type
 
 import httpx

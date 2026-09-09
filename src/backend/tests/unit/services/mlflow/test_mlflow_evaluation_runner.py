@@ -1336,7 +1336,6 @@ class TestCompleteEvaluationPaths:
 
     def _setup_complete_eval_mocks(self):
         """Build a comprehensive mock mlflow for complete_evaluation."""
-        import sys
 
         mock_mlflow = MagicMock()
         mock_mlflow.set_tracking_uri = MagicMock()
@@ -1488,8 +1487,6 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_with_contexts(self):
         """complete_evaluation adds Groundedness/Relevance scorers when has_ctx_col=True."""
         import sys
-
-        import pandas as pd_real
 
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 

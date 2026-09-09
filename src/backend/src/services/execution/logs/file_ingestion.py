@@ -1,7 +1,7 @@
 """Persist a process execution's matching file logs through the routed log service."""
 
-from pathlib import Path
 from logging import Logger
+from pathlib import Path
 from typing import Any
 
 
@@ -44,9 +44,7 @@ async def ingest_execution_log(
                 else None
             ),
             "group_email": (
-                getattr(group_context, "group_email", None)
-                if group_context
-                else None
+                getattr(group_context, "group_email", None) if group_context else None
             ),
         }
     )

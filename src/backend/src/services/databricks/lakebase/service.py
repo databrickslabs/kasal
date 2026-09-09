@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import time
-import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -16,8 +15,13 @@ from typing import Any, Dict, List, Optional
 TABLE_MIGRATION_TIMEOUT_SECONDS = 1800
 STATEMENT_TIMEOUT_MS = 1_800_000
 
-from databricks.sdk import WorkspaceClient
-from sqlalchemy import create_engine, text
+from databricks.sdk import (  # noqa: E402 - import follows module initialization
+    WorkspaceClient,
+)
+from sqlalchemy import (  # noqa: E402 - import follows module initialization
+    create_engine,
+    text,
+)
 
 # Try to import DatabaseInstance, but make it optional
 try:
@@ -40,19 +44,37 @@ except ImportError:
     DatabaseInstanceRoleMembershipRole = None
     DatabaseInstanceRoleIdentityType = None
     LAKEBASE_AVAILABLE = False
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
+    AsyncSession,
+)
 
-from src.config.settings import settings
-from src.core.base_service import BaseService
-from src.core.logger import LoggerManager
-from src.db.base import Base
-from src.models.database_config import LakebaseConfig
-from src.repositories.database_config_repository import DatabaseConfigRepository
-from src.services.databricks.lakebase.connection import LakebaseConnectionService
-from src.services.databricks.lakebase.migration import LakebaseMigrationService
-from src.services.databricks.lakebase.permission import LakebasePermissionService
-from src.services.databricks.lakebase.schema import LakebaseSchemaService
-from src.utils.databricks_auth import get_workspace_client
+from src.config.settings import (  # noqa: E402 - import follows module initialization
+    settings,
+)
+from src.core.base_service import (  # noqa: E402 - import follows module initialization
+    BaseService,
+)
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.models.database_config import (  # noqa: E402 - import follows module initialization
+    LakebaseConfig,
+)
+from src.repositories.database_config_repository import (  # noqa: E402 - import follows module initialization
+    DatabaseConfigRepository,
+)
+from src.services.databricks.lakebase.connection import (  # noqa: E402 - import follows module initialization
+    LakebaseConnectionService,
+)
+from src.services.databricks.lakebase.migration import (  # noqa: E402 - import follows module initialization
+    LakebaseMigrationService,
+)
+from src.services.databricks.lakebase.permission import (  # noqa: E402 - import follows module initialization
+    LakebasePermissionService,
+)
+from src.services.databricks.lakebase.schema import (  # noqa: E402 - import follows module initialization
+    LakebaseSchemaService,
+)
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -431,7 +453,7 @@ class LakebaseService(BaseService):
 
             # Create new instance using service principal
             w = await self.get_workspace_client()
-            instance = w.database.create_database_instance(
+            w.database.create_database_instance(
                 DatabaseInstance(
                     name=instance_name,
                     capacity=capacity,
@@ -785,7 +807,6 @@ class LakebaseService(BaseService):
             logger.info("📤 Starting data migration...")
 
             # Import json for serialization (datetime already imported at top)
-            import json
 
             # Initialize migration service with engines
             self.migration_service = LakebaseMigrationService(

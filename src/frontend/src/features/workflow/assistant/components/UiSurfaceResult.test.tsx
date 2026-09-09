@@ -70,6 +70,17 @@ describe('UiSurfaceResult (A2UI result card)', () => {
     expect(screen.queryByText('Generated UI')).toBeNull();
   });
 
+  it('offers Chat’s color palette and passes the chosen surface back to the conversation', () => {
+    const onRestyle = vi.fn();
+    render(<UiSurfaceResult surface={makeSurface()} onRestyle={onRestyle} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Customize colors' }));
+    const choice = screen.getByRole('menu').querySelector('button')!;
+    fireEvent.click(choice);
+    expect(onRestyle).toHaveBeenCalledWith(expect.objectContaining({
+      root: 'root', theme: expect.objectContaining({ accent: expect.any(String) }),
+    }));
+  });
+
   it('opens a full-size dialog from the expand control', () => {
     render(<UiSurfaceResult surface={makeSurface()} />);
     fireEvent.click(screen.getByLabelText('Open in preview pane'));

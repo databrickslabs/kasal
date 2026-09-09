@@ -241,15 +241,10 @@ async def test_streamable_connection_success():
     mock_session = _mock_mcp_session(tool_count=3)
 
     with (
-        patch(
-            "src.services.mcp.mcp_client.service.streamablehttp_client", create=True
-        ) as mock_connect,
-        patch(
-            "src.services.mcp.mcp_client.service.ClientSession", create=True
-        ) as mock_cs,
+        patch("src.services.mcp.mcp_client.service.streamablehttp_client", create=True),
+        patch("src.services.mcp.mcp_client.service.ClientSession", create=True),
     ):
         # Patch the inline imports used by the method
-        import src.services.mcp.mcp_client.service as mod
 
         mock_connect_cm = AsyncMock()
         mock_connect_cm.__aenter__.return_value = (Mock(), Mock(), None)

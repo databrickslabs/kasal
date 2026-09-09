@@ -5,8 +5,6 @@ This module defines schemas used for validating and structuring data
 in template generation API requests and responses.
 """
 
-from typing import Any, Dict, Optional
-
 from pydantic import BaseModel, Field
 
 

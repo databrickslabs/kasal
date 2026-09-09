@@ -2,8 +2,7 @@
 Unit tests for asyncio_utils module.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -204,7 +203,7 @@ class TestRunInThreadWithLoop:
         with (
             patch("src.utils.asyncio_utils.asyncio.get_event_loop") as mock_get_loop,
             patch("src.utils.asyncio_utils.asyncio.new_event_loop") as mock_new_loop,
-            patch("src.utils.asyncio_utils.asyncio.set_event_loop") as mock_set_loop,
+            patch("src.utils.asyncio_utils.asyncio.set_event_loop"),
         ):
 
             # Simulate no existing event loop
@@ -234,7 +233,7 @@ class TestRunInThreadWithLoop:
         with (
             patch("src.utils.asyncio_utils.asyncio.all_tasks") as mock_all_tasks,
             patch("src.utils.asyncio_utils.asyncio.current_task") as mock_current_task,
-            patch("src.utils.asyncio_utils.asyncio.gather") as mock_gather,
+            patch("src.utils.asyncio_utils.asyncio.gather"),
         ):
 
             mock_current_task.return_value = current_task
@@ -255,7 +254,7 @@ class TestRunInThreadWithLoop:
         with (
             patch("src.utils.asyncio_utils.asyncio.get_event_loop") as mock_get_loop,
             patch("src.utils.asyncio_utils.asyncio.new_event_loop") as mock_new_loop,
-            patch("src.utils.asyncio_utils.asyncio.set_event_loop") as mock_set_loop,
+            patch("src.utils.asyncio_utils.asyncio.set_event_loop"),
             patch("src.utils.asyncio_utils.logger") as mock_logger,
         ):
 

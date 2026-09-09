@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from src.api.chat_assets_router import router
-from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.core.exceptions import KasalError
+from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.services.assets.service import AssetValidationError, ChatAssetService
 from src.utils.user_context import GroupContext
 

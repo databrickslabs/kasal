@@ -10,7 +10,6 @@ This service handles all connection-related operations for Databricks Lakebase i
 
 import logging
 import os
-import time
 import uuid
 from typing import Any, Dict, Optional
 

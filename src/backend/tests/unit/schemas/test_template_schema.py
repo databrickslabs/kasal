@@ -442,7 +442,7 @@ class TestBackwardCompatibilityAliases:
         prompt_template = PromptTemplateCreate(**template_data)
         alias_template = TemplateCreate(**template_data)
 
-        assert type(prompt_template) == type(alias_template)
+        assert type(prompt_template) is type(alias_template)
         assert prompt_template.name == alias_template.name
         assert prompt_template.template == alias_template.template
         assert prompt_template.is_active == alias_template.is_active
@@ -458,7 +458,7 @@ class TestBackwardCompatibilityAliases:
         prompt_update = PromptTemplateUpdate(**update_data)
         alias_update = TemplateUpdate(**update_data)
 
-        assert type(prompt_update) == type(alias_update)
+        assert type(prompt_update) is type(alias_update)
         assert prompt_update.name == alias_update.name
         assert prompt_update.is_active == alias_update.is_active
 

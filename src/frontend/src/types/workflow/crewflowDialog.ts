@@ -6,6 +6,7 @@ import { Task } from './task';
 
 export interface CrewFlowSelectionDialogProps {
   open: boolean;
+  embedded?: boolean;
   onClose: () => void;
   onCrewSelect: (nodes: Node[], edges: Edge[], crewName?: string, crewId?: string) => void;
   onFlowSelect: (nodes: Node[], edges: Edge[], flowConfig?: FlowConfiguration) => void;

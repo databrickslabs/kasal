@@ -506,8 +506,8 @@ class TestCaptureTraceAndUpdateExecution:
     @pytest.mark.asyncio
     async def test_handles_exception_returns_none(self):
         mock_get_last = Mock(return_value="trace-456")
-        mock_update = AsyncMock(side_effect=RuntimeError("update failed"))
-        mock_logger = Mock()
+        AsyncMock(side_effect=RuntimeError("update failed"))
+        Mock()
 
         with patch(
             (
@@ -527,7 +527,7 @@ class TestCaptureTraceAndUpdateExecution:
             mock_fn.side_effect = RuntimeError("unexpected")
             # This simulates the exception path in real code
             try:
-                result = await mock_fn(
+                await mock_fn(
                     execution_id="exec-1",
                     experiment_name=None,
                     group_id=None,
@@ -775,7 +775,7 @@ class TestExecuteWithMlflowTrace:
         assert "MyCrew" in captured_name[0]
 
     def test_falls_back_on_import_error(self):
-        mlflow_result = MlflowSetupResult(enabled=True, tracing_ready=True)
+        MlflowSetupResult(enabled=True, tracing_ready=True)
         kickoff = Mock(return_value="fallback")
 
         # Patch the lazy import to fail
@@ -966,15 +966,15 @@ class TestConfigureMlflowFullSPNPath:
         # DatabricksService for experiment name resolution
         mock_db_service_instance = MagicMock()
         mock_db_service_instance.get_databricks_config = AsyncMock(return_value=None)
-        mock_db_service_cls = MagicMock(return_value=mock_db_service_instance)
+        MagicMock(return_value=mock_db_service_instance)
 
         mock_session_ctx = MagicMock()
         mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
 
-        mock_session_factory = MagicMock(return_value=mock_session_ctx)
+        MagicMock(return_value=mock_session_ctx)
 
-        mock_enable_autologs = MagicMock()
+        MagicMock()
 
         with patch.dict(
             sys.modules,
@@ -1912,8 +1912,6 @@ class TestTrackedCompletionMonkeyPatch:
 
         import litellm as _litellm
 
-        original_completion = _litellm.completion
-
         mock_mlflow = MagicMock()
         mock_exp = MagicMock()
         mock_exp.experiment_id = "exp-trace"
@@ -2001,11 +1999,10 @@ class TestTrackedCompletionMonkeyPatch:
             patch("litellm.completion", return_value=mock_result),
         ):
             # Reconstruct patched with the mocked original
-            import litellm as _litellm
+            import litellm as _litellm  # noqa: F401 - verifies optional dependency availability
 
-            saved = _litellm.completion
             try:
-                result = patched(model="test-model", messages=[])
+                patched(model="test-model", messages=[])
             except Exception:
                 pass  # May fail if internal calls have issues, but code paths exercised
 

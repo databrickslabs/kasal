@@ -6,10 +6,8 @@ This was a bug where PerplexitySearchTool.__init__() received an unexpected
 'execution_inputs' keyword argument.
 """
 
-from typing import Any, Dict, Optional
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from typing import Dict, Optional
+from unittest.mock import Mock, patch
 
 from src.services.tools.tool_factory import ToolFactory
 
@@ -556,7 +554,7 @@ class TestToolCreationErrorHandling:
         factory._tool_implementations["ScrapeWebsiteTool"] = mock_tool_class
 
         with patch.object(factory, "get_tool_info", return_value=tool_info):
-            result = factory.create_tool("ScrapeWebsiteTool")
+            factory.create_tool("ScrapeWebsiteTool")
 
         # Should still work since base_config defaults to {} when config attr missing
         if mock_tool_class.called:

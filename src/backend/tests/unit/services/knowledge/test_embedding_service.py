@@ -2,7 +2,6 @@
 Comprehensive unit tests for services/knowledge_embedding_service.py
 """
 
-import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -456,7 +455,6 @@ class TestEmbedFile:
 
 
 from src.schemas.memory_backend import (  # noqa: E402
-    DatabricksMemoryConfig,
     MemoryBackendType,
 )
 

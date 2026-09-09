@@ -8,8 +8,6 @@ template management, versioning, and multi-group support.
 from datetime import datetime
 from unittest.mock import patch
 
-import pytest
-
 from src.models.template import PromptTemplate
 
 
@@ -577,7 +575,7 @@ Tools: {tools}""",
     def test_template_specialization_pattern(self):
         """Test template specialization pattern."""
         # Base template
-        base_template = PromptTemplate(
+        PromptTemplate(
             name="base_agent_template",
             description="Base template for all agents",
             template="Agent {name} with role {role}",

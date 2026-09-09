@@ -3,10 +3,8 @@ Coverage-focused tests for DatabricksKnowledgeService.
 Targets uncovered branches to push coverage to 85%+.
 """
 
-import asyncio
-import io
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,9 +28,7 @@ def make_svc(group_id="g1"):
     with (
         # DatabricksConfigRepository is gone from this service — it was constructed
         # and never read.
-        patch(
-            "src.services.knowledge.databricks_service.DatabricksVolumeRepository"
-        ) as vol_repo,
+        patch("src.services.knowledge.databricks_service.DatabricksVolumeRepository"),
         patch.dict(
             "sys.modules",
             {
@@ -68,7 +64,7 @@ class TestUploadKnowledgeFile:
         svc = make_svc()
         file = make_upload_file("test.txt", b"file content")
 
-        fake_config = SimpleNamespace(
+        SimpleNamespace(
             knowledge_volume_enabled=True,
             knowledge_volume_path="main.default.knowledge",
             workspace_url="https://ws.databricks.com",
@@ -140,7 +136,7 @@ class TestUploadKnowledgeFile:
         svc = make_svc()
         file = make_upload_file()
 
-        fake_config = SimpleNamespace(
+        SimpleNamespace(
             knowledge_volume_enabled=True,
             knowledge_volume_path="invalid_path",  # No dots
             workspace_url="https://ws.databricks.com",
@@ -336,7 +332,7 @@ class TestUploadKnowledgeFile:
     async def test_with_date_dirs(self):
         svc = make_svc()
         file = make_upload_file()
-        fake_config = SimpleNamespace(
+        SimpleNamespace(
             knowledge_volume_enabled=True,
             knowledge_volume_path="main.default.knowledge",
             workspace_url="https://ws.databricks.com",
@@ -405,7 +401,7 @@ class TestUploadKnowledgeFile:
     async def test_with_agent_ids(self):
         svc = make_svc()
         file = make_upload_file()
-        fake_config = SimpleNamespace(
+        SimpleNamespace(
             knowledge_volume_path="main.default.knowledge",
             knowledge_volume_enabled=True,
             workspace_url="https://ws.databricks.com",
@@ -689,7 +685,7 @@ class TestAdditionalCoverage:
         """Cover lines 201-202: auth exception during workspace URL lookup."""
         svc = make_svc()
         file = make_upload_file()
-        fake_config = SimpleNamespace(
+        SimpleNamespace(
             knowledge_volume_path="main.default.knowledge",
             knowledge_volume_enabled=True,
             workspace_url="https://ws.databricks.com",

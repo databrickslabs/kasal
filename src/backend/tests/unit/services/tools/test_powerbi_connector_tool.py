@@ -4,7 +4,7 @@ Unit tests for services/tools/custom/powerbi_connector_tool.py
 Tests CrewAI integration tool for Power BI dataset extraction and conversion.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 

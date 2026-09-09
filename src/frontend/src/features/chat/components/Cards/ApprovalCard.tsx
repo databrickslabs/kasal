@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HITLService } from '../../../../api/execution/HITLService';
+import { HITLService, HITLRejectionAction } from '../../../../api/execution/HITLService';
 import { useSessionStore } from '../../store/sessionStore';
 
 /**
@@ -36,24 +36,30 @@ export interface ApprovalData {
   decided?: 'approved' | 'denied';
   /** Feedback the reviewer typed when denying / requesting changes. */
   decided_reason?: string;
+  unavailable?: string;
+  require_comment?: boolean;
+  decided_action?: 'reject' | 'retry';
 }
 
 interface ApprovalCardProps {
   data: ApprovalData;
   messageId: string;
+  onDecision?: (data: ApprovalData) => void;
 }
 
 /** Short echo of the typed feedback for the decided line (~60 chars). */
 const echoOf = (reason: string): string =>
   reason.length > 60 ? `${reason.slice(0, 60).trimEnd()}…` : reason;
 
-const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
+const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId, onDecision }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Denying opens an inline feedback row (task_review feedback becomes the
   // retry prompt on the backend; tool_call reason is optional context).
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [comment, setComment] = useState('');
+  const [retry, setRetry] = useState(false);
   const updateMessage = useSessionStore((s) => s.updateMessage);
   const decided = data.decided;
   const isTaskReview = data.kind === 'task_review';
@@ -63,16 +69,19 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
   const isFlowGate = data.kind === 'flow_gate';
 
   const persistDecision = (decision: 'approved' | 'denied', reason?: string) => {
+    const resultData = { ...data, decided: decision, ...(reason ? { decided_reason: reason } : {}), ...(decision === 'denied' && isFlowGate ? { decided_action: retry ? 'retry' as const : 'reject' as const } : {}) };
+    if (onDecision) { onDecision(resultData); return; }
     updateMessage(messageId, {
-      resultData: { ...data, decided: decision, ...(reason ? { decided_reason: reason } : {}) },
+      resultData,
     });
   };
 
   const approve = async () => {
+    if (data.require_comment && !comment.trim()) { setError('A comment is required to approve'); return; }
     setBusy(true);
     setError(null);
     try {
-      await HITLService.approveGate(Number(data.approval_id), {});
+      await HITLService.approveGate(Number(data.approval_id), comment.trim() ? { comment: comment.trim() } : {});
       persistDecision('approved');
     } catch (e: unknown) {
       setError((e as Error)?.message ?? 'Could not submit the decision');
@@ -89,6 +98,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
 
   const submitDenial = async () => {
     const typed = feedback.trim();
+    if (retry && !typed) { setError('Describe what should change before retrying'); return; }
     setBusy(true);
     setError(null);
     try {
@@ -97,6 +107,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
         // so send the typed feedback; fall back to a generic reason if empty.
         reason:
           typed || (isTaskReview ? 'Changes requested from chat' : 'Denied from chat'),
+        ...(isFlowGate ? { action: retry ? HITLRejectionAction.RETRY : HITLRejectionAction.REJECT } : {}),
       });
       persistDecision('denied', typed || undefined);
       setFeedbackOpen(false);
@@ -115,14 +126,15 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
   // row with an underlined text field (Enter submits, Escape cancels).
   const args = data.tool_args ?? {};
   const argsJson = Object.keys(args).length > 0 ? JSON.stringify(args) : '';
-  const detail = isTaskReview ? (data.output_preview ?? '') : argsJson;
+  const detail = isTaskReview ? (data.output_preview ?? '') : isFlowGate ? (data.message ?? '') : argsJson;
 
   const linkClass =
     'underline underline-offset-2 disabled:opacity-50 hover:opacity-80 font-medium shrink-0';
+  const linkStyle = { color: 'var(--text-primary)', background: 'transparent', border: 0, padding: 0, font: 'inherit', cursor: 'pointer' };
 
   return (
     <div className="my-1.5 px-1 text-[13px] leading-[1.7]" style={{ color: 'var(--text-muted)' }}>
-      <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+      <div className="flex items-center gap-1.5 flex-wrap">
         <span className="shrink-0">
           ✋ {isFlowGate
             ? 'The flow is waiting to continue to'
@@ -130,7 +142,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
               ? 'Review the output of'
               : `${data.agent_role || 'The agent'} wants to run`}
         </span>
-        <span className="font-medium shrink-0" style={{ color: 'var(--text-primary)' }}>
+        <span className="font-medium min-w-0 break-words" style={{ color: 'var(--text-primary)' }}>
           {isFlowGate
             ? data.step_name || 'the next step'
             : (isTaskReview ? data.task_name : data.tool_name)
@@ -144,7 +156,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
             {detail}
           </span>
         )}
-        {decided ? (
+        {data.unavailable ? <span>— {data.unavailable}</span> : decided ? (
           <span className="truncate min-w-0">
             {decided === 'approved'
               ? '— approved'
@@ -152,7 +164,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
                 ? data.decided_reason
                   ? `— changes requested: ${echoOf(data.decided_reason)}`
                   : '— changes requested, the task retries'
-                : '— denied'}
+                : data.decided_action === 'retry' ? '— changes requested, the previous crew retries' : '— denied'}
           </span>
         ) : feedbackOpen ? null : (
           <>
@@ -162,7 +174,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
               disabled={busy}
               onClick={() => void approve()}
               className={linkClass}
-              style={{ color: 'var(--text-primary)' }}
+              style={linkStyle}
             >
               Approve
             </button>
@@ -170,18 +182,24 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
             <button
               type="button"
               disabled={busy}
-              onClick={() => setFeedbackOpen(true)}
+              onClick={() => { setRetry(false); setFeedbackOpen(true); }}
               className={linkClass}
-              style={{ color: 'var(--text-primary)' }}
+              style={linkStyle}
             >
               {isTaskReview ? 'Request changes' : 'Deny'}
             </button>
+            {isFlowGate && <button type="button" disabled={busy} className={linkClass} style={linkStyle}
+              onClick={() => { setRetry(true); setFeedbackOpen(true); }}>Request changes &amp; retry</button>}
             {busy && <span className="shrink-0">…</span>}
           </>
         )}
         {error && <span className="truncate min-w-0"> — {error}</span>}
       </div>
-      {!decided && feedbackOpen && (
+      {!decided && !data.unavailable && data.require_comment && !feedbackOpen && <input
+        aria-label="Approval comment" placeholder="Comment required to approve" value={comment}
+        onChange={event => setComment(event.target.value)} disabled={busy}
+        className="w-full mt-1 text-[13px]" style={{ background: 'transparent', color: 'var(--text-primary)', border: 0, borderBottom: '1px solid var(--border-color)' }} />}
+      {!decided && !data.unavailable && feedbackOpen && (
         <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden mt-0.5 pl-6">
           <input
             autoFocus
@@ -214,7 +232,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
             disabled={busy}
             onClick={() => void submitDenial()}
             className={linkClass}
-            style={{ color: 'var(--text-primary)' }}
+            style={linkStyle}
           >
             Send
           </button>
@@ -224,7 +242,7 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
             disabled={busy}
             onClick={cancelFeedback}
             className={linkClass}
-            style={{ color: 'var(--text-muted)' }}
+            style={{ ...linkStyle, color: 'var(--text-muted)' }}
           >
             Cancel
           </button>

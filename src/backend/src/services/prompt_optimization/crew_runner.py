@@ -9,32 +9,18 @@ import asyncio
 import hashlib
 import logging
 import os
-import re
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
-    _CREW_DOC_FIELD_LABELS,
     _distill_requirements,
-    _extract_user_from_log,
     _parse_crew_doc,
     _parse_requirement_lines,
-    _serialize_crew_doc,
 )
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
-    _CATEGORICAL_GRADES,
-    JUDGE_SPREAD_WARN,
-    VALID_INTENTS,
-    _checklist_grade,
     _grade_judge_verdict,
-    _intent_format_score,
-    _job_name_score,
-    _json_keys_score,
-    _judge_value_to_grade,
     _median_sample,
     _parse_grade_from_text,
     _to_float,
@@ -44,8 +30,6 @@ from src.services.prompt_optimization.gepa.judge_memory import (
     majority_embedder,
 )
 from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
-    _crew_target_model,
-    _resolve_judge_model,
     _stored_judge_model_to_key,
 )
 from src.services.prompt_optimization.gepa.reflection import (
@@ -54,8 +38,6 @@ from src.services.prompt_optimization.gepa.reflection import (
     _judge_sample_count,
     _make_reflection_fn,
     _preflight_reflection,
-    _sync_llm_completion,
-    _sync_run_crew,
 )
 from src.services.prompt_optimization.run_state import _RUNS
 from src.utils.user_context import GroupContext

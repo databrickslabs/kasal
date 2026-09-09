@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.external.identity import ExternalAuthError, ExternalCaller
+from src.services.external.identity import ExternalCaller
 from src.services.external.interaction import (
     PendingInteraction,
     pending_for_run,

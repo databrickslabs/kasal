@@ -6,18 +6,14 @@ flow execution, crew execution, status tracking, and execution management.
 """
 
 import concurrent.futures
-import json
 import uuid
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.core.exceptions import BadRequestError, KasalError
 from src.schemas.execution import (
-    CrewConfig,
-    ExecutionCreateResponse,
-    ExecutionNameGenerationRequest,
     ExecutionStatus,
 )
 from src.services.execution.service import ExecutionService
@@ -446,11 +442,11 @@ class TestExecutionService:
         ExecutionService.executions.clear()
 
         # Create first instance and add data
-        service1 = ExecutionService()
+        ExecutionService()
         ExecutionService.executions["test1"] = {"data": "value1"}
 
         # Create second instance and verify data persists
-        service2 = ExecutionService()
+        ExecutionService()
         assert ExecutionService.executions["test1"]["data"] == "value1"
 
         # Add data from second instance
@@ -479,8 +475,8 @@ class TestExecutionService:
 
         # Add data and verify it persists across instances
         ExecutionService.executions["test"] = {"data": "value"}
-        service1 = ExecutionService()
-        service2 = ExecutionService()
+        ExecutionService()
+        ExecutionService()
 
         # Both instances should share the same executions dict
         assert ExecutionService.executions["test"]["data"] == "value"

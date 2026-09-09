@@ -5,9 +5,7 @@ Targets missing lines: 69, 104-105, 134-145, 191, 256-257, 259, 266-269, 293,
 685-718, 753, 781, 822-827, 831, 836-847, 873, 887-890, 893-894
 """
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from src.services.converters.base.models import KPI, KPIDefinition, Structure
 from src.services.converters.formats.sql.helpers.sql_structures import (
@@ -18,7 +16,6 @@ from src.services.converters.formats.sql.models import (
     SQLDefinition,
     SQLDialect,
     SQLMeasure,
-    SQLStructure,
     SQLTranslationOptions,
 )
 

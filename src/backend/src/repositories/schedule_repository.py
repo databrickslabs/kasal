@@ -220,7 +220,6 @@ class ScheduleRepository:
             return None
 
         # Convert timezone-aware datetime to timezone-naive for database
-        from datetime import timezone
 
         if hasattr(execution_time, "tzinfo") and execution_time.tzinfo is not None:
             execution_time_naive = execution_time.replace(tzinfo=None)

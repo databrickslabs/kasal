@@ -4,13 +4,10 @@ Flow processors module for CrewAI flow execution.
 This module handles processing of starting points, listeners, and routers in flow configuration.
 """
 
-import logging
-from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
-from src.services.flow_builder.runtime import listen, router
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 
@@ -1391,7 +1388,7 @@ class FlowProcessorManager:
                 if processed_routes:
                     router_configs.append((router_method_name, processed_routes))
                     logger.info(
-                        f"Added router {router_method_name} with {len(processed_routes)} routes, listening to '{listen_to}'"
+                        f"Added router {router_method_name} with {len(processed_routes)} routes, listening to '{listen_to_crew_id}'"
                     )
                 else:
                     logger.warning(f"No valid routes found for router {idx}")

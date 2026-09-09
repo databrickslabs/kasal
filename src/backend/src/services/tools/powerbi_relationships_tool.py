@@ -13,7 +13,7 @@ Date: 2025
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Type
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr

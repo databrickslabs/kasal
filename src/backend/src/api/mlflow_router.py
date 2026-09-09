@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.mlflow import (
     MLflowConfigResponse,
     MLflowConfigUpdate,
@@ -120,7 +120,7 @@ async def trigger_evaluation(
     return MLflowEvaluateResponse(**info)
 
 
-from typing import Dict, Optional
+from typing import Dict, Optional  # noqa: E402 - import follows module initialization
 
 
 @router.get("/experiment-info", response_model=Dict)

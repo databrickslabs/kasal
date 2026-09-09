@@ -8,7 +8,7 @@ lifecycle management (start/stop).
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -472,7 +472,7 @@ class TestEmbeddingQueueServiceInsertWithRetry:
 
         mock_session = AsyncMock()
         mock_session.commit.side_effect = Exception("Persistent DB error")
-        mock_session_ctx = _mock_async_session_ctx(mock_session)
+        _mock_async_session_ctx(mock_session)
         mock_repo = MagicMock()
         mock_repo.insert_raw = AsyncMock()
 

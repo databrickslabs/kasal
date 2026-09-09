@@ -2072,7 +2072,7 @@ class TestCalculateEqualityFilter:
 
     def test_filter_form_not_matched_here(self, translator):
         # A FILTER()-based CALCULATE must NOT be caught by the simple equality matcher.
-        r = translator.translate(
+        translator.translate(
             {
                 "measure_name": "m",
                 "dax_expression": "CALCULATE(SUM(factsales[amount]), FILTER(ALL(factsales), factsales[qty]>10))",

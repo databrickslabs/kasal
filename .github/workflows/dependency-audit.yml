@@ -7,7 +7,7 @@ name: Dependency Audit
 #   3. npm-cve           — npm lockfile consistency + npm audit.
 #
 # The hygiene guard runs on every PR (cheap). The CVE/drift jobs run weekly and
-# whenever a dependency manifest/lock changes.
+# on every pull request, even when its changes are outside lockfiles.
 
 on:
   pull_request:
@@ -49,7 +49,6 @@ jobs:
   python-cve:
     name: Python deps — lock drift + CVE audit
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dependencies')
     defaults:
       run:
         working-directory: src/backend
@@ -69,22 +68,17 @@ jobs:
           #   chromadb 1.x  (CVE-2026-45830/45831/45833, PYSEC-2026-311): no
           #     patched version published.
           #   diskcache     (PYSEC-2026-2447): unmaintained, no fix released.
-          #   cryptography  (PYSEC-2026-3552): fixed only in 50.x, which
-          #     mlflow<4 excludes (mlflow caps cryptography <50). We are on
-          #     49.0.0 — every other cryptography advisory is cleared. Drop
-          #     this when mlflow lifts the cap or we move to mlflow 4.
+          # Exposure and mitigations: src/docs/VALIDATION_AND_SECURITY.md.
           uvx pip-audit -r /tmp/reqs.txt \
             --ignore-vuln CVE-2026-45830 \
             --ignore-vuln CVE-2026-45831 \
             --ignore-vuln CVE-2026-45833 \
             --ignore-vuln PYSEC-2026-311 \
-            --ignore-vuln PYSEC-2026-2447 \
-            --ignore-vuln PYSEC-2026-3552
+            --ignore-vuln PYSEC-2026-2447
 
   npm-cve:
     name: Frontend deps — lock consistency + npm audit
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'dependencies')
     defaults:
       run:
         working-directory: src/frontend

@@ -35,7 +35,6 @@ import { useToolHandlers } from '../../../../hooks/workflow/useToolHandlers';
 import { useCanvasHandlers } from '../../../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../../../hooks/workflow/useDialogHandlers';
 import ManagerNodeController from './ManagerNodeController';
-import RightSidebar from '../../../../app/workspace/RightSidebar';
 import FlowBackLink from '../../../../app/workspace/FlowBackLink';
 import { useAgentTaskLayout } from '../../../../hooks/workflow/useAgentTaskLayout';
 
@@ -44,7 +43,6 @@ import { useAgentTaskLayout } from '../../../../hooks/workflow/useAgentTaskLayou
 // Import dialog components
 import AgentGenerationDialog from '../../agents/components/AgentGenerationDialog';
 import TaskGenerationDialog from '../../tasks/components/TaskGenerationDialog';
-import CrewPlanningDialog from '../../planning/components/CrewPlanningDialog';
 import CrewFlowSelectionDialog from '../../crews/components/CrewFlowDialog/CrewFlowDialog';
 import LLMSelectionDialog from '../../agents/components/LLMSelectionDialog';
 import MaxRPMSelectionDialog from '../../agents/components/MaxRPMSelectionDialog';
@@ -52,7 +50,6 @@ import ToolSelectionDialog from '../../agents/components/ToolSelectionDialog';
 import MCPConfigDialog from '../../../configuration/mcp/components/MCPConfigDialog';
 
 // Import types
-import { Crew, CrewAgent, CrewTask } from '../../../../types/workflow/crewPlan';
 
 // Use imported node and edge types from flow-config
 const nodeTypes = importedNodeTypes;
@@ -78,21 +75,11 @@ interface CrewCanvasProps {
   selectedModel: string;
   setSelectedModel: (model: string) => void;
   // Dialog props
-  onOpenLogsDialog: () => void;
-  onToggleChat: () => void;
-  isChatOpen: boolean;
-  setIsAgentDialogOpen: (open: boolean) => void;
-  setIsTaskDialogOpen: (open: boolean) => void;
-  setIsCrewDialogOpen: (open: boolean) => void;
   // Execution history visibility
   showRunHistory?: boolean;
-  executionHistoryHeight?: number;
   // Tutorial and configuration
   onOpenTutorial?: () => void;
   onOpenConfiguration?: () => void;
-  // Play button handlers
-  onPlayPlan?: () => void;
-  onPlayFlow?: () => void;
 }
 
 
@@ -112,16 +99,9 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setReasoningEnabled: _setReasoningEnabled,
   selectedModel: _selectedModelProp,
   setSelectedModel: _setSelectedModelProp,
-  onToggleChat,
-  isChatOpen,
-  setIsAgentDialogOpen,
-  setIsTaskDialogOpen,
   showRunHistory,
-  executionHistoryHeight = 200,
   onOpenTutorial: _onOpenTutorial,
   onOpenConfiguration: _onOpenConfiguration,
-  onPlayPlan,
-  onPlayFlow
 }) => {
 
   useAgentTaskLayout(nodes, edges, setNodes);
@@ -148,7 +128,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   // Dialog states without underscore prefix
   const [isAgentGenerationDialogOpen, setIsAgentGenerationDialogOpen] = useState(false);
   const [isTaskGenerationDialogOpen, setIsTaskGenerationDialogOpen] = useState(false);
-  const [isCrewPlanningDialogOpen, setIsCrewPlanningDialogOpen] = useState(false);
   const [isCrewFlowDialogOpen, setIsCrewFlowDialogOpen] = useState(false);
   const [isLLMSelectionDialogOpen, setIsLLMSelectionDialogOpen] = useState(false);
   const [isMaxRPMSelectionDialogOpen, setIsMaxRPMSelectionDialogOpen] = useState(false);
@@ -631,19 +610,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             setEdges={setEdges}
           />
 
-          <RightSidebar
-            onToggleChat={onToggleChat}
-            isChatOpen={isChatOpen}
-            setIsAgentDialogOpen={setIsAgentDialogOpen}
-            setIsTaskDialogOpen={setIsTaskDialogOpen}
-            showRunHistory={showRunHistory}
-            executionHistoryHeight={executionHistoryHeight}
-            hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
-            hasFlowNodes={nodes.some(node => node.type === 'crewNode')}
-            edges={edges}
-            onPlayPlan={onPlayPlan}
-            onPlayFlow={onPlayFlow}
-          />
+
 
         </ReactFlow>
       )}
@@ -676,98 +643,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         open={isTaskGenerationDialogOpen}
         onClose={() => setIsTaskGenerationDialogOpen(false)}
         onTaskGenerated={_handleTaskGenerated}
-      />
-      <CrewPlanningDialog
-        open={isCrewPlanningDialogOpen}
-        onClose={() => setIsCrewPlanningDialogOpen(false)}
-        onGenerateCrew={(crewPlan: Crew, shouldExecute: boolean) => {
-
-          
-          const newNodes: Node[] = [];
-          const newEdges: Edge[] = [];
-          
-          // Step 1: Process agents and create agent nodes
-          crewPlan.agents.forEach((agent: CrewAgent, index: number) => {
-            const nodeId = `agent-${agent.id}`;
-
-            newNodes.push({
-              id: nodeId,
-              type: 'agentNode',
-              position: { x: 80, y: 100 + (index * 150) },
-              data: {
-                label: agent.name,
-                agentId: agent.id,
-                role: agent.role || '',
-                goal: agent.goal || '',
-                backstory: agent.backstory || '',
-                llm: agent.llm || _selectedModel,
-                tools: agent.tools || [],
-                agent: agent // Pass the full agent object if needed by the node
-              }
-            });
-          });
-          
-          // Step 2: Process tasks and create task nodes
-          crewPlan.tasks.forEach((task: CrewTask, index: number) => {
-            const nodeId = `task-${task.id}`;
-
-            newNodes.push({
-              id: nodeId,
-              type: 'taskNode',
-              // Position tasks to the right of agents
-              position: { x: 360, y: 100 + (index * 150) }, 
-              data: {
-                label: task.name,
-                taskId: task.id,
-                description: task.description || task.name,
-                expected_output: task.expected_output || '',
-                human_input: task.human_input || false,
-                tools: task.tools || [],
-                async_execution: task.async_execution !== undefined ? Boolean(task.async_execution) : false,
-                // Include context in node data if TaskNode needs it, otherwise it's just for edges
-                context: task.context || [],
-                config: {
-                  markdown: task.markdown || false
-                },
-                task: task // Pass the full task object
-              }
-            });
-          });
-
-          // Step 3: Create edges based on agent assignments and task context (dependencies)
-          crewPlan.tasks.forEach((task: CrewTask) => {
-            const targetNodeId = `task-${task.id}`;
-
-            // Create agent-to-task assignment edges
-            if (task.agent_id) {
-              const sourceNodeId = `agent-${task.agent_id}`;
-              newEdges.push({
-                id: `edge-${task.id}`,
-                source: sourceNodeId,
-                target: targetNodeId,
-                type: 'default',
-                animated: true,
-                sourceHandle: 'right',
-                targetHandle: 'left'
-              });
-            }
-          });
-
-          // Update nodes and edges
-          onNodesChange(newNodes.map(node => ({ type: 'add', item: node })));
-          onEdgesChange(newEdges.map(edge => ({ type: 'add', item: edge })));
-
-          if (shouldExecute) {
-            handleExecuteCrewButtonClick();
-          }
-        }}
-        selectedModel={_selectedModel}
-        tools={tools.map(tool => ({
-          ...tool,
-          icon: tool.icon || ''
-        }))}
-        selectedTools={_selectedAgentGenerationTools}
-        onToolsChange={_setSelectedAgentGenerationTools}
       />
       <CrewFlowSelectionDialog
         open={isCrewFlowDialogOpen}

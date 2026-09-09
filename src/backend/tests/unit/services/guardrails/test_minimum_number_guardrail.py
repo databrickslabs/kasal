@@ -4,7 +4,6 @@ import os
 # Use relative imports that will work with the project structure
 import sys
 import unittest
-from typing import Any, Dict
 from unittest.mock import MagicMock, Mock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))

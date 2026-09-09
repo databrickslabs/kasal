@@ -280,7 +280,7 @@ class CrewDeploymentService:
 
         # Check if endpoint exists
         try:
-            existing_endpoint = w.serving_endpoints.get(endpoint_name)
+            w.serving_endpoints.get(endpoint_name)
             logger.info(f"Endpoint {endpoint_name} exists, updating...")
 
             # Update endpoint
@@ -323,7 +323,7 @@ class CrewDeploymentService:
             status = DeploymentStatus.PENDING
 
         # Get endpoint URL
-        endpoint = w.serving_endpoints.get(endpoint_name)
+        w.serving_endpoints.get(endpoint_name)
         endpoint_url = (
             f"https://{w.config.host}/serving-endpoints/{endpoint_name}/invocations"
         )
@@ -494,8 +494,6 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         import time
 
         import pandas as pd
-
-        from src.services.execution.runtime import Agent, Crew, Process, Task
 
         results = []
 

@@ -5,12 +5,10 @@ Tests the changes that route execution logs through get_smart_db_session
 and ExecutionLogsRepository for writing execution logs to the database.
 """
 
-import asyncio
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

@@ -31,7 +31,7 @@ export default function ExpandedBuilderConversation({ dark, landing, response, p
     ref={(node: HTMLDivElement | null) => { if (node && composerHost.parentElement !== node) node.appendChild(composerHost); }} />;
   return createPortal(<Box role="region" aria-label="Expanded conversation" className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'}
     onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); onClose(); } }}
-    sx={{ position: 'fixed', top: 0, bottom: 0, left: expanded ? leftWidth : 48, right: 48, zIndex: 1202,
+    sx={{ position: 'fixed', top: 0, bottom: 0, left: expanded ? leftWidth : 48, right: 0, zIndex: 1202,
       display: 'flex', minWidth: 0, overflow: 'hidden', ...kasalStageSurface(dark),
       '& [data-testid="builder-composer"]': { bgcolor: 'var(--bg-input)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-input)',
         '&:focus-within': { boxShadow: 'var(--shadow-input-focus)' } },

@@ -4,38 +4,15 @@ catalogue GEPA can optimize, and the MLflow experiment pin.
 Separate from the service so the mixins can read it without importing the
 service back (which would be a cycle)."""
 
-import asyncio
-import hashlib
 import logging
 import os
-import re
-import threading
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from src.core.exceptions import BadRequestError
 from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
-    _CREW_DOC_FIELD_LABELS,
-    _distill_requirements,
     _extract_user_from_log,
-    _parse_crew_doc,
-    _parse_requirement_lines,
-    _serialize_crew_doc,
 )
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
-    _CATEGORICAL_GRADES,
-    JUDGE_SPREAD_WARN,
-    VALID_INTENTS,
-    _checklist_grade,
-    _grade_judge_verdict,
-    _intent_format_score,
     _job_name_score,
-    _json_keys_score,
-    _judge_value_to_grade,
-    _median_sample,
-    _parse_grade_from_text,
-    _to_float,
 )
 
 logger = logging.getLogger(__name__)

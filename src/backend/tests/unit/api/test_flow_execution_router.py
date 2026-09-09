@@ -9,10 +9,10 @@ from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
-from src.core.exceptions import KasalError
 from fastapi.testclient import TestClient
 
 from src.api.flow_execution_router import router
+from src.core.exceptions import KasalError
 from src.dependencies.admin_auth import (
     get_admin_user,
     get_authenticated_user,
@@ -311,7 +311,7 @@ class TestFlowExecutionRouter:
         assert response.status_code == 200
         data = response.json()
         # The router returns the whole result since there's no 'executions' key
-        assert data["success"] == True
+        assert data["success"]
         assert len(data["data"]) == 2
         assert data["data"][0]["execution_id"] == 1
         assert data["data"][1]["execution_id"] == 2

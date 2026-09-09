@@ -5,8 +5,7 @@ with no duplication and proper isolation from dependencies.
 """
 
 import json
-import sys
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -229,7 +228,7 @@ class TestTaskConfig:
                                 "source", ""
                             ).startswith("agent-"):
                                 agent_node_id = edge.get("source")
-                                inferred_agent_id = agent_node_id.replace("agent-", "")
+                                agent_node_id.replace("agent-", "")
 
                                 # Mock agent lookup and configuration
                                 mock_agent = Mock()
@@ -1068,7 +1067,7 @@ class TestTaskConfigGuardrails:
             mock_factory.create_guardrail.return_value = mock_guardrail
             mock_wrapper_class.return_value = Mock()
 
-            result = await TaskConfig.configure_task(
+            await TaskConfig.configure_task(
                 mock_task_data_with_code_guardrail, agent=mock_agent
             )
 
@@ -1119,7 +1118,7 @@ class TestTaskConfigGuardrails:
             mock_llm_guardrail = Mock()
             mock_llm_guardrail_class.return_value = mock_llm_guardrail
 
-            result = await TaskConfig.configure_task(
+            await TaskConfig.configure_task(
                 mock_task_data_with_llm_guardrail, agent=mock_agent
             )
 
@@ -1182,7 +1181,7 @@ class TestTaskConfigGuardrails:
             mock_llm_guardrail = Mock()
             mock_llm_guardrail_class.return_value = mock_llm_guardrail
 
-            result = await TaskConfig.configure_task(
+            await TaskConfig.configure_task(
                 mock_task_data_with_both_guardrails, agent=mock_agent
             )
 

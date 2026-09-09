@@ -4,7 +4,7 @@ Unit tests for services/tools/custom/powerbi_relationships_tool.py
 Tests Power BI Relationships extraction tool for CrewAI.
 """
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

@@ -1,7 +1,4 @@
 import json
-import os
-from datetime import datetime
-from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -57,7 +54,7 @@ class TestDatabaseBackupRepositoryInit:
         with patch(
             "src.repositories.database_backup_repository.DatabricksVolumeRepository"
         ) as mock_volume_repo:
-            repo = DatabaseBackupRepository(mock_session, user_token)
+            DatabaseBackupRepository(mock_session, user_token)
 
             # Verify volume repository was created with correct parameters
             mock_volume_repo.assert_called_once_with(user_token=user_token)

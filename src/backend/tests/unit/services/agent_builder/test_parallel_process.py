@@ -6,7 +6,7 @@ and one that silently did nothing unless every independent task got it. The crew
 now carries process="parallel" and the engine opts the independent tasks in.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

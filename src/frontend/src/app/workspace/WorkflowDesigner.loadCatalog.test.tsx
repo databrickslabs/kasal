@@ -16,15 +16,10 @@ import { CATALOG_FLOWS_TAB, CATALOG_CREWS_TAB } from './WorkflowEventHandlers';
 // ── Heavy child components → inert stubs ────────────────────────────────────
 vi.mock('./WorkflowPanels', () => ({ default: () => null }));
 vi.mock('../../features/workflow/assistant/ChatPanel', () => ({ default: () => null }));
-vi.mock('./RightSidebar', () => ({ default: () => null }));
 vi.mock('../sessions/SessionSidebar', () => ({ default: ({ onOpenCatalog }: { onOpenCatalog: () => void }) => <button onClick={onOpenCatalog}>load-from-catalog</button> }));
 vi.mock('../../features/groups/components/GroupSelector', () => ({ default: () => null }));
 vi.mock('../../features/chat/ChatWorkspace', () => ({ default: () => null }));
-vi.mock('../../features/workflow/agents/components/AgentDialog', () => ({ default: () => null }));
-vi.mock('../../features/workflow/tasks/components/TaskDialog', () => ({ default: () => null }));
-vi.mock('../../features/workflow/planning/components/CrewPlanningDialog', () => ({ default: () => null }));
 vi.mock('../../features/workflow/scheduling/components/ScheduleDialog', () => ({ default: () => null }));
-vi.mock('../../features/executions/components/JobsPanel', () => ({ default: () => null }));
 vi.mock('../../features/executions/components/InputVariablesDialog', () => ({ InputVariablesDialog: () => null }));
 vi.mock('../../features/help/tutorial/InteractiveTutorial', () => ({ default: () => null }));
 vi.mock('../../features/configuration/components/APIKeys/APIKeys', () => ({ default: () => null }));
@@ -41,9 +36,10 @@ vi.mock('../sessions/SessionLibrary', () => ({ default: () => null }));
 
 // CrewFlowSelectionDialog → surface the props the closure sets.
 vi.mock('../../features/workflow/crews/components/CrewFlowDialog/index', () => ({
-  CrewFlowSelectionDialog: (props: { isOpen?: boolean; open?: boolean; showOnlyTab?: number; initialTab?: number }) => (
+  CrewFlowSelectionDialog: (props: { isOpen?: boolean; open?: boolean; embedded?: boolean; showOnlyTab?: number; initialTab?: number }) => (
     <div
       data-testid="catalog-dialog"
+      data-embedded={String(props.embedded)}
       data-open={String(props.isOpen ?? props.open ?? false)}
       data-showonlytab={String(props.showOnlyTab)}
       data-initialtab={String(props.initialTab)}
@@ -66,24 +62,14 @@ vi.mock('../../hooks/workflow/useFlowManager', () => ({
 }));
 vi.mock('../../hooks/workflow/useTabSync', () => ({ useTabSync: () => ({ activeTabId: null }) }));
 vi.mock('../../hooks/workflow/useTabExecutionSync', () => ({ useTabExecutionSync: () => undefined }));
-vi.mock('../../hooks/workflow/useChatPanelResize', () => ({ useChatPanelResize: () => ({ handleResizeStart: vi.fn() }) }));
-vi.mock('../../hooks/workflow/useExecutionHistoryResize', () => ({ useExecutionHistoryResize: () => ({ handleHistoryResizeStart: vi.fn() }) }));
 vi.mock('../../hooks/workflow/useResponsiveLayout', () => ({ useResponsiveLayout: () => ({ isCompact: false, isMobile: false }) }));
 vi.mock('../../hooks/workflow/useUIFitView', () => ({ useUIFitView: () => ({ handleUIAwareFitView: vi.fn(), handleFitViewToNodesInternal: vi.fn() }) }));
 vi.mock('../../hooks/workflow/useWorkflowLayoutEvents', () => ({ useWorkflowLayoutEvents: () => undefined }));
 vi.mock('../../hooks/workflow/useAgentManager', () => ({
-  useAgentManager: () => ({
-    agents: [], addAgentNode: vi.fn(), isAgentDialogOpen: false, setIsAgentDialogOpen: vi.fn(),
-    handleAgentSelect: vi.fn(), handleShowAgentForm: vi.fn(), fetchAgents: vi.fn(),
-    openInCreateMode: false, openAgentDialog: vi.fn(),
-  }),
+  useAgentManager: () => ({ handleAgentSelect: vi.fn() }),
 }));
 vi.mock('../../hooks/workflow/useTaskManager', () => ({
-  useTaskManager: () => ({
-    tasks: [], addTaskNode: vi.fn(), isTaskDialogOpen: false, setIsTaskDialogOpen: vi.fn(),
-    handleTaskSelect: vi.fn(), handleShowTaskForm: vi.fn(), fetchTasks: vi.fn(),
-    openInCreateMode: false, openTaskDialog: vi.fn(),
-  }),
+  useTaskManager: () => ({ handleTaskSelect: vi.fn() }),
 }));
 vi.mock('./WorkflowPanelManager', () => ({
   PANEL_STATE: { LEFT: 'left', CENTER: 'center', RIGHT: 'right' },
@@ -126,6 +112,7 @@ describe('WorkflowDesigner - Load from Catalog matches the active canvas', () =>
 
     const dialog = screen.getAllByTestId('catalog-dialog').find(d => d.getAttribute('data-open') === 'true');
     expect(dialog).toBeTruthy();
+    expect(dialog?.getAttribute('data-embedded')).toBe('true');
     expect(dialog?.getAttribute('data-showonlytab')).toBe(String(CATALOG_FLOWS_TAB));
   });
 
@@ -137,6 +124,7 @@ describe('WorkflowDesigner - Load from Catalog matches the active canvas', () =>
 
     const dialog = screen.getAllByTestId('catalog-dialog').find(d => d.getAttribute('data-open') === 'true');
     expect(dialog).toBeTruthy();
+    expect(dialog?.getAttribute('data-embedded')).toBe('true');
     expect(dialog?.getAttribute('data-initialtab')).toBe(String(CATALOG_CREWS_TAB));
   });
 });

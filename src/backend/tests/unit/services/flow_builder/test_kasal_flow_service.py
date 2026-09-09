@@ -9,8 +9,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from src.core.exceptions import KasalError
 
+from src.core.exceptions import KasalError
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
 
@@ -61,7 +61,7 @@ class TestGetFlowRunner:
         with patch(
             "src.services.flow_builder.kasal_flow_service.FlowRunnerService"
         ) as mock_flow_runner:
-            flow_runner = service._get_flow_runner()
+            service._get_flow_runner()
             mock_flow_runner.assert_called_once_with(mock_session)
 
     @patch("src.services.flow_builder.kasal_flow_service.logger")
@@ -72,7 +72,7 @@ class TestGetFlowRunner:
         with patch(
             "src.services.flow_builder.kasal_flow_service.FlowRunnerService"
         ) as mock_flow_runner:
-            flow_runner = service._get_flow_runner()
+            service._get_flow_runner()
             mock_flow_runner.assert_called_once_with(None)
             mock_logger.warning.assert_called()
 
@@ -524,7 +524,7 @@ class TestRunFlowIntegration:
             with patch(
                 "src.services.flow_builder.kasal_flow_service.logger"
             ) as mock_logger:
-                result = await service.run_flow(flow_id=flow_id, config=config)
+                await service.run_flow(flow_id=flow_id, config=config)
 
                 # Verify logging was called
                 assert mock_logger.info.called

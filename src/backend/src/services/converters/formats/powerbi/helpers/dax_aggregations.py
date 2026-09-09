@@ -5,7 +5,7 @@ Provides comprehensive aggregation types for KBI to DAX conversion
 
 import re
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 class AggregationType(Enum):

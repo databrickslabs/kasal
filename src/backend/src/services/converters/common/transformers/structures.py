@@ -6,7 +6,7 @@ combined measures with names like: kbi_name + "_" + structure_name
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from ...base.models import KPI, KPIDefinition, Structure
 

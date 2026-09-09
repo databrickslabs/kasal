@@ -4,7 +4,7 @@ Unit tests for src/engines/kasal/helpers/agent_helpers.py
 Targets uncovered lines (52% → 85%+).
 """
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -57,7 +57,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
         patch("src.services.llm.manager.LLMManager") as mock_lm,
         patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
         patch("src.db.session.routed_scoped_session") as mock_sess,
-        patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_svc,
+        patch("src.services.mcp.mcp_client.service.MCPService"),
         patch_build(
             "src.services.execution.kernel.agent_builder", "agent"
         ) as mock_agent_cls,
@@ -67,7 +67,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
         mock_llm_instance.model = agent_config.get("llm", "gpt-4o")
         mock_lm.configure_kasal_llm = AsyncMock(return_value=mock_llm_instance)
 
-        mock_mcp_instance = MagicMock()
+        MagicMock()
         mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
         mock_session = AsyncMock()
@@ -301,7 +301,7 @@ class TestCreateAgentLLMConfig:
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="default-llm",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -342,7 +342,7 @@ class TestCreateAgentLLMConfig:
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="fallback-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -394,7 +394,7 @@ class TestCreateAgentToolResolution:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_resolve.return_value = [(name, {}) for name in ["SearchTool"]]
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="tool-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -445,7 +445,7 @@ class TestCreateAgentToolResolution:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_resolve.return_value = [(name, {}) for name in ["MCPTool"]]
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="mcp-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -492,7 +492,7 @@ class TestCreateAgentToolResolution:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_resolve.return_value = [(name, {}) for name in ["MCPAdapterTool"]]
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="mcp-adapter-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -536,7 +536,7 @@ class TestCreateAgentToolResolution:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_resolve.return_value = [(name, {}) for name in ["MissingTool"]]
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="missing-tool-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -578,7 +578,7 @@ class TestCreateAgentToolResolution:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_resolve.return_value = [(name, {}) for name in ["SomeToolName"]]
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="no-factory-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -694,7 +694,7 @@ class TestCreateAgentAdditionalParams:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_resolve.return_value = [(name, {}) for name in ["GenieTool"]]
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="genie-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -813,7 +813,7 @@ class TestCreateAgentLLMConfigExtended:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_llm_cls.return_value = MagicMock()
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="temp-override-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -853,7 +853,7 @@ class TestCreateAgentLLMConfigExtended:
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
             mock_llm_cls.return_value = MagicMock()
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="no-model-dict-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},
@@ -931,7 +931,7 @@ class TestCreateAgentLLMConfigExtended:
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
 
-            agent = await create_agent(
+            await create_agent(
                 agent_key="databricks-prefix-agent",
                 agent_config=cfg,
                 config={"group_id": "grp-1"},

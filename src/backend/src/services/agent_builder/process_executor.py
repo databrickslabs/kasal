@@ -35,6 +35,8 @@ Example:
 """
 
 # Global hardening: disable CrewAI cloud tracing/telemetry and suppress interactive prompts at module import time
+import traceback
+
 try:
     import os as _kasal_ce_env
 
@@ -76,11 +78,9 @@ except Exception:
 import logging
 import multiprocessing as mp
 import os
-import pickle
 import signal
-import traceback
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -134,7 +134,6 @@ def run_crew_in_process(
     import logging
     import os
     import sys
-    import traceback
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ["CREW_SUBPROCESS_MODE"] = "true"
@@ -648,8 +647,6 @@ def run_crew_in_process(
                     )
 
                 # Create services with the session and group_id
-                from src.services.settings.api_keys import ApiKeysService
-                from src.services.tools.tool_service import ToolService
 
                 tool_service = ToolService(session)
                 api_keys_service = ApiKeysService(session, group_id=group_id)
@@ -1629,7 +1626,6 @@ def run_crew_in_process(
                         pass
         except Exception as async_error:
             print(f"[SUBPROCESS DEBUG] Async error: {async_error}", file=sys.stderr)
-            import traceback
 
             traceback.print_exc(file=sys.stderr)
             raise
@@ -1886,7 +1882,6 @@ class ProcessCrewExecutor:
         """
         import logging
         import os
-        import sys
 
         # Suppress all output in subprocess
         os.environ["PYTHONUNBUFFERED"] = "0"
@@ -2301,7 +2296,7 @@ class ProcessCrewExecutor:
                             logger.info(
                                 f"Force killed process {process.pid} using psutil"
                             )
-                        except:
+                        except Exception:
                             pass
 
                 # Remove from tracking
@@ -2472,6 +2467,7 @@ class ProcessCrewExecutor:
 
         try:
             from pathlib import Path
+
             from src.services.execution.logs.file_ingestion import ingest_execution_log
 
             await ingest_execution_log(
@@ -2484,7 +2480,6 @@ class ProcessCrewExecutor:
             )
 
         except Exception as e:
-            import traceback
 
             logger.error(
                 f"[ProcessCrewExecutor] [DEBUG] Error processing logs from crew.log: {e}"
@@ -2554,7 +2549,7 @@ class ProcessCrewExecutor:
                             psutil_proc.kill()
                             logger.info("Force killed process using psutil")
                             terminated = True
-                    except:
+                    except Exception:
                         pass
             else:
                 logger.info(f"Process for execution {execution_id} already terminated")

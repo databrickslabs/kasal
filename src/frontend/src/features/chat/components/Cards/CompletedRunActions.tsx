@@ -11,18 +11,24 @@ interface CompletedRunActionsProps {
   defaultName: string;
   usedWorkspaceMemory?: boolean;
   disabled?: boolean;
+  onOpenSchedule?: (executionId: string, defaultName: string, onCreated: (name: string) => void) => void;
   onOpenMemory?: (executionId: string) => void;
 }
 
 const ICON_BTN = 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed';
 
 /** The same run-scoped actions in Chat and the builder transcript. */
-const CompletedRunActions: React.FC<CompletedRunActionsProps> = ({ executionId, defaultName, usedWorkspaceMemory, disabled, onOpenMemory }) => {
+const CompletedRunActions: React.FC<CompletedRunActionsProps> = ({ executionId, defaultName, usedWorkspaceMemory, disabled, onOpenMemory, onOpenSchedule }) => {
   const canSchedule = usePermissionStore((s) => s.allowAgentBuilder || s.allowFlowBuilder);
   const dark = useThemeStore((s) => s.isDarkMode);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduledName, setScheduledName] = useState<string>();
   const canShowGraph = Boolean(usedWorkspaceMemory && executionId);
+  const scheduleCreated = (name: string) => {
+    setScheduledName(name);
+    setScheduleOpen(false);
+    void useAppStore.getState().loadSchedules();
+  };
   return <>
         {/* Schedule — re-run THIS run on a cadence. The run's stored config is
             the template (POST /schedules/from-execution), so it works the same
@@ -30,7 +36,7 @@ const CompletedRunActions: React.FC<CompletedRunActionsProps> = ({ executionId, 
         {executionId && canSchedule && (
           <button
             type="button"
-            onClick={() => setScheduleOpen(true)}
+            onClick={() => onOpenSchedule ? onOpenSchedule(executionId, defaultName, scheduleCreated) : setScheduleOpen(true)}
             disabled={disabled}
             title={scheduledName ? `Scheduled — ${scheduledName}` : 'Run this on a schedule'}
             className={ICON_BTN}
@@ -85,11 +91,7 @@ const CompletedRunActions: React.FC<CompletedRunActionsProps> = ({ executionId, 
           executionId={executionId}
           defaultName={defaultName}
           onClose={() => setScheduleOpen(false)}
-          onCreated={(name) => {
-            setScheduledName(name);
-            setScheduleOpen(false);
-            void useAppStore.getState().loadSchedules();
-          }}
+          onCreated={scheduleCreated}
         />
       </div>
       </Modal>

@@ -9,8 +9,6 @@ import uuid
 from datetime import datetime
 from unittest.mock import patch
 
-import pytest
-
 from src.models.flow import Flow
 
 

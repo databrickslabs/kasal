@@ -6,7 +6,7 @@ Note: engine_factory.py uses 'from src.services.execution.engine_service import 
 inside the function body (local import), so we patch at that path.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -72,13 +72,12 @@ async def test_get_engine_unknown_type_returns_none():
 @pytest.mark.asyncio
 async def test_get_engine_kasal_initialize_true():
     """Test that initialize=True works without error."""
-    import asyncio
 
     from src.services.execution.engine_factory import EngineFactory
 
     # Use the real engine but catch any event loop issues
     try:
-        result = await EngineFactory.get_engine("kasal", initialize=True)
+        await EngineFactory.get_engine("kasal", initialize=True)
         # Either returns engine or None (if task creation fails)
         # Just verify no crash
     except RuntimeError:

@@ -10,7 +10,6 @@ Author: Kasal Team
 Date: 2025
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +18,7 @@ from src.services.converters.base.connectors import (
     ConnectorType,
     InboundConnectorMetadata,
 )
-from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.base.models import KPI
 
 from ..powerbi.authentication import AadService
 from .llm_converter import MQueryLLMConverter

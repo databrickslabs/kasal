@@ -5,7 +5,7 @@ This module handles the configuration of tasks for CrewAI flows.
 """
 
 import json
-from typing import Dict, Optional
+from typing import Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
@@ -79,7 +79,15 @@ class TaskConfig:
 
             # Assemble the Task args via the shared builder (base + markdown + Genie
             # formatting + code/LLM guardrails + output_pydantic) — shared with the crew path.
-            spec = TaskConfig._task_data_to_spec(task_data)
+            from src.services.flow_builder.output_contracts import (
+                apply_flow_output_contract,
+            )
+
+            spec = apply_flow_output_contract(
+                TaskConfig._task_data_to_spec(task_data),
+                getattr(task_data, "id", None),
+                flow_data,
+            )
             group_id = (
                 getattr(group_context, "primary_group_id", None)
                 if group_context
@@ -145,8 +153,15 @@ class TaskConfig:
         # toggle), not a column. Context is intentionally omitted — flow chains
         # tasks via the graph, not CrewAI task context.
         cfg = getattr(task_data, "config", None) or {}
-        if isinstance(cfg, dict) and cfg.get("llm_guardrail"):
-            spec["llm_guardrail"] = cfg["llm_guardrail"]
+        if isinstance(cfg, dict):
+            for key in (
+                "llm_guardrail",
+                "output_pydantic",
+                "output_schema",
+                "output_schema_name",
+            ):
+                if cfg.get(key) is not None:
+                    spec[key] = cfg[key]
         return spec
 
     @staticmethod
@@ -286,7 +301,6 @@ class TaskConfig:
             group_context: Group context for multi-tenant tool access (optional)
         """
         # Initialize the ToolFactory with proper context for API key access
-        from src.services.tools.tool_factory import ToolFactory
 
         # Build config with group_id for multi-tenant isolation
         factory_config = {}

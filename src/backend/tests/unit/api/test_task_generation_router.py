@@ -13,8 +13,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.task_generation_router import router
-from src.dependencies.providers import get_group_context
 from src.db.database_router import get_smart_db_session
+from src.dependencies.providers import get_group_context
 from src.schemas.task_generation import (
     AdvancedConfig,
     TaskGenerationResponse,

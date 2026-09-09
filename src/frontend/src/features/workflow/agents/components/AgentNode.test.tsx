@@ -6,6 +6,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material';
 import AgentNode from './AgentNode';
+import { getDefaultModel } from '../../../../config/defaultModel';
 
 /* ------------------------------------------------------------------ */
 /* Mocks                                                               */
@@ -224,7 +225,7 @@ describe('AgentNode', () => {
 
     it('renders default LLM when no llm specified', () => {
       renderNode({ llm: undefined });
-      expect(screen.getByText('databricks-claude-sonnet-4-6')).toBeInTheDocument();
+      expect(screen.getByText(getDefaultModel())).toBeInTheDocument();
     });
 
     it('renders connection handles', () => {

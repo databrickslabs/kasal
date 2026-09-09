@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { Box } from '@mui/material';
+import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 import { alpha, createTheme, ThemeProvider, useTheme } from '@mui/material/styles';
 
 /** A shared presentation layer for settings and the dialogs opened from them.
@@ -11,9 +12,9 @@ export default function SettingsContent({ children }: { children: ReactNode }) {
   const theme = useMemo(() => {
     const ink = outer.palette.text.primary;
     const dark = outer.palette.mode === 'dark';
-    const surface = dark ? '#232A31' : '#FFFFFF';
-    const field = dark ? alpha(ink, 0.035) : '#FAFAF9';
-    const hover = dark ? alpha(ink, 0.06) : '#F7F7F5';
+    const surface = 'transparent';
+    const field = alpha(ink, 0.035);
+    const hover = alpha(ink, 0.06);
     const focus = {
       outline: `2px solid ${outer.palette.primary.main}`,
       outlineOffset: 3,
@@ -31,7 +32,16 @@ export default function SettingsContent({ children }: { children: ReactNode }) {
       components: {
         MuiPaper: { defaultProps: { elevation: 0 }, styleOverrides: { root: {
           '&&': { border: 0, borderRadius: 16, backgroundImage: 'none', boxShadow: 'none', backgroundColor: surface },
-          '& .MuiPaper-root': { backgroundColor: dark ? alpha(ink, 0.025) : '#FFFFFF' },
+          '& .MuiPaper-root': { backgroundColor: 'transparent' },
+          '&.MuiDialog-paper, &.MuiPopover-paper, &.MuiMenu-paper': kasalStageSurface(dark),
+          // Autocomplete lists float over the form; transparent section surfaces
+          // would let the fields underneath show through their options.
+          '&&.MuiAutocomplete-paper': {
+            ...kasalStageSurface(dark),
+            marginBlock: 6,
+            borderRadius: 12,
+            boxShadow: `0 8px 24px ${alpha('#000', dark ? 0.3 : 0.12)}`,
+          },
         } } },
         MuiCardContent: { styleOverrides: { root: { padding: 24, '&:last-child': { paddingBottom: 24 } } } },
         MuiButton: { defaultProps: { disableElevation: true }, styleOverrides: { root: {
@@ -49,7 +59,7 @@ export default function SettingsContent({ children }: { children: ReactNode }) {
           '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: alpha(ink, 0.2) },
           '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: outer.palette.primary.main, borderWidth: 1 },
           '&.Mui-error .MuiOutlinedInput-notchedOutline': { borderColor: outer.palette.error.main },
-          '&.Mui-disabled': { backgroundColor: dark ? alpha(ink, 0.02) : '#FCFCFB' },
+          '&.Mui-disabled': { backgroundColor: alpha(ink, 0.02) },
           '&.Mui-disabled .MuiOutlinedInput-notchedOutline': { borderColor: 'transparent' },
         } } },
         MuiFormHelperText: { styleOverrides: { root: { marginLeft: 2, marginTop: 6, fontSize: 12, lineHeight: 1.55 } } },
@@ -94,7 +104,7 @@ export default function SettingsContent({ children }: { children: ReactNode }) {
       '& > .MuiBox-root': { p: 0 },
       '& [data-settings-page-title]': { display: 'none' },
       '& [data-settings-toolbar]': { gap: 2, flexWrap: 'wrap', alignItems: 'center' },
-      '& [data-settings-section]': { p: { xs: 2, sm: 3 }, borderRadius: '16px', bgcolor: outer.palette.mode === 'dark' ? '#232A31' : '#FFFFFF' },
+      '& [data-settings-section]': { p: { xs: 2, sm: 3 }, borderRadius: '16px', bgcolor: 'transparent' },
       '& pre': { overflowX: 'auto', borderRadius: 2, fontSize: 12 },
       '& .MuiFormControlLabel-label': { fontSize: 13 },
     }}>{children}</Box>

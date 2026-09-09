@@ -17,7 +17,9 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 # Import core logger
-from src.core.logger import LoggerManager
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
 
 # Configure logger
 logger = logging.getLogger(__name__)

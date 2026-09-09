@@ -10,7 +10,6 @@ import re
 from typing import Any
 
 from .data_classes import MetricViewSpec, TranslationResult
-from .utils import to_snake_case
 
 # Keywords that classify a measure as a PBI UI artifact (not a real business measure)
 _ARTIFACT_SKIP_KEYWORDS = (

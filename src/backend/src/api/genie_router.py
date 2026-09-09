@@ -7,10 +7,10 @@ Handles Genie-related API endpoints using proper service/repository architecture
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
-from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import KasalError, NotFoundError
+from src.dependencies.providers import GroupContextDep
 from src.schemas.genie import (
     GenieAuthConfig,
     GenieExecutionRequest,

@@ -88,3 +88,145 @@ class TestAssertSafeOutboundUrl:
     async def test_blocks(self, url):
         with pytest.raises(UnsafeUrlError):
             await assert_safe_outbound_url(url)
+
+
+class TestPublicConnector:
+    """Exercise the actual HTTPX adapter, including HTTP host and TLS identity."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "private_ip", ["127.0.0.1", "169.254.169.254", "::1", "10.0.0.1"]
+    )
+    async def test_dns_rebinding_cannot_reach_private_address(
+        self, monkeypatch, private_ip
+    ):
+        import asyncio
+        import socket
+        from unittest.mock import AsyncMock
+
+        import httpx
+
+        from src.utils.safe_http import PublicHTTPTransport
+
+        dns = AsyncMock(
+            side_effect=[
+                [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))],
+                [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (private_ip, 443))],
+            ]
+        )
+        monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+        await assert_safe_outbound_url("https://hooks.example.com")
+        transport = PublicHTTPTransport()
+        connect = AsyncMock()
+        monkeypatch.setattr(
+            transport._pool._network_backend._backend, "connect_tcp", connect
+        )
+        async with httpx.AsyncClient(transport=transport, trust_env=False) as client:
+            with pytest.raises(UnsafeUrlError):
+                await client.post("https://hooks.example.com", json={"secret": "test"})
+        connect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("ip", ["8.8.8.8", "2606:4700:4700::1111"])
+    async def test_validated_ip_preserves_host_and_tls_sni(self, monkeypatch, ip):
+        import asyncio
+        import socket
+        from unittest.mock import AsyncMock
+
+        import httpcore
+        import httpx
+
+        from src.utils.safe_http import PublicHTTPTransport
+
+        class Stream(httpcore.AsyncNetworkStream):
+            def __init__(self):
+                self.writes = []
+                self.server_hostname = None
+                self.response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"
+
+            async def read(self, max_bytes, timeout=None):
+                response, self.response = self.response, b""
+                return response
+
+            async def write(self, buffer, timeout=None):
+                self.writes.append(buffer)
+
+            async def aclose(self):
+                pass
+
+            async def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+                self.server_hostname = server_hostname
+                assert ssl_context.check_hostname
+                return self
+
+            def get_extra_info(self, info):
+                return None
+
+        monkeypatch.setattr(
+            asyncio.get_running_loop(),
+            "getaddrinfo",
+            AsyncMock(
+                return_value=[
+                    (
+                        socket.AF_INET6 if ":" in ip else socket.AF_INET,
+                        socket.SOCK_STREAM,
+                        6,
+                        "",
+                        (ip, 443),
+                    ),
+                ]
+            ),
+        )
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
+        stream = Stream()
+        transport = PublicHTTPTransport()
+        connect = AsyncMock(return_value=stream)
+        monkeypatch.setattr(
+            transport._pool._network_backend._backend, "connect_tcp", connect
+        )
+        async with httpx.AsyncClient(transport=transport, trust_env=False) as client:
+            response = await client.get("https://hooks.example.com/path")
+        assert response.text == "OK"
+        assert connect.await_args.args == (ip, 443)
+        assert stream.server_hostname == "hooks.example.com"
+        assert b"Host: hooks.example.com\r\n" in b"".join(stream.writes)
+
+    @pytest.mark.asyncio
+    async def test_dns_timeout_is_bounded(self, monkeypatch):
+        import asyncio
+
+        import httpcore
+
+        from src.utils.safe_http import PublicNetworkBackend
+
+        async def never_resolves(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", never_resolves)
+        with pytest.raises(httpcore.ConnectTimeout):
+            await PublicNetworkBackend().connect_tcp(
+                "hooks.example.com", 443, timeout=0.01
+            )
+
+    @pytest.mark.asyncio
+    async def test_aiohttp_rejects_mixed_public_private_answers(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from src.utils.safe_http import PublicResolver
+
+        resolver = PublicResolver()
+        monkeypatch.setattr(
+            resolver._resolver,
+            "resolve",
+            AsyncMock(
+                return_value=[
+                    {"host": "8.8.8.8"},
+                    {"host": "127.0.0.1"},
+                ]
+            ),
+        )
+        try:
+            with pytest.raises(UnsafeUrlError):
+                await resolver.resolve("hooks.example.com", 443)
+        finally:
+            await resolver.close()

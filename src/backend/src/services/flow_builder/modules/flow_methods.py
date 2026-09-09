@@ -5,15 +5,19 @@ This module handles dynamic creation of flow methods (starting points, listeners
 """
 
 import asyncio
-import logging
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
-from src.services.flow_builder.runtime import and_, listen, or_, router, start
+from src.services.flow_builder.modules.task_context import (
+    task_with_context,
+    tasks_for_review,
+)
+from src.services.flow_builder.runtime import listen, start
 
+from .crew_completion import completed_sequence
 from .flow_conditions import state_snapshot
 
 # Initialize logger - use flow logger for flow execution
@@ -615,6 +619,8 @@ class FlowMethodFactory:
             Async function decorated with @start()
         """
 
+        task_list = tasks_for_review(task_list, method_name, callbacks)
+
         @start()
         async def starting_point_crew_method(self):
             """Starting point method - executes crew with multiple sequential tasks."""
@@ -1087,6 +1093,8 @@ class FlowMethodFactory:
         """
         decorator = listen(method_condition)
 
+        listener_tasks = tasks_for_review(listener_tasks, method_name, callbacks)
+
         @decorator
         async def listener_method(self, *results):
             """Listener method - executes when listening to a specific event."""
@@ -1163,29 +1171,11 @@ class FlowMethodFactory:
                     f"📤 Context injection: {len(previous_output_context)} chars in task description (original: {full_len:,} chars)"
                 )
 
-            # Create new Task objects with modified descriptions.
-            # CRITICAL: carry over tools/output_pydantic/output_json/converter_cls/
-            # context. Rebuilding with only description/agent/expected_output (the
-            # prior behavior) silently dropped them, so listener crews lost their
-            # tools (no MCP/tool calls) AND their structured-output schema (no
-            # .pydantic → routers fall back to flaky raw-text parsing). The
-            # starting crew keeps its original Task objects, which is why only
-            # listener (@listen) crews were affected.
+            # Clone validated tasks so context injection preserves review policies,
+            # tools, schemas and the private identity used by checkpoints.
             for task in listener_tasks:
                 # Create new task with injected context, preserving execution config.
-                runtime_task = active_harness().build_task(
-                    description=f"{task.description}{previous_output_context}",
-                    agent=task.agent,
-                    expected_output=(
-                        task.expected_output
-                        if hasattr(task, "expected_output")
-                        else "Task completed successfully"
-                    ),
-                    tools=getattr(task, "tools", None) or [],
-                    output_pydantic=getattr(task, "output_pydantic", None),
-                    output_json=getattr(task, "output_json", None),
-                    converter_cls=getattr(task, "converter_cls", None),
-                )
+                runtime_task = task_with_context(task, previous_output_context)
                 runtime_tasks.append(runtime_task)
                 logger.info(
                     f"Created runtime task with injected context for agent: {task.agent.role} "
@@ -2153,6 +2143,10 @@ class FlowMethodFactory:
             logger.info(f"Gate config: {gate_config}")
             logger.info("=" * 80)
 
+            gate_sequence = completed_sequence(
+                self, previous_method_name, crew_sequence
+            )
+
             # Extract execution context
             job_id = callbacks.get("job_id") if callbacks else None
             flow_id = callbacks.get("flow_id") if callbacks else None
@@ -2301,7 +2295,7 @@ class FlowMethodFactory:
                     execution_id=job_id,
                     flow_id=flow_id or "",
                     gate_node_id=gate_node_id,
-                    crew_sequence=crew_sequence,
+                    crew_sequence=gate_sequence,
                     gate_config=gate_config,
                     group_id=group_id,
                     previous_crew_name=previous_crew_name,
@@ -2336,7 +2330,7 @@ class FlowMethodFactory:
                 gate_node_id=gate_node_id,
                 message=gate_config.get("message", "Approval required to proceed"),
                 execution_id=job_id,
-                crew_sequence=crew_sequence,
+                crew_sequence=gate_sequence,
                 flow_uuid=flow_uuid,
             )
 

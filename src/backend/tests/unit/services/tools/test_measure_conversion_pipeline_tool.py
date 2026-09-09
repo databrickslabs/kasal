@@ -4,7 +4,7 @@ Unit tests for services/tools/custom/measure_conversion_pipeline_tool.py
 Tests universal measure conversion pipeline tool for CrewAI.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 

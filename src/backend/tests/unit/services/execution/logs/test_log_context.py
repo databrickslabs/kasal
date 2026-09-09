@@ -2,14 +2,7 @@
 Unit tests for src/services/execution/logs/context.py
 """
 
-import asyncio
-import io
 import logging
-import os
-import sys
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
-
-import pytest
 
 from src.services.execution.logs.context import (
     ExecutionContextFormatter,

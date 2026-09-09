@@ -6,15 +6,13 @@ CRUD operations, group isolation, and data serialization.
 """
 
 from datetime import datetime
-from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError
-from src.models.crew import Crew
 from src.repositories.crew_repository import CrewRepository
 from src.schemas.crew import CrewCreate, CrewUpdate
 from src.services.catalog.crews import CrewService

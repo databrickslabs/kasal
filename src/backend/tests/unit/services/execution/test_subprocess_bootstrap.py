@@ -2,16 +2,12 @@
 Unit tests for src/services/execution/subprocess_bootstrap.py
 """
 
-import asyncio
 import io
 import logging
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from src.services.execution.logs.context import _execution_context
 from src.services.execution.subprocess_bootstrap import (
     configure_subprocess_logging,
     restore_stdout_stderr,

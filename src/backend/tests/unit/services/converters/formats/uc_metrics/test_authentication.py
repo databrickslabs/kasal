@@ -115,7 +115,6 @@ class TestAcquireTokenWithServicePrincipal:
             )
 
     def test_returns_token_on_success(self):
-        import requests
 
         svc = DatabricksAuthService(
             workspace_url="https://example.databricks.com",
@@ -222,7 +221,7 @@ class TestGetHeaders:
         pass
 
 
-class TestValidateToken:
+class TestValidateTokenAdditionalCases:
     """Tests for validate_token function"""
 
     def test_validate_token_success(self):
@@ -236,7 +235,7 @@ class TestValidateToken:
         pass
 
 
-class TestGetHeaders:
+class TestGetHeadersAdditionalCases:
     """Tests for get_headers function"""
 
     def test_get_headers_success(self):

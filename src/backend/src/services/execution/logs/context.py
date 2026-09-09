@@ -29,7 +29,6 @@ class ExecutionContextFormatter(logging.Formatter):
         # Extract prefix from original format (e.g., "[FLOW]" or "[CREW]")
         self._original_fmt = fmt or "[CREW] %(asctime)s - %(levelname)s - %(message)s"
         # Extract the prefix by finding the pattern [SOMETHING]
-        import re
 
         match = re.match(r"(\[[\w]+\])", self._original_fmt)
         self._prefix = match.group(1) if match else "[CREW]"

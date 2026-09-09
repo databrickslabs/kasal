@@ -10,9 +10,8 @@ Strategy:
 - All external I/O (DB, env, event loop) is mocked.
 """
 
-import asyncio
 import os
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

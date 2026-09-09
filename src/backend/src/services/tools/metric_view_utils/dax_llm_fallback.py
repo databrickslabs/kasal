@@ -13,11 +13,9 @@ import logging
 import os
 import re
 from collections import OrderedDict
-from typing import Any
 
 from .data_classes import TranslationResult
 from .function_ref_retriever import render_function_refs
-from .utils import to_snake_case
 
 logger = logging.getLogger(__name__)
 

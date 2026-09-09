@@ -13,11 +13,11 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from src.core.llm.robust_json import robust_json_parser
 from src.repositories.log_repository import LLMLogRepository
 from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
-from src.core.llm.robust_json import robust_json_parser
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 
@@ -89,6 +89,11 @@ class PromptImprovementService:
         system = await TemplateService.get_effective_template_content(
             "improve_prompt", group_context
         )
+        if not (system and system.strip()):
+            from src.seeds.prompt_templates import IMPROVE_PROMPT_TEMPLATE
+
+            logger.warning("Missing improve_prompt template; using the bundled default")
+            system = IMPROVE_PROMPT_TEMPLATE
         user = json.dumps(
             {"target": target, "fields": fields, "instructions": instructions},
             ensure_ascii=False,

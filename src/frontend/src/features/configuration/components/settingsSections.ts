@@ -19,6 +19,7 @@ export const settingsSections = [
   { id: 'databricks', title: 'Databricks', description: 'Connect your workspace, data, and storage.', group: 'connections', scopes: ['workspace'], key: 'databricks.tab', admin: true },
   { id: 'mcp', title: 'MCP servers', description: 'Connect external tools and resources through MCP.', group: 'connections', scopes: ['workspace', 'system'], key: 'settings.mcp', admin: true },
   { id: 'remote-agents', title: 'Remote agents', description: 'Connect agents hosted outside this Kasal instance.', group: 'connections', scopes: ['workspace', 'system'], key: 'settings.remoteAgents', admin: true },
+  { id: 'event-triggers', title: 'Event triggers', description: 'Start saved crews and flows from events and manage event subscriptions.', group: 'connections', scopes: ['workspace'], key: 'settings.eventTriggers' },
   { id: 'mlflow', title: 'MLflow', description: 'Connect tracing, experiments, and evaluation.', group: 'connections', scopes: ['workspace'], key: 'mlflow.tab', admin: true },
   { id: 'api-keys', title: 'API Keys', description: 'Manage credentials for your connected services.', group: 'connections', scopes: ['workspace'], key: 'apiKeys.tab' },
   { id: 'access', title: 'Access', description: 'Manage people, teamspaces, and their permissions.', group: 'administration', scopes: ['system'], key: 'access.tab' },

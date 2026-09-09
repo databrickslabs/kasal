@@ -1249,7 +1249,6 @@ class TestRunAsyncInSyncContext:
 
     def test_raises_on_coro_exception(self):
         """Exceptions from the coroutine propagate out."""
-        import pytest
 
         from src.services.tools.powerbi_metadata_reducer_tool import (
             _run_async_in_sync_context,

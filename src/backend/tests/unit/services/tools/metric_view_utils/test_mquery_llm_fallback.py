@@ -5,11 +5,8 @@ import json
 from collections import OrderedDict
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from src.services.tools.metric_view_utils import mquery_llm_fallback as mllm
 from src.services.tools.metric_view_utils.mquery_llm_fallback import (
-    _content_hash,
     _parse_response,
     _validate_source_sql,
     recover_sources_with_llm,

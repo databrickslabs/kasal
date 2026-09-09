@@ -27,22 +27,15 @@ Example:
 import asyncio
 import concurrent.futures
 import copy
-import json
 import logging
-import os
-import sys
-import traceback
 import uuid
-from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Union
-
-from sqlalchemy.orm import Session
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError, KasalError
 from src.core.logger import LoggerManager
 from src.schemas.execution import (
     CrewConfig,
-    ExecutionCreateResponse,
     ExecutionNameGenerationRequest,
     ExecutionStatus,
 )
@@ -884,7 +877,7 @@ class ExecutionService:
                 exec_logger.debug(
                     f"[run_crew_execution] Using thread pool execution for {execution_type} job_id {execution_id}"
                 )
-                future = ExecutionService._thread_pool.submit(
+                ExecutionService._thread_pool.submit(
                     run_in_thread_with_loop,
                     ExecutionService._execute_crew,
                     execution_id,
@@ -1556,7 +1549,7 @@ class ExecutionService:
                         and config.nodes is not None
                         and len(config.nodes) > 0
                     )
-                    has_edges = hasattr(config, "edges") and config.edges is not None
+                    hasattr(config, "edges") and config.edges is not None
 
                     if has_nodes:
                         # Ad-hoc flow execution with nodes from canvas (no database save required)
@@ -2255,13 +2248,11 @@ class ExecutionService:
         Returns:
             Dict with stop status and partial results if available
         """
-        from datetime import datetime
 
         from src.models.execution_status import ExecutionStatus
         from src.repositories.execution_history_repository import (
             ExecutionHistoryRepository,
         )
-        from src.schemas.execution import StopExecutionResponse
 
         crew_logger.info("[STOP] ========== STOP EXECUTION CALLED ==========")
         crew_logger.info(
@@ -2501,7 +2492,7 @@ class ExecutionService:
                         execution_id, f"Failed to stop: {str(e)}"
                     )
                     await db.commit()
-                except:
+                except Exception:
                     pass
 
             raise Exception(f"Failed to stop execution: {str(e)}")
