@@ -31,6 +31,10 @@ class TranslationResult:
     # gaps. Populated from config['measure_usage']; measure→measure refs only
     # (not dashboard/visual usage). 0 = nothing references it.
     referenced_by: int = 0
+    # The LLM's one-line justification for the translation (or the decline
+    # reason). Surfaced as a provenance comment on the emitted measure so a
+    # reviewer sees HOW/WHY each best-effort measure was produced. Reporting only.
+    explanation: str | None = None
 
 
 @dataclass

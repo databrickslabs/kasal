@@ -51,6 +51,7 @@ import { DatabricksService } from '../../../api/databricks/DatabricksService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
 import { UCMVResultWithAutoSave } from './UCMVResultWithAutoSave';
 import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
+import ReevaluationResultViewer, { isReevaluationResult } from './ReevaluationResultViewer';
 import { runService } from '../../../api/execution/ExecutionHistoryService';
 
 const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
@@ -725,6 +726,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
             }
             if (isValidatorResult(inner)) {
               return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+            }
+            if (isReevaluationResult(inner)) {
+              return <ReevaluationResultViewer result={inner as Parameters<typeof ReevaluationResultViewer>[0]['result']} />;
             }
           }
         } catch { /* not JSON */ }

@@ -265,15 +265,25 @@ class TestTranslateBatchWithLLM:
         ]
         seen = []
 
-        async def fake_call(prompt, sysp, model):
+        async def fake_call(prompt, sysp, model, max_tokens=2000):
             seen.append(prompt)
+            # Batch path: respond with a JSON ARRAY echoing each measure name.
             return {
                 "content": json.dumps(
-                    {
-                        "success": True,
-                        "sql_expr": "SUM(source.amount)",
-                        "confidence": "medium",
-                    }
+                    [
+                        {
+                            "measure_name": "F_Start_date",
+                            "success": True,
+                            "sql_expr": "SUM(source.amount)",
+                            "confidence": "medium",
+                        },
+                        {
+                            "measure_name": "Guarded",
+                            "success": True,
+                            "sql_expr": "SUM(source.amount)",
+                            "confidence": "medium",
+                        },
+                    ]
                 ),
                 "usage": {},
             }
@@ -284,18 +294,21 @@ class TestTranslateBatchWithLLM:
         ):
             result = await translate_batch_with_llm(measures, "fact_test", set(), {})
 
-        # Both SELECTEDVALUE measures were sent to the LLM (not artifact-filtered)
-        # and got translated.
-        assert len(seen) == 2
+        # Both SELECTEDVALUE measures were sent to the LLM (not artifact-filtered):
+        # one batch call carries BOTH, and both got translated.
+        assert len(seen) == 1
+        assert "F_Start_date" in seen[0] and "Guarded" in seen[0]
         assert all(m.is_translatable for m in result)
 
 
 class TestBatchConcurrency:
-    """translate_batch_with_llm runs in bounded-concurrency chunks (not one-at-a-time).
+    """translate_batch_with_llm sends ONE LLM call per batch (not one-at-a-time).
 
-    Regression: the old sequential loop could exceed the flow's crew timeout on
-    models with hundreds of measures. Chunked concurrency cuts wall-time while
-    preserving cross-measure MEASURE() reference resolution between chunks.
+    Regression: the old per-measure loop re-sent the ~14k-token skill corpus on
+    every measure, blowing the workspace tokens-per-minute rate limit. Batching
+    amortises the corpus + shared fact-table context across all measures in a
+    batch, and batches run sequentially so cross-measure MEASURE() references
+    still resolve between them.
     """
 
     def _mk(self, i):
@@ -310,20 +323,32 @@ class TestBatchConcurrency:
             category="",
         )
 
-    def test_all_translated_and_runs_concurrently(self):
+    def test_all_translated_in_batches(self):
         import asyncio
+        import re
         import time
 
         from src.services.tools.metric_view_utils import dax_llm_fallback as d
 
-        measures = [self._mk(i) for i in range(14)]  # 3 chunks at concurrency=6
+        measures = [self._mk(i) for i in range(14)]  # 2 batches at batch_size=12
 
-        async def fake_call(prompt, sys, model):
+        async def fake_call(prompt, sys, model, max_tokens=2000):
             await asyncio.sleep(0.05)
+            # Batch path: echo one result object per measure named in the prompt.
+            names = re.findall(r"name: (M\d+)", prompt)
             return {
                 "content": json.dumps(
-                    {"success": True, "sql_expr": "SUM(source.c)", "confidence": "high"}
-                )
+                    [
+                        {
+                            "measure_name": n,
+                            "success": True,
+                            "sql_expr": "SUM(source.c)",
+                            "confidence": "high",
+                        }
+                        for n in names
+                    ]
+                ),
+                "usage": {},
             }
 
         async def go():
@@ -336,8 +361,8 @@ class TestBatchConcurrency:
 
         out, dur = asyncio.run(go())
         assert sum(1 for m in out if m.is_translatable) == 14
-        # Sequential would be ~14*0.05=0.70s; chunked(6) is ~3*0.05=0.15s.
-        assert dur < 0.45, f"expected concurrent execution, got {dur:.2f}s"
+        # Per-measure would be ~14*0.05=0.70s; batched(12) is 2 calls ~0.10s.
+        assert dur < 0.45, f"expected batched execution, got {dur:.2f}s"
 
     def test_artifacts_skipped(self):
         import asyncio
@@ -450,24 +475,30 @@ class TestLLMFirstCorpus:
         )
         seen_order = []
 
-        async def fake_call(prompt, sysp, model):
-            # record which measure ran (prompt carries the name)
-            seen_order.append(
-                "Parent" if "Parent" in prompt and "Child" not in prompt else "Child"
-            )
+        async def fake_call(prompt, sysp, model, max_tokens=2000):
+            # record which measure ran (prompt carries the name). With batch_size=1
+            # each measure is its own batch call, so call order == candidate order.
+            name = "Parent" if "Parent" in prompt and "Child" not in prompt else "Child"
+            seen_order.append(name)
             return {
                 "content": json.dumps(
-                    {
-                        "success": True,
-                        "sql_expr": "SUM(source.a)",
-                        "dax_class": "translatable_direct",
-                    }
+                    [
+                        {
+                            "measure_name": name,
+                            "success": True,
+                            "sql_expr": "SUM(source.a)",
+                            "dax_class": "translatable_direct",
+                        }
+                    ]
                 ),
                 "usage": {},
             }
 
         async def go():
-            with patch.object(d, "_call_llm", new=fake_call):
+            # Force one measure per batch so topo ordering yields distinct calls.
+            with patch.object(d, "_call_llm", new=fake_call), patch.object(
+                d, "_DAX_LLM_BATCH_SIZE", 1
+            ):
                 # child listed first, but topo_priority puts parent (rank 0) before child (rank 1)
                 await d.translate_batch_with_llm(
                     [child, parent],

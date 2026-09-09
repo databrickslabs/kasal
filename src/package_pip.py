@@ -28,7 +28,8 @@ def ensure_frontend(skip: bool) -> None:
     if skip:
         sys.exit("src/frontend_static missing and --skip-frontend given")
     print("Building frontend (npm run build in src/)…")
-    subprocess.run(["npm", "run", "build"], cwd=str(SRC), check=True)
+    npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+    subprocess.run([npm_cmd, "run", "build"], cwd=str(SRC), check=True)
     if not index.exists():
         sys.exit(
             "frontend build finished but src/frontend_static/index.html is missing"
