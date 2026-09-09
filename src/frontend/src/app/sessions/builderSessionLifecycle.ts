@@ -1,4 +1,6 @@
 import { useBuilderCanvasStore, type BuilderCanvas } from './builderCanvasStore';
+import { useSessionPreferences } from './sessionPreferences';
+import { builderSessionKey } from './sessionIndex';
 import { useSessionStore } from './sessionStore';
 import { useFlowStateStore } from '../../store/flowState';
 import { useErrorStore } from '../../store/error';
@@ -14,13 +16,16 @@ export async function pauseBuilderSessionWrites(id: string) {
 }
 
 /** One lifecycle above the mode views; writes continue across session navigation. */
-export async function connectBuilderSessions(group: string, sessions: ChatSession[], cancelled: () => boolean) {
+export async function connectBuilderSessions(group: string, sessions: ChatSession[], cancelled: () => boolean,
+  onError: (cause: unknown) => void = () => {},
+) {
   const user = useUserStore.getState().currentUser?.email;
   if (!user || !group) return () => {};
   if (canvasOwner !== user) {
     useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null, hydrated: false });
     canvasOwner = user;
   }
+  const blocked = new Set<string>();
   const revisions = new Map<string, number>();
   const acknowledged = new Map<string, string>();
   const beforeLoad = new Map(useBuilderCanvasStore.getState().canvases.map(canvas =>
@@ -35,41 +40,51 @@ export async function connectBuilderSessions(group: string, sessions: ChatSessio
   // Read sequentially to bound DB/crypto work during large legacy imports.
   for (const id of ids) {
     if (!owned()) return () => {};
-    const saved = await readCanvas(id, group);
-    if (!owned()) return () => {};
-    const old = legacy.find(canvas => (canvas.chatSessionId || canvas.id) === id);
-    let state = saved?.state;
-    let revision = saved?.revision || 0;
-    if (pending[id]) {
-      if (pending[id].revision !== revision) {
-        // A refresh immediately after an acknowledged server write is harmless.
-        if (JSON.stringify(saved?.state) !== JSON.stringify(pending[id].state))
-          throw new Error('This session changed in another browser. Your unsaved canvas is retained locally.');
-      } else {
-        state = pending[id].state;
+    try {
+      const saved = await readCanvas(id, group);
+      if (!owned()) return () => {};
+      const old = legacy.find(canvas => (canvas.chatSessionId || canvas.id) === id);
+      let state = saved?.state;
+      let revision = saved?.revision || 0;
+      if (pending[id]) {
+        if (pending[id].revision !== revision) {
+          // A refresh immediately after an acknowledged server write is harmless.
+          if (JSON.stringify(saved?.state) !== JSON.stringify(pending[id].state))
+            throw new Error('This session changed in another browser. Your unsaved canvas is retained locally.');
+        } else {
+          state = pending[id].state;
+          revision = await writeCanvas(id, group, state, revision);
+        }
+        keepPending(user, group, id);
+      } else if (!state && old) {
+        state = { ...old, chatSessionId: id, group_id: group,
+          declaredFlowState: useFlowStateStore.getState().getDeclared(old.id) };
         revision = await writeCanvas(id, group, state, revision);
       }
-      keepPending(user, group, id);
-    } else if (!state && old) {
-      state = { ...old, chatSessionId: id, group_id: group,
-        declaredFlowState: useFlowStateStore.getState().getDeclared(old.id) };
-      revision = await writeCanvas(id, group, state, revision);
+      if (!owned()) return () => {};
+      if (!state) throw new Error('Saved builder canvas is unavailable.');
+      const serverCanvas = restoreCanvas(state, group, id);
+      const current = useBuilderCanvasStore.getState().getCanvas(serverCanvas.id);
+      const editedDuringLoad = current && JSON.stringify(snapshot(current,
+        useFlowStateStore.getState().getDeclared(current.id))) !== beforeLoad.get(current.id);
+      const canvas = editedDuringLoad ? current : serverCanvas;
+      imported.push(canvas);
+      revisions.set(id, revision);
+      if (!editedDuringLoad) {
+        if (state.declaredFlowState) useFlowStateStore.getState().setDeclared(canvas.id, state.declaredFlowState);
+        else useFlowStateStore.getState().clearDeclared(canvas.id);
+      }
+      acknowledged.set(id, JSON.stringify(snapshot(serverCanvas, state.declaredFlowState)));
+      if (old) retireLegacyCanvas(old.id);
+      const preferences = useSessionPreferences.getState();
+      const key = builderSessionKey(canvas);
+      const oldPreference = preferences.entries[`builder:${canvas.id}`];
+      if (oldPreference && !preferences.entries[key]) preferences.update(key, oldPreference);
+    } catch (cause) {
+      if (!owned()) return () => {};
+      blocked.add(id);
+      onError(cause);
     }
-    if (!owned()) return () => {};
-    if (!state) continue;
-    const serverCanvas = restoreCanvas(state, group, id);
-    const current = useBuilderCanvasStore.getState().getCanvas(serverCanvas.id);
-    const editedDuringLoad = current && JSON.stringify(snapshot(current,
-      useFlowStateStore.getState().getDeclared(current.id))) !== beforeLoad.get(current.id);
-    const canvas = editedDuringLoad ? current : serverCanvas;
-    imported.push(canvas);
-    revisions.set(id, revision);
-    if (!editedDuringLoad) {
-      if (state.declaredFlowState) useFlowStateStore.getState().setDeclared(canvas.id, state.declaredFlowState);
-      else useFlowStateStore.getState().clearDeclared(canvas.id);
-    }
-    acknowledged.set(id, JSON.stringify(snapshot(serverCanvas, state.declaredFlowState)));
-    if (old) retireLegacyCanvas(old.id);
   }
   if (!owned()) return () => {};
   const prior = useBuilderCanvasStore.getState();
@@ -78,8 +93,8 @@ export async function connectBuilderSessions(group: string, sessions: ChatSessio
   const activeKey = `kasal-active-builder:${user}:${group}`;
   const restoredId = localStorage.getItem(activeKey) || legacyActive;
   const activeId = imported.find(canvas => canvas.id === restoredId)?.id ||
-    canvases.find(canvas => canvas.id === prior.activeCanvasId && canvas.group_id === group)?.id || imported[0]?.id || null;
-  useBuilderCanvasStore.setState({ canvases, activeCanvasId: activeId, hydrated: true });
+    canvases.find(canvas => canvas.id === prior.activeCanvasId && canvas.group_id === group && !blocked.has(canvas.chatSessionId || canvas.id))?.id || imported[0]?.id || null;
+  useBuilderCanvasStore.setState({ canvases, activeCanvasId: activeId, hydrated: true, unavailableSessionIds: [...blocked] });
 
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const writes = new Map<string, Promise<void>>();
@@ -92,7 +107,9 @@ export async function connectBuilderSessions(group: string, sessions: ChatSessio
     { id, title: state.name, mode: state.viewMode, groupId: group,
       createdAt: new Date(state.createdAt), updatedAt: new Date(state.lastModified) },
   ] }));
-  imported.forEach(canvas => publish(canvas.chatSessionId!, snapshot(canvas)));
+  // Existing metadata owns the timestamp; reading a canvas is not an edit.
+  imported.filter(canvas => !useSessionStore.getState().sessions.some(session => session.id === canvas.chatSessionId))
+    .forEach(canvas => publish(canvas.chatSessionId!, snapshot(canvas)));
 
   const flush = (id: string) => {
     if (stopped || !owned() || writes.has(id) || paused.has(id)) return;
@@ -122,7 +139,7 @@ export async function connectBuilderSessions(group: string, sessions: ChatSessio
     if (store.activeCanvasId) localStorage.setItem(activeKey, store.activeCanvasId);
     for (const canvas of store.canvases.filter(c => c.group_id === group)) {
       const id = canvas.chatSessionId || canvas.id;
-      if (paused.has(id)) continue;
+      if (paused.has(id) || blocked.has(id)) continue;
       deletionBarriers.set(id, async () => {
         paused.add(id);
         clearTimeout(timers.get(id)); timers.delete(id); latest.delete(id);

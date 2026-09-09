@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { SessionLoadError } from './sessionLoadError';
 import { ChatMessage, ChatSession } from '../../features/chat/types/chat';
 import { generateId } from '../../features/chat/utils/markdown';
 // Sessions persist server-side (SQLite locally / Lakebase when active)
@@ -20,6 +21,7 @@ import {
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 let sessionNavigationVersion = 0;
+let sessionListRequestVersion = 0;
 export const cancelSessionNavigation = () => { sessionNavigationVersion += 1; };
 
 /**
@@ -236,12 +238,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reloadForGroup: async (restoreActiveSession = false) => {
+    const listVersion = ++sessionListRequestVersion;
     const version = ++sessionNavigationVersion;
     const group = currentGroupId();
     // Always re-list this workspace's sessions for the history rail.
-    const allSessions = await dbListSessions(currentGroupId());
-    if (group !== currentGroupId()) return;
-    if (version !== sessionNavigationVersion) { set({ sessions: allSessions }); return; }
+    let allSessions: ChatSession[];
+    try { allSessions = await dbListSessions(group); }
+    catch (cause) { throw new SessionLoadError('list', cause); }
+    if (group !== currentGroupId() || listVersion !== sessionListRequestVersion) return;
+    // Publish the list independently of restoring the selected conversation.
+    // A missing/corrupt conversation must not hide the other saved sessions.
+    set({ sessions: allSessions });
+    if (version !== sessionNavigationVersion) return;
     const activeId = localStorage.getItem(ACTIVE_SESSION_KEY);
     // On a full page reload (refresh), RESTORE the session the user left — so a
     // refresh keeps you in your conversation instead of bouncing to a new chat.
@@ -252,7 +260,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       activeId &&
       allSessions.some((s) => s.id === activeId && (!s.mode || s.mode === 'chat'))
     ) {
-      const msgs = await getSessionMessages(activeId);
+      let msgs: ChatMessage[];
+      try { msgs = await getSessionMessages(activeId); }
+      catch (cause) { throw new SessionLoadError('messages', cause); }
       if (version !== sessionNavigationVersion || group !== currentGroupId()) return;
       set({ sessions: allSessions, currentSessionId: activeId, messages: msgs });
       return;

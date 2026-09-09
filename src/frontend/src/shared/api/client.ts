@@ -27,7 +27,7 @@ apiClient.interceptors.request.use(
       && /\/(?:users\/me|groups\/my-groups)\/?(?:\?|$)/.test(config.url ?? '');
     if (identityDiscovery) {
       delete config.headers['group_id'];
-    } else if (selectedGroupId && !config.headers['group_id']) {
+    } else if (selectedGroupId && !('group_id' in config.headers)) {
       config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
     }
 
@@ -58,7 +58,8 @@ apiClient.interceptors.response.use(
       typeof detail === 'string' &&
       detail.toLowerCase().includes('access to group');
     if (isGroupAccessDenied && original && !original._groupAccessRetry
-      && (original.method ?? 'get').toLowerCase() === 'get') {
+      && (original.method ?? 'get').toLowerCase() === 'get'
+      && !/\/chat-history(?:\/|$)/.test(original.url ?? '')) {
       original._groupAccessRetry = true;
       try {
         localStorage.removeItem('selectedGroupId');

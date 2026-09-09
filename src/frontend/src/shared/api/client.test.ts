@@ -137,3 +137,16 @@ describe('shared API client', () => {
     });
   });
 });
+
+it.each(['/chat-history/sessions/named', '/chat-history/sessions/s/canvas', '/chat-history/sessions/s/messages'])(
+  'does not change workspace or replay denied history reads: %s', async (url) => {
+    await import('./client');
+    instance.mockClear();
+    localStorage.setItem('selectedGroupId', 'team');
+    const error = { response: { status: 403, data: { detail: 'No access to group team' } },
+      config: { url, method: 'get', headers: { group_id: 'team' } } };
+    await expect(captured.responseErr!(error)).rejects.toBe(error);
+    expect(instance).not.toHaveBeenCalled();
+    expect(localStorage.getItem('selectedGroupId')).toBe('team');
+  },
+);

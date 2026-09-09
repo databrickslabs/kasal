@@ -2,11 +2,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
 import { apiClient } from '../../shared/api/client';
 import { useBuilderCanvasStore } from './builderCanvasStore';
+import { useSessionPreferences } from './sessionPreferences';
 import { useSessionStore } from './sessionStore';
 import { useUserStore } from '../../store/user';
 import { useErrorStore } from '../../store/error';
 import { connectBuilderSessions, pauseBuilderSessionWrites } from './builderSessionLifecycle';
-import { legacyKey, pendingCanvases, snapshot, type CanvasSnapshot } from './builderSessionPersistence';
+import { legacyKey, pendingCanvases, restoreCanvas, snapshot, type CanvasSnapshot } from './builderSessionPersistence';
 
 vi.mock('../../shared/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }));
 let release = () => {};
@@ -25,6 +26,7 @@ beforeEach(() => {
   useUserStore.setState({ currentUser: { id: 'user', username: 'person', email: user } });
   useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
   useSessionStore.setState({ sessions: [] });
+  useSessionPreferences.setState({ entries: {} });
   useErrorStore.getState().clearError();
   vi.mocked(apiClient.put).mockResolvedValue({ data: { revision: 1 } });
 });
@@ -67,7 +69,9 @@ it('keeps the legacy backup when importing fails', async () => {
   localStorage.setItem(legacyKey, JSON.stringify({ state: { tabs: [canvas()] } }));
   vi.mocked(apiClient.get).mockResolvedValue({ data: { state: null, revision: 0 } });
   vi.mocked(apiClient.put).mockRejectedValue(new Error('offline'));
-  await expect(connectBuilderSessions(group, [], () => false)).rejects.toThrow('offline');
+  const onError = vi.fn();
+  release = await connectBuilderSessions(group, [], () => false, onError);
+  expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'offline' }));
   expect(localStorage.getItem(legacyKey)).toContain('legacy-canvas');
 });
 
@@ -89,7 +93,9 @@ it('preserves a conflicting outbox rather than overwriting another browser', asy
   const state = canvas();
   localStorage.setItem(`kasal-session-outbox:${user}:${group}`, JSON.stringify({ conversation: { state, revision: 1 } }));
   vi.mocked(apiClient.get).mockResolvedValue({ data: { state: { ...state, name: 'Changed elsewhere' }, revision: 2 } });
-  await expect(connectBuilderSessions(group, [metadata('conversation')], () => false)).rejects.toThrow('another browser');
+  const onError = vi.fn();
+  release = await connectBuilderSessions(group, [metadata('conversation')], () => false, onError);
+  expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('another browser') }));
   expect(apiClient.put).not.toHaveBeenCalled();
   expect(pendingCanvases(user, group).conversation.state.name).toBe('Research');
 });
@@ -118,4 +124,33 @@ it('serializes canvas callbacks safely without modifying the live nodes', () => 
   const state = snapshot({ ...stored, nodes: [node], createdAt: new Date(), lastModified: new Date(), lastSavedAt: undefined, lastExecutionTime: undefined });
   expect(state.nodes[0].data).toEqual({ label: 'Task' });
   expect(node.data.onClick).toBeTypeOf('function');
+});
+
+it('isolates a conflicting canvas and preserves metadata ordering while healthy sessions save', async () => {
+  const conflict = canvas();
+  const healthy = canvas('healthy', 'healthy');
+  const rows = [metadata('conversation'), { ...metadata('healthy'), updatedAt: new Date('2020-01-01') }];
+  useSessionStore.setState({ sessions: rows });
+  useBuilderCanvasStore.setState({ canvases: [restoreCanvas(conflict, group, 'conversation')], activeCanvasId: conflict.id });
+  localStorage.setItem(`kasal-session-outbox:${user}:${group}`, JSON.stringify({ conversation: { state: conflict, revision: 1 } }));
+  vi.mocked(apiClient.get).mockResolvedValueOnce({ data: { state: { ...conflict, name: 'Other browser' }, revision: 2 } })
+    .mockResolvedValueOnce({ data: { state: healthy, revision: 3 } });
+  const onError = vi.fn();
+  release = await connectBuilderSessions(group, rows, () => false, onError);
+  expect(onError).toHaveBeenCalledTimes(1);
+  expect(useBuilderCanvasStore.getState().getActiveCanvas()?.id).toBe('healthy');
+  expect(useBuilderCanvasStore.getState().unavailableSessionIds).toEqual(['conversation']);
+  expect(useSessionStore.getState().sessions).toEqual(rows);
+  useBuilderCanvasStore.getState().updateCanvasName(conflict.id, 'Still local');
+  useBuilderCanvasStore.getState().updateCanvasName('healthy', 'Healthy edit');
+  await waitFor(() => expect(apiClient.put).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(apiClient.put).mock.calls[0][0]).toContain('/healthy/canvas');
+  expect(pendingCanvases(user, group).conversation).toEqual({ state: conflict, revision: 1 });
+});
+
+it('retains legacy archive and pin preferences under the stable conversation key', async () => {
+  useSessionPreferences.getState().update('builder:legacy-canvas', { archived: true, pinned: true });
+  vi.mocked(apiClient.get).mockResolvedValue({ data: { state: canvas(), revision: 3 } });
+  release = await connectBuilderSessions(group, [metadata('conversation')], () => false);
+  expect(useSessionPreferences.getState().entries['builder:conversation']).toEqual({ archived: true, pinned: true });
 });

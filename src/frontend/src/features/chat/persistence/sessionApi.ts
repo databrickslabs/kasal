@@ -58,14 +58,15 @@ export async function createSession(title: string, _groupId?: string): Promise<C
  * guard, not a design limit (2,000 sessions is already beyond what a flat rail
  * can present).
  */
-export async function listSessions(_groupId?: string): Promise<ChatSession[]> {
+export async function listSessions(groupId?: string): Promise<ChatSession[]> {
+  const scope = groupId ?? localStorage.getItem('selectedGroupId') ?? '';
   const PER_PAGE = 100;
   const MAX_PAGES = 20;
   const all: NamedSessionWire[] = [];
   for (let page = 0; page < MAX_PAGES; page++) {
     const res = await getClient().get<NamedSessionWire[]>(
       `${BASE}/sessions/named`,
-      { params: { page, per_page: PER_PAGE } },
+      { params: { page, per_page: PER_PAGE }, headers: { group_id: scope } },
     );
     const batch = res.data || [];
     all.push(...batch);

@@ -17,7 +17,7 @@ import { useExecutionStore } from '../../features/chat/store/executionStore';
 import SidebarAccountActions from '../../components/SidebarAccountActions';
 import SidebarAction from '../../components/SidebarAction';
 import { kasalStageSurface } from '../../theme/kasalSurfaces';
-import { collectSessions, type WorkspaceSession } from './sessionIndex';
+import { builderSessionKey, collectSessions, type WorkspaceSession } from './sessionIndex';
 import { modeLabels, openWorkspaceSession } from './sessionNavigation';
 import { useSessionPreferences } from './sessionPreferences';
 import NewSessionButton from './NewSessionButton';
@@ -28,8 +28,9 @@ const modeIcons = { chat: MessageSquare, crew: Network, flow: Workflow };
 interface Props { onOpenSettings: () => void; onOpenCatalog?: () => void; library?: React.ReactNode }
 
 export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library }: Props) {
-  const { groupId, loadError } = useWorkspaceSessions();
+  const { groupId, loadError, loading, retry } = useWorkspaceSessions();
   const tabs = useBuilderCanvasStore(state => state.canvases);
+  const unavailableSessionIds = useBuilderCanvasStore(state => state.unavailableSessionIds);
   const activeCanvasId = useBuilderCanvasStore(state => state.activeCanvasId);
   const chats = useSessionStore(state => state.sessions);
   const currentChatId = useSessionStore(state => state.currentSessionId);
@@ -53,13 +54,14 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
   const [opening, setOpening] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const sessions = useMemo(
-    () => collectSessions(chats, tabs, groupId, { crew: allowCrew, flow: allowFlow }),
-    [chats, tabs, groupId, allowCrew, allowFlow],
+    () => collectSessions(chats, tabs, groupId, { crew: allowCrew, flow: allowFlow }, unavailableSessionIds),
+    [chats, tabs, groupId, allowCrew, allowFlow, unavailableSessionIds],
   );
   const visible = sessions.filter(session => Boolean(preferences[session.key]?.archived) === archived
     && `${session.title} ${modeLabels[session.mode]}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => Number(Boolean(preferences[b.key]?.pinned)) - Number(Boolean(preferences[a.key]?.pinned)));
-  const activeKey = mode === 'chat' ? `chat:${currentChatId}` : `builder:${activeCanvasId}`;
+  const activeTab = tabs.find(tab => tab.id === activeCanvasId);
+  const activeKey = mode === 'chat' ? `chat:${currentChatId}` : activeTab ? builderSessionKey(activeTab) : null;
   const select = async (session: WorkspaceSession) => {
     setOpening(session.key); setError('');
     try { await openWorkspaceSession(session); }
@@ -109,7 +111,10 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
             </Tooltip>
           </Box>
           {archived && <Typography sx={{ px: 2.5, pb: 1, fontSize: 11, color: 'text.secondary' }}>Archived</Typography>}
-          {(error || loadError) && <Alert severity="warning" sx={{ mx: 1, fontSize: 12 }}>{error || 'Chat history could not be loaded. Refresh to retry.'}</Alert>}
+          {(error || loadError) && <Alert severity="warning" sx={{ mx: 1, fontSize: 12 }}
+            action={loadError && <Button color="inherit" size="small" disabled={loading} onClick={retry}>Retry</Button>}>
+            {error || loadError}
+          </Alert>}
           <Box data-tour="session-list" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 1, pb: 2 }}>
             {!visible.length && <Typography sx={{ px: 1.5, pt: 2, fontSize: 12, color: 'text.secondary' }}>
               {search ? 'No matching sessions' : archived ? 'No archived sessions' : 'Start a conversation or add to your canvas.'}
@@ -134,15 +139,15 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
                       inputProps={{ 'aria-label': 'Session name', maxLength: 200 }} sx={{ flex: 1, px: 1.5, py: 1, fontSize: 13 }} />
                   ) : (
                     <Button disableRipple color="inherit" aria-current={selected ? 'page' : undefined}
-                      disabled={deleting === session.key} onClick={() => void select(session)} title={`${session.title} · ${modeLabels[session.mode]}`}
+                      disabled={deleting === session.key || session.canvasPending} onClick={() => void select(session)} title={`${session.title} · ${modeLabels[session.mode]}`}
                       sx={{ minWidth: 0, flex: 1, textAlign: 'left', justifyContent: 'flex-start', gap: 1.25, px: 1.5, py: 1.1, textTransform: 'none', color: selected ? 'text.primary' : 'text.secondary' }}>
                       <Icon size={16} style={{ flexShrink: 0 }} />
                       <Typography noWrap sx={{ flex: 1, fontSize: 13, fontWeight: selected ? 600 : 400 }}>{session.title}</Typography>
                       {preferences[session.key]?.pinned && <Pin size={12} style={{ flexShrink: 0 }} />}
-                      <SessionActivity session={session} opening={opening === session.key} />
+                      <SessionActivity session={session} opening={opening === session.key || Boolean(loading && session.canvasPending)} />
                     </Button>
                   )}
-                  <IconButton className="session-options" aria-label={`Options for ${session.title}`} size="small" disabled={deleting === session.key}
+                  <IconButton className="session-options" aria-label={`Options for ${session.title}`} size="small" disabled={deleting === session.key || session.canvasPending}
                     onClick={event => setMenu({ session, anchor: event.currentTarget })} sx={{ opacity: selected ? 1 : 0, mr: 0.5 }}>
                     <MoreHorizontal size={16} />
                   </IconButton>

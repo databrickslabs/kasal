@@ -4,7 +4,7 @@ import { usePermissionStore } from '../../store/permissions';
 import { useSessionStore, cancelSessionNavigation } from './sessionStore';
 import { useExecutionStore } from '../../features/chat/store/executionStore';
 import { useSessionPreferences } from './sessionPreferences';
-import type { WorkspaceSession } from './sessionIndex';
+import { builderSessionKey, type WorkspaceSession } from './sessionIndex';
 
 export const modeLabels: Record<AppMode, string> = { chat: 'Chat', crew: 'Agent Builder', flow: 'Flow Builder' };
 
@@ -37,7 +37,7 @@ export function newWorkspaceSession(mode: AppMode) {
 }
 
 export async function openWorkspaceSession(session: WorkspaceSession) {
-  if (!allowed(session.mode)) return;
+  if (!allowed(session.mode) || session.canvasPending) return;
   const version = ++navigationVersion;
   cancelSessionNavigation();
   if (useUILayoutStore.getState().appMode === 'chat') saveChat();
@@ -48,7 +48,7 @@ export async function openWorkspaceSession(session: WorkspaceSession) {
     useExecutionStore.getState().restoreSessionState(session.id);
   } else {
     const tab = useBuilderCanvasStore.getState().getCanvas(session.id);
-    if (!tab || tab.group_id !== (localStorage.getItem('selectedGroupId') || '')) return;
+    if (!tab || useBuilderCanvasStore.getState().unavailableSessionIds.includes(tab.chatSessionId || tab.id) || tab.group_id !== (localStorage.getItem('selectedGroupId') || '')) return;
     useBuilderCanvasStore.getState().setActiveCanvas(tab.id);
   }
   useUILayoutStore.getState().setAppMode(session.mode);
@@ -67,7 +67,8 @@ export function switchWorkspaceMode(mode: AppMode) {
   const store = useBuilderCanvasStore.getState();
   const preferences = useSessionPreferences.getState().entries;
   const matching = store.getCanvasesForCurrentGroup()
-    .filter(tab => tab.viewMode === mode && !preferences[`builder:${tab.id}`]?.archived)
+    .filter(tab => tab.viewMode === mode && !preferences[builderSessionKey(tab)]?.archived
+      && !store.unavailableSessionIds.includes(tab.chatSessionId || tab.id))
     .sort((a, b) => Number(b.id === store.activeCanvasId) - Number(a.id === store.activeCanvasId)
       || new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
   if (matching[0]) {

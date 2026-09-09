@@ -15,6 +15,8 @@ interface GroupState {
   getCurrentGroup: () => GroupWithRole | null;
 }
 
+let groupsRequestVersion = 0;
+
 export const useGroupStore = create<GroupState>()(
   devtools((set, get) => ({
     groups: [],
@@ -28,9 +30,13 @@ export const useGroupStore = create<GroupState>()(
     },
 
     fetchMyGroups: async () => {
+      const requestVersion = ++groupsRequestVersion;
       let currentUser = useUserStore.getState().currentUser;
       if (!currentUser?.email) return;
 
+      const email = currentUser.email;
+      const isCurrent = () => requestVersion === groupsRequestVersion
+        && useUserStore.getState().currentUser?.email === email;
       set({ isLoading: true });
       try {
         if (!currentUser.personal_group_id) {
@@ -42,14 +48,8 @@ export const useGroupStore = create<GroupState>()(
           throw new Error('Personal workspace allocation is unavailable');
         }
         const groupService = GroupService.getInstance();
-        let userGroups: GroupWithRole[] = [];
-
-        try {
-          userGroups = await groupService.getMyGroups();
-        } catch (error) {
-          console.warn('Could not fetch user groups, using empty list:', error);
-          userGroups = [];
-        }
+        const userGroups = await groupService.getMyGroups();
+        if (!isCurrent()) return;
 
         // The authenticated user's allocated ID is the only personal scope.
         const personalGroup: GroupWithRole = {
@@ -66,13 +66,7 @@ export const useGroupStore = create<GroupState>()(
         // Add personal group at the beginning
         const allGroups = [personalGroup, ...userGroups.filter(g => g.id !== primaryGroupId)];
         
-        // Determine effective group id. Validate the previously-selected group
-        // against the workspaces the user actually has RIGHT NOW: a stored group
-        // can be stale (e.g. after a redeploy the workspace list is temporarily
-        // empty until Lakebase is reconnected, or the user lost access). Falling
-        // back to the personal workspace keeps the app usable instead of sending a
-        // group_id header the backend rejects; the user re-selects the workspace
-        // once it reappears.
+        // Only a successful membership response can invalidate the selection.
         const selectedFromStorage = localStorage.getItem('selectedGroupId');
         const prevCurrent = get().currentGroupId || selectedFromStorage;
         const isPrevValid = !!prevCurrent && allGroups.some(g => g.id === prevCurrent);
@@ -92,6 +86,7 @@ export const useGroupStore = create<GroupState>()(
           window.dispatchEvent(new CustomEvent('group-changed', { detail: { groupId: effectiveGroupId } }));
         }
       } catch (error) {
+        if (!isCurrent()) return;
         console.error('Failed to fetch user groups:', error);
         set({ isLoading: false });
       }

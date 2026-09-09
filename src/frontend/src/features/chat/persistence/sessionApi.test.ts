@@ -88,7 +88,7 @@ describe('sessionApi - sessions', () => {
     const sessions = await api.listSessions();
 
     expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/named', {
-      params: { page: 0, per_page: 100 },
+      params: { page: 0, per_page: 100 }, headers: { group_id: '' },
     });
     expect(sessions).toHaveLength(1);
     expect(sessions[0].title).toBe('A');
@@ -110,7 +110,7 @@ describe('sessionApi - sessions', () => {
 
     expect(mockGet).toHaveBeenCalledTimes(2);
     expect(mockGet).toHaveBeenNthCalledWith(2, '/chat-history/sessions/named', {
-      params: { page: 1, per_page: 100 },
+      params: { page: 1, per_page: 100 }, headers: { group_id: '' },
     });
     expect(sessions).toHaveLength(101);
     expect(sessions[100].id).toBe('s100');
@@ -757,4 +757,16 @@ describe('sessionApi - running-job marker (server-backed, replaces IndexedDB)', 
     mockPut.mockRejectedValue(new Error('down'));
     await expect(api.setSessionRunningJob('s1', 'j')).resolves.toBeUndefined();
   });
+});
+
+it('pins every session-list page to the workspace that started the request', async () => {
+  localStorage.setItem('selectedGroupId', 'team-a');
+  const wire = { id: 's', title: 'Saved', created_at: '2026-01-01', updated_at: '2026-01-01', group_id: 'team-a' };
+  mockGet.mockImplementationOnce(async () => {
+    localStorage.setItem('selectedGroupId', 'team-b');
+    return { data: Array.from({ length: 100 }, () => wire) };
+  }).mockResolvedValueOnce({ data: [] });
+  await api.listSessions();
+  expect(mockGet).toHaveBeenCalledTimes(2);
+  for (const [, config] of mockGet.mock.calls) expect(config.headers.group_id).toBe('team-a');
 });

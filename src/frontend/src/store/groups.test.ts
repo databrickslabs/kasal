@@ -29,8 +29,7 @@ beforeEach(() => {
 
 describe('useGroupStore.fetchMyGroups — stored-group validation', () => {
   it('falls back to the personal workspace when the stored group no longer exists', async () => {
-    // e.g. right after a redeploy the workspace list is temporarily empty (Lakebase
-    // not reconnected yet), so the previously-selected workspace is gone.
+    // A successful authoritative response confirms membership was removed.
     localStorage.setItem('selectedGroupId', 'marketing_53f80242');
     getMyGroups.mockResolvedValue([]);
     const useGroupStore = await freshStore();
@@ -77,4 +76,34 @@ describe('useGroupStore.fetchMyGroups — stored-group validation', () => {
     expect(useGroupStore.getState().currentGroupId).toBe(PERSONAL);
     expect(localStorage.getItem('selectedGroupId')).toBe(PERSONAL);
   });
+});
+
+it('preserves the teamspace and cached groups when membership lookup fails', async () => {
+  localStorage.setItem('selectedGroupId', 'team');
+  const store = await freshStore();
+  const groups = [{ id: 'team', name: 'Team' }] as GroupWithRole[];
+  store.setState({ groups });
+  getMyGroups.mockRejectedValueOnce(new Error('temporary 503'));
+  const onChange = vi.fn();
+  window.addEventListener('group-changed', onChange);
+  try {
+    await store.getState().fetchMyGroups();
+    expect(store.getState().currentGroupId).toBe('team');
+    expect(store.getState().groups).toEqual(groups);
+    expect(localStorage.getItem('selectedGroupId')).toBe('team');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(store.getState().isLoading).toBe(false);
+  } finally { window.removeEventListener('group-changed', onChange); }
+});
+it('ignores an older membership response that would reset the current teamspace', async () => {
+  localStorage.setItem('selectedGroupId', 'team');
+  const store = await freshStore();
+  let finish!: (groups: GroupWithRole[]) => void;
+  getMyGroups.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const old = store.getState().fetchMyGroups();
+  getMyGroups.mockResolvedValueOnce([{ id: 'team', name: 'Team' }]);
+  await store.getState().fetchMyGroups();
+  finish([]); await old;
+  expect(store.getState().currentGroupId).toBe('team');
+  expect(store.getState().groups.map(g => g.id)).toContain('team');
 });

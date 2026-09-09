@@ -804,3 +804,15 @@ describe('session navigation races', () => {
     expect(useSessionStore.getState().messages).toEqual([]);
   });
 });
+
+
+it('retains the session list and saved selection when selected messages fail', async () => {
+  localStorage.setItem('selectedGroupId', 'g');
+  localStorage.setItem(ACTIVE_SESSION_KEY, 'broken');
+  vi.mocked(db.listSessions).mockResolvedValue([makeSession('broken'), makeSession('other')]);
+  vi.mocked(db.getSessionMessages).mockRejectedValueOnce(new Error('message read failed'));
+  await expect(useSessionStore.getState().reloadForGroup(true)).rejects.toMatchObject({ stage: 'messages' });
+  expect(useSessionStore.getState().sessions.map(s => s.id)).toEqual(['broken', 'other']);
+  expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('broken');
+  expect(db.deleteSession).not.toHaveBeenCalled();
+});

@@ -1,6 +1,6 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SessionSidebar from './SessionSidebar';
 import { useBuilderCanvasStore } from './builderCanvasStore';
 import { useUILayoutStore } from '../../store/uiLayout';
@@ -11,7 +11,8 @@ import { useSessionPreferences } from './sessionPreferences';
 import { deleteSession } from '../../features/chat/persistence/sessionApi';
 import { useChatMessagesStore } from '../../features/workflow/assistant/store/chatMessagesStore';
 
-vi.mock('./useWorkspaceSessions', () => ({ useWorkspaceSessions: () => ({ groupId: 'g', loadError: false }) }));
+const historyLoad = vi.hoisted(() => ({ groupId: 'g', loadError: null as string | null, loading: false, retry: vi.fn() }));
+vi.mock('./useWorkspaceSessions', () => ({ useWorkspaceSessions: () => historyLoad }));
 vi.mock('../../components/SidebarAccountActions', () => ({ default: () => null }));
 vi.mock('../../features/chat/persistence/sessionApi', () => ({ getSessionMessages: vi.fn(async () => []), initDb: vi.fn(), deleteSession: vi.fn() }));
 vi.mock('../../features/chat/store/executionStore', () => ({
@@ -21,13 +22,14 @@ vi.mock('../../features/chat/store/executionStore', () => ({
 }));
 
 beforeEach(() => {
+  historyLoad.loadError = null; historyLoad.loading = false; historyLoad.retry.mockClear();
   vi.mocked(deleteSession).mockReset().mockResolvedValue(undefined);
   localStorage.setItem('selectedGroupId', 'g');
   useAppStore.setState({ sidebarOpen: true });
   usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
   useUILayoutStore.setState({ appMode: 'crew', areFlowsVisible: false });
   useSessionPreferences.setState({ entries: {} });
-  useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+  useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null, unavailableSessionIds: [] });
   useBuilderCanvasStore.getState().createCanvas('Research crew', 'crew');
   useBuilderCanvasStore.getState().createCanvas('Reporting flow', 'flow');
   useSessionStore.setState({ currentSessionId: 'c', sessions: [{ id: 'c', title: 'A conversation', groupId: 'g', createdAt: new Date(), updatedAt: new Date() }], messages: [] });
@@ -150,4 +152,34 @@ describe('shared session sidebar', () => {
     expect(await screen.findByText('Stop the running session before deleting it.')).toBeInTheDocument();
     expect(deleteSession).not.toHaveBeenCalled();
   });
+});
+
+
+it('shows the specific diagnostic and retries without hiding saved sessions', () => {
+  historyLoad.loadError = 'Builder canvases could not be restored. Diagnostic: HISTORY-v1/builders/HTTP-500.';
+  mount();
+  expect(screen.getByRole('alert')).toHaveTextContent(historyLoad.loadError);
+  expect(screen.getByTitle('A conversation · Chat')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry', exact: true }));
+  expect(historyLoad.retry).toHaveBeenCalledTimes(1);
+});
+
+it('shows a saved builder before hydration and enables the same row when its canvas arrives', () => {
+  const tab = useBuilderCanvasStore.getState().canvases.find(canvas => canvas.viewMode === 'crew')!;
+  useSessionStore.setState(state => ({ sessions: [...state.sessions, {
+    id: tab.chatSessionId!, title: tab.name, mode: 'crew', groupId: 'g',
+    createdAt: new Date('2020-01-01'), updatedAt: new Date('2020-01-01'),
+  }] }));
+  useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+  historyLoad.loading = true;
+  mount();
+  const row = screen.getByTitle('Research crew · Agent Builder');
+  expect(row).toBeDisabled();
+  expect(screen.getByLabelText('Options for Research crew')).toBeDisabled();
+  expect(screen.getByTitle('A conversation · Chat')).toBeEnabled();
+  act(() => useBuilderCanvasStore.setState({ canvases: [tab] }));
+  expect(screen.getByTitle('Research crew · Agent Builder')).toBe(row);
+  expect(row).toBeEnabled();
+  act(() => useBuilderCanvasStore.setState({ unavailableSessionIds: [tab.chatSessionId!] }));
+  expect(row).toBeDisabled();
 });

@@ -52,6 +52,7 @@ interface BuilderCanvasState {
   canvases: BuilderCanvas[];
   activeCanvasId: string | null;
   hydrated: boolean;
+  unavailableSessionIds: string[];
 
 
   // Actions
@@ -148,6 +149,7 @@ export const useBuilderCanvasStore = create<BuilderCanvasState>()(
       canvases: [],
       activeCanvasId: null,
       hydrated: false,
+      unavailableSessionIds: [],
 
       createCanvas: (name?: string, viewMode?: 'crew' | 'flow', options?: { sessionDraft?: boolean }) => {
         const newCanvasId = uuidv4();
