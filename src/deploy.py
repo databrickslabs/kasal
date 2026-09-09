@@ -133,7 +133,7 @@ def build_frontend(root_dir, api_url=None):
 
     Runs the root package.json npm lifecycle (prebuild → build → postbuild):
     docs are copied into frontend/public/docs, the React app is built with
-    npm install + npm run build, and frontend_static/ is recreated from the
+    npm ci + npm run build, and frontend_static/ is recreated from the
     build output (including docs). Aborts the deployment if the build fails.
 
     VITE_API_URL is pinned via the process environment, which in Vite takes
