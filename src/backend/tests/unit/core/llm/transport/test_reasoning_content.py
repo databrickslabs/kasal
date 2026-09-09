@@ -32,11 +32,13 @@ from src.core.events.types import LLMCallCompletedEvent, LLMReasoningChunkEvent
 from src.core.llm.transport.completion import OpenAICompletion
 from src.core.llm.transport.response_parsing import (
     REDACTED_REASONING,
+    function_calls,
     reasoning_was_redacted,
     split_content_blocks,
     split_message_content,
     text_content,
 )
+from src.core.llm.transport.tool_rounds import run_chat_round
 
 # ── The exact payloads the live endpoints returned ──────────────────────────
 
@@ -117,6 +119,62 @@ class TestSplitMessageContent:
 
     def test_a_message_with_neither_is_empty(self):
         assert split_message_content(SimpleNamespace(content=None)) == ("", "")
+
+
+class TestGeminiThoughtSignatures:
+    @staticmethod
+    def _tool_response(**metadata):
+        call = SimpleNamespace(
+            id="call_memory",
+            function=SimpleNamespace(name="search_memory", arguments='{"query":"x"}'),
+            **metadata,
+        )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[call]))]
+        )
+
+    @pytest.mark.parametrize(
+        ("metadata", "expected"),
+        [
+            (
+                {"thought_signature": "gateway-signature"},
+                {"thought_signature": "gateway-signature"},
+            ),
+            (
+                {
+                    "extra_content": {
+                        "google": {"thought_signature": "openai-signature"}
+                    }
+                },
+                {
+                    "extra_content": {
+                        "google": {"thought_signature": "openai-signature"}
+                    }
+                },
+            ),
+        ],
+    )
+    def test_signature_survives_the_kasal_tool_round(self, metadata, expected):
+        """Both Databricks gateway envelopes must reach the next request."""
+        calls = function_calls(self._tool_response(**metadata))
+        conversation = []
+
+        run_chat_round(
+            conversation,
+            None,
+            calls,
+            lambda _name, _arguments: "memory result",
+        )
+
+        assert conversation[0]["tool_calls"][0] == {
+            "id": "call_memory",
+            "type": "function",
+            "function": {
+                "name": "search_memory",
+                "arguments": '{"query":"x"}',
+            },
+            **expected,
+        }
 
 
 class TestRedactedReasoning:

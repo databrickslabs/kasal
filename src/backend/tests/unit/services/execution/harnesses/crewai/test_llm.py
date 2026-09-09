@@ -332,6 +332,41 @@ class TestToolCallsAreHandedToCrewAI:
         assert answer == "done"
         assert ran, "the transport must still execute tools for the Kasal harness"
 
+    def test_gateway_signature_is_restored_after_crewai_rebuilds_history(self):
+        """CrewAI drops unknown tool-call fields; the adapter puts them back."""
+        from crewai.utilities.agent_utils import build_tool_calls_assistant_message
+
+        inner = MagicMock(model="m", temperature=None, stop=[], provider="openai")
+        inner.call.side_effect = [
+            [
+                {
+                    "id": "call_memory",
+                    "name": "search_memory",
+                    "arguments": '{"query":"x"}',
+                    "thought_signature": "gateway-signature",
+                }
+            ],
+            "done",
+        ]
+        wrapped = build_kasal_backed_llm(inner)
+
+        tool_calls = wrapped.call([{"role": "user", "content": "remember"}])
+        assistant, _ = build_tool_calls_assistant_message(tool_calls)
+        history = [
+            {"role": "user", "content": "remember"},
+            assistant,
+            {
+                "role": "tool",
+                "tool_call_id": "call_memory",
+                "name": "search_memory",
+                "content": "memory result",
+            },
+        ]
+
+        assert wrapped.call(history) == "done"
+        sent = inner.call.call_args_list[1].args[0]
+        assert sent[1]["tool_calls"][0]["thought_signature"] == "gateway-signature"
+
 
 class TestContextWindow:
     def test_it_answers_from_the_transport_not_crewai_s_model_table(self):

@@ -100,11 +100,21 @@ def function_calls(response: Any) -> list[dict[str, Any]]:
 def tool_call_metadata(call: Any) -> dict[str, Any]:
     """Preserve opaque provider state at its original OpenAI-compatible location.
 
-    Gemini requires tool_calls[].extra_content.google.thought_signature on
-    subsequent turns. It is protocol state, never tool arguments or answer text.
+    Gemini requires its thought signature on subsequent tool rounds. Direct
+    OpenAI-compatible endpoints put it under
+    ``extra_content.google.thought_signature``; Databricks' MLflow AI Gateway
+    returns ``tool_calls[].thought_signature`` instead. Preserve either envelope
+    exactly: it is protocol state, never tool arguments or answer text.
     """
+    metadata: dict[str, Any] = {}
     extra = _block_field(call, "extra_content")
-    return {"extra_content": deepcopy(extra)} if isinstance(extra, dict) else {}
+    if isinstance(extra, dict):
+        metadata["extra_content"] = deepcopy(extra)
+    for key in ("thought_signature", "thoughtSignature"):
+        value = _block_field(call, key)
+        if value is not None:
+            metadata[key] = deepcopy(value)
+    return metadata
 
 
 def merge_tool_call_metadata(target: dict[str, Any], source: Any) -> None:
