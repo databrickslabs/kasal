@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
@@ -12,7 +11,6 @@ import {
   Alert,
   CircularProgress,
   Typography,
-  IconButton,
   LinearProgress,
   Link,
   InputLabel,
@@ -20,9 +18,9 @@ import {
   MenuItem,
   SelectChangeEvent,
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
+import CatalogActionPane from '../../crews/components/CrewFlowDialog/CatalogActionPane';
 import { CrewExportService } from '../../../../api/workflow/CrewExportService';
 import { ModelService } from '../../../../api/config/ModelService';
 import { Models } from '../../../../types/config/models';
@@ -240,26 +238,10 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   const isApp = exportFormat === ExportFormat.DATABRICKS_APP;
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleClose}
-      maxWidth="sm"
-      fullWidth
-    >
-      <DialogTitle>
-        Deploy App: {crewName}
-        <IconButton
-          aria-label="close"
-          onClick={handleClose}
-          disabled={isExporting}
-          sx={{
-            position: 'absolute',
-            right: 8,
-            top: 8,
-          }}
-        >
-          <CloseIcon />
-        </IconButton>
+    <CatalogActionPane open={open} label={`Deploy · ${crewName}`} onClose={handleClose}>
+      <DialogTitle component="div">
+        <Typography component="h2" sx={{ fontSize: 20, fontWeight: 600 }}>Deploy app</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>{crewName}</Typography>
       </DialogTitle>
 
       <DialogContent dividers>
@@ -300,7 +282,7 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
                   sx={{ mt: 1 }}
                   disabled={isDeploying}
                 />
-                <Box sx={{ display: 'flex', gap: 1 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
                   <TextField
                     label="Catalog"
                     value={deployCatalog}
@@ -428,7 +410,7 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
               label="Model (optional)"
               value={options.model_override || ''}
               onChange={handleModelOverrideChange}
-              disabled={loadingModels}
+              disabled={loadingModels || isExporting || isDeploying}
             >
               <MenuItem value="">
                 <em>Keep each agent&apos;s configured model</em>
@@ -489,7 +471,7 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
           </Button>
         )}
       </DialogActions>
-    </Dialog>
+    </CatalogActionPane>
   );
 };
 

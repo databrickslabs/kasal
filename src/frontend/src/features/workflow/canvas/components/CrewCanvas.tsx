@@ -645,6 +645,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         onTaskGenerated={_handleTaskGenerated}
       />
       <CrewFlowSelectionDialog
+        embedded
         open={isCrewFlowDialogOpen}
         onClose={() => setIsCrewFlowDialogOpen(false)}
         onCrewSelect={_handleCrewSelect}

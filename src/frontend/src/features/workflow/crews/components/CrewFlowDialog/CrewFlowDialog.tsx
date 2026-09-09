@@ -1,5 +1,7 @@
 import { catalogExecutionSettings } from './catalogExecutionSettings';
 import CatalogSurface from './CatalogSurface';
+import CatalogActionPane from './CatalogActionPane';
+import { CatalogNavigation } from './CatalogNavigation';
 import { getDefaultModel } from '../../../../../config/defaultModel';
 import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
 import { 
@@ -39,7 +41,6 @@ import CrewCatalogActions from './CrewCatalogActions';
 import CrewOptimizeDialog from '../CrewOptimizeDialog';
 import { useMLflowEnabled } from '../../../../../hooks/global/useMLflowEnabled';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
-import EditFlowForm from '../../../flows/components/EditFlowForm/index';
 import { AgentService } from '../../../../../api/workflow/AgentService';
 import { TaskService } from '../../../../../api/workflow/TaskService';
 import { Agent } from '../../../../../types/workflow/agent';
@@ -157,8 +158,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       setSearchQuery('');
     }
   }, [open]);
-  const [editFlowDialogOpen, setEditFlowDialogOpen] = useState(false);
-  const [selectedFlowId, setSelectedFlowId] = useState<number | string | null>(null);
   const [_focusedCardIndex, _setFocusedCardIndex] = useState<number>(0);
   const firstCrewCardRef = useRef<HTMLDivElement>(null);
   const firstFlowCardRef = useRef<HTMLDivElement>(null);
@@ -561,7 +560,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
 
       // Extract any flow configuration from the response
       // The FlowService should map flow_config to flowConfig
-      let flowConfig = selectedFlow.flowConfig;
+      let flowConfig = selectedFlow.flowConfig ?? selectedFlow.flow_config;
       
       // If still no explicit flowConfig but we have nodes with listener data, rebuild the config
       if (!flowConfig && selectedFlow.nodes.some(node => node.data?.listener)) {
@@ -595,6 +594,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       // Ensure flowConfig is properly structured
       if (flowConfig) {
         flowConfig = {
+          ...flowConfig,
           id: flowConfig.id || `flow-${Date.now()}`,
           name: flowConfig.name || selectedFlow.name,
           listeners: flowConfig.listeners || [],
@@ -705,24 +705,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
-  const handleEditFlow = async (event: React.MouseEvent, flowId: string) => {
+  const handleEditFlow = (event: React.MouseEvent, flowId: string) => {
     event.stopPropagation();
-    try {
-      setSelectedFlowId(flowId);
-      setEditFlowDialogOpen(true);
-    } catch (error) {
-      console.error('Error editing flow:', error);
-      setError('Failed to edit flow');
-    }
-  };
-  
-  const handleEditFlowDialogClose = () => {
-    setEditFlowDialogOpen(false);
-    setSelectedFlowId(null);
-  };
-  
-  const handleFlowUpdated = () => {
-    loadFlows();
+    void handleFlowSelect(flowId);
   };
 
   const handleDeleteAgent = async (event: React.MouseEvent, agentId: string) => {
@@ -1313,7 +1298,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   };
 
   return (
-    <>
+    <CatalogNavigation open={open}>
       <CatalogSurface open={open} embedded={embedded} onClose={onClose} titleId={catalogTitleId}
         tab={showOnlyTab ?? (embedded ? initialTab : undefined)} onEntered={handleDialogEntered}>
         <DialogContent onKeyDown={handleDialogKeyDown} data-tour="catalog-dialog" sx={{ px: 3, pb: 3, '& .MuiButton-outlined': { border: 0, color: 'text.secondary', bgcolor: 'action.hover', borderRadius: 2 }, '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTab-root': { minHeight: 40, borderRadius: 2, mx: 0.25, color: 'text.secondary' }, '& .MuiTab-root.Mui-selected': { color: 'text.primary', bgcolor: 'action.selected' } }}>
@@ -1854,9 +1839,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                             >
 
                                 {canEdit && (
-                                  <Tooltip title="Edit Flow">
+                                  <Tooltip title="Edit on canvas">
                                     <IconButton
                                       size="small"
+                                      aria-label={`Edit ${flow.name} on canvas`}
+                                      onKeyDown={(event) => event.stopPropagation()}
                                       onClick={(e) => handleEditFlow(e, flow.id.toString())}
                                     >
                                       <EditIcon fontSize="small" />
@@ -1906,16 +1893,6 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         </DialogContent>
       </CatalogSurface>
 
-      {/* Edit Flow Dialog */}
-      {selectedFlowId && (
-        <EditFlowForm
-          open={editFlowDialogOpen}
-          onClose={handleEditFlowDialogClose}
-          flowId={selectedFlowId}
-          onSave={handleFlowUpdated}
-        />
-      )}
-      
       {/* Hidden file inputs */}
       <input 
         type="file" 
@@ -1932,14 +1909,17 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         onChange={handleBulkImport}
       />
 
-      <CrewOptimizeDialog
+      {open && optimizeCrew && <CatalogActionPane open label={`Optimize · ${optimizeCrew.name}`}
+        onClose={() => setOptimizeCrew(null)}>
+      <CrewOptimizeDialog embedded
         open={optimizeCrew !== null}
         crewId={optimizeCrew?.id ?? null}
         crewName={optimizeCrew?.name}
         onClose={() => setOptimizeCrew(null)}
       />
+      </CatalogActionPane>}
 
-    </>
+    </CatalogNavigation>
   );
 };
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { CanvasAssistantLayout } from './CanvasAssistantLayout';
@@ -90,26 +91,57 @@ describe('Canvas assistant sidebar', () => {
     expect(screen.queryByRole('tab', { name: 'Schedule', exact: true })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Canvas', exact: true })).toHaveAttribute('aria-selected', 'true');
   });
-  it('moves a node editor into its own tab and preserves its form across canvas and activity tabs', async () => {
+  it.each(['agent', 'task', 'connection'] as const)('opens the %s form under Canvas and Back restores the same graph', async kind => {
     const closed = vi.fn();
-    const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openStep('run', { label: 'Response', detail: 'Details' })}>Open activity</button>}</BuilderPreviewContext.Consumer>;
-    render(<><CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />
-      <BuilderNodeEditor open kind="agent" nodeId="agent-1" label="Researcher" onClose={closed}>
-        <input aria-label="Agent goal" defaultValue="Research news" />
-      </BuilderNodeEditor></>, { wrapper });
-    const tab = await screen.findByRole('tab', { name: 'Agent · Researcher' });
-    expect(tab).toHaveAttribute('aria-selected', 'true');
+    function Editor() {
+      const [open, setOpen] = useState(false);
+      return <><button onClick={() => setOpen(true)}>Edit node</button>
+        <BuilderNodeEditor open={open} kind={kind} nodeId="node-1" label="Research" onClose={() => { closed(); setOpen(false); }}>
+          <input aria-label="Node description" defaultValue="Saved description" />
+        </BuilderNodeEditor></>;
+    }
+    render(<><CanvasAssistantLayout {...props} sessionKey="crew:one" /><Editor /></>, { wrapper });
+    const canvas = screen.getByTestId('canvas-content');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit node' }));
+    expect(await screen.findByRole('button', { name: 'Back to Canvas' })).toBeVisible();
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['Canvas']);
+    expect(screen.getByRole('tab', { name: 'Canvas', exact: true })).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByRole('dialog')).toBeNull();
-    const field = screen.getByRole('textbox', { name: 'Agent goal' });
-    fireEvent.change(field, { target: { value: 'Edited goal' } });
-    fireEvent.click(screen.getByRole('tab', { name: 'Canvas', exact: true }));
-    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
-    fireEvent.click(tab);
-    expect(screen.getByRole('textbox', { name: 'Agent goal' })).toBe(field);
-    expect(field).toHaveValue('Edited goal');
-    fireEvent.click(screen.getByRole('button', { name: 'Close Agent · Researcher' }));
+    expect(canvas).not.toBeVisible();
+    expect(canvas.inert).toBe(true);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Node description' }), { target: { value: 'Unsaved draft' } });
+    act(() => useUILayoutStore.getState().setAssistantPanelSide('left'));
+    expect(screen.getByRole('textbox', { name: 'Node description' })).toHaveValue('Unsaved draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Canvas' }));
     expect(closed).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('tab', { name: 'Agent · Researcher' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Node description' })).toBeNull();
+    expect(screen.getByTestId('canvas-content')).toBe(canvas);
+    expect(canvas).toBeVisible();
+    expect(canvas.inert).not.toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit node' }));
+    expect(screen.getByRole('textbox', { name: 'Node description' })).toHaveValue('Saved description');
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas', exact: true }));
+    expect(screen.queryByRole('button', { name: 'Back to Canvas' })).toBeNull();
+    expect(canvas).toBeVisible();
+  });
+  it('closes a canvas form when a conversation action opens another view', async () => {
+    const closed = vi.fn();
+    function Editor() {
+      const [open, setOpen] = useState(true);
+      return <BuilderNodeEditor open={open} kind="task" nodeId="task-1" label="Research" onClose={() => { closed(); setOpen(false); }}>
+        <input aria-label="Task draft" />
+      </BuilderNodeEditor>;
+    }
+    const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openStep('run', { label: 'Response', detail: 'Details' })}>Open activity</button>}</BuilderPreviewContext.Consumer>;
+    render(<><CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" /><Editor /></>, { wrapper });
+    await screen.findByRole('button', { name: 'Back to Canvas' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open activity' }));
+    expect(closed).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('textbox', { name: 'Task draft' })).toBeNull();
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['Canvas', 'Run activity']);
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas', exact: true }));
+    expect(screen.getByTestId('canvas-content')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Back to Canvas' })).toBeNull();
   });
   it('opens a rich result beside either side of the conversation and clears it on a session switch', () => {
     const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openResult?.({ type: 'ui', data: 'Surface data', sourceMessageId: 'result-one' })}>Open result</button>}</BuilderPreviewContext.Consumer>;

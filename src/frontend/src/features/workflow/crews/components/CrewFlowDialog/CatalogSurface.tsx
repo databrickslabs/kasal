@@ -3,6 +3,7 @@ import { Box, Dialog, DialogTitle, IconButton, useMediaQuery, useTheme } from '@
 import { X } from 'lucide-react';
 import BuilderNodeEditor from '../../../assistant/components/BuilderNodeEditor';
 import { kasalStageSurface } from '../../../../../theme/kasalSurfaces';
+import { CatalogNavigationContent } from './CatalogNavigation';
 
 /** The same catalog and actions, hosted alongside the canvas in builders. */
 export default function CatalogSurface({ open, embedded, onClose, titleId, tab, onEntered, children }: {
@@ -19,7 +20,9 @@ export default function CatalogSurface({ open, embedded, onClose, titleId, tab, 
   }, [open, embedded]);
   if (embedded) return <BuilderNodeEditor open={open} kind="catalog" nodeId={String(tab ?? 'all')} label={title} onClose={onClose}>
     <Box aria-label={title} sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0,
-      '& > .MuiDialogContent-root': { pt: 2, px: 2 }, '& .MuiGrid-item': { flexBasis: '100%', maxWidth: '100%' } }}>{children}</Box>
+      '& .catalog-list > .MuiDialogContent-root': { pt: 2, px: 2 }, '& .MuiGrid-item': { flexBasis: '100%', maxWidth: '100%' } }}>
+      <CatalogNavigationContent>{children}</CatalogNavigationContent>
+    </Box>
   </BuilderNodeEditor>;
   return <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth fullScreen={compact}
     aria-labelledby={titleId} TransitionProps={{ onEntered }} PaperProps={{ sx: {
@@ -29,6 +32,6 @@ export default function CatalogSurface({ open, embedded, onClose, titleId, tab, 
     <DialogTitle id={titleId} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, pt: 3, pb: 2 }}>
       {title}<IconButton aria-label="Close catalog" onClick={onClose}><X size={20} /></IconButton>
     </DialogTitle>
-    {children}
+    <CatalogNavigationContent>{children}</CatalogNavigationContent>
   </Dialog>;
 }

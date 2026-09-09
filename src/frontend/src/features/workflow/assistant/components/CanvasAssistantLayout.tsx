@@ -7,7 +7,7 @@ import type { PreviewContent } from '../../../chat/types/preview';
 import type { RunStep } from '../../../chat/components/Preview/traceEventStep';
 import BuilderSidePane, { type BuilderPaneTab, type BuilderPaneId } from './BuilderSidePane';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
-import { useBuilderNodeEditorBridge, type BuilderNodeEditorEntry } from '../store/builderNodeEditorBridge';
+import { isCanvasEditorId, useBuilderNodeEditorBridge, type BuilderNodeEditorEntry } from '../store/builderNodeEditorBridge';
 import '../../../chat/chat.css';
 
 interface Props {
@@ -31,14 +31,22 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   const [composerHost] = useState(() => document.createElement('div'));
   const [fullscreen, setFullscreen] = useState(false);
   const [views, setViews] = useState<{ sessionKey?: string; tabs: BuilderPaneTab[]; active: BuilderPaneId }>({ sessionKey, tabs: [], active: 'canvas' });
+  const canvasEditor = useRef<BuilderNodeEditorEntry | null>(null);
   const tabs = views.sessionKey === sessionKey ? views.tabs : [];
   const activeTab = views.sessionKey === sessionKey ? views.active : 'canvas';
   const activePreview = tabs.find(tab => tab.id === activeTab);
   const [previewHost, setPreviewHost] = useState<HTMLElement | null>(null);
   useEffect(() => { setViews({ sessionKey, tabs: [], active: 'canvas' }); setFullscreen(false); }, [sessionKey]);
   const openTab = useCallback((tab: BuilderPaneTab) => {
+    // A form is one level below Canvas, never another retained workspace tab.
+    if (canvasEditor.current && canvasEditor.current.id !== tab.id) {
+      const previous = canvasEditor.current;
+      canvasEditor.current = null;
+      previous.onClose();
+    }
     setViews(previous => {
-      const current = previous.sessionKey === sessionKey ? previous.tabs : [];
+      const current = previous.sessionKey === sessionKey
+        ? previous.tabs.filter(item => !isCanvasEditorId(item.id) || item.id === tab.id) : [];
       return { sessionKey, active: tab.id, tabs: current.some(item => item.id === tab.id)
         ? current.map(item => item.id === tab.id ? tab : item) : [...current, tab] };
     });
@@ -55,8 +63,16 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   };
   useLayoutEffect(() => {
     const editors = new Map<BuilderNodeEditorEntry['id'], BuilderNodeEditorEntry>();
-    const open = (editor: BuilderNodeEditorEntry) => { editors.set(editor.id, editor); openTab({ id: editor.id, editor }); };
-    const release = (id: BuilderNodeEditorEntry['id']) => { editors.delete(id); releaseTab(id); };
+    const open = (editor: BuilderNodeEditorEntry) => {
+      editors.set(editor.id, editor);
+      openTab({ id: editor.id, editor });
+      if (isCanvasEditorId(editor.id)) canvasEditor.current = editor;
+    };
+    const release = (id: BuilderNodeEditorEntry['id']) => {
+      editors.delete(id);
+      if (canvasEditor.current?.id === id) canvasEditor.current = null;
+      releaseTab(id);
+    };
     useBuilderNodeEditorBridge.setState({ open, release });
     return () => {
       editors.forEach(editor => editor.onClose());
@@ -64,6 +80,7 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
     };
   }, [openTab, releaseTab]);
   const selectTab = (id: BuilderPaneId) => {
+    if (isCanvasEditorId(activeTab) && id !== activeTab) closeCanvas(activeTab);
     setViews(previous => ({ ...previous, active: id }));
     if (id === 'canvas') setFullscreen(false);
   };

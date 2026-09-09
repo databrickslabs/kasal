@@ -60,8 +60,7 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
         Inputs
       </Typography>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-        The values this {entityLabel} takes, found from its {'{placeholders}'}. Untick
-        anything a caller can leave out; otherwise they are asked for all of them.
+        Values this {entityLabel} needs to run. Mark only the fields a caller must provide as required.
       </Typography>
 
       <Stack spacing={1}>
@@ -72,7 +71,8 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
           // looks like it simply got the answer wrong.
           const unused = used !== null && !used.has(field.name);
           return (
-            <Stack key={field.name} direction="row" spacing={1} alignItems="center">
+            <Box key={field.name} sx={{ p: 1.5, borderRadius: 2.5, bgcolor: 'action.hover', minWidth: 0 }}>
+              <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 1 }}>
               <Tooltip title={field.required ? 'Required' : 'Optional'}>
                 <Checkbox
                   size="small"
@@ -92,8 +92,9 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
                   variant="body2"
                   sx={{
                     fontFamily: 'monospace',
-                    minWidth: 120,
-                    flexShrink: 0,
+                    flex: 1,
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
                     color: unused ? 'warning.main' : undefined,
                   }}
                 >
@@ -101,13 +102,7 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
                   {unused && ' ⚠'}
                 </Typography>
               </Tooltip>
-              <TextField
-                value={field.description}
-                onChange={(e) => update(index, { description: e.target.value })}
-                placeholder="What this value is (helps a caller supply it)"
-                size="small"
-                fullWidth
-              />
+              <Typography variant="caption" color="text.secondary">{field.required ? 'Required' : 'Optional'}</Typography>
               <IconButton
                 size="small"
                 onClick={() => remove(index)}
@@ -115,7 +110,17 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
               >
                 <DeleteOutlineIcon fontSize="small" />
               </IconButton>
-            </Stack>
+              </Stack>
+              <TextField
+                value={field.description}
+                onChange={(e) => update(index, { description: e.target.value })}
+                label={`Description for ${field.name}`}
+                placeholder="Help the caller provide the right value"
+                size="small"
+                multiline
+                fullWidth
+              />
+            </Box>
           );
         })}
 
@@ -144,7 +149,9 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
               }
             }}
             placeholder="Add a field"
+            inputProps={{ 'aria-label': 'New input field' }}
             size="small"
+            fullWidth
           />
           <IconButton size="small" onClick={add} aria-label="Add field">
             <AddIcon fontSize="small" />

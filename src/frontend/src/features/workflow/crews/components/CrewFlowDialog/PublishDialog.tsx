@@ -6,7 +6,6 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
-  Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
@@ -16,6 +15,8 @@ import {
   Typography,
 } from '@mui/material';
 import PublicIcon from '@mui/icons-material/Public';
+import { Bot, MessageCircle, Plug } from 'lucide-react';
+import CatalogActionPane from './CatalogActionPane';
 
 import { PublicationService } from '../../../../../api/workflow/PublicationService';
 import { useAppStore as useChatAppStore } from '../../../../chat/store/appStore';
@@ -45,6 +46,14 @@ import {
  * NOT to chat, which is the opposite of what they asked for on both counts.
  */
 const DEFAULT_PROTOCOLS: PublicationProtocol[] = ['mcp', 'a2a', 'chat'];
+const destinations = [
+  { id: 'chat', title: 'Workspace chat', description: 'Available in Use existing, inside this workspace.', icon: MessageCircle },
+  { id: 'mcp', title: 'MCP clients', description: 'Let connected tools such as Claude Code and Cursor run it.', icon: Plug },
+  { id: 'a2a', title: 'Agent platforms', description: 'Let other agents discover and run it through A2A.', icon: Bot },
+] as const;
+
+const sectionSx = { p: 2, border: 1, borderColor: 'divider', borderRadius: 3, minWidth: 0 };
+
 
 /**
  * Reload the chat-mode catalog after a publication changes.
@@ -242,180 +251,94 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
 
   const nameIsValid = /^[a-z][a-z0-9_]{0,63}$/.test(externalName);
   const canPublish =
-    nameIsValid && description.trim().length > 0 && protocols.length > 0 && !saving;
+    nameIsValid && description.trim().length > 0 && protocols.length > 0 && !saving && !loading;
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth="sm"
-      fullWidth
-      // The dialog is rendered from inside a catalogue card, and that card has
-      // onClick={loadCrew} / onKeyDown={cardNavigation}. MUI portals the dialog
-      // out of the DOM, but React's synthetic events still travel the REACT
-      // tree — so clicking the Description field loaded the crew onto the canvas
-      // and closed the catalogue, and typing drove the card's keyboard nav.
-      // (The feedback block a few hundred lines away carries the same guard for
-      // the same reason.)
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <PublicIcon fontSize="small" />
-        Publish {entityType}
-        {existing && <Chip size="small" color="success" label="Published" />}
+    <CatalogActionPane open={open}
+      label={`Publish · ${entityName}`} onClose={() => { if (!saving) onClose(); }}>
+      <DialogTitle component="div">
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Box sx={{ display: 'flex', p: 1.25, borderRadius: 3, bgcolor: 'action.hover' }}><PublicIcon fontSize="small" /></Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography component="h2" sx={{ fontSize: 20, fontWeight: 600 }}>Publish {entityType}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{entityName}</Typography>
+          </Box>
+          <Chip size="small" variant="outlined" color={existing ? 'success' : 'default'} label={existing ? 'Published' : 'Not published'} />
+        </Stack>
       </DialogTitle>
 
       <DialogContent>
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress size={24} />
-          </Box>
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress size={24} aria-label="Loading publication" /></Box>
         ) : (
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Publishing makes <strong>{entityName}</strong> reachable by something
-              other than the canvas. Pick where below. Publishing to chat alone
-              exposes nothing outside this workspace.
-            </Typography>
-
+          <Stack spacing={2.5}>
             {error && <Alert severity="error">{error}</Alert>}
-
-            <TextField
-              label="External name"
-              value={externalName}
-              onChange={(e) => setExternalName(e.target.value)}
-              fullWidth
-              size="small"
-              error={externalName.length > 0 && !nameIsValid}
-              helperText={
-                externalName.length > 0 && !nameIsValid
-                  ? 'Lowercase letters, digits and underscores; must start with a letter.'
-                  : 'The tool name external clients will use. Changing it breaks callers that pinned the old one.'
-              }
-            />
-
-            <TextField
-              label="Description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              fullWidth
-              multiline
-              minRows={3}
-              size="small"
-              helperText={
-                'What it does AND when to use it. This is the only thing a caller ' +
-                'matches on; a vague description means it is never chosen. Chat ' +
-                'routing has the least context of any caller, so name the phrases ' +
-                'someone would actually type.'
-              }
-            />
-
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                Reachable from
-              </Typography>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={protocols.includes('chat')}
-                    onChange={() => toggleProtocol('chat')}
-                  />
-                }
-                label="Chat: let this be picked in Use existing mode"
-              />
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                display="block"
-                sx={{ ml: 4, mt: -0.5, mb: 0.5 }}
-              >
-                Inside this workspace only. Nothing is exposed outside it.
-              </Typography>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={protocols.includes('mcp')}
-                    onChange={() => toggleProtocol('mcp')}
-                  />
-                }
-                label="MCP: Claude Code, Cursor, other MCP clients"
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={protocols.includes('a2a')}
-                    onChange={() => toggleProtocol('a2a')}
-                  />
-                }
-                label="A2A: other agent platforms"
-              />
-              {protocols.length === 0 && (
-                <Typography variant="caption" color="warning.main" display="block">
-                  With nothing selected this is not reachable from anywhere.
-                </Typography>
-              )}
+            <Box component="section" aria-label="Publication details" sx={sectionSx}>
+              <Typography component="h3" variant="subtitle2" sx={{ mb: 0.5 }}>Details</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>Help people and agents recognize when to use this {entityType}.</Typography>
+              <Stack spacing={2.5}>
+                <TextField label="External name" value={externalName} onChange={e => setExternalName(e.target.value)}
+                  fullWidth size="small" disabled={saving} error={externalName.length > 0 && !nameIsValid}
+                  helperText={externalName.length > 0 && !nameIsValid
+                    ? 'Use lowercase letters, digits and underscores, starting with a letter.'
+                    : existing ? 'Changing this name affects clients using the current name.' : 'The identifier connected clients use to run this workload.'} />
+                <TextField label="Description" value={description} onChange={e => setDescription(e.target.value)}
+                  fullWidth multiline minRows={3} size="small" disabled={saving}
+                  placeholder="What does it deliver, and when should someone use it?"
+                  helperText="Describe the result and include phrases someone might use to ask for it." />
+              </Stack>
             </Box>
-            {entityType === 'crew' && (
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Conversation
-                </Typography>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={conversational}
-                      onChange={(e) => setConversational(e.target.checked)}
-                      inputProps={{ 'aria-label': 'Holds a conversation' }}
-                    />
-                  }
-                  label="Holds a conversation: follow-ups continue this crew"
-                />
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  display="block"
-                  sx={{ ml: 4, mt: -0.5 }}
-                >
-                  Each follow-up runs the crew again with the recent conversation in
-                  front of it, and MCP or A2A callers are told to keep the same
-                  session. Leave it off for one-shot work.
-                </Typography>
-              </Box>
-            )}
 
-            <PublishInputSchema
-              fields={inputFields}
-              onChange={setInputFields}
-              entityLabel={entityType}
-              usedPlaceholders={usedPlaceholders}
-            />
+            <Box component="section" aria-label="Publication availability" sx={sectionSx}>
+              <Typography component="h3" variant="subtitle2" sx={{ mb: 0.5 }}>Where it is available</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose one or more places that can run this {entityType}.</Typography>
+              <Stack spacing={1}>
+                {destinations.map(({ id, title, description: detail, icon: Icon }) => {
+                  const selected = protocols.includes(id);
+                  return <FormControlLabel key={id} sx={{ m: 0, p: 1.25, gap: 1, borderRadius: 2.5,
+                    border: 1, borderColor: selected ? 'text.secondary' : 'divider', bgcolor: selected ? 'action.hover' : 'transparent',
+                    alignItems: 'flex-start', '& .MuiFormControlLabel-label': { flex: 1, minWidth: 0 } }}
+                    control={<Checkbox size="small" color="default" checked={selected} disabled={saving}
+                      inputProps={{ 'aria-label': title }} onChange={() => toggleProtocol(id)} sx={{ p: 0.25, mt: 0.25 }} />}
+                    label={<Box sx={{ display: 'flex', gap: 1.25, alignItems: 'flex-start' }}>
+                      <Box sx={{ display: 'flex', mt: 0.5, color: 'text.secondary' }}><Icon size={17} /></Box>
+                      <Box><Typography variant="body2" sx={{ fontWeight: 600 }}>{title}</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>{detail}</Typography></Box>
+                    </Box>} />;
+                })}
+              </Stack>
+              {protocols.length === 0 && <Typography role="status" variant="caption" color="warning.main" sx={{ display: 'block', mt: 1 }}>Select at least one destination to publish.</Typography>}
+            </Box>
 
-            {entityType === 'flow' && (
-              <PublishFlowOutcomes
-                crews={flowCrews}
-                outcomes={outcomes}
-                onChange={setOutcomes}
-              />
-            )}
+            {entityType === 'crew' && <Box component="section" aria-label="Conversation behavior" sx={sectionSx}>
+              <Typography component="h3" variant="subtitle2" sx={{ mb: 1 }}>Conversation</Typography>
+              <FormControlLabel sx={{ m: 0, alignItems: 'flex-start' }}
+                control={<Checkbox color="default" checked={conversational} disabled={saving}
+                  onChange={e => setConversational(e.target.checked)} inputProps={{ 'aria-label': 'Holds a conversation' }} sx={{ pl: 0, pt: 0.25 }} />}
+                label={<Box><Typography variant="body2" sx={{ fontWeight: 500 }}>Continue this crew on follow-ups</Typography>
+                  <Typography variant="caption" color="text.secondary">Run it again with recent conversation context. Leave this off for a single request.</Typography></Box>} />
+            </Box>}
+
+            <Box component="section" aria-label="Publication inputs" sx={sectionSx}>
+              <PublishInputSchema fields={inputFields} onChange={setInputFields} entityLabel={entityType} usedPlaceholders={usedPlaceholders} />
+            </Box>
+            {entityType === 'flow' && flowCrews.length > 0 && <Box component="section" aria-label="Flow outcomes" sx={sectionSx}>
+              <PublishFlowOutcomes crews={flowCrews} outcomes={outcomes} onChange={setOutcomes} />
+            </Box>}
           </Stack>
         )}
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        {existing && (
-          <Button color="error" onClick={handleUnpublish} disabled={saving}>
-            Unpublish
-          </Button>
-        )}
+      <DialogActions>
+        {existing && <Button color="error" onClick={handleUnpublish} disabled={saving || loading}>Unpublish</Button>}
         <Box sx={{ flex: 1 }} />
-        <Button onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button variant="contained" onClick={handlePublish} disabled={!canPublish}>
-          {existing ? 'Update' : 'Publish'}
+        <Button color="inherit" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handlePublish} disabled={!canPublish}
+          startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}>
+          {saving ? 'Saving…' : existing ? 'Update publication' : 'Publish'}
         </Button>
       </DialogActions>
-    </Dialog>
+    </CatalogActionPane>
   );
 };
 
