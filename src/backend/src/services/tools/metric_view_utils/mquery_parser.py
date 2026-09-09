@@ -19,6 +19,18 @@ from .data_classes import TableInfo
 
 logger = logging.getLogger(__name__)
 
+# Connector functions for "Get Data → browse catalog/schema/table" navigation
+# UIs. Not Databricks-specific: Snowflake/Postgres/MySQL/Oracle/Redshift/
+# BigQuery's catalog-browse connectors emit the identical [Name=,Kind=]
+# navigation-chain shape (a shared Power Query SDK convention), so the same
+# regex walk in extract_source_table/resolve_mquery_to_sql applies to all of
+# them — only the connector-function gate below differs per family.
+_CATALOG_NAV_CONNECTORS = re.compile(
+    r"\b(Databricks\.\w+|Snowflake\.Databases|PostgreSQL\.Database|"
+    r"MySQL\.Database|Oracle\.Database|AmazonRedshift\.Database|"
+    r"GoogleBigQuery\.Database)\b"
+)
+
 
 def looks_like_raw_mquery(sql: str) -> bool:
     """Heuristic: does this string look like raw Power Query M rather than SQL?
@@ -78,12 +90,28 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
             "inline constant table (slicer/selector helper, base64-embedded) — "
             "no warehouse source; correctly skipped",
         )
+    if re.search(r"Table\.FromRows\s*\(\s*\{", m):
+        return (
+            "inline_const",
+            "inline constant table (hardcoded literal rows) — "
+            "no warehouse source; correctly skipped",
+        )
+    # (?<!\.) excludes M's dotted standard-library calls (Table.SelectColumns,
+    # Table.AddColumns, ...) — DAX never namespaces a function with a leading
+    # dot, so a bare match preceded by "." is always M, not the DAX function of
+    # the same name. Without this, a Databricks.Catalogs (or any other
+    # catalog-nav) source with an ordinary Table.SelectColumns step downstream
+    # got mis-classified as 'dax_calc' and short-circuited before ever reaching
+    # the 'extractable' branch — an M source with a real physical table lost
+    # to a DAX-function-name collision purely because it also selected columns.
     if (
         re.search(
-            r"\b(GENERATESERIES|SUMMARIZECOLUMNS|ADDCOLUMNS|SELECTCOLUMNS|VALUES|CALENDAR|CALENDARAUTO)\s*\(",
+            r"(?<!\.)\b(GENERATESERIES|SUMMARIZECOLUMNS|SUMMARIZE|CALCULATETABLE|"
+            r"ADDCOLUMNS|SELECTCOLUMNS|VALUES|CALENDAR|CALENDARAUTO)\s*\(",
             mu,
         )
         or re.match(r"^\s*ROW\s*\(", mu)
+        or re.match(r"^\s*\{\s*\(", m)
         or re.search(r"IsParameterQuery\s*=\s*true", m, re.IGNORECASE)
     ):
         return (
@@ -102,12 +130,13 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
             "customer-supplied source-table mapping",
         )
     if re.search(
-        r"\b(Value\.NativeQuery|Sql\.Databases?|Databricks\.\w+|Spark\.)\b", m
-    ):
+        r"\b(Value\.NativeQuery|Sql\.Databases?|Spark\.)\b", m
+    ) or _CATALOG_NAV_CONNECTORS.search(m):
         return (
             "extractable",
-            "looks extractable (native query / Databricks connector) but no "
-            "source table was resolved — extraction gap, investigate",
+            "looks extractable (native query / catalog-browsing warehouse "
+            "connector) but no source table was resolved — extraction gap, "
+            "investigate",
         )
     return ("unknown", "unrecognized M source shape")
 
@@ -125,7 +154,7 @@ def _unquote(ident: str) -> str:
     return ident.strip().strip("`").strip("[]").strip('"')
 
 
-def extract_source_table(mquery: str) -> str | None:
+def extract_source_table(mquery: str, expressions: dict | None = None) -> str | None:
     """Parse a physical ``catalog.schema.table`` out of an *extractable* M source.
 
     Only runs for sources ``classify_mquery_source`` tags ``extractable`` (Databricks
@@ -134,9 +163,40 @@ def extract_source_table(mquery: str) -> str | None:
     cannot resolve one confidently — it never guesses (a wrong ``source_table`` would
     silently wire a bad join). Used to fill ``join_key_map[dim].source_table`` during
     config-generation enrichment.
+
+    ``expressions`` (optional): the model's ``{name: raw_M}`` named/shared expressions.
+    When given, a source whose physical table is BUILT from parameters at model-open
+    time — ``FromClause = Catalog & "." & Db & "." & Object`` inside a ``let`` block —
+    is resolved via ``mquery_let_evaluator`` (which nehme's literal-FROM extractor and
+    ``PbiParameterResolver`` can't handle, since the table NAME itself is parametric).
+    Fail-open: falls through to the literal-extraction logic below on any miss.
     """
     if not mquery or not isinstance(mquery, str):
         return None
+
+    # Parameter-driven source: resolve the let block to literal SQL first, then pull
+    # the FROM target out of the resolved SQL. Only when expressions are supplied.
+    if expressions:
+        from .mquery_let_evaluator import (
+            extract_parameter_defaults,
+            resolve_via_let_evaluation,
+        )
+
+        _params = extract_parameter_defaults(expressions)
+        if _params:
+            _resolved_sql = resolve_via_let_evaluation(mquery, _params)
+            if _resolved_sql:
+                _fm = re.search(
+                    r"\bFROM\s+((?:`[^`]+`|[A-Za-z_]\w*)"
+                    r"(?:\.(?:`[^`]+`|[A-Za-z_]\w*)){2})",
+                    _resolved_sql,
+                    re.IGNORECASE,
+                )
+                if _fm:
+                    _parts = _FQN_RE.match(_fm.group(1))
+                    if _parts:
+                        return ".".join(_unquote(p) for p in _parts.groups())
+
     category, _ = classify_mquery_source(mquery)
     if category != "extractable":
         return None
@@ -182,6 +242,218 @@ def extract_source_table(mquery: str) -> str | None:
     if bare:
         return ".".join(_unquote(p) for p in bare.groups())
 
+    return None
+
+
+def _quote_sql_ident(name: str) -> str:
+    """Backtick-quote a SQL identifier unless it's already a plain token.
+
+    ``extract_source_table`` returns the FQN un-quoted (existing callers use it
+    as a plain dotted config value, e.g. ``join_key_map[dim].source_table``),
+    but a catalog/schema/column name containing a space or other special
+    character (M's connector nav routinely surfaces these, e.g. a catalog
+    literally named ``Databricks Data Catalog``) is not valid unquoted SQL —
+    ``resolve_mquery_to_sql`` must quote it before it lands in a FROM/SELECT.
+    """
+    if re.fullmatch(r"[A-Za-z_]\w*", name):
+        return name
+    return "`" + name.replace("`", "``") + "`"
+
+
+def resolve_mquery_to_sql(mquery: str) -> str | None:
+    """Deterministically compile an *extractable* M source into a compact SQL
+    string — ``SELECT col, col2 AS alias, ... FROM catalog.schema.table`` —
+    that the downstream ``MQueryParser`` (SQL-only) can read directly.
+
+    This is what closes the gap for "click-together" M authored via a
+    catalog-browse connector (``Databricks.Catalogs`` et al): those sources
+    have no embedded SQL text for the parser to find, and previously the only
+    way to recover them was routing the FULL raw M through an LLM. Query
+    folding for this shape is trivial and fully structural — a source
+    navigation chain plus, at most, a column projection/rename — so it needs
+    no LLM: same physical-table resolution as ``extract_source_table``, plus a
+    best-effort read of a following ``Table.SelectColumns``/``RenameColumns``
+    step pair for the projected column list.
+
+    Returns ``None`` when the source table itself can't be resolved (caller
+    then falls back to the LLM path or skips the table, per the same policy
+    for a bare ``extract_source_table`` miss). Never invents a JOIN or a
+    filter — those M shapes are more varied and are left to the LLM fallback.
+    """
+    fqn = extract_source_table(mquery)
+    if not fqn:
+        return None
+    m = mquery
+
+    # Table.SelectColumns(<prevStep>, {"a","b","c"}) — projected column list,
+    # order preserved. Absent → keep every source column (SELECT *).
+    select_cols: list[str] = []
+    sel_match = re.search(r"Table\.SelectColumns\s*\([^,]+,\s*\{([^}]*)\}", m)
+    if sel_match:
+        select_cols = re.findall(r'"([^"]+)"', sel_match.group(1))
+
+    # Table.RenameColumns(<prevStep>, {{"old","new"}, {"old2","new2"}, ...})
+    # — old→new alias map, applied over the projected list (if any).
+    renames: dict[str, str] = {}
+    ren_match = re.search(
+        r"Table\.RenameColumns\s*\([^,]+,\s*\{(.*?)\}\s*\)", m, re.DOTALL
+    )
+    if ren_match:
+        for pair in re.finditer(
+            r'\{\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\}', ren_match.group(1)
+        ):
+            renames[pair.group(1)] = pair.group(2)
+
+    if select_cols:
+        projected = [
+            (
+                f"{_quote_sql_ident(c)} AS {_quote_sql_ident(renames[c])}"
+                if renames.get(c) and renames[c] != c
+                else _quote_sql_ident(c)
+            )
+            for c in select_cols
+        ]
+        select_clause = ", ".join(projected)
+    else:
+        select_clause = "*"
+
+    fqn_quoted = ".".join(_quote_sql_ident(p) for p in fqn.split("."))
+    return f"SELECT {select_clause} FROM {fqn_quoted}"
+
+
+# A table whose M is nothing but a passthrough to another named expression —
+# a disabled "staging query" referenced by the tables that actually load. Two
+# shapes seen in practice: `let Source = #"Other Name" in Source` (or a bare
+# unquoted reference), and — for some Admin-Scanner-reported tables — just the
+# referenced name on its own with no `let` wrapper at all.
+_BARE_LET_REF_RE = re.compile(
+    r'^\s*let\s+(?:\w+|#"[^"]+")\s*=\s*(?:#"([^"]+)"|([A-Za-z_]\w*))\s*'
+    r'(?:,\s*)?in\s+(?:\w+|#"[^"]+")\s*$',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _as_reference_name(expr: str) -> str | None:
+    """If ``expr`` (already isolated — e.g. one `let` binding's RHS) is
+    nothing but a reference to another name — ``#"Quoted Name"``, a bare
+    identifier, or a plain quoted string — return that name. ``None`` for
+    anything with actual logic (a function call, an operator, ...)."""
+    e = (expr or "").strip()
+    m = re.fullmatch(r'#"([^"]+)"', e)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r'"(?:[^"]|"")+"', e):
+        return e[1:-1].replace('""', '"')
+    if re.fullmatch(r"[A-Za-z_]\w*", e):
+        return e
+    return None
+
+
+def _extract_bare_reference(mquery: str) -> str | None:
+    """If ``mquery`` does nothing but reference another named expression (no
+    transformation of its own), return that expression's name. ``None`` for
+    anything with real logic."""
+    s = (mquery or "").strip()
+    if not s:
+        return None
+    direct = _as_reference_name(s)
+    if direct:
+        return direct
+    m = _BARE_LET_REF_RE.match(s)
+    if m:
+        return m.group(1) or m.group(2)
+    return None
+
+
+# Any of these combine MULTIPLE sources into one table (union/join/merge) —
+# when present, "the M's first binding is a reference" is no longer a safe
+# signal of the WHOLE table's physical source (it might be only one side of a
+# union), so _extract_first_binding_reference refuses to guess.
+_COMBINING_FUNCTIONS_RE = re.compile(
+    r"\b(Table\.Combine|Table\.Append|Table\.NestedJoin|Table\.Join|"
+    r"Table\.FuzzyNestedJoin|Table\.Merge)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_first_binding_reference(mquery: str) -> str | None:
+    """If ``mquery``'s FIRST ``let`` binding is a bare reference to another
+    named expression, return that name — even when later bindings do more
+    than pass the result straight through (``Table.TransformColumnTypes``,
+    ``Table.RenameColumns``, ``Table.SelectColumns``, ...). Those reshape
+    columns; they don't change which physical table is being read, so a
+    reference in the first binding is still the real source — UNLESS
+    anything in the M combines multiple sources (see
+    ``_COMBINING_FUNCTIONS_RE``), in which case trusting "the first binding"
+    could silently pick only one side of a union. Bails to ``None`` there
+    rather than guess.
+    """
+    if not mquery or _COMBINING_FUNCTIONS_RE.search(mquery):
+        return None
+    from .mquery_let_evaluator import _extract_let_block, _parse_binding
+
+    parsed = _extract_let_block(mquery)
+    if not parsed:
+        return None
+    bindings, _final_expr = parsed
+    if not bindings:
+        return None
+    pb = _parse_binding(bindings[0])
+    if not pb:
+        return None
+    _, first_raw_expr = pb
+    return _as_reference_name(first_raw_expr)
+
+
+def resolve_mquery_with_context(
+    mquery: str,
+    expressions: dict[str, str] | None = None,
+) -> str | None:
+    """``resolve_mquery_to_sql``, extended with model-level context for the
+    shapes a table's own M can't resolve on its own:
+
+    1. **Reference-following** — the table's M is only a passthrough to a
+       separate named/shared expression (a "staging query" disabled from
+       load, referenced by the tables that actually load) — recurse into
+       that expression's own M via the direct resolver. Covers both a pure
+       passthrough (``let Source = #"Other Name" in Source``) and a
+       reference followed by column-level cleanup that doesn't change the
+       physical source (``Table.TransformColumnTypes``/``RenameColumns``/
+       ``SelectColumns`` after it) — see ``_extract_first_binding_reference``.
+    2. **Parameter-driven sources** — the physical table (or the whole native
+       query) is built from string concatenation of model parameters at
+       model-open time — resolved via ``mquery_let_evaluator`` using each
+       parameter's current default value, both pulled from the SAME
+       ``expressions`` map (Admin Scanner / Fabric TMDL report parameters as
+       ordinary named expressions tagged ``IsParameterQuery = true``).
+
+    ``expressions`` is the model's ``{name: raw_M}`` map of named/shared
+    expressions — absent (or empty) callers just get the direct resolver's
+    result. Never guesses: ``None`` if nothing resolves confidently.
+    """
+    direct = resolve_mquery_to_sql(mquery)
+    if direct:
+        return direct
+    if not expressions:
+        return None
+
+    for ref_name in (
+        _extract_bare_reference(mquery),
+        _extract_first_binding_reference(mquery),
+    ):
+        if ref_name and ref_name in expressions and expressions[ref_name] != mquery:
+            resolved = resolve_mquery_to_sql(expressions[ref_name])
+            if resolved:
+                return resolved
+
+    from .mquery_let_evaluator import (
+        extract_parameter_defaults,
+        resolve_via_let_evaluation,
+    )
+
+    params = extract_parameter_defaults(expressions)
+    if params:
+        return resolve_via_let_evaluation(mquery, params)
     return None
 
 

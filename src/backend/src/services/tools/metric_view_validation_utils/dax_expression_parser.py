@@ -18,6 +18,20 @@ _RETURN_PATTERN = re.compile(r"RETURN(.*)$", re.IGNORECASE | re.DOTALL)
 _MAX_VAR_SUBSTITUTION_ITERATIONS = 100
 _VAR_SUBSTITUTION_WARNING_THRESHOLD = 95
 
+# Hard cap on the character length of any expression produced by variable
+# substitution. Textual VAR substitution expands chained VARs that each
+# reference the next more than once as ~2^N: a ~28-deep chain expands to
+# multiple GB, and both the substitution and the follow-on parse then peg
+# CPU/RAM for ~an hour with zero log output before an outer watchdog kills the
+# run (observed on large Power BI reports, e.g. DCC/PAAT). The iteration cap
+# above never trips because the size explodes within ~21 iterations. Legit
+# measures expand to at most a few KB even fully substituted, so 200 KB is a
+# generous ceiling. Exceeding it fails OPEN: a RuntimeError is raised and the
+# caller (ExpressionValidator / MetricExpressionValidatorPipeline) already
+# catches it, marking that one measure ERROR/skipped instead of hanging the
+# entire per-table validation loop.
+_MAX_EXPANDED_EXPR_CHARS = 200_000
+
 
 class DAXExpressionParser:
     """Parser for DAX expressions with hierarchical decomposition."""
@@ -240,6 +254,19 @@ class DAXExpressionParser:
                         other_var["variable_name"],
                         other_var["variable_expr"],
                     )
+
+                    if len(new_expr) > _MAX_EXPANDED_EXPR_CHARS:
+                        logger.error(
+                            "DAX variable substitution for '%s' exceeded %d chars "
+                            "(likely exponential VAR-chain expansion); aborting to "
+                            "avoid a parser hang.",
+                            var["variable_name"], _MAX_EXPANDED_EXPR_CHARS,
+                        )
+                        raise RuntimeError(
+                            "DAX variable substitution exceeded maximum expression "
+                            f"size ({_MAX_EXPANDED_EXPR_CHARS} chars); possible "
+                            "exponential VAR-chain expansion."
+                        )
 
                     if new_expr != var["variable_expr"]:
                         var["variable_expr"] = new_expr

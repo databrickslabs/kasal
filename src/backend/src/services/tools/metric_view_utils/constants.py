@@ -10,9 +10,11 @@ RE_AGG_COL = re.compile(
     re.IGNORECASE,
 )
 
-# Regex: extract FROM clause
+# Regex: extract FROM clause. Each dotted segment may be a bare word or a
+# backtick-quoted identifier (needed for a catalog/schema/table containing a
+# space, e.g. a PBI-connector catalog literally named `Databricks Data Catalog`).
 RE_FROM_CLAUSE = re.compile(
-    r"FROM\s+([\w.]+)(?:\s+(?:as\s+)?(\w+))?",
+    r"FROM\s+((?:`[^`]+`|[\w]+)(?:\.(?:`[^`]+`|[\w]+))*)(?:\s+(?:as\s+)?(\w+))?",
     re.IGNORECASE,
 )
 

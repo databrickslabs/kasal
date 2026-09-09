@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import replace
+from typing import Any
 
 from .artifact_cascade import (
     collect_unassigned,
@@ -28,7 +29,7 @@ from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
 from .metadata_generator import MetadataGenerator
 from .pbi_parameter_resolver import PbiParameterResolver
-from .report_emitter import emit_migration_report
+from .report_emitter import build_proposal, emit_migration_report
 from .sql_emitter import emit_deploy_sql
 from .sql_post_processor import SqlPostProcessor
 from .table_processor import (
@@ -72,16 +73,32 @@ class MetricViewPipeline:
         refresh_policy_tables: list[dict] | None = None,
         no_summarize_columns: list[dict] | None = None,
         rls_tables: set[str] | None = None,
+        mquery_expressions: dict | None = None,
     ):
         self.mapping = mapping
         self.mquery_tables = mquery_tables
         self.config = config or {}
         self.inner_dim_joins = inner_dim_joins
         self.scan_data = scan_data or {}
+        # Raw Power Query M per table, for physical-name resolution (Gaps 1-3).
+        # Prefer the explicit map; otherwise recover it from scan_data if present.
+        self._mquery_expressions: dict[str, str] = dict(mquery_expressions or {})
+        if not self._mquery_expressions and self.scan_data:
+            for _k, _si in self.scan_data.items():
+                _m = (_si.get("raw_m_expression") or _si.get("m_expression")
+                      if isinstance(_si, dict) else getattr(_si, "raw_m_expression", None))
+                if _m:
+                    self._mquery_expressions[_k] = _m
+        # Fallback: config-gen ships the raw M per table in the config (no scan_data
+        # needed). Enables physical-name resolution + generated-view SQL in the flow.
+        if not self._mquery_expressions:
+            _cfg_m = self.config.get("table_mquery_expressions")
+            if isinstance(_cfg_m, dict):
+                self._mquery_expressions = {k: v for k, v in _cfg_m.items() if v}
         self.unflatten_tables = unflatten_tables
         self.llm_config = llm_config or {}
         self._inactive_rels: list[dict] = inactive_relationships or []
-        self._limitations: dict[str, list] = {}
+        self._limitations: dict[str, Any] = {}
         if self._inactive_rels:
             self._limitations["inactive_relationships"] = self._inactive_rels
         if m2n_relationships:
@@ -340,6 +357,30 @@ class MetricViewPipeline:
                         m.skip_reason = (
                             "Covered on primary table (secondary allocation)"
                         )
+
+        # Phase 2b-fix: resolve physical table/column names from the Power Query M
+        # (KASAL_FIXES Gaps 1-3). Fail-open — unresolved identifiers are left as-is.
+        if self._mquery_expressions:
+            from .physical_name_resolver import resolve_physical_names
+            _res = resolve_physical_names(
+                self.all_specs, self.mquery_tables, self._mquery_expressions)
+            if _res.get("generated_tables"):
+                self._limitations["generated_tables"] = _res["generated_tables"]
+                # Gap 3 materialization: emit CREATE VIEW SQL for generated calendars
+                # (List.Dates etc.) so the reviewer can create the missing source.
+                from .generated_table_emitter import emit_view_sql
+                _gen_sql = {}
+                for _t in _res["generated_tables"]:
+                    _sql = emit_view_sql(
+                        self._mquery_expressions.get(_t, ""),
+                        f"{{catalog}}.{{schema}}.{to_snake_case(_t)}")
+                    if _sql:
+                        _gen_sql[_t] = _sql
+                if _gen_sql:
+                    self._limitations["generated_view_sql"] = _gen_sql
+                    logger.info(
+                        "[MetricViewPipeline] emitted CREATE VIEW SQL for %d generated "
+                        "table(s): %s", len(_gen_sql), ", ".join(sorted(_gen_sql)))
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
         for spec in self.all_specs.values():
@@ -798,6 +839,16 @@ class MetricViewPipeline:
 
     def get_results(self) -> dict:
         """Return pipeline results as a serializable dict."""
+        from .recovery_recommender import draft_source_view as _draft_source_view
+        from .recovery_recommender import recommend as _recovery_recipe
+        # Tables reachable only via a skipped many:many/bidirectional relationship
+        # — used to recommend an EXISTS-precompute recovery (Gap 4) instead of a
+        # generic decline.
+        _m2n_tables: set[str] = set()
+        for _r in self._limitations.get("m2n_relationships", []) or []:
+            _m2n_tables.add(_r.get("from_table", ""))
+            _m2n_tables.add(_r.get("to_table", ""))
+        _m2n_tables.discard("")
         results = {
             "specs": {},
             "stats": self.stats,
@@ -832,8 +883,33 @@ class MetricViewPipeline:
                 "untranslatable": [
                     {
                         "name": m.original_name,
+                        "original_name": m.original_name,
                         "skip_reason": m.skip_reason,
                         "category": m.category,
+                        # Rich fields for the validation-UI "Not transpiled" review
+                        # panel: the full original DAX, the LLM translation-class
+                        # label, and how many other measures depend on this one (so
+                        # reviewers can triage high-impact gaps first).
+                        "dax_expression": m.dax_expression,
+                        "dax_class": m.dax_class,
+                        "referenced_by": getattr(m, "referenced_by", 0),
+                        "explanation": getattr(m, "explanation", None),
+                        # Prefer the LLM's own recipe; else a concrete Gap 4/5 recovery
+                        # recipe (EXISTS precompute / separate-grain view) when the DAX
+                        # shape matches; else the class-based default.
+                        "proposal": build_proposal(
+                            m.dax_class,
+                            getattr(m, "explanation", None) or _recovery_recipe(
+                                m.dax_expression, fact_table=spec.fact_table_key,
+                                m2n_tables=_m2n_tables,
+                                join_tables={j.get("name") for j in (spec.joins or [])}),
+                            m.skip_reason),
+                        # Best-effort, UNVERIFIED source-view SQL scaffold for cross-fact /
+                        # multi-stage measures — a proposal starting point, never an emitted
+                        # measure. Clearly labeled DRAFT; complete + verify against PBI.
+                        "source_view_sql_draft": _draft_source_view(
+                            m.dax_expression, measure_name=m.measure_name,
+                            fact_table=spec.fact_table_key),
                     }
                     for m in spec.untranslatable
                 ],

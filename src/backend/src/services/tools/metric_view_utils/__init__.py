@@ -39,6 +39,17 @@ from .sql_post_processor import SqlPostProcessor
 from .table_processor import process_table
 from .utils import load_mapping, spark_sql_compat, to_snake_case, yaml_scalar
 from .yaml_emitter import emit_yaml
+from .capability_version import (
+    capability_fingerprint,
+    capability_summary,
+    has_capability_changed,
+)
+from .function_ref_retriever import detect_functions, render_function_refs
+from .generated_table_emitter import emit_view_sql
+from .mquery_let_evaluator import (
+    extract_parameter_defaults,
+    resolve_via_let_evaluation,
+)
 
 __all__ = [
     "TranslationResult",
@@ -63,6 +74,14 @@ __all__ = [
     "MetricViewPipeline",
     "process_table",
     "cross_table_artifact_cascade",
+    "capability_fingerprint",
+    "capability_summary",
+    "has_capability_changed",
+    "detect_functions",
+    "render_function_refs",
+    "emit_view_sql",
+    "extract_parameter_defaults",
+    "resolve_via_let_evaluation",
 ]
 
 __all__ += [

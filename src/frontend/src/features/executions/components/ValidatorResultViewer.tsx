@@ -5,6 +5,9 @@
  * measure counts, and expandable details.
  */
 import React, { useState, useMemo } from 'react';
+import { NonTranspiledPanel, type UntranslatableItem } from './NonTranspiledPanel';
+// The validator passes generator untranslatable_items straight through; same shape.
+export type ValidatorUntranslatableItem = UntranslatableItem;
 import {
   Box,
   Typography,
@@ -112,6 +115,9 @@ export interface ValidatorResult {
     switch?: number;
     manual_override?: number;
   }>;
+  /** Measures not transpiled by the generator, passed through so the quality
+   *  report can list WHICH measures were not emitted + why + the proposed approach. */
+  untranslatable_items?: UntranslatableItem[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -309,6 +315,14 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
           </Box>
           <Typography variant="caption" color="text.secondary">Tables Passing</Typography>
         </Paper>
+        {Array.isArray(result.untranslatable_items) && result.untranslatable_items.length > 0 && (
+          <Paper variant="outlined" sx={{ p: 2, flex: 1, minWidth: 150, textAlign: 'center' }}>
+            <Typography variant="h4" sx={{ fontWeight: 700, color: 'warning.main' }}>
+              {result.untranslatable_items.length}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">Not Transpiled</Typography>
+          </Paper>
+        )}
       </Box>
 
       {/* Overall progress bar */}
@@ -494,6 +508,23 @@ const ValidatorResultViewer: React.FC<{ result: ValidatorResult }> = ({ result }
           })}
         </TableBody>
       </Table>
+
+      {/* Not transpiled — measures not emitted by the generator (read-only here;
+          the quality report shows WHICH + why + proposed approach). */}
+      {Array.isArray(result.untranslatable_items) && result.untranslatable_items.length > 0 && (
+        <Box sx={{ mt: 1 }}>
+          <Box display="flex" alignItems="center" gap={1} sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Not transpiled</Typography>
+            <Chip size="small" label={result.untranslatable_items.length} color="warning" variant="outlined" />
+          </Box>
+          <NonTranspiledPanel
+            items={result.untranslatable_items as UntranslatableItem[]}
+            review={{}}
+            editable={false}
+            onReviewChange={() => {}}
+          />
+        </Box>
+      )}
 
       {/* YAML Viewer Dialog */}
       <Dialog

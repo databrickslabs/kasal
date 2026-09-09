@@ -71,6 +71,33 @@ class ExecutionHistoryRepository:
                 return data
         return None
 
+    async def find_recent_results_containing(
+        self, key: str, limit: int = 20
+    ) -> List[ExecutionHistory]:
+        """Recent runs whose decoded ``result`` dict contains ``key`` (dialect-portable).
+
+        Serves the UCMV re-evaluation tool's scan for prior runs that recorded
+        non-transpiled measures (``untranslatable_items``). Filters the decoded JSON
+        in Python over a bounded, ordered window rather than a Postgres-only
+        ``result::text LIKE`` cast, so it behaves the same on SQLite and Lakebase.
+        Returns the ORM rows (caller reads job_id / run_name / created_at / result).
+        """
+        result = await self.session.execute(
+            select(ExecutionHistory)
+            .where(ExecutionHistory.result.isnot(None))
+            .order_by(ExecutionHistory.created_at.desc())
+            .limit(max(limit * 5, 50))
+        )
+        out: List[ExecutionHistory] = []
+        for run in result.scalars().all():
+            data = run.result
+            text = data if isinstance(data, str) else json.dumps(data, default=str)
+            if key in text:
+                out.append(run)
+                if len(out) >= limit:
+                    break
+        return out
+
     async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
         """The most recent run whose ``checkpoint_data`` holds ``key``.
 

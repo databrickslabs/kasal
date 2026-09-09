@@ -667,15 +667,34 @@ def process_table(
             _ctx_lines.append(
                 f"- dimension / group-by columns: {', '.join(table_info.group_by_columns[:60])}"
             )
-        if getattr(table_info, "dim_source_tables", None):
-            _joins = [
-                f"{alias} → {tbl}"
-                for alias, tbl in table_info.dim_source_tables.items()
-            ]
-            if _joins:
-                _ctx_lines.append(
-                    f"- joined dimensions (use as alias.<col>): {'; '.join(_joins[:30])}"
-                )
+        # Joined dimensions the LLM may reference as alias.<col>. Source these from
+        # the AUTHORITATIVE `joins` list (DAX-detected + relationship-enrichment +
+        # fact joins, Step 3) — NOT just table_info.dim_source_tables, which carries
+        # only MQuery-embedded joins and omitted the enrichment joins, causing the
+        # LLM to (correctly, given its context) report "missing join to Dim_X" for
+        # measures whose dim join WAS in fact declared on the emitted spec.
+        # Show ONLY the alias (never the physical table name): the alias is the
+        # single valid namespace in the emitted view, and the DAX dim name maps to
+        # it by lowercase (Dim_Wkctr → dim_wkctr). Displaying "alias → table" led
+        # the LLM to reference the physical table name instead of the alias.
+        _join_aliases: list[str] = []
+        _seen_alias: set[str] = set()
+        for _j in joins:
+            _nm = _j.get("name")
+            if _nm and _nm not in _seen_alias:
+                _seen_alias.add(_nm)
+                _join_aliases.append(_nm)
+        for alias in (getattr(table_info, "dim_source_tables", None) or {}):
+            if alias not in _seen_alias:
+                _seen_alias.add(alias)
+                _join_aliases.append(alias)
+        if _join_aliases:
+            _ctx_lines.append(
+                "- joined dimensions (reference columns as ALIAS.<col> using EXACTLY "
+                "these aliases; a DAX filter on a dim table maps to its alias, "
+                "e.g. Dim_Wkctr[x] → dim_wkctr.x): "
+                f"{', '.join(_join_aliases[:30])}"
+            )
         if getattr(table_info, "static_filters", None):
             _ctx_lines.append(
                 f"- table-level filters already applied: {'; '.join(table_info.static_filters[:10])}"

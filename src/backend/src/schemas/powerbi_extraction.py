@@ -36,6 +36,10 @@ class PowerBIExtractionCreate(PowerBIExtractionBase):
         None,
         description="Admin/TMDL table metadata {table: {columns, mquery, measures}}",
     )
+    expressions: Optional[Dict[str, str]] = Field(
+        None,
+        description="Model-level named/shared expressions {name: raw_M} — staging queries + parameters",
+    )
     report_definition: Optional[Dict[str, Any]] = Field(
         None, description="Report visual bindings / definition"
     )
@@ -57,6 +61,7 @@ class PowerBIExtractionResponse(PowerBIExtractionBase):
     relationships: Optional[List[Dict[str, Any]]] = None
     measures: Optional[List[Dict[str, Any]]] = None
     admin_tables: Optional[Dict[str, Any]] = None
+    expressions: Optional[Dict[str, str]] = None
     report_definition: Optional[Dict[str, Any]] = None
     proposed_config: Optional[Dict[str, Any]] = None
     warnings: Optional[List[str]] = None

@@ -232,3 +232,32 @@ async def _ensure_users_columns(conn) -> None:
         )
     except Exception as e:  # noqa: BLE001 — the column is the requirement
         logger.warning(f"Could not create the users.personal_group_id index: {e}")
+
+
+async def _ensure_powerbi_extraction_columns(conn) -> None:
+    """powerbi_extraction.expressions — the model's named/shared expressions
+    ({name: raw_M} staging queries + parameters) added to the PowerBIExtraction
+    model. Because SQLAlchemy selects every mapped column, a missing one breaks
+    EVERY read of the table, not just the write path — a DB provisioned before
+    the column would fail extraction persistence AND any later query of it."""
+    await ensure_columns(
+        conn, "powerbi_extraction", [("expressions", "JSON", "JSON")]
+    )
+
+
+async def _ensure_flow_states_columns(conn) -> None:
+    """flow_states.group_id — tenant scoping added to the FlowState model. Because
+    SQLAlchemy selects every mapped column, a missing group_id breaks EVERY read of
+    the table (flow persistence load, crash-resume), not just group-filtered paths —
+    which is exactly how a flow run fails with 'column flow_states.group_id does not
+    exist' on a database that predates the column."""
+    await ensure_columns(
+        conn, "flow_states", [("group_id", "VARCHAR(100)", "VARCHAR(100)")]
+    )
+    try:
+        await conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_flow_states_group_uuid "
+            "ON flow_states (group_id, flow_uuid)"
+        )
+    except Exception as e:  # noqa: BLE001 — the column is the requirement
+        logger.warning(f"Could not create the flow_states.group_uuid index: {e}")

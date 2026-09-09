@@ -17,6 +17,12 @@ The seeded crews cover the full E2E flow:
 
 Plus the E2E flow that wires them all together.
 
+And one STANDALONE crew, outside that flow:
+ 10. UCMV Re-evaluation              (tool 97) — looks BACKWARDS at already-converted
+     models and re-tries only the measures that failed then, using today's improved
+     transpiler. Run manually or on a schedule after shipping transpiler improvements.
+     Read-only: it proposes re-transpilation candidates, never modifies metric views.
+
 Credential/input placeholders are left empty so the user only needs to fill in
 their workspace_id, client_id, client_secret, catalog, schema, warehouse_id etc.
 All tool logic and agent configurations are ready to run.
@@ -34,8 +40,11 @@ from src.models.group import Group
 from src.models.group_tool import GroupTool
 from src.models.task import Task
 
-# Tools required by the PBI migration pipeline — pre-enabled for bi-specialist
-BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95]
+# Tools required by the PBI migration pipeline — pre-enabled for bi-specialist.
+# These become GroupTool rows (explicit (group_id, tool_id) eligibility), so a
+# tool missing here is filtered out of the workspace's Tools list and the crew UI.
+# 97 = UCMV Re-evaluation (the standalone recovery crew below).
+BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95, 97]
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +317,12 @@ UCMV_GEN_TASK = {
             "tenant_id": "",
             "client_id": "",
             "client_secret": "",
+            # Distinct admin Service Principal for the MQuery Admin Scanner's
+            # 3rd fallback tier (retries the scan itself with admin rights when
+            # client_id/client_secret and Fabric TMDL both fail) — mirrors
+            # Pipeline Config Generator's admin_client_id/admin_client_secret.
+            "admin_client_id": "",
+            "admin_client_secret": "",
             "catalog": "",
             "schema_name": "",
             "use_llm_fallback": True,
@@ -905,6 +920,112 @@ GENIE_GEN_CREW = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Crew 10 — UCMV Re-evaluation (recoverable measures)
+# ─────────────────────────────────────────────────────────────────────────────
+# STANDALONE, not part of the conversion flow: it looks BACKWARDS at models that
+# were already converted and re-tries only the measures that failed back then,
+# using today's (improved) transpiler. Run it manually or on a schedule after
+# shipping transpiler improvements. Read-only — it proposes re-transpilation
+# candidates and never modifies metric views.
+# Docs: src/docs/powerbi/ucmv-reevaluation-recoverable-measures.md
+
+UCMV_REEVAL_AGENT_ID = "bi-ucmv-reeval-agent-001"
+UCMV_REEVAL_TASK_ID = "bi-ucmv-reeval-task-001"
+UCMV_REEVAL_CREW_ID = "bi-ucmv-reeval-crew-001"
+
+UCMV_REEVAL_AGENT = {
+    "id": UCMV_REEVAL_AGENT_ID,
+    "name": "UCMV Re-evaluation Agent",
+    "role": "Metric View Recovery Analyst",
+    "goal": (
+        "Find previously-untranslatable DAX measures that today's improved "
+        "transpiler can now recover, and report them for human review."
+    ),
+    "backstory": (
+        "You track how Kasal's DAX→UC Metric View capability improves over time. "
+        "Models converted months ago still carry measures that failed back then but "
+        "are translatable today. You replay the stored conversion history and report "
+        "which measures are now recoverable. "
+        "Call the UCMV Re-evaluation tool with ZERO arguments — the group scope and "
+        "settings come from the tool config. Report the findings verbatim; do NOT "
+        "invent SQL and do NOT claim anything was applied — the tool only proposes."
+    ),
+    "llm": "databricks-claude-opus-4-8",
+    "tools": [],
+    "tool_configs": {},
+    "max_iter": 5,
+    "max_rpm": 10,
+    "max_execution_time": 600,
+    "verbose": True,
+    "allow_delegation": False,
+    "cache": True,
+    "memory": False,
+    "embedder_config": DEFAULT_EMBEDDER,
+    "max_retry_limit": 3,
+}
+
+UCMV_REEVAL_TASK = {
+    "id": UCMV_REEVAL_TASK_ID,
+    "name": "Find measures the improved transpiler can now recover",
+    "description": (
+        "Scan the stored UCMV conversion history and re-try ONLY the measures that "
+        "previously failed to transpile, using today's transpiler.\n\n"
+        "⚠️ CRITICAL: Call the UCMV Re-evaluation tool with ZERO arguments — the "
+        "group scope and settings are supplied by the tool config.\n\n"
+        "The tool is READ-ONLY. It proposes re-transpilation candidates; it never "
+        "modifies metric views. Return its report as-is, highlighting per dataset "
+        "which measures are now recoverable, the reason each failed before, and the "
+        "new SQL. If nothing is recoverable, say so plainly — that is a valid result "
+        "(either the transpiler has not changed since those runs, or the remaining "
+        "gaps are permanent limitations)."
+    ),
+    "expected_output": (
+        "A JSON report with the capability fingerprint, per-dataset lists of "
+        "newly-recoverable measures (name, previous skip reason, new SQL, impact), "
+        "and a summary of datasets scanned / measures retried / measures recovered."
+    ),
+    "agent_id": UCMV_REEVAL_AGENT_ID,
+    "tools": ["97"],
+    "tool_configs": {
+        "UCMV Re-evaluation": {
+            "result_as_answer": True,
+            # Scope: leave group_id empty to have the runtime group context apply;
+            # set dataset_ids to target specific models.
+            "group_id": None,
+            "dataset_ids": None,
+            # Cost guards. use_llm=False keeps a scheduled sweep free (deterministic
+            # fast-path only); flip it on for a deeper, token-spending pass.
+            "use_llm": False,
+            "include_impossible": False,
+            "max_measures_per_dataset": 200,
+            "max_datasets": 50,
+            # force=True re-tries even when the transpiler has NOT changed since the
+            # stored run. Useful to verify the sweep end-to-end; leave False in
+            # production so the sweep only reports genuine capability gains.
+            "force": False,
+        }
+    },
+    "config": DEFAULT_TASK_CONFIG,
+}
+
+UCMV_REEVAL_CREW = {
+    "id": UCMV_REEVAL_CREW_ID,
+    "name": "UCMV Re-evaluation",
+    "process": "sequential",
+    "planning": False,
+    "reasoning": False,
+    "memory": False,
+    "verbose": True,
+    "agent_ids": [UCMV_REEVAL_AGENT_ID],
+    "task_ids": [UCMV_REEVAL_TASK_ID],
+    "nodes": [
+        _agent_node(UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_AGENT, 68, 68),
+        _task_node(UCMV_REEVAL_TASK_ID, UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK, 368, 68),
+    ],
+    "edges": [_agent_to_task_edge("ucmv-reeval", UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK_ID)],
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # All crews (ordered for seeding)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -922,6 +1043,8 @@ ALL_CREWS = [
     {"crew": DASHBOARD_CREW, "agent": DASHBOARD_AGENT, "task": DASHBOARD_TASK},
     {"crew": GENIE_CFG_CREW, "agent": GENIE_CFG_AGENT, "task": GENIE_CFG_TASK},
     {"crew": GENIE_GEN_CREW, "agent": GENIE_GEN_AGENT, "task": GENIE_GEN_TASK},
+    # Standalone (not part of the conversion flow) — run manually or on a schedule.
+    {"crew": UCMV_REEVAL_CREW, "agent": UCMV_REEVAL_AGENT, "task": UCMV_REEVAL_TASK},
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────

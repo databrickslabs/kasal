@@ -101,6 +101,25 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
+    async def execution_history_service():
+        """Yield an ExecutionHistoryService — the owner of execution_history rows.
+
+        Lets a tool read prior run results (e.g. the UCMV re-evaluation scan) through
+        the owning domain's service instead of querying the table directly, so query
+        construction stays in the repository and the tool imports no repository.
+        """
+        from src.db.session import routed_scoped_session
+        from src.services.execution.history import ExecutionHistoryService
+
+        async with routed_scoped_session() as session:
+            try:
+                yield ExecutionHistoryService(session)
+            except Exception:
+                await session.rollback()
+                raise
+
+    @staticmethod
+    @asynccontextmanager
     async def powerbi_extraction_service(group_context=None):
         """Yield a PowerBIExtractionService — the owner of extraction rows.
 

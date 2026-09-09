@@ -44,6 +44,14 @@ class PowerBIExtraction(Base):
     admin_tables = Column(
         JSON, nullable=True
     )  # {table_name: {columns, mquery_expression, measures}}
+    # {name: raw_M} model-level named/shared expressions (staging queries +
+    # parameters) — parsed alongside admin_tables (parse_admin_expressions /
+    # parse_tmdl_expressions), needed by resolve_mquery_with_context to follow
+    # a table's reference to a disabled staging query or substitute a
+    # parameter-driven Value.NativeQuery. Without this, the UCMV Generator
+    # fallback can only redo the DIRECT resolution tier, not the fuller
+    # reference-following / parameter-substitution one.
+    expressions = Column(JSON, nullable=True)
     report_definition = Column(
         JSON, nullable=True
     )  # report visual bindings (measure expressions)

@@ -21,6 +21,9 @@ For each DAX measure, classify it into one of these categories:
 6. **Not translatable**: `ALLSELECTED`, `USERELATIONSHIP`, certain time-intelligence -> flag for review.
 7. **Out of scope**: `EXTERNALMEASURE`, DirectQuery references -> flag.
 
-For the complete pattern catalog, read [PATTERNS.md](PATTERNS.md).
+For the complete pattern catalog (measure shapes), read [PATTERNS.md](PATTERNS.md).
+For the function-by-function map (what any individual DAX function becomes in a
+measure expr, and which functions are not a measure at all), read
+[FUNCTION_REFERENCE.md](FUNCTION_REFERENCE.md).
 For patterns that cannot be translated, read [UNSUPPORTED.md](UNSUPPORTED.md).
 For edge cases and gotchas, read [EDGE_CASES.md](EDGE_CASES.md).

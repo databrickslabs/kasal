@@ -220,6 +220,12 @@ tools_data = [
         "Delegate a task to a remote agent over the A2A protocol and wait for its answer. Remote agents are attached per workspace (Configuration > Remote Agents); this tool exposes every enabled one, or a named subset, with each remote's advertised skills listed in its description. Use it to hand work to a specialist agent that lives outside Kasal — a partner team's agent, another Kasal workspace, or any A2A-compliant service. If the remote asks a clarifying question, it comes back with a task_id you can answer by calling the tool again.",
         "ai",
     ),
+    (
+        97,
+        "UCMV Re-evaluation",
+        "Finds previously-untranslatable DAX measures that TODAY's improved transpiler can now recover. Replays stored conversion history (no PowerBI API call): for each dataset it compares the capability fingerprint of the original run against the current one, and re-tries ONLY the measures that failed back then. Reports which are now recoverable with their new SQL, the reason they failed before, and how many other measures depend on them. Read-only — proposes re-transpilation candidates, never modifies metric views. Deterministic by default (no LLM tokens); set use_llm=true to also try the LLM-first path. Skips permanent-limitation categories (display artifacts, slicer scalars, prior-year) and measures a reviewer already dismissed. Schedule it or trigger manually after shipping transpiler improvements.",
+        "database",
+    ),
 ]
 
 

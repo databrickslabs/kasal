@@ -53,6 +53,15 @@ import { Highlight, themes } from 'prism-react-renderer';
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  NonTranspiledPanel,
+  untranslatableKey,
+  type UntranslatableItem,
+  type ReviewAnnotation,
+} from './NonTranspiledPanel';
+// Re-export the panel's public contract so consumers/tests can import it from here.
+export { untranslatableKey };
+export type { UntranslatableItem, ReviewAnnotation, ReviewStatus } from './NonTranspiledPanel';
 import rehypeSanitize from 'rehype-sanitize';
 
 /* ------------------------------------------------------------------ */
@@ -90,6 +99,11 @@ export interface UCMVResult {
   fallback_extract?: FallbackExtractRow[];
   /** Number of UC metric views actually generated (0 → show the fallback table). */
   views_generated?: number;
+  /** Flat list of measures that were NOT transpiled (original DAX + reason +
+   *  proposed approach), for the "Not transpiled" review panel. */
+  untranslatable_items?: UntranslatableItem[];
+  /** Persisted reviewer triage annotations, keyed by untranslatableKey(item). */
+  untranslatable_review?: Record<string, ReviewAnnotation>;
 }
 
 export interface FallbackExtractRow {
@@ -344,6 +358,31 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Non-transpiled review: the measures that weren't emitted, plus the reviewer's
+  // triage annotations. Seeded from any persisted review on the result; edits are
+  // held locally and flow up via onResultChange so a Save persists them.
+  const untranslatableItems = useMemo<UntranslatableItem[]>(
+    () => (Array.isArray(result.untranslatable_items) ? result.untranslatable_items : []),
+    [result.untranslatable_items],
+  );
+  const [reviewAnnotations, setReviewAnnotations] = useState<Record<string, ReviewAnnotation>>(
+    () => result.untranslatable_review ?? {},
+  );
+  const handleReviewChange = useCallback(
+    (key: string, patch: Partial<ReviewAnnotation>) => {
+      setReviewAnnotations((prev) => {
+        const next = { ...prev, [key]: { ...prev[key], ...patch } };
+        const persist: Record<string, ReviewAnnotation> = {};
+        for (const [k, v] of Object.entries(next)) {
+          if (v && (v.status || (v.note && v.note.trim()))) persist[k] = v;
+        }
+        onResultChange?.({ ...result, untranslatable_review: persist });
+        return next;
+      });
+    },
+    [onResultChange, result],
+  );
 
   // The "live" YAML for the selected view — draft if editing, else original
   const currentYaml = editingYaml[selected] ?? result.yaml[selected] ?? '';
@@ -635,6 +674,32 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
             <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
               {result.migration_report}
             </ReactMarkdown>
+          </Box>
+        </Section>
+      )}
+
+      {/* Not transpiled — non-emitted measures for review + triage annotation */}
+      {untranslatableItems.length > 0 && (
+        <Section
+          title="Not transpiled"
+          icon={<DescriptionIcon fontSize="small" color="warning" />}
+          defaultExpanded={false}
+          action={
+            <Chip
+              size="small"
+              color="warning"
+              variant="outlined"
+              label={`${untranslatableItems.length} not transpiled`}
+            />
+          }
+        >
+          <Box sx={{ p: 1.5 }}>
+            <NonTranspiledPanel
+              items={untranslatableItems}
+              review={reviewAnnotations}
+              editable={editable}
+              onReviewChange={handleReviewChange}
+            />
           </Box>
         </Section>
       )}

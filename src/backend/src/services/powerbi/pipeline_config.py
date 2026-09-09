@@ -229,6 +229,49 @@ def parse_tmdl_to_admin_tables(
     return tables
 
 
+def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
+    """Fabric TMDL equivalent of ``parse_admin_expressions`` — best-effort.
+
+    TMDL groups a model's shared/named expressions into a single
+    ``definition/expressions.tmdl`` (multiple ``expression <Name> = ...``
+    blocks), unlike tables, which each get their own
+    ``definition/tables/<name>.tmdl``. Not live-verified against a real
+    Fabric-enabled workspace: every run observed while building this reached
+    the model via the Admin Scanner (``parse_admin_expressions``), with TMDL
+    only ever attempted as its fallback and returning no data. Kept
+    defensive/best-effort rather than blocking on that verification — same
+    posture as ``fetch_tmdl_parts``/``parse_tmdl_to_admin_tables`` already
+    take with tables.
+    """
+    import base64
+
+    expressions: dict[str, str] = {}
+    for part in tmdl_parts or []:
+        path = part.get("path", "")
+        if not (path == "definition/expressions.tmdl"
+                or path.startswith("definition/expressions/")):
+            continue
+        try:
+            content = base64.b64decode(part.get("payload", "")).decode("utf-8")
+        except Exception:
+            continue
+        epattern = re.compile(
+            r"^expression\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)"
+            r"(?=\n\s*expression\s|\Z)",
+            re.MULTILINE,
+        )
+        for m in epattern.finditer(content):
+            name = m.group(1) or m.group(2)
+            expr = m.group(3).strip()
+            clean = []
+            for line in expr.split("\n"):
+                if line.strip().startswith(("lineageTag:", "annotation", "queryGroup:")):
+                    break
+                clean.append(line)
+            expressions[name] = "\n".join(clean).strip()
+    return expressions
+
+
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -1192,6 +1235,42 @@ def parse_admin_tables(
                     "measures": tbl.get("measures", []),
                 }
     return tables
+
+
+def parse_admin_expressions(
+    scan_result: dict,
+    dataset_id: str | None = None,
+) -> dict[str, str]:
+    """Parse the model's named/shared expressions out of an admin scan result.
+
+    A dataset's schema splits into ``tables`` (what ``parse_admin_tables``
+    reads — loaded tables only) and ``expressions``: named queries NOT loaded
+    as a table. Two things live only here, neither visible in ``tables`` at
+    all: (1) "staging" queries disabled from load that a real table's M does
+    nothing but reference (``let Source = #"Some Staging Query" in Source``)
+    — the query's actual Databricks/SQL source is only in ``expressions``;
+    (2) model **parameters** (an expression tagged ``IsParameterQuery=true``
+    holding the parameter's current literal value) — some tables build their
+    physical source from these at model-open time via string concatenation
+    rather than a literal, and the table name/schema doesn't exist anywhere
+    until that substitution happens.
+
+    Returns ``{name: raw_M_expression}``. Feed to
+    ``metric_view_utils.mquery_parser.resolve_mquery_with_context`` (which
+    both follows references and evaluates parameter-driven sources) alongside
+    a table's own ``mquery_expression`` — without this, both patterns are
+    unresolvable no matter how good the per-table M parsing is.
+    """
+    expressions: dict[str, str] = {}
+    for ws in scan_result.get("workspaces", []):
+        for dataset in ws.get("datasets", []):
+            if dataset_id and dataset.get("id", "").lower() != dataset_id.lower():
+                continue
+            for expr in dataset.get("expressions", []):
+                name = expr.get("name", "")
+                if name:
+                    expressions[name] = expr.get("expression", "")
+    return expressions
 
 
 def derive_column_metadata(admin_tables: dict[str, dict]) -> dict[str, dict]:
