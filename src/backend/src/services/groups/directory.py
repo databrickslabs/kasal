@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from uuid import uuid4
 
 import httpx
 from databricks.sdk.core import Config
@@ -14,7 +15,23 @@ from src.schemas.user import DirectoryPerson
 from src.utils.databricks_auth import get_auth_context
 
 logger = logging.getLogger(__name__)
+DIAGNOSTIC_VERSION = "DIR-v2"
 EMAIL_FALLBACK = " You can still add a person by their exact sign-in email."
+
+
+def _http_status(error: Exception) -> int | None:
+    """Read status only, including HTTP errors wrapped by SDK configuration."""
+    current = error
+    for _ in range(8):
+        if current is None:
+            break
+        response = getattr(current, "response", None)
+        for source in (response, current):
+            status = getattr(source, "status_code", None)
+            if type(status) is int and 300 <= status <= 599:
+                return status
+        current = current.__cause__ or current.__context__
+    return None
 
 
 async def search_directory(
@@ -22,8 +39,15 @@ async def search_directory(
 ) -> list[DirectoryPerson]:
     installation = DatabricksAppInstallation.from_env()
     auth_method = "app" if installation.hosted else "configured"
+    diagnostic = f"{DIAGNOSTIC_VERSION}/{uuid4().hex[:12]}"
+    stage = "authentication"
+    response_status = None
+    logger.info(
+        "User directory search started: diagnostic=%s auth=%s", diagnostic, auth_method
+    )
 
     async def lookup():
+        nonlocal stage, response_status
         if installation.hosted:
             # Workspace SCIM is not an Apps user-authorization scope. This
             # system-admin-only operation uses the app's installed identity,
@@ -42,8 +66,7 @@ async def search_directory(
             auth = await get_auth_context(user_token=user_token)
             if auth is None:
                 raise KasalError(
-                    "Databricks credentials are not configured for directory search."
-                    + EMAIL_FALLBACK,
+                    "Databricks credentials are not configured for directory search.",
                     status_code=503,
                 )
             workspace_url = auth.workspace_url
@@ -51,6 +74,7 @@ async def search_directory(
         # JSON quoting prevents input from becoming a SCIM filter expression.
         value = json.dumps(search)
 
+        stage = "directory_request"
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
                 f"{workspace_url}/api/2.0/preview/scim/v2/Users",
@@ -62,7 +86,9 @@ async def search_directory(
                     "attributes": "id,userName,displayName,active",
                 },
             )
+            response_status = response.status_code
             response.raise_for_status()
+            stage = "directory_response"
             results = []
             for person in response.json().get("Resources", [])[:20]:
                 if person.get("active") is False:
@@ -81,57 +107,61 @@ async def search_directory(
 
     try:
         return await asyncio.wait_for(lookup(), timeout=15)
-    except KasalError:
-        raise
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        # Never log response bodies, headers or the URL (which contains the
-        # search text). Status + auth method make remote failures diagnosable.
-        logger.warning(
-            "User directory HTTP error: status=%s auth=%s", status, auth_method
-        )
-        if status == 403:
-            identity = (
-                "this app's service principal"
-                if installation.hosted
-                else "the configured Databricks identity"
-            )
-            detail = (
-                f"Databricks denied directory access (HTTP 403). A Databricks workspace "
-                f"administrator must check permission for {identity} to read workspace users."
-            )
-        elif status == 401:
-            detail = "Databricks rejected the directory credentials (HTTP 401). Check the app's Databricks authentication."
-        elif status == 429:
-            detail = "Databricks directory search is rate limited (HTTP 429). Please try again shortly."
-        else:
-            detail = f"Databricks directory search failed (HTTP {status}). Check the app logs and workspace endpoint."
-        raise KasalError(detail + EMAIL_FALLBACK, status_code=503) from exc
-    except (TimeoutError, httpx.TimeoutException) as exc:
-        logger.warning("User directory lookup timed out: auth=%s", auth_method)
-        raise KasalError(
-            "Databricks directory search timed out. Please try again." + EMAIL_FALLBACK,
-            status_code=503,
-        ) from exc
-    except httpx.RequestError as exc:
-        logger.warning(
-            "User directory connection failed: auth=%s type=%s",
-            auth_method,
-            type(exc).__name__,
-        )
-        raise KasalError(
-            "Cannot reach the Databricks directory. Check the app's network access to its workspace."
-            + EMAIL_FALLBACK,
-            status_code=503,
-        ) from exc
     except Exception as exc:
+        status = (
+            None
+            if isinstance(exc, KasalError)
+            else (_http_status(exc) or response_status)
+        )
+        identity = (
+            "this app's service principal"
+            if installation.hosted
+            else "the configured Databricks identity"
+        )
+        if isinstance(exc, KasalError):
+            detail = exc.detail
+        elif status is not None and status >= 300:
+            if stage == "authentication":
+                detail = (
+                    f"Databricks authentication failed (HTTP {status}) before the directory was queried. "
+                    "Check the app's Databricks credentials and authentication configuration."
+                )
+            elif status == 403:
+                detail = (
+                    "Databricks denied directory access (HTTP 403). A Databricks workspace "
+                    f"administrator must check permission for {identity} to read workspace users."
+                )
+            elif status == 401:
+                detail = "Databricks rejected the directory credentials (HTTP 401). Check the app's Databricks authentication."
+            elif status == 429:
+                detail = "Databricks directory search is rate limited (HTTP 429). Please try again shortly."
+            else:
+                detail = f"Databricks directory search failed (HTTP {status}). Check the app logs and workspace endpoint."
+        elif isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+            detail = "Databricks directory search timed out. Please try again."
+        elif isinstance(exc, httpx.RequestError):
+            detail = "Cannot reach the Databricks directory. Check the app's network access to its workspace."
+        else:
+            detail = (
+                "Databricks directory search could not initialize or read its response. "
+                "Check the app's Databricks credentials and logs."
+            )
+
+        # Never log exception messages, response bodies, headers or request URLs:
+        # these can include credentials or the person's search text. The same
+        # reference in the dialog and log identifies one search and code version.
+        status_label = str(status) if status is not None else "unavailable"
         logger.warning(
-            "User directory lookup failed: auth=%s type=%s",
+            "User directory lookup failed: diagnostic=%s stage=%s status=%s auth=%s type=%s",
+            diagnostic,
+            stage,
+            status_label,
             auth_method,
             type(exc).__name__,
         )
         raise KasalError(
-            "Databricks directory search could not initialize or read its response. Check the app's Databricks credentials and logs."
-            + EMAIL_FALLBACK,
+            detail
+            + EMAIL_FALLBACK
+            + f" Diagnostic: {diagnostic}; stage={stage}; HTTP={status_label}; auth={auth_method}.",
             status_code=503,
         ) from exc

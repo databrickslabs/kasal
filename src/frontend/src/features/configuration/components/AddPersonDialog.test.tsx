@@ -10,7 +10,7 @@ vi.mock('../../../api/groups/UserService', () => ({
 
 describe('directory search diagnostics', () => {
   it('shows the backend permission diagnostic', async () => {
-    const detail = "Databricks denied directory access (HTTP 403). Check the app's service principal.";
+    const detail = "Databricks denied directory access (HTTP 403). Check the app's service principal. Diagnostic: DIR-v2/123456abcdef; stage=directory_request; HTTP=403; auth=app.";
     searchDirectory.mockRejectedValueOnce({ response: { data: { detail } } });
     render(<AddPersonDialog onClose={vi.fn()} onAdded={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Search Databricks directory'), { target: { value: 'alice' } });

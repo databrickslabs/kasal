@@ -1,12 +1,13 @@
 import json
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from src.core.exceptions import KasalError
 from src.core.databricks_app import DatabricksAppInstallation
+from src.core.exceptions import KasalError
 from src.services.groups.directory import search_directory
 
 
@@ -70,6 +71,8 @@ async def test_unavailable_directory_returns_actionable_error():
         with pytest.raises(KasalError, match="exact sign-in email") as error:
             await search_directory("ada", None)
     assert error.value.status_code == 503
+    assert "HTTP=unavailable" in error.value.detail
+    assert error.value.detail.count("exact sign-in email") == 1
 
 
 @pytest.mark.asyncio
@@ -161,6 +164,10 @@ async def test_http_errors_identify_failure_without_exposing_remote_body(
     assert "sensitive remote details" not in str(error.value) + caplog.text
     assert "private-search" not in caplog.text
     assert f"status={status} auth=app" in caplog.text
+    diagnostic = re.search(r"DIR-v2/[a-f0-9]{12}", error.value.detail).group()
+    assert diagnostic in caplog.text
+    assert "stage=directory_request" in error.value.detail
+    assert f"HTTP={status}" in error.value.detail
 
 
 @pytest.mark.asyncio
@@ -187,3 +194,74 @@ async def test_transport_errors_do_not_claim_permission_denied(failure, expected
         factory.return_value.__aenter__.return_value = client
         with pytest.raises(KasalError, match=expected):
             await search_directory("new", None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrapped", [False, True])
+async def test_authentication_http_failure_preserves_status_without_claiming_directory_denied(
+    wrapped, caplog
+):
+    response = httpx.Response(
+        401,
+        request=httpx.Request("POST", "https://workspace.example/oidc/v1/token"),
+    )
+    failure = httpx.HTTPStatusError(
+        "secret-token private-search", request=response.request, response=response
+    )
+    if wrapped:
+        wrapper = ValueError("SDK config contained secret-token")
+        wrapper.__cause__ = failure
+        failure = wrapper
+    with (
+        patch(
+            "src.services.groups.directory.DatabricksAppInstallation.from_env",
+            return_value=DatabricksAppInstallation(
+                hosted=True, host="https://workspace.example"
+            ),
+        ),
+        patch("src.services.groups.directory.Config", side_effect=failure),
+        patch("src.services.groups.directory.httpx.AsyncClient") as client,
+    ):
+        with pytest.raises(KasalError) as error:
+            await search_directory("private-search", None)
+    client.assert_not_called()
+    assert "before the directory was queried" in error.value.detail
+    assert "stage=authentication; HTTP=401" in error.value.detail
+    assert "stage=authentication status=401 auth=app" in caplog.text
+    assert "secret-token" not in error.value.detail + caplog.text
+    assert "private-search" not in error.value.detail + caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", ["not-json secret-token", "[]"])
+async def test_invalid_response_reports_response_stage_and_unique_search_reference(
+    body, caplog
+):
+    auth = SimpleNamespace(
+        workspace_url="https://workspace.example", get_headers=lambda: {}
+    )
+    response = httpx.Response(
+        200, request=httpx.Request("GET", auth.workspace_url), text=body
+    )
+    client = AsyncMock()
+    client.get.return_value = response
+    references = []
+    with (
+        patch(
+            "src.services.groups.directory.get_auth_context",
+            AsyncMock(return_value=auth),
+        ),
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        for _ in range(2):
+            with pytest.raises(KasalError) as error:
+                await search_directory("private-search", None)
+            assert "stage=directory_response; HTTP=200" in error.value.detail
+            references.append(
+                re.search(r"DIR-v2/[a-f0-9]{12}", error.value.detail).group()
+            )
+    assert len(set(references)) == 2
+    assert all(reference in caplog.text for reference in references)
+    assert "secret-token" not in caplog.text
+    assert "private-search" not in caplog.text

@@ -55,9 +55,25 @@ in **Add User**. Users do not need to open Kasal first. Membership is assigned t
 the supplied email and becomes available when that identity signs in. This does
 not send an invitation or grant access to the Databricks app itself.
 
-The suggestions list contains Kasal users, not the entire Databricks directory.
-A Databricks directory search would require a separate SCIM integration with
-appropriate directory-read permissions.
+Teamspace member suggestions contain existing Kasal users. System administrators
+can also use **Configuration → System administration → People → Add person**
+to search the Databricks workspace directory or add someone by sign-in email.
+In hosted Apps, directory search uses the app service principal, which needs
+permission to read workspace users through SCIM. Adding someone by email does
+not require directory access.
+
+If search fails after deployment, copy the full error from the Add person dialog.
+It includes a diagnostic reference such as `DIR-v2/123456abcdef`, the failed step,
+the upstream HTTP status when available, and whether app or configured credentials
+were selected. Search the app logs for that same reference or `User directory`.
+`authentication` means credentials could not be obtained; `directory_request`
+means the workspace directory request failed; `directory_response` means the
+response could not be read. `HTTP=unavailable` means no upstream HTTP status was
+available, rather than an inferred permission denial. Search text, tokens, and
+raw remote response bodies are excluded from these diagnostics.
+
+Repeated service-principal credential reuse is logged at DEBUG. Actual token
+refreshes remain at INFO under `Refreshing service principal OAuth token`.
 
 ## Installer preparation
 

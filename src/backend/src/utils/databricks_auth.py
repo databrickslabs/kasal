@@ -1358,7 +1358,9 @@ async def get_auth_context(
                 token = _databricks_auth._service_token
 
             if token:
-                logger.info(
+                # Credential reuse happens on every request, including polling.
+                # Actual OAuth refreshes are logged separately at INFO.
+                logger.debug(
                     "[AUTH] Priority 3: ✓ Service Principal authentication successful"
                 )
                 return AuthContext(
