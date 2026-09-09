@@ -164,7 +164,7 @@ async def test_http_errors_identify_failure_without_exposing_remote_body(
     assert "sensitive remote details" not in str(error.value) + caplog.text
     assert "private-search" not in caplog.text
     assert f"status={status} auth=app" in caplog.text
-    diagnostic = re.search(r"DIR-v2/[a-f0-9]{12}", error.value.detail).group()
+    diagnostic = re.search(r"DIR-v3/[a-f0-9]{12}", error.value.detail).group()
     assert diagnostic in caplog.text
     assert "stage=directory_request" in error.value.detail
     assert f"HTTP={status}" in error.value.detail
@@ -259,9 +259,140 @@ async def test_invalid_response_reports_response_stage_and_unique_search_referen
                 await search_directory("private-search", None)
             assert "stage=directory_response; HTTP=200" in error.value.detail
             references.append(
-                re.search(r"DIR-v2/[a-f0-9]{12}", error.value.detail).group()
+                re.search(r"DIR-v3/[a-f0-9]{12}", error.value.detail).group()
             )
     assert len(set(references)) == 2
     assert all(reference in caplog.text for reference in references)
     assert "secret-token" not in caplog.text
     assert "private-search" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload,expected",
+    [
+        (
+            {
+                "Resources": [{"id": "123", "displayName": "Existing Person"}],
+                "totalResults": 1,
+            },
+            "none provided an active, usable sign-in email",
+        ),
+        (
+            {
+                "Resources": [{"userName": "disabled@example.com", "active": False}],
+                "totalResults": 1,
+            },
+            "were inactive",
+        ),
+        ({"message": "private upstream response"}, "could not initialize or read"),
+        ({"totalResults": 1}, "could not initialize or read"),
+    ],
+)
+async def test_unusable_or_unexpected_response_is_not_reported_as_no_matches(
+    payload, expected, caplog
+):
+    auth = SimpleNamespace(
+        workspace_url="https://workspace.example", get_headers=lambda: {}
+    )
+    client = AsyncMock()
+    client.get.return_value = httpx.Response(
+        200, request=httpx.Request("GET", auth.workspace_url), json=payload
+    )
+    with (
+        patch(
+            "src.services.groups.directory.get_auth_context",
+            AsyncMock(return_value=auth),
+        ),
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        with pytest.raises(KasalError, match=expected) as error:
+            await search_directory("Existing Person", None)
+    assert "HTTP=200" in error.value.detail
+    assert "Existing Person" not in caplog.text
+    assert "private upstream response" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload", [{"Resources": [], "totalResults": 0}, {"totalResults": 0}]
+)
+async def test_true_empty_results_log_completion_counts(payload, caplog):
+    caplog.set_level("INFO", logger="src.services.groups.directory")
+    auth = SimpleNamespace(
+        workspace_url="https://workspace.example", get_headers=lambda: {}
+    )
+    client = AsyncMock()
+    client.get.return_value = httpx.Response(
+        200, request=httpx.Request("GET", auth.workspace_url), json=payload
+    )
+    with (
+        patch(
+            "src.services.groups.directory.get_auth_context",
+            AsyncMock(return_value=auth),
+        ),
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        assert await search_directory("not-present", None) == []
+    assert "User directory search completed: diagnostic=DIR-v3/" in caplog.text
+    assert "received=0 returned=0 inactive=0 unusable=0" in caplog.text
+    assert "not-present" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_search_continues_past_inactive_first_page():
+    auth = SimpleNamespace(
+        workspace_url="https://workspace.example", get_headers=lambda: {}
+    )
+    client = AsyncMock()
+    client.get.side_effect = [
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", auth.workspace_url),
+            json={"Resources": [{"active": False}] * 20, "totalResults": 21},
+        ),
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", auth.workspace_url),
+            json={"Resources": [{"userName": "found@example.com"}], "totalResults": 21},
+        ),
+    ]
+    with (
+        patch(
+            "src.services.groups.directory.get_auth_context",
+            AsyncMock(return_value=auth),
+        ),
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        result = await search_directory("found", None)
+    assert [person.email for person in result] == ["found@example.com"]
+    assert [
+        call.kwargs["params"]["startIndex"] for call in client.get.call_args_list
+    ] == [1, 21]
+
+
+@pytest.mark.asyncio
+async def test_directory_that_repeats_unusable_pages_is_bounded():
+    auth = SimpleNamespace(
+        workspace_url="https://workspace.example", get_headers=lambda: {}
+    )
+    client = AsyncMock()
+    client.get.return_value = httpx.Response(
+        200,
+        request=httpx.Request("GET", auth.workspace_url),
+        json={"Resources": [{"id": "123"}] * 20, "totalResults": 999},
+    )
+    with (
+        patch(
+            "src.services.groups.directory.get_auth_context",
+            AsyncMock(return_value=auth),
+        ),
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        with pytest.raises(KasalError, match="usable sign-in email"):
+            await search_directory("found", None)
+    assert client.get.call_count == 5

@@ -15,7 +15,9 @@ from src.schemas.user import DirectoryPerson
 from src.utils.databricks_auth import get_auth_context
 
 logger = logging.getLogger(__name__)
-DIAGNOSTIC_VERSION = "DIR-v2"
+DIAGNOSTIC_VERSION = "DIR-v3"
+PAGE_SIZE = 20
+MAX_PAGES = 5
 EMAIL_FALLBACK = " You can still add a person by their exact sign-in email."
 
 
@@ -74,42 +76,107 @@ async def search_directory(
         # JSON quoting prevents input from becoming a SCIM filter expression.
         value = json.dumps(search)
 
-        stage = "directory_request"
+        results = []
+        received = inactive = unusable = pages = 0
+        seen_emails = set()
+        start_index = 1
+        truncated = False
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{workspace_url}/api/2.0/preview/scim/v2/Users",
-                headers=headers,
-                params={
-                    "filter": f"userName co {value} or displayName co {value}",
-                    "count": 20,
-                    "startIndex": 1,
-                    "attributes": "id,userName,displayName,active",
-                },
-            )
-            response_status = response.status_code
-            response.raise_for_status()
-            stage = "directory_response"
-            results = []
-            for person in response.json().get("Resources", [])[:20]:
-                if person.get("active") is False:
-                    continue
-                try:
-                    results.append(
-                        DirectoryPerson(
+            for _ in range(MAX_PAGES):
+                stage = "directory_request"
+                response_status = None
+                response = await client.get(
+                    f"{workspace_url}/api/2.0/preview/scim/v2/Users",
+                    headers=headers,
+                    params={
+                        "filter": f"userName co {value} or displayName co {value}",
+                        "count": PAGE_SIZE,
+                        "startIndex": start_index,
+                        "attributes": "id,userName,displayName,active",
+                    },
+                )
+                response_status = response.status_code
+                response.raise_for_status()
+                stage = "directory_response"
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a SCIM list response")
+                resources = payload.get("Resources")
+                total = payload.get("totalResults")
+                # SCIM can omit Resources when no matches exist, but a different
+                # response shape must not silently masquerade as an empty list.
+                if resources is None and type(total) is int and total == 0:
+                    resources = []
+                if not isinstance(resources, list) or any(
+                    not isinstance(person, dict) for person in resources
+                ):
+                    raise ValueError("Expected SCIM Resources")
+                pages += 1
+                received += len(resources)
+                for person in resources:
+                    if person.get("active") is False:
+                        inactive += 1
+                        continue
+                    try:
+                        entry = DirectoryPerson(
                             email=person.get("userName"),
                             display_name=person.get("displayName"),
                         )
-                    )
-                except ValidationError:
-                    # Only identities that can sign in by email can be provisioned.
-                    continue
-            return results
+                    except ValidationError:
+                        # Names and alternate email aliases are not proof of a
+                        # sign-in identity. Never infer one to grant permissions.
+                        unusable += 1
+                        continue
+                    if entry.email.lower() not in seen_emails:
+                        seen_emails.add(entry.email.lower())
+                        results.append(entry)
+                    if len(results) == PAGE_SIZE:
+                        break
+                if not resources or len(results) == PAGE_SIZE:
+                    break
+                start_index += len(resources)
+                if type(total) is int and start_index > total:
+                    break
+                if total is None and len(resources) < PAGE_SIZE:
+                    break
+            else:
+                truncated = True
+
+        logger.info(
+            "User directory search completed: diagnostic=%s status=%s auth=%s "
+            "pages=%s received=%s returned=%s inactive=%s unusable=%s truncated=%s",
+            diagnostic,
+            response_status,
+            auth_method,
+            pages,
+            received,
+            len(results),
+            inactive,
+            unusable,
+            truncated,
+        )
+        if not results and unusable:
+            raise KasalError(
+                f"Databricks returned {received} matching directory records, but "
+                "none provided an active, usable sign-in email. The directory response "
+                "may contain limited identity details. Ask your Databricks administrator "
+                "to check whether the app can read users' sign-in emails.",
+                status_code=503,
+            )
+        if not results and inactive:
+            raise KasalError(
+                f"The {received} matching directory records checked were inactive. "
+                "Try the person's full sign-in email or check their workspace access."
+                + (" The search reached its page limit." if truncated else ""),
+                status_code=503,
+            )
+        return results
 
     try:
         return await asyncio.wait_for(lookup(), timeout=15)
     except Exception as exc:
         status = (
-            None
+            response_status
             if isinstance(exc, KasalError)
             else (_http_status(exc) or response_status)
         )

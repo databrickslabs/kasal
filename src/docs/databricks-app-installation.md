@@ -63,7 +63,7 @@ permission to read workspace users through SCIM. Adding someone by email does
 not require directory access.
 
 If search fails after deployment, copy the full error from the Add person dialog.
-It includes a diagnostic reference such as `DIR-v2/123456abcdef`, the failed step,
+It includes a diagnostic reference such as `DIR-v3/123456abcdef`, the failed step,
 the upstream HTTP status when available, and whether app or configured credentials
 were selected. Search the app logs for that same reference or `User directory`.
 `authentication` means credentials could not be obtained; `directory_request`
@@ -71,6 +71,18 @@ means the workspace directory request failed; `directory_response` means the
 response could not be read. `HTTP=unavailable` means no upstream HTTP status was
 available, rather than an inferred permission denial. Search text, tokens, and
 raw remote response bodies are excluded from these diagnostics.
+
+Each completed search also logs `User directory search completed` with counts:
+`received` is the number of matching records Databricks returned, `returned` is
+the number of usable people Kasal can display, and `inactive` / `unusable` count
+records excluded for inactivity or missing/invalid sign-in identity details.
+`received=0` means the workspace API returned no matches for that search; it does
+not establish that the Databricks account has no users. Searches cover users
+associated with the app's workspace and do not search the entire account or IdP.
+Kasal checks up to five filtered pages to find 20 usable people. When matching
+records exist but none are usable, the dialog explains that condition instead of
+reporting no matches. Names and email aliases are never substituted for sign-in
+identity when assigning permissions.
 
 Repeated service-principal credential reuse is logged at DEBUG. Actual token
 refreshes remain at INFO under `Refreshing service principal OAuth token`.
