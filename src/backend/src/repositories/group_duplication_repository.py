@@ -71,9 +71,15 @@ class GroupDuplicationRepository:
             data["group_id"] = target_id
         if "created_by_email" in model.__table__.columns:
             data["created_by_email"] = actor_email
+        now = datetime.now(timezone.utc)
         for field in ("created_at", "updated_at"):
             if field in model.__table__.columns:
-                data[field] = datetime.now(timezone.utc)
+                # asyncpg requires naive UTC for TIMESTAMP WITHOUT TIME ZONE
+                # (tools, API keys, skills, etc.) and aware UTC for TIMESTAMPTZ
+                # (memberships, UI/integration settings). SQLite accepts both
+                # and therefore cannot expose this PostgreSQL bind failure.
+                column = model.__table__.columns[field]
+                data[field] = now if column.type.timezone else now.replace(tzinfo=None)
         data.update(overrides)
         copied = model(**data)
         self.session.add(copied)

@@ -1,12 +1,15 @@
 """A duplicate is independent configuration, committed as a single unit."""
 
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.db.base import Base
@@ -18,6 +21,7 @@ from src.models.tool import Tool
 from src.models.user import User
 from src.repositories.group_duplication_repository import (
     CONFIGURATION_MODELS,
+    GroupDuplicationRepository,
     A2AAgent,
     ApiKey,
     DatabricksConfig,
@@ -36,9 +40,22 @@ from src.schemas.group import GroupDuplicateRequest
 from src.services.groups.duplication import GroupDuplicationService
 
 
-@pytest_asyncio.fixture
-async def database():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+@pytest_asyncio.fixture(params=["sqlite", "postgres"])
+async def database(request):
+    schema = None
+    if request.param == "postgres":
+        url = os.getenv("KASAL_TEST_DUPLICATION_POSTGRES_URL")
+        if not url:
+            pytest.skip(
+                "Set KASAL_TEST_DUPLICATION_POSTGRES_URL to run against PostgreSQL"
+            )
+        # Each test owns a fresh schema; never drop or modify pre-existing tables.
+        schema = f"test_group_copy_{uuid4().hex}"
+        engine = create_async_engine(
+            url, connect_args={"server_settings": {"search_path": schema}}
+        )
+    else:
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     models = (
         *CONFIGURATION_MODELS,
         User,
@@ -51,6 +68,8 @@ async def database():
         Agent,
     )
     async with engine.begin() as connection:
+        if schema:
+            await connection.execute(CreateSchema(schema))
         await connection.run_sync(
             lambda sync: Base.metadata.create_all(
                 sync, tables=[model.__table__ for model in models]
@@ -83,14 +102,12 @@ async def database():
                     allow_flow_builder=False,
                 ),
                 Tool(
-                    id=1,
                     title="Catalog",
                     description="Global",
                     icon="tool",
                     group_id=None,
                 ),
                 Tool(
-                    id=2,
                     title="Private",
                     description="Owned",
                     icon="tool",
@@ -98,14 +115,12 @@ async def database():
                     config={"nested": {"value": 1}},
                 ),
                 Tool(
-                    id=3,
                     title="Other",
                     description="Other",
                     icon="tool",
                     group_id="other",
                 ),
                 Skill(
-                    id=1,
                     group_id="source",
                     name="team-guide",
                     description="Guide",
@@ -202,8 +217,13 @@ async def database():
             ]
         )
         await session.commit()
-    yield factory
-    await engine.dispose()
+    try:
+        yield factory
+    finally:
+        if schema:
+            async with engine.begin() as connection:
+                await connection.execute(DropSchema(schema, cascade=True))
+        await engine.dispose()
 
 
 ACTOR = SimpleNamespace(id="admin", email="admin@example.com")
@@ -216,6 +236,24 @@ async def rows(session, model, group_id):
         .unique()
         .all()
     )
+
+
+@pytest.mark.asyncio
+async def test_group_tool_copy_inserts_timestamp_values(database):
+    async with database() as session:
+        original = (await rows(session, GroupTool, "source"))[0]
+        copied = GroupDuplicationRepository(session)._copy(
+            original, "other", ACTOR.email, credentials_status="unknown"
+        )
+        # Check the driver input too: SQLite silently accepts an aware value
+        # here, while asyncpg rejects it before executing the INSERT.
+        assert copied.created_at.tzinfo is None
+        assert copied.updated_at.tzinfo is None
+        await session.commit()
+        await session.refresh(copied)
+        assert copied.created_at is not None
+        assert copied.updated_at is not None
+        assert copied.credentials_status == "unknown"
 
 
 @pytest.mark.asyncio

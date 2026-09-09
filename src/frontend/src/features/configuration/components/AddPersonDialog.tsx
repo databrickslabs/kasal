@@ -23,8 +23,11 @@ export default function AddPersonDialog({ onClose, onAdded }: {
     try {
       setResults(await UserService.getInstance().searchDirectory(query.trim()));
       setSearched(true);
-    } catch {
-      setError('Databricks directory is unavailable or access is denied. You can still add a person by their exact sign-in email.');
+    } catch (error) {
+      const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === 'string' && detail.trim()
+        ? detail
+        : 'Could not contact the directory search service. Please try again, or add the person by their exact sign-in email.');
     } finally {
       setSearching(false);
     }

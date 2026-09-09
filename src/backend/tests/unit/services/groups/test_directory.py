@@ -1,12 +1,22 @@
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from src.core.exceptions import KasalError
+from src.core.databricks_app import DatabricksAppInstallation
 from src.services.groups.directory import search_directory
+
+
+@pytest.fixture(autouse=True)
+def local_installation():
+    with patch(
+        "src.services.groups.directory.DatabricksAppInstallation.from_env",
+        return_value=DatabricksAppInstallation(hosted=False),
+    ):
+        yield
 
 
 @pytest.mark.asyncio
@@ -60,3 +70,120 @@ async def test_unavailable_directory_returns_actionable_error():
         with pytest.raises(KasalError, match="exact sign-in email") as error:
             await search_directory("ada", None)
     assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_hosted_directory_uses_app_identity_not_forwarded_token_or_team_pat():
+    installation = DatabricksAppInstallation(
+        hosted=True, host="https://installed-workspace.example.com"
+    )
+    response = httpx.Response(
+        200,
+        request=httpx.Request("GET", installation.host),
+        json={"Resources": [{"userName": "new@example.com"}]},
+    )
+    client = AsyncMock()
+    client.get.return_value = response
+    config = MagicMock()
+    config.authenticate.return_value = {"Authorization": "Bearer app-token"}
+    with (
+        patch(
+            "src.services.groups.directory.DatabricksAppInstallation.from_env",
+            return_value=installation,
+        ),
+        patch(
+            "src.services.groups.directory.Config", return_value=config
+        ) as config_factory,
+        patch(
+            "src.services.groups.directory.get_auth_context", AsyncMock()
+        ) as unified_auth,
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        result = await search_directory("new", "restricted-forwarded-token")
+    assert result[0].email == "new@example.com"
+    config_factory.assert_called_once_with(
+        host=installation.host,
+        auth_type="oauth-m2m",
+        http_timeout_seconds=10,
+        retry_timeout_seconds=10,
+    )
+    unified_auth.assert_not_awaited()
+    assert (
+        client.get.call_args.args[0]
+        == installation.host + "/api/2.0/preview/scim/v2/Users"
+    )
+    assert client.get.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer app-token"
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        (401, "rejected"),
+        (403, "app's service principal"),
+        (429, "rate limited"),
+        (400, "HTTP 400"),
+        (500, "HTTP 500"),
+    ],
+)
+async def test_http_errors_identify_failure_without_exposing_remote_body(
+    status, expected, caplog
+):
+    installation = DatabricksAppInstallation(
+        hosted=True, host="https://installed-workspace.example.com"
+    )
+    response = httpx.Response(
+        status,
+        request=httpx.Request("GET", installation.host),
+        json={"message": "sensitive remote details"},
+    )
+    client = AsyncMock()
+    client.get.return_value = response
+    with (
+        patch(
+            "src.services.groups.directory.DatabricksAppInstallation.from_env",
+            return_value=installation,
+        ),
+        patch("src.services.groups.directory.Config") as config,
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        config.return_value.authenticate.return_value = {
+            "Authorization": "Bearer secret"
+        }
+        factory.return_value.__aenter__.return_value = client
+        with pytest.raises(KasalError, match=expected) as error:
+            await search_directory("private-search", "forwarded")
+    assert error.value.status_code == 503
+    assert "exact sign-in email" in str(error.value)
+    assert "sensitive remote details" not in str(error.value) + caplog.text
+    assert "private-search" not in caplog.text
+    assert f"status={status} auth=app" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        (httpx.ReadTimeout("timeout"), "timed out"),
+        (httpx.ConnectError("unreachable"), "Cannot reach"),
+    ],
+)
+async def test_transport_errors_do_not_claim_permission_denied(failure, expected):
+    auth = SimpleNamespace(
+        workspace_url="https://workspace.example.com", get_headers=lambda: {}
+    )
+    client = AsyncMock()
+    client.get.side_effect = failure
+    with (
+        patch(
+            "src.services.groups.directory.get_auth_context",
+            AsyncMock(return_value=auth),
+        ),
+        patch("src.services.groups.directory.httpx.AsyncClient") as factory,
+    ):
+        factory.return_value.__aenter__.return_value = client
+        with pytest.raises(KasalError, match=expected):
+            await search_directory("new", None)

@@ -103,7 +103,7 @@ describe('AccessManagement (combined Access screen)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     fireEvent.change(screen.getByLabelText('Search Databricks directory'), { target: { value: 'new' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Search', exact: true }).at(-1)!);
-    expect(await screen.findByText(/directory is unavailable/)).toBeInTheDocument();
+    expect(await screen.findByText(/Could not contact the directory search service/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Sign-in email/), { target: { value: 'new@example.com' } });
     fireEvent.submit(document.getElementById('add-person-form')!);
     await waitFor(() => expect(provisionUser).toHaveBeenCalledWith('new@example.com'));
