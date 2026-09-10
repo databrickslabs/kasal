@@ -8,8 +8,76 @@ It starts the FastAPI backend server and serves the frontend static files.
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
+
+
+def _dependency_project(root: Path) -> Path:
+    """Select a complete manifest pair, never an unrelated parent project."""
+    for project in (root, root / "backend"):
+        manifest = project / "pyproject.toml"
+        lock = project / "uv.lock"
+        if manifest.exists() or lock.exists():
+            if not manifest.is_file() or not lock.is_file():
+                raise RuntimeError(
+                    f"DEP-v1: Incomplete dependency files in {project}. "
+                    "Deploy both backend/pyproject.toml and backend/uv.lock together."
+                )
+            return project
+    raise RuntimeError(
+        "DEP-v1: Dependency files are missing. Deploy pyproject.toml and uv.lock "
+        "beside entrypoint.py or inside backend/."
+    )
+
+
+def _ensure_databricks_environment() -> None:
+    """Bootstrap hosted Apps before third-party imports, once per process tree."""
+    entrypoint = Path(__file__).resolve()
+    if not os.environ.get("DATABRICKS_APP_NAME"):
+        return
+    if os.environ.get("KASAL_LOCKED_ENTRYPOINT") == str(entrypoint):
+        return
+    root = entrypoint.parent
+    try:
+        project = _dependency_project(root)
+        uv = shutil.which("uv")
+        if not uv:
+            raise RuntimeError(
+                "DEP-v1: uv is unavailable on PATH. The Databricks App runtime "
+                "must provide uv to install and run the declared dependencies."
+            )
+        print(
+            f"DEP-v1: Synchronizing locked dependencies from {project}; "
+            "starting in the project Python environment.",
+            flush=True,
+        )
+        # Keep backend/static paths relative to the app root. --project selects
+        # the dependency environment without changing the entrypoint's cwd.
+        os.environ["KASAL_LOCKED_ENTRYPOINT"] = str(entrypoint)
+        os.chdir(root)
+        os.execv(
+            uv,
+            [
+                uv,
+                "run",
+                "--locked",
+                "--no-dev",
+                "--project",
+                str(project),
+                "python",
+                str(root / "entrypoint.py"),
+                *sys.argv[1:],
+            ],
+        )
+    except (RuntimeError, OSError) as error:
+        print(f"DEP-v1: Startup failed: {error}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from error
+
+
+if __name__ == "__main__":
+    _ensure_databricks_environment()
+
 
 # Add backend directory to path FIRST
 project_root = Path(__file__).parent
