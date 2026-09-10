@@ -192,6 +192,17 @@ async def _ensure_modelconfig_columns(conn) -> None:
     )
 
 
+async def _ensure_memory_backend_columns(conn) -> None:
+    """Memory tuning was added by Alembic, which deployments do not run.
+
+    Keep legacy enable_* columns and existing settings intact; only add the
+    nullable JSON field required by every MemoryBackend ORM read.
+    """
+    await ensure_columns(
+        conn, "memory_backends", [("cognitive_config", "JSON", "JSON")]
+    )
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """databricksconfig.ai_gateway_enabled — defaults to false (serving-endpoint
     routing) so an existing install keeps its behaviour."""
