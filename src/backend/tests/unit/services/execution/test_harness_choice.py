@@ -93,7 +93,7 @@ class TestResolve:
             ),
         ):
             resolved = await harness_choice.resolve_run_harness(MagicMock())
-        assert resolved is HarnessName.KASAL
+        assert resolved is HarnessName.CREWAI
 
 
 class TestTravel:
@@ -132,8 +132,8 @@ class TestAdoptInSubprocess:
         monkeypatch.setenv(selection.HARNESS_ENV_VAR, "crewai")
         assert harness_choice.adopt_in_subprocess({}) is HarnessName.CREWAI
 
-    def test_falls_back_to_kasal_when_nothing_says_anything(self):
-        assert harness_choice.adopt_in_subprocess(None) is HarnessName.KASAL
+    def test_falls_back_to_crewai_when_nothing_says_anything(self):
+        assert harness_choice.adopt_in_subprocess(None) is HarnessName.CREWAI
 
     def test_pins_the_whole_interpreter_not_a_context(self):
         """A crew runs its tasks on a thread pool, which copies no ContextVar."""

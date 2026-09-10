@@ -29,15 +29,15 @@ def _clean_registry():
 
 
 class TestRegistry:
-    def test_active_engine_is_kasal_by_default(self):
-        assert harnesses.active_harness().name is HarnessName.KASAL
+    def test_active_engine_is_crewai_by_default(self):
+        assert harnesses.active_harness().name is HarnessName.CREWAI
 
     def test_bindings_are_cached_per_process(self):
         """Not merely an optimisation: ``import crewai`` costs seconds."""
         assert harnesses.binding_for("kasal") is harnesses.binding_for("kasal")
 
     def test_an_unknown_name_falls_back_to_the_default_engine(self):
-        assert harnesses.binding_for("nonsense").name is HarnessName.KASAL
+        assert harnesses.binding_for("nonsense").name is HarnessName.CREWAI
 
     def test_describe_reports_every_engine_including_unavailable_ones(
         self, monkeypatch

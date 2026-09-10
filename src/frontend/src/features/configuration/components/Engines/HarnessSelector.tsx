@@ -30,7 +30,7 @@ import {
  *   explanation is indistinguishable from a bug.
  */
 const HarnessSelector: React.FC = () => {
-  const [harness, setHarness] = useState<string>('kasal');
+  const [harness, setHarness] = useState<string>('crewai');
   const [options, setOptions] = useState<HarnessDescription[]>([]);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);

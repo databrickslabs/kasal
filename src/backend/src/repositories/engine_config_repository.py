@@ -13,7 +13,7 @@ from src.models.engine_config import EngineConfig
 #: it would be a data migration for no gain. The harness is simply a row in it.
 HARNESS_ENGINE_NAME = "execution"
 HARNESS_KEY = "harness"
-HARNESS_DEFAULT = "kasal"
+HARNESS_DEFAULT = "crewai"
 
 
 class EngineConfigRepository(BaseRepository[EngineConfig]):
@@ -383,7 +383,7 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
     # ------------------------------------------------------------------
 
     async def get_harness(self) -> str:
-        """The configured agent runtime, defaulting to 'kasal'.
+        """The configured agent runtime, defaulting to 'crewai'.
 
         Never raises on an unknown stored value — resolution is on the hot path
         of every execution, and a bad row must degrade to the default engine

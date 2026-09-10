@@ -8,7 +8,7 @@ flip in a deployed app, because a bundle carries one runtime.
 ``LLMGuardrail`` from here and constructs them exactly the same way either way.
 Everything that differs between the two runtimes is in this file.
 
-**Kasal** (the default) — the vendored runtime under ``kasal_runtime/``. The app
+**Kasal** — the vendored runtime under ``kasal_runtime/``. The app
 depends on no third-party agent framework at all.
 
 **CrewAI** — CrewAI's Agent/Task/Crew, sitting on Kasal's transport, tools and

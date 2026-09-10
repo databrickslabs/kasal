@@ -996,3 +996,26 @@ class TestOtelAppTelemetryMethods:
                         "WARNING"
                     )
                 mock_async_session.rollback.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [None, ""])
+async def test_unconfigured_engine_defaults_to_crewai(mock_async_session, value):
+    repository = EngineConfigRepository(mock_async_session)
+    row = None if value is None else MockEngineConfig(config_value=value)
+    with patch.object(
+        repository, "find_by_engine_and_key", AsyncMock(return_value=row)
+    ):
+        assert await repository.get_harness() == "crewai"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["kasal", "crewai"])
+async def test_explicit_engine_selection_is_preserved(mock_async_session, value):
+    repository = EngineConfigRepository(mock_async_session)
+    with patch.object(
+        repository,
+        "find_by_engine_and_key",
+        AsyncMock(return_value=MockEngineConfig(config_value=value)),
+    ):
+        assert await repository.get_harness() == value

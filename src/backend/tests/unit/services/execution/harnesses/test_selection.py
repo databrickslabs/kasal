@@ -2,8 +2,7 @@
 
 The property under test throughout: **resolution never fails a run**. A bad
 config value, an absent environment variable, a harness nobody registered — all
-of them degrade to the Kasal harness, which is the one that has always been
-here. An exception on this path would turn a typo in one settings row into
+of them resolve to the default CrewAI harness. An exception on this path would turn a typo in one settings row into
 every execution failing.
 """
 
@@ -55,8 +54,8 @@ class TestCoerce:
 
 
 class TestActiveName:
-    def test_defaults_to_kasal_with_nothing_configured(self):
-        assert selection.active_name() is HarnessName.KASAL
+    def test_defaults_to_crewai_with_nothing_configured(self):
+        assert selection.active_name() is HarnessName.CREWAI
 
     def test_environment_is_read_when_nothing_else_says(self, monkeypatch):
         monkeypatch.setenv(selection.HARNESS_ENV_VAR, "crewai")
@@ -64,7 +63,7 @@ class TestActiveName:
 
     def test_a_bad_environment_value_degrades_rather_than_raises(self, monkeypatch):
         monkeypatch.setenv(selection.HARNESS_ENV_VAR, "not-an-harness")
-        assert selection.active_name() is HarnessName.KASAL
+        assert selection.active_name() is HarnessName.CREWAI
 
     def test_process_default_beats_the_environment(self, monkeypatch):
         monkeypatch.setenv(selection.HARNESS_ENV_VAR, "kasal")
@@ -93,7 +92,7 @@ class TestActiveName:
 
     def test_binding_an_unknown_engine_binds_the_default(self):
         with selection.bind("nonsense") as bound:
-            assert bound is HarnessName.KASAL
+            assert bound is HarnessName.CREWAI
 
     def test_binding_is_restored_even_when_the_block_raises(self):
         selection.set_process_default("kasal")

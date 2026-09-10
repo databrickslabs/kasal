@@ -194,9 +194,9 @@ async def harness_for_execution(session: Any, execution_id: str) -> HarnessName:
                 "Execution %s records no harness; treating it as %s, the only "
                 "harness that existed when the row was written",
                 execution_id,
-                DEFAULT_HARNESS.value,
+                HarnessName.KASAL.value,
             )
-            return DEFAULT_HARNESS
+            return HarnessName.KASAL
     except Exception as e:  # noqa: BLE001 — never block a run on this lookup
         logger.warning(
             "Could not read the recorded harness for execution %s (%s)",

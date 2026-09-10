@@ -25,9 +25,8 @@ Checked in this order:
 3. **The environment** (``KASAL_HARNESS``). The child interpreter's
    earliest reader, before any config has been parsed.
 
-Then ``kasal`` — which is not a guess so much as the invariant this module
-protects: an unresolvable harness must never fail a run, it must run the harness
-that has always been here.
+Then ``crewai``, the default for new executions when no engine is selected.
+Explicit choices and recorded engines on resumed executions take precedence.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ HARNESS_ENV_VAR = "KASAL_HARNESS"
 HARNESS_CONFIG_KEY = "_harness"
 
 #: What a run gets when nothing says otherwise.
-DEFAULT_HARNESS = HarnessName.KASAL
+DEFAULT_HARNESS = HarnessName.CREWAI
 
 _current: ContextVar[Optional[HarnessName]] = ContextVar(
     "kasal_active_engine", default=None
