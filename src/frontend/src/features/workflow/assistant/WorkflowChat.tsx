@@ -76,6 +76,7 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 import BuilderRunActivity from './components/BuilderRunActivity';
 import { builderTranscript } from './utils/builderTranscript';
 import { ChatMessageItem } from './components/ChatMessageItem';
+import BuilderCatalogAction from './components/BuilderCatalogAction';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
 import SlashCommandMenu from './components/SlashCommandMenu';
@@ -227,6 +228,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   visibleSessionRef.current = providedChatSessionId || sessionId;
   const generationCanvas = useBuilderCanvasStore(state => state.canvases.find(canvas =>
     canvas.chatSessionId === sessionId && canvas.group_id === groupId));
+  const hasCatalogCanvas = (builderMode === 'flow' ? generationCanvas?.flowNodes : generationCanvas?.nodes)
+    ?.some(node => node.type === (builderMode === 'flow' ? 'crewNode' : 'agentNode'));
   const capabilities = generationCanvas?.executionConfig?.generationCapabilities?.[builderMode];
   const generationTools = capabilities?.tools ?? selectedTools;
   const selectedMcpServers = capabilities?.mcpServers ?? [];
@@ -1320,6 +1323,8 @@ showSessionList && (
 
       )
   );
+  const catalogMessage = [...messages].reverse().find(message => message.metadata?.catalogKind === builderMode);
+  const catalogName = catalogMessage?.metadata?.catalogName;
   const responseContent = (
 <Box
         ref={messagesContainerRef}
@@ -1355,9 +1360,14 @@ showSessionList && (
             {builderTranscript(messages, executingJobId || generationTraceId).map(item => item.kind === 'activity'
               ? <BuilderRunActivity key={`activity-${item.jobId}`} jobId={item.jobId} running={item.jobId === executingJobId || item.jobId === generationTraceId} onOpenLogs={onOpenLogs} />
               : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark}
-                sessionId={sessionId} groupId={groupId || undefined} model={selectedModel} />)}
+                sessionId={sessionId} groupId={groupId || undefined} model={selectedModel} showCatalogAction={false} />)}
           </List>
         )}
+        {hasCatalogCanvas && generationCanvas && <Box sx={{ px: 2, py: 1 }}>
+          <BuilderCatalogAction key={`${generationCanvas.id}:${builderMode}`} canvasId={generationCanvas.id}
+            suggestedName={typeof catalogName === 'string' ? catalogName : undefined}
+            flow={builderMode === 'flow'} disabled={isLoading || !!executingJobId} />
+        </Box>}
         </Box>
       </Box>
   );
@@ -1685,7 +1695,7 @@ showSessionList && (
   );
   if (layout === 'canvas') return <>
     <CanvasAssistantLayout composer={composerContent} response={responseContent} sessionKey={`${builderMode}:${sessionId}`}
-      responseKey={messages[messages.length - 1]?.id} hasMessages={messages.length > 0} busy={isLoading || !!executingJobId} dark={composerDark}
+      responseKey={messages[messages.length - 1]?.id} hasMessages={messages.length > 0 || !!hasCatalogCanvas} busy={isLoading || !!executingJobId} dark={composerDark}
       onHide={onToggleCollapse} />
     <HtmlPreviewDialog />
   </>;

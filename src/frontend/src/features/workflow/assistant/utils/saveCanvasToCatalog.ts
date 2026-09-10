@@ -6,9 +6,10 @@ export interface CanvasSaveCallbacks {
 }
 
 /** Use the same SaveCrew/SaveFlow handlers as the sidebar, with an automatic name. */
-export function saveCanvasToCatalog(flow: boolean, suggestedName: string): Promise<{ name: string }> {
+export function saveCanvasToCatalog(flow: boolean, suggestedName: string, canvasId?: string): Promise<{ name: string }> {
   const tab = useBuilderCanvasStore.getState().getActiveCanvas();
   if (!tab) return Promise.reject(new Error('Open a canvas to save it to the catalog.'));
+  if (canvasId && tab.id !== canvasId) return Promise.reject(new Error('Open this conversation’s canvas before saving it to the catalog.'));
   const nodes = flow ? tab.flowNodes : tab.nodes;
   if (!nodes?.some(node => node.type === (flow ? 'crewNode' : 'agentNode'))) {
     return Promise.reject(new Error(`Open the ${flow ? 'flow' : 'crew'} on the canvas to save it to the catalog.`));

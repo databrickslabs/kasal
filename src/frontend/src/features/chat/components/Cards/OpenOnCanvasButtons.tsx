@@ -67,7 +67,7 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
       });
       window.dispatchEvent(
         new CustomEvent('catalogLoadCrew', {
-          detail: { nodes, edges, name: savedName || deriveCrewName(data) },
+          detail: { nodes, edges, name: savedName || deriveCrewName(data), ...(savedCrewId ? { id: savedCrewId } : {}) },
         }),
       );
       setAppMode('crew');

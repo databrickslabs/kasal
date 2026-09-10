@@ -47,6 +47,13 @@ describe('OpenOnCanvasButtons — chat-only users', () => {
 });
 
 describe('OpenOnCanvasButtons — Open in Agent Builder', () => {
+  it('retains the catalog identity so later canvas edits update the same crew', () => {
+    const spy = vi.spyOn(window, 'dispatchEvent');
+    render(<OpenOnCanvasButtons data={DATA} savedCrewId="catalog-42" savedName="Saved crew" />);
+    fireEvent.click(screen.getByLabelText('Open in Agent Builder'));
+    const event = spy.mock.calls.map(([event]) => event).find(event => event.type === 'catalogLoadCrew') as CustomEvent;
+    expect(event.detail).toMatchObject({ id: 'catalog-42', name: 'Saved crew' });
+  });
   it('carries the chat-selected MCP servers onto the canvas crew (tasks + agents)', () => {
     const events: CanvasEvent[] = [];
     const spy = vi

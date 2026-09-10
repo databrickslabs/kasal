@@ -253,7 +253,9 @@ export class CrewService {
       console.log('Extracted task_ids:', task_ids);
 
       // Clean up node data
-      const cleanedNodes = crew.nodes.map(node => {
+      const cleanedNodes = crew.nodes.map(sourceNode => {
+        // Normalize the request without changing the live canvas or its saved revision.
+        const node = { ...sourceNode, data: sourceNode.data ? { ...sourceNode.data } : sourceNode.data };
         if (!node.data) {
           node.data = { label: node.id };
         }
@@ -497,7 +499,9 @@ export class CrewService {
       }).filter(Boolean) as string[];
 
       // Clean up node data
-      const cleanedNodes = crew.nodes.map(node => {
+      const cleanedNodes = crew.nodes.map(sourceNode => {
+        // Normalize the request without changing the live canvas or its saved revision.
+        const node = { ...sourceNode, data: sourceNode.data ? { ...sourceNode.data } : sourceNode.data };
         if (!node.data) {
           node.data = { label: node.id };
         }

@@ -6,11 +6,12 @@ import { useThemeStore } from '../../../../store/theme';
 import { useAppStore } from '../../../chat/store/appStore';
 import { saveCanvasToCatalog } from '../utils/saveCanvasToCatalog';
 
-/** Direct catalog saving for generated crew and flow plans. */
-export default function BuilderCatalogAction({ flow, suggestedName = '' }: { flow: boolean; suggestedName?: string }) {
+/** Save the conversation's current canvas, including crews restored from history. */
+export default function BuilderCatalogAction({ flow, suggestedName = '', canvasId, disabled = false }: { flow: boolean; suggestedName?: string; canvasId?: string; disabled?: boolean }) {
   const dark = useThemeStore(state => state.isDarkMode);
   const [saving, setSaving] = useState(false);
-  const tab = useBuilderCanvasStore(state => state.canvases.find(item => item.id === state.activeCanvasId));
+  const tab = useBuilderCanvasStore(state => state.canvases.find(item => item.id === (canvasId ?? state.activeCanvasId)));
+  const catalogId = flow ? tab?.savedFlowId : tab?.savedCrewId;
   const revision = useMemo(() => JSON.stringify({
     id: tab?.id,
     nodes: (flow ? tab?.flowNodes : tab?.nodes)?.map(({ id, type, data }) => ({ id, type, data })),
@@ -23,11 +24,11 @@ export default function BuilderCatalogAction({ flow, suggestedName = '' }: { flo
   const canSaveCrew = usePermissionStore(s => s.allowAgentBuilder && s.userRole !== 'operator');
   const canSaveFlow = usePermissionStore(s => s.allowFlowBuilder && s.userRole !== 'operator');
   const save = async () => {
-    if (saving) return;
+    if (saving || disabled) return;
     setSaving(true);
     setError('');
     try {
-      const saved = await saveCanvasToCatalog(flow, suggestedName);
+      const saved = await (canvasId ? saveCanvasToCatalog(flow, suggestedName, canvasId) : saveCanvasToCatalog(flow, suggestedName));
       setSaved({ name: saved.name, revision });
       void useAppStore.getState().loadCatalog();
     } catch (error) {
@@ -36,10 +37,10 @@ export default function BuilderCatalogAction({ flow, suggestedName = '' }: { flo
     } finally { setSaving(false); }
   };
   return <div className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'}>
-        {(flow ? canSaveFlow : canSaveCrew) && <button type="button" onClick={() => void save()} disabled={saving || Boolean(savedName)} title={savedName ? `Saved as “${savedName}”` : `Save the current ${flow ? 'flow' : 'crew'} to the catalog`}
+        {(flow ? canSaveFlow : canSaveCrew) && <button type="button" onClick={() => void save()} disabled={disabled || saving || Boolean(savedName)} title={savedName ? `Saved as “${savedName}”` : catalogId ? `Update “${(flow ? tab?.savedFlowName : tab?.savedCrewName) || tab?.name}” in the catalog` : `Save the current ${flow ? 'flow' : 'crew'} to the catalog`}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}>
-          <Bookmark size={14} fill={savedName ? 'currentColor' : 'none'} />{saving ? 'Saving…' : savedName ? 'Saved to catalog' : 'Save to catalog'}
+          <Bookmark size={14} fill={savedName ? 'currentColor' : 'none'} />{saving ? 'Saving…' : savedName ? 'Saved to catalog' : catalogId ? 'Update catalog' : 'Save to catalog'}
         </button>}
     {error && <p role="alert" style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '4px 10px' }}>{error}</p>}
   </div>;

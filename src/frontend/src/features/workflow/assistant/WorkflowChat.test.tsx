@@ -19,6 +19,9 @@ import WorkflowChat from './WorkflowChat';
 import { improveChatPrompt } from '../../chat/api/prompt';
 vi.mock('../../chat/api/prompt', () => ({ improveChatPrompt: vi.fn() }));
 import { Node, Edge } from 'reactflow';
+import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
+import { useGroupStore } from '../../../store/groups';
+import { usePermissionStore } from '../../../store/permissions';
 
 // Mock DOM methods not implemented in jsdom
 Element.prototype.scrollIntoView = vi.fn();
@@ -1440,4 +1443,58 @@ it('holds the reading position during streaming and resumes following only at th
   rerender(<WorkflowChat {...props} />);
   expect(viewport.scrollTop).toBe(2200);
   state.messagesBySession = {};
+});
+
+
+describe('Catalog actions for restored builder conversations', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+    useGroupStore.setState({ currentGroupId: 'catalog-test' });
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true, userRole: 'admin' });
+    const { __storeState } = await import('./store/chatMessagesStore') as unknown as {
+      __storeState: { messagesBySession: Record<string, unknown[]> };
+    };
+    __storeState.messagesBySession = {};
+    const { __execState } = await import('./hooks/useExecutionMonitoring') as unknown as {
+      __execState: { executingJobId: string | null };
+    };
+    __execState.executingJobId = null;
+  });
+  afterEach(() => useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null }));
+
+  it.each([['crew', true], ['flow', true], ['crew', false], ['flow', false]] as const)('offers catalog saving in a loaded %s conversation without a generated-plan message (linked=%s)', async (builderMode, linked) => {
+    const tabs = useBuilderCanvasStore.getState();
+    const id = tabs.createCanvas('Loaded from history', builderMode);
+    const nodes = [{ id: 'node', type: builderMode === 'flow' ? 'crewNode' : 'agentNode', position: { x: 0, y: 0 }, data: { label: 'Adapted' } }];
+    if (builderMode === 'flow') {
+      tabs.updateCanvasFlowNodes(id, nodes);
+      if (linked) tabs.updateCanvasFlowInfo(id, 'catalog-42', 'Saved flow');
+    } else {
+      tabs.updateCanvasNodes(id, nodes);
+      if (linked) tabs.updateCanvasCrewInfo(id, 'catalog-42', 'Saved crew');
+    }
+    useBuilderCanvasStore.setState(state => ({ canvases: state.canvases.map(canvas => ({ ...canvas, group_id: 'catalog-test', chatSessionId: 'test-session-123' })) }));
+    render(<WorkflowChat builderMode={builderMode} chatSessionId="test-session-123" />);
+    const conversation = within(screen.getByTestId('builder-conversation-scroll'));
+    const label = linked ? 'Update catalog' : 'Save to catalog';
+    expect(conversation.getByRole('button', { name: label })).toBeEnabled();
+    const spy = vi.spyOn(window, 'dispatchEvent');
+    fireEvent.click(conversation.getByRole('button', { name: label }));
+    const kind = builderMode === 'flow' ? 'Flow' : 'Crew';
+    const event = spy.mock.calls.map(([event]) => event).find(event => event.type === (linked ? `updateExisting${kind}` : `openSave${kind}Dialog`)) as CustomEvent;
+    expect(event.detail).toMatchObject({ tabId: id, [builderMode === 'flow' ? 'flowId' : 'crewId']: linked ? 'catalog-42' : undefined });
+    await act(async () => event.detail.onSaved({ name: 'Saved item' }));
+    expect(conversation.getByRole('button', { name: 'Saved to catalog' })).toBeDisabled();
+    spy.mockRestore();
+  });
+
+  it('does not offer to save a canvas belonging to another conversation', () => {
+    const tabs = useBuilderCanvasStore.getState();
+    const id = tabs.createCanvas('Other conversation', 'crew');
+    tabs.updateCanvasNodes(id, [{ id: 'node', type: 'agentNode', position: { x: 0, y: 0 }, data: {} }]);
+    useBuilderCanvasStore.setState(state => ({ canvases: state.canvases.map(canvas => ({ ...canvas, group_id: 'catalog-test', chatSessionId: 'another-session' })) }));
+    render(<WorkflowChat chatSessionId="test-session-123" />);
+    expect(screen.queryByRole('button', { name: /^(Save to catalog|Update catalog)$/ })).not.toBeInTheDocument();
+  });
 });

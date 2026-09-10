@@ -42,6 +42,7 @@ interface ChatMessageItemProps {
   sessionId?: string;
   groupId?: string;
   model?: string;
+  showCatalogAction?: boolean;
 }
 
 /** Pick the human-readable answer out of a result envelope object: the runner
@@ -179,7 +180,7 @@ const resultTextSx = {
   lineHeight: 1.5,
 } as const;
 
-export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs, appearance = 'default', dark = false, sessionId, groupId, model }) => {
+export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs, appearance = 'default', dark = false, sessionId, groupId, model, showCatalogAction = true }) => {
   const { content: resultContent, restyle, acceptContent } = useBuilderResultSurface(message);
   const editDeck = sessionId && groupId && message.backendId && !message.isIntermediate
     ? async (next: string, previous: string) => {
@@ -564,7 +565,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               >
                 {renderMessageContent()}
               </Box>
-              {message.type === 'assistant' && !message.isIntermediate && (
+                {showCatalogAction && message.type === 'assistant' && !message.isIntermediate && (
                 message.metadata?.catalogKind ||
                 message.content.includes('✓ Crew generated successfully') || message.content.includes('Your flow is on the canvas.')
               ) && <BuilderCatalogAction

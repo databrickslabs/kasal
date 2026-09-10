@@ -177,7 +177,12 @@ export const useBuilderCanvasSync = ({ nodes, edges, setNodes, setEdges }: UseBu
       // Update the last active tab reference
       lastActiveTabIdRef.current = activeCanvasId;
     }
-    return () => timers.forEach(clearTimeout);
+    return () => {
+      timers.forEach(clearTimeout);
+      // A crew load can interrupt the switch before its unlock timer fires.
+      // Release the lock with that timer so later edits still reach the canvas.
+      isSwitchingTabsRef.current = false;
+    };
   }, [activeCanvasId, getActiveCanvas, setNodes, setEdges, saveStateForTab]);
 
   // Save current state before tab switch
