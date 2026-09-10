@@ -3,6 +3,7 @@ import { Box, Button } from '@mui/material';
 import { MCPService, type DatabricksMcpOption } from '../../../../api/tools/MCPService';
 import type { MCPServerConfig } from '../../../../types/config/mcp';
 import { usePermissionStore } from '../../../../store/permissions';
+import CapabilitySection from './CapabilitySection';
 import CapabilityRow from './CapabilityRow';
 import DatabricksMcpPicker from './DatabricksMcpPicker';
 
@@ -100,8 +101,9 @@ export default function McpConnectionPicker({ selectedNames = [], onChange, disa
     '--bg-rail-hover': theme.palette.action.hover, '--border-color': theme.palette.divider,
     '--text-primary': theme.palette.text.primary, '--text-secondary': theme.palette.text.secondary,
     '--text-muted': theme.palette.text.secondary, '--accent': theme.palette.error.main,
-    color: 'text.primary', p: 1, minWidth: 0,
+    color: 'text.primary', minWidth: 0,
   })}>
+    <CapabilitySection title={searchQuery === undefined ? undefined : 'MCP servers'}>
     {view !== 'available' && <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
       <button type="button" style={button} onClick={() => { setView('available'); setError(null); }}>‹ Your tools</button>
       {systemAdmin && <button type="button" style={button} onClick={() => { setView(view === 'custom' ? 'databricks' : 'custom'); setError(null); }}>
@@ -148,5 +150,6 @@ export default function McpConnectionPicker({ selectedNames = [], onChange, disa
       <button type="submit" disabled={disabled || busy} style={input}>{busy ? 'Connecting…' : 'Connect'}</button>
     </form>}
     {error && <p role="alert" style={{ color: 'var(--accent)', fontSize: 12 }}>{error}</p>}
+    </CapabilitySection>
   </Box>;
 }

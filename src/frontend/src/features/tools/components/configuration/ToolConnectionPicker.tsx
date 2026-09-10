@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Button, CircularProgress, List, TextField, Typography } from '@mui/material';
+import { Box, Button, CircularProgress, TextField, Typography } from '@mui/material';
+import CapabilitySection from './CapabilitySection';
 import CapabilityRow from './CapabilityRow';
 import { ToolService, type Tool } from '../../../../api/tools/ToolService';
 import { GroupToolService } from '../../../../api/groups/GroupToolService';
@@ -54,10 +55,9 @@ export default function ToolConnectionPicker({ selectedIds = [], onChange, disab
   };
   const rows = [...tools, ...(browse ? available.filter(t => !tools.some(enabled => enabled.id === t.id)) : [])]
     .filter(tool => `${tool.title} ${tool.description}`.toLowerCase().includes((searchQuery ?? query).toLowerCase()));
-  return <Box sx={{ p: 1 }}>
-    <Typography variant="subtitle2" sx={{ mb: 1 }}>Tools</Typography>
+  return <CapabilitySection title="Tools">
     {searchQuery === undefined && <TextField size="small" fullWidth placeholder="Search tools…" inputProps={{ 'aria-label': 'Search tools' }} value={query} onChange={e => setQuery(e.target.value)} />}
-    {loading ? <CircularProgress size={20} aria-label="Loading tools" /> : <List dense sx={{ maxHeight: 260, overflowY: 'auto' }}>
+    {loading ? <CircularProgress size={20} aria-label="Loading tools" /> : <Box>
       {rows.map(tool => {
         const enabled = tools.some(t => t.id === tool.id);
         const selected = selectedIds.includes(String(tool.id));
@@ -71,8 +71,8 @@ export default function ToolConnectionPicker({ selectedIds = [], onChange, disab
           } : undefined} />;
       })}
       {!rows.length && !error && <Typography variant="body2">{query ? 'No matching tools.' : 'No tools enabled in this teamspace.'}</Typography>}
-    </List>}
+    </Box>}
     {admin && <Button size="small" disabled={disabled || busy} onClick={() => setBrowse(!browse)}>{browse ? 'Show enabled tools' : 'Add tools to teamspace'}</Button>}
     {error && <Box role="alert"><Typography color="error" variant="body2">{error}</Typography><Button onClick={() => setRevision(n => n + 1)}>Retry tools</Button></Box>}
-  </Box>;
+  </CapabilitySection>;
 }

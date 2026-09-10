@@ -9,7 +9,7 @@ export default function CapabilityRow({ name, description, selected, status, onC
 }) {
   return <ButtonBase component={onClick ? 'button' : 'div'} onClick={onClick} disabled={disabled}
     role={selectable ? 'checkbox' : undefined} aria-checked={selectable ? !!selected : undefined}
-    sx={{ width: '100%', display: 'flex', gap: 1.25, textAlign: 'left', justifyContent: 'flex-start', px: 1.25, py: 1,
+    sx={{ width: '100%', minHeight: 52, display: 'flex', gap: 1.25, textAlign: 'left', justifyContent: 'flex-start', px: 1.25, py: 1,
       borderRadius: 1.5, color: 'text.primary', bgcolor: selected ? 'action.selected' : 'transparent',
       '&:hover': { bgcolor: 'action.hover' }, '&.Mui-disabled': { opacity: 0.5 }, mb: 0.25 }}>
     <Box sx={{ border: '1px solid', borderColor: selected ? 'text.secondary' : 'divider', width: 20, height: 20,

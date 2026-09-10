@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Divider, InputAdornment, TextField, Typography } from '@mui/material';
+import { Box, Divider, InputAdornment, TextField } from '@mui/material';
 import { Search } from 'lucide-react';
 import { useGroupStore } from '../../../../store/groups';
 import ToolConnectionPicker from './ToolConnectionPicker';
@@ -19,7 +19,6 @@ export default function CapabilitiesPicker({ selectedTools, onToolsChange, selec
     <Box sx={{ maxHeight: 'min(55vh, 520px)', overflowY: 'auto', mt: 1 }}>
       <ToolConnectionPicker key={`tools:${groupId}`} searchQuery={query} selectedIds={selectedTools} onChange={onToolsChange} disabled={disabled} />
       <Divider sx={{ my: 1 }} />
-      <Typography variant="subtitle2" sx={{ px: 1 }}>MCP servers</Typography>
       <McpConnectionPicker key={`mcp:${groupId}`} searchQuery={query} selectedNames={selectedMcpServers} onChange={onMcpServersChange} disabled={disabled} reconcileSelection={reconcileSelection} />
       <Divider sx={{ my: 1 }} />
       <A2AConnectionPicker key={`a2a:${groupId}`} searchQuery={query} disabled={disabled} />
