@@ -153,7 +153,18 @@ class TestProcessStartingPoints:
         crew_id = str(uuid.uuid4())
         agent_id = str(uuid.uuid4())
 
-        flow_config = {"startingPoints": [{"taskId": task_id, "crewId": crew_id}]}
+        flow_config = {
+            "startingPoints": [{"taskId": task_id, "crewId": crew_id}],
+            "nodes": [
+                {
+                    "data": {
+                        "crewId": crew_id,
+                        "mcpAssignments": {task_id: ["postgres"]},
+                        "toolAssignments": {task_id: ["4"]},
+                    }
+                }
+            ],
+        }
         all_tasks = {}
 
         # Create mock crew with nodes and edges
@@ -203,6 +214,13 @@ class TestProcessStartingPoints:
                 flow_config, all_tasks, mock_repositories
             )
 
+            assembled = mock_agent_config.configure_agent_and_tools.call_args.kwargs
+            assert assembled["crew_tool_configs"] == {
+                "MCP_SERVERS": {"servers": ["postgres"]}
+            }
+            assert assembled["additional_tool_ids"] == ["4"]
+            assert mock_task.tool_configs == {}
+            assert mock_crew.tool_configs == {}
             assert len(result) == 1
             assert result[0][0] == "starting_point_0"
 

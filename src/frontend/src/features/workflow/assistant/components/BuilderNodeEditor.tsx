@@ -6,7 +6,7 @@ import { useBuilderNodeEditorBridge } from '../store/builderNodeEditorBridge';
 
 /** Existing form and callbacks, rendered in a pane when a builder owns one. */
 export default function BuilderNodeEditor({ open, kind, nodeId, label, onClose, children }: {
-  open: boolean; kind: 'agent' | 'task' | 'connection' | 'catalog'; nodeId: string; label: string; onClose: () => void; children: ReactNode;
+  open: boolean; kind: 'agent' | 'task' | 'connection' | 'catalog' | 'capabilities' | 'model'; nodeId: string; label: string; onClose: () => void; children: ReactNode;
 }) {
   const openPane = useBuilderNodeEditorBridge(state => state.open);
   const release = useBuilderNodeEditorBridge(state => state.release);

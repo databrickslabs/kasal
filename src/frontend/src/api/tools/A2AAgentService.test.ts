@@ -99,3 +99,10 @@ describe('A2AAgentService — global vs workspace', () => {
     expect(saved.id).toBe(9);
   });
 });
+
+
+it('pins the originating teamspace when enabling an A2A agent from a picker', async () => {
+  client.patch.mockResolvedValue({ data: { id: 9, enabled: true, group_id: 'team' } });
+  await A2AAgentService.setWorkspaceEnabled(1, true, 'team');
+  expect(client.patch).toHaveBeenCalledWith('/a2a-agents/1/workspace-enabled', { enabled: true }, { headers: { group_id: 'team' } });
+});

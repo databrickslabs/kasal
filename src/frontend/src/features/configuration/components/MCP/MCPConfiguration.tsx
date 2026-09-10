@@ -737,9 +737,12 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
           {/* Only the global (system) view registers servers; the workspace view
               consumes the globally-enabled set and toggles it per workspace. */}
           {isSystem && (
-            <>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button variant="contained" size="small" startIcon={<StorageIcon />} onClick={() => setCatalogOpen(true)}>
+                Browse Databricks
+              </Button>
               <Button
-                variant="contained"
+                variant="outlined"
                 size="small"
                 startIcon={<AddIcon />}
                 onClick={(e) => setAddMenuAnchor(e.currentTarget)}
@@ -784,7 +787,7 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
                   />
                 </MenuItem>
               </Menu>
-            </>
+            </Box>
           )}
         </Box>
 

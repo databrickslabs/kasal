@@ -306,3 +306,9 @@ describe('setWorkspaceEnabled', () => {
     expect(client.patch).toHaveBeenCalledWith('/mcp/servers/5/workspace-enabled', { enabled: false });
   });
 });
+
+it('pins workspace enablement to the teamspace where connection started', async () => {
+  client.post.mockResolvedValue({ data: { id: '1', name: 'sales', enabled: true } });
+  await service.enableForWorkspace('1', 'team-original');
+  expect(client.post).toHaveBeenCalledWith('/mcp/servers/1/enable-for-workspace', undefined, { headers: { group_id: 'team-original' } });
+});

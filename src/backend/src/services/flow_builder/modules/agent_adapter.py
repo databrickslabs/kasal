@@ -25,6 +25,7 @@ class AgentConfig:
         repositories=None,
         group_context=None,
         crew_tool_configs=None,
+        additional_tool_ids=None,
     ):
         """
         Configure an agent with its associated tools.
@@ -100,6 +101,8 @@ class AgentConfig:
                 tool_ids = AgentConfig._get_tool_ids_from_flow_nodes(
                     agent_data, flow_data
                 )
+
+            tool_ids = list(dict.fromkeys([*tool_ids, *(additional_tool_ids or [])]))
 
             # Build the MCP config dict (flow constructs it with group attribution).
             mcp_config = None

@@ -120,8 +120,6 @@ interface ChatContainerProps {
    *  overlaps the input the way a fixed-offset floating button did). */
   showReopenPreview?: boolean;
   onReopenPreview?: () => void;
-  /** Open the MCP configuration dialog (from the composer's "+" picker). */
-  onOpenMcpConfig?: () => void;
 }
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -153,7 +151,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onRunPending,
   showReopenPreview,
   onReopenPreview,
-  onOpenMcpConfig,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Suggestion chips drop text into the empty-state composer without sending; the
@@ -352,7 +349,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={onMemoryEnabledChange}
               prefill={prefill}
-              onOpenMcpConfig={onOpenMcpConfig}
+
               isLanding
             />
           </div>
@@ -520,7 +517,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onMemoryEnabledChange={onMemoryEnabledChange}
           pendingRunLabel={pendingRunLabel}
           onRunPending={onRunPending}
-          onOpenMcpConfig={onOpenMcpConfig}
+
         />
       </div>
     </div>

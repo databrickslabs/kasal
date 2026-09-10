@@ -23,6 +23,7 @@ except ImportError:
 
 
 from src.core.cache import intent_cache
+from src.core.exceptions import BadRequestError
 from src.core.llm.robust_json import robust_json_parser
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest
@@ -807,7 +808,19 @@ class DispatcherService:
         if requested:
             if not enabled_titles:
                 return list(requested)
-            return [t for t in requested if t in enabled_titles]
+            ids = (
+                {
+                    str(tid): title
+                    for title, tid in enabled_titles.items()
+                    if tid is not None
+                }
+                if isinstance(enabled_titles, dict)
+                else {}
+            )
+            resolved = [ids.get(str(tool), tool) for tool in requested]
+            return list(
+                dict.fromkeys(tool for tool in resolved if tool in enabled_titles)
+            )
         return [t for t in enabled_titles if t != "DatabricksKnowledgeSearchTool"]
 
     async def detect_intent(
@@ -1265,6 +1278,22 @@ Please analyze this message and provide your intent classification."""
                 except Exception as e:
                     logger.warning(f"Failed to fetch enabled workspace tools: {e}")
 
+            if request.tools and any(str(tool).isdecimal() for tool in request.tools):
+                # Builder pickers persist stable IDs; the generation prompts use titles.
+                # Resolve IDs only through this workspace's enabled catalog.
+                from src.services.tools.tool_service import ToolService
+
+                enabled = await ToolService(self.session).get_enabled_tools_for_group(
+                    group_context
+                )
+                enabled_titles = {tool.title: str(tool.id) for tool in enabled.tools}
+                requested_ids = {
+                    str(tool) for tool in request.tools if str(tool).isdecimal()
+                }
+                if not requested_ids <= set(enabled_titles.values()):
+                    raise BadRequestError(
+                        "The selected tools are no longer enabled in this teamspace"
+                    )
             effective_tools = self._resolve_effective_tools(
                 request.tools, enabled_titles
             )

@@ -12,6 +12,7 @@ export interface CanvasExecutionConfig {
   reasoningConfig?: ReasoningConfig;  // Model reasoning/thinking budget
   managerLLM?: string;
   selectedModel?: string;
+  generationCapabilities?: Partial<Record<'crew' | 'flow', { tools: string[]; mcpServers: string[] }>>;
 }
 
 export interface BuilderCanvas {

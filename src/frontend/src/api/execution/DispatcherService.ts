@@ -6,6 +6,7 @@ export interface DispatcherRequest {
   message: string;
   model?: string;
   tools?: string[];
+  mcp_servers?: string[];
 }
 
 export interface DispatcherResponse {

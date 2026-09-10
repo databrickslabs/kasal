@@ -22,6 +22,7 @@ import { ModelService } from '../../../../api/config/ModelService';
 
 export interface LLMSelectionDialogProps {
   open: boolean;
+  embedded?: boolean;
   onClose: () => void;
   onSelectLLM: (model: string) => void;
   currentLLM?: string;
@@ -30,6 +31,7 @@ export interface LLMSelectionDialogProps {
 
 const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
   open,
+  embedded = false,
   onClose,
   onSelectLLM,
   currentLLM = '',
@@ -113,14 +115,9 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
     }
   };
 
-  return (
-    <Dialog
-      open={open}
-      onClose={handleClose}
-      maxWidth="sm"
-      fullWidth
-      onKeyDown={handleKeyDown}
-    >
+  if (!open) return null;
+  const content = (
+    <>
       <DialogTitle>
         <Typography variant="h6" component="div">
           Select LLM
@@ -182,8 +179,10 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
           {isUpdating ? <CircularProgress size={24} /> : 'Select'}
         </Button>
       </DialogActions>
-    </Dialog>
+    </>
   );
+  return embedded ? <Box onKeyDown={handleKeyDown} sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}> {content} </Box>
+    : <Dialog open onClose={handleClose} maxWidth="sm" fullWidth onKeyDown={handleKeyDown}> {content} </Dialog>;
 };
 
 export default LLMSelectionDialog;

@@ -15,7 +15,6 @@ import PreviewPanel from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useThemeStore } from '../../store/theme';
-import ChatMcpDialog from './components/Chat/ChatMcpDialog';
 import './chat.css';
 
 
@@ -127,8 +126,6 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   // A crew/flow loaded from the catalog that the chat submit button will run.
   // Session-scoped so it only applies to the session it was loaded into.
   const [pendingRun, setPendingRun] = useState<{ sessionId: string | null; label: string; run: () => void } | null>(null);
-  // MCP config dialog opened from the composer's "+" picker ("Connect a tool").
-  const [mcpConfigOpen, setMcpConfigOpen] = useState(false);
 
   const chatThemeIsDark = useThemeStore((s) => s.isDarkMode);
 
@@ -137,7 +134,9 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
     useAppStore.getState().init();
     useAppStore.getState().loadModels();
     useAppStore.getState().loadTools();
-
+    const refreshTools = () => { void useAppStore.getState().loadTools(); };
+    window.addEventListener('tools-changed', refreshTools);
+    return () => window.removeEventListener('tools-changed', refreshTools);
   }, []);
 
   // Chat sessions are per workspace. When the user switches workspace (the
@@ -470,7 +469,6 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
                   run();
                 }
               }}
-              onOpenMcpConfig={() => setMcpConfigOpen(true)}
             />
           </div>
         </main>
@@ -516,14 +514,8 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
         />
       )}
 
-      {/* Chat-native MCP dialog — opened from the composer picker's "Connect a
-          tool" action. Styled with chat tokens (not the MUI config dialog, which
-          stays for the Agent Builder). The picker refetches its list on reopen,
-          so a server enabled here shows up next time without extra wiring. */}
-      <ChatMcpDialog
-        open={mcpConfigOpen}
-        onClose={() => setMcpConfigOpen(false)}
-      />
+
+
 
     </div>
   );

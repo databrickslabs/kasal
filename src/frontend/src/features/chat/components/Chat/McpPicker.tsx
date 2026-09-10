@@ -1,47 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { KasalMcpServer, listKasalMcpServers } from '../../api/mcp';
+import CapabilitiesPicker from '../../../tools/components/configuration/CapabilitiesPicker';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
-import { usePermissionStore } from '../../../../store/permissions';
 import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/databricks/AgentBricksService';
 
-/**
- * The chat input's "+" control (left of Send): pick the MCP servers (and Agent
- * Bricks endpoints) the next crew should be equipped with.
- *
- * It lists ONLY the MCP servers ENABLED for this workspace — the curated,
- * group-scoped allow-list returned by /mcp/servers, filtered to enabled servers
- * (disabled ones aren't usable in a run, so they're omitted). Browsing and
- * registering the full
- * Databricks catalog (external connections, Databricks SQL, Unity Catalog
- * Functions, Genie spaces, AI Search indexes) now lives in
- * Configuration → MCP, so this picker never enumerates the whole workspace.
- *
- * Selections live in the execution store and are injected into every generated
- * agent's tool_configs.MCP_SERVERS.
- */
+/** Shared inline MCP connections plus Chat's Agent Bricks selection. */
 const McpPicker: React.FC<{
   disabled?: boolean;
   menuPlacement?: 'up' | 'down';
-  /** Open the MCP configuration dialog — shown as a "Connect a tool" footer action
-   *  for workspace/system admins so first-run users can register/enable servers
-   *  right from the picker. Members (who can't configure MCP) don't see it. */
-  onOpenMcpConfig?: () => void;
   /** 'button' (default): the composer's icon trigger + its own popover.
    *  'inline': render ONLY the list content, always open, position: static —
    *  for embedding inside another menu (the composer "+" accordion), where an
    *  absolutely-positioned popover would be clipped by overflow-hidden. */
   variant?: 'button' | 'inline';
-}> = ({ disabled, menuPlacement = 'up', onOpenMcpConfig, variant = 'button' }) => {
+}> = ({ disabled, menuPlacement = 'up', variant = 'button' }) => {
   const [open, setOpen] = useState(false);
-  const canConfigureMcp = usePermissionStore((s) => s.isWorkspaceAdmin());
   const [filter, setFilter] = useState('');
-  const [kasalServers, setKasalServers] = useState<KasalMcpServer[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const selected = useExecutionStore((s) => s.selectedMcpServers);
-  const toggle = useExecutionStore((s) => s.toggleMcpServer);
+  const setSelected = useExecutionStore((s) => s.setSelectedMcpServers);
   // Default to [] so a persisted store snapshot predating this field (or a
   // partial test store) never crashes the picker on `.length`/`.includes`.
   const selectedAgentBricks = useExecutionStore((s) => s.selectedAgentBricksEndpoints) ?? [];
@@ -70,37 +48,6 @@ const McpPicker: React.FC<{
   // variant never sets `open`, and gating on it left the list on "Loading…"
   // forever.
   const contentVisible = variant === 'inline' || open;
-
-  // Load the workspace's configured MCP servers when the content shows.
-  useEffect(() => {
-    if (!contentVisible) return;
-    let cancelled = false;
-    setError(null);
-    listKasalMcpServers()
-      .then((servers) => {
-        if (cancelled) return;
-        setKasalServers(servers);
-        // Reconcile the persisted selection against reality: servers removed or
-        // disabled in Configuration leave stale names in the store, which show as
-        // a phantom "+" count. Drop any selected name no longer available so the
-        // badge reflects what's actually equipped.
-        const store = useExecutionStore.getState();
-        const available = new Set(servers.map((s) => s.name));
-        const kept = store.selectedMcpServers.filter((n) => available.has(n));
-        if (kept.length !== store.selectedMcpServers.length) {
-          store.setSelectedMcpServers(kept);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setKasalServers([]);
-          setError('Could not load MCP servers');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [contentVisible]);
 
   // Agent Bricks endpoints (loaded once when the content shows; the section is
   // hidden entirely when the workspace has none — i.e. the feature isn't in use).
@@ -149,8 +96,6 @@ const McpPicker: React.FC<{
   // The configured-server list can be long, so it's searchable by name.
   const query = filter.trim().toLowerCase();
   const nameMatches = (name: string) => !query || name.toLowerCase().includes(query);
-  const kasalList = kasalServers ?? [];
-  const visibleKasal = kasalList.filter((s) => nameMatches(s.name));
 
   // Agent Bricks rows (filtered by the same top search box as MCP, matched on
   // the friendly agent name).
@@ -171,6 +116,7 @@ const McpPicker: React.FC<{
           backgroundColor: 'var(--bg-primary)',
           border: '1px solid var(--border-color)',
           boxShadow: 'var(--shadow-popover)',
+          maxHeight: '70vh', overflowY: 'auto',
         }}
       >
         {children}
@@ -214,60 +160,10 @@ const McpPicker: React.FC<{
             className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide"
             style={{ color: 'var(--text-muted)' }}
           >
-            MCP
+            Tools and agents
           </div>
 
-          <div className="px-3 pb-1.5">
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search MCP servers…"
-              aria-label="Search MCP servers"
-              className="w-full rounded-md px-2 py-1 text-xs outline-none"
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-              }}
-            />
-          </div>
-
-          <div className="max-h-80 overflow-y-auto px-1.5 pb-1.5">
-            {kasalServers === null ? (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
-            ) : kasalList.length === 0 ? (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                No MCP servers available
-              </div>
-            ) : visibleKasal.length === 0 ? (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                No matching MCP servers
-              </div>
-            ) : (
-              visibleKasal.map((server) => {
-                const isSelected = selected.includes(server.name);
-                return (
-                  <button
-                    key={String(server.id)}
-                    type="button"
-                    role="menuitemcheckbox"
-                    aria-checked={isSelected}
-                    disabled={!server.enabled && !isSelected}
-                    onClick={() => toggle(server.name)}
-                    title={!server.enabled ? 'Disabled — enable it in Configuration → MCP' : server.server_url}
-                    className="w-full flex items-center gap-2 !px-2.5 !py-1.5 my-0.5 rounded-lg text-left text-xs transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    {check(isSelected)}
-                    <span className="truncate flex-1">{server.name}</span>
-                    {!server.enabled && (
-                      <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>disabled</span>
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
+          <CapabilitiesPicker selectedMcpServers={selected} onMcpServersChange={setSelected} disabled={disabled} reconcileSelection />
 
           {/* Agent Bricks section — pick a Databricks Agent Bricks agent to equip
               the crew with (via AgentBricksTool). Hidden entirely when the
@@ -280,6 +176,7 @@ const McpPicker: React.FC<{
               >
                 Agents
               </div>
+              <input aria-label="Search agents" placeholder="Search agents…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: 8, width: '100%' }} />
               <div className="max-h-48 overflow-y-auto px-1.5 pb-1.5">
                 {visibleAgentBricks.length === 0 ? (
                   <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -325,34 +222,7 @@ const McpPicker: React.FC<{
               Be careful what you ask for and check what it did before trusting it.
             </div>
           )}
-          {error && (
-            <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--accent)', borderTop: '1px solid var(--border-color)' }}>
-              {error}
-            </div>
-          )}
 
-          {/* Connect-a-tool action — registering/enabling MCP servers is admin-only,
-              so this footer appears for workspace/system admins. It opens the MCP
-              config dialog; on close the list refetches so a newly enabled server
-              shows up without reopening the picker. */}
-          {canConfigureMcp && onOpenMcpConfig && (
-            <div className="p-1.5" style={{ borderTop: '1px solid var(--border-color)' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onOpenMcpConfig();
-                }}
-                className="w-full flex items-center gap-2 !px-2.5 !py-1.5 rounded-lg text-left text-xs transition-colors hover:bg-[var(--bg-rail-hover)]"
-                style={{ color: 'var(--text-primary)' }}
-              >
-                <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                Connect a tool…
-              </button>
-            </div>
-          )}
         </>,
       )}
     </div>

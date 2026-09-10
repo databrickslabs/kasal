@@ -580,6 +580,7 @@ describe('WorkflowChatRefactored', () => {
           session_id: 'test-session-123',
           model: 'test-model',
           tools: [],
+          mcp_servers: [],
         }, expect.any(Function), expect.any(AbortSignal));
       });
     });
@@ -1335,7 +1336,7 @@ describe('Flow Builder conversation', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Message Kasal' }), { target: { value: 'Research and write' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
     await waitFor(() => expect(generated).toHaveBeenCalledWith(draft));
-    expect(FlowService.generateFlow).toHaveBeenCalledWith('Research and write', 'test-model', ['saved-a'], expect.any(AbortSignal), expect.any(Function), expect.any(String));
+    expect(FlowService.generateFlow).toHaveBeenCalledWith('Research and write', 'test-model', ['saved-a'], expect.any(AbortSignal), expect.any(Function), expect.any(String), [], []);
   });
 
   it('cancels generation when switching canvases and never applies the late result', async () => {

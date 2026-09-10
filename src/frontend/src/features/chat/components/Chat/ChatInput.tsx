@@ -114,9 +114,6 @@ interface ChatInputProps {
    * just hit Enter.
    */
   prefill?: { text: string; nonce: number };
-  /** Open the MCP config dialog — forwarded to the "+" picker's admin-only
-   *  "Connect a tool" action. */
-  onOpenMcpConfig?: () => void;
   /** True for the empty/landing composer — enables the rotating placeholder that
    *  advertises deliverable types (dashboard, presentation, quiz, …). The
    *  conversation composer keeps the stable base placeholder. */
@@ -163,7 +160,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onRunPending,
   menuPlacement = 'up',
   prefill,
-  onOpenMcpConfig,
   isLanding = false,
 }) => {
   const [isStopping, setIsStopping] = useState(false);
@@ -818,7 +814,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               onToggleMemory={toggleMemoryMode}
               attachmentCount={attachments.length}
               onAttachFiles={() => fileInputRef.current?.click()}
-              onOpenMcpConfig={onOpenMcpConfig}
+
             />
 
             {/* The active execution replaces Send with Stop in every mode.

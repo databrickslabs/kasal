@@ -4840,3 +4840,9 @@ class TestRepeatedTurnAnswersFromTheConversation:
             )
             await svc.dispatch(canvas)
             assert canvas.chat_mode_type == "research"
+
+
+def test_builder_tool_ids_resolve_only_within_the_enabled_workspace_catalog():
+    assert DispatcherService._resolve_effective_tools(
+        ["4", "5", "disabled", "Web search"], {"Web search": "4", "Read documents": "7"}
+    ) == ["Web search"]

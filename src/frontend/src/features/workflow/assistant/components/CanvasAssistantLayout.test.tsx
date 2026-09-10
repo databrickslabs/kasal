@@ -91,7 +91,7 @@ describe('Canvas assistant sidebar', () => {
     expect(screen.queryByRole('tab', { name: 'Schedule', exact: true })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Canvas', exact: true })).toHaveAttribute('aria-selected', 'true');
   });
-  it.each(['agent', 'task', 'connection'] as const)('opens the %s form under Canvas and Back restores the same graph', async kind => {
+  it.each(['agent', 'task', 'connection', 'capabilities', 'model'] as const)('opens the %s form under Canvas and Back restores the same graph', async kind => {
     const closed = vi.fn();
     function Editor() {
       const [open, setOpen] = useState(false);

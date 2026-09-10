@@ -8,6 +8,10 @@ from uuid import UUID
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
+from src.services.flow_builder.mcp_assignments import (
+    apply_flow_mcp_assignments,
+    flow_task_tool_ids,
+)
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 
@@ -432,8 +436,14 @@ class FlowProcessorManager:
                         )
 
                         # Build CrewAI Agent object using configure_agent_and_tools
+                        effective_tool_configs = apply_flow_mcp_assignments(
+                            effective_tool_configs, task_id, crew_id, flow_config
+                        )
                         agent_obj = await AgentConfig.configure_agent_and_tools(
                             agent_data=agent_data,
+                            additional_tool_ids=flow_task_tool_ids(
+                                task_id, crew_id, flow_config
+                            ),
                             flow_data=flow_config,
                             repositories=repositories,
                             group_context=group_context,
@@ -917,8 +927,14 @@ class FlowProcessorManager:
                         )
 
                         # Build CrewAI Agent object
+                        effective_tool_configs = apply_flow_mcp_assignments(
+                            effective_tool_configs, task_id, crew_id, flow_config
+                        )
                         agent_obj = await AgentConfig.configure_agent_and_tools(
                             agent_data=agent_data,
+                            additional_tool_ids=flow_task_tool_ids(
+                                task_id, crew_id, flow_config
+                            ),
                             flow_data=flow_config,
                             repositories=repositories,
                             group_context=group_context,
@@ -1336,8 +1352,14 @@ class FlowProcessorManager:
                             )
 
                             # Build CrewAI Agent object using configure_agent_and_tools
+                            effective_tool_configs = apply_flow_mcp_assignments(
+                                effective_tool_configs, task_id, crew_id, flow_config
+                            )
                             agent_obj = await AgentConfig.configure_agent_and_tools(
                                 agent_data=agent_data,
+                                additional_tool_ids=flow_task_tool_ids(
+                                    task_id, crew_id, flow_config
+                                ),
                                 flow_data=flow_config,
                                 repositories=repositories,
                                 group_context=group_context,

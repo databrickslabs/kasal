@@ -1,30 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   MCPService,
+  databricksMcpServerName,
   type DatabricksMcpOption,
   type DatabricksManagedMcpType,
   type DatabricksMcpCatalog as Catalog,
 } from '../../../../api/tools/MCPService';
-import { useExecutionStore } from '../../store/executionStore';
 
-/**
- * Chat-native Databricks MCP catalog picker (the "Add server" → Databricks tab in
- * ChatMcpDialog). Lists what the workspace exposes — external UC-connection MCPs,
- * managed leaves (e.g. Databricks SQL, Unity Catalog functions), and expandable
- * types (Genie spaces, AI Search indexes) that drill into a searchable list.
- * Registering an option calls MCPService.ensureDatabricksServer at the given scope
- * (idempotent), then asks the parent to reload so the new server shows in the list.
- *
- * Styled with chat tokens; buttons set padding inline (the #kasal-chat-root reset
- * zeroes Tailwind px/py).
- */
-export interface ChatMcpCatalogProps {
-  /** 'global' registers a base server (system admin); 'workspace' a scoped one. */
-  scope: 'global' | 'workspace';
-  /** Reload the parent server list after a successful registration. */
-  onRegistered: () => Promise<void> | void;
+
+/** Databricks discovery shared by Chat and builder tool pickers. */
+export interface DatabricksMcpPickerProps {
+  /** The owning picker registers, enables and applies its own selection. */
+  onConnect: (option: DatabricksMcpOption) => Promise<string>;
+  selectedNames: string[];
+  selectedLabel?: string;
   /** Server URLs already registered (trailing slash stripped). Their catalog
-   *  rows show "Added" and disable the button instead of offering "Add". */
+   *  rows offer "Use in chat" so registration is not mistaken for selection. */
   registeredUrls?: Set<string>;
 }
 
@@ -42,21 +33,29 @@ const managedLeafOption = (t: DatabricksManagedMcpType): DatabricksMcpOption => 
   server_url: t.server_url || '',
 });
 
-const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, registeredUrls }) => {
+const DatabricksMcpPicker: React.FC<DatabricksMcpPickerProps> = ({ onConnect, selectedNames, registeredUrls, selectedLabel = 'Selected' }) => {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [done, setDone] = useState<Set<string>>(new Set());
+  const [done, setDone] = useState<Record<string, string>>({});
+  const selected = selectedNames;
+  const connecting = useRef(false);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [extPage, setExtPage] = useState(0);
   const [expanded, setExpanded] = useState<'genie' | 'ai-search' | 'functions' | null>(null);
   const [genieSearch, setGenieSearch] = useState('');
+  const [genieNextToken, setGenieNextToken] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const genieRequest = useRef(0);
   const [genieOptions, setGenieOptions] = useState<DatabricksMcpOption[] | null>(null);
   const [aiSearchOptions, setAiSearchOptions] = useState<DatabricksMcpOption[] | null>(null);
   const [functionsSearch, setFunctionsSearch] = useState('');
   const [functionsOptions, setFunctionsOptions] = useState<DatabricksMcpOption[] | null>(null);
   const [functionsCatalogs, setFunctionsCatalogs] = useState<string[]>([]);
   const [functionsCatalog, setFunctionsCatalog] = useState<string | undefined>(undefined);
+  const [defaultCatalog, setDefaultCatalog] = useState('');
   const [functionsSchema, setFunctionsSchema] = useState<DatabricksMcpOption | null>(null);
   const [functionNameSearch, setFunctionNameSearch] = useState('');
   const [schemaFunctions, setSchemaFunctions] = useState<
@@ -65,29 +64,60 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
 
   useEffect(() => {
     let cancelled = false;
+    setCatalog(null);
+    setLoadFailed(false);
+    setError(null);
     MCPService.getInstance()
       .getDatabricksCatalog()
       .then((c) => { if (!cancelled) setCatalog(c); })
       .catch((e: unknown) => {
         if (!cancelled) {
+          setLoadFailed(true);
           setCatalog({ workspace_url: '', external: [], managed: [] });
           setError(e instanceof Error ? e.message : 'Could not load Databricks MCPs');
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [reload]);
 
-  // Genie spaces (searchable, first page).
+  // Search on demand; debounce typing and retain access to every result page.
   useEffect(() => {
     if (expanded !== 'genie') return;
-    let cancelled = false;
+    const version = ++genieRequest.current;
     setGenieOptions(null);
-    MCPService.getInstance()
-      .listGenieSpaces(genieSearch || undefined)
-      .then(({ options }) => { if (!cancelled) setGenieOptions(options); })
-      .catch(() => { if (!cancelled) setGenieOptions([]); });
-    return () => { cancelled = true; };
+    setGenieNextToken(null);
+    setLoadingMore(false);
+    const timer = window.setTimeout(() => {
+      MCPService.getInstance().listGenieSpaces(genieSearch || undefined)
+        .then(({ options, next_page_token }) => {
+          if (version !== genieRequest.current) return;
+          setGenieOptions(options);
+          setGenieNextToken(next_page_token);
+        })
+        .catch(() => {
+          if (version !== genieRequest.current) return;
+          setGenieOptions([]);
+          setError('Could not load Genie spaces. Try your search again.');
+        });
+    }, genieSearch ? 250 : 0);
+    return () => { genieRequest.current = version + 1; window.clearTimeout(timer); };
   }, [expanded, genieSearch]);
+
+  const loadMoreGenie = async () => {
+    if (!genieNextToken || loadingMore) return;
+    const version = genieRequest.current;
+    setLoadingMore(true);
+    try {
+      const { options, next_page_token } = await MCPService.getInstance().listGenieSpaces(genieSearch || undefined, genieNextToken);
+      if (version !== genieRequest.current) return;
+      setGenieOptions((previous) => [...new Map([...(previous ?? []), ...options].map((o) => [o.id, o])).values()]);
+      setGenieNextToken(next_page_token);
+    } catch {
+      if (version === genieRequest.current) setError('Could not load more Genie spaces. Try again.');
+    } finally {
+      if (version === genieRequest.current) setLoadingMore(false);
+    }
+  };
 
   // AI Search indexes (loaded once on expand).
   useEffect(() => {
@@ -96,7 +126,7 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
     MCPService.getInstance()
       .listAiSearchIndexes()
       .then((options) => { if (!cancelled) setAiSearchOptions(options); })
-      .catch(() => { if (!cancelled) setAiSearchOptions([]); });
+      .catch(() => { if (!cancelled) { setAiSearchOptions([]); setError('Could not load AI Search indexes.'); } });
     return () => { cancelled = true; };
   }, [expanded, aiSearchOptions]);
 
@@ -112,10 +142,10 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
         setFunctionsOptions(options);
         setFunctionsCatalogs(catalogs);
         if (functionsCatalog === undefined && selected_catalog) {
-          setFunctionsCatalog(selected_catalog);
+          setDefaultCatalog(selected_catalog);
         }
       })
-      .catch(() => { if (!cancelled) setFunctionsOptions([]); });
+      .catch(() => { if (!cancelled) { setFunctionsOptions([]); setError('Could not load function schemas. Try another catalog or search.'); } });
     return () => { cancelled = true; };
   }, [expanded, functionsSearch, functionsCatalog]);
 
@@ -131,47 +161,29 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
     MCPService.getInstance()
       .listSchemaFunctions(m[1], m[2], functionNameSearch || undefined)
       .then((fns) => { if (!cancelled) setSchemaFunctions(fns); })
-      .catch(() => { if (!cancelled) setSchemaFunctions([]); });
+      .catch(() => { if (!cancelled) { setSchemaFunctions([]); setError('Could not load functions.'); } });
     return () => { cancelled = true; };
   }, [functionsSchema, functionNameSearch]);
 
   const register = async (option: DatabricksMcpOption) => {
+    if (connecting.current) return;
+    connecting.current = true;
     setBusyId(option.id);
     setError(null);
     try {
-      const svc = MCPService.getInstance();
-      const name = await svc.ensureDatabricksServer(option, scope);
-      // One-action add: adding from chat should also turn the server on for THIS
-      // teamspace AND select it for the next run, so the user doesn't repeat the
-      // enable + pick in two other places. Enabling is best-effort — if it fails
-      // the server is still registered and the manual teamspace toggle remains.
-      try {
-        const { servers } =
-          scope === 'global' ? await svc.getBaseServers() : await svc.getMcpServers();
-        const match = servers.find((s) => s.name.toLowerCase() === name.toLowerCase());
-        if (match) await svc.enableForWorkspace(match.id);
-      } catch {
-        /* leave it registered; the teamspace toggle is the manual fallback */
-      }
-      const store = useExecutionStore.getState();
-      if (!store.selectedMcpServers.includes(name)) {
-        store.setSelectedMcpServers([...store.selectedMcpServers, name]);
-      }
-      setDone((d) => new Set(d).add(option.id));
-      await onRegistered();
+      const connectedName = await onConnect(option);
+      setDone((d) => ({ ...d, [option.id]: connectedName }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add server');
     } finally {
+      connecting.current = false;
       setBusyId(null);
     }
   };
 
   const optionRow = (option: DatabricksMcpOption, kindLabel?: string, onView?: () => void) => {
-    // "Added" if we registered it this session OR it's already a registered
-    // server (matched by URL) — so e.g. Genie One shows Added, not Add.
-    const added =
-      done.has(option.id) ||
-      (!!option.server_url && !!registeredUrls?.has(stripTrailingSlash(option.server_url)));
+    const added = selected.includes(done[option.id] || databricksMcpServerName(option));
+    const registered = !!option.server_url && !!registeredUrls?.has(stripTrailingSlash(option.server_url));
     return (
       <div
         key={option.id}
@@ -204,7 +216,7 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
         <button
           type="button"
           onClick={() => register(option)}
-          disabled={busyId === option.id || added}
+          disabled={busyId !== null || added}
           className="text-xs font-medium rounded-lg flex-shrink-0 transition-colors disabled:opacity-60"
           style={{
             padding: '6px 10px',
@@ -213,7 +225,7 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
             backgroundColor: added ? 'transparent' : 'var(--bg-primary)',
           }}
         >
-          {added ? 'Added' : busyId === option.id ? 'Adding…' : 'Add'}
+          {added ? selectedLabel : busyId === option.id ? 'Connecting…' : registered ? 'Use' : 'Connect'}
         </button>
       </div>
     );
@@ -239,11 +251,26 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
 
   const fnInputStyle = { padding: '7px 10px', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8, fontSize: 13, width: '100%', outline: 'none' } as const;
 
+  const categoryNavigation = (
+    <div className="flex flex-wrap gap-1 mb-3" aria-label="Databricks categories">
+      <button type="button" onClick={() => { setExpanded(null); setFunctionsSchema(null); setError(null); }}
+        style={{ ...fnInputStyle, width: 'auto', fontSize: 12 }}>All servers</button>
+      {(catalog?.managed ?? []).filter((m) => m.expandable).map((m) => (
+        <button key={m.id} type="button" aria-pressed={expanded === m.kind}
+          onClick={() => { setExpanded(m.kind as 'genie' | 'ai-search' | 'functions'); setFunctionsSchema(null); setError(null); }}
+          style={{ ...fnInputStyle, width: 'auto', fontSize: 12, backgroundColor: expanded === m.kind ? 'var(--bg-active-chip)' : 'var(--bg-input)' }}>
+          {m.name}
+        </button>
+      ))}
+    </div>
+  );
+
   // Second-level view: the individual functions of a chosen schema (visibility
   // only — enabling the schema server exposes all of them).
   if (expanded === 'functions' && functionsSchema) {
     return (
       <div>
+        {categoryNavigation}
         <div className="flex items-center gap-2 mb-2">
           <button
             type="button"
@@ -286,7 +313,7 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
             </div>
           ))
         )}
-        {error && <div className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
+        {error && <div role="alert" className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
       </div>
     );
   }
@@ -308,6 +335,7 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
     const inputStyle = { padding: '7px 10px', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8, fontSize: 13, width: '100%', outline: 'none' } as const;
     return (
       <div>
+        {categoryNavigation}
         <div className="flex items-center gap-2 mb-2">
           <button
             type="button"
@@ -337,7 +365,7 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
           <>
             {functionsCatalogs.length > 0 && (
               <select
-                value={functionsCatalog ?? ''}
+                value={functionsCatalog ?? defaultCatalog}
                 onChange={(e) => setFunctionsCatalog(e.target.value || undefined)}
                 aria-label="Select catalog"
                 className="mb-2"
@@ -372,7 +400,13 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
             ),
           )
         )}
-        {error && <div className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
+        {expanded === 'genie' && genieNextToken && (
+          <button type="button" onClick={() => void loadMoreGenie()} disabled={loadingMore}
+            style={{ ...fnInputStyle, marginTop: 8 }}>
+            {loadingMore ? 'Loading…' : 'Load more Genie spaces'}
+          </button>
+        )}
+        {error && <div role="alert" className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
       </div>
     );
   }
@@ -402,9 +436,11 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
     <div>
       {catalog === null ? (
         <div className="py-6 text-center text-xs" style={{ color: 'var(--text-muted)' }}>Loading catalog…</div>
+      ) : loadFailed ? (
+        <button type="button" onClick={() => setReload((n) => n + 1)} style={fnInputStyle}>Retry Databricks discovery</button>
       ) : allExternal.length === 0 && allManaged.length === 0 ? (
         <div className="py-6 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No Databricks MCP servers found in this workspace.
+          No Databricks servers were returned. Check your workspace connection or retry discovery.
         </div>
       ) : (
         <>
@@ -479,9 +515,9 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
           )}
         </>
       )}
-      {error && <div className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
+      {error && <div role="alert" className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
     </div>
   );
 };
 
-export default ChatMcpCatalog;
+export default DatabricksMcpPicker;

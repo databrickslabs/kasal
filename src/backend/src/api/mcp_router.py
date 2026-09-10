@@ -9,7 +9,7 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Request, status
 
-from src.core.exceptions import BadRequestError, ForbiddenError
+from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.permissions import check_role_in_context, is_system_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.mcp import (
@@ -324,6 +324,15 @@ async def get_databricks_mcp_options(
         workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
     except Exception as e:
         logger.warning(f"Could not resolve workspace URL for Databricks MCPs: {e}")
+
+    if not workspace_url:
+        logger.warning("MCP-DISCOVERY-v1: workspace authentication unavailable")
+        raise KasalError(
+            "Databricks discovery is unavailable because the workspace connection "
+            "could not be authenticated. Check the Databricks connection in "
+            "Configuration, then retry. Diagnostic: MCP-DISCOVERY-v1",
+            status_code=503,
+        )
 
     external: List[Dict[str, Any]] = []
     managed: List[Dict[str, Any]] = []

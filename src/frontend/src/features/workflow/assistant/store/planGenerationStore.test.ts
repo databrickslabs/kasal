@@ -23,9 +23,11 @@ describe('session-owned plan generation', () => {
     const a = deferred<DispatchResult>();
     const b = deferred<DispatchResult>();
     vi.mocked(DispatcherService.dispatch).mockImplementation(request => request.message === 'A' ? a.promise : b.promise);
-    startPlanGeneration('team-a', 'session-a', { message: 'A' }, async () => {}, vi.fn());
-    startPlanGeneration('team-a', 'session-b', { message: 'B' }, async () => {}, vi.fn());
+    startPlanGeneration('team-a', 'session-a', { message: 'A', tools: ['4'], mcp_servers: ['postgres'] }, async () => {}, vi.fn());
+    startPlanGeneration('team-a', 'session-b', { message: 'B', mcp_servers: ['studio'] }, async () => {}, vi.fn());
     await waitFor(() => expect(DispatcherService.dispatch).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(DispatcherService.dispatch).mock.calls[0][0]).toMatchObject({ session_id: 'session-a', tools: ['4'], mcp_servers: ['postgres'] });
+    expect(vi.mocked(DispatcherService.dispatch).mock.calls[1][0]).toMatchObject({ session_id: 'session-b', mcp_servers: ['studio'] });
     const signalA = vi.mocked(DispatcherService.dispatch).mock.calls[0][2];
     expect(signalA?.aborted).toBe(false);
     a.resolve(result('Plan A'));

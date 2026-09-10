@@ -260,9 +260,11 @@ export class MCPService {
   /**
    * Create or update a workspace override for a server and enable it
    */
-  async enableForWorkspace(id: string): Promise<MCPServerConfig> {
+  async enableForWorkspace(id: string, groupId?: string): Promise<MCPServerConfig> {
     try {
-      const response = await apiClient.post<MCPServerConfig>(`/mcp/servers/${id}/enable-for-workspace`);
+      const response = groupId
+        ? await apiClient.post<MCPServerConfig>(`/mcp/servers/${id}/enable-for-workspace`, undefined, { headers: { group_id: groupId } })
+        : await apiClient.post<MCPServerConfig>(`/mcp/servers/${id}/enable-for-workspace`);
       return response.data;
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;

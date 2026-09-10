@@ -1,14 +1,14 @@
 import { create } from 'zustand';
 
 export interface BuilderNodeEditorEntry {
-  id: `agent:${string}` | `task:${string}` | `connection:${string}` | `catalog:${string}`;
+  id: `agent:${string}` | `task:${string}` | `connection:${string}` | `catalog:${string}` | `capabilities:${string}` | `model:${string}`;
   label: string;
   host: HTMLElement;
   onClose: () => void;
 }
 
 export const isCanvasEditorId = (id: string) =>
-  id.startsWith('agent:') || id.startsWith('task:') || id.startsWith('connection:');
+  id.startsWith('agent:') || id.startsWith('task:') || id.startsWith('connection:') || id.startsWith('capabilities:') || id.startsWith('model:');
 
 /** Node editors retain their ReactFlow context via portals. The active builder
  * supplies only a destination; none of the form or save state moves here. */

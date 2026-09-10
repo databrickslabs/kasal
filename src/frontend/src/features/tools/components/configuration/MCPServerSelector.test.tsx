@@ -82,7 +82,7 @@ describe('MCPServerSelector', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByPlaceholderText('Select MCP servers...')).toBeInTheDocument();
+    expect(screen.getByText('Select MCP servers...')).toBeInTheDocument();
   });
 
   it('loads servers when opened', async () => {
@@ -96,7 +96,7 @@ describe('MCPServerSelector', () => {
     const input = screen.getByRole('combobox');
     // Focus and open the dropdown
     fireEvent.focus(input);
-    fireEvent.mouseDown(input);
+    fireEvent.click(input);
 
     await waitFor(() => {
       expect(mockGetMcpServers).toHaveBeenCalled();

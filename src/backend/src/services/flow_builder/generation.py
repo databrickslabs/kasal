@@ -25,6 +25,11 @@ from src.services.flow_builder.output_contracts import (
     plan_contracts,
     validate_term,
 )
+from src.services.generation.mcp_assignment import (
+    assign_mcps_to_tasks,
+    describe_selected_mcps,
+    describe_selected_tools,
+)
 from src.services.llm.manager import LLMManager
 
 SYSTEM_PROMPT = """Design a flow using ONLY the saved crews in the supplied catalog.
@@ -79,6 +84,8 @@ Contracts are local to this flow: they shape task output without changing saved
 catalog crews. Route only on declared, typed fields of that contract. Use realistic
 booleans, category enums and numeric thresholds, not an approval flag by default.
 Explain the schema, criteria, destination and unmatched behavior in the plan.
+Selected MCP capabilities can equip relevant tasks in a selected crew locally for this flow.
+Use them where needed; they do not change the saved crew definitions.
 The catalog contains compact previews. For ordinary selection, independent crews,
 or straightforward sequencing, return the final plan immediately with detail_crew_ids: [].
 If previews leave capabilities unclear, or conditions require exact output fields,
@@ -328,7 +335,13 @@ class FlowGenerationService:
                 message="There are no saved crews with available tasks in this teamspace. Save a crew in Agent Builder, then describe your flow here.",
                 missing_capabilities=["A saved crew with tasks"],
             )
+        mcp_capabilities = await describe_selected_mcps(
+            request.mcp_servers, group_context
+        )
+        selected_tools = await describe_selected_tools(request.tools, group_context)
+        capabilities = mcp_capabilities + selected_tools
         context = {
+            "selected_mcp_capabilities": capabilities,
             "prompt": request.prompt,
             "current_crew_ids": [
                 cid for cid in request.current_crew_ids if cid in catalog
@@ -384,7 +397,39 @@ class FlowGenerationService:
                     continue
                 if not plan.missing_capabilities:
                     validate_stage_assignments(plan, intent)
-                return build_flow(plan, catalog)
+                draft = build_flow(plan, catalog)
+                if draft.nodes and capabilities:
+                    task_map = {
+                        f"{cid}/{task['id']}": {
+                            **task,
+                            "crew_name": catalog[cid]["name"],
+                        }
+                        for cid in plan.crew_ids
+                        for task in catalog[cid]["tasks"]
+                    }
+                    assignments = await assign_mcps_to_tasks(
+                        task_map, capabilities, request.model
+                    )
+                    mcp_names = {cap["name"] for cap in mcp_capabilities}
+                    for node in draft.nodes:
+                        cid = str(node.data.crewId)
+                        node.data.mcpAssignments = {
+                            task["id"]: [
+                                name
+                                for name in assignments[f"{cid}/{task['id']}"]
+                                if name in mcp_names
+                            ]
+                            for task in catalog[cid]["tasks"]
+                        }
+                        node.data.toolAssignments = {
+                            task["id"]: [
+                                cap["tool_id"]
+                                for cap in selected_tools
+                                if cap["name"] in assignments[f"{cid}/{task['id']}"]
+                            ]
+                            for task in catalog[cid]["tasks"]
+                        }
+                return draft
             except (ValueError, TypeError) as exc:
                 if repaired:
                     raise ValueError(

@@ -95,10 +95,11 @@ export const A2AAgentService = {
    * Toggling an inherited global agent creates a workspace-scoped copy carrying
    * that choice; the global row is never touched.
    */
-  async setWorkspaceEnabled(id: number, enabled: boolean): Promise<A2AAgent> {
+  async setWorkspaceEnabled(id: number, enabled: boolean, groupId?: string): Promise<A2AAgent> {
     const { data } = await apiClient.patch<A2AAgent>(
       `${BASE}/${id}/workspace-enabled`,
       { enabled },
+      ...(groupId ? [{ headers: { group_id: groupId } }] : []),
     );
     return data;
   },

@@ -8,6 +8,8 @@ interface FlowTurnOptions {
   sessionId: string;
   inputValue: string;
   selectedModel: string;
+  selectedMcpServers?: string[];
+  selectedTools?: string[];
   nodes: Node[];
   flowRequest: MutableRefObject<AbortController | null>;
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
@@ -19,7 +21,7 @@ interface FlowTurnOptions {
   setGenerationTraceId: (jobId: string | null) => void;
 }
 
-export async function generateFlowTurn({ sessionId, inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId }: FlowTurnOptions) {
+export async function generateFlowTurn({ sessionId, inputValue, selectedModel, selectedMcpServers = [], selectedTools = [], nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId }: FlowTurnOptions) {
   const controller = new AbortController();
   flowRequest.current = controller;
   const userMessage: ChatMessage = { id: `flow-user-${Date.now()}`, type: 'user', content: inputValue.trim(), timestamp: new Date() };
@@ -29,7 +31,7 @@ export async function generateFlowTurn({ sessionId, inputValue, selectedModel, n
   useUILayoutStore.getState().setFlowPanelTab('responses');
   try {
     await saveMessageToBackend(userMessage);
-    const draft = await FlowService.generateFlow(userMessage.content, selectedModel, nodes.map(node => node.data?.crewId).filter(Boolean), controller.signal, beginGenerationTrace, sessionId);
+    const draft = await FlowService.generateFlow(userMessage.content, selectedModel, nodes.map(node => node.data?.crewId).filter(Boolean), controller.signal, beginGenerationTrace, sessionId, selectedMcpServers, selectedTools);
     if (controller.signal.aborted) return;
     if (draft.nodes.length) onFlowGenerated?.(draft);
     const response: ChatMessage = {

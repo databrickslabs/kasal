@@ -60,7 +60,6 @@ interface ComposerMenuProps {
   onToggleMemory: () => void;
   attachmentCount: number;
   onAttachFiles: () => void;
-  onOpenMcpConfig?: () => void;
 }
 
 /** One uniform menu row: label left, value right, a nav chevron (points right —
@@ -146,7 +145,6 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   onToggleMemory,
   attachmentCount,
   onAttachFiles,
-  onOpenMcpConfig,
 }) => {
   const effort = useChatEffortStore(s => s.settings);
   const setEffort = useChatEffortStore(s => s.setSettings);
@@ -290,7 +288,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
 
       {/* Multi-select: stays open — back out with the header when done. */}
       {id === 'tools' && (
-        <McpPicker variant="inline" disabled={disabled} onOpenMcpConfig={onOpenMcpConfig} />
+        <McpPicker variant="inline" disabled={disabled} />
       )}
 
       {/* Skills — same multi-select pattern; back out with the header. */}

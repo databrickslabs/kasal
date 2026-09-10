@@ -5,12 +5,17 @@ import { Add as AddIcon, ArrowBack as BackIcon, AttachFile as AttachFileIcon, Ch
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { ReasoningModelCatalogue, useReasoningSupport } from '../../../../hooks/global/useReasoningSupport';
 
+import CapabilitiesPicker from '../../../tools/components/configuration/CapabilitiesPicker';
 import EffortPicker, { EffortModel } from '../../../../shared/components/EffortPicker';
 import { DEFAULT_EFFORT, effortLabel } from '../../../../types/workflow/effort';
 
 export interface ChatInputPlusMenuProps {
   /** Opens the knowledge-file picker (the imperative handle on the uploader). */
   onAddFiles: () => void;
+  selectedTools?: string[];
+  selectedMcpServers?: string[];
+  onToolsChange?: (tools: string[]) => void;
+  onMcpServersChange?: (servers: string[]) => void;
   /** Attaching needs an agent and a task on the canvas to wire the file into. */
   attachDisabled?: boolean;
   /** Why attaching is unavailable, shown on the disabled row. */
@@ -42,10 +47,10 @@ const PROCESSES: { value: ProcessType; label: string; hint: string }[] = [
   { value: 'parallel', label: 'Parallel', hint: 'Independent tasks run at once' },
 ];
 
-type Section = 'settings' | 'models' | 'process' | 'manager' | 'reasoning';
+type Section = 'settings' | 'models' | 'process' | 'manager' | 'reasoning' | 'tools';
 const TITLES: Record<Section, string> = {
   settings: 'Files and run settings', models: 'Model', process: 'Process type',
-  manager: 'Manager model', reasoning: 'Effort',
+  manager: 'Manager model', reasoning: 'Effort', tools: 'Tools',
 };
 const ROW_SX = {
   minHeight: 42, px: 1.5, py: 1, gap: 1.5, borderRadius: '10px',
@@ -79,6 +84,7 @@ function ChoiceRow({ label, hint, selected, disabled, onClick }: {
 /** Sub-panels replace the root rows, keeping every choice above the composer
  * without opening another popover that could be clipped by the canvas edge. */
 const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
+  selectedTools = [], selectedMcpServers = [], onToolsChange, onMcpServersChange,
   onAddFiles, attachDisabled = false, attachDisabledReason, models, selectedModel,
   onModelChange, modelLabels = {}, loadingModels = false, disabled = false,
 }) => {
@@ -118,6 +124,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
     <SettingsRow key="process" label="Process type" value={PROCESSES.find(p => p.value === processType)?.label || 'Sequential'} onClick={() => setSection('process')} />,
     ...(processType === 'hierarchical' ? [<SettingsRow key="manager" label="Manager model" value={modelName(managerLLM || '')} onClick={() => setSection('manager')} />] : []),
     <SettingsRow key="reasoning" label="Effort" value={effort ? effortLabel(effort) : 'Use agent settings'} onClick={() => setSection('reasoning')} />,
+    <SettingsRow key="tools" label="Tools" value={`${selectedTools.length} tools, ${selectedMcpServers.length} MCP servers`} onClick={() => setSection('tools')} />,
     <Divider key="divider" sx={{ mx: 1.5, my: 0.5, opacity: 0.5 }} />,
     <Tooltip key="files" describeChild title={attachDisabled ? attachDisabledReason || '' : ''} placement="top">
       <MenuItem aria-disabled={attachDisabled} onClick={() => { if (!attachDisabled) { close(); onAddFiles(); } }}
@@ -127,7 +134,8 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
       </MenuItem>
     </Tooltip>,
   ];
-  const optionRows = section === 'models' ? modelRows(false)
+  const optionRows = section === 'tools' ? [<Box key="tools" onKeyDown={(e) => { if (e.key !== 'Escape') e.stopPropagation(); }}><CapabilitiesPicker selectedTools={selectedTools} onToolsChange={onToolsChange} selectedMcpServers={selectedMcpServers} onMcpServersChange={onMcpServersChange} disabled={disabled} /></Box>]
+    : section === 'models' ? modelRows(false)
     : section === 'manager' ? modelRows(true)
     : section === 'process' ? PROCESSES.map(process => <ChoiceRow key={process.value} label={process.label} hint={process.hint}
       selected={processType === process.value} onClick={() => pick(() => setProcessType(process.value))} />)

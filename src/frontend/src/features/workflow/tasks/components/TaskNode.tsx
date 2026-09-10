@@ -843,8 +843,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
             />
       </BuilderNodeEditor>
 
-      {/* Quick Tool & MCP Selection Dialog */}
-      <QuickToolSelectionDialog
+      <BuilderNodeEditor open={isToolDialogOpen} kind="capabilities" nodeId={id} label={String(data.label || 'Task')}
+        onClose={() => setIsToolDialogOpen(false)}>
+      <QuickToolSelectionDialog embedded
         open={isToolDialogOpen}
         onClose={() => setIsToolDialogOpen(false)}
         onApply={handleQuickDialogApply}
@@ -852,6 +853,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         currentMcpServers={currentMcpServers}
         initialTab={toolDialogInitialTab}
       />
+      </BuilderNodeEditor>
     </>
   );
 };

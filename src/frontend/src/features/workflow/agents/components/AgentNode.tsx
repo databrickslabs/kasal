@@ -722,13 +722,15 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         </BuilderNodeEditor>
       )}
 
-      {/* Quick LLM Selection Dialog */}
-      <LLMSelectionDialog
+      <BuilderNodeEditor open={isLLMDialogOpen} kind="model" nodeId={id} label={String(data.label || 'Agent')}
+        onClose={() => setIsLLMDialogOpen(false)}>
+      <LLMSelectionDialog embedded
         open={isLLMDialogOpen}
         onClose={() => setIsLLMDialogOpen(false)}
         onSelectLLM={handleLLMSelect}
         currentLLM={data.llm}
       />
+      </BuilderNodeEditor>
     </Box>
   );
 };

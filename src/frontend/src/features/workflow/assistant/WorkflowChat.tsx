@@ -225,6 +225,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const groupId = useGroupStore(state => state.currentGroupId);
   const visibleSessionRef = useRef(providedChatSessionId || sessionId);
   visibleSessionRef.current = providedChatSessionId || sessionId;
+  const generationCanvas = useBuilderCanvasStore(state => state.canvases.find(canvas =>
+    canvas.chatSessionId === sessionId && canvas.group_id === groupId));
+  const capabilities = generationCanvas?.executionConfig?.generationCapabilities?.[builderMode];
+  const generationTools = capabilities?.tools ?? selectedTools;
+  const selectedMcpServers = capabilities?.mcpServers ?? [];
+  const updateCapabilities = (tools: string[], mcpServers: string[]) => {
+    if (!generationCanvas) return;
+    useBuilderCanvasStore.getState().updateCanvasExecutionConfig(generationCanvas.id, {
+      generationCapabilities: { ...generationCanvas.executionConfig?.generationCapabilities, [builderMode]: { tools, mcpServers } },
+    });
+  };
   const generationKey = planGenerationKey(groupId, sessionId);
   const planRequest = usePlanGenerationStore(state => state.requests[generationKey]);
   const planActivity = usePlanGenerationStore(state => state.activityBySession[generationKey]);
@@ -720,7 +731,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (!inputValue.trim() || isLoading || generationTraceId) return;
 
     if (builderMode === 'flow' && !isCollectingVariables && !isExecuteFlowCommand(inputValue) && !/^\/?run(?:\s+(?:the\s+)?flow)?[.!]?$/i.test(inputValue.trim())) {
-      await generateFlowTurn({ sessionId, inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId });
+      await generateFlowTurn({ sessionId, inputValue, selectedModel, selectedMcpServers, selectedTools: generationTools, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId });
       return;
     }
 
@@ -1092,7 +1103,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     // Force scroll to bottom when user sends a message so they always see the response
     isUserNearBottomRef.current = true;
 
-    startPlanGeneration(groupId, sessionId, { message: userMessage.content, model: selectedModel, tools: selectedTools },
+    startPlanGeneration(groupId, sessionId, { message: userMessage.content, model: selectedModel, tools: generationTools, mcp_servers: selectedMcpServers },
       () => saveMessageToBackend(userMessage), jobId => {
         const anchor: ChatMessage = { id: `generation-trace-${jobId}`, type: 'trace', jobId, content: 'Design activity', timestamp: new Date() };
         setMessages(prev => prev.some(message => message.id === anchor.id) ? prev : [...prev, anchor]);
@@ -1615,6 +1626,11 @@ showSessionList && (
               </IconButton>
             </span></Tooltip>
             <ChatInputPlusMenu
+              key={`${groupId}:${sessionId}:${builderMode}`}
+              selectedTools={generationTools}
+              selectedMcpServers={selectedMcpServers}
+              onToolsChange={tools => updateCapabilities(tools, selectedMcpServers)}
+              onMcpServersChange={servers => updateCapabilities(generationTools, servers)}
               onAddFiles={() => knowledgeUploadRef.current?.open()}
               models={models}
               selectedModel={selectedModel}

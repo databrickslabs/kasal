@@ -36,9 +36,9 @@ export class GroupToolService {
     }
   }
 
-  static async addTool(toolId: number): Promise<GroupToolMapping> {
+  static async addTool(toolId: number, groupId?: string): Promise<GroupToolMapping> {
     try {
-      const res = await apiClient.post<GroupToolMapping>(`/group-tools/${toolId}`);
+      const res = await apiClient.post<GroupToolMapping>(`/group-tools/${toolId}`, undefined, groupId ? { headers: { group_id: groupId } } : undefined);
       return res.data;
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;
@@ -46,9 +46,9 @@ export class GroupToolService {
     }
   }
 
-  static async setEnabled(toolId: number, enabled: boolean): Promise<GroupToolMapping> {
+  static async setEnabled(toolId: number, enabled: boolean, groupId?: string): Promise<GroupToolMapping> {
     try {
-      const res = await apiClient.patch<GroupToolMapping>(`/group-tools/${toolId}/enabled`, { enabled });
+      const res = await apiClient.patch<GroupToolMapping>(`/group-tools/${toolId}/enabled`, { enabled }, groupId ? { headers: { group_id: groupId } } : undefined);
       return res.data;
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;

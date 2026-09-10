@@ -2423,6 +2423,38 @@ class TestProgressiveGeneration:
             m["plan"].assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_generated_tasks_persist_only_their_assigned_mcp_servers(self):
+        request = self._make_progressive_request()
+        request.mcp_servers = ["postgres", "studio"]
+        outline = self._make_plan(
+            tasks=[
+                {"name": "Fetch data", "assigned_agent": "Agent1"},
+                {"name": "Create slides", "assigned_agent": "Agent1"},
+            ]
+        )
+        with (
+            self._progressive_patches(plan=outline) as m,
+            patch(
+                "src.services.generation.crew.progressive.describe_selected_mcps",
+                new_callable=AsyncMock,
+                return_value=[{"name": "postgres"}, {"name": "studio"}],
+            ),
+            patch(
+                "src.services.generation.crew.progressive.assign_mcps_to_tasks",
+                new_callable=AsyncMock,
+                return_value={"0": ["postgres"], "1": ["studio"]},
+            ),
+        ):
+            await self.service.create_crew_progressive(request, None, "gen-mcp")
+            saved = m["repo"].create_single_task.call_args_list
+            assert len(saved) == 2
+            configs = [call.args[0]["tool_configs"] for call in saved]
+            assert configs == [
+                {"MCP_SERVERS": {"servers": ["postgres"]}},
+                {"MCP_SERVERS": {"servers": ["studio"]}},
+            ]
+
+    @pytest.mark.asyncio
     async def test_create_crew_progressive_happy_path(self):
         """Full flow broadcasts plan_ready, agent_detail, task_detail, generation_complete."""
         request = self._make_progressive_request()

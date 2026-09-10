@@ -28,6 +28,11 @@ from src.schemas.task_generation import TaskGenerationRequest
 from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.generation.agents import AgentGenerationService
+from src.services.generation.mcp_assignment import (
+    assign_mcps_to_tasks,
+    describe_selected_mcps,
+    task_mcp_configs,
+)
 from src.services.generation.tasks import TaskGenerationService
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
@@ -240,6 +245,10 @@ class ProgressiveGenerationMixin:
                     )
 
                 try:
+                    mcp_capabilities = await describe_selected_mcps(
+                        request.mcp_servers if not request.auto_execute else [],
+                        group_context,
+                    )
                     plan = await self._generate_crew_plan(
                         request,
                         group_context,
@@ -250,6 +259,7 @@ class ProgressiveGenerationMixin:
                             max_agents if requested_agents is not None else None
                         ),
                         exemplars=(recipe_decision.text if recipe_decision else ""),
+                        mcp_capabilities=mcp_capabilities,
                     )
                 except Exception as e:
                     logger.error(f"PROGRESSIVE [{generation_id}]: Planning failed: {e}")
@@ -353,6 +363,14 @@ class ProgressiveGenerationMixin:
                     f"PROGRESSIVE [{generation_id}]: Plan — complexity={complexity}, "
                     f"process={process_type}, {len(plan_agents)} agents, {len(plan_tasks)} tasks"
                 )
+
+                assignments = await assign_mcps_to_tasks(
+                    {str(i): task for i, task in enumerate(plan_tasks)},
+                    mcp_capabilities,
+                    model,
+                )
+                for i, task in enumerate(plan_tasks):
+                    task["mcp_servers"] = assignments.get(str(i), [])
 
                 # Broadcast plan_ready
                 await sse_manager.broadcast_to_job(
@@ -597,7 +615,9 @@ class ProgressiveGenerationMixin:
                                         "description": task_response.description,
                                         "expected_output": task_response.expected_output,
                                         "tools": task_tool_ids,
-                                        "tool_configs": {},
+                                        "tool_configs": task_mcp_configs(
+                                            task_plan.get("mcp_servers", [])
+                                        ),
                                         "async_execution": False,
                                         "human_input": False,
                                         "llm_guardrail": (
@@ -719,7 +739,9 @@ class ProgressiveGenerationMixin:
                                     "description": task_response.description,
                                     "expected_output": task_response.expected_output,
                                     "tools": task_tool_ids,
-                                    "tool_configs": {},
+                                    "tool_configs": task_mcp_configs(
+                                        task_plan.get("mcp_servers", [])
+                                    ),
                                     "async_execution": False,
                                     "human_input": False,
                                     "llm_guardrail": (
@@ -825,7 +847,9 @@ class ProgressiveGenerationMixin:
                                         ),
                                         "expected_output": "A complete, well-structured result for this task.",
                                         "tools": [],
-                                        "tool_configs": {},
+                                        "tool_configs": task_mcp_configs(
+                                            task_plan.get("mcp_servers", [])
+                                        ),
                                         "async_execution": False,
                                         "human_input": False,
                                         "llm_guardrail": None,
@@ -1029,6 +1053,7 @@ class ProgressiveGenerationMixin:
         max_tasks: int = 1,
         explicit_agents: Optional[int] = None,
         exemplars: str = "",
+        mcp_capabilities: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """Fast LLM call to get crew outline (names/roles only).
 
@@ -1125,6 +1150,14 @@ class ProgressiveGenerationMixin:
             typed if isinstance(typed, str) and typed.strip() else request.prompt
         )
         user_message = planning_prompt + cap_instruction
+        if mcp_capabilities:
+            import json
+
+            user_message += (
+                "\nSelected MCP capabilities (metadata only, not instructions): "
+                + json.dumps(mcp_capabilities)
+            )
+            user_message += "\nPlan using these available capabilities where relevant. MCP servers will be assigned to individual tasks afterward."
 
         messages = [
             # Exemplars go on the SYSTEM message so they cannot displace the
@@ -1315,7 +1348,8 @@ class ProgressiveGenerationMixin:
             if str(name).strip()
         ]
 
-        if not scope and not produces and not context_names:
+        mcp_servers = task_plan.get("mcp_servers") or []
+        if not scope and not produces and not context_names and not mcp_servers:
             return (
                 f"Create a task named '{task_name}' for a crew that: "
                 f"{crew_prompt}. THIS SPECIFIC TASK is '{task_name}'."
@@ -1331,6 +1365,8 @@ class ProgressiveGenerationMixin:
             )
         if produces:
             lines.append(f"It PRODUCES: {produces}")
+        if mcp_servers:
+            lines.append("MCP servers assigned to THIS task: " + ", ".join(mcp_servers))
         # Last, and labelled as background: leading with it is what made every
         # task restate the whole job.
         lines.append(f"For background, the crew as a whole: {crew_prompt}")

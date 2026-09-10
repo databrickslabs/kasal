@@ -33,7 +33,7 @@ export default function BuilderSidePane({ tabs, active, onSelect, onClose, dark,
   const labelFor = (id: BuilderPaneId) => {
     const tab = tabs.find(item => item.id === id);
     if (tab && 'editor' in tab && id.startsWith('catalog:')) return tab.editor.label;
-    return tab && 'editor' in tab ? `${id.startsWith('agent:') ? 'Agent' : id.startsWith('task:') ? 'Task' : 'Connection'} · ${tab.editor.label}` : labels[id];
+    return tab && 'editor' in tab ? `${id.startsWith('agent:') ? 'Agent' : id.startsWith('task:') ? 'Task' : id.startsWith('capabilities:') ? 'Capabilities' : id.startsWith('model:') ? 'Model' : 'Connection'} · ${tab.editor.label}` : labels[id];
   };
   // The graph remains mounted with its viewport and selection intact. A hidden
   // graph must not receive keyboard shortcuts or focus through the visible pane.

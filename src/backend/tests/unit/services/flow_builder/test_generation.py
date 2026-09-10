@@ -689,3 +689,45 @@ def test_generation_binding_handles_missing_task_id_without_mutating_answer():
     draft = FlowPlanningStep.model_validate(data, context={"catalog": catalog()})
     assert draft.output_contracts[0].task_id == "task-a"
     assert "task_id" not in data["output_contracts"][0]
+
+
+@pytest.mark.asyncio
+async def test_selected_capabilities_are_assigned_per_flow_task_without_editing_saved_crews():
+    service = generation_service()
+    with (
+        patch(
+            "src.services.flow_builder.generation.describe_selected_mcps",
+            new_callable=AsyncMock,
+            return_value=[{"name": "postgres"}, {"name": "studio"}],
+        ),
+        patch(
+            "src.services.flow_builder.generation.describe_selected_tools",
+            new_callable=AsyncMock,
+            return_value=[{"name": "tool:4", "tool_id": "4"}],
+        ),
+        patch(
+            "src.services.flow_builder.generation.assign_mcps_to_tasks",
+            new_callable=AsyncMock,
+            return_value={"a/task-a": ["postgres", "tool:4"], "b/task-b": ["studio"]},
+        ) as assign,
+        patch(
+            "src.services.flow_builder.generation.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=plan("ab", [{"source": "a", "target": "b"}]).model_dump_json(),
+        ),
+    ):
+        draft = await service.generate(
+            FlowGenerationRequest(
+                prompt="Research and create slides",
+                mcp_servers=["postgres", "studio"],
+                tools=["4"],
+            ),
+            SimpleNamespace(group_ids=["group"]),
+        )
+    assert draft.nodes[0].data.mcpAssignments == {"task-a": ["postgres"]}
+    assert draft.nodes[1].data.mcpAssignments == {"task-b": ["studio"]}
+    assert draft.nodes[0].data.toolAssignments == {"task-a": ["4"]}
+    assert draft.nodes[1].data.toolAssignments == {"task-b": []}
+    assert "mcpAssignments" in draft.model_dump()["nodes"][0]["data"]
+    assert set(assign.call_args.args[0]) == {"a/task-a", "b/task-b"}
+    assert not hasattr(service.tasks.find_by_group_ids.return_value[0], "tool_configs")

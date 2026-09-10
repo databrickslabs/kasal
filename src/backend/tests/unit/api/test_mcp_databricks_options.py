@@ -17,7 +17,7 @@ from src.api.mcp_router import (
     list_genie_mcp_spaces,
     list_schema_functions,
 )
-from src.core.exceptions import ForbiddenError
+from src.core.exceptions import ForbiddenError, KasalError
 
 
 def _request():
@@ -174,21 +174,29 @@ async def test_catalog_managed_ids_are_config_independent():
 
 
 @pytest.mark.asyncio
-async def test_catalog_empty_without_workspace_url():
+@pytest.mark.parametrize("auth_raises", [False, True])
+async def test_catalog_reports_unavailable_auth_instead_of_an_empty_catalog(
+    auth_raises,
+):
     with (
         patch(
-            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
+            "src.utils.databricks_auth.get_auth_context",
+            (
+                AsyncMock(side_effect=RuntimeError("unavailable"))
+                if auth_raises
+                else AsyncMock(return_value=None)
+            ),
         ),
         patch(
             "src.utils.databricks_auth.extract_user_token_from_request",
             return_value=None,
         ),
     ):
-        result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=_admin_ctx()
-        )
-
-    assert result == {"workspace_url": "", "external": [], "managed": []}
+        with pytest.raises(KasalError, match="MCP-DISCOVERY-v1") as error:
+            await get_databricks_mcp_options(
+                _request(), session=AsyncMock(), group_context=_admin_ctx()
+            )
+    assert error.value.status_code == 503
 
 
 @pytest.mark.asyncio

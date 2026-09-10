@@ -26,6 +26,7 @@ interface CrewNodeData {
   flowConfig?: FlowConfiguration;
   selectedTasks?: Task[];
   allTasks?: Task[];
+  mcpAssignments?: Record<string, string[]>;
   order?: number; // Track creation order for maintaining sequence during layout toggles
 }
 
@@ -126,9 +127,11 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   // Only worth a tooltip when it says something the node does not. The node
   // already renders the crew's name, so a tooltip repeating it is the same word
   // twice; the task list is not on the node anywhere.
-  const taskTooltip = selectedTasks.length > 0
-    ? `Selected tasks:\n${selectedTasks.map(t => `• ${t.name}`).join('\n')}`
-    : '';
+  const taskTooltip = [
+    selectedTasks.length ? `Selected tasks:\n${selectedTasks.map(t => `• ${t.name}`).join('\n')}` : '',
+    ...Object.entries(data.mcpAssignments || {}).filter(([, servers]) => servers.length).map(([taskId, servers]) =>
+      `${data.allTasks?.find(task => task.id === taskId)?.name || taskId}: ${servers.join(', ')}`),
+  ].filter(Boolean).join('\n');
   
   const handleDelete = (event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent node selection
