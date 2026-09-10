@@ -87,3 +87,15 @@ describe('builder result surface delivery', () => {
     expect(mocks.close).toHaveBeenCalled();
   });
 });
+
+
+it.each(['raw', 'envelope'])('keeps a %s slide deck instead of replacing it with a late UI surface', async kind => {
+  const deck = '<section class="slide"><h1>Saved edits</h1></section>';
+  message.content = kind === 'raw' ? deck : JSON.stringify({ output: JSON.stringify({ text: deck }) });
+  mocks.get.mockResolvedValue({ result: { text: 'Original answer', a2ui: surface } });
+  const { result } = renderHook(() => useBuilderResultSurface(message));
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(result.current.content).toBe(message.content);
+  expect(mocks.get).not.toHaveBeenCalled();
+  expect(mocks.listen).not.toHaveBeenCalled();
+});

@@ -28,6 +28,8 @@ interface HtmlDeckBlockProps {
   /** The chat message the deck lives in — the studio writes its edits back there. */
   messageId?: string;
   editable?: boolean;
+  onDeckChange?: (next: string, previous: string) => Promise<void>;
+  model?: string;
 }
 
 const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
@@ -36,6 +38,8 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   truncated = false,
   messageId,
   editable = true,
+  onDeckChange,
+  model,
 }) => {
   // While the deck streams in, rebuild the (expensive) iframe at most every
   // 400ms instead of per token — same throttle the diagram card uses. The
@@ -233,7 +237,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         <div className="absolute inset-0" aria-hidden="true" />
       </div>
       {studio && (
-        <DeckStudio code={code} messageId={messageId} initialIndex={shown} onClose={() => setStudio(false)} />
+        <DeckStudio code={code} messageId={messageId} onDeckChange={onDeckChange} model={model} initialIndex={shown} onClose={() => setStudio(false)} />
       )}
       {full && (
         // Presentation mode: the slide fills the screen on black, arrow keys

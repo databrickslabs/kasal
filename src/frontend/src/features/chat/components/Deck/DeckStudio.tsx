@@ -35,6 +35,8 @@ interface DeckStudioProps {
   /** The chat message the deck lives in — where edits are written back. */
   messageId?: string;
   initialIndex?: number;
+  onDeckChange?: (next: string, previous: string) => Promise<void>;
+  model?: string;
   onClose: () => void;
 }
 
@@ -44,7 +46,7 @@ interface HistoryEntry {
   prev: string;
 }
 
-const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose }) => {
+const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model }) => {
   const [deck, setDeck] = useState(code);
   // Follow the message: an edit written back (from this studio, or from a
   // sentence in the chat) is what the studio shows, whichever instance wrote it.
@@ -61,6 +63,8 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const [selected, setSelected] = useState(() => Math.max(0, Math.min(initialIndex, count - 1)));
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [working, setWorking] = useState<{ index: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // The bar revises the selected slide, or writes a just-inserted blank one.
   const [barMode, setBarMode] = useState<{ kind: 'refine' } | { kind: 'fill'; at: number }>({ kind: 'refine' });
@@ -77,40 +81,55 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   // closed studio loses nothing.
   const writeBack = useCallback(
     (next: string) => {
+      if (onDeckChange) return onDeckChange(next, deck);
       if (!messageId) return;
       const store = useSessionStore.getState();
       const msg = store.messages.find((m) => m.id === messageId);
       if (msg) store.updateMessage(messageId, { content: replaceDeckInContent(msg.content, next) });
     },
-    [messageId],
+    [messageId, onDeckChange, deck],
   );
-  const commit = useCallback(
-    (next: string, label: string) => {
-      setHistory((h) => [...h, { label, prev: deck }]);
-      setDeck(next);
-      writeBack(next);
-    },
-    [deck, writeBack],
-  );
-  const undo = useCallback(() => {
-    setHistory((h) => {
-      const last = h[h.length - 1];
-      if (!last) return h;
-      setDeck(last.prev);
-      writeBack(last.prev);
-      return h.slice(0, -1);
-    });
+  const save = useCallback((next: string, done: () => void) => {
+    if (savingRef.current) return;
+    setError(null);
+    try {
+      const pending = writeBack(next);
+      if (!pending) { done(); return; }
+      savingRef.current = true;
+      setSaving(true);
+      return pending.then(done).catch(() => {
+        setError('The deck could not be saved. Your previous version is still shown. Try again.');
+      }).finally(() => { savingRef.current = false; setSaving(false); });
+    } catch {
+      setError('The deck could not be saved. Your previous version is still shown. Try again.');
+    }
   }, [writeBack]);
+  const commit = useCallback((next: string, label: string, done?: () => void) => save(next, () => {
+    setHistory(h => [...h, { label, prev: deck }]);
+    setDeck(next);
+    done?.();
+  }), [deck, save]);
+  const undo = useCallback(() => {
+    const last = history[history.length - 1];
+    if (!last || working) return;
+    void save(last.prev, () => {
+      setDeck(last.prev);
+      setHistory(h => h.slice(0, -1));
+    });
+  }, [history, working, save]);
 
   const instant = (edit: SlideEdit) => {
+    if (working || savingRef.current) return;
     const plan = planSlideEdit(edit, deck);
     if (plan.kind !== 'instant') return;
-    commit(plan.deck, plan.done);
-    setSelected(plan.focus);
-    setError(null);
+    void commit(plan.deck, plan.done, () => {
+      setSelected(plan.focus);
+      if (edit.kind === 'blank') setBarMode({ kind: 'fill', at: edit.index });
+    });
   };
 
   const apply = async (instruction: string) => {
+    if (working || savingRef.current) return;
     const edit: SlideEdit =
       barMode.kind === 'fill'
         ? { kind: 'fill', index: barMode.at, instruction }
@@ -121,16 +140,17 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     setError(null);
     setWorking({ index: target });
     try {
-      const res = await DeckService.refineSlide({ ...plan.request, model: selectedModel || null });
+      const res = await DeckService.refineSlide({ ...plan.request, model: model || selectedModel || null });
       if (!res.section) throw new Error(res.error || 'The model did not return a slide.');
       if (res.section.trim() === (slides[target] || '').trim()) {
         // Silence here read as "nothing happened" — say what did.
         setError('The model returned the slide unchanged. Try a more specific instruction.');
         return;
       }
-      commit(plan.apply(res.section), plan.done);
-      setSelected(plan.focus);
-      setBarMode({ kind: 'refine' });
+      await commit(plan.apply(res.section), plan.done, () => {
+        setSelected(plan.focus);
+        setBarMode({ kind: 'refine' });
+      });
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       setError(typeof detail === 'string' ? detail : e instanceof Error ? e.message : 'The edit failed.');
@@ -234,7 +254,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             <button
               type="button"
               className={btn}
-              disabled={!lastEdit || !!working}
+              disabled={!lastEdit || !!working || saving}
               onClick={undo}
               title={lastEdit ? `Undo: ${lastEdit.label}` : 'Undo'}
             >
@@ -270,7 +290,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
           <ThumbnailRail
             slides={viewSlides}
             selected={shown}
-            working={working?.index ?? null}
+            working={working?.index ?? (saving ? shown : null)}
             onSelect={(i) => {
               setSelected(i);
               setBarMode({ kind: 'refine' });
@@ -282,7 +302,6 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             // click has to do something visible), then the bar offers to write it.
             onAddAt={(at) => {
               instant({ kind: 'blank', index: at });
-              setBarMode({ kind: 'fill', at });
             }}
           />
           <div className="flex min-w-0 flex-1 flex-col">
@@ -304,7 +323,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             <SlideInstructionBar
               slideNumber={barMode.kind === 'fill' ? barMode.at + 1 : shown + 1}
               mode={barMode.kind}
-              working={!!working}
+              working={!!working || saving}
               error={error}
               onApply={apply}
               onCancelFill={() => setBarMode({ kind: 'refine' })}

@@ -198,7 +198,7 @@ export function stageFor(section: string): string {
  * as the one fence the contract asks for. Content with no deck is returned
  * unchanged.
  */
-export function replaceDeckInContent(content: string, code: string): string {
+export function replaceDeckInContent(content: string, code: string, previous?: string): string {
   const segments = mergeDeckSegments(splitDiagramSegments(content || ''));
   let replaced = false;
   return segments
@@ -207,7 +207,8 @@ export function replaceDeckInContent(content: string, code: string): string {
       // The parser consumed the newline after a closing fence; give it back
       // whenever something follows, so the prose keeps its spacing.
       const tail = i < segments.length - 1 ? '\n' : '';
-      if (!replaced && seg.lang === 'html' && isDeck(seg.code)) {
+      if (!replaced && seg.lang === 'html' && isDeck(seg.code)
+        && (previous === undefined || seg.code.trim() === previous.trim())) {
         replaced = true;
         return fenceDeck(code) + tail;
       }

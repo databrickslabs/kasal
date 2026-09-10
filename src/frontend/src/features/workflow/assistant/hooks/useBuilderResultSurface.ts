@@ -4,7 +4,7 @@ import { ChatHistoryServiceEnhanced } from '../../../../api/chat/ChatHistoryServ
 import { streamExecution } from '../../../chat/api/streaming';
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
 import { useChatMessagesStore } from '../store/chatMessagesStore';
-import { builderResultContent } from '../utils/resultContent';
+import { builderResultContent, hasBuilderDeck } from '../utils/resultContent';
 import type { ChatMessage } from '../types';
 import type { Surface } from '../../../../shared/a2ui';
 
@@ -29,13 +29,14 @@ export function useBuilderResultSurface(message: ChatMessage) {
   const [resolved, setResolved] = useState<{ id: string; content: string } | null>(null);
   const content = resolved?.id === message.id ? resolved.content : message.content;
   const finalResult = message.type === 'result' && !message.isIntermediate;
+  const hasDeck = hasBuilderDeck(content);
   const hasSurface = finalResult && Boolean(toSurface(content));
   const jobId = message.jobId;
   const messageId = message.id;
   const timestamp = message.timestamp.getTime();
 
   useEffect(() => {
-    if (!finalResult || !jobId || hasSurface) return;
+    if (!finalResult || !jobId || hasSurface || hasDeck) return;
     let disposed = false;
     let complete = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -62,7 +63,7 @@ export function useBuilderResultSurface(message: ChatMessage) {
     }) : () => {};
     void check();
     return () => { disposed = true; clearTimeout(timer); close(); };
-  }, [messageId, timestamp, jobId, finalResult, hasSurface]);
+  }, [messageId, timestamp, jobId, finalResult, hasSurface, hasDeck]);
 
   const restyle = (surface: Surface) => {
     let replaced = false;
@@ -87,5 +88,8 @@ export function useBuilderResultSurface(message: ChatMessage) {
     setResolved({ id: messageId, content: next });
     saveContent(messageId, next);
   };
-  return { content, restyle };
+  // Deck edits also replace the resolved view, which may otherwise keep showing
+  // an earlier composed result after the transcript message has been updated.
+  const acceptContent = (next: string) => setResolved({ id: messageId, content: next });
+  return { content, restyle, acceptContent };
 }

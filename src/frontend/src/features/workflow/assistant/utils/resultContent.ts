@@ -1,5 +1,6 @@
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
 import { hasDiagram, splitDiagramSegments } from '../../../chat/utils/mdSandboxDiagram';
+import { isDeck } from '../../../chat/utils/htmlDeck';
 
 // Results can be fragments (often starting with an HTML comment), not just
 // full documents. Only recognize markup at the beginning: prose mentioning a
@@ -15,6 +16,19 @@ export function normalizeBuilderHtml(content: string): string {
 }
 
 export const hasRichHtml = (content: string) => hasDiagram(splitDiagramSegments(normalizeBuilderHtml(content)));
+
+/** Recognize a deck in the same answer envelopes supported by the transcript. */
+export function hasBuilderDeck(value: unknown, depth = 0): boolean {
+  if (depth > 6) return false;
+  if (typeof value === 'string') {
+    if (isDeck(value)) return true;
+    try { return hasBuilderDeck(JSON.parse(value), depth + 1); }
+    catch { return false; }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const object = value as Record<string, unknown>;
+  return ['text', 'value', 'result', 'output'].some(key => hasBuilderDeck(object[key], depth + 1));
+}
 
 /** Keep the rich-result envelope intact when output and a2ui are siblings. */
 export function builderResultContent(result: unknown): string | null {

@@ -1343,7 +1343,8 @@ showSessionList && (
           }}>
             {builderTranscript(messages, executingJobId || generationTraceId).map(item => item.kind === 'activity'
               ? <BuilderRunActivity key={`activity-${item.jobId}`} jobId={item.jobId} running={item.jobId === executingJobId || item.jobId === generationTraceId} onOpenLogs={onOpenLogs} />
-              : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />)}
+              : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark}
+                sessionId={sessionId} groupId={groupId || undefined} model={selectedModel} />)}
           </List>
         )}
         </Box>

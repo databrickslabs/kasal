@@ -29,6 +29,8 @@ import { UiSurfaceResult } from './UiSurfaceResult';
 import { useBuilderResultSurface } from '../hooks/useBuilderResultSurface';
 import BuilderRichText from './BuilderRichText';
 import { hasRichHtml } from '../utils/resultContent';
+import { isDeck } from '../../../chat/utils/htmlDeck';
+import { saveBuilderDeck } from '../utils/builderDeckEditing';
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
 import type { ToolConfigNeededData } from '../../../../hooks/global/useCrewGenerationSSE';
 
@@ -37,6 +39,9 @@ interface ChatMessageItemProps {
   onOpenLogs?: (jobId: string) => void;
   appearance?: 'default' | 'assistant-panel';
   dark?: boolean;
+  sessionId?: string;
+  groupId?: string;
+  model?: string;
 }
 
 /** Pick the human-readable answer out of a result envelope object: the runner
@@ -174,8 +179,12 @@ const resultTextSx = {
   lineHeight: 1.5,
 } as const;
 
-export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs, appearance = 'default', dark = false }) => {
-  const { content: resultContent, restyle } = useBuilderResultSurface(message);
+export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs, appearance = 'default', dark = false, sessionId, groupId, model }) => {
+  const { content: resultContent, restyle, acceptContent } = useBuilderResultSurface(message);
+  const editDeck = sessionId && groupId && message.backendId && !message.isIntermediate
+    ? async (next: string, previous: string) => {
+      acceptContent(await saveBuilderDeck(sessionId, groupId, message.id, next, previous));
+    } : undefined;
   const panel = appearance === 'assistant-panel';
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
@@ -214,7 +223,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
     // Process content to remove ANSI codes
     const processedContent = stripAnsiEscapes(resultContent);
     const renderAnswer = (content: string) => hasRichHtml(content)
-      ? <BuilderRichText content={content} streaming={Boolean(message.isIntermediate)} />
+      ? <BuilderRichText content={content} streaming={Boolean(message.isIntermediate)} onDeckChange={editDeck} model={model} />
       : <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(content)} />;
 
     // Special handling for result messages
@@ -230,7 +239,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       if (surface) {
         return (
           <Box sx={{ width: '100%', maxWidth: '100%' }}>
-            {answerText && !hasRichHtml(answerText) && (
+            {answerText && (!hasRichHtml(answerText) || isDeck(answerText)) && (
               <Box data-testid="result-text" sx={{ ...resultTextSx, mb: 1.5 }}>
                 {renderAnswer(answerText)}
               </Box>
@@ -421,7 +430,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
     }
     
     if (message.type === 'assistant' && hasRichHtml(processedContent)) {
-      return <BuilderRichText content={processedContent} streaming={Boolean(message.isIntermediate)} />;
+      return <BuilderRichText content={processedContent} streaming={Boolean(message.isIntermediate)} onDeckChange={editDeck} model={model} />;
     }
     // Preserve source rendering for user-authored HTML.
     if (isHtmlDocument(processedContent)) {

@@ -59,8 +59,9 @@ async function withRetry<T>(
 }
 
 export class ChatHistoryServiceEnhanced {
-  static async updateMessageContent(messageId: string, content: string): Promise<void> {
-    await withRetry(() => chatHistoryClient.put(`/chat-history/messages/${encodeURIComponent(messageId)}`, { content }), 'updateMessageContent');
+  static async updateMessageContent(messageId: string, content: string, groupId?: string): Promise<void> {
+    await withRetry(() => chatHistoryClient.put(`/chat-history/messages/${encodeURIComponent(messageId)}`, { content },
+      groupId === undefined ? undefined : { headers: { group_id: groupId } }), 'updateMessageContent');
   }
 
   /**
