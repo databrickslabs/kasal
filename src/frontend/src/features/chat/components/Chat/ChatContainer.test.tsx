@@ -23,6 +23,7 @@ vi.mock('./ChatInput', () => ({
     onStopExecution?: () => void;
   }) => (
     <div>
+      <textarea aria-label="Chat composer" readOnly={props.disabled} />
       <button data-testid="chat-input" disabled={props.disabled} onClick={() => props.onSend('typed')}>
         input
       </button>
@@ -66,6 +67,19 @@ const baseProps = {
   selectedModel: '',
   onModelChange: vi.fn(),
 };
+
+it('focuses the replacement composer after the first send, without stealing focus on replies', () => {
+  const { rerender } = render(<ChatContainer {...baseProps} messages={[]} />);
+  const landingInput = screen.getByRole('textbox');
+  landingInput.focus();
+  fireEvent.click(screen.getByTestId('chat-input'));
+  rerender(<ChatContainer {...baseProps} messages={[msg('user')]} isLoading />);
+  expect(screen.getByRole('textbox')).not.toBe(landingInput);
+  expect(screen.getByRole('textbox')).toHaveFocus();
+  screen.getByTestId('msg-user').focus();
+  rerender(<ChatContainer {...baseProps} messages={[msg('user'), msg('reply')]} />);
+  expect(screen.getByTestId('msg-user')).toHaveFocus();
+});
 
 describe('ChatContainer — the run activity sits above its answer', () => {
   const trace = (id: string) => ({

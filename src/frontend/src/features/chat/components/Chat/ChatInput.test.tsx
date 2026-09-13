@@ -37,10 +37,12 @@ describe('ChatInput — typing & send', () => {
   it('types and sends on Enter (no shift)', () => {
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
+    ta().focus();
     fireEvent.change(ta(), { target: { value: 'hello' } });
     fireEvent.keyDown(ta(), { key: 'Enter', shiftKey: false });
     expect(onSend).toHaveBeenCalledWith('hello');
     expect(ta().value).toBe('');
+    expect(ta()).toHaveFocus();
   });
 
   it('Shift+Enter does not send', () => {
@@ -65,8 +67,27 @@ describe('ChatInput — typing & send', () => {
     fireEvent.change(ta(), { target: { value: 'click send' } });
     // the send button is the last button in the bottom row
     const buttons = container.querySelectorAll('button');
+    buttons[buttons.length - 1].focus();
     fireEvent.click(buttons[buttons.length - 1]);
     expect(onSend).toHaveBeenCalledWith('click send');
+    expect(ta()).toHaveFocus();
+  });
+
+  it('keeps focus through loading without allowing another send', () => {
+    const { rerender } = render(<ChatInput {...baseProps} />);
+    ta().focus();
+    fireEvent.change(ta(), { target: { value: 'hello' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    rerender(<ChatInput {...baseProps} disabled />);
+    expect(ta()).toHaveFocus();
+    expect(ta()).toHaveAttribute('readonly');
+    fireEvent.keyDown(ta(), { key: 'ArrowUp' });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    expect(ta()).toHaveValue('');
+    expect(baseProps.onSend).toHaveBeenCalledTimes(1);
+    rerender(<ChatInput {...baseProps} />);
+    expect(ta()).toHaveFocus();
+    expect(ta()).not.toHaveAttribute('readonly');
   });
 
   it('disabled prop blocks send and shows the loading spinner', () => {

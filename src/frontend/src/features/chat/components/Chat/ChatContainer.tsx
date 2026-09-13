@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useMemo, useCallback } from 'react';
 import { ChatMessage as ChatMessageType, ImageRef } from '../../types/chat';
 import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
@@ -153,6 +153,14 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onReopenPreview,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const focusAfterSend = useRef(false);
+  // The first send replaces the landing composer with the conversation composer.
+  useLayoutEffect(() => {
+    if (!focusAfterSend.current) return;
+    focusAfterSend.current = false;
+    containerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+  });
   // Suggestion chips drop text into the empty-state composer without sending; the
   // nonce lets re-picking the same chip re-apply (see ChatInput's prefill effect).
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined);
@@ -326,7 +334,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   // the eye finds next).
   if (isEmpty && !isExecuting) {
     return (
-      <div className="flex flex-col items-center justify-center h-full px-6">
+      <div ref={containerRef} className="flex flex-col items-center justify-center h-full px-6">
         <div className="kasal-landing-hero w-full max-w-3xl">
           {/* Greeting — the rotating composer placeholder advertises what Kasal can
               build (dashboards, presentations, quizzes, …), so no subtitle needed. */}
@@ -340,7 +348,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           <div className="relative">
             {reopenPreviewPill}
             <ChatInput
-              onSend={onSend}
+              onSend={(message, meta) => {
+                focusAfterSend.current = true;
+                onSend(message, meta);
+              }}
               disabled={isLoading}
               models={models}
               selectedModel={selectedModel}
@@ -363,7 +374,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
 
   // Conversation / executing state
   return (
-    <div className="relative flex flex-col h-full">
+    <div ref={containerRef} className="relative flex flex-col h-full">
       {/* Run/generation status is shown inline in the chat input (with a Stop
           control) rather than a top-of-screen banner — see ChatInput. */}
 

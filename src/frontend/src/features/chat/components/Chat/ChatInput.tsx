@@ -460,6 +460,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     // Reset the auto-grown height after sending. The textarea is always mounted
     // when this runs, so the ref is non-null.
     inputRef.current!.style.height = 'auto';
+    inputRef.current?.focus({ preventScroll: true });
   };
 
   // On-demand prompt improvement (the sparkle button) — rewrites the typed
@@ -502,6 +503,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
     if (showCommands) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -694,6 +696,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             value={value}
             // A pasted screenshot is the main way an image arrives.
             onPaste={(e) => {
+              if (disabled) return;
               const files = Array.from(e.clipboardData?.files || []).filter(isImageFile);
               if (files.length > 0) {
                 e.preventDefault();
@@ -708,9 +711,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={placeholderText}
-            disabled={disabled}
+            readOnly={disabled}
             rows={2}
-            className="w-full resize-none bg-transparent text-[15px] outline-none disabled:opacity-50 max-h-40 overflow-y-auto leading-relaxed"
+            className="w-full resize-none bg-transparent text-[15px] outline-none read-only:opacity-50 max-h-40 overflow-y-auto leading-relaxed"
             style={{
               color: 'var(--text-primary)',
               minHeight: '52px',
