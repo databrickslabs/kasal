@@ -53,8 +53,13 @@ _DEFAULT_GEN_HEARTBEAT = min(get_heartbeat_seconds(10), 60)
 
 def _parse_last_event_id(request: Request) -> Optional[int]:
     """Extract Last-Event-ID from request headers (sent by EventSource on reconnect)."""
-    raw = request.headers.get("last-event-id")
-    if raw:
+    # Native retries send a header; a newly constructed EventSource cannot
+    # set headers, so allow its replay cursor in the URL. Ownership checks on
+    # the stream and replay buffer apply identically to both transports.
+    raw = request.headers.get("last-event-id") or request.query_params.get(
+        "last_event_id"
+    )
+    if isinstance(raw, str) and raw:
         try:
             return int(raw)
         except (ValueError, TypeError):

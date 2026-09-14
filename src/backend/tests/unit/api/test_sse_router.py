@@ -471,6 +471,23 @@ def test_parse_last_event_id_no_header_returns_none():
     assert result is None
 
 
+@pytest.mark.parametrize(
+    "header,query,expected",
+    [(None, "42", 42), ("43", "42", 43), (None, "invalid", None)],
+)
+def test_replacement_stream_cursor(header, query, expected):
+    from starlette.requests import Request
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"last-event-id", header.encode())] if header else [],
+            "query_string": f"last_event_id={query}".encode(),
+        }
+    )
+    assert _parse_last_event_id(request) == expected
+
+
 # ── stream_execution_updates ──────────────────────────────────────────────────
 
 

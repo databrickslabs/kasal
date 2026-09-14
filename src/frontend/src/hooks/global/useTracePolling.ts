@@ -18,12 +18,13 @@
  *
  * ACTIVATION STRATEGY:
  *   Polling always starts on jobCreated (after a short delay to give SSE a chance).
- *   If SSE delivers a real message for the active job, polling is stopped.
+ *   Early SSE traces defer polling; silence or disconnection activates it.
  *   This avoids relying on the flapping sseConnected state.
  */
 
 import { useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '../../shared/api/client';
+import { recordConnectionDiagnostic } from '../../utils/connectionDiagnostics';
 import { SSE_ENABLED } from '../../utils/sseTransport';
 import { HITLService } from '../../api/execution/HITLService';
 import { useRunStatusStore } from '../../store/runStatus';
@@ -40,6 +41,8 @@ const POLL_INTERVAL_MS = 2000;
 const HIDDEN_POLL_INTERVAL_MS = 15000;
 /** Delay before starting polling after jobCreated — gives SSE a chance to work */
 const SSE_GRACE_PERIOD_MS = 4000;
+const SSE_SILENCE_MS = 15000;
+const POLL_TIMEOUT_MS = 15000;
 /**
  * Consecutive 404s on the /executions/{id} status probe before we conclude the
  * job is gone (deleted, or it belongs to a workspace you no longer have
@@ -61,13 +64,14 @@ const HITL_OUTPUT_PREVIEW_CHARS = 500;
 
 /**
  * Hook that polls for execution state when SSE is unavailable.
- * Always activates on jobCreated; stops if SSE proves it's working.
+ * Uses a grace period for SSE, then reconciles on silence or disconnection.
  */
-export const useTracePolling = () => {
+export const useTracePolling = (connectionState = 'connected') => {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
-  const isPollingRef = useRef(false);
+  const pollControllerRef = useRef<AbortController | null>(null);
+  const latestPollRef = useRef<AbortController | null>(null);
   /** Highest trace id seen — the server-side `since_id` cursor. */
   const lastTraceIdRef = useRef<number>(0);
   /** execution_type from the status probe — gates run-type-specific requests. */
@@ -75,8 +79,6 @@ export const useTracePolling = () => {
   const lastStatusRef = useRef<string | null>(null);
   /** Consecutive 404s on the status probe — a gone job (deleted / different group). */
   const notFoundCountRef = useRef(0);
-  /** Set to true if SSE delivers a real trace/execution_update for the active job */
-  const sseProvenWorkingRef = useRef(false);
   /** Approval ids already announced — each gate fires 'hitlRequest' exactly once. */
   const seenApprovalIdsRef = useRef<Set<string>>(new Set());
   /** Poll tick counter driving the HITL probe cadence. */
@@ -96,15 +98,15 @@ export const useTracePolling = () => {
    * dialog) lights up identically with zero changes. Deduped by approval id
    * so each gate fires once per page load.
    */
-  const pollHitlStatus = useCallback(async (jobId: string) => {
+  const pollHitlStatus = useCallback(async (jobId: string, signal: AbortSignal) => {
     try {
-      const status = await HITLService.getExecutionHITLStatus(jobId);
+      const status = await HITLService.getExecutionHITLStatus(jobId, signal);
+      if (signal.aborted) return;
       const pending = status?.pending_approval;
       if (!status?.has_pending_approval || !pending || pending.is_expired) return;
 
       const key = String(pending.id);
       if (seenApprovalIdsRef.current.has(key)) return;
-      seenApprovalIdsRef.current.add(key);
 
       // Rebuild the flat shape the SSE event carries: the backend spreads
       // gate_config (kind, tool_name, tool_args, agent_role, task_name,
@@ -127,7 +129,7 @@ export const useTracePolling = () => {
         pending.has_previous_crew_output
       ) {
         try {
-          const full = await HITLService.getApproval(pending.id, 'ui');
+          const full = await HITLService.getApproval(pending.id, 'ui', signal);
           if (typeof full?.previous_crew_output === 'string') {
             detail.output_preview = full.previous_crew_output.slice(0, HITL_OUTPUT_PREVIEW_CHARS);
           }
@@ -136,7 +138,9 @@ export const useTracePolling = () => {
         }
       }
 
+      if (signal.aborted) return;
       console.log(`[TracePolling] Pending HITL approval ${key} for job ${jobId} — dispatching hitlRequest`);
+      seenApprovalIdsRef.current.add(key);
       window.dispatchEvent(new CustomEvent('hitlRequest', { detail }));
     } catch {
       /* best-effort probe — never break the main poll */
@@ -145,9 +149,18 @@ export const useTracePolling = () => {
 
   const pollStates = useCallback(async () => {
     const jobId = activeJobIdRef.current;
-    if (!jobId || isPollingRef.current) return;
+    if (!jobId || pollControllerRef.current) return;
 
-    isPollingRef.current = true;
+    const controller = new AbortController();
+    pollControllerRef.current = controller;
+    latestPollRef.current = controller;
+    const { signal } = controller;
+    const deadline = setTimeout(() => {
+      recordConnectionDiagnostic({ kind: 'poll-timeout' });
+      controller.abort();
+      if (pollControllerRef.current === controller) pollControllerRef.current = null;
+    }, POLL_TIMEOUT_MS);
+    signal.addEventListener('abort', () => clearTimeout(deadline), { once: true });
     try {
       const isFlow = useFlowExecutionStore.getState().currentJobId === jobId;
 
@@ -160,18 +173,20 @@ export const useTracePolling = () => {
       // resolved as execution_id="history" and just 404'd, adding noise without ever
       // matching the job.
       const requests: Promise<any>[] = [
-        apiClient.get(`/executions/${jobId}`),
+        apiClient.get(`/executions/${jobId}`, { signal }),
         apiClient.get(`/traces/job/${jobId}`, {
+          signal,
           params: { limit: 50, since_id: lastTraceIdRef.current }
         }),
       ];
 
       if (isFlow) {
-        requests.push(apiClient.get(`/traces/job/${jobId}/crew-node-states`));
+        requests.push(apiClient.get(`/traces/job/${jobId}/crew-node-states`, { signal }));
       }
 
       console.log(`[TracePolling] Polling | job=${jobId} | isFlow=${isFlow} | since_id=${lastTraceIdRef.current}`);
       const results = await Promise.allSettled(requests);
+      if (signal.aborted) return;
 
       // --- 1. Process execution status ---
       if (results[0].status === 'fulfilled') {
@@ -183,10 +198,8 @@ export const useTracePolling = () => {
         if (execData?.status) {
           const status = execData.status.toLowerCase();
 
-          if (status !== lastStatusRef.current) {
-            lastStatusRef.current = status;
-            console.log(`[TracePolling] Status change: ${status} | job=${jobId}`);
-
+          const terminal = ['completed', 'failed', 'stopped', 'cancelled'].includes(status);
+          const publishStatus = () => {
             useRunStatusStore.getState().handleSSEUpdate({
               job_id: jobId,
               status: execData.status,
@@ -199,17 +212,22 @@ export const useTracePolling = () => {
               group_id: execData.group_id,
               execution_type: execData.execution_type,
             });
+          };
+          if (!terminal && status !== lastStatusRef.current) {
+            lastStatusRef.current = status;
+            publishStatus();
           }
 
           // If job finished, do a final poll and stop
-          if (['completed', 'failed', 'stopped', 'cancelled'].includes(status)) {
+          if (terminal) {
             console.log(`[TracePolling] Job ${jobId} finished (${status}), final trace fetch`);
             try {
               const finalResp = await apiClient.get(`/traces/job/${jobId}`, {
+                signal,
                 params: { limit: 500, since_id: lastTraceIdRef.current }
               });
               const finalTraces = finalResp.data?.traces;
-              if (Array.isArray(finalTraces) && finalTraces.length > 0) {
+              if (!signal.aborted && Array.isArray(finalTraces) && finalTraces.length > 0) {
                 console.log(`[TracePolling] Final fetch: ${finalTraces.length} traces`);
                 // ONE store update for the whole batch (was: a Map copy per trace).
                 useRunStatusStore.getState().addTraces(jobId, finalTraces);
@@ -224,6 +242,9 @@ export const useTracePolling = () => {
               }
             } catch { /* non-fatal */ }
 
+            // A trace timeout must not hide a known terminal status. A newer
+            // poll/job, however, owns the state and must not be stopped here.
+            if (latestPollRef.current !== controller) return;
             // Stop polling inline
             if (intervalRef.current) {
               clearInterval(intervalRef.current);
@@ -232,6 +253,7 @@ export const useTracePolling = () => {
             activeJobIdRef.current = null;
             lastTraceIdRef.current = 0;
             lastStatusRef.current = null;
+            publishStatus();
             console.log(`[TracePolling] Stopped after job finished`);
             return;
           }
@@ -283,7 +305,8 @@ export const useTracePolling = () => {
         pollTickRef.current % HITL_POLL_EVERY_N_TICKS === 0 ||
         lastStatusRef.current === 'waiting_for_approval'
       ) {
-        await pollHitlStatus(jobId);
+        await pollHitlStatus(jobId, signal);
+        if (signal.aborted) return;
       }
 
       // --- 2. Process new traces (incremental via since_id cursor) ---
@@ -342,7 +365,8 @@ export const useTracePolling = () => {
       // taskExecutionStore for them — skip the extra request per tick.
       if (!isFlow && executionTypeRef.current !== 'agent') {
         try {
-          const taskResp = await apiClient.get(`/traces/job/${jobId}/task-states`);
+          const taskResp = await apiClient.get(`/traces/job/${jobId}/task-states`, { signal });
+          if (signal.aborted) return;
           const taskStates = taskResp.data;
           if (taskStates && typeof taskStates === 'object' && Object.keys(taskStates).length > 0) {
             const store = useTaskExecutionStore.getState();
@@ -362,7 +386,8 @@ export const useTracePolling = () => {
     } catch (error) {
       console.log('[TracePolling] Poll error (non-fatal):', error);
     } finally {
-      isPollingRef.current = false;
+      clearTimeout(deadline);
+      if (pollControllerRef.current === controller) pollControllerRef.current = null;
     }
   }, [pollHitlStatus]);
 
@@ -380,13 +405,21 @@ export const useTracePolling = () => {
     intervalRef.current = setInterval(pollStates, cadence);
   }, [pollStates]);
 
+  const cancelPoll = useCallback(() => {
+    latestPollRef.current = null;
+    pollControllerRef.current?.abort();
+    pollControllerRef.current = null;
+  }, []);
+
   const startPolling = useCallback((jobId: string) => {
+    cancelPoll();
+    if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
+    graceTimerRef.current = null;
     activeJobIdRef.current = jobId;
     lastTraceIdRef.current = 0;
     lastStatusRef.current = null;
     notFoundCountRef.current = 0;
     executionTypeRef.current = null;
-    sseProvenWorkingRef.current = false;
     pollTickRef.current = 0;
     // seenApprovalIdsRef is intentionally NOT cleared: approval ids are
     // globally unique DB rows, and re-announcing one after a poll restart
@@ -396,9 +429,10 @@ export const useTracePolling = () => {
     // Poll immediately, then at intervals
     pollStates();
     armInterval();
-  }, [pollStates, armInterval]);
+  }, [pollStates, armInterval, cancelPoll]);
 
   const stopPolling = useCallback(() => {
+    cancelPoll();
     if (intervalRef.current) {
       console.log('[TracePolling] ■ Stopping polling');
       clearInterval(intervalRef.current);
@@ -414,7 +448,13 @@ export const useTracePolling = () => {
     notFoundCountRef.current = 0;
     executionTypeRef.current = null;
     pollTickRef.current = 0;
-  }, []);
+  }, [cancelPoll]);
+
+  useEffect(() => {
+    if (connectionState !== 'connected' && activeJobIdRef.current && !intervalRef.current) {
+      startPolling(activeJobIdRef.current);
+    }
+  }, [connectionState, startPolling]);
 
   // Listen for job lifecycle events
   useEffect(() => {
@@ -424,7 +464,9 @@ export const useTracePolling = () => {
 
       console.log(`[TracePolling] jobCreated received | job=${jobId} | sseConnected=${useRunStatusStore.getState().sseConnected}`);
 
-      // SSE is disabled (Databricks Apps) — it's the primary transport now, so
+      stopPolling();
+
+      // SSE is disabled — it's the primary transport now, so
       // poll immediately instead of waiting out the SSE grace period.
       if (!SSE_ENABLED) {
         activeJobIdRef.current = jobId;
@@ -432,9 +474,7 @@ export const useTracePolling = () => {
         return;
       }
 
-      // Always schedule polling after a grace period.
-      // If SSE proves it works (delivers a real message), we cancel.
-      sseProvenWorkingRef.current = false;
+      // Early traces extend this grace period with a silence watchdog.
       activeJobIdRef.current = jobId;
 
       if (graceTimerRef.current) {
@@ -443,16 +483,12 @@ export const useTracePolling = () => {
 
       graceTimerRef.current = setTimeout(() => {
         graceTimerRef.current = null;
-        if (sseProvenWorkingRef.current) {
-          console.log(`[TracePolling] SSE delivered data during grace period, skipping polling`);
-          return;
-        }
         console.log(`[TracePolling] SSE did NOT deliver data in ${SSE_GRACE_PERIOD_MS}ms, activating polling fallback`);
         startPolling(jobId);
       }, SSE_GRACE_PERIOD_MS);
     };
 
-    // If SSE delivers a real trace for the active job, it's working — stop polling
+    // Early SSE traces defer polling while traffic keeps arriving.
     const handleSSETrace = (event: CustomEvent) => {
       const detail = event.detail;
       if (!detail?.trace || !activeJobIdRef.current) return;
@@ -462,8 +498,13 @@ export const useTracePolling = () => {
       // might have been dispatched by us. But if polling hasn't started yet (grace period),
       // then this trace definitely came from SSE.
       if (!intervalRef.current && detail.jobId === activeJobIdRef.current) {
-        console.log(`[TracePolling] SSE delivered trace during grace period — SSE is working`);
-        sseProvenWorkingRef.current = true;
+        // Keep a watchdog after early success: a later silent stream must
+        // not suppress REST reconciliation for the rest of the run.
+        if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
+        graceTimerRef.current = setTimeout(() => {
+          graceTimerRef.current = null;
+          if (activeJobIdRef.current) startPolling(activeJobIdRef.current);
+        }, SSE_SILENCE_MS);
       }
     };
 
@@ -497,7 +538,12 @@ export const useTracePolling = () => {
     // Re-pace polling when tab visibility flips: hidden → slow heartbeat,
     // visible → immediate poll + fast cadence. Only acts while a poll is live.
     const handleVisibilityChange = () => {
-      if (!activeJobIdRef.current || !intervalRef.current) return;
+      if (!activeJobIdRef.current) return;
+      if (!intervalRef.current && !document.hidden) {
+        startPolling(activeJobIdRef.current);
+        return;
+      }
+      if (!intervalRef.current) return;
       armInterval();
       if (!document.hidden) {
         console.log('[TracePolling] Tab visible again — polling immediately');
@@ -505,6 +551,7 @@ export const useTracePolling = () => {
       }
     };
 
+    window.addEventListener('online', handleVisibilityChange);
     window.addEventListener('jobCreated', handleJobCreated as EventListener);
     window.addEventListener('traceUpdate', handleSSETrace as EventListener);
     window.addEventListener('jobCompleted', handleJobCompleted as EventListener);
@@ -516,6 +563,7 @@ export const useTracePolling = () => {
     console.log('[TracePolling] Hook mounted, event listeners registered');
 
     return () => {
+      window.removeEventListener('online', handleVisibilityChange);
       window.removeEventListener('jobCreated', handleJobCreated as EventListener);
       window.removeEventListener('traceUpdate', handleSSETrace as EventListener);
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);

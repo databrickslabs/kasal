@@ -185,12 +185,13 @@ export class HITLService {
    */
   static async getApproval(
     approvalId: number,
-    view?: 'ui'
+    view?: 'ui',
+    signal?: AbortSignal
   ): Promise<HITLApprovalResponse> {
     const url = `/hitl/approvals/${approvalId}`;
     const response = view
-      ? await apiClient.get<HITLApprovalResponse>(url, { params: { view } })
-      : await apiClient.get<HITLApprovalResponse>(url);
+      ? await apiClient.get<HITLApprovalResponse>(url, { params: { view }, ...(signal ? { signal } : {}) })
+      : await apiClient.get<HITLApprovalResponse>(url, ...(signal ? [{ signal }] : []));
     return response.data;
   }
 
@@ -226,10 +227,12 @@ export class HITLService {
    * Get HITL status for a specific execution.
    */
   static async getExecutionHITLStatus(
-    executionId: string
+    executionId: string,
+    signal?: AbortSignal
   ): Promise<ExecutionHITLStatus> {
     const response = await apiClient.get<ExecutionHITLStatus>(
-      `/hitl/execution/${executionId}`
+      `/hitl/execution/${executionId}`,
+      ...(signal ? [{ signal }] : [])
     );
     return response.data;
   }

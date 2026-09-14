@@ -79,7 +79,7 @@ class MockEventSource {
 
   // Helper to simulate error
   simulateError() {
-    this.readyState = MockEventSource.CLOSED;
+    this.readyState = MockEventSource.CONNECTING;
     if (this.onerror) {
       this.onerror(new Event('error'));
     }
@@ -332,10 +332,8 @@ describe('useSSE', () => {
     });
   });
 
-  // The hook delegates reconnection to the browser's native EventSource (it does
-  // NOT manually create new connections or use timer-based backoff). It only
-  // tracks consecutive errors and gives up — closing the connection — once
-  // maxReconnectAttempts is exceeded.
+  // Transient errors use native retries; closed/stalled recovery is covered
+  // separately in sseRecovery.test.ts.
   describe('Reconnection Logic', () => {
     it('does not manually recreate the EventSource on a transient error', async () => {
       const onMessage = vi.fn();
