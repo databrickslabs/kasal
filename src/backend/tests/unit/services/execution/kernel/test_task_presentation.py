@@ -12,6 +12,31 @@ from src.services.execution.kernel.task_builder import build_task_args
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "expected",
+    [
+        "An implementation feasibility assessment.",
+        "A structured research report containing at least 8 identified crewAI "
+        "use cases for ecommerce, each with: use case name, problem statement, "
+        "proposed agent workflow description, recommended agent roles and "
+        "configurations, expected business impact metrics, and implementation "
+        "feasibility assessment.",
+    ],
+)
+async def test_research_assessment_does_not_inject_quiz_contract(expected):
+    args = await build_task_args(
+        {
+            "description": "Research crewAI use cases for ecommerce.",
+            "expected_output": expected,
+        },
+        MagicMock(),
+        [],
+    )
+    assert "The app builds the quiz" not in args["description"]
+    assert "four options and the correct answer" not in args["expected_output"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "prompt,kind",
     [
         ("Create a quiz about LLMs", "quiz"),
