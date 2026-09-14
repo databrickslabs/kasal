@@ -1058,17 +1058,31 @@ class TestGetAuthContext:
             assert await get_auth_context() is None
 
     @pytest.mark.asyncio
-    async def test_no_workspace_host(self):
+    @pytest.mark.parametrize("in_app", [False, True])
+    async def test_no_workspace_host(self, in_app):
         s = self._save()
         _databricks_auth._workspace_host = None
         try:
-            with patch.object(
-                _databricks_auth,
-                "_load_config",
-                new_callable=AsyncMock,
-                return_value=True,
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.core.databricks_app.is_databricks_app", return_value=in_app),
+                patch("src.utils.databricks_auth.logger") as log,
             ):
                 assert await get_auth_context() is None
+                if in_app:
+                    log.error.assert_called_once_with(
+                        "No workspace host available after config load"
+                    )
+                else:
+                    log.error.assert_not_called()
+                    log.debug.assert_any_call(
+                        "Databricks authentication unavailable: no workspace configured"
+                    )
         finally:
             self._restore(s)
 
@@ -1294,9 +1308,9 @@ class TestGetAuthContext:
                 result = (
                     await get_auth_context()
                 )  # no group_id param → searches all groups
-            assert (
-                result is not None
-            ), "PAT under a non-primary group should still resolve"
+            assert result is not None, (
+                "PAT under a non-primary group should still resolve"
+            )
             assert result.auth_method == "pat" and result.token == "pat_from_g3"
         finally:
             invalidate_pat_cache()

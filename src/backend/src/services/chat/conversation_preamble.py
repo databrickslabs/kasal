@@ -120,13 +120,22 @@ async def build_conversation_preamble(
             if getattr(m, "timestamp", None) is None or m.timestamp > summary_upto
         ]
 
-    # Drop the current turn: everything from the LAST 'user' row onward is
-    # this run (that user message + its placeholder assistant rows).
-    last_user = -1
-    for i, m in enumerate(messages):
-        if getattr(m, "message_type", "") == "user":
-            last_user = i
-    prior = messages[:last_user] if last_user >= 0 else list(messages)
+    # Only the identified current user row is a safe boundary. A missing/late
+    # save (or an older caller without an ID) must not erase the last completed
+    # exchange. In particular, a redesign needs the deck already on screen.
+    inputs = getattr(config, "inputs", None) or {}
+    current_id = inputs.get("chat_user_message_id")
+    boundary = next(
+        (
+            i
+            for i, m in enumerate(messages)
+            if current_id
+            and getattr(m, "id", None) == current_id
+            and getattr(m, "message_type", "") == "user"
+        ),
+        len(messages),
+    )
+    prior = messages[:boundary]
 
     placeholders = {"thinking...", "[ui-card]", ""}
     # Real turns, in order: user/assistant rows minus placeholders and cards.

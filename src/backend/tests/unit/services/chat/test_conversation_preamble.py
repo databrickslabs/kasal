@@ -33,8 +33,16 @@ def _history_patches(messages):
     )
 
 
-async def _preamble(messages):
-    config = SimpleNamespace(session_id="sess-1")
+async def _preamble(messages, current_id="auto"):
+    for i, message in enumerate(messages):
+        message.id = f"message-{i}"
+    if current_id == "auto":
+        current_id = next(
+            (m.id for m in reversed(messages) if m.message_type == "user"), None
+        )
+    config = SimpleNamespace(
+        session_id="sess-1", inputs={"chat_user_message_id": current_id}
+    )
     ctx = SimpleNamespace(group_ids=["g1"])
     p_sess, p_repo = _history_patches(messages)
     with p_sess, p_repo:
@@ -42,6 +50,42 @@ async def _preamble(messages):
 
 
 class TestTheAnswerOnScreenIsKeptWhole:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("current_id", [None, "not-saved-yet"])
+    async def test_redesign_keeps_original_deck_when_current_user_is_missing(
+        self, current_id
+    ):
+        outline = "How LLMs work for a 10-year-old. Slide 1: Words. Slide 25: Recap."
+        out = await _preamble(
+            [
+                _msg("user", "Explain LLMs to a 10-year-old in up to 25 slides"),
+                _msg("assistant", outline),
+                _msg("assistant", "[ui-card]"),
+            ],
+            current_id=current_id,
+        )
+        assert "Explain LLMs to a 10-year-old" in out
+        assert outline in out
+
+    @pytest.mark.asyncio
+    async def test_identified_turn_is_boundary_even_when_another_user_turn_follows(
+        self,
+    ):
+        out = await _preamble(
+            [
+                _msg("user", "Explain LLMs to a 10-year-old"),
+                _msg("assistant", "Original LLM presentation"),
+                _msg("user", "Make the design nicer"),
+                _msg("assistant", "partial current response"),
+                _msg("user", "A later request"),
+            ],
+            current_id="message-2",
+        )
+        assert "Original LLM presentation" in out
+        assert "Make the design nicer" not in out
+        assert "partial current response" not in out
+        assert "A later request" not in out
+
     @pytest.mark.asyncio
     async def test_most_recent_answer_is_whole_while_older_ones_are_stubs(self):
         old_report = "OLD " * 200  # 800 chars — over the 240 stub cap

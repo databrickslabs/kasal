@@ -51,6 +51,7 @@ export interface DispatcherRequest {
   // auto-executed with the chat's own memory scope + attached data sources,
   // without a frontend round-trip. AgentBuilder doesn't send these.
   session_id?: string;
+  user_message_id?: string;
   memory_workspace_scope?: boolean;
   disable_memory?: boolean;
   mcp_servers?: string[];
@@ -78,6 +79,7 @@ export interface DispatchRunSettings {
   auto_execute?: boolean;
   execution_effort?: EffortSettings;
   session_id?: string;
+  user_message_id?: string;
   memory_workspace_scope?: boolean;
   disable_memory?: boolean;
   mcp_servers?: string[];

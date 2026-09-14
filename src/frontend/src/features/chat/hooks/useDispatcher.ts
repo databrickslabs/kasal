@@ -26,6 +26,7 @@ export type PlanData = NonNullable<CatalogLoadResult['plan']>;
 export type FlowData = NonNullable<FlowLoadResult['flow']>;
 
 interface UseDispatcherOptions {
+  saveUserMessage: (sessionId: string, content: string, extra?: Partial<ChatMessage>) => Promise<string>;
   addMessage: (
     role: ChatMessage['role'],
     content: string,
@@ -319,8 +320,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
         return;
       }
 
-      options.addMessage(
-        'user',
+      const userMessageSaved = options.saveUserMessage(
+        originSessionId,
         // Show a friendly label (e.g. "Open crew: X" from the library rail)
         // while still dispatching the real command/message below.
         displayAs || message,
@@ -357,6 +358,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       }
 
       try {
+        const userMessageId = await userMessageSaved;
         // ChatMode run settings: the backend auto-executes the generated crew
         // with the chat's own memory scope + attached MCP data sources, so the
         // run survives a session switch before the plan finishes. Read at
@@ -374,6 +376,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
           auto_execute: true,
           execution_effort: useChatEffortStore.getState().settings,
           session_id: originSessionId || undefined,
+          user_message_id: userMessageId,
           memory_workspace_scope: execState.workspaceMemory,
           disable_memory: !execState.memoryEnabled,
           mcp_servers: execState.selectedMcpServers,

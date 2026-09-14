@@ -350,6 +350,7 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
 
   // --- Dispatcher ---
   const dispatcher = useDispatcher({
+    saveUserMessage: (sessionId, content, extra) => useSessionStore.getState().saveUserMessage(sessionId, content, extra),
     addMessage,
     addMessageToTargetSession,
     updateMessage,

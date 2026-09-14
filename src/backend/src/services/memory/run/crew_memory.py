@@ -705,8 +705,8 @@ class CrewMemoryService:
         """Pick an LLM for memory analysis so we don't implicitly need OpenAI.
 
         Preference order: explicit crew ``manager_llm`` > first agent's ``llm``
-        > ``None`` (lets ``Memory`` default to ``gpt-4o-mini`` if the caller
-        has ``OPENAI_API_KEY`` set).
+        > ``None``. The async resolver normally supplies the configured model;
+        this is the fallback when that resolution fails.
         """
         manager = crew_kwargs.get("manager_llm")
         if manager is not None:
@@ -730,13 +730,17 @@ class CrewMemoryService:
         on the placeholder key. Resolve it through ``LLMManager`` here so ``Memory``
         receives a ready-to-call instance (provider prefix + api_key + api_base).
 
-        Returns ``None`` when no override is set — callers then fall back to the
-        crew's own configured LLM instance via ``_resolve_memory_llm``.
+        With no analysis override, use the session's selected model or Kasal's
+        configured default. Session memory and maintenance have no crew agents
+        to borrow an LLM from, and the memory engine does not create one itself.
+        Resolution failures still fall back to the crew's configured instance.
         """
         tuning = getattr(memory_config, "cognitive_config", None)
         model_name = getattr(tuning, "memory_llm_model", None) if tuning else None
         if not model_name:
-            return None
+            from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+            model_name = self.config.get("model") or DEFAULT_ENGINE_MODEL
 
         group_id = self.config.get("group_id") or "default"
         try:
@@ -744,16 +748,14 @@ class CrewMemoryService:
 
             llm = await LLMManager.configure_kasal_llm(model_name, group_id)
             logger.info(
-                "Resolved memory LLM override '%s' to a configured instance (group=%s)",
+                "Resolved memory analysis LLM '%s' to a configured instance (group=%s)",
                 model_name,
                 group_id,
             )
             return llm
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
+        except Exception as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
             logger.warning(
-                "Could not build memory LLM override '%s' (%s); "
+                "Could not build memory analysis LLM '%s' (%s); "
                 "falling back to the crew's LLM instance",
                 model_name,
                 exc,

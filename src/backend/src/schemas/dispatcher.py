@@ -84,6 +84,10 @@ class DispatcherRequest(BaseModel):
         None,
         description="Chat session id — scopes session-only memory recall for the run",
     )
+    user_message_id: Optional[str] = Field(
+        None,
+        description="Saved user message that starts this turn; used to bound prior history",
+    )
     memory_workspace_scope: Optional[bool] = Field(
         True,
         description="True/None = workspace-wide memory recall, False = restrict to this session",

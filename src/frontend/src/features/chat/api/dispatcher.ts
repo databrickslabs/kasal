@@ -30,6 +30,7 @@ export async function dispatch(
       request.execution_effort = runSettings.execution_effort;
     }
     if (runSettings.session_id) request.session_id = runSettings.session_id;
+    if (runSettings.user_message_id) request.user_message_id = runSettings.user_message_id;
     if (runSettings.memory_workspace_scope !== undefined)
       request.memory_workspace_scope = runSettings.memory_workspace_scope;
     if (runSettings.disable_memory !== undefined)

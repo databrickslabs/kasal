@@ -22,6 +22,7 @@ const ASSISTANT_ID = 'assistant-id-1';
 
 function makeOptions(overrides: Record<string, unknown> = {}) {
   return {
+    saveUserMessage: vi.fn(async () => 'user-msg-id'),
     addMessage: vi.fn((_role: string, _content: string) => 'user-msg-id'),
     addMessageToTargetSession: vi.fn(() => 'targeted-msg-id'),
     updateMessage: vi.fn(),
@@ -57,6 +58,7 @@ const RUN_SETTINGS = {
   execution_effort: { tier: 'medium' },
   auto_execute: true,
   session_id: 'session-1',
+  user_message_id: 'user-msg-id',
   memory_workspace_scope: true,
   disable_memory: true,
   mcp_servers: [],
@@ -86,6 +88,33 @@ afterEach(() => {
 });
 
 describe('useDispatcher', () => {
+  it('waits for the user message to be saved and forwards its exact ID', async () => {
+    let saved!: (id: string) => void;
+    const opts = makeOptions({ saveUserMessage: vi.fn(() => new Promise<string>(resolve => { saved = resolve; })) });
+    mockedDispatch.mockResolvedValue(result('conversation', { message: 'Done' }));
+    const { result: hook } = renderHook(() => useDispatcher(opts));
+    let sending!: Promise<void>;
+    await act(async () => { sending = hook.current.sendMessage('Make the LLM slides nicer'); });
+    expect(mockedDispatch).not.toHaveBeenCalled();
+    await act(async () => { saved('redesign-user-message'); await sending; });
+    expect(mockedDispatch.mock.calls[0][3]).toEqual(expect.objectContaining({
+      session_id: 'session-1', user_message_id: 'redesign-user-message',
+    }));
+  });
+
+  it('does not launch a run when saving the user message fails and allows retry', async () => {
+    const save = vi.fn().mockRejectedValueOnce(new Error('Your message could not be saved')).mockResolvedValue('retry-message');
+    const opts = makeOptions({ saveUserMessage: save });
+    const { result: hook } = renderHook(() => useDispatcher(opts));
+    await act(async () => { await hook.current.sendMessage('Make the LLM slides nicer'); });
+    expect(mockedDispatch).not.toHaveBeenCalled();
+    expect(opts.updateMessageInTargetSession).toHaveBeenCalledWith('session-1', ASSISTANT_ID,
+      expect.objectContaining({ content: expect.stringContaining('could not be saved') }));
+    mockedDispatch.mockResolvedValue(result('conversation', { message: 'Done' }));
+    await act(async () => { await hook.current.sendMessage('Make the LLM slides nicer'); });
+    expect(mockedDispatch).toHaveBeenCalledTimes(1);
+  });
+
   it('exposes sendMessage, isDispatching ref, and setLastGenerated', () => {
     const { result: hook } = renderHook(() => useDispatcher(makeOptions()));
     expect(typeof hook.current.sendMessage).toBe('function');
@@ -279,7 +308,7 @@ describe('useDispatcher', () => {
       });
 
       // The chat shows the clean message (no suffix, no attachments).
-      expect(opts.addMessage).toHaveBeenCalledWith('user', 'build me a crew', undefined);
+      expect(opts.saveUserMessage).toHaveBeenCalledWith('session-1', 'build me a crew', undefined);
       // The dispatch payload carries the suffix + the tool.
       expect(mockedDispatch).toHaveBeenCalledWith(
         'build me a crew\n\n[Knowledge files attached: a.txt.]',
@@ -325,7 +354,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('build me a crew', 'm', undefined, undefined, ['a.txt', 'b.pdf']);
       });
 
-      expect(opts.addMessage).toHaveBeenCalledWith('user', 'build me a crew', {
+      expect(opts.saveUserMessage).toHaveBeenCalledWith('session-1', 'build me a crew', {
         attachments: ['a.txt', 'b.pdf'],
       });
     });
@@ -913,7 +942,7 @@ describe('useDispatcher', () => {
       });
 
       // The displayed user message uses displayAs, not the raw message.
-      expect(opts.addMessage).toHaveBeenCalledWith('user', 'Open crew: My Plan', undefined);
+      expect(opts.saveUserMessage).toHaveBeenCalledWith('session-1', 'Open crew: My Plan', undefined);
       // The raw message is still dispatched (slash command -> not augmented).
       expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined, RUN_SETTINGS, '/crew open p1');
     });

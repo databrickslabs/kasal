@@ -170,6 +170,8 @@ interface SessionActions {
     content: string,
     extra?: Partial<ChatMessage>,
   ) => string;
+  /** Append a user turn and wait for its server row before starting a run. */
+  saveUserMessage: (sessionId: string, content: string, extra?: Partial<ChatMessage>) => Promise<string>;
   addMessageToTargetSession: (
     targetSessionId: string,
     role: ChatMessage['role'],
@@ -359,6 +361,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await dbRenameSession(id, title);
     const allSessions = await dbListSessions(currentGroupId());
     set({ sessions: allSessions });
+  },
+
+  saveUserMessage: async (sessionId, content, extra) => {
+    const id = extra?.id || generateId();
+    const message: ChatMessage = { ...extra, id, role: 'user', content, timestamp: new Date(), sessionId };
+    if (get().currentSessionId === sessionId) {
+      set((state) => ({ messages: [...state.messages, message] }));
+    }
+    rememberExtras(id, message);
+    try {
+      await addMessageToSession(sessionId, message);
+    } catch {
+      throw new Error('Your message could not be saved. Please send it again before starting a run.');
+    }
+    if (!autoTitled.has(sessionId) && !content.startsWith('/')) {
+      autoTitled.add(sessionId);
+      // Title updates are cosmetic; the user turn is already durable.
+      void dbRenameSession(sessionId, content.slice(0, 40).trim() || 'New Chat')
+        .then(() => dbListSessions(currentGroupId()))
+        .then((sessions) => set({ sessions }))
+        .catch(() => autoTitled.delete(sessionId));
+    }
+    return id;
   },
 
   addMessage: (role, content, extra) => {

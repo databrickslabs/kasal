@@ -1164,7 +1164,14 @@ async def get_auth_context(
 
         # Ensure workspace host is set
         if not _databricks_auth._workspace_host:
-            logger.error("No workspace host available after config load")
+            from src.core.databricks_app import is_databricks_app
+
+            if is_databricks_app():
+                logger.error("No workspace host available after config load")
+            else:
+                logger.debug(
+                    "Databricks authentication unavailable: no workspace configured"
+                )
             return None
 
         workspace_url = _databricks_auth._workspace_host

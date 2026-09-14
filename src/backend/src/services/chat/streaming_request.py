@@ -22,6 +22,7 @@ def streaming_request_for(
         execution_effort=request.execution_effort,
         auto_execute=request.auto_execute,
         session_id=request.session_id,
+        user_message_id=request.user_message_id,
         memory_workspace_scope=request.memory_workspace_scope,
         disable_memory=request.disable_memory,
         answer_from_conversation=request.answer_from_conversation,
