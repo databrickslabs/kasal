@@ -21,10 +21,23 @@ from src.services.a2ui.compose import (
     resolve_catalog,
     resolve_directives,
     resolve_themes,
+    wants_rich_surface,
 )
 
 CATALOG = load_catalog()
 FULL = set(CATALOG["components"])
+
+
+def test_assessment_is_not_a_quiz_request():
+    for prompt in (
+        "Conduct an implementation feasibility assessment",
+        "Provide risk assessments for ecommerce use cases",
+        "Create a skills assessment",
+    ):
+        assert infer_deliverable(prompt) is None
+        assert not wants_rich_surface("Plain findings.", prompt)
+    assert infer_deliverable("Create a quiz about risk assessment") == "quiz"
+    assert infer_deliverable("Create quizzes about feasibility assessments") == "quiz"
 
 
 # --- presentation_needs_body (hollow-deck detection) -----------------------

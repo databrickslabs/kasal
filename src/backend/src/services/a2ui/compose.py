@@ -124,7 +124,6 @@ DELIVERABLE_KEYWORDS = [
     ("anki", "flashcards"),
     ("quizzes", "quiz"),
     ("quiz", "quiz"),
-    ("assessment", "quiz"),
     # Mindmap keywords MUST precede the bare "map" keyword below, else "mind map"
     # / "concept map" greedily match "map" and mis-route to the geographic map.
     ("mindmap", "mindmap"),
@@ -605,14 +604,16 @@ def a2ui_system_prompt(
         '4. Put long text / arrays in dataModel and reference them with {"path":"/key"} (JSON pointer).\n'
         "5. Choose surfaceKind from the USER'S REQUEST first: for a "
         "dashboard/metrics/charts use 'dashboard' with Grid+Chart/KeyValue/Table; for a "
-        "mind map use 'mindmap'; for a quiz/assessment/test use 'quiz' with ONE Quiz "
-        "component. For these SPECIAL deliverables, use a 'dashboard' or 'document' "
+        "mind map use 'mindmap'; for an explicitly requested quiz use 'quiz' with ONE Quiz "
+        "component. Do not infer a quiz from the word assessment: feasibility, risk, "
+        "and business assessments are prose/document content, unless the user explicitly "
+        "requests a quiz. For these SPECIAL deliverables, use a 'dashboard' or 'document' "
         "surface whose ROOT is the matching component (see rule 10): a photo "
         "album/image gallery -> ONE Album; a forecast/projection/prediction over time "
         "-> ONE Forecast; a relationship/network/dependency graph -> ONE Graph; a "
         "sequence/interaction diagram -> ONE Sequence. "
         "Only when NONE of the above fit, use 'document' with Markdown.\n"
-        "6. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
+        "6. For an explicitly requested quiz build ONE Quiz component whose 'questions' is a list of "
         "REAL, answerable questions — each {question, options:[4 distinct strings], "
         "answer:<0-based index of the correct option>, explanation:<one sentence why>}. "
         "Produce the ACTUAL questions and options (as many as the request asks for, else "
@@ -719,7 +720,6 @@ RICH_INTENT = (
     "concept map",
     "quiz",
     "quizzes",
-    "assessment",
     "trivia",
     "exam",
     "test my",
