@@ -429,7 +429,7 @@ describe('getErrorMessage helper', () => {
     onError({ isFatal: true });
 
     expect(mocks.mockToast.error).toHaveBeenCalledWith(
-      expect.stringContaining('refresh'),
+      expect.stringContaining('Using polling'),
       expect.any(Object)
     );
   });

@@ -21,7 +21,7 @@ import { createTraceBatcher } from '../../features/executions/trace/lib/traceBat
 const getErrorMessage = (error: any, jobId: string): string => {
   // Check for fatal errors (max reconnection attempts)
   if (error.isFatal) {
-    return `Lost connection to job ${jobId}. Please refresh the page to reconnect.`;
+    return 'Live execution stream unavailable. Using polling for run updates.';
   }
 
   // Check for parsing errors
@@ -151,7 +151,7 @@ const GlobalSSEConnection: React.FC = () => {
 
   // Trace polling fallback — activates automatically when SSE fails to deliver
   // data within a grace period after job creation.
-  useTracePolling();
+  useTracePolling(connectionState);
 
   useEffect(() => {
     console.log(`[GlobalSSE] Connection state: ${connectionState}`);
