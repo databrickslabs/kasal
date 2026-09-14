@@ -308,9 +308,9 @@ class TestSetupStorageDirectory:
                 # Capture INSIDE the patch.dict block — it reverts os.environ
                 # (including CREWAI_STORAGE_DIR) when the context exits.
                 value = os.environ.get("CREWAI_STORAGE_DIR")
-                assert (
-                    value is not None
-                ), "setup_storage_directory did not set CREWAI_STORAGE_DIR"
+                assert value is not None, (
+                    "setup_storage_directory did not set CREWAI_STORAGE_DIR"
+                )
                 return value
 
     def test_sets_default_storage_dir(self):
@@ -925,15 +925,50 @@ class TestMemoryLlmOverride:
     LLM and 401 on the placeholder key (regression for the memory-LLM override)."""
 
     @pytest.mark.asyncio
-    async def test_resolve_returns_none_without_override(self):
+    @pytest.mark.parametrize("has_tuning", [True, False])
+    async def test_resolve_uses_default_without_override(self, has_tuning):
         service = CrewMemoryService({"group_id": "grp1"})
         mem_cfg = MagicMock()
-        mem_cfg.cognitive_config = MagicMock(memory_llm_model=None)
-        assert await service.resolve_memory_llm_override(mem_cfg) is None
+        mem_cfg.cognitive_config = (
+            MagicMock(memory_llm_model=None) if has_tuning else None
+        )
+        fake_llm = MagicMock(name="DefaultLLM")
+        with (
+            patch("src.utils.model_config.DEFAULT_ENGINE_MODEL", "configured-default"),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new=AsyncMock(return_value=fake_llm),
+            ) as configure,
+        ):
+            result = await service.resolve_memory_llm_override(mem_cfg)
+        configure.assert_awaited_once_with("configured-default", "grp1")
+        assert result is fake_llm
+
+    @pytest.mark.asyncio
+    async def test_resolve_uses_session_model_without_override(self):
+        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+
+        service = CrewMemoryService({"group_id": "grp1", "model": "session-model"})
+        mem_cfg = MemoryBackendConfig(backend_type=MemoryBackendType.DEFAULT)
+        fake_llm = MagicMock(name="SessionLLM")
+        with patch(
+            "src.services.llm.manager.LLMManager.configure_kasal_llm",
+            new=AsyncMock(return_value=fake_llm),
+        ) as configure:
+            result = await service.resolve_memory_llm_override(mem_cfg)
+        configure.assert_awaited_once_with("session-model", "grp1")
+        kwargs = service._build_memory_kwargs(
+            crew_kwargs={"agents": []},
+            custom_embedder=None,
+            crew_id="session",
+            memory_config=mem_cfg,
+            memory_llm_override=result,
+        )
+        assert kwargs["llm"] is fake_llm
 
     @pytest.mark.asyncio
     async def test_resolve_builds_configured_instance_for_override(self):
-        service = CrewMemoryService({"group_id": "grp1"})
+        service = CrewMemoryService({"group_id": "grp1", "model": "session-model"})
         mem_cfg = MagicMock()
         mem_cfg.cognitive_config = MagicMock(
             memory_llm_model="databricks-claude-haiku-4-5"

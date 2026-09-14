@@ -284,6 +284,24 @@ class TestLocalFallbackConfig:
         return svc
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("reachable", [True, False])
+    async def test_custom_endpoint_fallback_without_provider_key(
+        self, monkeypatch, reachable
+    ):
+        svc = self._svc([mk_model("KAT-Coder", provider="custom")])
+        monkeypatch.setenv("KAT_BASE_URL", "http://10.0.0.61:8082/v1")
+        probe = AsyncMock(return_value=reachable)
+        monkeypatch.setattr("src.services.settings.models._endpoint_reachable", probe)
+        _patch_keys(monkeypatch, None)
+        out = await svc._local_fallback_config()
+        probe.assert_awaited_once_with("http://10.0.0.61:8082/v1")
+        if reachable:
+            assert out["key"] == "KAT-Coder"
+            assert out["provider"] == "custom"
+        else:
+            assert out is None
+
+    @pytest.mark.asyncio
     async def test_prefers_self_hosted_when_it_answers(self, monkeypatch):
         svc = self._svc(
             [

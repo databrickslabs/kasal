@@ -650,6 +650,11 @@ class CrewGenerationService(
                     getattr(request, "execution_effort", None), EffortSettings
                 )
                 else {}
+            )
+            | (
+                {"chat_user_message_id": request.user_message_id}
+                if getattr(request, "user_message_id", None)
+                else {}
             ),
             "reasoning": _reasoning,
             "model": request.model or None,

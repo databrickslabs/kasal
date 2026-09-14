@@ -216,6 +216,10 @@ def _history_patches(messages):
     async def _fake_session():
         yield MagicMock(name="db_session")
 
+    for message in reversed(messages):
+        if message.message_type == "user":
+            message.id = "current"
+            break
     repo = MagicMock()
     # The preamble fetches the most-recent window via get_recent_by_session_and_group.
     repo.get_recent_by_session_and_group = AsyncMock(return_value=messages)
@@ -227,7 +231,9 @@ def _history_patches(messages):
 
 
 def _cfg_ctx(session_id="sess-1"):
-    config = SimpleNamespace(session_id=session_id)
+    config = SimpleNamespace(
+        session_id=session_id, inputs={"chat_user_message_id": "current"}
+    )
     ctx = SimpleNamespace(group_ids=["g1"])
     return config, ctx
 
@@ -828,6 +834,6 @@ class TestRunTraceWriterRelease:
         # The LAST finally in the method is the run's outermost teardown; the
         # trace writer must be closed there, not only on the success/except paths.
         tail = source[source.rindex("finally:") :]
-        assert (
-            "_trace_writer.close()" in tail
-        ), "run_light_agent_execution must release the trace writer in its finally"
+        assert "_trace_writer.close()" in tail, (
+            "run_light_agent_execution must release the trace writer in its finally"
+        )

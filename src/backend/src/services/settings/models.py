@@ -52,12 +52,13 @@ def _databricks_configured() -> bool:
 SELF_HOSTED_ENDPOINTS = {
     "vllm": ("VLLM_BASE_URL", "http://localhost:8081/v1"),
     "ollama": ("OLLAMA_API_BASE", "http://localhost:11434"),
+    "custom": ("KAT_BASE_URL", "http://127.0.0.1:8082/v1"),
 }
 
 # Ranking for fallback candidates: self-hosted first (free), then hosted models
 # that have a usable API key.
-_FALLBACK_RANK = {"vllm": 0, "ollama": 1}
-_HOSTED_RANK = 2
+_FALLBACK_RANK = {"vllm": 0, "ollama": 1, "custom": 2}
+_HOSTED_RANK = 3
 
 # How long to wait for a TCP connect when probing a self-hosted endpoint. Long
 # enough for a LAN box, short enough that a dead host costs a blink.

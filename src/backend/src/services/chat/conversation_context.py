@@ -96,14 +96,11 @@ async def recent_turns(
     already persisted so the router cannot treat the question as its own
     antecedent.
 
-    It is matched by CONTENT, not by position, and that is the whole point.
-    Routing happens mid-turn: ``chat_history`` is written when the turn ends, so
-    the current user row usually does not exist yet. The light agent's
-    ``_conversation_preamble`` can drop "everything from the last user row
-    onward" because it runs INSIDE the run, after that row is written. Copying
-    that rule here dropped the PREVIOUS exchange instead — the answer on screen
-    that a follow-up is asking about — so the router saw a conversation with its
-    most recent turn missing and read the follow-up as a fresh request.
+    It is matched by CONTENT, not by position. Some callers have not saved the
+    current user row yet. Dropping everything from the last user row would then
+    discard the PREVIOUS exchange — the answer a follow-up is asking about.
+    The light agent uses the saved current message ID when available; this
+    router's content match must likewise preserve completed earlier exchanges.
     """
     if not session_id or not group_ids:
         return []

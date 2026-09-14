@@ -1171,7 +1171,6 @@ class TestCreateCrewComplete:
             patch("src.services.generation.crew.complete.robust_json_parser") as rjp,
             patch.object(self.service, "_process_crew_setup") as pcs,
         ):
-
             gtd.return_value = [tool_detail]
             ppt.return_value = "system prompt"
             lm.completion = AsyncMock(return_value='{"agents":[],"tasks":[]}')
@@ -3979,6 +3978,25 @@ class TestBuildCrewConfigFromGenerated:
         from src.schemas.crew import CrewStreamingRequest
 
         return CrewStreamingRequest(prompt="p", **kw)
+
+    def test_current_message_id_survives_dispatch_to_execution_config(self):
+        from src.schemas.dispatcher import DispatcherRequest
+        from src.schemas.execution import CrewConfig
+        from src.services.chat.streaming_request import streaming_request_for
+
+        request = DispatcherRequest(
+            message="Make the LLM presentation nicer",
+            session_id="chat-1",
+            user_message_id="redesign-1",
+            auto_execute=True,
+        )
+        streaming = streaming_request_for(request, None, [])
+        config = CrewGenerationService.build_crew_config_from_generated(
+            streaming, [], []
+        )
+        parsed = CrewConfig(**config)
+        assert parsed.session_id == "chat-1"
+        assert parsed.inputs["chat_user_message_id"] == "redesign-1"
 
     def test_keys_links_and_top_level(self):
         req = self._req(

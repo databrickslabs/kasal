@@ -433,6 +433,9 @@ class CrewStreamingRequest(BaseModel):
         None,
         description="Chat session id — memory partition + run ownership for the auto-executed run",
     )
+    user_message_id: Optional[str] = Field(
+        None, description="Saved user message that starts this chat turn"
+    )
     memory_workspace_scope: Optional[bool] = Field(
         True,
         description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only",

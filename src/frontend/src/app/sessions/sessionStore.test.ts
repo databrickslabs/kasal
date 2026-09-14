@@ -58,6 +58,30 @@ const resetState = () => {
   });
 };
 
+describe('durable user turns', () => {
+  it('shows the turn immediately but waits for persistence in its original session', async () => {
+    useSessionStore.setState({ currentSessionId: 's1' });
+    let finish!: () => void;
+    vi.mocked(db.addMessageToSession).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    let complete = false;
+    const saved = useSessionStore.getState().saveUserMessage('s1', '/redesign LLM deck').then(id => { complete = true; return id; });
+    expect(useSessionStore.getState().messages[0].content).toBe('/redesign LLM deck');
+    await flush();
+    expect(complete).toBe(false);
+    useSessionStore.setState({ currentSessionId: 's2', messages: [] });
+    finish();
+    const id = await saved;
+    expect(db.addMessageToSession).toHaveBeenCalledWith('s1', expect.objectContaining({ id, role: 'user', sessionId: 's1' }));
+    expect(useSessionStore.getState().messages).toEqual([]);
+  });
+
+  it('rejects a failed save so the caller cannot dispatch an unsaved turn', async () => {
+    useSessionStore.setState({ currentSessionId: 's1' });
+    vi.mocked(db.addMessageToSession).mockRejectedValueOnce(new Error('offline'));
+    await expect(useSessionStore.getState().saveUserMessage('s1', 'Improve the deck')).rejects.toThrow('could not be saved');
+  });
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   idCounter = 0;
