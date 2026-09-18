@@ -1,6 +1,6 @@
 """Schemas for deck editing — one slide at a time."""
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,14 @@ class SlideRefineRequest(BaseModel):
     )
     position: str = Field("", max_length=40, description='Where it sits, e.g. "3 of 8"')
     model: Optional[str] = Field(None, description="Model key from the chat picker")
+    tools: Optional[List[str]] = None
+    mcp_servers: List[str] = Field(default_factory=list)
+    agentbricks_endpoints: List[str] = Field(default_factory=list)
+    skills: List[str] = Field(default_factory=list)
+
+
+class SlideRefineRunResponse(BaseModel):
+    job_id: str
 
 
 class SlideRefineResponse(BaseModel):

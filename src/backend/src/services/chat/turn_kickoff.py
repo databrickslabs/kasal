@@ -22,6 +22,7 @@ async def kickoff_chat_turn(
     conversation_preamble,
     _agent_memory,
     _log,
+    output_evidence=None,
 ):
     raw = (getattr(config, "inputs", None) or {}).get(
         "execution_effort"
@@ -38,7 +39,7 @@ async def kickoff_chat_turn(
         object.__setattr__(agent, "_kasal_run_deadline", deadline)
     try:
         with run_deadline(seconds if raw else None):
-            return await _kickoff(
+            kicked = await _kickoff(
                 service,
                 agent,
                 config,
@@ -52,6 +53,23 @@ async def kickoff_chat_turn(
                 _agent_memory,
                 _log,
             )
+            if getattr(config, "output_contract", None) == "slide":
+                from src.services.decks.finish_slide import finish_slide
+
+                kicked = await finish_slide(
+                    service,
+                    agent,
+                    kicked,
+                    prompt,
+                    output_evidence or [],
+                    config,
+                    execution_id,
+                    trace_context,
+                    group_context,
+                    group_id,
+                    _log,
+                )
+            return kicked
     except ExecutionBudgetExceededError as error:
         if not raw:
             raise

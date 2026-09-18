@@ -36,6 +36,8 @@ const RunProgress: React.FC<{
   latestStep?: TraceEntryData;
   /** Let the surrounding conversation own spacing and scrolling. */
   inline?: boolean;
+  /** Open live inline activity automatically; disable for click-only surfaces. */
+  autoExpand?: boolean;
   running: boolean;
   generating: boolean;
   onStop?: () => void;
@@ -47,14 +49,14 @@ const RunProgress: React.FC<{
   onSelectStep?: (step: RunStep) => void;
   /** The run whose trace the expanded activity renders. */
   jobId?: string;
-}> = ({ latestStep, inline = false, running, generating, onStop, onShowInPane, onSelectStep, jobId }) => {
-  const [open, setOpen] = useState(() => (jobId ? expandedRuns.get(jobId) : undefined) ?? (inline && running));
+}> = ({ latestStep, inline = false, autoExpand = true, running, generating, onStop, onShowInPane, onSelectStep, jobId }) => {
+  const [open, setOpen] = useState(() => (jobId ? expandedRuns.get(jobId) : undefined) ?? (autoExpand && inline && running));
   useEffect(() => {
     if (jobId) expandedRuns.set(jobId, open);
   }, [jobId, open]);
   useEffect(() => {
-    if (inline && running) setOpen(true);
-  }, [inline, running, jobId]);
+    if (autoExpand && inline && running) setOpen(true);
+  }, [autoExpand, inline, running, jobId]);
   // Transient feedback: the moment Stop is pressed we show "Stopping…" (the
   // backend takes a beat to actually halt the run); cleared once it ends.
   const [stopping, setStopping] = useState(false);

@@ -398,9 +398,11 @@ export function useChatExecutionActions({
           else sessionStore.updateMessage(stepId, updates);
         };
         try {
-          const res = await DeckService.refineSlide({ ...plan.request, model: model || null });
+          const res = await DeckService.refineSlide({ ...plan.request, model: model || null }, (id) => {
+            setStep({ kind: 'tool_call', label: plan.summary, sublabel: trimmed, source: 'refine', timestamp: startedAt }, id);
+          });
           if (!res.section) throw new Error(res.error || 'The model did not return a slide.');
-          const calls = res.attempts && res.attempts > 1 ? `${res.attempts} LLM calls` : '1 LLM call';
+          const calls = 'Agent run';
           setStep(
             {
               kind: 'tool_result',

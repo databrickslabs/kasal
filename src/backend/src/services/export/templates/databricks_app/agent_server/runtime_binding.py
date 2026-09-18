@@ -27,7 +27,7 @@ from typing import Any
 RUNTIME = "{{BUNDLE_RUNTIME}}"
 
 if RUNTIME == "crewai":
-    from agent_server.kasal_runtime.services.execution.harnesses.crewai.build import (
+    from agent_server.kasal_runtime.services.execution.harnesses.crewai.kwargs import (
         translate,
     )
     from agent_server.kasal_runtime.services.execution.harnesses.crewai.llm import (

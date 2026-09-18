@@ -3491,10 +3491,11 @@ class TestProgressiveGeneration:
             assert "generation_complete" in event_types
 
     @pytest.mark.asyncio
-    async def test_create_crew_progressive_lakebase_no_config(self):
+    async def test_create_crew_progressive_lakebase_no_config(self, monkeypatch):
         """When lakebase config is None, uses env var fallback for instance name."""
         request = self._make_progressive_request()
         gen_id = "gen-lakebase-noconf"
+        monkeypatch.delenv("LAKEBASE_INSTANCE_NAME", raising=False)
 
         with self._progressive_patches():
             with patch(

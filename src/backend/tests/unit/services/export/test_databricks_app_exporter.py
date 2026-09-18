@@ -237,7 +237,7 @@ class TestDatabricksAppExporter:
         exported crew must run on the same engine Kasal runs, or the two drift
         (which they demonstrably did: deep mode once re-enabled a planner the
         crew had disabled). The OpenAI Agents SDK must still not leak in."""
-        files = _files(await exporter.export(crew_data, {}))
+        files = _files(await exporter.export(crew_data, {"runtime": "kasal"}))
         agent = files["agent_server/agent.py"]
         assert "crew.kickoff" in agent
         # The construction seam. agent.py imports the runtime through
@@ -1375,9 +1375,10 @@ class TestDatabricksAppA2UI:
         ]
         # System prompt instructs the model to build ONE Quiz component for quizzes.
         assert "surfaceKind from the USER'S REQUEST" in compose
-        assert "for a quiz/assessment/test use 'quiz'" in compose
+        assert "for an explicitly requested quiz use 'quiz'" in compose
         # Rich-intent vocabulary includes quiz terms so the surface is composed.
-        assert '"quiz",' in compose and '"assessment",' in compose
+        assert '"quiz",' in compose
+        assert "Do not infer a quiz from the word assessment" in compose
 
     @pytest.mark.asyncio
     async def test_frontend_bundled_not_cloned(self, exporter, crew_data):

@@ -115,6 +115,12 @@ _MODULES: List[Tuple[Path, str]] = [
 # ``core/__init__.py`` and ``services/__init__.py`` are already inert upstream;
 # they are synthesised too so the vendored tree has no partial-copy ambiguity.
 STUB_INITS: Dict[str, str] = {
+    "services/execution/harnesses/__init__.py": (
+        '"""Portable runtime adapters for this exported app."""\n'
+    ),
+    "services/execution/harnesses/crewai/__init__.py": (
+        '"""Portable CrewAI adapters; no backend binding is imported."""\n'
+    ),
     "__init__.py": (
         '"""Kasal\'s agent runtime, vendored into this standalone app.\n\n'
         "Copied verbatim from Kasal's backend at export time (only the ``src.``\n"
@@ -207,11 +213,12 @@ async def _read(path: Path) -> str:
 #: Task and Crew sit on Kasal's transport, tools and events — the same
 #: arrangement the platform runs, so an exported CrewAI app behaves like the runs
 #: it was tested as rather than like a fresh CrewAI project.
-_CREWAI_TREES: List[Tuple[Path, str]] = [
-    (
-        BACKEND_SRC / "services" / "execution" / "harnesses",
-        "services/execution/harnesses",
-    ),
+_CREWAI_MODULES = [
+    "binding.py",
+    "crewai/availability.py",
+    "crewai/kwargs.py",
+    "crewai/llm.py",
+    "crewai/tools.py",
 ]
 
 
@@ -228,6 +235,8 @@ async def kasal_runtime_files(
     files: List[Dict[str, str]] = []
 
     for rel, content in STUB_INITS.items():
+        if rel.startswith("services/execution/harnesses/") and runtime != "crewai":
+            continue
         files.append(
             {"path": f"{VENDOR_ROOT}/{rel}", "content": content, "type": "python"}
         )
@@ -251,23 +260,19 @@ async def kasal_runtime_files(
             )
 
     if runtime == "crewai":
-        for source_dir, dest in _CREWAI_TREES:
-            if not source_dir.is_dir():
-                raise FileNotFoundError(
-                    f"CrewAI harness source missing: {source_dir}. A CrewAI "
-                    "bundle cannot be produced without it."
-                )
-            for path in sorted(source_dir.rglob("*")):
-                if not _is_vendorable(path):
-                    continue
-                rel = path.relative_to(source_dir).as_posix()
-                files.append(
-                    {
-                        "path": f"{VENDOR_ROOT}/{dest}/{rel}",
-                        "content": rewrite_import_root(await _read(path)),
-                        "type": "python",
-                    }
-                )
+        # Export only portable adapters. The platform bindings load the backend's
+        # LLM manager, settings and guardrail services, which do not exist here.
+        for relative in _CREWAI_MODULES:
+            source = BACKEND_SRC / "services/execution/harnesses" / relative
+            if not source.is_file():
+                raise FileNotFoundError(f"CrewAI harness source missing: {source}")
+            files.append(
+                {
+                    "path": f"{VENDOR_ROOT}/services/execution/harnesses/{relative}",
+                    "content": rewrite_import_root(await _read(source)),
+                    "type": "python",
+                }
+            )
 
     for source_file, dest in _MODULES:
         if not source_file.is_file():

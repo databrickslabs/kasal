@@ -18,6 +18,9 @@ from src.services.flow_builder.flow_runner_service import FlowRunnerService
 # ---------------------------------------------------------------------------
 
 
+pytestmark = pytest.mark.usefixtures("kasal_harness")
+
+
 def _make_service():
     db = MagicMock(spec=AsyncSession)
     with patch("src.services.flow_builder.flow_runner_service.FlowExecutionService"):

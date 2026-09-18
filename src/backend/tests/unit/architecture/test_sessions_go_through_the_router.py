@@ -93,7 +93,6 @@ ALLOWED = {
         "seeders take an explicit factory argument (seed_runner patches it) so "
         "they seed whichever database is active"
     ),
-    "scripts/": "one-shot operator scripts, run against a chosen database",
     # ---- genuinely cannot route -------------------------------------------
     "utils/databricks_auth.py": (
         "REENTRANT. The router needs a credential to reach Lakebase, so it calls "

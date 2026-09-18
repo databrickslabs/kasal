@@ -24,6 +24,9 @@ from tests.unit.helpers.harness_double import patch_build
 # ---------------------------------------------------------------------------
 
 
+pytestmark = pytest.mark.usefixtures("kasal_harness")
+
+
 class TestResolveToolOverride:
 
     def test_no_tool_configs_returns_none(self):

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DeckStudio from './DeckStudio';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
@@ -8,7 +8,20 @@ const refineSlide = vi.fn();
 vi.mock('../../../../api/chat/DeckService', () => ({
   DeckService: { refineSlide: (...args: unknown[]) => refineSlide(...args) },
 }));
+vi.mock('../../persistence/sessionApi', () => ({
+  addMessageToSession: vi.fn().mockResolvedValue(undefined),
+  updateMessageInSession: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../../utils/deckExport', () => ({ downloadDeckPdf: vi.fn(), downloadDeckPptx: vi.fn() }));
+vi.mock('../Chat/RunProgress', () => ({
+  default: ({ jobId, running, onSelectStep }: { jobId?: string; running: boolean; onSelectStep: (step: unknown) => void }) =>
+    <div data-testid="slide-run" data-job-id={jobId} data-running={String(running)}>
+      <button onClick={() => onSelectStep({ id: 'call', label: 'Model request', detail: 'The slide-edit prompt' })}>Open model request</button>
+    </div>,
+}));
+vi.mock('../Preview/StepContent', () => ({
+  default: ({ step }: { step: { detail: string } }) => <div>{step.detail}</div>,
+}));
 
 const slide = (t: string) => `<section class="slide"><h1>${t}</h1></section>`;
 const DECK = [slide('Cover'), slide('Two'), slide('Three')].join('\n');
@@ -19,11 +32,12 @@ const deckInMessage = () => {
 };
 
 describe('DeckStudio', () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     refineSlide.mockReset();
     useSessionStore.setState({
       messages: [{ id: 'm1', role: 'assistant', content: 'Deck:\n```html\n' + DECK + '\n```', timestamp: new Date() } as never],
-      currentSessionId: null,
+      currentSessionId: 'owner',
     } as never);
   });
 
@@ -72,9 +86,52 @@ describe('DeckStudio', () => {
       position: '2 of 3',
     });
     await waitFor(() => expect(deckInMessage()).toEqual(['Cover', 'Two!', 'Three']));
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'j');
+    expect(useSessionStore.getState().messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'user', content: 'Slide 2: bigger title' }),
+      expect.objectContaining({ executionId: 'j', resultType: 'trace' }),
+    ]));
+    fireEvent.click(screen.getByText('Open model request'));
+    expect(screen.getByText('The slide-edit prompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Back to run activity'));
     expect(screen.getByText('3 slides · 1 edit')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('Undo: Refined slide 2'));
     expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('shows pending activity and retains the run trace when no slide is returned', async () => {
+    let resolve!: (result: unknown) => void;
+    refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
+    fireEvent.click(screen.getByText('Apply'));
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'true');
+    act(() => refineSlide.mock.calls[0][1]('failed-edit'));
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'failed-edit');
+    await act(async () => resolve({ section: null, error: 'No slide returned', job_id: 'failed-edit' }));
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'false');
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'failed-edit');
+    expect(useSessionStore.getState().messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ executionId: 'failed-edit', resultData: expect.objectContaining({ label: 'Slide edit failed' }) }),
+    ]));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('keeps the activity in the originating session after the studio closes', async () => {
+    useSessionStore.setState({ currentSessionId: 'owner' });
+    const post = vi.spyOn(useSessionStore.getState(), 'addMessageToTargetSession').mockReturnValue('edit-step');
+    const update = vi.spyOn(useSessionStore.getState(), 'updateMessageInTargetSession').mockImplementation(() => {});
+    let resolve!: (result: unknown) => void;
+    refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
+    const { unmount } = render(<DeckStudio code={DECK} messageId="m1" onDeckChange={async () => {}} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
+    fireEvent.click(screen.getByText('Apply'));
+    expect(post).toHaveBeenCalledWith('owner', 'user', 'Slide 1: bigger title', undefined);
+    unmount();
+    useSessionStore.setState({ currentSessionId: 'other', messages: [] });
+    await act(async () => resolve({ section: slide('Updated'), job_id: 'edit-job' }));
+    expect(update).toHaveBeenCalledWith('owner', 'edit-step', expect.objectContaining({ executionId: 'edit-job' }));
+    expect(useSessionStore.getState().messages).toEqual([]);
   });
 
   it('the studio follows the message: an edit written back from elsewhere shows up', () => {

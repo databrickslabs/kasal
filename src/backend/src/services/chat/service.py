@@ -189,8 +189,9 @@ class LightAgentService:
             from src.services.a2ui.compose import deck_intent, resolve_themes
             from src.services.chat.diagram_directive import apply_diagram_directive
 
+            slide_edit = getattr(config, "output_contract", None) == "slide"
             _deck_themes: Optional[Dict[str, Any]] = None
-            if deck_intent(prompt):
+            if not slide_edit and deck_intent(prompt):
                 try:
                     from src.services.settings.ui import UIConfigService
 
@@ -206,7 +207,8 @@ class LightAgentService:
                 except Exception as theme_err:  # noqa: BLE001 — defaults still render
                     logger.debug(f"[light_agent] deck theme load skipped: {theme_err}")
 
-            apply_diagram_directive(agent_spec, prompt, themes=_deck_themes)
+            if not slide_edit:
+                apply_diagram_directive(agent_spec, prompt, themes=_deck_themes)
             group_email = getattr(group_context, "group_email", None)
             # Diagnostic: MCP servers are workspace-scoped, so the resolved group_id
             # must match the workspace where a server was enabled or MCP resolves to
@@ -507,6 +509,7 @@ class LightAgentService:
                 # Mutable holder so the (sync, possibly worker-thread) started/completed
                 # handlers can share the kickoff start time to compute a duration.
                 _agent_started_at: list = []
+                _slide_evidence: list[str] = []
 
                 _role_lower = str(role or "").strip().lower()
 
@@ -573,6 +576,12 @@ class LightAgentService:
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         out_val = getattr(event, "output", None)
                         content = "" if out_val is None else str(out_val)
+                        if slide_edit:
+                            from src.services.decks.finish_slide import capture_evidence
+
+                            capture_evidence(
+                                _slide_evidence, tool_name, _args_str(event), content
+                            )
                         # Cap the stored/streamed trace so a large tool dump (e.g. a
                         # full web-search payload) doesn't bloat the run record. The
                         # frontend renders a clamped body gracefully — it decodes any
@@ -930,7 +939,7 @@ class LightAgentService:
                 # ship a shell for these requests.
                 from src.services.a2ui.compose import html_owned_intent
 
-                _html_owned = html_owned_intent(prompt)
+                _html_owned = slide_edit or html_owned_intent(prompt)
                 if _html_owned:
                     # Make the hand-off VISIBLE in the run's trace: without this
                     # event a deck turn shows one opaque llm_call and nothing
@@ -1129,6 +1138,7 @@ class LightAgentService:
                         conversation_preamble,
                         _agent_memory,
                         _log,
+                        output_evidence=_slide_evidence,
                     )
                 finally:
                     if _uninstall_approval_hook is not None:
@@ -1250,6 +1260,18 @@ class LightAgentService:
             # Persisted as a {text, a2ui} envelope; the chat renders the surface inline
             # by default. Never blocks completion (returns None / markdown on any issue).
             result_payload: Any = answer
+            if slide_edit and not budget_exhausted:
+                from src.services.decks.slide_refine import first_slide_section
+
+                section = first_slide_section(answer, require_single=True)
+                if not section:
+                    raise ValueError(
+                        "The slide-edit agent did not return exactly one complete slide. "
+                        "Check its execution trace for details."
+                    )
+                result_payload = {
+                    "section": section, "model": getattr(config, "model", None)
+                }
             try:
                 # Diagram/slides/presentation are rendered from the agent's own
                 # ```html block — skip A2UI composition entirely for them. (The
@@ -1545,7 +1567,7 @@ class LightAgentService:
     async def _kickoff_with_mlflow_trace(
         self,
         agent: Any,
-        kickoff_prompt: str,
+        kickoff_prompt: str | list[dict[str, str]],
         config: Any,
         execution_id: str,
         trace_context: str,

@@ -9,7 +9,7 @@ import json
 import time
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -84,6 +84,8 @@ class CrewConfig(BaseModel):
     inputs: Dict[str, Any] = Field(
         default_factory=dict, description="Input values for the execution"
     )
+    output_contract: Optional[Literal["slide"]] = None
+
     reasoning: bool = Field(
         False, description="Whether to enable the model's native reasoning budget"
     )
