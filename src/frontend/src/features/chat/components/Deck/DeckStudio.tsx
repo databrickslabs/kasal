@@ -5,6 +5,10 @@ import ScaledFrame from '../Chat/ScaledFrame';
 import DeckPresentation from '../Chat/DeckPresentation';
 import ThumbnailRail from './ThumbnailRail';
 import SlideInstructionBar from './SlideInstructionBar';
+import RunProgress from '../Chat/RunProgress';
+import StepContent from '../Preview/StepContent';
+import type { RunStep } from '../Preview/traceEventStep';
+import type { TraceEntryData } from '../Chat/ChatMessage';
 import { DeckService } from '../../../../api/chat/DeckService';
 import { useAppStore } from '../../store/appStore';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
@@ -66,6 +70,8 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<{ startedAt: number; jobId?: string; step: TraceEntryData } | null>(null);
+  const [activityStep, setActivityStep] = useState<RunStep | null>(null);
   // The bar revises the selected slide, or writes a just-inserted blank one.
   const [barMode, setBarMode] = useState<{ kind: 'refine' } | { kind: 'fill'; at: number }>({ kind: 'refine' });
   const [present, setPresent] = useState(false);
@@ -139,9 +145,39 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     const target = barMode.kind === 'fill' ? barMode.at : shown;
     setError(null);
     setWorking({ index: target });
+    setActivityStep(null);
+    // Pin the transcript to the session that initiated this edit. The studio
+    // may close or the user may switch sessions before the response arrives.
+    const store = useSessionStore.getState();
+    const owner = messageId ? store.currentSessionId : null;
+    const post = (role: 'user' | 'assistant', content: string, extra?: Parameters<typeof store.addMessage>[2]) =>
+      owner ? store.addMessageToTargetSession(owner, role, content, extra) : undefined;
+    post('user', `Slide ${target + 1}: ${instruction}`);
+    const startedAt = Date.now();
+    const pending: TraceEntryData = {
+      kind: 'tool_call', label: plan.summary, sublabel: instruction,
+      source: 'refine', timestamp: startedAt,
+    };
+    const stepId = post('assistant', '', { resultType: 'trace', resultData: pending });
+    let jobId: string | undefined;
+    const updateActivity = (step: TraceEntryData) => {
+      const updates = { resultType: 'trace', resultData: step, ...(jobId ? { executionId: jobId } : {}) };
+      if (owner && stepId) store.updateMessageInTargetSession(owner, stepId, updates);
+      setActivity({ startedAt, jobId, step });
+    };
+    setActivity({ startedAt, step: pending });
     try {
-      const res = await DeckService.refineSlide({ ...plan.request, model: model || selectedModel || null });
+      const res = await DeckService.refineSlide({ ...plan.request, model: model || selectedModel || null }, (id) => {
+        jobId = id;
+        updateActivity(pending);
+      });
+      jobId = res.job_id || undefined;
       if (!res.section) throw new Error(res.error || 'The model did not return a slide.');
+      updateActivity({
+        kind: 'tool_result', label: plan.done,
+        sublabel: [res.model, 'Agent run'].filter(Boolean).join(' · '),
+        source: 'refine', timestamp: Date.now(), durationMs: Date.now() - startedAt,
+      });
       if (res.section.trim() === (slides[target] || '').trim()) {
         // Silence here read as "nothing happened" — say what did.
         setError('The model returned the slide unchanged. Try a more specific instruction.');
@@ -153,7 +189,10 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
       });
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : e instanceof Error ? e.message : 'The edit failed.');
+      const message = typeof detail === 'string' ? detail : e instanceof Error ? e.message : 'The edit failed.';
+      setError(message);
+      updateActivity({ kind: 'event', label: 'Slide edit failed', detail: message,
+        source: 'refine', timestamp: Date.now(), durationMs: Date.now() - startedAt });
     } finally {
       setWorking(null);
     }
@@ -320,6 +359,14 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
                 />
               </div>
             </div>
+            {activity && <div className="kasal-chat-root overflow-auto px-3" data-theme="dark"
+              style={{ maxHeight: '30vh', flexShrink: 0 }} aria-label="Slide edit activity">
+              {activityStep ? <>
+                <button type="button" className={btn} onClick={() => setActivityStep(null)}>Back to run activity</button>
+                <StepContent step={activityStep} />
+              </> : <RunProgress key={activity.startedAt} inline autoExpand={false} running={!!working} generating={!!working}
+                latestStep={activity.step} jobId={activity.jobId} onSelectStep={setActivityStep} />}
+            </div>}
             <SlideInstructionBar
               slideNumber={barMode.kind === 'fill' ? barMode.at + 1 : shown + 1}
               mode={barMode.kind}

@@ -36,7 +36,7 @@ it.each(['crew', 'flow'] as const)('edits, persists, reopens and undoes a deck i
   fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve title' } });
   fireEvent.click(screen.getByText('Apply'));
   await waitFor(() => expect(screen.getByText('2 slides · 1 edit')).toBeInTheDocument());
-  expect(DeckService.refineSlide).toHaveBeenCalledWith(expect.objectContaining({ model: 'builder-model' }));
+  expect(DeckService.refineSlide).toHaveBeenCalledWith(expect.objectContaining({ model: 'builder-model' }), expect.any(Function));
   expect(ChatHistoryServiceEnhanced.updateMessageContent).toHaveBeenCalledWith('backend-message', expect.stringContaining('Refined'), 'team-a');
   expect(useSessionStore.getState().messages[0].content).toBe('Unrelated chat');
   fireEvent.click(screen.getByTitle('Undo: Refined slide 1'));

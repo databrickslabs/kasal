@@ -223,3 +223,12 @@ def test_an_llm_failure_fails_the_run_and_still_raises(monkeypatch):
     else:
         raise AssertionError("expected the LLM failure to propagate")
     assert closed == [("job-x", "endpoint down")]
+
+
+def test_agent_slide_contract_rejects_whole_deck_and_incomplete_slide():
+    from src.services.decks.slide_refine import first_slide_section
+
+    slide = '<section class="slide"><section>Content</section></section>'
+    assert first_slide_section(slide, require_single=True) == slide
+    assert first_slide_section(slide + slide, require_single=True) is None
+    assert first_slide_section('<section class="slide">Partial', require_single=True) is None

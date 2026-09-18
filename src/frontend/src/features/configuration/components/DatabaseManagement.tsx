@@ -1587,7 +1587,7 @@ const DatabaseManagement: React.FC = () => {
                 </Typography>
                 <Typography variant="caption" sx={{ opacity: 0.85 }}>
                   {schemaExists
-                    ? 'Reset schema and copy all data from current database'
+                    ? 'Drops the existing Lakebase schema, then copies all data from current database'
                     : 'Create schema and copy all data from current database'}
                 </Typography>
               </Box>
@@ -1615,7 +1615,7 @@ const DatabaseManagement: React.FC = () => {
                 </Typography>
                 <Typography variant="caption" color={schemaExists ? 'error' : 'text.secondary'}>
                   {schemaExists
-                    ? 'Drops the existing schema and recreates it empty — no data is copied'
+                    ? 'Drops the existing Lakebase schema and recreates it EMPTY — no data is copied'
                     : 'Create empty tables without migrating data'}
                 </Typography>
               </Box>

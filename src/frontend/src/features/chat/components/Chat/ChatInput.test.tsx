@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import ChatInput from './ChatInput';
+import { MCPService } from '../../../../api/tools/MCPService';
 import type { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import { useExecutionStore } from '../../store/executionStore';
@@ -744,7 +745,8 @@ describe('ChatInput — "+" menu placement (flips with the input position)', () 
 });
 
 describe('ChatInput — Tools & MCP (inline inside the "+" menu)', () => {
-  it('expanding the Tools row renders the MCP list inline (no nested popover)', () => {
+  it('expanding the Tools row renders the MCP list inline (no nested popover)', async () => {
+    const servers = vi.spyOn(MCPService.getInstance(), 'getMcpServers').mockResolvedValue({ servers: [], count: 0 });
     render(<ChatInput {...baseProps} />);
     openMenu();
     fireEvent.click(screen.getByLabelText('Tools & MCP'));
@@ -753,6 +755,9 @@ describe('ChatInput — Tools & MCP (inline inside the "+" menu)', () => {
     // Inline: statically positioned inside the menu, so overflow-hidden
     // cannot clip it (the invisible-MCP bug).
     expect((mcp as HTMLElement).className).not.toContain('absolute');
+    await act(async () => {});
+    expect(servers).toHaveBeenCalled();
+    servers.mockRestore();
   });
 });
 

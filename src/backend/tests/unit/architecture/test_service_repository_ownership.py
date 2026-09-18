@@ -82,7 +82,7 @@ _OWNED = {
     "external": {"crew_publication"},
     "flow_builder": {"flow", "flow_state"},
     "generation": {"crew_generator", "log"},
-    "groups": {"group", "group_tool", "user"},
+    "groups": {"group", "group_tool", "group_duplication", "user"},
     "guardrails": {"data_processing"},
     "hitl": {"hitl"},
     "knowledge": {"documentation_embedding", "databricks_volume"},

@@ -42,7 +42,7 @@ _SECTION_TAG = re.compile(r"<\s*(/?)section\b[^>]*>", re.I)
 _FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.S)
 
 
-def first_slide_section(reply: str) -> Optional[str]:
+def first_slide_section(reply: str, *, require_single: bool = False) -> Optional[str]:
     """The one COMPLETE slide a reply carries — the first
     ``<section class="slide">…</section>`` inside its ```html fence (or bare,
     when the model skipped the fence) — or None when there is no finished slide.
@@ -50,6 +50,8 @@ def first_slide_section(reply: str) -> Optional[str]:
     text = reply or ""
     fenced = _FENCE.search(text)
     code = fenced.group(1) if fenced else text
+    if require_single and len(_SLIDE_OPEN.findall(code)) != 1:
+        return None
     opener = _SLIDE_OPEN.search(code)
     if not opener:
         return None

@@ -55,7 +55,7 @@ class TestTheAdaptersAreShipped:
         )
         assert (vendored / "crewai" / "llm.py").is_file()
         assert (vendored / "crewai" / "tools.py").is_file()
-        assert (vendored / "crewai" / "build.py").is_file()
+        assert (vendored / "crewai" / "kwargs.py").is_file()
 
     def test_the_logger_shim_lets_them_vendor_verbatim(self, crewai_app_bundle):
         """The adapters log through LoggerManager upstream. Rather than editing

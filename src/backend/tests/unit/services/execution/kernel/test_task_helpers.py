@@ -15,6 +15,9 @@ from src.services.tools.base import BaseTool
 from tests.unit.helpers.harness_double import patch_build
 
 
+pytestmark = pytest.mark.usefixtures("kasal_harness")
+
+
 class TestIsDataMissing:
     """Test cases for is_data_missing function."""
 

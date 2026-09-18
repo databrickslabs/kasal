@@ -6,7 +6,7 @@ from fastapi import APIRouter
 
 from src.core.exceptions import BadRequestError
 from src.dependencies.providers import GroupContextDep, SessionDep
-from src.schemas.deck import SlideRefineRequest, SlideRefineResponse
+from src.schemas.deck import SlideRefineRequest, SlideRefineResponse, SlideRefineRunResponse
 from src.services.decks.slide_refine import SlideRefineService
 
 router = APIRouter(
@@ -16,6 +16,19 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
+
+
+@router.post("/slides/refine/start", response_model=SlideRefineRunResponse)
+async def start_refine_slide(
+    body: SlideRefineRequest, session: SessionDep, group_context: GroupContextDep
+):
+    """Start a tool-enabled light-agent run; read progress/result via executions."""
+    from src.services.decks.agent_refine import start_slide_refinement
+
+    try:
+        return await start_slide_refinement(body, session, group_context)
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
 
 
 @router.post("/slides/refine", response_model=SlideRefineResponse)

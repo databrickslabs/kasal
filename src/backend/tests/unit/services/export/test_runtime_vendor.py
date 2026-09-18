@@ -57,10 +57,10 @@ def crew_data():
     }
 
 
-@pytest_asyncio.fixture
-async def runtime_files(exporter, crew_data):
+@pytest_asyncio.fixture(params=["kasal", "crewai"])
+async def runtime_files(exporter, crew_data, request):
     """Emitted path → content, for the vendored runtime only."""
-    result = await exporter.export(crew_data, {})
+    result = await exporter.export(crew_data, {"runtime": request.param})
     return {
         f["path"]: f["content"]
         for f in result["files"]

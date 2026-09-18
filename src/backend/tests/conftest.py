@@ -648,3 +648,12 @@ def pytest_sessionfinish(session, exitstatus):
             reporter.write_line(message, red=True)
         else:
             print(message, file=sys.stderr)
+
+
+@pytest.fixture
+def kasal_harness():
+    """Opt in when a test constructs Kasal runtime objects directly."""
+    from src.services.execution.harnesses import bind
+
+    with bind("kasal"):
+        yield

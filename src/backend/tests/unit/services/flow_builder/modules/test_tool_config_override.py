@@ -38,6 +38,9 @@ from src.services.flow_builder.modules.task_adapter import (
 # ---------------------------------------------------------------------------
 # _resolve_tool_override helper tests
 # ---------------------------------------------------------------------------
+pytestmark = pytest.mark.usefixtures("kasal_harness")
+
+
 class TestResolveToolOverride:
     """Tests for the _resolve_tool_override module-level helper."""
 
