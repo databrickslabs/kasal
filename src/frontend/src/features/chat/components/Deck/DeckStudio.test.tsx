@@ -1,8 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DeckStudio from './DeckStudio';
+import { useAppStore } from '../../store/appStore';
+import { fetchEnabledModels } from '../../api/models';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
+
+vi.mock('../../api/models', () => ({ fetchEnabledModels: vi.fn() }));
 
 const refineSlide = vi.fn();
 vi.mock('../../../../api/chat/DeckService', () => ({
@@ -35,10 +39,59 @@ describe('DeckStudio', () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     refineSlide.mockReset();
+    useAppStore.setState({ selectedModel: 'chat-model', models: [] });
+    vi.mocked(fetchEnabledModels).mockResolvedValue([
+      { key: 'chat-model', name: 'Chat model' },
+      { key: 'edit-model', name: 'Editing model' },
+    ] as Awaited<ReturnType<typeof fetchEnabledModels>>);
     useSessionStore.setState({
       messages: [{ id: 'm1', role: 'assistant', content: 'Deck:\n```html\n' + DECK + '\n```', timestamp: new Date() } as never],
       currentSessionId: 'owner',
     } as never);
+  });
+
+  it('chooses an edit-local model and keeps picker keys from navigating slides', async () => {
+    const close = vi.fn();
+    refineSlide.mockResolvedValue({ section: slide('Updated') });
+    render(<DeckStudio code={DECK} messageId="m1" model="builder-model" onClose={close} />);
+    const picker = screen.getByRole('combobox', { name: 'Slide edit model' });
+    expect(picker).toHaveValue('builder-model');
+    await screen.findByRole('option', { name: 'Editing model' });
+    fireEvent.keyDown(picker, { key: 'ArrowDown' });
+    fireEvent.keyDown(picker, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
+    fireEvent.change(picker, { target: { value: 'edit-model' } });
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve' } });
+    fireEvent.click(screen.getByText('Apply'));
+    expect(picker).toBeDisabled();
+    await waitFor(() => expect(refineSlide).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'edit-model' }), expect.any(Function),
+    ));
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    expect(picker).toHaveValue('edit-model');
+    expect(useAppStore.getState().selectedModel).toBe('chat-model');
+  });
+
+  it('allows the workspace default when writing a new slide', async () => {
+    refineSlide.mockResolvedValue({ section: slide('New') });
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    expect(screen.getByLabelText('Slide edit model')).toHaveValue('chat-model');
+    fireEvent.change(screen.getByLabelText('Slide edit model'), { target: { value: '' } });
+    fireEvent.click(screen.getByLabelText('Add a slide at position 2'));
+    fireEvent.change(screen.getByLabelText('New slide instruction'), { target: { value: 'Explain tokens' } });
+    fireEvent.click(screen.getByText('Apply'));
+    await waitFor(() => expect(refineSlide).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'add', model: null }), expect.any(Function),
+    ));
+  });
+
+  it('keeps the inherited model usable when loading models fails', async () => {
+    vi.mocked(fetchEnabledModels).mockRejectedValue(new Error('offline'));
+    render(<DeckStudio code={DECK} messageId="m1" model="builder-model" onClose={() => {}} />);
+    expect(await screen.findByRole('status')).toHaveTextContent('Could not refresh models.');
+    expect(screen.getByLabelText('Slide edit model')).toHaveValue('builder-model');
+    expect(screen.getByLabelText('Slide edit model')).not.toBeDisabled();
   });
 
   it('shows every slide in the rail, selects on click, and pages with the keys', () => {

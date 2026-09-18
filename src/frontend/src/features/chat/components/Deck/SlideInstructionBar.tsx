@@ -11,6 +11,7 @@ import { FILL_CHIPS, REFINE_CHIPS } from './chips';
 interface SlideInstructionBarProps {
   /** Which slide the bar is about (1-based, for the label). */
   slideNumber: number;
+  controls?: React.ReactNode;
   /** `fill` writes a just-inserted blank slide from scratch instead of revising one. */
   mode: 'refine' | 'fill';
   working: boolean;
@@ -22,6 +23,7 @@ interface SlideInstructionBarProps {
 
 const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
   slideNumber,
+  controls,
   mode,
   working,
   error,
@@ -90,7 +92,8 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
           {working ? 'Working…' : 'Apply'}
         </button>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {controls}
         {chips.map((chip) => (
           <button
             key={chip}

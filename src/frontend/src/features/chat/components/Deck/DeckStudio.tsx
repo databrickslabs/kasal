@@ -5,6 +5,7 @@ import ScaledFrame from '../Chat/ScaledFrame';
 import DeckPresentation from '../Chat/DeckPresentation';
 import ThumbnailRail from './ThumbnailRail';
 import SlideInstructionBar from './SlideInstructionBar';
+import DeckModelPicker from './DeckModelPicker';
 import RunProgress from '../Chat/RunProgress';
 import StepContent from '../Preview/StepContent';
 import type { RunStep } from '../Preview/traceEventStep';
@@ -79,6 +80,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const [busy, setBusy] = useState<'' | 'pdf' | 'pptx'>('');
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedModel = useAppStore((s) => s.selectedModel);
+  const [editModel, setEditModel] = useState(() => model || selectedModel || '');
 
   const shown = Math.min(selected, Math.max(0, count - 1));
   const stage = useMemo(() => stageFor(viewSlides[shown] ?? ''), [viewSlides, shown]);
@@ -167,7 +169,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     };
     setActivity({ startedAt, step: pending });
     try {
-      const res = await DeckService.refineSlide({ ...plan.request, model: model || selectedModel || null }, (id) => {
+      const res = await DeckService.refineSlide({ ...plan.request, model: editModel || null }, (id) => {
         jobId = id;
         updateActivity(pending);
       });
@@ -368,6 +370,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
                 latestStep={activity.step} jobId={activity.jobId} onSelectStep={setActivityStep} />}
             </div>}
             <SlideInstructionBar
+              controls={<DeckModelPicker value={editModel} onChange={setEditModel} disabled={!!working || saving} />}
               slideNumber={barMode.kind === 'fill' ? barMode.at + 1 : shown + 1}
               mode={barMode.kind}
               working={!!working || saving}
