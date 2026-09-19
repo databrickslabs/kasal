@@ -1,3 +1,4 @@
+import { formatModelLabel } from '../../../../utils/modelDisplay';
 /**
  * The composer's "+" menu — one home for every input-bar setting.
  *
@@ -178,14 +179,14 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   }, [open]);
 
   const activeSource = preferExisting ? SOURCE_MODES[1] : SOURCE_MODES[0];
-  const modelName = models.find((m) => m.key === selectedModel)?.name || selectedModel || 'Default';
+  const modelName = formatModelLabel(models.find((m) => m.key === selectedModel)?.name || selectedModel) || 'Default';
   const activeMemory = MEMORY_MODES[memoryEnabled ? 0 : 1];
 
   const badgeCount = attachmentCount + toolCount + skillCount;
 
   const modelQuery = modelFilter.trim().toLowerCase();
   const visibleModels = modelQuery
-    ? models.filter((m) => (m.name || m.key).toLowerCase().includes(modelQuery) || m.key.toLowerCase().includes(modelQuery))
+    ? models.filter((m) => formatModelLabel(m.name || m.key).toLowerCase().includes(modelQuery) || m.key.toLowerCase().includes(modelQuery))
     : models;
 
   /** Pick handler shared by every radio-style option: apply, back to the main
@@ -244,7 +245,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
               visibleModels.map((m) => (
                 <Option
                   key={m.key}
-                  label={m.name || m.key}
+                  label={formatModelLabel(m.name || m.key)}
                   active={m.key === selectedModel}
                   onClick={() => pick(() => onModelChange(m.key))}
                 />

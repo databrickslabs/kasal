@@ -1,3 +1,4 @@
+import { formatModelLabel } from '../../../../utils/modelDisplay';
 import React, { useEffect, useState } from 'react';
 import { fetchEnabledModels } from '../../api/models';
 import { useAppStore } from '../../store/appStore';
@@ -41,7 +42,7 @@ export default function DeckModelPicker({ value, onChange, disabled }: Props) {
       >
         <option value="">Workspace default</option>
         {value && !models.some((item) => item.key === value) && <option value={value}>{value}</option>}
-        {models.map((item) => <option key={item.key} value={item.key}>{item.name || item.key}</option>)}
+        {models.map((item) => <option key={item.key} value={item.key}>{formatModelLabel(item.name || item.key)}</option>)}
       </select>
       {loadError && <span role="status">Could not refresh models.</span>}
     </label>

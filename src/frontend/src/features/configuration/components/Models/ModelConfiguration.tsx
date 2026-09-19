@@ -1,3 +1,4 @@
+import { formatModelLabel } from '../../../../utils/modelDisplay';
 import React, { useEffect } from 'react';
 import {
   Typography,
@@ -704,7 +705,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
   const filteredModels = Object.entries(models)
     .filter(([key, model]) =>
       key.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      model.name.toLowerCase().includes(searchTerm.toLowerCase())
+      formatModelLabel(model.name).toLowerCase().includes(searchTerm.toLowerCase()) || model.name.toLowerCase().includes(searchTerm.toLowerCase())
     )
     .filter(([_, model]) =>
       !isSystemView || providerFilter === 'all' || (model.provider || '') === providerFilter
@@ -836,7 +837,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
               {filteredModels.map(([key, model]) => (
                 <TableRow key={key}>
                   <TableCell>{key}</TableCell>
-                  <TableCell>{model.name}</TableCell>
+                  <TableCell>{formatModelLabel(model.name)}</TableCell>
                   <TableCell>{model.provider}</TableCell>
                   <TableCell>
                     <FormControlLabel

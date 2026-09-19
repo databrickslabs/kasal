@@ -59,11 +59,12 @@ async def _built(name, provider):
 
 class TestDeepSeek:
     @pytest.mark.asyncio
-    async def test_the_name_carries_no_provider_prefix(self):
+    @pytest.mark.parametrize("name", ["deepseek-flash", "deepseek-v4-flash"])
+    async def test_the_name_carries_no_provider_prefix(self, name):
         """The regression that made every DeepSeek call a 400."""
-        built = await _built("deepseek-v4-flash", "deepseek")
+        built = await _built(name, "deepseek")
 
-        assert built["model"] == "deepseek-v4-flash"
+        assert built["model"] == name
 
     @pytest.mark.asyncio
     async def test_the_pro_model_too(self):

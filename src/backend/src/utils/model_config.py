@@ -65,13 +65,8 @@ DEFAULT_ENGINE_MODEL = DatabricksAppInstallation.from_env().default_model or os.
 #   - Kimi / self-hosted vLLM: no `reasoning_effort` param (Kimi K2.7 cannot
 #     even disable thinking). Note kimi-k2-7-code DOES return thinking text —
 #     unprompted, in a sibling `reasoning_content` field.
-#   - DeepSeek v4 (flash/pro): DOES support reasoning effort, but NESTED —
-#     `thinking: {"type": "enabled", "reasoning_effort": "high"|"max"}`, where
-#     low/medium collapse to "high". Our emitter sends a TOP-LEVEL
-#     `reasoning_effort`, which DeepSeek would ignore, so it stays excluded here
-#     until the nested shape is emitted (same situation as Anthropic's
-#     `thinking: {budget_tokens}`). Verified 2026-07-25 against
-#     api-docs.deepseek.com/api/create-chat-completion.
+#   - DeepSeek direct API: top-level reasoning_effort supports none/low/high/max
+#     (September 2026). Registered in the central model capability table.
 #   - o1 / o1-preview / o1-mini: predate `reasoning_effort`.
 #   - *deep-research*: fixed internal budget, rejects an explicit effort.
 #

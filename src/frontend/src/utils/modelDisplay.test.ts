@@ -63,3 +63,15 @@ describe('buildModelLabels', () => {
     expect(labels['some-key']).toBe('some-key');
   });
 });
+
+ it('shows the Flash version without relabelling dated Databricks endpoints', () => {
+   expect(formatModelLabel('deepseek-flash')).toBe('DeepSeek V4.1 Flash');
+   expect(formatModelLabel('databricks-deepseek-v4-flash-0731')).toBe('deepseek-v4-flash-0731');
+   const labels = buildModelLabels({
+     'deepseek-flash': { name: 'deepseek-flash' },
+     'deepseek-v4-flash': { name: 'deepseek-flash' },
+   });
+   expect(labels['deepseek-flash']).toContain('V4.1');
+   expect(labels['deepseek-v4-flash']).toContain('V4.1');
+   expect(labels['deepseek-flash']).not.toBe(labels['deepseek-v4-flash']);
+ });

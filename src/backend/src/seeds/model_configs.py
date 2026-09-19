@@ -161,20 +161,20 @@ DEFAULT_MODELS = {
         "max_output_tokens": 4096,
     },
     # --- DeepSeek ---
-    # Verified 2026-07-25 against https://api-docs.deepseek.com/quick_start/pricing.
-    # DeepSeek serves exactly TWO API models now, both 1M context / 384K max
-    # output, and both thinking-capable (flash supports thinking + non-thinking,
-    # thinking is the default; pro thinks by default). Mode is a REQUEST
-    # parameter — `"thinking": {"type": "enabled", "reasoning_effort": ...}` —
-    # not a separate model name, so there is no "thinking model" to seed
-    # separately.
-    #
-    # The old entries were wrong in every field that matters: context_window was
-    # 128k (8x under), max_output_tokens 8k/64k, and deepseek-chat /
-    # deepseek-reasoner were DEPRECATED on 2026/07/24. They are pruned via
-    # REMOVED_MODEL_KEYS.
+    # Verified 2026-09-18 against DeepSeek's pricing and September 10 release.
+    # deepseek-flash now serves V4.1-Flash; V4 Pro remains available.
+    # Both support 1M context, 384K output, and top-level reasoning_effort.
+    "deepseek-flash": {
+        "name": "deepseek-flash",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
+    },
+    # Preserve saved agent keys while sending the current API identifier.
     "deepseek-v4-flash": {
-        "name": "deepseek-v4-flash",
+        "name": "deepseek-flash",
         "temperature": 0.7,
         "provider": "deepseek",
         "context_window": 1000000,
@@ -195,7 +195,7 @@ DEFAULT_MODELS = {
     # so they resolve to the v4 endpoints and keep working). Removing them would
     # leave those agents pointing at a model that no longer exists.
     "deepseek-v3.1-non-thinking": {
-        "name": "deepseek-v4-flash",
+        "name": "deepseek-flash",
         "temperature": 0.7,
         "provider": "deepseek",
         "context_window": 1000000,

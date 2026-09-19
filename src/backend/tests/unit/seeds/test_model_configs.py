@@ -626,38 +626,35 @@ class TestAuditedDatabricksModels:
 
 
 class TestDeepSeekModels:
-    """DeepSeek's live API surface, verified 2026-07-25 against
-    api-docs.deepseek.com/quick_start/pricing.
+    """Direct API models and compatibility aliases, verified September 2026."""
 
-    The seeded values were wrong in every field that matters — 128k context (8x
-    under), 8k/64k output caps, and two model names DeepSeek deprecated on
-    2026/07/24 — which silently truncated context and capped output on a model
-    that supports far more.
-    """
-
-    def test_exactly_two_real_models_plus_two_aliases(self):
-        keys = {k for k, v in DEFAULT_MODELS.items() if v.get("provider") == "deepseek"}
-        assert keys == {
+    def test_two_live_models_plus_three_aliases(self):
+        models = {
+            k: v for k, v in DEFAULT_MODELS.items() if v.get("provider") == "deepseek"
+        }
+        assert set(models) == {
+            "deepseek-flash",
             "deepseek-v4-flash",
             "deepseek-v4-pro",
             "deepseek-v3.1-non-thinking",
             "deepseek-v3.1-thinking",
         }
+        assert {v["name"] for v in models.values()} == {
+            "deepseek-flash",
+            "deepseek-v4-pro",
+        }
 
     def test_context_and_output_match_the_published_limits(self):
-        for key in ("deepseek-v4-flash", "deepseek-v4-pro"):
+        for key in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"):
             model = DEFAULT_MODELS[key]
             assert model["context_window"] == 1_000_000, key
             assert model["max_output_tokens"] == 384_000, key
             assert model["extended_thinking"] is True, key
 
     def test_retired_names_resolve_to_a_live_endpoint(self):
-        """The API call uses `name`, not the key (llm_manager builds
-        f"deepseek/{name}"), so an agent still on a v3.1 key must land on a v4
-        endpoint rather than a model that no longer exists."""
-        assert (
-            DEFAULT_MODELS["deepseek-v3.1-non-thinking"]["name"] == "deepseek-v4-flash"
-        )
+        """Saved agent keys resolve to a currently supported API name."""
+        assert DEFAULT_MODELS["deepseek-v4-flash"]["name"] == "deepseek-flash"
+        assert DEFAULT_MODELS["deepseek-v3.1-non-thinking"]["name"] == "deepseek-flash"
         assert DEFAULT_MODELS["deepseek-v3.1-thinking"]["name"] == "deepseek-v4-pro"
 
     def test_deprecated_models_are_pruned_not_merely_dropped(self):
@@ -672,14 +669,14 @@ class TestDeepSeekModels:
             assert key not in DEFAULT_MODELS, key
             assert key in REMOVED_MODEL_KEYS, key
 
-    def test_deepseek_is_excluded_from_top_level_reasoning_effort(self):
-        """DeepSeek v4 DOES take a reasoning effort, but nested inside
-        `thinking: {...}`. Our emitter sends it top-level, so DeepSeek would
-        ignore it — it must not be advertised as supported."""
+    def test_direct_api_supports_current_reasoning_efforts(self):
+        from src.core.llm.model_capabilities import model_capability
         from src.utils.model_config import model_supports_reasoning_effort
 
-        assert not model_supports_reasoning_effort("deepseek-v4-flash")
-        assert not model_supports_reasoning_effort("deepseek-v4-pro")
+        for key, config in DEFAULT_MODELS.items():
+            if config.get("provider") == "deepseek":
+                assert model_supports_reasoning_effort(key)
+                assert model_capability(key).efforts == ("none", "low", "high", "max")
 
 
 class TestEveryModelDeclaresAnOutputCeiling:

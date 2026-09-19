@@ -41,6 +41,8 @@ function titleCase(token: string): string {
 /** Label for a single model name. Never returns an empty string. */
 export function formatModelLabel(name: string): string {
   if (!name) return '';
+  // Direct API's rolling identifier currently serves V4.1; dated endpoints differ.
+  if (name === 'deepseek-flash') return 'DeepSeek V4.1 Flash';
   // Provider prefix carries no information in a list already grouped by provider.
   const base = name.replace(/^databricks-/, '');
 
@@ -81,7 +83,10 @@ export function buildModelLabels(
 
   const labels: Record<string, string> = {};
   for (const [key, label] of Object.entries(raw)) {
-    labels[key] = counts[label] > 1 ? models[key]?.name || key : label;
+    const name = models[key]?.name || key;
+    labels[key] = counts[label] > 1
+      ? name === 'deepseek-flash' ? `${label} (${key})` : name
+      : label;
   }
   return labels;
 }
