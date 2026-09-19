@@ -1,3 +1,4 @@
+import { formatModelLabel } from '../../../../utils/modelDisplay';
 import { getDefaultModel } from '../../../../config/defaultModel';
 import React, { useState, useEffect } from 'react';
 import {
@@ -1079,7 +1080,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                         ) : Object.keys(models).length > 0 ? (
                           Object.entries(models).map(([key, model]) => (
                             <MenuItem key={`llm-model-${key}`} value={key}>
-                              {model.name}
+                              {formatModelLabel(model.name)}
                               {model.provider && (
                                 <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
                                   ({model.provider})

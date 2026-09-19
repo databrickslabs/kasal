@@ -386,6 +386,15 @@ _GROK = ModelCapability(
     note="Grok 4.6 always reasons and exposes four effort levels.",
 )
 
+_DEEPSEEK_DIRECT = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("none", "low", "high", "max"),
+    returns_text=True,
+    evidence="documented",
+    source="https://api-docs.deepseek.com/guides/thinking_mode/",
+    note="Defaults to high; none disables thinking. Returns reasoning_content.",
+)
+
 _HYBRID_LOW_HIGH_MAX = ModelCapability(
     style=ReasoningStyle.REASONING_EFFORT,
     efforts=("none", "low", "high", "max"),
@@ -475,6 +484,12 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     # Other documented Databricks reasoning endpoints.
     ("deepseek-v4-pro-0813", _HYBRID_LOW_HIGH_MAX),
     ("deepseek-v4-flash-0731", _HYBRID_LOW_HIGH_MAX),
+    # Keep dated Databricks matches above these direct-API identifiers.
+    ("deepseek-flash", _DEEPSEEK_DIRECT),
+    ("deepseek-v4-flash", _DEEPSEEK_DIRECT),
+    ("deepseek-v4-pro", _DEEPSEEK_DIRECT),
+    ("deepseek-v3.1-non-thinking", _DEEPSEEK_DIRECT),
+    ("deepseek-v3.1-thinking", _DEEPSEEK_DIRECT),
     ("kimi-k3", _HYBRID_LOW_HIGH_MAX),
     ("glm-5-3-flash", _ALWAYS_LOW_HIGH_MAX),
     ("glm-5-3", _ALWAYS_LOW_HIGH_MAX),
