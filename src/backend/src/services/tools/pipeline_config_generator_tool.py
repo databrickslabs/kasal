@@ -169,6 +169,26 @@ class PipelineConfigGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
+    def _resolve_execution_id(self) -> Optional[str]:
+        """Job id used as the provenance key on persisted extraction rows.
+
+        Prefers this instance's attached ``trace_context`` job_id, then falls
+        back to the process-scoped current execution id. The fallback is what
+        makes the handoff reliable: ToolFactory can rebuild this tool at
+        task-execution time — after ``attach_tools_trace_context`` tagged an
+        earlier instance — leaving ``self.trace_context`` empty. Without it the
+        powerbi_extraction row is saved with a NULL execution_id and the UC
+        Metric View Generator's DB-fallback cannot find it (0 views).
+        """
+        try:
+            from src.services.execution.kernel.trace_context import (
+                resolve_tool_execution_id,
+            )
+
+            return resolve_tool_execution_id(self)
+        except Exception:
+            return (getattr(self, "trace_context", None) or {}).get("job_id")
+
     def _run(self, **kwargs: Any) -> str:
         """Execute the pipeline config generation."""
 
@@ -1167,7 +1187,7 @@ class PipelineConfigGeneratorTool(BaseTool):
             )
 
             history_data = ConversionHistoryCreate(
-                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                execution_id=self._resolve_execution_id(),
                 source_format="powerbi_config",
                 target_format="pipeline_config",
                 input_data={
@@ -1267,7 +1287,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 pass
 
             data = PowerBIExtractionCreate(
-                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                execution_id=self._resolve_execution_id(),
                 workspace_id=workspace_id or None,
                 dataset_id=dataset_id or None,
                 report_id=report_id or None,

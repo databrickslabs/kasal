@@ -292,7 +292,14 @@ class UCMetricViewGeneratorTool(BaseTool):
             or config_raw == "{}"
             or _rel_raw_missing
         ):
-            _job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+            try:
+                from src.services.execution.kernel.trace_context import (
+                    resolve_tool_execution_id,
+                )
+
+                _job_id = resolve_tool_execution_id(self)
+            except Exception:
+                _job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
             if not _job_id:
                 logger.info(
                     "[UCMV] DB fallback: no job_id on trace_context — cannot look up powerbi_extraction"
@@ -1220,8 +1227,18 @@ class UCMetricViewGeneratorTool(BaseTool):
             view_count = len(yaml_output) if isinstance(yaml_output, dict) else 0
             # measure_count reflects extracted DAX when present, else views built.
             measure_count = raw_dax_count or view_count
+            try:
+                from src.services.execution.kernel.trace_context import (
+                    resolve_tool_execution_id,
+                )
+
+                _hist_exec_id = resolve_tool_execution_id(self)
+            except Exception:
+                _hist_exec_id = (getattr(self, "trace_context", None) or {}).get(
+                    "job_id"
+                )
             history_data = ConversionHistoryCreate(
-                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                execution_id=_hist_exec_id,
                 source_format="powerbi_dax",
                 target_format="uc_metrics",
                 input_data={
