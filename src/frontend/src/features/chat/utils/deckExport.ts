@@ -1,5 +1,5 @@
 /**
- * Export an HTML slide deck to PDF or PowerPoint.
+ * Export an HTML slide deck to HTML, PDF or PowerPoint.
  *
  * Each slide (a full `<section class="slide">`) is rendered onto an offscreen
  * 1280×720 stage in the app document, then:
@@ -19,12 +19,98 @@
 import DOMPurify from 'dompurify';
 import { SLIDE_H, SLIDE_W } from './htmlDeck';
 
+const ACTIVE_CONTENT_TAGS = ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form'];
+
 // Keep slide layout and SVG diagrams while removing active HTML before export.
 export function sanitizeForRender(html: string): string {
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true, svg: true, svgFilters: true },
-    FORBID_TAGS: ['iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style'],
+    FORBID_TAGS: [...ACTIVE_CONTENT_TAGS, 'style'],
   });
+}
+
+/** A portable, offline deck document with its own paging controls. */
+export function standaloneDeckHtml(deckHtml: string): string {
+  const safeDeck = DOMPurify.sanitize(deckHtml, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    // Keep authored <style> blocks: unlike the in-app renderer, this document
+    // has an isolated origin and needs the deck's shared CSS to travel with it.
+    FORBID_TAGS: ACTIVE_CONTENT_TAGS,
+  });
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Presentation</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #111; }
+  body { font-family: system-ui, sans-serif; }
+  #deck-stage { position: absolute; left: 50%; top: 50%; width: ${SLIDE_W}px; height: ${SLIDE_H}px;
+    transform-origin: center; background: #fff; overflow: hidden; }
+  #deck-stage > section.slide { width: ${SLIDE_W}px; height: ${SLIDE_H}px; box-sizing: border-box; overflow: hidden; }
+  #deck-stage > section.slide[hidden] { display: none !important; }
+  #deck-controls { position: fixed; right: 16px; bottom: 14px; z-index: 2147483647; display: flex;
+    align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px;
+    color: #fff; background: rgba(0, 0, 0, .72); font: 14px/1 system-ui, sans-serif; }
+  #deck-controls button { border: 1px solid rgba(255,255,255,.35); border-radius: 6px; padding: 5px 10px;
+    color: inherit; background: transparent; cursor: pointer; font: inherit; }
+  #deck-controls button:disabled { opacity: .35; cursor: default; }
+</style>
+</head>
+<body>
+<main id="deck-stage">${safeDeck}</main>
+<nav id="deck-controls" aria-label="Presentation controls">
+  <button id="deck-prev" type="button" aria-label="Previous slide">Previous</button>
+  <span id="deck-count" aria-live="polite"></span>
+  <button id="deck-next" type="button" aria-label="Next slide">Next</button>
+</nav>
+<script data-kasal-deck-player>
+(() => {
+  const stage = document.getElementById('deck-stage');
+  const slides = Array.from(stage.querySelectorAll(':scope > section.slide'));
+  const previous = document.getElementById('deck-prev');
+  const next = document.getElementById('deck-next');
+  const count = document.getElementById('deck-count');
+  let index = 0;
+  const resize = () => {
+    const scale = Math.min(window.innerWidth / ${SLIDE_W}, window.innerHeight / ${SLIDE_H});
+    stage.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+  };
+  const show = (requested) => {
+    index = Math.max(0, Math.min(requested, slides.length - 1));
+    slides.forEach((slide, i) => { slide.hidden = i !== index; });
+    count.textContent = slides.length ? (index + 1) + ' / ' + slides.length : '0 / 0';
+    previous.disabled = index === 0;
+    next.disabled = index >= slides.length - 1;
+  };
+  previous.addEventListener('click', () => show(index - 1));
+  next.addEventListener('click', () => show(index + 1));
+  window.addEventListener('resize', resize);
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft' || event.key === 'PageUp') show(index - 1);
+    else if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') show(index + 1);
+    else if (event.key === 'Home') show(0);
+    else if (event.key === 'End') show(slides.length - 1);
+  });
+  resize();
+  show(0);
+})();
+</script>
+</body>
+</html>`;
+}
+
+export function downloadDeckHtml(deckHtml: string, filename = 'presentation.html'): void {
+  const blob = new Blob([standaloneDeckHtml(deckHtml)], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function mountSlide(sectionHtml: string): HTMLDivElement {
