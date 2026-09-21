@@ -21,6 +21,14 @@ import { SLIDE_H, SLIDE_W } from './htmlDeck';
 
 const ACTIVE_CONTENT_TAGS = ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form'];
 
+/** Keep deck markup and shared CSS while removing executable/embedded content. */
+export function sanitizeDeckDocument(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    FORBID_TAGS: ACTIVE_CONTENT_TAGS,
+  });
+}
+
 // Keep slide layout and SVG diagrams while removing active HTML before export.
 export function sanitizeForRender(html: string): string {
   return DOMPurify.sanitize(html, {
@@ -31,12 +39,9 @@ export function sanitizeForRender(html: string): string {
 
 /** A portable, offline deck document with its own paging controls. */
 export function standaloneDeckHtml(deckHtml: string): string {
-  const safeDeck = DOMPurify.sanitize(deckHtml, {
-    USE_PROFILES: { html: true, svg: true, svgFilters: true },
-    // Keep authored <style> blocks: unlike the in-app renderer, this document
-    // has an isolated origin and needs the deck's shared CSS to travel with it.
-    FORBID_TAGS: ACTIVE_CONTENT_TAGS,
-  });
+  // Keep authored <style> blocks: unlike the in-app renderer, this document
+  // has an isolated origin and needs the deck's shared CSS to travel with it.
+  const safeDeck = sanitizeDeckDocument(deckHtml);
   return `<!doctype html>
 <html lang="en">
 <head>
