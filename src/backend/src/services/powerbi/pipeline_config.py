@@ -47,15 +47,50 @@ __all__ = [
 
 import requests
 
-from src.services.powerbi.calculation_groups import derive_calculation_groups
-from src.services.powerbi.custom_function_resolution import (
-    derive_fx_otckpi_resolutions,
-)
-from src.services.powerbi.switch_decomposition import (
-    _resolve_referenced_measure_dax,
-    derive_geo_switch_decompositions,
-    derive_switch_decompositions,
-)
+# This module is also loaded standalone, by file path, via
+# generate_config.py's own CLI fallback (`importlib.util.
+# spec_from_file_location`, used when `python generate_config.py` is run
+# directly) — in that context it has NO real parent package, so `__package__`
+# is falsy and both an absolute `src.`-rooted import AND a relative `from
+# .switch_decomposition import` raise ImportError (confirmed empirically;
+# `spec_from_file_location` does not give the executed module a resolvable
+# package even though its `__name__` may contain dots). Mirror
+# generate_config.py's own `if __package__:` branch instead of picking one
+# import form and having it silently break in the other context.
+if __package__:
+    from .calculation_groups import derive_calculation_groups
+    from .custom_function_resolution import derive_fx_otckpi_resolutions
+    from .switch_decomposition import (
+        _resolve_referenced_measure_dax,
+        derive_geo_switch_decompositions,
+        derive_switch_decompositions,
+    )
+else:
+    import importlib.util as _ilu
+    from pathlib import Path as _Path
+
+    def _load_sibling(_mod_name: str, _filename: str):
+        _spec = _ilu.spec_from_file_location(
+            _mod_name, _Path(__file__).resolve().parent / _filename
+        )
+        _mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        return _mod
+
+    _switch_mod = _load_sibling(
+        "kasal_switch_decomposition_cli", "switch_decomposition.py"
+    )
+    _calc_groups_mod = _load_sibling(
+        "kasal_calculation_groups_cli", "calculation_groups.py"
+    )
+    _custom_fn_mod = _load_sibling(
+        "kasal_custom_function_resolution_cli", "custom_function_resolution.py"
+    )
+    derive_switch_decompositions = _switch_mod.derive_switch_decompositions
+    derive_geo_switch_decompositions = _switch_mod.derive_geo_switch_decompositions
+    _resolve_referenced_measure_dax = _switch_mod._resolve_referenced_measure_dax
+    derive_calculation_groups = _calc_groups_mod.derive_calculation_groups
+    derive_fx_otckpi_resolutions = _custom_fn_mod.derive_fx_otckpi_resolutions
 
 # ═══════════════════════════════════════════════════════════════════════
 # Auth

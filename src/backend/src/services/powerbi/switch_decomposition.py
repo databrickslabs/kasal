@@ -8,10 +8,16 @@ deployable UCMV measure attributed to the correct fact table, instead of the
 non-fact selector table (``Measures_Table``, ``OTC_MeasuresSlicer``, ...) the
 raw extraction always allocates the dispatcher measure to.
 
-``to_snake_case`` is imported lazily (function-local) from ``pipeline_config``
-to avoid a circular top-level import — ``pipeline_config.build_config`` calls
-back into this module's ``derive_switch_decompositions``/
-``derive_geo_switch_decompositions``.
+``to_snake_case`` is duplicated locally (see ``_to_snake_case`` below, same
+logic as ``pipeline_config.to_snake_case``) rather than imported from there,
+so this module has NO dependency on ``pipeline_config`` at all —
+``pipeline_config.build_config`` is what calls INTO this module's
+``derive_switch_decompositions``/``derive_geo_switch_decompositions``, and
+``pipeline_config.py`` is also loaded standalone, by file path, via
+``generate_config.py``'s CLI fallback (see that module's docstring), where it
+has no real parent package — an import back from here to there would raise
+``ModuleNotFoundError`` in that context. Keeping this module a self-contained
+leaf avoids the cycle entirely instead of working around it.
 """
 
 from __future__ import annotations
@@ -19,6 +25,19 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from typing import Any
+
+
+def _to_snake_case(name: str) -> str:
+    """Convert PascalCase/camelCase/mixed to snake_case.
+
+    Kept identical to (and independently of) ``pipeline_config.to_snake_case``
+    — see this module's own docstring for why it isn't imported from there.
+    """
+    s = re.sub(r"%", "_pct", name)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+    s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
+    s = re.sub(r"[\s\-]+", "_", s)
+    return s.lower().strip("_")
 
 
 def _extract_switch_branches(dax: str) -> list[dict]:
@@ -95,8 +114,6 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
     Returns ``{table: [ {name, raw_expr, comment}, ... ]}`` list-format entries
     (real SQL, not skeletons), mergeable into ``switch_decompositions``.
     """
-    from src.services.powerbi.pipeline_config import to_snake_case
-
     out: dict[str, list[dict]] = defaultdict(list)
 
     for m in measures:
@@ -123,7 +140,7 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
         # Base measure name → strip a leading Plant_Comp / Plant_Company token and
         # the geo word, so `Plant_Comp KBI_Value_Actual` → `kbi_value_actual`.
         base = re.sub(r"(?i)^\s*plant[_ ]?comp(?:any)?[_ ]*", "", name).strip()
-        base_snake = to_snake_case(base) or to_snake_case(name)
+        base_snake = _to_snake_case(base) or _to_snake_case(name)
 
         emitted = []
         for label, branch in (("plant", branches[0]), ("company", branches[1])):
@@ -165,8 +182,6 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     Returns ``{'base_expr': str, 'base_filters': [str]}`` or ``None`` when the DAX
     is not one of these self-contained aggregate shapes (caller then keeps a TODO).
     """
-    from src.services.powerbi.pipeline_config import to_snake_case
-
     if not dax:
         return None
     d = dax.strip()
@@ -250,7 +265,7 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
         "AVERAGEX": "AVG",
         "DISTINCTCOUNT": "COUNT_DISTINCT",
     }.get(func, func)
-    col = to_snake_case(agg.group(2))
+    col = _to_snake_case(agg.group(2))
     base_expr = f"{spark_func}(source.{col})"
 
     # Extract equality filters  T[a] = "x"  →  a = 'x'
@@ -259,7 +274,7 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
         r"""(?:'[^']+'|\w+)\[(\w+)\]\s*=\s*("[^"]*"|'[^']*'|-?\d+(?:\.\d+)?)""",
         inner,
     ):
-        fcol = to_snake_case(fm.group(1))
+        fcol = _to_snake_case(fm.group(1))
         val = fm.group(2)
         if val[0] == '"':
             val = "'" + val[1:-1] + "'"
@@ -426,8 +441,6 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
     and even the raw skeleton was parked under a table that never survives to a
     deployable view.
     """
-    from src.services.powerbi.pipeline_config import to_snake_case
-
     decompositions: dict[str, list[dict]] = defaultdict(list)
     measure_by_name = {
         m.get("measure_name", ""): m for m in measures if m.get("measure_name")
@@ -452,7 +465,7 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
             if resolved:
                 break
 
-        entry: dict[str, Any] = {"name": to_snake_case(name)}
+        entry: dict[str, Any] = {"name": _to_snake_case(name)}
         if resolved:
             entry["raw_expr"] = resolved["sql"]
             entry["comment"] = (

@@ -29,12 +29,33 @@ Fabric TMDL, or the TMSCHEMA_* DMVs on this tenant), ``fx_TimeIntelligencePY``/
 ``fx_TimeIntelligencePM`` (period-shifting wrappers — need date-filter
 rewriting, not a plain aggregate), and ``fx_SparkLineSVG``/``fx_GaugeSVG``
 (render an SVG string — a display artifact, not a business measure).
+
+``to_snake_case`` is duplicated locally (``_to_snake_case``) rather than
+imported from ``pipeline_config`` — this module has no dependency on it at
+all, since ``pipeline_config.py`` is also loaded standalone, by file path, via
+``generate_config.py``'s CLI fallback (no real parent package in that
+context), and it is what calls INTO this module, not the other way round. See
+``switch_decomposition.py``'s docstring for the full explanation.
 """
 
 from __future__ import annotations
 
 import re
 from collections import defaultdict
+
+
+def _to_snake_case(name: str) -> str:
+    """Convert PascalCase/camelCase/mixed to snake_case.
+
+    Kept identical to (and independently of) ``pipeline_config.to_snake_case``
+    — see this module's own docstring for why it isn't imported from there.
+    """
+    s = re.sub(r"%", "_pct", name)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+    s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
+    s = re.sub(r"[\s\-]+", "_", s)
+    return s.lower().strip("_")
+
 
 # Column-name substrings that mark a column as a DIMENSION, not the EAV table's
 # value column — confirmed against Fact_OTC's real columns (fiscper, comp_code,
@@ -106,14 +127,12 @@ def derive_fx_otckpi_resolutions(
     ``switch_decompositions``, which ``table_processor.py``'s Step 6 already
     consumes, so no new downstream wiring is needed.
     """
-    from src.services.powerbi.pipeline_config import to_snake_case
-
     kbi_tables = _find_kbi_code_value_columns(admin_tables)
     if len(kbi_tables) != 1:
         return {}
     table_name, (code_col, value_col) = next(iter(kbi_tables.items()))
-    code_col_snake = to_snake_case(code_col)
-    value_col_snake = to_snake_case(value_col)
+    code_col_snake = _to_snake_case(code_col)
+    value_col_snake = _to_snake_case(value_col)
 
     out: dict[str, list[dict]] = defaultdict(list)
     for m in measures:
@@ -135,7 +154,7 @@ def derive_fx_otckpi_resolutions(
         )
         out[table_name].append(
             {
-                "name": to_snake_case(name),
+                "name": _to_snake_case(name),
                 "raw_expr": f"{num} / NULLIF({den}, 0)",
                 "comment": (
                     f"fx_OTCKPI('{code_a}','{code_b}') resolved against "
