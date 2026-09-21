@@ -48,6 +48,9 @@ __all__ = [
 import requests
 
 from src.services.powerbi.calculation_groups import derive_calculation_groups
+from src.services.powerbi.custom_function_resolution import (
+    derive_fx_otckpi_resolutions,
+)
 from src.services.powerbi.switch_decomposition import (
     _resolve_referenced_measure_dax,
     derive_geo_switch_decompositions,
@@ -354,8 +357,19 @@ def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | 
 
 
 def to_snake_case(name: str) -> str:
-    """Convert PascalCase/camelCase/mixed to snake_case."""
-    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    """Convert PascalCase/camelCase/mixed to snake_case.
+
+    A literal ``%`` becomes ``_pct`` (matching ``metric_view_utils/utils.py``'s
+    own ``to_snake_case``, which every REGULARLY-translated measure name
+    already goes through) — otherwise it survives verbatim into a YAML
+    ``name:`` field, where an unquoted ``%`` is a directive indicator and
+    breaks the parser. Previously invisible here because every switch/custom-
+    function-resolved measure name reaching YAML emission was still a TODO
+    skeleton; confirmed live once `custom_function_resolution.py` started
+    emitting real ``%``-suffixed KPI names (e.g. "Order Accuracy %").
+    """
+    s = re.sub(r"%", "_pct", name)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
     s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
     s = re.sub(r"[\s\-]+", "_", s)
     return s.lower().strip("_")
@@ -1732,6 +1746,13 @@ def build_config(
     # the company variant the single PBI SWITCH measure would otherwise collapse.
     geo_decomps = derive_geo_switch_decompositions(measures)
     for _tbl, _entries in geo_decomps.items():
+        switch_decomps.setdefault(_tbl, []).extend(_entries)
+    # Merge named custom-DAX-function resolutions (fx_OTCKPI and friends) — a
+    # different shape from a SWITCH (a library function call, not a branch
+    # dispatcher) but the same downstream contract, so it shares the same
+    # switch_decompositions bucket table_processor.py's Step 6 already reads.
+    fx_decomps = derive_fx_otckpi_resolutions(measures, admin_tables)
+    for _tbl, _entries in fx_decomps.items():
         switch_decomps.setdefault(_tbl, []).extend(_entries)
     config["filter_sets"] = derive_filter_sets(measures, switch_decomps)
 
