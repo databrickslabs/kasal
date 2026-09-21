@@ -882,6 +882,16 @@ class PipelineConfigGeneratorTool(BaseTool):
                 # filter_sets, cross-fact drafts). Surfaced in the Config Editor so
                 # a reviewer sees WHAT was auto-filled and what still needs review.
                 "enrichment_log": enrichment_log,
+                # Same diagnostic as UC Metric View Generator's own
+                # "trace_context_seen" — compare the two on one run to see
+                # whether the SAME job_id reaches both tools (the powerbi_
+                # extraction row this tool saves is keyed by this same
+                # value, and UCMV's DB fallback looks it up by it).
+                "trace_context_seen": (
+                    dict(getattr(self, "trace_context", None) or {})
+                    if isinstance(getattr(self, "trace_context", None), dict)
+                    else getattr(self, "trace_context", None)
+                ),
             }
 
             logger.info(

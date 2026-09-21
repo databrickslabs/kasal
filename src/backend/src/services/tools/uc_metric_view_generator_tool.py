@@ -258,6 +258,19 @@ class UCMetricViewGeneratorTool(BaseTool):
             ),
             "db_fallback_fired_for": [],
             "db_fallback_extraction_id": None,
+            # Cuts through speculation about WHY the DB fallback did/didn't
+            # fire, without needing live debugger access: shows exactly what
+            # this tool instance saw on self.trace_context (set by
+            # attach_tools_trace_context via attach_execution_trace_context)
+            # at the moment it ran. Compare job_id here against Pipeline
+            # Config Generator's own "trace_context_seen" on the SAME run —
+            # a mismatch (or a None on either side) is the actual root cause,
+            # not something inferable from the narrative "Final Answer" text.
+            "trace_context_seen": (
+                dict(getattr(self, "trace_context", None) or {})
+                if isinstance(getattr(self, "trace_context", None), dict)
+                else getattr(self, "trace_context", None)
+            ),
         }
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
