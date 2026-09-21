@@ -29,6 +29,7 @@ __all__ = [
     "derive_enrichment_joins",
     "derive_dim_alias_map",
     "derive_switch_decompositions",
+    "derive_calculation_groups",
     "derive_filter_sets",
     "derive_measure_resolutions",
     "derive_measure_usage",
@@ -46,6 +47,7 @@ __all__ = [
 
 import requests
 
+from src.services.powerbi.calculation_groups import derive_calculation_groups
 from src.services.powerbi.switch_decomposition import (
     _resolve_referenced_measure_dax,
     derive_geo_switch_decompositions,
@@ -974,6 +976,13 @@ def parse_admin_tables(
                     "columns": columns,
                     "mquery_expression": source_expr,
                     "measures": tbl.get("measures", []),
+                    # Present only when this table IS a Calculation Group (the
+                    # Admin Scanner's own schema, not a Kasal invention — see
+                    # `calculation_groups.derive_calculation_groups`, which turns
+                    # this raw shape into the `{name, items}` list
+                    # `expand_calculation_groups` (metric_view_utils/
+                    # table_processor.py) expects).
+                    "calculation_group": tbl.get("calculationGroup"),
                 }
     return tables
 
@@ -1739,6 +1748,14 @@ def build_config(
 
     # 6. column_overrides
     config["column_overrides"] = derive_column_overrides(measures, admin_tables)
+
+    # 6b. calculation_groups — real PBI Calculation Group definitions, when the
+    # Admin Scanner tier ran (parse_admin_tables carries `calculation_group`
+    # raw off each table). `metric_view_utils/table_processor.py`'s
+    # `expand_calculation_groups` already consumes this key; before this it
+    # was never produced. Empty list (not present at all in most models) is a
+    # correct, expected no-op for `expand_calculation_groups`.
+    config["calculation_groups"] = derive_calculation_groups(admin_tables)
 
     # 7. measure_resolutions
     raw_resolutions = derive_measure_resolutions(measures)
