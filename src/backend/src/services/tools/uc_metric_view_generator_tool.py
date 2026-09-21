@@ -605,6 +605,22 @@ class UCMetricViewGeneratorTool(BaseTool):
             except Exception as e:
                 logger.warning(f"Failed to parse/apply visual_usage_index: {e}")
 
+        # Reconciliation framework input (priority 3): a deterministic
+        # PBI-measure <-> UCMV-measure mapping draft per fact table. Reads
+        # each measure's used_in_visuals, so it runs after the annotation
+        # above — but unlike that step, ordering relative to emission doesn't
+        # matter here: this is its own output key, not embedded in the
+        # YAML/report.
+        pbi_ucmv_mapping: dict = {}
+        try:
+            from src.services.tools.metric_view_utils.pbi_ucmv_mapping import (
+                derive_pbi_ucmv_mapping,
+            )
+
+            pbi_ucmv_mapping = derive_pbi_ucmv_mapping(pipeline.all_specs)
+        except Exception as e:
+            logger.warning(f"Failed to derive pbi_ucmv_mapping: {e}")
+
         # Emit YAML + SQL
         yaml_output = pipeline.emit_all_yaml(catalog=catalog, schema=schema)
         sql_output = pipeline.emit_all_sql(catalog=catalog, schema=schema)
@@ -781,6 +797,13 @@ class UCMetricViewGeneratorTool(BaseTool):
             # projections/filters, which is a real (if unusual) result, not
             # necessarily a bug.
             "visual_usage_annotated_count": visual_usage_annotated,
+            # {view_name: mapping_candidates_yaml_text} — the reconciliation
+            # framework's (dqa/kpi_reconciliation) input, deterministically
+            # derived instead of hand-authored. A DRAFT: binding: fields are
+            # left TODO (see pbi_ucmv_mapping.py's own docstring for why),
+            # and every measure's pbi_kind should be spot-checked before
+            # trusting it for reconciliation.
+            "pbi_ucmv_mapping": pbi_ucmv_mapping,
             "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
