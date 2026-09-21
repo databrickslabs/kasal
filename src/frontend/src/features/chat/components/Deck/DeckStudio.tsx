@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Loader2, Maximize2, Undo2, X } from 'lucide-react';
+import { Download, Loader2, Maximize2, Undo2, Upload, X } from 'lucide-react';
 import ScaledFrame from '../Chat/ScaledFrame';
 import DeckPresentation from '../Chat/DeckPresentation';
 import ThumbnailRail from './ThumbnailRail';
@@ -17,7 +17,7 @@ import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { hasPendingAssets } from '../../utils/assetRefs';
 import { SLIDE_W, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
-import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
+import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx, sanitizeDeckDocument } from '../../utils/deckExport';
 
 /**
  * The deck studio: a deck opened for editing, one slide at a time.
@@ -51,6 +51,16 @@ interface HistoryEntry {
   prev: string;
 }
 
+const readTextFile = (file: File): Promise<string> => {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('File read failed'));
+    reader.readAsText(file);
+  });
+};
+
 const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model }) => {
   const [deck, setDeck] = useState(code);
   // Follow the message: an edit written back (from this studio, or from a
@@ -79,6 +89,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState<'' | 'html' | 'pdf' | 'pptx'>('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
   const selectedModel = useAppStore((s) => s.selectedModel);
   const [editModel, setEditModel] = useState(() => model || selectedModel || '');
 
@@ -258,6 +269,33 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     }
   };
 
+  const importHtml = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || working || savingRef.current) return;
+    setError(null);
+    try {
+      const documentHtml = await readTextFile(file);
+      const parsed = new DOMParser().parseFromString(documentHtml, 'text/html');
+      // Our own standalone export keeps the authored deck inside #deck-stage.
+      // For another HTML document, carry its head styles along with its body.
+      const exportedStage = parsed.querySelector<HTMLElement>('#deck-stage');
+      const headStyles = Array.from(parsed.head.querySelectorAll('style')).map((style) => style.outerHTML).join('\n');
+      const candidate = exportedStage?.innerHTML ?? [headStyles, parsed.body.innerHTML].filter(Boolean).join('\n');
+      const imported = sanitizeDeckDocument(candidate).trim();
+      if (splitSlides(imported).length === 0) {
+        setError('That HTML file does not contain any presentation slides.');
+        return;
+      }
+      void commit(imported, 'Imported HTML deck', () => {
+        setSelected(0);
+        setBarMode({ kind: 'refine' });
+      });
+    } catch {
+      setError('The HTML presentation could not be imported.');
+    }
+  };
+
   const btn =
     'inline-flex items-center gap-1.5 rounded-md !px-2.5 !py-1.5 text-xs font-medium transition-colors hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent';
   const lastEdit = history[history.length - 1];
@@ -293,6 +331,14 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             {history.length > 0 ? ` · ${history.length} edit${history.length === 1 ? '' : 's'}` : ''}
           </span>
           <div className="ml-auto flex items-center gap-1">
+            <input
+              ref={importRef}
+              type="file"
+              accept=".html,text/html"
+              hidden
+              data-testid="deck-html-input"
+              onChange={importHtml}
+            />
             <button
               type="button"
               className={btn}
@@ -304,6 +350,15 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             </button>
             <button type="button" className={btn} onClick={() => setPresent(true)} title="Present">
               <Maximize2 size={14} /> Present
+            </button>
+            <button
+              type="button"
+              className={btn}
+              disabled={!!working || saving}
+              onClick={() => importRef.current?.click()}
+              title="Import HTML"
+            >
+              <Upload size={14} /> Import HTML
             </button>
             <div ref={menuRef} className="relative">
               <button type="button" className={btn} disabled={!!busy} onClick={() => setMenu((m) => !m)} title="Download">

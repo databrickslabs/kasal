@@ -17,7 +17,12 @@ vi.mock('../../persistence/sessionApi', () => ({
   addMessageToSession: vi.fn().mockResolvedValue(undefined),
   updateMessageInSession: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../utils/deckExport', () => ({ downloadDeckHtml: vi.fn(), downloadDeckPdf: vi.fn(), downloadDeckPptx: vi.fn() }));
+vi.mock('../../utils/deckExport', () => ({
+  downloadDeckHtml: vi.fn(),
+  downloadDeckPdf: vi.fn(),
+  downloadDeckPptx: vi.fn(),
+  sanitizeDeckDocument: (html: string) => html,
+}));
 vi.mock('../Chat/RunProgress', () => ({
   default: ({ jobId, running, onSelectStep }: { jobId?: string; running: boolean; onSelectStep: (step: unknown) => void }) =>
     <div data-testid="slide-run" data-job-id={jobId} data-running={String(running)}>
@@ -113,6 +118,34 @@ describe('DeckStudio', () => {
     fireEvent.click(screen.getByTitle('Download'));
     fireEvent.click(screen.getByRole('button', { name: 'Download HTML' }));
     expect(downloadDeckHtml).toHaveBeenCalledWith(DECK);
+  });
+
+  it('imports a standalone HTML presentation through the existing save path', async () => {
+    const onDeckChange = vi.fn().mockResolvedValue(undefined);
+    const imported = [slide('Imported cover'), slide('Imported detail')].join('\n');
+    render(<DeckStudio code={DECK} messageId="m1" onDeckChange={onDeckChange} onClose={() => {}} />);
+
+    const file = new File(
+      [`<!doctype html><html><body><main id="deck-stage">${imported}</main></body></html>`],
+      'imported.html',
+      { type: 'text/html' },
+    );
+    fireEvent.change(screen.getByTestId('deck-html-input'), { target: { files: [file] } });
+
+    await waitFor(() => expect(onDeckChange).toHaveBeenCalledWith(imported, DECK));
+    expect(await screen.findByText('2 slides · 1 edit')).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('rejects an HTML document without presentation slides', async () => {
+    const onDeckChange = vi.fn().mockResolvedValue(undefined);
+    render(<DeckStudio code={DECK} messageId="m1" onDeckChange={onDeckChange} onClose={() => {}} />);
+
+    const file = new File(['<!doctype html><html><body><p>Not a deck</p></body></html>'], 'notes.html', { type: 'text/html' });
+    fireEvent.change(screen.getByTestId('deck-html-input'), { target: { files: [file] } });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('does not contain any presentation slides');
+    expect(onDeckChange).not.toHaveBeenCalled();
   });
 
   it('selects a slide on pointer-down, so a draggable row eating the click still selects', () => {
