@@ -46,6 +46,12 @@ __all__ = [
 
 import requests
 
+from src.services.powerbi.switch_decomposition import (
+    _resolve_referenced_measure_dax,
+    derive_geo_switch_decompositions,
+    derive_switch_decompositions,
+)
+
 # ═══════════════════════════════════════════════════════════════════════
 # Auth
 # ═══════════════════════════════════════════════════════════════════════
@@ -248,8 +254,10 @@ def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
     expressions: dict[str, str] = {}
     for part in tmdl_parts or []:
         path = part.get("path", "")
-        if not (path == "definition/expressions.tmdl"
-                or path.startswith("definition/expressions/")):
+        if not (
+            path == "definition/expressions.tmdl"
+            or path.startswith("definition/expressions/")
+        ):
             continue
         try:
             content = base64.b64decode(part.get("payload", "")).decode("utf-8")
@@ -265,7 +273,9 @@ def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
             expr = m.group(3).strip()
             clean = []
             for line in expr.split("\n"):
-                if line.strip().startswith(("lineageTag:", "annotation", "queryGroup:")):
+                if line.strip().startswith(
+                    ("lineageTag:", "annotation", "queryGroup:")
+                ):
                     break
                 clean.append(line)
             expressions[name] = "\n".join(clean).strip()
@@ -640,159 +650,6 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
     return measures
 
 
-def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
-    """Detect SELECTEDVALUE+SWITCH measures → skeleton decompositions."""
-    decompositions: dict[str, list[dict]] = defaultdict(list)
-
-    for m in measures:
-        dax = m.get("expression", "") or ""
-        name = m.get("measure_name", "")
-        table = m.get("table_name", "")
-
-        if not dax:
-            continue
-        dax_upper = dax.upper()
-        if "SELECTEDVALUE" not in dax_upper or "SWITCH" not in dax_upper:
-            continue
-
-        branches = _extract_switch_branches(dax)
-        skeleton: dict[str, Any] = {
-            "name": to_snake_case(name),
-            "raw_expr": (
-                f"TODO: SQL expression for SWITCH measure '{name}' "
-                f"(DAX: {dax[:120]}...)"
-            ),
-            "comment": f"SWITCH measure from {name}",
-        }
-        if branches:
-            skeleton["_detected_branches"] = branches
-            skeleton["comment"] = f"SWITCH({len(branches)} branches): " + ", ".join(
-                b.get("case_value", "?") for b in branches[:5]
-            )
-
-        decompositions[table].append(skeleton)
-
-    return dict(decompositions)
-
-
-def _extract_switch_branches(dax: str) -> list[dict]:
-    """Parse SWITCH(TRUE(), ...) branches from DAX."""
-    branches: list[dict] = []
-    switch_match = re.search(
-        r"SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,\s*(.+)",
-        dax,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not switch_match:
-        return branches
-
-    body = switch_match.group(1)
-    branch_re = re.compile(
-        r'(\w+)\s*=\s*"([^"]+)"\s*,\s*([^,]+?)(?=,\s*\w+\s*=\s*"|$)',
-        re.DOTALL,
-    )
-    for bm in branch_re.finditer(body):
-        branches.append(
-            {
-                "variable": bm.group(1),
-                "case_value": bm.group(2),
-                "dax_snippet": bm.group(3).strip().rstrip(",").strip()[:200],
-            }
-        )
-    return branches
-
-
-def _calculate_branch_bodies(text: str) -> list[str]:
-    """Return the balanced inner text of every top-level ``CALCULATE( ... )``."""
-    bodies: list[str] = []
-    for m in re.finditer(r"CALCULATE\s*\(", text, re.IGNORECASE):
-        start = m.end()
-        depth = 1
-        pos = start
-        while pos < len(text) and depth > 0:
-            if text[pos] == "(":
-                depth += 1
-            elif text[pos] == ")":
-                depth -= 1
-                if depth == 0:
-                    bodies.append(text[start:pos])
-                    break
-            pos += 1
-    return bodies
-
-
-def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
-    """Detect plant/company geo-selector SWITCH measures and emit BOTH branches.
-
-    Shape (no SELECTEDVALUE — that's the parameterized case handled elsewhere):
-        SWITCH(TRUE(),
-               Or(ISFILTERED(dim[plant_desc]), HASONEVALUE(dim[plant])),
-               CALCULATE(<agg>, … creg_type="Plant"),      -- branch A (plant)
-               CALCULATE(<agg>, … creg_type="Company Code"))-- branch B (company)
-
-    A UC metric view has no slicer context, so the single PBI SWITCH measure must
-    become TWO static measures — ``plant_<base>`` and ``company_<base>`` — matching
-    the ground truth. Each branch is resolved to real SQL via the same
-    ``_resolve_referenced_measure_dax`` used for measure-refs, so downstream
-    dependents (which reference the parent by name) still resolve, and the second
-    (company) variant — previously dropped entirely — is now emitted.
-
-    Returns ``{table: [ {name, raw_expr, comment}, ... ]}`` list-format entries
-    (real SQL, not skeletons), mergeable into ``switch_decompositions``.
-    """
-    out: dict[str, list[dict]] = defaultdict(list)
-
-    for m in measures:
-        dax = m.get("expression", "") or ""
-        name = m.get("original_name") or m.get("measure_name", "")
-        table = m.get("table_name", "") or m.get("proposed_allocation", "")
-        if not dax or not name:
-            continue
-        du = dax.upper()
-        # geo-selector: SWITCH(TRUE(), …) whose condition tests plant filter state
-        if not re.search(r"SWITCH\s*\(\s*TRUE\s*\(\s*\)", du):
-            continue
-        if not re.search(r"ISFILTERED|HASONEVALUE", du):
-            continue
-        # Strip var…return scaffolding so the branch CALCULATEs are the ones found.
-        body = dax
-        _ret = re.search(r"\breturn\b\s*(.+)$", body, re.IGNORECASE | re.DOTALL)
-        if _ret and re.match(r"(?is)^\s*var\s+", body):
-            body = _ret.group(1)
-        branches = _calculate_branch_bodies(body)
-        if len(branches) < 2:
-            continue  # need at least a plant + company branch
-
-        # Base measure name → strip a leading Plant_Comp / Plant_Company token and
-        # the geo word, so `Plant_Comp KBI_Value_Actual` → `kbi_value_actual`.
-        base = re.sub(r"(?i)^\s*plant[_ ]?comp(?:any)?[_ ]*", "", name).strip()
-        base_snake = to_snake_case(base) or to_snake_case(name)
-
-        emitted = []
-        for label, branch in (("plant", branches[0]), ("company", branches[1])):
-            resolved = _resolve_referenced_measure_dax(f"CALCULATE({branch})")
-            if not resolved:
-                continue
-            base_expr = resolved["base_expr"]
-            filters = resolved["base_filters"]
-            sql = base_expr
-            if filters:
-                sql = f"{base_expr} FILTER (WHERE {' AND '.join(filters)})"
-            emitted.append(
-                {
-                    "name": f"{label}_{base_snake}",
-                    "raw_expr": sql,
-                    "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
-                }
-            )
-        # Only emit when BOTH branches resolved — a half-decomposition would be
-        # worse than leaving the parent measure to the normal path.
-        if len(emitted) == 2:
-            out[table].extend(emitted)
-
-    return dict(out)
-
-
 def derive_filter_sets(
     measures: list[dict],
     switch_decomps: dict[str, list[dict]],
@@ -831,122 +688,6 @@ def derive_filter_sets(
                 filter_sets[set_key] = sorted(set(values))
 
     return filter_sets
-
-
-def _resolve_referenced_measure_dax(dax: str) -> dict | None:
-    """PROP-1: transpile a REFERENCED measure's DAX into a UCMV ``base_expr``
-    (+ ``base_filters``) so ``[MeasureRef]`` resolutions carry real SQL instead of
-    a ``TODO`` placeholder.
-
-    Handles the concrete shapes seen in the reference model (and common elsewhere):
-      * numeric constant                     → base_expr = the number
-      * ``SUM(T[col])`` / ``SUMX(T, T[col])`` → base_expr = ``SUM(source.col)``
-      * ``CALCULATE(SUM(T[col]), T[a]="x", …)`` → base_expr + base_filters
-      * ``SWITCH(TRUE(), <cond>, CALCULATE(...), CALCULATE(...))`` (plant-vs-company
-        selector) → the FIRST CALCULATE branch (the default the GT also picks)
-
-    Returns ``{'base_expr': str, 'base_filters': [str]}`` or ``None`` when the DAX
-    is not one of these self-contained aggregate shapes (caller then keeps a TODO).
-    """
-    if not dax:
-        return None
-    d = dax.strip()
-
-    # Strip leading slicer-scalar scaffolding vars before locating the aggregate.
-    # Measures on the _BP/_PY side carry `var std = CALCULATE([F_Start_date]) var
-    # etd = CALCULATE([F_End_date]) return <real expr>` — those date-window vars
-    # are display scaffolding (ignored elsewhere in the pipeline). If we don't
-    # drop them, the FIRST CALCULATE( found is `CALCULATE([F_Start_date])` (the
-    # scaffolding), not the real aggregate branch, and resolution fails — which is
-    # exactly why the _BP twins dropped while the scaffolding-free _Actual twins
-    # resolved. Cut to the RETURN body so the aggregate is the first CALCULATE.
-    _ret = re.search(r"\breturn\b\s*(.+)$", d, re.IGNORECASE | re.DOTALL)
-    if _ret and re.match(r"(?is)^\s*var\s+", d):
-        d = _ret.group(1).strip()
-
-    # Constant (e.g. AVG_KBI_Div_Factor's effective value is 1 in the GT).
-    if re.fullmatch(r"-?\d+(?:\.\d+)?", d):
-        return {"base_expr": d, "base_filters": []}
-
-    def _first_calculate_body(text: str) -> str | None:
-        """Return the balanced inner text of the FIRST ``CALCULATE( ... )``."""
-        cm = re.search(r"CALCULATE\s*\(", text, re.IGNORECASE)
-        if not cm:
-            return None
-        start = cm.end()
-        depth = 1
-        pos = start
-        while pos < len(text) and depth > 0:
-            if text[pos] == "(":
-                depth += 1
-            elif text[pos] == ")":
-                depth -= 1
-                if depth == 0:
-                    return text[start:pos]
-            pos += 1
-        return text[start:pos]
-
-    # If it's a SWITCH selector (or any wrapper containing CALCULATE), resolve to
-    # the FIRST CALCULATE(...) branch — the plant/default branch the ground truth
-    # picks. Bound the parse to that single balanced CALCULATE so a second branch's
-    # filters (e.g. "Company Code") don't leak into this resolution.
-    if re.match(r"(?is)^\s*(?:var\s+.*?return\s+)?switch\s*\(", d) or (
-        "CALCULATE" in d.upper() and not re.match(r"(?is)^\s*CALCULATE\s*\(", d)
-    ):
-        body = _first_calculate_body(d)
-        if body is not None:
-            inner = body
-        else:
-            inner = d
-    else:
-        # CALCULATE(SUM(T[col]), <filter>, ...)  — take its balanced body
-        body = _first_calculate_body(d)
-        inner = body if body is not None else d
-
-    # Aggregate over Table[Column]  →  SUM(source.col)
-    agg = re.search(
-        r"\b(SUM|SUMX|AVERAGE|MIN|MAX|COUNT|DISTINCTCOUNT)\s*\("
-        r"(?:\s*\w+\s*,\s*)?"  # SUMX(Table, ...) optional table arg
-        r"(?:'[^']+'|\w+)\[(\w+)\]",  # Table[col] / 'Table Name'[col]
-        inner,
-        re.IGNORECASE,
-    )
-    if not agg:
-        # Also handle the SUMX(FILTER(fact, <pred>), fact[col]) shape, where the
-        # first arg is a FILTER(...) table rather than a bare table — the column
-        # is the FINAL Table[col] argument. (Plant/Company KBI selectors on the
-        # _BP side use this shape, unlike the _Actual side's CALCULATE(SUM,…).)
-        agg = re.search(
-            r"\b(SUMX|COUNTX|AVERAGEX)\s*\(\s*FILTER\s*\(.*\)\s*,\s*"
-            r"(?:'[^']+'|\w+)\[(\w+)\]\s*\)",
-            inner,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if not agg:
-            return None
-    func = agg.group(1).upper()
-    spark_func = {
-        "SUMX": "SUM",
-        "COUNTX": "COUNT",
-        "AVERAGEX": "AVG",
-        "DISTINCTCOUNT": "COUNT_DISTINCT",
-    }.get(func, func)
-    col = to_snake_case(agg.group(2))
-    base_expr = f"{spark_func}(source.{col})"
-
-    # Extract equality filters  T[a] = "x"  →  a = 'x'
-    filters: list[str] = []
-    for fm in re.finditer(
-        r"""(?:'[^']+'|\w+)\[(\w+)\]\s*=\s*("[^"]*"|'[^']*'|-?\d+(?:\.\d+)?)""",
-        inner,
-    ):
-        fcol = to_snake_case(fm.group(1))
-        val = fm.group(2)
-        if val[0] == '"':
-            val = "'" + val[1:-1] + "'"
-        filters.append(f"{fcol} = {val}")
-
-    return {"base_expr": base_expr, "base_filters": filters}
 
 
 def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
