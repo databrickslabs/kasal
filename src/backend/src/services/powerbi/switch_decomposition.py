@@ -163,6 +163,13 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
                     "original_name": name,
                     "raw_expr": sql,
                     "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
+                    # dimension_conditional: resolved by whether `plant` is
+                    # present in the query's own grouping, not by a selector
+                    # VALUE — matches dqa/kpi_reconciliation's own pbi_kind
+                    # for exactly this ft_qse-style plant/company shape.
+                    "pbi_kind": "dimension_conditional",
+                    "pbi_sources": [name],
+                    "pbi_operator": "passthrough",
                 }
             )
         # Only emit when BOTH branches resolved — a half-decomposition would be
@@ -412,6 +419,10 @@ def _resolve_switch_branch(
             "sql": _sql_with_filters(resolved),
             "table": mrow.get("table_name", ""),
             "sources": [single.group(1)],
+            # For the reconciliation mapping generator (pbi_ucmv_mapping.py):
+            # a single passthrough IS the referenced PBI measure, verbatim.
+            "kind": "direct",
+            "operator": "passthrough",
         }
 
     op_match = re.fullmatch(
@@ -426,7 +437,13 @@ def _resolve_switch_branch(
             return None
         sql = f"({_sql_with_filters(a_res)}) {op} ({_sql_with_filters(b_res)})"
         table = a_row.get("table_name", "") or b_row.get("table_name", "")
-        return {"sql": sql, "table": table, "sources": [a_name, b_name]}
+        return {
+            "sql": sql,
+            "table": table,
+            "sources": [a_name, b_name],
+            "kind": "composite",
+            "operator": "add" if op == "+" else "subtract",
+        }
 
     return None
 
@@ -446,6 +463,18 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
     branches were detected (``_detected_branches``) but never resolved to SQL,
     and even the raw skeleton was parked under a table that never survives to a
     deployable view.
+
+    A SWITCH can branch for two different reasons, and this function tells them
+    apart by what actually comes out, not by guessing from the DAX shape up
+    front: some (confirmed live on ``ACT vs Target``) branch on a cosmetic
+    condition — every candidate resolves to the SAME underlying value, just
+    scaled/formatted differently — and collapse to ONE UCMV measure, same as
+    before this change. Others genuinely dispatch between DIFFERENT KPIs shown
+    through one shared visual (the pattern ``dqa/kpi_reconciliation`` was built
+    for — e.g. a total_sc report's SWITCH selecting between EPL/OPL/Speed
+    Losses) — ALL distinct resolutions are collected and each becomes its own
+    UCMV measure, `<name>__<branch-label>`, instead of only ever emitting
+    whichever branch happened to resolve first and silently losing the rest.
     """
     decompositions: dict[str, list[dict]] = defaultdict(list)
     measure_by_name = {
@@ -464,44 +493,80 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
             continue
 
         vars_map = _parse_dax_vars(dax)
-        resolved = None
+        # Collect every DISTINCT resolution (dedup by SQL) instead of stopping
+        # at the first — see docstring for why one vs. many matters.
+        distinct: list[dict] = []
+        seen_sql: set[str] = set()
         for candidate in _switch_result_candidates(dax):
             expanded = _substitute_vars(candidate, vars_map)
             resolved = _resolve_switch_branch(expanded, measure_by_name)
-            if resolved:
-                break
-
-        # `original_name` carries the TRUE PBI display name (not snake_cased) —
-        # `_build_switch_measure` (pipeline.py) falls back to `name` when this
-        # is absent, but visual-usage matching (`visual_usage_annotator`) joins
-        # on the real PBI name, so omitting this silently breaks that match for
-        # every switch-resolved measure.
-        entry: dict[str, Any] = {"name": _to_snake_case(name), "original_name": name}
-        if resolved:
-            entry["raw_expr"] = resolved["sql"]
-            entry["comment"] = (
-                f"SWITCH measure [{name}] — resolved from {resolved['sources']}"
-            )
-            target_table = resolved["table"] or selector_table
-        else:
-            entry["raw_expr"] = (
-                f"TODO: SQL expression for SWITCH measure '{name}' "
-                f"(DAX: {dax[:120]}...)"
-            )
-            entry["comment"] = f"SWITCH measure from {name}"
-            target_table = selector_table
+            if resolved and resolved["sql"] not in seen_sql:
+                seen_sql.add(resolved["sql"])
+                distinct.append(resolved)
 
         # `derive_filter_sets` (in `pipeline_config.py`) reads `_detected_branches`
-        # (the OLDER named-branch shape: `variable="value", expr`) off this key
-        # when present, to recover a selector's value list — best-effort, only
-        # populated when the DAX happens to use that shape (most of this report's
-        # own SWITCHes branch on an arbitrary boolean condition instead, per
-        # `_switch_result_candidates`'s docstring, so this is often empty and
-        # that's fine).
+        # (the OLDER named-branch shape: `variable="value", expr`) off ONE entry
+        # per measure when present, to recover a selector's value list —
+        # best-effort, only populated when the DAX happens to use that shape
+        # (most of this report's own SWITCHes branch on an arbitrary boolean
+        # condition instead, per `_switch_result_candidates`'s docstring, so
+        # this is often empty and that's fine).
         named_branches = _extract_switch_branches(dax)
-        if named_branches:
-            entry["_detected_branches"] = named_branches
 
-        decompositions[target_table].append(entry)
+        if len(distinct) <= 1:
+            resolved = distinct[0] if distinct else None
+            # `original_name` carries the TRUE PBI display name (not
+            # snake_cased) — `_build_switch_measure` (pipeline.py) falls back
+            # to `name` when this is absent, but visual-usage matching
+            # (`visual_usage_annotator`) and the reconciliation mapping
+            # generator (`pbi_ucmv_mapping.py`) both join on the real PBI
+            # name, so omitting this silently breaks both for every
+            # switch-resolved measure.
+            entry: dict[str, Any] = {
+                "name": _to_snake_case(name),
+                "original_name": name,
+            }
+            if resolved:
+                entry["raw_expr"] = resolved["sql"]
+                entry["comment"] = (
+                    f"SWITCH measure [{name}] — resolved from {resolved['sources']}"
+                )
+                entry["pbi_kind"] = resolved["kind"]
+                entry["pbi_sources"] = resolved["sources"]
+                entry["pbi_operator"] = resolved["operator"]
+                target_table = resolved["table"] or selector_table
+            else:
+                entry["raw_expr"] = (
+                    f"TODO: SQL expression for SWITCH measure '{name}' "
+                    f"(DAX: {dax[:120]}...)"
+                )
+                entry["comment"] = f"SWITCH measure from {name}"
+                target_table = selector_table
+            if named_branches:
+                entry["_detected_branches"] = named_branches
+            decompositions[target_table].append(entry)
+            continue
+
+        # Genuinely N different KPIs behind one SWITCH — one UCMV measure per
+        # distinct resolution, labeled by what it actually resolves from
+        # (e.g. `act_vs_target__epl_actual`) since the branch's DAX condition
+        # text is a display string, not a stable identifier.
+        for i, resolved in enumerate(distinct):
+            label = _to_snake_case("_".join(resolved["sources"])) or f"branch{i}"
+            branch_name = f"{_to_snake_case(name)}__{label}"
+            entry = {
+                "name": branch_name,
+                "original_name": name,
+                "raw_expr": resolved["sql"],
+                "comment": (
+                    f"SWITCH branch of [{name}] — resolved from {resolved['sources']}"
+                ),
+                "pbi_kind": resolved["kind"],
+                "pbi_sources": resolved["sources"],
+                "pbi_operator": resolved["operator"],
+            }
+            if i == 0 and named_branches:
+                entry["_detected_branches"] = named_branches
+            decompositions[resolved["table"] or selector_table].append(entry)
 
     return dict(decompositions)

@@ -163,6 +163,29 @@ def derive_fx_otckpi_resolutions(
                     f"fx_OTCKPI('{code_a}','{code_b}') resolved against "
                     f"{table_name}.{code_col}/{value_col}"
                 ),
+                # Not a named-measure reference (unlike switch_decomposition's
+                # "direct"/"composite") — each operand is a code-filtered raw
+                # column aggregate, so each source is a dict, not a plain
+                # measure-name string. See pbi_ucmv_mapping.py for how this
+                # shape maps onto mapping_schema.py's `raw_column` pbi_kind.
+                "pbi_kind": "composite",
+                "pbi_operator": "divide",
+                "pbi_sources": [
+                    {
+                        "kind": "raw_column",
+                        "table": table_name,
+                        "column": code_col,
+                        "value_column": value_col,
+                        "filter_value": code_a,
+                    },
+                    {
+                        "kind": "raw_column",
+                        "table": table_name,
+                        "column": code_col,
+                        "value_column": value_col,
+                        "filter_value": code_b,
+                    },
+                ],
             }
         )
     return dict(out)

@@ -721,6 +721,12 @@ class MetricViewPipeline:
                 confidence="high",
                 category="switch_decomposition",
                 window_spec=defn.get("window"),
+                # PBI-reconciliation provenance (priority 3) — present only
+                # when the entry actually resolved (a TODO skeleton carries
+                # none of these); see data_classes.py's field docstrings.
+                pbi_kind=defn.get("pbi_kind"),
+                pbi_sources=defn.get("pbi_sources") or [],
+                pbi_operator=defn.get("pbi_operator"),
             )
 
         num = defn["num"]
