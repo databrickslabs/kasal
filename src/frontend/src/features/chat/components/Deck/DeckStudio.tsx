@@ -17,7 +17,7 @@ import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { hasPendingAssets } from '../../utils/assetRefs';
 import { SLIDE_W, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
-import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
+import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 
 /**
  * The deck studio: a deck opened for editing, one slide at a time.
@@ -77,7 +77,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const [barMode, setBarMode] = useState<{ kind: 'refine' } | { kind: 'fill'; at: number }>({ kind: 'refine' });
   const [present, setPresent] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [busy, setBusy] = useState<'' | 'pdf' | 'pptx'>('');
+  const [busy, setBusy] = useState<'' | 'html' | 'pdf' | 'pptx'>('');
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedModel = useAppStore((s) => s.selectedModel);
   const [editModel, setEditModel] = useState(() => model || selectedModel || '');
@@ -244,11 +244,12 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     return () => document.removeEventListener('mousedown', onDoc);
   }, [menu]);
 
-  const runExport = async (kind: 'pdf' | 'pptx') => {
+  const runExport = async (kind: 'html' | 'pdf' | 'pptx') => {
     setMenu(false);
     setBusy(kind);
     try {
-      if (kind === 'pdf') await downloadDeckPdf(viewSlides);
+      if (kind === 'html') downloadDeckHtml(resolvedDeck);
+      else if (kind === 'pdf') await downloadDeckPdf(viewSlides);
       else await downloadDeckPptx(viewSlides);
     } catch (err) {
       console.error('[deck] export failed', err);
@@ -313,6 +314,9 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
                   className="absolute right-0 z-10 mt-1 min-w-[10rem] overflow-hidden rounded-md border py-1 shadow-lg"
                   style={{ background: '#1c1c1c', borderColor: '#333' }}
                 >
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('html')}>
+                    Download HTML
+                  </button>
                   <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('pdf')}>
                     Download PDF
                   </button>

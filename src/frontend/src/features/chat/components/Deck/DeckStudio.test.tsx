@@ -5,6 +5,7 @@ import { useAppStore } from '../../store/appStore';
 import { fetchEnabledModels } from '../../api/models';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
+import { downloadDeckHtml } from '../../utils/deckExport';
 
 vi.mock('../../api/models', () => ({ fetchEnabledModels: vi.fn() }));
 
@@ -16,7 +17,7 @@ vi.mock('../../persistence/sessionApi', () => ({
   addMessageToSession: vi.fn().mockResolvedValue(undefined),
   updateMessageInSession: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../utils/deckExport', () => ({ downloadDeckPdf: vi.fn(), downloadDeckPptx: vi.fn() }));
+vi.mock('../../utils/deckExport', () => ({ downloadDeckHtml: vi.fn(), downloadDeckPdf: vi.fn(), downloadDeckPptx: vi.fn() }));
 vi.mock('../Chat/RunProgress', () => ({
   default: ({ jobId, running, onSelectStep }: { jobId?: string; running: boolean; onSelectStep: (step: unknown) => void }) =>
     <div data-testid="slide-run" data-job-id={jobId} data-running={String(running)}>
@@ -105,6 +106,13 @@ describe('DeckStudio', () => {
     // inside it — as a real keypress with focus in the studio does.
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Deck studio' }), { key: 'ArrowLeft' });
     expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('downloads the presentation as HTML', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    fireEvent.click(screen.getByTitle('Download'));
+    fireEvent.click(screen.getByRole('button', { name: 'Download HTML' }));
+    expect(downloadDeckHtml).toHaveBeenCalledWith(DECK);
   });
 
   it('selects a slide on pointer-down, so a draggable row eating the click still selects', () => {

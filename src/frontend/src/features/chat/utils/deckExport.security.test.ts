@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { downloadDeckPdf, downloadDeckPptx, sanitizeForRender } from './deckExport';
+import { downloadDeckPdf, downloadDeckPptx, sanitizeForRender, standaloneDeckHtml } from './deckExport';
 
 const capture = vi.hoisted(() => ({ html: '' }));
 vi.mock('html2canvas', () => ({ default: vi.fn(async (host: HTMLElement) => {
@@ -46,6 +46,19 @@ describe('deck export security', () => {
     expect(host.querySelector('h1')?.textContent).toBe('Title');
     expect(host.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png/);
     expect(host.querySelector('path')?.getAttribute('stroke')).toBe('blue');
+  });
+
+  it('builds a styled standalone HTML player without agent-authored active content', () => {
+    const html = standaloneDeckHtml(
+      '<style>.slide{color:red}</style>' + attack + '<section class="slide"><h1>Two</h1></section>',
+    );
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelectorAll('#deck-stage > section.slide')).toHaveLength(2);
+    expect(doc.querySelector('style')?.textContent).toContain('.slide');
+    expect(doc.querySelectorAll('script')).toHaveLength(1);
+    expect(doc.querySelector('script')?.textContent).not.toContain('__security_review_marker');
+    expect(doc.querySelector('svg')?.hasAttribute('onload')).toBe(false);
+    expect(doc.querySelector('#deck-controls')).not.toBeNull();
   });
 
   it.each([['PDF', downloadDeckPdf], ['PowerPoint', downloadDeckPptx]] as const)(
