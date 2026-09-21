@@ -623,6 +623,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                     )
                     logger.warning(f"[PipelineConfigGen] {msg}")
                     warnings.append(msg)
+            visual_usage_index: dict = {}
             if report_id:
                 logger.info("[PipelineConfigGen] API 4: Report Definition...")
                 report_def = gen.extract_report_definition(
@@ -633,6 +634,25 @@ class PipelineConfigGeneratorTool(BaseTool):
                     client_id=client_id,
                     client_secret=client_secret,
                 )
+                # Business-usage signal (PROP-8): which page(s)/visual(s) each
+                # measure is actually drawn on or filtered by — same PBIR parts
+                # API 4 already fetched, no extra call. Never fatal: a report
+                # this can't parse (e.g. no report_def) just yields an empty
+                # index, same as "no usage data available" downstream.
+                try:
+                    from src.services.powerbi.visual_usage import (
+                        derive_visual_usage_index,
+                    )
+
+                    visual_usage_index = derive_visual_usage_index(report_def)
+                    logger.info(
+                        f"[PipelineConfigGen]   → visual usage for "
+                        f"{len(visual_usage_index)} field(s)"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[PipelineConfigGen] Visual usage extraction failed: {e}"
+                    )
 
             # Build config
             logger.info("[PipelineConfigGen] Building config...")
@@ -833,6 +853,11 @@ class PipelineConfigGeneratorTool(BaseTool):
                 # Measures ranked by how many other measures reference them —
                 # reviewers use this to prioritize which gaps/TODOs to fix first.
                 "measure_usage_ranking": usage_ranking,
+                # {original_measure_name: [{page, visual_type, role}, ...]} —
+                # consumed by the flow handoff → UCMV JSON mode, same as
+                # measures_json/mquery_json/relationships_json, to tag each
+                # measure with WHERE it's actually seen in the report.
+                "visual_usage_index": visual_usage_index,
                 "summary": {
                     "total_keys": len(config),
                     "auto_filled": auto_count,
@@ -1052,7 +1077,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         return out
 
     @staticmethod
-    def _build_ucmv_mquery(admin_tables: dict, expressions: dict | None = None) -> list[dict]:
+    def _build_ucmv_mquery(
+        admin_tables: dict, expressions: dict | None = None
+    ) -> list[dict]:
         """Convert admin_tables into the UCMV `mquery_json` shape.
 
         Both `parse_admin_tables` and `parse_tmdl_to_admin_tables` populate
@@ -1304,7 +1331,9 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _enrich_source_tables_from_mquery(
-        config: dict, admin_tables: dict, expressions: dict | None = None,
+        config: dict,
+        admin_tables: dict,
+        expressions: dict | None = None,
     ) -> list[dict]:
         """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
         Power Query M source (deterministic — no warehouse, no LLM).
@@ -1334,9 +1363,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 continue  # human/derived value — never overwrite
             tinfo = admin_tables.get(dim) or {}
             mquery = tinfo.get("mquery_expression") or tinfo.get("mquery") or ""
-            resolved = (
-                extract_source_table(mquery, expressions) if mquery else None
-            )
+            resolved = extract_source_table(mquery, expressions) if mquery else None
             if resolved:
                 entry["source_table"] = resolved
                 log.append(

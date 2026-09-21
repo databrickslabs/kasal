@@ -206,6 +206,39 @@ def _usage_suffix(referenced_by: int) -> str:
     return f" — referenced by {referenced_by} {noun}"
 
 
+def _visual_usage_suffix(measure) -> str:
+    """Business-usage annotation for a measure comment: which report page(s)
+    this measure is actually drawn on or filtered by (PROP-8).
+
+    Distinct from `_usage_suffix` (measure→measure DAX references) — this is
+    dashboard/visual usage, from `TranslationResult.used_in_visuals`
+    (`visual_usage_annotator.annotate_visual_usage`). Empty when the field
+    wasn't found in any visual (common — many measures exist only as
+    intermediate building blocks for other measures) or when no
+    visual_usage_index was supplied at all (report_id omitted, or the run
+    predates this feature) — both cases are silent, not flagged as an error.
+    Collapses multiple occurrences on the same page to one mention; caps at 3
+    pages named explicitly, then "+N more" so a measure used everywhere
+    doesn't produce an unreadable comment line.
+    """
+    usage = getattr(measure, "used_in_visuals", None)
+    if not usage:
+        return ""
+    pages_seen: list[str] = []
+    for occ in usage:
+        page = occ.get("page")
+        if page and page not in pages_seen:
+            pages_seen.append(page)
+    if not pages_seen:
+        return ""
+    shown = pages_seen[:3]
+    suffix = "Used on: " + ", ".join(shown)
+    remaining = len(pages_seen) - len(shown)
+    if remaining > 0:
+        suffix += f" (+{remaining} more)"
+    return f" · {suffix}"
+
+
 _MAX_EXPLANATION = 140
 
 
@@ -838,6 +871,7 @@ def emit_yaml(
                     m.skip_reason or col_to_readable(m.measure_name)
                 ) + _provenance_suffix(m)
             comment += _usage_suffix(m.referenced_by)
+            comment += _visual_usage_suffix(m)
             lines.append(f"    comment: {_yaml_val(comment)}")
             m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
             display_name = m_override.get("display_name") or m_meta.get(
@@ -913,6 +947,7 @@ def emit_yaml(
                     dax_comment = f"PBI: {m.original_name}"
                 dax_comment += _provenance_suffix(m)
             dax_comment += _usage_suffix(m.referenced_by)
+            dax_comment += _visual_usage_suffix(m)
             if dax_comment:
                 lines.append(f"    comment: {_yaml_val(dax_comment)}")
             # Display name
@@ -975,7 +1010,7 @@ def emit_yaml(
                     f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
                 )
             lines.append(
-                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by))}"
+                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m))}"
             )
             lines.append("")
 
@@ -1019,7 +1054,7 @@ def emit_yaml(
             lines.append(f"  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}")
             for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
                 lines.append(
-                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}"
+                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}{_visual_usage_suffix(m)}"
                 )
                 # Preserve the full original DAX so a reviewer can hand-translate
                 # without re-opening the PBIX. Each DAX line is emitted as its own
@@ -1035,12 +1070,16 @@ def emit_yaml(
                 # Never an emitted measure; the reviewer completes + verifies it.
                 try:
                     from .recovery_recommender import draft_source_view
+
                     _draft = draft_source_view(
-                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key)
+                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key
+                    )
                 except Exception:
                     _draft = None
                 if _draft:
-                    lines.append("  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):")
+                    lines.append(
+                        "  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):"
+                    )
                     for _dl in _draft.split("\n"):
                         lines.append(f"  #         {_dl}")
 

@@ -155,6 +155,12 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
             emitted.append(
                 {
                     "name": f"{label}_{base_snake}",
+                    # Both plant/company variants inherit the PARENT PBI
+                    # measure's true name for visual-usage matching — neither
+                    # is itself a distinct PBI field, but if the parent is
+                    # drawn/filtered somewhere, both derived variants are a
+                    # reasonable approximation of "used there too."
+                    "original_name": name,
                     "raw_expr": sql,
                     "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
                 }
@@ -465,7 +471,12 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
             if resolved:
                 break
 
-        entry: dict[str, Any] = {"name": _to_snake_case(name)}
+        # `original_name` carries the TRUE PBI display name (not snake_cased) —
+        # `_build_switch_measure` (pipeline.py) falls back to `name` when this
+        # is absent, but visual-usage matching (`visual_usage_annotator`) joins
+        # on the real PBI name, so omitting this silently breaks that match for
+        # every switch-resolved measure.
+        entry: dict[str, Any] = {"name": _to_snake_case(name), "original_name": name}
         if resolved:
             entry["raw_expr"] = resolved["sql"]
             entry["comment"] = (

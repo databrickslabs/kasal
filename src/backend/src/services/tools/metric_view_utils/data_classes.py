@@ -35,6 +35,15 @@ class TranslationResult:
     # reason). Surfaced as a provenance comment on the emitted measure so a
     # reviewer sees HOW/WHY each best-effort measure was produced. Reporting only.
     explanation: str | None = None
+    # Business-usage signal (PROP-8): which report page(s)/visual(s) actually
+    # draw or filter on this measure, e.g. [{"page": "OTC Scorecard",
+    # "visual_type": "pivotTable", "role": "drawn"}]. Populated from
+    # `visual_usage_annotator.annotate_visual_usage` (config['visual_usage_index'],
+    # itself from `services.powerbi.visual_usage.derive_visual_usage_index`) —
+    # an EMPTY list means "no visual reference found," not "not yet checked";
+    # distinct from `referenced_by`, which is measure→measure DAX in-degree,
+    # not dashboard usage.
+    used_in_visuals: list = field(default_factory=list)
 
 
 @dataclass

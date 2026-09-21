@@ -1615,6 +1615,7 @@ class FlowMethodFactory:
                                         "measures_json",
                                         "mquery_json",
                                         "relationships_json",
+                                        "visual_usage_index",
                                     ):
                                         payload = prev_data.get(_hk)
                                         if not payload:

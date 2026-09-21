@@ -155,6 +155,9 @@ def derive_fx_otckpi_resolutions(
         out[table_name].append(
             {
                 "name": _to_snake_case(name),
+                # TRUE PBI display name — see switch_decomposition.py's
+                # identical comment for why this must not be omitted.
+                "original_name": name,
                 "raw_expr": f"{num} / NULLIF({den}, 0)",
                 "comment": (
                     f"fx_OTCKPI('{code_a}','{code_b}') resolved against "

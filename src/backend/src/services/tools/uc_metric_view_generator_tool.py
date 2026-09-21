@@ -36,6 +36,14 @@ class UCMetricViewGeneratorSchema(BaseModel):
     scan_data_json: Optional[str] = Field(
         None, description="JSON string of PBI scan data (optional, for enrichment)"
     )
+    visual_usage_index: Optional[str] = Field(
+        None,
+        description=(
+            "JSON string of {original_measure_name: [{page, visual_type, role}, ...]} "
+            "(from Pipeline Config Generator's report-definition parse) — tags each "
+            "translated measure with where it's actually used in the report."
+        ),
+    )
     config_json: Optional[str] = Field(
         None,
         description="JSON pipeline config overrides (join_key_map, fact_join_map, etc.)",
@@ -141,6 +149,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "mquery_json",
             "relationships_json",
             "scan_data_json",
+            "visual_usage_index",
             "config_json",
             "catalog",
             "schema_name",
@@ -198,6 +207,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "config_json",
             "relationships_json",
             "scan_data_json",
+            "visual_usage_index",
         )
 
         def _get_json(key):
@@ -228,6 +238,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         mquery_raw = _get_json("mquery_json") or "[]"
         relationships_raw = _get_json("relationships_json")
         scan_raw = _get_json("scan_data_json")
+        visual_usage_raw = _get_json("visual_usage_index")
         config_raw = _get_json("config_json") or "{}"
         # Diagnostic: what arrived via flow injection/kwargs BEFORE any API-mode
         # extraction or DB fallback runs below, and whether the DB fallback ends
@@ -572,6 +583,28 @@ class UCMetricViewGeneratorTool(BaseTool):
         )
         pipeline.run()
 
+        # Tag each measure with WHERE it's actually seen in the report (PROP-8)
+        # — mutates pipeline.all_specs in place, so it must run before emission
+        # to reach the YAML comment, migration report, and JSON output alike.
+        visual_usage_annotated = 0
+        if visual_usage_raw:
+            try:
+                visual_usage_obj = (
+                    json.loads(visual_usage_raw)
+                    if isinstance(visual_usage_raw, str)
+                    else visual_usage_raw
+                )
+                if isinstance(visual_usage_obj, dict):
+                    from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                        annotate_visual_usage,
+                    )
+
+                    visual_usage_annotated = annotate_visual_usage(
+                        pipeline.all_specs, visual_usage_obj
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to parse/apply visual_usage_index: {e}")
+
         # Emit YAML + SQL
         yaml_output = pipeline.emit_all_yaml(catalog=catalog, schema=schema)
         sql_output = pipeline.emit_all_sql(catalog=catalog, schema=schema)
@@ -741,6 +774,13 @@ class UCMetricViewGeneratorTool(BaseTool):
             "untranslatable_items": self._build_untranslatable_items(
                 results.get("specs", {})
             ),
+            # How many measures got a non-empty used_in_visuals — a sanity
+            # count, not the data itself (that's on each measure in `specs`/
+            # `yaml`/the migration report). 0 with a non-empty
+            # visual_usage_index means nothing in scope matched any page's
+            # projections/filters, which is a real (if unusual) result, not
+            # necessarily a bug.
+            "visual_usage_annotated_count": visual_usage_annotated,
             "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
@@ -818,6 +858,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                         # Labeled DRAFT CREATE VIEW scaffold for cross-fact / multi-stage
                         # (proposal artifact, never an emitted measure).
                         "source_view_sql_draft": m.get("source_view_sql_draft"),
+                        "used_in_visuals": m.get("used_in_visuals") or [],
                     }
                 )
         items.sort(key=lambda x: x.get("referenced_by", 0), reverse=True)
