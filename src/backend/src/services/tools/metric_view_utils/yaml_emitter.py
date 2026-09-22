@@ -206,6 +206,39 @@ def _usage_suffix(referenced_by: int) -> str:
     return f" — referenced by {referenced_by} {noun}"
 
 
+def _visual_usage_suffix(measure) -> str:
+    """Business-usage annotation for a measure comment: which report page(s)
+    this measure is actually drawn on or filtered by (PROP-8).
+
+    Distinct from `_usage_suffix` (measure→measure DAX references) — this is
+    dashboard/visual usage, from `TranslationResult.used_in_visuals`
+    (`visual_usage_annotator.annotate_visual_usage`). Empty when the field
+    wasn't found in any visual (common — many measures exist only as
+    intermediate building blocks for other measures) or when no
+    visual_usage_index was supplied at all (report_id omitted, or the run
+    predates this feature) — both cases are silent, not flagged as an error.
+    Collapses multiple occurrences on the same page to one mention; caps at 3
+    pages named explicitly, then "+N more" so a measure used everywhere
+    doesn't produce an unreadable comment line.
+    """
+    usage = getattr(measure, "used_in_visuals", None)
+    if not usage:
+        return ""
+    pages_seen: list[str] = []
+    for occ in usage:
+        page = occ.get("page")
+        if page and page not in pages_seen:
+            pages_seen.append(page)
+    if not pages_seen:
+        return ""
+    shown = pages_seen[:3]
+    suffix = "Used on: " + ", ".join(shown)
+    remaining = len(pages_seen) - len(shown)
+    if remaining > 0:
+        suffix += f" (+{remaining} more)"
+    return f" · {suffix}"
+
+
 _MAX_EXPLANATION = 140
 
 
@@ -436,12 +469,24 @@ def emit_yaml(
     # Measures — split into base and DAX-translated sections (needed for dimension validation below)
     base_measures = [m for m in spec.measures if m.category == "base"]
     dax_measures = [
-        m for m in spec.measures if m.category not in ("base", "switch_decomposition")
+        m
+        for m in spec.measures
+        if m.category
+        not in ("base", "switch_decomposition", "implicit_visual_column")
     ]
     switch_measures = [m for m in spec.measures if m.category == "switch_decomposition"]
+    # Raw columns with PBI's own implicit aggregation, drawn/filtered in a
+    # visual with no named DAX measure — kept in its OWN bucket (not lumped
+    # into dax_measures) so the emitted YAML clearly separates "this came
+    # from DAX translation" from "this is a column PBI itself aggregates,
+    # included only because the report visibly uses it" (see the comment
+    # each one carries — always includes _visual_usage_suffix's "Used on:").
+    implicit_measures = [
+        m for m in spec.measures if m.category == "implicit_visual_column"
+    ]
 
     # Rewrite known MQuery column aliases -> physical columns (e.g. nr_of_deliveries_final -> nr_of_deliveries)
-    for m in base_measures + dax_measures + switch_measures:
+    for m in base_measures + dax_measures + switch_measures + implicit_measures:
         if m.sql_expr:
             for alias_name, phys_name in _COLUMN_ALIAS_MAP.items():
                 m.sql_expr = re.sub(
@@ -486,7 +531,7 @@ def emit_yaml(
                 if cfg["alias"] == alias:
                     for col in cfg.get("column_map", {}).values():
                         _join_col_to_alias[col] = alias
-    for m in base_measures + dax_measures + switch_measures:
+    for m in base_measures + dax_measures + switch_measures + implicit_measures:
         if m.sql_expr and _join_col_to_alias:
             for col, alias in _join_col_to_alias.items():
                 m.sql_expr = re.sub(
@@ -496,14 +541,14 @@ def emit_yaml(
     # Clean FILTER clause prefixes: UC MV FILTER uses bare column names
     # Collect valid join aliases from the spec's declared joins
     _join_aliases = {j["name"].lower() for j in spec.joins} if spec.joins else set()
-    for m in base_measures + dax_measures + switch_measures:
+    for m in base_measures + dax_measures + switch_measures + implicit_measures:
         if m.sql_expr and "FILTER" in m.sql_expr:
             m.sql_expr = _clean_filter_prefixes(
                 m.sql_expr, fact_key, _join_aliases, _FACT_JOIN_MAP
             )
 
     # Strip SQL single-line comments (-- ...) from expressions — breaks YAML parser
-    for m in base_measures + dax_measures + switch_measures:
+    for m in base_measures + dax_measures + switch_measures + implicit_measures:
         if m.sql_expr and "--" in m.sql_expr:
             m.sql_expr = re.sub(r"--\s*\w[^\n)]*", "", m.sql_expr).strip()
 
@@ -513,12 +558,12 @@ def emit_yaml(
             m.sql_expr = re.sub(r"\s+[Aa][Ss]\s+\w+\s*$", "", m.sql_expr).strip()
 
     # Apply T-SQL -> Spark SQL compatibility to all measure expressions
-    for m in base_measures + dax_measures + switch_measures:
+    for m in base_measures + dax_measures + switch_measures + implicit_measures:
         if m.sql_expr:
             m.sql_expr = spark_sql_compat(m.sql_expr, _cat, _sch)
 
     # Security: reject measures with dangerous SQL patterns
-    for measure_list in (base_measures, dax_measures, switch_measures):
+    for measure_list in (base_measures, dax_measures, switch_measures, implicit_measures):
         drop_idx = []
         for i, m in enumerate(measure_list):
             if m.sql_expr and not _check_dangerous_sql(m.sql_expr):
@@ -556,7 +601,7 @@ def emit_yaml(
                 return alias
         return None
 
-    for measure_list in (dax_measures, switch_measures):
+    for measure_list in (dax_measures, switch_measures, implicit_measures):
         drop_idx = []
         for i, m in enumerate(measure_list):
             if m.sql_expr:
@@ -576,6 +621,14 @@ def emit_yaml(
     for m in base_measures:
         if m.sql_expr:
             _known_source_cols.update(re.findall(r"\bsource\.(\w+)", m.sql_expr))
+    # Implicit visual-column measures are, like base measures, a literal
+    # physical column (not derived DAX) — confirmed to exist on this table by
+    # the DMV query that produced them (column_metadata.py), so they count as
+    # a KNOWN column exactly like a base measure's, not something to validate
+    # away for lack of independent corroboration.
+    for m in implicit_measures:
+        if m.sql_expr:
+            _known_source_cols.update(re.findall(r"\bsource\.(\w+)", m.sql_expr))
     for d in spec.dimensions:
         _known_source_cols.update(re.findall(r"\bsource\.(\w+)", d["expr"]))
     # Also pull columns from FILTER clauses in switch measures
@@ -586,7 +639,7 @@ def emit_yaml(
                     re.findall(r"\b(\w+)\s*(?:=|<>|!=|IN\b)", fc_m.group(1))
                 )
     if _known_source_cols:
-        for measure_list in (dax_measures, switch_measures):
+        for measure_list in (dax_measures, switch_measures, implicit_measures):
             drop_idx = []
             for i, m in enumerate(measure_list):
                 if m.sql_expr:
@@ -605,10 +658,11 @@ def emit_yaml(
     # Iterative cascade: dropping one measure might invalidate others.
     for _mref_pass in range(5):
         _final_names = {
-            m.measure_name for m in base_measures + dax_measures + switch_measures
+            m.measure_name
+            for m in base_measures + dax_measures + switch_measures + implicit_measures
         }
         _dropped = 0
-        for measure_list in (dax_measures, switch_measures):
+        for measure_list in (dax_measures, switch_measures, implicit_measures):
             drop_idx = []
             for i, m in enumerate(measure_list):
                 if m.sql_expr:
@@ -637,7 +691,7 @@ def emit_yaml(
                 on_clause = j.get("join_on") or j.get("on") or ""
                 _join_cols_fv.update(re.findall(r"\w+\.(\w+)", str(on_clause)))
         _all_known_filter_cols = _known_source_cols | _join_cols_fv
-        for measure_list in (dax_measures, switch_measures):
+        for measure_list in (dax_measures, switch_measures, implicit_measures):
             drop_idx = []
             for i, m in enumerate(measure_list):
                 if m.sql_expr and "FILTER" in m.sql_expr:
@@ -681,14 +735,19 @@ def emit_yaml(
                 measure_list.pop(i)
 
     # Handle empty measures: if ALL measures were dropped, skip the view entirely
-    if not base_measures and not dax_measures and not switch_measures:
+    if (
+        not base_measures
+        and not dax_measures
+        and not switch_measures
+        and not implicit_measures
+    ):
         return ""
 
     # Early dimension validation: drop phantom source.column dimensions.
     # Build column set from base measures and FILTER clauses only (not from dimensions
     # themselves — that would be circular self-validation).
     _base_only_cols_early: set[str] = set()
-    for m in base_measures:
+    for m in base_measures + implicit_measures:
         if m.sql_expr:
             _base_only_cols_early.update(re.findall(r"\bsource\.(\w+)", m.sql_expr))
     for m in dax_measures + switch_measures:
@@ -787,7 +846,8 @@ def emit_yaml(
     # measure is the KPI and wins; the raw column is dropped as a dimension.
     if spec.dimensions:
         _measure_names = {
-            m.measure_name for m in (base_measures + dax_measures + switch_measures)
+            m.measure_name
+            for m in (base_measures + dax_measures + switch_measures + implicit_measures)
         }
         if _measure_names:
             spec.dimensions = [
@@ -838,6 +898,7 @@ def emit_yaml(
                     m.skip_reason or col_to_readable(m.measure_name)
                 ) + _provenance_suffix(m)
             comment += _usage_suffix(m.referenced_by)
+            comment += _visual_usage_suffix(m)
             lines.append(f"    comment: {_yaml_val(comment)}")
             m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
             display_name = m_override.get("display_name") or m_meta.get(
@@ -913,6 +974,7 @@ def emit_yaml(
                     dax_comment = f"PBI: {m.original_name}"
                 dax_comment += _provenance_suffix(m)
             dax_comment += _usage_suffix(m.referenced_by)
+            dax_comment += _visual_usage_suffix(m)
             if dax_comment:
                 lines.append(f"    comment: {_yaml_val(dax_comment)}")
             # Display name
@@ -975,7 +1037,30 @@ def emit_yaml(
                     f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
                 )
             lines.append(
-                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by))}"
+                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m))}"
+            )
+            lines.append("")
+
+    if implicit_measures:
+        # Its own labeled section \u2014 never folded into "DAX-Translated" \u2014 so a
+        # reviewer sees at a glance that these came from a raw column PBI
+        # itself aggregates, not from a named measure's DAX. The comment
+        # (built in table_processor.py's Step 6d) always states that, and
+        # `_visual_usage_suffix` always appends "Used on: <pages>" since a
+        # column only reaches this bucket by being found in a visual.
+        lines.append(
+            f"  # \u2500\u2500\u2500 Aggregated Column Measures ({len(implicit_measures)}) "
+            + "\u2500" * (44 - len(str(len(implicit_measures))))
+        )
+        lines.append("")
+        for m in implicit_measures:
+            lines.append(f"  - name: {m.measure_name}")
+            expr = m.sql_expr
+            if expr is None:
+                continue
+            lines.append(f"    expr: {expr}")
+            lines.append(
+                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m))}"
             )
             lines.append("")
 
@@ -1019,7 +1104,7 @@ def emit_yaml(
             lines.append(f"  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}")
             for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
                 lines.append(
-                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}"
+                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}{_visual_usage_suffix(m)}"
                 )
                 # Preserve the full original DAX so a reviewer can hand-translate
                 # without re-opening the PBIX. Each DAX line is emitted as its own
@@ -1035,12 +1120,16 @@ def emit_yaml(
                 # Never an emitted measure; the reviewer completes + verifies it.
                 try:
                     from .recovery_recommender import draft_source_view
+
                     _draft = draft_source_view(
-                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key)
+                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key
+                    )
                 except Exception:
                     _draft = None
                 if _draft:
-                    lines.append("  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):")
+                    lines.append(
+                        "  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):"
+                    )
                     for _dl in _draft.split("\n"):
                         lines.append(f"  #         {_dl}")
 

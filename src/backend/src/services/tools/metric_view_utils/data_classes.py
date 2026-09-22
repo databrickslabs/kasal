@@ -35,6 +35,31 @@ class TranslationResult:
     # reason). Surfaced as a provenance comment on the emitted measure so a
     # reviewer sees HOW/WHY each best-effort measure was produced. Reporting only.
     explanation: str | None = None
+    # Business-usage signal (PROP-8): which report page(s)/visual(s) actually
+    # draw or filter on this measure, e.g. [{"page": "OTC Scorecard",
+    # "visual_type": "pivotTable", "role": "drawn"}]. Populated from
+    # `visual_usage_annotator.annotate_visual_usage` (config['visual_usage_index'],
+    # itself from `services.powerbi.visual_usage.derive_visual_usage_index`) —
+    # an EMPTY list means "no visual reference found," not "not yet checked";
+    # distinct from `referenced_by`, which is measure→measure DAX in-degree,
+    # not dashboard usage.
+    used_in_visuals: list = field(default_factory=list)
+    # PBI-reconciliation provenance (priority 3): how this measure's SQL was
+    # derived from the PBI side, ONLY set for switch/fx-resolved measures
+    # (`switch_decomposition.py`/`custom_function_resolution.py` — see their
+    # entry dicts' `pbi_kind`/`pbi_sources`/`pbi_operator` keys, threaded
+    # through by `pipeline.py`'s `_build_switch_measure`). None for an
+    # ordinarily-translated measure — `pbi_ucmv_mapping.py` treats that as
+    # `pbi_kind="direct"` against `original_name` itself, the correct default
+    # for the vast majority of measures, without needing it stamped here.
+    # pbi_kind: "direct" | "composite" | "dimension_conditional" | None.
+    pbi_kind: str | None = None
+    # Plain measure-name strings for a switch resolution (e.g. ["ACT", "BP"]),
+    # or {"kind": "raw_column", "table", "column", "value_column",
+    # "filter_value"} dicts for an fx_* code-filtered EAV resolution — never
+    # a mix within one list.
+    pbi_sources: list = field(default_factory=list)
+    pbi_operator: str | None = None  # "passthrough" | "add" | "subtract" | "divide"
 
 
 @dataclass
@@ -68,6 +93,7 @@ class MetricViewSpec:
     base_measure_count: int = 0
     dax_measure_count: int = 0
     switch_measure_count: int = 0
+    implicit_measure_count: int = 0
     source_filter: str = ""  # MQuery WHERE → UC MV filter: key
     source_sql: str = ""  # Inline SQL for source: |-
 

@@ -36,9 +36,26 @@ class UCMetricViewGeneratorSchema(BaseModel):
     scan_data_json: Optional[str] = Field(
         None, description="JSON string of PBI scan data (optional, for enrichment)"
     )
+    visual_usage_index: Optional[str] = Field(
+        None,
+        description=(
+            "JSON string of {original_measure_name: [{page, visual_type, role}, ...]} "
+            "(from Pipeline Config Generator's report-definition parse) — tags each "
+            "translated measure with where it's actually used in the report."
+        ),
+    )
     config_json: Optional[str] = Field(
         None,
         description="JSON pipeline config overrides (join_key_map, fact_join_map, etc.)",
+    )
+    implicit_column_measures: Optional[str] = Field(
+        None,
+        description=(
+            "JSON string of {table: [{name, original_name, raw_expr, comment, "
+            "used_in_visuals, ...}, ...]} (from Pipeline Config Generator) — raw "
+            "columns with PBI's own implicit aggregation that are drawn/filtered "
+            "directly in a report visual with no named DAX measure behind them."
+        ),
     )
     catalog: Optional[str] = Field(None, description="Target UC catalog name")
     schema_name: Optional[str] = Field(None, description="Target UC schema name")
@@ -141,6 +158,8 @@ class UCMetricViewGeneratorTool(BaseTool):
             "mquery_json",
             "relationships_json",
             "scan_data_json",
+            "visual_usage_index",
+            "implicit_column_measures",
             "config_json",
             "catalog",
             "schema_name",
@@ -198,6 +217,8 @@ class UCMetricViewGeneratorTool(BaseTool):
             "config_json",
             "relationships_json",
             "scan_data_json",
+            "visual_usage_index",
+            "implicit_column_measures",
         )
 
         def _get_json(key):
@@ -228,6 +249,8 @@ class UCMetricViewGeneratorTool(BaseTool):
         mquery_raw = _get_json("mquery_json") or "[]"
         relationships_raw = _get_json("relationships_json")
         scan_raw = _get_json("scan_data_json")
+        visual_usage_raw = _get_json("visual_usage_index")
+        implicit_column_measures_raw = _get_json("implicit_column_measures")
         config_raw = _get_json("config_json") or "{}"
         # Diagnostic: what arrived via flow injection/kwargs BEFORE any API-mode
         # extraction or DB fallback runs below, and whether the DB fallback ends
@@ -245,8 +268,36 @@ class UCMetricViewGeneratorTool(BaseTool):
             "preinject_config_json_chars": (
                 len(config_raw) if isinstance(config_raw, str) else None
             ),
+            # Same shape as the three above, added after visual usage tags and
+            # the PBI<->UCMV mapping showed up empty in a run where
+            # config/measures/mquery all arrived intact — this is what tells
+            # the difference between "the flow handoff dropped this one field"
+            # and "Pipeline Config Generator's own report-definition extraction
+            # legitimately came back empty this run" (both look like 0
+            # annotations downstream, only this shows which one happened).
+            "preinject_visual_usage_index_chars": (
+                len(visual_usage_raw) if isinstance(visual_usage_raw, str) else None
+            ),
+            "preinject_implicit_column_measures_chars": (
+                len(implicit_column_measures_raw)
+                if isinstance(implicit_column_measures_raw, str)
+                else None
+            ),
             "db_fallback_fired_for": [],
             "db_fallback_extraction_id": None,
+            # Cuts through speculation about WHY the DB fallback did/didn't
+            # fire, without needing live debugger access: shows exactly what
+            # this tool instance saw on self.trace_context (set by
+            # attach_tools_trace_context via attach_execution_trace_context)
+            # at the moment it ran. Compare job_id here against Pipeline
+            # Config Generator's own "trace_context_seen" on the SAME run —
+            # a mismatch (or a None on either side) is the actual root cause,
+            # not something inferable from the narrative "Final Answer" text.
+            "trace_context_seen": (
+                dict(getattr(self, "trace_context", None) or {})
+                if isinstance(getattr(self, "trace_context", None), dict)
+                else getattr(self, "trace_context", None)
+            ),
         }
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
@@ -464,6 +515,22 @@ class UCMetricViewGeneratorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
+        # Implicit visual-column measures (from Pipeline Config Generator) ride
+        # inside `config`, same bucket shape as switch_decompositions — merge
+        # rather than overwrite in case config_json already carried one (e.g.
+        # a manually-supplied config in a standalone/JSON-mode run).
+        if implicit_column_measures_raw:
+            try:
+                _icm = _parse_json_input(implicit_column_measures_raw, {})
+                if isinstance(_icm, dict) and _icm:
+                    config.setdefault("implicit_column_measures", {})
+                    for _tbl, _entries in _icm.items():
+                        config["implicit_column_measures"].setdefault(
+                            _tbl, []
+                        ).extend(_entries)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[UCMV] Failed to parse implicit_column_measures: {e}")
+
         # ── Raw Power Query M → SQL source recovery (opt-in) ────────────────
         # When a table's source is raw M (`let ... in ...`) with no embedded
         # native SQL, MQueryParser cannot extract a FROM clause → the table is
@@ -578,6 +645,44 @@ class UCMetricViewGeneratorTool(BaseTool):
             rls_tables=scan_parser.get_rls_tables() or None,
         )
         pipeline.run()
+
+        # Tag each measure with WHERE it's actually seen in the report (PROP-8)
+        # — mutates pipeline.all_specs in place, so it must run before emission
+        # to reach the YAML comment, migration report, and JSON output alike.
+        visual_usage_annotated = 0
+        if visual_usage_raw:
+            try:
+                visual_usage_obj = (
+                    json.loads(visual_usage_raw)
+                    if isinstance(visual_usage_raw, str)
+                    else visual_usage_raw
+                )
+                if isinstance(visual_usage_obj, dict):
+                    from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                        annotate_visual_usage,
+                    )
+
+                    visual_usage_annotated = annotate_visual_usage(
+                        pipeline.all_specs, visual_usage_obj
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to parse/apply visual_usage_index: {e}")
+
+        # Reconciliation framework input (priority 3): a deterministic
+        # PBI-measure <-> UCMV-measure mapping draft per fact table. Reads
+        # each measure's used_in_visuals, so it runs after the annotation
+        # above — but unlike that step, ordering relative to emission doesn't
+        # matter here: this is its own output key, not embedded in the
+        # YAML/report.
+        pbi_ucmv_mapping: dict = {}
+        try:
+            from src.services.tools.metric_view_utils.pbi_ucmv_mapping import (
+                derive_pbi_ucmv_mapping,
+            )
+
+            pbi_ucmv_mapping = derive_pbi_ucmv_mapping(pipeline.all_specs)
+        except Exception as e:
+            logger.warning(f"Failed to derive pbi_ucmv_mapping: {e}")
 
         # Emit YAML + SQL
         yaml_output = pipeline.emit_all_yaml(catalog=catalog, schema=schema)
@@ -748,6 +853,20 @@ class UCMetricViewGeneratorTool(BaseTool):
             "untranslatable_items": self._build_untranslatable_items(
                 results.get("specs", {})
             ),
+            # How many measures got a non-empty used_in_visuals — a sanity
+            # count, not the data itself (that's on each measure in `specs`/
+            # `yaml`/the migration report). 0 with a non-empty
+            # visual_usage_index means nothing in scope matched any page's
+            # projections/filters, which is a real (if unusual) result, not
+            # necessarily a bug.
+            "visual_usage_annotated_count": visual_usage_annotated,
+            # {view_name: mapping_candidates_yaml_text} — the reconciliation
+            # framework's (dqa/kpi_reconciliation) input, deterministically
+            # derived instead of hand-authored. A DRAFT: binding: fields are
+            # left TODO (see pbi_ucmv_mapping.py's own docstring for why),
+            # and every measure's pbi_kind should be spot-checked before
+            # trusting it for reconciliation.
+            "pbi_ucmv_mapping": pbi_ucmv_mapping,
             "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
@@ -825,6 +944,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                         # Labeled DRAFT CREATE VIEW scaffold for cross-fact / multi-stage
                         # (proposal artifact, never an emitted measure).
                         "source_view_sql_draft": m.get("source_view_sql_draft"),
+                        "used_in_visuals": m.get("used_in_visuals") or [],
                     }
                 )
         items.sort(key=lambda x: x.get("referenced_by", 0), reverse=True)
