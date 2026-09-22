@@ -191,6 +191,13 @@ def adapt_tool(tool: Any) -> Any:
     fields: dict[str, Any] = {
         "name": str(getattr(tool, "name", None) or type(tool).__name__),
         "description": str(getattr(tool, "description", "") or ""),
+        # CrewAI's own executor (crew_agent_executor.py, tool_usage.py) reads
+        # THIS object's result_as_answer to decide whether to short-circuit the
+        # agent loop and use the tool's raw output verbatim as the Final
+        # Answer. Leaving it at the adapter's default (False) means every
+        # result_as_answer tool silently degrades to the LLM paraphrasing the
+        # tool output in prose instead of relaying it.
+        "result_as_answer": bool(getattr(tool, "result_as_answer", False)),
     }
     schema = _args_schema_of(tool)
     if schema is not None:
