@@ -44,6 +44,7 @@ import {
   HITLRejectionAction,
 } from '../../../api/execution/HITLService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../../executions/components/UCMVResultViewer';
+import BIArtifactsView from '../../executions/components/BIArtifactsView';
 import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../../tools/components/configuration/GenieSpaceConfigSelector';
 import { runService } from '../../../api/execution/ExecutionHistoryService';
 import SaveIcon from '@mui/icons-material/Save';
@@ -582,6 +583,14 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         )}
 
         <Divider sx={{ my: 2 }} />
+
+        {/* The crew's own answer is often a markdown SUMMARY, not the structured
+            JSON — so parsing previous_crew_output can't surface the config/UCMV
+            downloads. Fetch the real artifacts from conversion_history by
+            execution_id instead (config-gen JSON + "Review & edit config" here at
+            the gate; UCMV YAML/SQL once that step has run). Renders nothing when
+            there are none. */}
+        {executionId && <BIArtifactsView jobId={executionId} />}
 
         {/* Output still lazy-loading (status omits it; fetched via getApproval) */}
         {outputLoading && !approval.previous_crew_output && (
