@@ -60,6 +60,8 @@ import requests
 if __package__:
     from .calculation_groups import derive_calculation_groups
     from .custom_function_resolution import derive_fx_otckpi_resolutions
+    from .mapping_only_tables import derive_mapping_only_tables
+    from .report_discovery import discover_report_id
     from .switch_decomposition import (
         _resolve_referenced_measure_dax,
         derive_geo_switch_decompositions,
@@ -86,11 +88,19 @@ else:
     _custom_fn_mod = _load_sibling(
         "kasal_custom_function_resolution_cli", "custom_function_resolution.py"
     )
+    _mapping_only_mod = _load_sibling(
+        "kasal_mapping_only_tables_cli", "mapping_only_tables.py"
+    )
+    _report_discovery_mod = _load_sibling(
+        "kasal_report_discovery_cli", "report_discovery.py"
+    )
     derive_switch_decompositions = _switch_mod.derive_switch_decompositions
     derive_geo_switch_decompositions = _switch_mod.derive_geo_switch_decompositions
     _resolve_referenced_measure_dax = _switch_mod._resolve_referenced_measure_dax
     derive_calculation_groups = _calc_groups_mod.derive_calculation_groups
     derive_fx_otckpi_resolutions = _custom_fn_mod.derive_fx_otckpi_resolutions
+    derive_mapping_only_tables = _mapping_only_mod.derive_mapping_only_tables
+    discover_report_id = _report_discovery_mod.discover_report_id
 
 # ═══════════════════════════════════════════════════════════════════════
 # Auth
@@ -352,38 +362,6 @@ def _check_response(resp, context: str = "") -> None:
         raise RuntimeError(f"{context} HTTP {resp.status_code}: {body}")
 
 
-def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | None:
-    """PROP-7: find the report bound to ``dataset_id`` in the workspace.
-
-    Running the pipeline WITHOUT a report_id silently degrades measure DAX (the
-    report's visual bindings carry the full measure expressions). When the caller
-    did not supply one, auto-discover it: list the workspace reports and return the
-    first whose ``datasetId`` matches. Returns None (fail-open) if none match or the
-    API call fails — the caller then proceeds report-less with a loud warning.
-    """
-    try:
-        url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
-        resp = requests.get(url, headers=_headers(token), timeout=30)
-        if resp.status_code != 200:
-            return None
-        reports = resp.json().get("value", [])
-        matches = [
-            r
-            for r in reports
-            if str(r.get("datasetId", "")).lower() == str(dataset_id).lower()
-        ]
-        if not matches:
-            return None
-        # Prefer a real report over an auto-generated/usage one; else first match.
-        matches.sort(
-            key=lambda r: (
-                "usage metrics" in str(r.get("name", "")).lower(),
-                "auto" in str(r.get("name", "")).lower(),
-            )
-        )
-        return matches[0].get("id")
-    except Exception:
-        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -893,34 +871,6 @@ def derive_column_overrides(
     return overrides
 
 
-def derive_mapping_only_tables(
-    measures: list[dict],
-    admin_tables: dict[str, dict],
-) -> dict[str, dict]:
-    """Measures allocated to tables not in admin scan → mapping_only_tables."""
-    mapping_only: dict[str, dict] = {}
-
-    allocated_tables: set[str] = set()
-    for m in measures:
-        table = m.get("table_name", "")
-        if table:
-            allocated_tables.add(table)
-
-    admin_table_names = set(admin_tables.keys())
-
-    for tbl in sorted(allocated_tables - admin_table_names):
-        # Collect measure names for this table
-        tbl_measures = [
-            m["measure_name"] for m in measures if m.get("table_name") == tbl
-        ]
-        mapping_only[tbl] = {
-            "source_table": "{catalog}.{schema}." + to_snake_case(tbl),
-            "dimensions": "TODO: specify dimensions for this table",
-            "aggregate_columns": "TODO: specify aggregate columns",
-            "_hint": f"{len(tbl_measures)} measures: {', '.join(tbl_measures[:5])}",
-        }
-
-    return mapping_only
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1775,11 +1725,11 @@ def build_config(
     config["enrichment_joins"] = derive_enrichment_joins(relationships, admin_tables)
 
     # 4. filter_sets
-    switch_decomps = derive_switch_decompositions(measures)
+    switch_decomps = derive_switch_decompositions(measures, fact_tables)
     # Merge geo-selector (plant/company) SWITCH decompositions — these emit BOTH
     # branches as real-SQL measures (plant_<base> + company_<base>), recovering
     # the company variant the single PBI SWITCH measure would otherwise collapse.
-    geo_decomps = derive_geo_switch_decompositions(measures)
+    geo_decomps = derive_geo_switch_decompositions(measures, fact_tables)
     for _tbl, _entries in geo_decomps.items():
         switch_decomps.setdefault(_tbl, []).extend(_entries)
     # Merge named custom-DAX-function resolutions (fx_OTCKPI and friends) — a

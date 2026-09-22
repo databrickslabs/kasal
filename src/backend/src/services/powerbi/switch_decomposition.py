@@ -40,6 +40,42 @@ def _to_snake_case(name: str) -> str:
     return s.lower().strip("_")
 
 
+# Kept identical to (and independently of, per this module's own docstring)
+# ``pipeline_config_generator_tool._DAX_TABLE_REF`` — a `Table[` or `'Table
+# Name'[` reference.
+_DAX_TABLE_REF = re.compile(r"(?:'([^']+)'|(\w+))\s*\[")
+
+
+def _real_fact_table(
+    dax: str, home_table: str, fact_tables: "set[str] | None"
+) -> str:
+    """The real fact table a measure's DAX draws from, falling back to its
+    PBI home table.
+
+    Both SWITCH branches and geo-selectors were, before this, allocated to
+    whatever ``table_name`` the REFERENCED (or geo-selector) measure happens
+    to be *defined* on — which, in a holder-pattern model where most business
+    measures live on one shared ``Measures_Table``/``OTC_MeasuresSlicer``,
+    is almost never a fact table. ``table_processor.py``'s Step 6 only reads
+    ``switch_decompositions[table_key]`` for the table it is CURRENTLY
+    processing, and a holder table is never itself processed (no warehouse
+    source) — so every decomposition parked there was silently orphaned,
+    never reaching any emitted view. This mirrors
+    ``PipelineConfigGeneratorTool._resolve_measure_allocations``'s re-homing
+    for ordinary (non-SWITCH) measures: scan the DAX for real
+    ``Table[Column]`` references against the known fact-table set, and prefer
+    the first match over the raw home table.
+    """
+    if fact_tables:
+        if home_table in fact_tables:
+            return home_table
+        for m in _DAX_TABLE_REF.finditer(dax or ""):
+            raw = (m.group(1) or m.group(2) or "").strip()
+            if raw in fact_tables:
+                return raw
+    return home_table
+
+
 def _extract_switch_branches(dax: str) -> list[dict]:
     """Parse named ``SWITCH(TRUE(), var="value", expr, ...)`` branches from DAX.
 
@@ -94,7 +130,9 @@ def _calculate_branch_bodies(text: str) -> list[str]:
     return bodies
 
 
-def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
+def derive_geo_switch_decompositions(
+    measures: list[dict], fact_tables: "set[str] | None" = None
+) -> dict[str, list[dict]]:
     """Detect plant/company geo-selector SWITCH measures and emit BOTH branches.
 
     Shape (no SELECTEDVALUE — that's the parameterized case handled by
@@ -119,7 +157,8 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
     for m in measures:
         dax = m.get("expression", "") or ""
         name = m.get("original_name") or m.get("measure_name", "")
-        table = m.get("table_name", "") or m.get("proposed_allocation", "")
+        home_table = m.get("table_name", "") or m.get("proposed_allocation", "")
+        table = _real_fact_table(dax, home_table, fact_tables)
         if not dax or not name:
             continue
         du = dax.upper()
@@ -381,7 +420,9 @@ def _switch_result_candidates(dax: str) -> list[str]:
 
 
 def _resolve_switch_branch(
-    expanded_expr: str, measure_by_name: dict[str, dict]
+    expanded_expr: str,
+    measure_by_name: dict[str, dict],
+    fact_tables: "set[str] | None" = None,
 ) -> dict | None:
     """Resolve a VAR-expanded SWITCH branch to real SQL + its real target table.
 
@@ -417,7 +458,9 @@ def _resolve_switch_branch(
             return None
         return {
             "sql": _sql_with_filters(resolved),
-            "table": mrow.get("table_name", ""),
+            "table": _real_fact_table(
+                mrow.get("expression", ""), mrow.get("table_name", ""), fact_tables
+            ),
             "sources": [single.group(1)],
             # For the reconciliation mapping generator (pbi_ucmv_mapping.py):
             # a single passthrough IS the referenced PBI measure, verbatim.
@@ -436,7 +479,11 @@ def _resolve_switch_branch(
         if not a_res or not b_res:
             return None
         sql = f"({_sql_with_filters(a_res)}) {op} ({_sql_with_filters(b_res)})"
-        table = a_row.get("table_name", "") or b_row.get("table_name", "")
+        table = _real_fact_table(
+            a_row.get("expression", ""), a_row.get("table_name", ""), fact_tables
+        ) or _real_fact_table(
+            b_row.get("expression", ""), b_row.get("table_name", ""), fact_tables
+        )
         return {
             "sql": sql,
             "table": table,
@@ -448,7 +495,9 @@ def _resolve_switch_branch(
     return None
 
 
-def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
+def derive_switch_decompositions(
+    measures: list[dict], fact_tables: "set[str] | None" = None
+) -> dict[str, list[dict]]:
     """Detect SELECTEDVALUE+SWITCH measures and resolve each branch to real SQL.
 
     A SWITCH branch usually just selects one of the model's OTHER already-defined
@@ -499,7 +548,7 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
         seen_sql: set[str] = set()
         for candidate in _switch_result_candidates(dax):
             expanded = _substitute_vars(candidate, vars_map)
-            resolved = _resolve_switch_branch(expanded, measure_by_name)
+            resolved = _resolve_switch_branch(expanded, measure_by_name, fact_tables)
             if resolved and resolved["sql"] not in seen_sql:
                 seen_sql.add(resolved["sql"])
                 distinct.append(resolved)
