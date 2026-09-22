@@ -108,6 +108,10 @@ export interface UCMVResult {
    *  entry per view (keyed by view name), from pbi_ucmv_mapping.py. Feeds the
    *  downstream KPI-reconciliation pipeline once reviewed. */
   pbi_ucmv_mapping?: Record<string, string>;
+  /** Views backed by a LIVE connection to a semantic model (M-Query
+   *  AnalysisServices.Database) — the transpiler can't resolve these, so the UI
+   *  flags which semantic model/table to parse. {view_name: {server, database, table}}. */
+  live_connections?: Record<string, { server: string; database: string; table: string }>;
 }
 
 export interface FallbackExtractRow {
@@ -229,7 +233,9 @@ const extractUsedOn = (comment?: string): UsedOnInfo => {
   if (!comment) return { count: 0, entries: [] };
   const m = comment.match(/Used on(?: (\d+) visuals?)?:\s*(.+)$/);
   if (!m) return { count: 0, entries: [] };
-  let list = m[2].trim();
+  // The indirect-usage clause ("· Indirectly used via …") can follow the direct
+  // one on the same comment — stop before it so its text isn't parsed as pages.
+  let list = m[2].split(/\s*·\s*Indirectly used/)[0].trim();
   const more = list.match(/\s*\(\+\d+ more\)\s*$/);
   if (more?.index != null) list = list.slice(0, more.index).trim();
   const entries: UsedOnEntry[] = list
@@ -265,6 +271,38 @@ const extractUsedOn = (comment?: string): UsedOnInfo => {
   return { count: total, entries };
 };
 
+/** One backtraced indirect-usage entry: a visual-placed measure (`via`) whose
+ *  DAX reaches this measure, and the report page(s) it's shown on. */
+interface IndirectUsedOnEntry {
+  via: string;
+  pages: string[];
+}
+
+/** Parse the measure comment's indirect-usage clause
+ *  (yaml_emitter._indirect_visual_usage_suffix):
+ *    "· Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary; [X] on: P (+1 more)"
+ *  Returns one entry per `via` measure. Empty when the measure has no indirect
+ *  usage (the common case). This measure isn't drawn in a visual itself — a
+ *  visual-placed KPI depends on it — so it's shown distinctly from direct use. */
+const extractIndirectUsedOn = (comment?: string): IndirectUsedOnEntry[] => {
+  if (!comment) return [];
+  const m = comment.match(/Indirectly used via (.+)$/);
+  if (!m) return [];
+  let rest = m[1].trim();
+  const more = rest.match(/\s*\(\+\d+ more\)\s*$/);
+  if (more?.index != null) rest = rest.slice(0, more.index).trim();
+  return rest
+    .split(';')
+    .map((tok) => tok.trim())
+    .filter(Boolean)
+    .map((tok) => {
+      const vm = tok.match(/^\[([^\]]+)\](?:\s*on:\s*(.+))?$/);
+      if (!vm) return { via: tok.replace(/^\[|\]$/g, ''), pages: [] };
+      const pages = vm[2] ? vm[2].split(',').map((p) => p.trim()).filter(Boolean) : [];
+      return { via: vm[1].trim(), pages };
+    });
+};
+
 const FieldTable: React.FC<{
   fields: Array<{ name: string; expr?: string; comment?: string; format?: string }>;
   showFormat?: boolean;
@@ -273,8 +311,16 @@ const FieldTable: React.FC<{
   // least one measure carries a usage count — keeps dimension tables unchanged.
   const showUsage = !!showFormat && fields.some((f) => extractReferencedBy(f.comment) !== null);
   // Same, for the visual-usage "Used on" column (report pages the measure appears
-  // on) — only for measures, only when at least one carries it.
-  const showUsedOn = !!showFormat && fields.some((f) => extractUsedOn(f.comment).entries.length > 0);
+  // on) — only for measures, only when at least one carries DIRECT or INDIRECT
+  // (backtraced) usage, so a sub-KPI that's only referenced by a visual KPI
+  // still shows up.
+  const showUsedOn =
+    !!showFormat &&
+    fields.some(
+      (f) =>
+        extractUsedOn(f.comment).entries.length > 0 ||
+        extractIndirectUsedOn(f.comment).length > 0,
+    );
   // Sort measures so the highest-impact surface first: measures used on more
   // visuals rank above those used on fewer, then by how many other measures
   // reference them.
@@ -307,6 +353,7 @@ const FieldTable: React.FC<{
         {rows.map((f) => {
           const usage = extractReferencedBy(f.comment);
           const usedOn = extractUsedOn(f.comment);
+          const indirect = extractIndirectUsedOn(f.comment);
           return (
             <TableRow key={f.name} hover>
               <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
@@ -322,45 +369,71 @@ const FieldTable: React.FC<{
               )}
               {showUsedOn && (
                 <TableCell sx={{ fontSize: '0.8rem' }}>
-                  {usedOn.entries.length > 0 ? (
+                  {usedOn.entries.length > 0 || indirect.length > 0 ? (
                     <Box display="flex" flexDirection="column" gap={0.5} alignItems="flex-start">
-                      {/* HOW OFTEN — visual-occurrence count. */}
-                      <Chip
-                        size="small"
-                        color="info"
-                        variant="filled"
-                        label={`${usedOn.count} visual${usedOn.count !== 1 ? 's' : ''}`}
-                        sx={{ height: 18, fontSize: '0.7rem' }}
-                      />
-                      {/* WHERE + HOW — page, visual type(s), and drawn vs filter. */}
-                      <Box display="flex" gap={0.5} flexWrap="wrap">
-                        {usedOn.entries.map((e) => {
-                          // "×N" on the page chip so a count of 7 all on one page
-                          // reads as "OTC Scorecard ×7" instead of looking like a
-                          // mismatch with the total.
-                          const tally = e.count > 1 ? ` ×${e.count}` : '';
-                          const typeLabel = e.types.length ? ` · ${e.types.join('/')}` : '';
-                          const roleWord =
-                            e.role === 'filter' ? 'used as a filter' : e.role === 'drawn' ? 'drawn (shown)' : '';
-                          return (
-                            <Chip
-                              key={e.page}
-                              size="small"
-                              variant="outlined"
-                              color={e.role === 'filter' ? 'default' : 'info'}
-                              label={`${e.page}${tally}${typeLabel}`}
-                              title={[
-                                e.count > 1 ? `${e.count} visuals on this page` : '',
-                                roleWord,
-                                e.types.length ? `in ${e.types.join(', ')}` : '',
-                              ]
-                                .filter(Boolean)
-                                .join(' · ')}
-                              sx={{ height: 18, fontSize: '0.7rem', maxWidth: '100%' }}
-                            />
-                          );
-                        })}
-                      </Box>
+                      {usedOn.entries.length > 0 && (
+                        <>
+                          {/* HOW OFTEN — visual-occurrence count. */}
+                          <Chip
+                            size="small"
+                            color="info"
+                            variant="filled"
+                            label={`${usedOn.count} visual${usedOn.count !== 1 ? 's' : ''}`}
+                            sx={{ height: 18, fontSize: '0.7rem' }}
+                          />
+                          {/* WHERE + HOW — page, visual type(s), and drawn vs filter. */}
+                          <Box display="flex" gap={0.5} flexWrap="wrap">
+                            {usedOn.entries.map((e) => {
+                              // "×N" on the page chip so a count of 7 all on one page
+                              // reads as "OTC Scorecard ×7" instead of looking like a
+                              // mismatch with the total.
+                              const tally = e.count > 1 ? ` ×${e.count}` : '';
+                              const typeLabel = e.types.length ? ` · ${e.types.join('/')}` : '';
+                              const roleWord =
+                                e.role === 'filter' ? 'used as a filter' : e.role === 'drawn' ? 'drawn (shown)' : '';
+                              return (
+                                <Chip
+                                  key={e.page}
+                                  size="small"
+                                  variant="outlined"
+                                  color={e.role === 'filter' ? 'default' : 'info'}
+                                  label={`${e.page}${tally}${typeLabel}`}
+                                  title={[
+                                    e.count > 1 ? `${e.count} visuals on this page` : '',
+                                    roleWord,
+                                    e.types.length ? `in ${e.types.join(', ')}` : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                  sx={{ height: 18, fontSize: '0.7rem', maxWidth: '100%' }}
+                                />
+                              );
+                            })}
+                          </Box>
+                        </>
+                      )}
+                      {/* INDIRECT — backtraced: a visual-placed KPI depends on this
+                          measure. Distinct style (dashed, muted, "↳ via …") so it
+                          never reads as direct usage. */}
+                      {indirect.map((ind) => (
+                        <Chip
+                          key={`via-${ind.via}`}
+                          size="small"
+                          variant="outlined"
+                          label={`↳ via ${ind.via}`}
+                          title={
+                            `Indirectly used — [${ind.via}] references this measure` +
+                            (ind.pages.length ? ` · shown on ${ind.pages.join(', ')}` : '')
+                          }
+                          sx={{
+                            height: 18,
+                            fontSize: '0.7rem',
+                            maxWidth: '100%',
+                            borderStyle: 'dashed',
+                            color: 'text.secondary',
+                          }}
+                        />
+                      ))}
                     </Box>
                   ) : (
                     '—'
@@ -828,6 +901,36 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           )}
         </Box>
       </Box>
+
+      {/* Live-connection note: these views are backed by a live connection to a
+          semantic model, so the transpiler can't resolve them — tell the team
+          which model/table to parse. */}
+      {result.live_connections && Object.keys(result.live_connections).length > 0 && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Live connection to a semantic model — parse the upstream model to complete these
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            These view(s) are sourced from a live connection (AnalysisServices.Database), not a
+            warehouse table, so their measures/columns can't be resolved here. Parse the semantic
+            model below to finish the mapping.
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, fontSize: '0.8rem' }}>
+            {Object.entries(result.live_connections).map(([view, lc]) => (
+              <li key={view}>
+                <Box component="span" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{view}</Box>
+                {' → semantic model '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.database}</Box>
+                {' (table '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.table}</Box>
+                {', server '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.server}</Box>
+                {')'}
+              </li>
+            ))}
+          </Box>
+        </Alert>
+      )}
 
       {/* Migration Report (collapsible) */}
       {result.migration_report && (

@@ -55,6 +55,11 @@ const BIArtifactsView: React.FC<BIArtifactsViewProps> = ({ jobId }) => {
             pbi_ucmv_mapping: ucmvRec.output_data.pbi_ucmv_mapping as
               | Record<string, string>
               | undefined,
+            // Live-connection flag (which semantic model/table to parse) —
+            // persisted in output_data; carry it so the UI note shows at the gate.
+            live_connections: ucmvRec.output_data.live_connections as
+              | Record<string, { server: string; database: string; table: string }>
+              | undefined,
           });
         }
         if (cfgRec) {

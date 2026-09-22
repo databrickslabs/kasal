@@ -280,6 +280,49 @@ def _visual_usage_suffix(measure) -> str:
     return f" · {suffix}"
 
 
+def _indirect_visual_usage_suffix(measure) -> str:
+    """Indirect (backtraced) visual usage: this measure isn't drawn/filtered in
+    a visual itself, but a visual-placed measure references it (transitively) in
+    its DAX. Kept SEPARATE from ``_visual_usage_suffix`` (direct usage) so the
+    two never blur — a sub-KPI feeding a slicer KPI is real usage, but inherited.
+
+    From ``TranslationResult.indirect_visual_usage`` ([{page, visual_type, role,
+    via}], stamped by ``annotate_indirect_visual_usage``). Emits e.g.
+        · Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary
+    Groups by the ``via`` measure (what a reviewer traces back through), lists
+    that parent's pages, caps parents at 2 then "+N more". Empty when there is
+    no indirect usage (the common case).
+    """
+    usage = getattr(measure, "indirect_visual_usage", None)
+    if not usage:
+        return ""
+    # Group pages per `via` measure, preserving first-seen order.
+    per_via: dict[str, list[str]] = {}
+    order: list[str] = []
+    for occ in usage:
+        via = occ.get("via")
+        page = occ.get("page")
+        if not via:
+            continue
+        if via not in per_via:
+            per_via[via] = []
+            order.append(via)
+        if page and page not in per_via[via]:
+            per_via[via].append(page)
+    if not order:
+        return ""
+    shown = order[:2]
+    parts: list[str] = []
+    for via in shown:
+        pages = ", ".join(per_via[via]) if per_via[via] else ""
+        parts.append(f"[{via}] on: {pages}" if pages else f"[{via}]")
+    suffix = "Indirectly used via " + "; ".join(parts)
+    remaining = len(order) - len(shown)
+    if remaining > 0:
+        suffix += f" (+{remaining} more)"
+    return f" · {suffix}"
+
+
 _MAX_EXPLANATION = 140
 
 
@@ -940,6 +983,7 @@ def emit_yaml(
                 ) + _provenance_suffix(m)
             comment += _usage_suffix(m.referenced_by)
             comment += _visual_usage_suffix(m)
+            comment += _indirect_visual_usage_suffix(m)
             lines.append(f"    comment: {_yaml_val(comment)}")
             m_meta = _meta_gen.get_measure_meta(m.measure_name, expr)
             display_name = m_override.get("display_name") or m_meta.get(
@@ -1016,6 +1060,7 @@ def emit_yaml(
                 dax_comment += _provenance_suffix(m)
             dax_comment += _usage_suffix(m.referenced_by)
             dax_comment += _visual_usage_suffix(m)
+            dax_comment += _indirect_visual_usage_suffix(m)
             if dax_comment:
                 lines.append(f"    comment: {_yaml_val(dax_comment)}")
             # Display name
@@ -1078,7 +1123,7 @@ def emit_yaml(
                     f"        semiadditive: {m.window_spec.get('semiadditive', 'last')}"
                 )
             lines.append(
-                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m))}"
+                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
             )
             lines.append("")
 
@@ -1101,7 +1146,7 @@ def emit_yaml(
                 continue
             lines.append(f"    expr: {expr}")
             lines.append(
-                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m))}"
+                f"    comment: {_yaml_val(m.skip_reason + _usage_suffix(m.referenced_by) + _visual_usage_suffix(m) + _indirect_visual_usage_suffix(m))}"
             )
             lines.append("")
 
@@ -1145,7 +1190,7 @@ def emit_yaml(
             lines.append(f"  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}")
             for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
                 lines.append(
-                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}{_visual_usage_suffix(m)}"
+                    f"  #   - {m.original_name}{_usage_suffix(m.referenced_by)}{_visual_usage_suffix(m)}{_indirect_visual_usage_suffix(m)}"
                 )
                 # Preserve the full original DAX so a reviewer can hand-translate
                 # without re-opening the PBIX. Each DAX line is emitted as its own

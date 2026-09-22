@@ -44,6 +44,16 @@ class TranslationResult:
     # distinct from `referenced_by`, which is measure→measure DAX in-degree,
     # not dashboard usage.
     used_in_visuals: list = field(default_factory=list)
+    # INDIRECT visual usage: this measure is not drawn/filtered in a visual
+    # itself, but a measure that IS uses it (transitively) in its DAX. Each
+    # entry [{"page", "visual_type", "role", "via"}] mirrors `used_in_visuals`
+    # plus `via` = the ORIGINAL name of the visual-placed measure whose
+    # dependency chain reaches this one. Populated by
+    # `visual_usage_annotator.annotate_indirect_visual_usage` after the direct
+    # pass, by walking `dependency_graph` adjacency. Kept SEPARATE from
+    # `used_in_visuals` so direct vs inherited usage stays distinguishable
+    # (a sub-KPI feeding a slicer KPI still matters, but differently).
+    indirect_visual_usage: list = field(default_factory=list)
     # PBI-reconciliation provenance (priority 3): how this measure's SQL was
     # derived from the PBI side, ONLY set for switch/fx-resolved measures
     # (`switch_decomposition.py`/`custom_function_resolution.py` — see their

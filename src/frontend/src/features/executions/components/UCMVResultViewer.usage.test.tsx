@@ -136,6 +136,51 @@ measures:
     expect(screen.getByText('2 visuals')).toBeInTheDocument();
   });
 
+  it('shows indirect (backtraced) usage distinctly and keeps direct parsing clean', () => {
+    const yaml = `version: '1.1'
+source: cat.sch.fact_test
+
+measures:
+  - name: promoters
+    expr: COUNT(source.p)
+    comment: "PBI: Promoters · Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary"
+  - name: health
+    expr: DIVIDE(...)
+    comment: "PBI: Health · Used on 1 visual: OTC Scorecard (slicer·filter) · Indirectly used via [Exec KPI] on: Exec Summary"
+`;
+    render(<UCMVResultViewer result={makeResult(yaml)} />);
+    // The indirect-only sub-KPI surfaces as a distinct "↳ via <parent>" chip.
+    expect(screen.getByText('↳ via OTC Health Score')).toBeInTheDocument();
+    // A measure with BOTH direct + indirect: direct chip intact, indirect distinct.
+    expect(screen.getByText('OTC Scorecard · slicer')).toBeInTheDocument();
+    expect(screen.getByText('↳ via Exec KPI')).toBeInTheDocument();
+    // The indirect clause must NOT be swallowed into the direct count — the only
+    // direct count chip is health's "1 visual" (promoters has no direct usage).
+    expect(screen.getAllByText(/^\d+ visuals?$/)).toHaveLength(1);
+    expect(screen.getByText('1 visual')).toBeInTheDocument();
+  });
+
+  it('flags live-connection views with which semantic model/table to parse', () => {
+    const result: UCMVResult = {
+      yaml: { mv_live: "version: '1.1'\nmeasures:\n  - name: a\n    expr: SUM(source.a)\n" },
+      sql: {},
+      stats: {},
+      views_generated: 1,
+      live_connections: {
+        mv_live: { server: 'powerbi://myorg/OTC', database: 'OTC Model', table: 'Live_Sales' },
+      },
+    };
+    render(<UCMVResultViewer result={result} />);
+    expect(screen.getByText(/Live connection to a semantic model/i)).toBeInTheDocument();
+    expect(screen.getByText('OTC Model')).toBeInTheDocument();
+    expect(screen.getByText('Live_Sales')).toBeInTheDocument();
+  });
+
+  it('shows no live-connection note when there are none', () => {
+    render(<UCMVResultViewer result={makeResult(yamlWithUsage)} />);
+    expect(screen.queryByText(/Live connection to a semantic model/i)).not.toBeInTheDocument();
+  });
+
   it('omits the Used on column entirely when no measure is used on a visual', () => {
     const plain = `version: '1.1'
 source: cat.sch.fact_test

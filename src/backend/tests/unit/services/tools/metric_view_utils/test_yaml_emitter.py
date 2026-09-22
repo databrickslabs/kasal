@@ -1081,3 +1081,40 @@ class TestVisualUsageSuffix:
     def test_missing_type_still_emits_role(self):
         s = self._suffix([{"page": "P", "role": "drawn"}])
         assert s == " · Used on 1 visual: P (drawn)"
+
+
+class TestIndirectVisualUsageSuffix:
+    """The '· Indirectly used via [Parent] on: <pages>' clause — backtraced
+    sub-KPI usage, kept separate from the direct 'Used on' suffix."""
+
+    @staticmethod
+    def _suffix(indirect):
+        from types import SimpleNamespace
+
+        from src.services.tools.metric_view_utils.yaml_emitter import (
+            _indirect_visual_usage_suffix,
+        )
+
+        return _indirect_visual_usage_suffix(
+            SimpleNamespace(indirect_visual_usage=indirect)
+        )
+
+    def test_empty(self):
+        assert self._suffix([]) == ""
+        assert self._suffix(None) == ""
+
+    def test_single_via_lists_its_pages(self):
+        s = self._suffix([
+            {"page": "OTC Scorecard", "via": "OTC Health Score", "role": "drawn"},
+            {"page": "Exec Summary", "via": "OTC Health Score", "role": "drawn"},
+        ])
+        assert s == " · Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary"
+
+    def test_caps_parents_at_two_then_plus_more(self):
+        s = self._suffix([
+            {"page": "P", "via": f"KPI {i}"} for i in range(4)
+        ])
+        assert "Indirectly used via [KPI 0]" in s
+        assert "[KPI 1]" in s
+        assert "[KPI 2]" not in s
+        assert "(+2 more)" in s

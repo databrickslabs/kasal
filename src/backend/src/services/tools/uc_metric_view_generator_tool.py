@@ -668,6 +668,22 @@ class UCMetricViewGeneratorTool(BaseTool):
             except Exception as e:
                 logger.warning(f"Failed to parse/apply visual_usage_index: {e}")
 
+        # Backtrace: propagate that direct usage DOWN the measure-dependency
+        # graph so sub-KPIs feeding a visual-placed KPI are surfaced too
+        # (indirect_visual_usage, kept separate from the direct tag). Runs after
+        # the direct pass and before emission; fail-open.
+        indirect_visual_annotated = 0
+        try:
+            from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                annotate_indirect_visual_usage,
+            )
+
+            indirect_visual_annotated = annotate_indirect_visual_usage(
+                pipeline.all_specs
+            )
+        except Exception as e:
+            logger.warning(f"Failed to derive indirect visual usage: {e}")
+
         # Reconciliation framework input (priority 3): a deterministic
         # PBI-measure <-> UCMV-measure mapping draft per fact table. Reads
         # each measure's used_in_visuals, so it runs after the annotation
@@ -683,6 +699,25 @@ class UCMetricViewGeneratorTool(BaseTool):
             pbi_ucmv_mapping = derive_pbi_ucmv_mapping(pipeline.all_specs)
         except Exception as e:
             logger.warning(f"Failed to derive pbi_ucmv_mapping: {e}")
+
+        # Live-connection flag: which views are backed by a live connection to a
+        # semantic model (M-Query AnalysisServices.Database) rather than a
+        # warehouse table — the transpiler can't resolve those, so surface WHICH
+        # semantic model/table to parse. {view_name: {server, database, table}}.
+        live_connections: dict = {}
+        try:
+            from src.services.powerbi.live_connection import derive_live_connections
+
+            live_connections = derive_live_connections(
+                pipeline.all_specs, getattr(pipeline, "_mquery_expressions", {})
+            )
+            if live_connections:
+                logger.info(
+                    f"[UCMVGenerator] {len(live_connections)} view(s) on a live "
+                    "semantic-model connection (flagged for manual parse)"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to derive live_connections: {e}")
 
         # Emit YAML + SQL
         yaml_output = pipeline.emit_all_yaml(catalog=catalog, schema=schema)
@@ -896,6 +931,9 @@ class UCMetricViewGeneratorTool(BaseTool):
             # projections/filters, which is a real (if unusual) result, not
             # necessarily a bug.
             "visual_usage_annotated_count": visual_usage_annotated,
+            # How many measures gained INDIRECT usage (a visual-placed measure
+            # references them transitively) — backtraced sub-KPIs.
+            "indirect_visual_usage_count": indirect_visual_annotated,
             # {view_name: mapping_candidates_yaml_text} — the reconciliation
             # framework's (dqa/kpi_reconciliation) input, deterministically
             # derived instead of hand-authored. A DRAFT: binding: fields are
@@ -903,6 +941,10 @@ class UCMetricViewGeneratorTool(BaseTool):
             # and every measure's pbi_kind should be spot-checked before
             # trusting it for reconciliation.
             "pbi_ucmv_mapping": pbi_ucmv_mapping,
+            # {view_name: {server, database, table}} — views backed by a live
+            # connection to a semantic model; the UI flags these as a note
+            # telling the team which model/table to parse to complete them.
+            "live_connections": live_connections,
             "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
@@ -940,6 +982,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     schema=schema,
                     untranslatable_items=output.get("untranslatable_items") or [],
                     pbi_ucmv_mapping=output.get("pbi_ucmv_mapping") or {},
+                    live_connections=output.get("live_connections") or {},
                 )
             )
         except Exception as _hist_err:
@@ -1345,6 +1388,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         schema: Optional[str],
         untranslatable_items: Optional[list] = None,
         pbi_ucmv_mapping: Optional[dict] = None,
+        live_connections: Optional[dict] = None,
     ) -> None:
         """Persist the full raw DAX extract to conversion_history (fail-open).
 
@@ -1428,6 +1472,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                     # (GET /conversion-history), not only from the live tool
                     # result the UI happens to hold in-session.
                     "pbi_ucmv_mapping": pbi_ucmv_mapping or {},
+                    # Live-connection flag (which semantic model/table to parse),
+                    # persisted so the UI note is retrievable by execution_id.
+                    "live_connections": live_connections or {},
                 },
                 output_summary=(
                     f"Generated {view_count} UC metric view(s)"
