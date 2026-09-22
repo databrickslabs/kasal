@@ -49,7 +49,6 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
   const [archived, setArchived] = useState(false);
   const [menu, setMenu] = useState<{ session: WorkspaceSession; anchor: HTMLElement } | null>(null);
   const [renameKey, setRenameKey] = useState<string | null>(null);
-  const [rename, setRename] = useState('');
   const [error, setError] = useState('');
   const [opening, setOpening] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -68,12 +67,13 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
     catch { setError('Could not open this session. Please try again.'); }
     finally { setOpening(null); }
   };
-  const finishRename = async (session: WorkspaceSession) => {
+  const finishRename = async (session: WorkspaceSession, value: string) => {
     setRenameKey(null);
-    if (!rename.trim() || rename.trim() === session.title) return;
+    const v = value.trim();
+    if (!v || v === session.title) return;
     try {
-      if (session.mode === 'chat') await useSessionStore.getState().renameSession(session.id, rename.trim());
-      else useBuilderCanvasStore.getState().updateCanvasName(session.id, rename.trim());
+      if (session.mode === 'chat') await useSessionStore.getState().renameSession(session.id, v);
+      else useBuilderCanvasStore.getState().updateCanvasName(session.id, v);
     } catch { setError('Could not rename this session. Please try again.'); }
   };
   const remove = async (session: WorkspaceSession) => {
@@ -130,13 +130,11 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
                   '&:hover .session-options, &:focus-within .session-options': { opacity: 1 },
                 }}>
                   {renameKey === session.key ? (
-                    <InputBase autoFocus value={rename} onChange={event => setRename(event.target.value)}
-                      onBlur={() => void finishRename(session)}
-                      onKeyDown={event => {
-                        if (event.key === 'Enter') void finishRename(session);
-                        if (event.key === 'Escape') setRenameKey(null);
-                      }}
-                      inputProps={{ 'aria-label': 'Session name', maxLength: 200 }} sx={{ flex: 1, px: 1.5, py: 1, fontSize: 13 }} />
+                    <SessionRenameField
+                      initial={session.title}
+                      onCommit={value => void finishRename(session, value)}
+                      onCancel={() => setRenameKey(null)}
+                    />
                   ) : (
                     <Button disableRipple color="inherit" aria-current={selected ? 'page' : undefined}
                       disabled={deleting === session.key || session.canvasPending} onClick={() => void select(session)} title={`${session.title} · ${modeLabels[session.mode]}`}
@@ -167,7 +165,7 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
       <SidebarAccountActions onOpenSettings={onOpenSettings} showLabel={open} />
       <Menu disableEnforceFocus disableRestoreFocus anchorEl={menu?.anchor} open={Boolean(menu)} onClose={() => setMenu(null)}
         slotProps={{ paper: { sx: { borderRadius: 3, minWidth: 180 } } }}>
-        <MenuItem onClick={() => { if (menu) { setRenameKey(menu.session.key); setRename(menu.session.title); } setMenu(null); }}>Rename</MenuItem>
+        <MenuItem onClick={() => { if (menu) setRenameKey(menu.session.key); setMenu(null); }}>Rename</MenuItem>
         <MenuItem onClick={() => { if (menu) updatePreference(menu.session.key, { pinned: !preferences[menu.session.key]?.pinned }); setMenu(null); }}>
           {menu && preferences[menu.session.key]?.pinned ? 'Unpin' : 'Pin'}
         </MenuItem>
@@ -185,4 +183,24 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
 function SessionActivity({ session, opening }: { session: WorkspaceSession; opening: boolean }) {
   const chatRunning = useExecutionStore(state => session.mode === 'chat' && state.hasActiveExecution(session.id));
   return opening || session.running || chatRunning ? <CircularProgress size={12} color="inherit" aria-label={opening ? 'Opening session' : 'Running'} /> : null;
+}
+
+// The rename field keeps its draft in LOCAL state so typing re-renders only this
+// input — not the whole session list (30+ rows) on every keystroke, which made
+// renaming laggy/unresponsive. Commits on Enter/blur, cancels on Escape.
+function SessionRenameField({ initial, onCommit, onCancel }: {
+  initial: string;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <InputBase autoFocus value={value} onChange={event => setValue(event.target.value)}
+      onBlur={() => onCommit(value)}
+      onKeyDown={event => {
+        if (event.key === 'Enter') onCommit(value);
+        if (event.key === 'Escape') onCancel();
+      }}
+      inputProps={{ 'aria-label': 'Session name', maxLength: 200 }} sx={{ flex: 1, px: 1.5, py: 1, fontSize: 13 }} />
+  );
 }
