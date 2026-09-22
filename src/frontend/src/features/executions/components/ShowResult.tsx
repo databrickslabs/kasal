@@ -725,7 +725,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 : <UCMVResultViewer result={inner as Parameters<typeof UCMVResultViewer>[0]['result']} />;
             }
             if (isValidatorResult(inner)) {
-              return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+              return <ValidatorResultViewer result={inner as Parameters<typeof ValidatorResultViewer>[0]['result']} jobId={run?.job_id} />;
             }
             if (isReevaluationResult(inner)) {
               return <ReevaluationResultViewer result={inner as Parameters<typeof ReevaluationResultViewer>[0]['result']} />;
@@ -741,7 +741,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
       // UCMV Quality Validator result: green/amber/red quality report
       if (isValidatorResult(parsed)) {
-        return <ValidatorResultViewer result={parsed as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+        return <ValidatorResultViewer result={parsed as Parameters<typeof ValidatorResultViewer>[0]['result']} jobId={run?.job_id} />;
       }
 
       // If there's only one key called 'Value', render its content directly
@@ -785,7 +785,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
                 try {
                   const innerParsed = JSON.parse(value);
                   if (isValidatorResult(innerParsed)) {
-                    return <ValidatorResultViewer result={innerParsed as Parameters<typeof ValidatorResultViewer>[0]['result']} />;
+                    return <ValidatorResultViewer result={innerParsed as Parameters<typeof ValidatorResultViewer>[0]['result']} jobId={run?.job_id} />;
                   }
                   if (isUCMVResult(innerParsed)) {
                     return <UCMVResultViewer result={innerParsed as Parameters<typeof UCMVResultViewer>[0]['result']} />;
