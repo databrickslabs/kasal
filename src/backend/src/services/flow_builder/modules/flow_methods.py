@@ -1563,7 +1563,31 @@ class FlowMethodFactory:
                 try:
                     injected_count = 0
                     for agent in agents:
-                        for tool in agent.tools or []:
+                        for _raw_tool in agent.tools or []:
+                            # Under the CrewAI harness, `agent.tools` holds
+                            # `KasalToolAdapter` wrappers (harnesses/crewai/tools.py)
+                            # — the real Kasal tool with `_default_config` sits on
+                            # `.kasal_tool`, not on the adapter itself. Without this
+                            # unwrap, `hasattr(tool, "_default_config")` is always
+                            # False under CrewAI (the default harness), so this
+                            # whole injection loop silently no-ops: UCMV never
+                            # receives the previous crew's config/measures/mquery
+                            # and falls back to its own weaker direct-API
+                            # extraction, which skips fx_OTCKPI resolution and
+                            # measure re-homing.
+                            # Only unwrap when the inner object genuinely carries a
+                            # real dict `_default_config` — a plain MagicMock() tool
+                            # fixture (no `spec=`) auto-fabricates a truthy
+                            # `.kasal_tool` child mock too, and unconditionally
+                            # preferring it would shadow a mock's own directly-set
+                            # `_default_config` in tests that predate the CrewAI
+                            # harness.
+                            _inner = getattr(_raw_tool, "kasal_tool", None)
+                            tool = (
+                                _inner
+                                if isinstance(getattr(_inner, "_default_config", None), dict)
+                                else _raw_tool
+                            )
                             if not hasattr(tool, "_default_config") or not isinstance(
                                 tool._default_config, dict
                             ):
@@ -1647,6 +1671,7 @@ class FlowMethodFactory:
                                         "mquery_json",
                                         "relationships_json",
                                         "visual_usage_index",
+                                        "implicit_column_measures",
                                     ):
                                         payload = prev_data.get(_hk)
                                         if not payload:
