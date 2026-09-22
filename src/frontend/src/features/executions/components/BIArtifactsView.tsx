@@ -48,6 +48,13 @@ const BIArtifactsView: React.FC<BIArtifactsViewProps> = ({ jobId }) => {
             sql: (ucmvRec.output_data.sql as Record<string, string>) ?? {},
             stats: (ucmvRec.output_data.stats as Record<string, never>) ?? {},
             untranslatable_items: ucmvRec.output_data.untranslatable_items,
+            // Persisted alongside yaml/sql (uc_metric_view_generator_tool
+            // output_data.pbi_ucmv_mapping) — carry it through so the
+            // "Download Mapping" button renders at the builder/gate step, not
+            // only when the viewer holds the live in-session tool result.
+            pbi_ucmv_mapping: ucmvRec.output_data.pbi_ucmv_mapping as
+              | Record<string, string>
+              | undefined,
           });
         }
         if (cfgRec) {
