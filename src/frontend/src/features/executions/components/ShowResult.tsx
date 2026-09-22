@@ -52,6 +52,7 @@ import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
 import { UCMVResultWithAutoSave } from './UCMVResultWithAutoSave';
 import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
 import ConfigGenResultView, { isPipelineConfigResult } from './ConfigGenResultView';
+import BIArtifactsView from './BIArtifactsView';
 import ReevaluationResultViewer, { isReevaluationResult } from './ReevaluationResultViewer';
 import { runService } from '../../../api/execution/ExecutionHistoryService';
 
@@ -1310,6 +1311,11 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           display: 'flex',
           flexDirection: 'column',
         }}>
+          {/* BI-migration runs persist a dashboard surface, so the structured
+              UCMV / config-gen viewers (with YAML/SQL/JSON downloads + review)
+              never trigger. Surface them here from conversion_history by job_id —
+              renders nothing for non-BI runs. */}
+          {run?.job_id && <BIArtifactsView jobId={run.job_id} />}
           {viewMode === 'ui' && uiSurface ? (
             // Render through the SAME chat preview pane (PreviewPanel) — not a
             // separate viewer — so the Jobs "Show result" matches the chat exactly.
