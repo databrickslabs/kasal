@@ -198,6 +198,10 @@ function SessionRenameField({ initial, onCommit, onCancel }: {
     <InputBase autoFocus value={value} onChange={event => setValue(event.target.value)}
       onBlur={() => onCommit(value)}
       onKeyDown={event => {
+        // Keep keystrokes from reaching the ReactFlow canvas — otherwise
+        // Backspace/Delete while typing a name deletes the selected flow nodes
+        // ("Canvas cleared…") and every key re-renders the canvas (the lag).
+        event.stopPropagation();
         if (event.key === 'Enter') onCommit(value);
         if (event.key === 'Escape') onCancel();
       }}
