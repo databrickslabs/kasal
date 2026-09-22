@@ -8,9 +8,11 @@
  * as its own JSON file (and a full bundle).
  */
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Box, Button, Chip, Paper, Typography } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import DataObjectIcon from '@mui/icons-material/DataObject';
+import EditNoteIcon from '@mui/icons-material/EditNote';
 
 type Cfg = Record<string, unknown>;
 
@@ -53,7 +55,17 @@ function count(v: unknown): number | null {
   return null;
 }
 
-const ConfigGenResultView: React.FC<{ cfg: Record<string, unknown> }> = ({ cfg }) => {
+const ConfigGenResultView: React.FC<{ cfg: Record<string, unknown>; jobId?: string }> = ({ cfg, jobId }) => {
+  const navigate = useNavigate();
+  // The review/edit page (per-key status, TODO triage, edit + save-back) lives at
+  // /config-editor; open it with the extracted proposed_config so reviewers can
+  // work through it here, not only at the approval gate.
+  const configForReview = (cfg.proposed_config ?? cfg) as Record<string, unknown>;
+  const openConfigEditor = () =>
+    navigate('/config-editor', {
+      state: { config: configForReview, source: 'BI migration result', jobId },
+    });
+
   const available = ARTIFACTS.filter((a) => {
     const c = count(cfg[a.key]);
     return cfg[a.key] != null && (c === null || c > 0);
@@ -73,6 +85,17 @@ const ConfigGenResultView: React.FC<{ cfg: Record<string, unknown> }> = ({ cfg }
         {mquery != null && <Chip size="small" label={`${mquery} M-Query tables`} variant="outlined" />}
         {relationships != null && (
           <Chip size="small" label={`${relationships} relationships`} variant="outlined" />
+        )}
+        {configForReview && Object.keys(configForReview).length > 0 && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<EditNoteIcon />}
+            onClick={openConfigEditor}
+            sx={{ ml: 'auto' }}
+          >
+            Review &amp; edit config
+          </Button>
         )}
       </Box>
 

@@ -733,7 +733,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               return <ReevaluationResultViewer result={inner as Parameters<typeof ReevaluationResultViewer>[0]['result']} />;
             }
             if (isPipelineConfigResult(inner)) {
-              return <ConfigGenResultView cfg={inner as Record<string, unknown>} />;
+              return <ConfigGenResultView cfg={inner as Record<string, unknown>} jobId={run?.job_id} />;
             }
           }
         } catch { /* not JSON */ }
@@ -751,7 +751,7 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
 
       // Pipeline Config Generator result: summary + downloadable extracted JSON
       if (isPipelineConfigResult(parsed)) {
-        return <ConfigGenResultView cfg={parsed as Record<string, unknown>} />;
+        return <ConfigGenResultView cfg={parsed as Record<string, unknown>} jobId={run?.job_id} />;
       }
 
       // If there's only one key called 'Value', render its content directly

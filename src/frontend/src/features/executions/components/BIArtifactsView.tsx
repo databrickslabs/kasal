@@ -81,7 +81,7 @@ const BIArtifactsView: React.FC<BIArtifactsViewProps> = ({ jobId }) => {
       <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700 }}>
         Downloadable artifacts
       </Typography>
-      {hasConfig && config && <ConfigGenResultView cfg={config} />}
+      {hasConfig && config && <ConfigGenResultView cfg={config} jobId={jobId} />}
       {ucmv && hasConfig && <Divider flexItem />}
       {ucmv && <UCMVResultViewer result={ucmv} />}
       <Divider flexItem sx={{ mt: 1 }} />
