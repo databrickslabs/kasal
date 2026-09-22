@@ -43,13 +43,28 @@ def _covered_names(all_specs: dict) -> set:
     return covered
 
 
+def _entry_fields(m: dict) -> tuple[str, str, str]:
+    """(name, original_name, dax) tolerant of the two entry shapes this receives:
+    the pipeline ``mapping`` (measure_name / dax_expression) and the raw extracted
+    measures / ``measures_with_dax`` (name / expression)."""
+    name = m.get("measure_name") or m.get("name") or m.get("original_name") or ""
+    orig = m.get("original_name") or m.get("measure_name") or m.get("name") or ""
+    dax = m.get("dax_expression") or m.get("expression") or m.get("raw_expr") or ""
+    return name, orig, dax
+
+
 def build_none_allocated_spec(
-    mapping: list[dict],
+    reference_measures: list[dict],
     all_specs: dict,
     translator,
     artifact_patterns,
 ) -> MetricViewSpec | None:
     """Build the synthetic catch-all spec, or ``None`` if nothing is orphaned.
+
+    ``reference_measures`` is the FULL extracted measure set (e.g. the run's
+    ``measures_with_dax`` — all 138 for OTC), so coverage does not depend on how
+    measures were grouped or allocated downstream: a holder-table / dispatcher /
+    DCC-score measure is still caught here instead of vanishing.
 
     ``artifact_patterns`` is the pipeline's compiled ``_PBI_ARTIFACT_PATTERNS``
     regex; a DAX that matches it is labelled a visual/formatting/slicer artifact
@@ -60,20 +75,21 @@ def build_none_allocated_spec(
     untranslatable: list[TranslationResult] = []
     seen: set = set()
 
-    for m in mapping:
-        name = m.get("measure_name") or ""
-        orig = m.get("original_name") or name
+    for m in reference_measures:
+        name, orig, dax = _entry_fields(m)
         if not orig:
             continue
         if orig in covered or to_snake_case(orig) in covered or orig in seen:
             continue
         seen.add(orig)
 
-        dax = m.get("dax_expression") or ""
         is_artifact = bool(artifact_patterns.search(dax)) if dax else False
 
+        # Normalise the keys translate() reads, so both entry shapes work.
+        translate_input = {**m, "measure_name": name, "original_name": orig,
+                           "dax_expression": dax}
         try:
-            res = translator.translate(m, _VIEW_KEY)
+            res = translator.translate(translate_input, _VIEW_KEY)
         except Exception as e:  # translator must never break the catch-all
             res = TranslationResult(
                 measure_name=to_snake_case(orig),
@@ -106,6 +122,30 @@ def build_none_allocated_spec(
     if not measures and not untranslatable:
         return None
 
+    translated_count = len(measures)  # real translations, before any placeholder
+
+    # emit_yaml drops a view with zero measures (returns ""), which would throw
+    # away the documented block. When nothing translated, add one clearly-labelled
+    # placeholder measure so the view — and every documented orphan in it — still
+    # emits. It is obviously not a KPI (COUNT over a placeholder source).
+    if not measures:
+        measures.append(
+            TranslationResult(
+                measure_name="_documented_only_placeholder",
+                original_name="_documented_only_placeholder",
+                sql_expr="COUNT(1)",
+                is_translatable=True,
+                skip_reason="",
+                dax_expression="",
+                confidence="low",
+                category="base",
+                explanation=(
+                    "Placeholder — nothing in this catch-all was translatable; "
+                    "every real measure is documented as a comment below."
+                ),
+            )
+        )
+
     comment = (
         f"NONE-ALLOCATED MEASURES ({_VIEW_KEY}) — catch-all so nothing is dropped.\n"
         "PBI measures that did not land on any fact view are gathered here: the ones "
@@ -114,7 +154,7 @@ def build_none_allocated_spec(
         "measures are listed with that reason — they have no metric-view or Genie form.\n"
         "These reference columns across multiple facts, so `source:` is a placeholder — "
         "treat this file as a reconciliation worklist, not a deployable view.\n"
-        f"{len(measures)} best-effort translated · {len(untranslatable)} documented."
+        f"{translated_count} best-effort translated · {len(untranslatable)} documented."
     )
     return MetricViewSpec(
         fact_table_key=_VIEW_KEY,
@@ -126,19 +166,21 @@ def build_none_allocated_spec(
         measures=measures,
         untranslatable=untranslatable,
         base_measure_count=0,
-        dax_measure_count=len(measures),
+        dax_measure_count=translated_count,
     )
 
 
 def build_none_allocated_yaml(
-    mapping: list[dict],
+    reference_measures: list[dict],
     all_specs: dict,
     translator,
     artifact_patterns,
 ) -> str | None:
     """Emit the catch-all view's YAML text, or ``None`` when nothing is orphaned
     (or emission fails — the caller treats this as best-effort)."""
-    spec = build_none_allocated_spec(mapping, all_specs, translator, artifact_patterns)
+    spec = build_none_allocated_spec(
+        reference_measures, all_specs, translator, artifact_patterns
+    )
     if spec is None:
         return None
     try:

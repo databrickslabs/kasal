@@ -98,6 +98,33 @@ def test_none_when_everything_is_covered():
     assert build_none_allocated_spec(_mapping(), specs, _FakeTranslator(), _ARTIFACT_RE) is None
 
 
+class _NeverTranslator:
+    def translate(self, measure, table_key):
+        return _tr(measure.get("original_name") or measure.get("name"), ok=False,
+                   dax=measure.get("dax_expression") or measure.get("expression", ""))
+
+
+def test_zero_translated_still_emits_documented_yaml():
+    # raw entry shape (name/expression) + a translator that never translates.
+    universe = [
+        {"name": "Overview_Agg_Vendor_Score", "expression": "CALCULATE([Overview_Agg_Score], 'D'[Domain]=\"Vendor\")"},
+        {"name": "AI BUs Improving", "expression": "COUNTROWS(FILTER(x,[AI Improvement]>0))"},
+    ]
+    yaml_text = build_none_allocated_yaml(universe, {}, _NeverTranslator(), _ARTIFACT_RE)
+    # Nothing translated, but the file MUST still exist with the documented block.
+    assert yaml_text and "none_allocated_measures" in yaml_text
+    assert "_documented_only_placeholder" in yaml_text
+    assert "Overview_Agg_Vendor_Score" in yaml_text  # documented, not dropped
+
+
+def test_entry_shape_tolerance_name_and_expression_keys():
+    # measures keyed by name/expression (raw extract shape) must NOT be skipped.
+    universe = [{"name": "Some Orphan KPI", "expression": "SUM(f[x])"}]
+    spec = build_none_allocated_spec(universe, {}, _NeverTranslator(), _ARTIFACT_RE)
+    all_names = {m.original_name for m in spec.measures} | {u.original_name for u in spec.untranslatable}
+    assert "Some Orphan KPI" in all_names
+
+
 def test_yaml_emits_and_carries_view_name_and_dax():
     specs = {"fact_x": _spec_with(["Already Here"])}
     yaml_text = build_none_allocated_yaml(_mapping(), specs, _FakeTranslator(), _ARTIFACT_RE)

@@ -702,8 +702,11 @@ class UCMetricViewGeneratorTool(BaseTool):
                 build_none_allocated_yaml,
             )
 
+            # Reconcile against the FULL extracted measure set (all 138), not a
+            # downstream-derived subset, so nothing can slip through the gap
+            # between "extracted" and "allocated".
             none_allocated_yaml = build_none_allocated_yaml(
-                pipeline.mapping,
+                measures if isinstance(measures, list) else pipeline.mapping,
                 pipeline.all_specs,
                 pipeline.translator,
                 pipeline._PBI_ARTIFACT_PATTERNS,
