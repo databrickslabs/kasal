@@ -104,6 +104,10 @@ export interface UCMVResult {
   untranslatable_items?: UntranslatableItem[];
   /** Persisted reviewer triage annotations, keyed by untranslatableKey(item). */
   untranslatable_review?: Record<string, ReviewAnnotation>;
+  /** Deterministic PBI<->UCMV reconciliation mapping draft, one YAML-text
+   *  entry per view (keyed by view name), from pbi_ucmv_mapping.py. Feeds the
+   *  downstream KPI-reconciliation pipeline once reviewed. */
+  pbi_ucmv_mapping?: Record<string, string>;
 }
 
 export interface FallbackExtractRow {
@@ -590,8 +594,28 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     URL.revokeObjectURL(url);
   }, []);
 
+  // Download each view's PBI<->UCMV reconciliation mapping draft as its OWN
+  // .mapping_candidates.yml file, staggered like the YAML/SQL downloads.
+  const handleDownloadAllMappings = useCallback(() => {
+    const mapping = result.pbi_ucmv_mapping || {};
+    const entries = Object.entries(mapping).filter(([, v]) => v && v.trim());
+    entries.forEach(([name, yamlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([yamlContent], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}.mapping_candidates.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
+  }, [result.pbi_ucmv_mapping]);
+
   const hasDax = Array.isArray(result.measures_with_dax) && result.measures_with_dax.length > 0;
   const hasMquery = Array.isArray(result.mquery_raw) && result.mquery_raw.length > 0;
+  const hasMapping =
+    !!result.pbi_ucmv_mapping && Object.keys(result.pbi_ucmv_mapping).length > 0;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
@@ -645,6 +669,18 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
                 onClick={() => downloadJson(result.measures_with_dax as unknown[], 'original_dax_measures.json')}
               >
                 Download DAX
+              </Button>
+            </Tooltip>
+          )}
+          {hasMapping && (
+            <Tooltip title="Download the deterministic PBI<->UCMV measure mapping draft (one file per view) for the KPI-reconciliation pipeline">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadAllMappings}
+              >
+                Download Mapping
               </Button>
             </Tooltip>
           )}
