@@ -61,3 +61,49 @@ measures:
     expect(screen.queryByText('Used by')).not.toBeInTheDocument();
   });
 });
+
+const yamlWithVisualUsage = `version: '1.1'
+source: cat.sch.fact_test
+
+measures:
+  - name: on_scorecard
+    expr: SUM(source.a)
+    comment: "PBI: A · Used on: OTC Scorecard"
+  - name: on_two_pages
+    expr: SUM(source.b)
+    comment: "PBI: B — referenced by 2 measures · Used on: OTC NPS, DCC Score"
+  - name: nowhere
+    expr: SUM(source.c)
+    comment: "Leaf measure, not on any visual"
+`;
+
+describe('UCMVResultViewer — Used on (visual reference) column', () => {
+  it('renders a Used on column with each report page the measure appears on', () => {
+    render(<UCMVResultViewer result={makeResult(yamlWithVisualUsage)} />);
+    expect(screen.getByText('Used on')).toBeInTheDocument();
+    // Page names surfaced as chips (parsed from the "· Used on: …" suffix).
+    expect(screen.getByText('OTC Scorecard')).toBeInTheDocument();
+    expect(screen.getByText('OTC NPS')).toBeInTheDocument();
+    expect(screen.getByText('DCC Score')).toBeInTheDocument();
+  });
+
+  it('ranks measures drawn on a visual above those drawn nowhere', () => {
+    render(<UCMVResultViewer result={makeResult(yamlWithVisualUsage)} />);
+    const html = document.body.innerHTML;
+    expect(html.indexOf('on_scorecard')).toBeLessThan(html.indexOf('nowhere'));
+    expect(html.indexOf('on_two_pages')).toBeLessThan(html.indexOf('nowhere'));
+  });
+
+  it('omits the Used on column entirely when no measure is used on a visual', () => {
+    const plain = `version: '1.1'
+source: cat.sch.fact_test
+
+measures:
+  - name: a
+    expr: SUM(source.a)
+    comment: "plain"
+`;
+    render(<UCMVResultViewer result={makeResult(plain)} />);
+    expect(screen.queryByText('Used on')).not.toBeInTheDocument();
+  });
+});

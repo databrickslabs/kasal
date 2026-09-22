@@ -198,6 +198,23 @@ const extractReferencedBy = (comment?: string): number | null => {
   return m ? parseInt(m[1], 10) : null;
 };
 
+/** Extract the report page(s) a measure is drawn/filtered on, from the
+ *  "· Used on: <page>, <page> (+N more)" suffix the backend appends
+ *  (yaml_emitter._visual_usage_suffix). This is the visual-reference signal
+ *  reviewers use to judge which measures actually matter — a measure shown on a
+ *  report page is business-relevant; one referenced by nothing and drawn nowhere
+ *  is likely an intermediate building block. Returns [] when absent (the suffix
+ *  is always last on the comment, so it captures to end of string). */
+const extractUsedOn = (comment?: string): string[] => {
+  if (!comment) return [];
+  const m = comment.match(/Used on:\s*(.+)$/);
+  if (!m) return [];
+  return m[1]
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+};
+
 const FieldTable: React.FC<{
   fields: Array<{ name: string; expr?: string; comment?: string; format?: string }>;
   showFormat?: boolean;
@@ -205,25 +222,40 @@ const FieldTable: React.FC<{
   // Only show the "Used by" column for measures (showFormat) and only when at
   // least one measure carries a usage count — keeps dimension tables unchanged.
   const showUsage = !!showFormat && fields.some((f) => extractReferencedBy(f.comment) !== null);
-  // Sort measures by usage desc so the highest-impact ones surface first.
-  const rows = showUsage
-    ? [...fields].sort(
-        (a, b) => (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1),
-      )
-    : fields;
+  // Same, for the visual-usage "Used on" column (report pages the measure appears
+  // on) — only for measures, only when at least one carries it.
+  const showUsedOn = !!showFormat && fields.some((f) => extractUsedOn(f.comment).length > 0);
+  // Sort measures so the highest-impact surface first: measures drawn on a visual
+  // rank above those that aren't, then by how many other measures reference them.
+  const rows =
+    showUsage || showUsedOn
+      ? [...fields].sort((a, b) => {
+          const va = extractUsedOn(a.comment).length > 0 ? 1 : 0;
+          const vb = extractUsedOn(b.comment).length > 0 ? 1 : 0;
+          if (va !== vb) return vb - va;
+          return (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1);
+        })
+      : fields;
+  // Column widths depend on which optional columns are present (all measures
+  // carry a Comment column via showFormat; dimensions never show usage/usedOn).
+  const nameW = showUsedOn && showUsage ? '20%' : showUsage || showUsedOn ? '24%' : showFormat ? '30%' : '30%';
+  const exprW = !showFormat ? '70%' : showUsedOn && showUsage ? '26%' : showUsage || showUsedOn ? '32%' : '40%';
+  const commentW = showUsedOn && showUsage ? '22%' : showUsedOn ? '26%' : '30%';
   return (
     <Table size="small" sx={{ tableLayout: 'fixed' }}>
       <TableHead>
         <TableRow>
-          <TableCell sx={{ fontWeight: 600, width: showUsage ? '24%' : '30%' }}>Name</TableCell>
-          <TableCell sx={{ fontWeight: 600, width: showFormat ? (showUsage ? '34%' : '40%') : '70%' }}>Expression</TableCell>
-          {showFormat && <TableCell sx={{ fontWeight: 600, width: showUsage ? '30%' : '30%' }}>Comment / Format</TableCell>}
+          <TableCell sx={{ fontWeight: 600, width: nameW }}>Name</TableCell>
+          <TableCell sx={{ fontWeight: 600, width: exprW }}>Expression</TableCell>
+          {showFormat && <TableCell sx={{ fontWeight: 600, width: commentW }}>Comment / Format</TableCell>}
+          {showUsedOn && <TableCell sx={{ fontWeight: 600, width: '20%' }} title="Report page(s) this measure is drawn on or filtered by">Used on</TableCell>}
           {showUsage && <TableCell sx={{ fontWeight: 600, width: '12%' }} align="right" title="How many other measures reference this measure">Used by</TableCell>}
         </TableRow>
       </TableHead>
       <TableBody>
         {rows.map((f) => {
           const usage = extractReferencedBy(f.comment);
+          const usedOn = extractUsedOn(f.comment);
           return (
             <TableRow key={f.name} hover>
               <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
@@ -235,6 +267,20 @@ const FieldTable: React.FC<{
               {showFormat && (
                 <TableCell sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>
                   {f.comment || f.format || '—'}
+                </TableCell>
+              )}
+              {showUsedOn && (
+                <TableCell sx={{ fontSize: '0.8rem' }}>
+                  {usedOn.length > 0 ? (
+                    <Box display="flex" gap={0.5} flexWrap="wrap">
+                      {usedOn.map((page) => (
+                        <Chip key={page} size="small" label={page} variant="outlined" color="info"
+                          sx={{ height: 18, fontSize: '0.7rem' }} />
+                      ))}
+                    </Box>
+                  ) : (
+                    '—'
+                  )}
                 </TableCell>
               )}
               {showUsage && (
