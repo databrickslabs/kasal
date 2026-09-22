@@ -118,6 +118,43 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     }
   }, [approval?.previous_crew_output]);
 
+  // Config-gen's extracted arrays (measures_json/mquery_json/relationships_json)
+  // are STRIPPED from the gate's 'ui' payload, so to download the real JSON we
+  // re-fetch the FULL approval on click (getApproval without view=ui) and save
+  // each array as its own file.
+  const downloadExtractedConfigJson = useCallback(async () => {
+    if (!approval) return;
+    try {
+      const full = await HITLService.getApproval(approval.id);
+      const raw = full.previous_crew_output;
+      if (!raw) return;
+      const cfg = JSON.parse(raw) as Record<string, unknown>;
+      const files: Array<[string, unknown]> = [
+        ['measures.json', cfg.measures_json],
+        ['mquery.json', cfg.mquery_json],
+        ['relationships.json', cfg.relationships_json],
+        ['pipeline_config.json', cfg.proposed_config],
+      ];
+      files
+        .filter(([, v]) => v != null)
+        .forEach(([name, v], i) =>
+          setTimeout(() => {
+            const blob = new Blob([JSON.stringify(v, null, 2)], {
+              type: 'application/json;charset=utf-8',
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name as string;
+            a.click();
+            URL.revokeObjectURL(url);
+          }, i * 150),
+        );
+    } catch {
+      /* best-effort: the raw step-output download remains as the fallback */
+    }
+  }, [approval]);
+
   // The rendered "Previous Crew Output" body, memoized so typing a comment does
   // NOT re-render the UCMVResultViewer / Genie config editor beneath it. Depends
   // only on the parsed output and the edit drafts — never on comment/reason.
@@ -148,10 +185,31 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
         </Paper>
       );
     }
+    if (parsed && 'proposed_config' in parsed) {
+      return (
+        <Box>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center', mb: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Extracted config:
+            </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={downloadExtractedConfigJson}
+              title="Download measures.json / mquery.json / relationships.json / pipeline_config.json"
+            >
+              Download extracted JSON
+            </Button>
+          </Box>
+          <CrewOutputRenderer content={approval?.previous_crew_output ?? ''} maxHeight={320} />
+        </Box>
+      );
+    }
     return (
       <CrewOutputRenderer content={approval?.previous_crew_output ?? ''} maxHeight={320} />
     );
-  }, [parsedPreviousOutput, editedUCMV, editedGenieConfig, approval?.previous_crew_output]);
+  }, [parsedPreviousOutput, editedUCMV, editedGenieConfig, approval?.previous_crew_output, downloadExtractedConfigJson]);
 
   // Tool-call gates: denying just lets the agent continue without the tool, so
   // a reason is optional context. For task_review (and flow gates) the reason
