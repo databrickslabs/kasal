@@ -689,6 +689,30 @@ class UCMetricViewGeneratorTool(BaseTool):
         sql_output = pipeline.emit_all_sql(catalog=catalog, schema=schema)
         results = pipeline.get_results()
 
+        # Catch-all so no reference measure is silently dropped: gather every
+        # measure that never landed on a fact view into a synthetic
+        # `none_allocated_measures` view — best-effort translated where possible,
+        # the rest documented as comments with DAX + reason (visual/formatting/
+        # slicer artifacts are labelled as such, since Genie/analytics don't use
+        # them). Merged into yaml_output AFTER validation below so it is not
+        # validated as a deployable view (it spans multiple facts by design).
+        none_allocated_yaml = None
+        try:
+            from src.services.tools.metric_view_utils.none_allocated_emitter import (
+                build_none_allocated_yaml,
+            )
+
+            none_allocated_yaml = build_none_allocated_yaml(
+                pipeline.mapping,
+                pipeline.all_specs,
+                pipeline.translator,
+                pipeline._PBI_ARTIFACT_PATTERNS,
+            )
+        except Exception as _na_err:
+            logger.warning(
+                f"[UCMVGenerator] none_allocated_measures emit skipped: {_na_err}"
+            )
+
         # Run validation (optional — compares DAX structure vs generated SQL)
         validation_results = {}
         try:
@@ -820,6 +844,14 @@ class UCMetricViewGeneratorTool(BaseTool):
                     f"Tables/measures may be MISSING — every measure marked TODO: verify."
                 )
 
+        # Count only the real generated views; the catch-all worklist is added
+        # next and must not inflate views_generated.
+        _generated_view_count = len(yaml_output) if isinstance(yaml_output, dict) else 0
+        # Surface the catch-all as its own downloadable file
+        # (none_allocated_measures.yaml), alongside the real views.
+        if none_allocated_yaml:
+            yaml_output = {**yaml_output, "none_allocated_measures": none_allocated_yaml}
+
         output = {
             "yaml": yaml_output,
             "sql": sql_output,
@@ -839,7 +871,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             # Present when 0 views generated: actionable "why + what to do" so a
             # thin-report run is never a silent empty result.
             "zero_view_diagnosis": zero_view_diagnosis,
-            "views_generated": len(yaml_output) if isinstance(yaml_output, dict) else 0,
+            "views_generated": _generated_view_count,
             "specs_summary": {
                 k: {
                     "view_name": v.get("view_name"),
@@ -903,6 +935,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     catalog=catalog,
                     schema=schema,
                     untranslatable_items=output.get("untranslatable_items") or [],
+                    pbi_ucmv_mapping=output.get("pbi_ucmv_mapping") or {},
                 )
             )
         except Exception as _hist_err:
@@ -1307,6 +1340,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         catalog: Optional[str],
         schema: Optional[str],
         untranslatable_items: Optional[list] = None,
+        pbi_ucmv_mapping: Optional[dict] = None,
     ) -> None:
         """Persist the full raw DAX extract to conversion_history (fail-open).
 
@@ -1321,6 +1355,11 @@ class UCMetricViewGeneratorTool(BaseTool):
         also persisted so re-evaluation can later answer "which measures failed,
         and at what capability level?" and decide whether a retry can gain
         anything — without re-hitting the PowerBI API.
+
+        ``pbi_ucmv_mapping`` (per-view PBI<->UCMV reconciliation mapping draft) is
+        persisted in ``output_data`` alongside ``yaml``/``sql`` so the
+        "Download Mapping" artifact is retrievable by ``execution_id`` after the
+        run, not only from the transient tool result.
         """
 
         def _capability_fp() -> str:
@@ -1378,6 +1417,13 @@ class UCMetricViewGeneratorTool(BaseTool):
                     # Re-evaluation inputs: WHICH measures failed, and at WHAT
                     # capability level. A later sweep re-tries only these.
                     "untranslatable_items": untranslatable_items or [],
+                    # Per-view PBI<->UCMV reconciliation mapping draft
+                    # ({view_name: mapping_candidates_yaml_text}, from
+                    # pbi_ucmv_mapping.py). Persisted alongside yaml/sql so the
+                    # "Download Mapping" artifact is retrievable by execution_id
+                    # (GET /conversion-history), not only from the live tool
+                    # result the UI happens to hold in-session.
+                    "pbi_ucmv_mapping": pbi_ucmv_mapping or {},
                 },
                 output_summary=(
                     f"Generated {view_count} UC metric view(s)"
