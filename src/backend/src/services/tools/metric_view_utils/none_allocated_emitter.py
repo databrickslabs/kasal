@@ -32,14 +32,34 @@ _VIEW_KEY = "none_allocated_measures"
 _PLACEHOLDER_SOURCE = "TODO.none_allocated.measures_span_multiple_facts"
 
 
-def _covered_names(all_specs: dict) -> set:
-    """Every measure name already accounted for on some fact view — translated
-    OR documented as untranslatable — in both PBI and snake_case form."""
+def _covered_names(all_specs: dict, emitted_yaml) -> set:
+    """Measures that ACTUALLY made it into the exported YAML — as an emitted
+    measure or a documented comment — in both PBI and snake_case form.
+
+    Gated on the rendered text, not on spec membership: a measure can sit on a
+    spec's ``untranslatable`` list yet never render (e.g. a dimension spec with 0
+    measures, which ``emit_yaml`` drops to ""). Counting those as "covered" would
+    let them fall through the catch-all. We use the specs only for the exact name
+    FORMS (emitted snake name / original PBI name) and confirm each against the
+    rendered YAML.
+    """
+    blob = (
+        "\n".join(emitted_yaml.values())
+        if isinstance(emitted_yaml, dict)
+        else "\n".join(emitted_yaml or [])
+    )
     covered: set = set()
     for spec in all_specs.values():
-        for m in list(spec.measures) + list(spec.untranslatable):
-            covered.add(m.original_name)
-            covered.add(to_snake_case(m.original_name))
+        for m in spec.measures:
+            nm = getattr(m, "measure_name", "") or ""
+            if nm and nm in blob:  # `- name: <snake>` actually emitted
+                covered.add(m.original_name)
+                covered.add(to_snake_case(m.original_name))
+        for m in spec.untranslatable:
+            on = m.original_name or ""
+            if on and on in blob:  # documented as a `#  - <PBI name>` comment
+                covered.add(on)
+                covered.add(to_snake_case(on))
     return covered
 
 
@@ -56,6 +76,7 @@ def _entry_fields(m: dict) -> tuple[str, str, str]:
 def build_none_allocated_spec(
     reference_measures: list[dict],
     all_specs: dict,
+    emitted_yaml,
     translator,
     artifact_patterns,
 ) -> MetricViewSpec | None:
@@ -66,11 +87,16 @@ def build_none_allocated_spec(
     measures were grouped or allocated downstream: a holder-table / dispatcher /
     DCC-score measure is still caught here instead of vanishing.
 
+    ``emitted_yaml`` is the rendered YAML of the real views (dict view->text or a
+    list of texts); a reference measure is treated as already covered only when it
+    actually appears there — so a measure on a spec that emitted nothing still
+    lands in the catch-all instead of being silently dropped.
+
     ``artifact_patterns`` is the pipeline's compiled ``_PBI_ARTIFACT_PATTERNS``
     regex; a DAX that matches it is labelled a visual/formatting/slicer artifact
     (documented, not translated).
     """
-    covered = _covered_names(all_specs)
+    covered = _covered_names(all_specs, emitted_yaml)
     measures: list[TranslationResult] = []
     untranslatable: list[TranslationResult] = []
     seen: set = set()
@@ -173,13 +199,14 @@ def build_none_allocated_spec(
 def build_none_allocated_yaml(
     reference_measures: list[dict],
     all_specs: dict,
+    emitted_yaml,
     translator,
     artifact_patterns,
 ) -> str | None:
     """Emit the catch-all view's YAML text, or ``None`` when nothing is orphaned
     (or emission fails — the caller treats this as best-effort)."""
     spec = build_none_allocated_spec(
-        reference_measures, all_specs, translator, artifact_patterns
+        reference_measures, all_specs, emitted_yaml, translator, artifact_patterns
     )
     if spec is None:
         return None

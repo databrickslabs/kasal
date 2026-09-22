@@ -1,5 +1,7 @@
 """Catch-all emitter: orphaned measures are translated where possible and
-otherwise documented — never silently dropped."""
+otherwise documented — never silently dropped. "Covered" is gated on what
+actually rendered in the exported YAML, so a measure on a spec that emitted
+nothing still lands in the catch-all."""
 
 import re
 
@@ -15,9 +17,13 @@ from src.services.tools.metric_view_utils.none_allocated_emitter import (
 _ARTIFACT_RE = re.compile(r"fx_SparkLineSVG|SELECTEDVALUE|FORMAT\(", re.IGNORECASE)
 
 
+def _snake(n):
+    return n.lower().replace(" ", "_")
+
+
 def _tr(orig, sql=None, ok=False, reason="No matching pattern", dax=""):
     return TranslationResult(
-        measure_name=orig.lower().replace(" ", "_"),
+        measure_name=_snake(orig),
         original_name=orig,
         sql_expr=sql,
         is_translatable=ok,
@@ -32,24 +38,31 @@ class _FakeTranslator:
     """Translates 'Good Ratio' to SQL; everything else is untranslatable."""
 
     def translate(self, measure, table_key):
-        orig = measure.get("original_name") or measure.get("measure_name")
-        dax = measure.get("dax_expression", "")
+        orig = measure.get("original_name") or measure.get("measure_name") or measure.get("name")
+        dax = measure.get("dax_expression", "") or measure.get("expression", "")
         if orig == "Good Ratio":
             return _tr(orig, sql="SUM(source.a) / NULLIF(SUM(source.b), 0)", ok=True, dax=dax)
         return _tr(orig, ok=False, dax=dax)
 
 
+class _NeverTranslator:
+    def translate(self, measure, table_key):
+        orig = measure.get("original_name") or measure.get("name")
+        return _tr(orig, ok=False, dax=measure.get("dax_expression") or measure.get("expression", ""))
+
+
 def _spec_with(covered_names):
     return MetricViewSpec(
-        fact_table_key="fact_x",
-        source_table="cat.sch.fact_x",
-        view_name="fact_x",
-        comment="",
-        joins=[],
-        dimensions=[],
+        fact_table_key="fact_x", source_table="cat.sch.fact_x", view_name="fact_x",
+        comment="", joins=[], dimensions=[],
         measures=[_tr(n, sql="SUM(source.c)", ok=True) for n in covered_names],
         untranslatable=[],
     )
+
+
+def _yaml_for(names):
+    """Minimal rendered-view text so `nm in blob` gating sees these as emitted."""
+    return {"fact_x": "measures:\n" + "\n".join(f"  - name: {_snake(n)}" for n in names)}
 
 
 def _mapping():
@@ -67,27 +80,32 @@ def _mapping():
 
 def test_orphans_split_into_translated_and_documented():
     specs = {"fact_x": _spec_with(["Already Here"])}
-    spec = build_none_allocated_spec(_mapping(), specs, _FakeTranslator(), _ARTIFACT_RE)
+    emitted = _yaml_for(["Already Here"])
+    spec = build_none_allocated_spec(_mapping(), specs, emitted, _FakeTranslator(), _ARTIFACT_RE)
 
     assert spec is not None
     m_names = {m.original_name for m in spec.measures}
     u_names = {u.original_name for u in spec.untranslatable}
-
-    # translatable orphan → a real measure
-    assert "Good Ratio" in m_names
-    # untranslatable orphans → documented, never dropped
-    assert "Orders billed same day %" in u_names
+    assert "Good Ratio" in m_names                       # translatable orphan -> measure
+    assert "Orders billed same day %" in u_names         # untranslatable -> documented
     assert "Trend Sparkline" in u_names
-    # already covered on a fact view → not repeated here
-    assert "Already Here" not in m_names and "Already Here" not in u_names
+    assert "Already Here" not in m_names and "Already Here" not in u_names  # rendered -> covered
+
+
+def test_measure_on_unrendered_spec_still_caught():
+    """A measure on a spec whose YAML rendered EMPTY must NOT be treated as
+    covered — it should still land in the catch-all (the real 9-leak bug)."""
+    # spec claims "Already Here" but the emitted YAML is empty (0-measure dim view).
+    specs = {"fact_x": _spec_with(["Already Here"])}
+    spec = build_none_allocated_spec(_mapping(), specs, {"fact_x": ""}, _FakeTranslator(), _ARTIFACT_RE)
+    names = {m.original_name for m in spec.measures} | {u.original_name for u in spec.untranslatable}
+    assert "Already Here" in names  # not in the export -> caught here
 
 
 def test_visual_artifact_gets_labelled_reason():
-    specs = {"fact_x": _spec_with([])}
-    spec = build_none_allocated_spec(_mapping(), specs, _FakeTranslator(), _ARTIFACT_RE)
+    spec = build_none_allocated_spec(_mapping(), {}, {}, _FakeTranslator(), _ARTIFACT_RE)
     trend = next(u for u in spec.untranslatable if u.original_name == "Trend Sparkline")
     assert "no Genie/analytical form" in trend.skip_reason
-    # a non-artifact orphan keeps its plain reason
     billed = next(u for u in spec.untranslatable if u.original_name.startswith("Orders billed"))
     assert "Genie" not in billed.skip_reason
 
@@ -95,41 +113,30 @@ def test_visual_artifact_gets_labelled_reason():
 def test_none_when_everything_is_covered():
     covered = ["Already Here", "Good Ratio", "Orders billed same day %", "Trend Sparkline"]
     specs = {"fact_x": _spec_with(covered)}
-    assert build_none_allocated_spec(_mapping(), specs, _FakeTranslator(), _ARTIFACT_RE) is None
-
-
-class _NeverTranslator:
-    def translate(self, measure, table_key):
-        return _tr(measure.get("original_name") or measure.get("name"), ok=False,
-                   dax=measure.get("dax_expression") or measure.get("expression", ""))
+    assert build_none_allocated_spec(_mapping(), specs, _yaml_for(covered), _FakeTranslator(), _ARTIFACT_RE) is None
 
 
 def test_zero_translated_still_emits_documented_yaml():
-    # raw entry shape (name/expression) + a translator that never translates.
     universe = [
         {"name": "Overview_Agg_Vendor_Score", "expression": "CALCULATE([Overview_Agg_Score], 'D'[Domain]=\"Vendor\")"},
         {"name": "AI BUs Improving", "expression": "COUNTROWS(FILTER(x,[AI Improvement]>0))"},
     ]
-    yaml_text = build_none_allocated_yaml(universe, {}, _NeverTranslator(), _ARTIFACT_RE)
-    # Nothing translated, but the file MUST still exist with the documented block.
+    yaml_text = build_none_allocated_yaml(universe, {}, {}, _NeverTranslator(), _ARTIFACT_RE)
     assert yaml_text and "none_allocated_measures" in yaml_text
     assert "_documented_only_placeholder" in yaml_text
-    assert "Overview_Agg_Vendor_Score" in yaml_text  # documented, not dropped
+    assert "Overview_Agg_Vendor_Score" in yaml_text
 
 
 def test_entry_shape_tolerance_name_and_expression_keys():
-    # measures keyed by name/expression (raw extract shape) must NOT be skipped.
     universe = [{"name": "Some Orphan KPI", "expression": "SUM(f[x])"}]
-    spec = build_none_allocated_spec(universe, {}, _NeverTranslator(), _ARTIFACT_RE)
+    spec = build_none_allocated_spec(universe, {}, {}, _NeverTranslator(), _ARTIFACT_RE)
     all_names = {m.original_name for m in spec.measures} | {u.original_name for u in spec.untranslatable}
     assert "Some Orphan KPI" in all_names
 
 
 def test_yaml_emits_and_carries_view_name_and_dax():
     specs = {"fact_x": _spec_with(["Already Here"])}
-    yaml_text = build_none_allocated_yaml(_mapping(), specs, _FakeTranslator(), _ARTIFACT_RE)
+    yaml_text = build_none_allocated_yaml(_mapping(), specs, _yaml_for(["Already Here"]), _FakeTranslator(), _ARTIFACT_RE)
     assert yaml_text and "none_allocated_measures" in yaml_text
-    # best-effort translated measure present as a real measure
-    assert "SUM(source.a)" in yaml_text
-    # documented orphan's DAX preserved in the comment block
-    assert "fx_SparkLineSVG" in yaml_text
+    assert "SUM(source.a)" in yaml_text          # translated measure present
+    assert "fx_SparkLineSVG" in yaml_text         # documented orphan's DAX preserved

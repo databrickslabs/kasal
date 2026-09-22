@@ -708,6 +708,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             none_allocated_yaml = build_none_allocated_yaml(
                 measures if isinstance(measures, list) else pipeline.mapping,
                 pipeline.all_specs,
+                yaml_output,  # rendered real views: covered == actually in the export
                 pipeline.translator,
                 pipeline._PBI_ARTIFACT_PATTERNS,
             )
