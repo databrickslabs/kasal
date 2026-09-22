@@ -380,6 +380,10 @@ class PipelineConfigGeneratorTool(BaseTool):
             # NOT fatal: on failure we fall back to Fabric TMDL (which a Service
             # Account CAN read), mirroring the Semantic Model Fetcher.
             admin_tables = {}
+            # Set only if an Admin Scan actually runs below (API 3 tiers) — fed
+            # to discover_report_id as a reliable, already-fetched source of
+            # report/dataset bindings when the SA-only classic REST call 401s.
+            scan_result: Optional[dict] = None
             # {name: raw_M} of the model's named/shared expressions — parsed
             # from the SAME scan_result/tmdl_parts as admin_tables (no extra
             # API calls). Needed for two M shapes a table's own mquery_
@@ -607,7 +611,9 @@ class PipelineConfigGeneratorTool(BaseTool):
             # dataset; if none is found, proceed but warn loudly.
             report_def = None
             if not report_id:
-                discovered = gen.discover_report_id(token, workspace_id, dataset_id)
+                discovered = gen.discover_report_id(
+                    token, workspace_id, dataset_id, scan_result=scan_result
+                )
                 if discovered:
                     report_id = discovered
                     logger.info(
@@ -778,6 +784,40 @@ class PipelineConfigGeneratorTool(BaseTool):
             )
             ucmv_mquery = self._build_ucmv_mquery(admin_tables, expressions)
 
+            # Implicit-aggregation columns used directly in a visual, with no
+            # named PBI measure behind them (PBI applies the column's own
+            # SummarizeBy). Only worth the extra DAX query when there's
+            # visual usage data to check against at all.
+            implicit_column_measures: dict = {}
+            if visual_usage_index:
+                try:
+                    from src.services.powerbi.column_metadata import (
+                        extract_column_summarize_by,
+                    )
+                    from src.services.powerbi.implicit_column_measures import (
+                        derive_implicit_column_measures,
+                    )
+
+                    column_summarize_by = extract_column_summarize_by(
+                        token, workspace_id, dataset_id
+                    )
+                    implicit_column_measures = derive_implicit_column_measures(
+                        visual_usage_index,
+                        ucmv_measures,
+                        column_summarize_by,
+                        fact_tables=set(config.get("fact_join_map", {}).keys()),
+                    )
+                    if implicit_column_measures:
+                        logger.info(
+                            f"[PipelineConfigGen]   → {sum(len(v) for v in implicit_column_measures.values())} "
+                            f"implicit visual-column measure(s) across "
+                            f"{len(implicit_column_measures)} table(s)"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[PipelineConfigGen] Implicit column measure detection failed: {e}"
+                    )
+
             # Diagnostic split: how many tables resolve via the DIRECT path alone
             # (resolve_mquery_to_sql — no `expressions` needed) vs how many the
             # ACTUAL ucmv_mquery got (resolve_mquery_with_context — reference-
@@ -858,6 +898,12 @@ class PipelineConfigGeneratorTool(BaseTool):
                 # measures_json/mquery_json/relationships_json, to tag each
                 # measure with WHERE it's actually seen in the report.
                 "visual_usage_index": visual_usage_index,
+                # {table: [{name, original_name, raw_expr, comment, used_in_visuals,
+                # ...}, ...]} — consumed by the flow handoff → UCMV JSON mode, same
+                # as switch_decompositions: raw columns with PBI's own implicit
+                # aggregation that are actually drawn/filtered in a visual, with no
+                # named DAX measure behind them.
+                "implicit_column_measures": implicit_column_measures,
                 "summary": {
                     "total_keys": len(config),
                     "auto_filled": auto_count,
@@ -876,6 +922,9 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "expressions_source": expressions_source,
                     "mquery_resolved_direct_only": _direct_resolved,
                     "mquery_resolved_with_context": _context_resolved,
+                    "implicit_column_measures_found": sum(
+                        len(v) for v in implicit_column_measures.values()
+                    ),
                 },
                 "warnings": warnings,
                 # Additive-enrichment audit trail (source_table parse, warehouse

@@ -43,7 +43,13 @@ from __future__ import annotations
 
 from src.services.tools.metric_view_utils.data_classes import MetricViewSpec
 
-_VALID_PBI_KINDS = {"direct", "composite", "dimension_conditional", "unresolved"}
+_VALID_PBI_KINDS = {
+    "direct",
+    "composite",
+    "dimension_conditional",
+    "raw_column",
+    "unresolved",
+}
 
 
 def _yaml_str(value: str) -> str:
@@ -76,6 +82,19 @@ def _measure_pbi_kind(m) -> dict:
         return {"kind": "unresolved", "raw_hint": hint[:300]}
 
     if m.pbi_kind and m.pbi_kind in _VALID_PBI_KINDS:
+        if m.pbi_kind == "raw_column":
+            # No named PBI measure exists at all — implicit_column_measures.py
+            # (derive_implicit_column_measures) promoted a raw column PBI
+            # itself aggregates, matching mapping_schema.py's own `raw_column`
+            # pbi_kind (the reconciliation framework this feeds distinguishes
+            # it from `direct` for exactly this reason: there is no measure
+            # name to look up on the PBI side, only a table+column).
+            src = m.pbi_sources[0] if m.pbi_sources else {}
+            return {
+                "kind": "raw_column",
+                "pbi_table": src.get("table"),
+                "pbi_column": src.get("column", m.original_name),
+            }
         if m.pbi_kind == "dimension_conditional":
             parent = m.pbi_sources[0] if m.pbi_sources else m.original_name
             return {"kind": "dimension_conditional", "context_measure": parent}
@@ -130,6 +149,10 @@ def _emit_measure_entry(m) -> list[str]:
 
     if info["kind"] == "direct":
         lines.append(f"    pbi_measure: {_yaml_str(info['pbi_measure'])}")
+    elif info["kind"] == "raw_column":
+        if info.get("pbi_table"):
+            lines.append(f"    pbi_table: {_yaml_str(info['pbi_table'])}")
+        lines.append(f"    pbi_column: {_yaml_str(info['pbi_column'])}")
     elif info["kind"] == "dimension_conditional":
         lines.append(f"    context_measure: {_yaml_str(info['context_measure'])}")
         lines.append(

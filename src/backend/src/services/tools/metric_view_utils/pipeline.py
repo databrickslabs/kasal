@@ -425,6 +425,7 @@ class MetricViewPipeline:
                     "base": 0,
                     "dax": 0,
                     "switch": 0,
+                    "implicit_column": 0,
                     "manual_override": 0,
                     "skipped": True,
                     "skip_reason": "All measures dropped by validation (no deployable measures)",
@@ -442,6 +443,7 @@ class MetricViewPipeline:
                 "base": spec.base_measure_count,
                 "dax": spec.dax_measure_count,
                 "switch": spec.switch_measure_count,
+                "implicit_column": spec.implicit_measure_count,
                 "manual_override": sum(
                     1
                     for m in spec.measures
@@ -608,6 +610,11 @@ class MetricViewPipeline:
         ]
         if spec.switch_measure_count:
             lines.append(f"{spec.switch_measure_count} SWITCH-decomposed measures")
+        if spec.implicit_measure_count:
+            lines.append(
+                f"{spec.implicit_measure_count} aggregated-column measures "
+                "(used in visuals, no named PBI measure)"
+            )
         lines.append(
             f"{len(spec.untranslatable)} untranslatable DAX measures (documented below)"
         )

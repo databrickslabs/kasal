@@ -48,6 +48,15 @@ class UCMetricViewGeneratorSchema(BaseModel):
         None,
         description="JSON pipeline config overrides (join_key_map, fact_join_map, etc.)",
     )
+    implicit_column_measures: Optional[str] = Field(
+        None,
+        description=(
+            "JSON string of {table: [{name, original_name, raw_expr, comment, "
+            "used_in_visuals, ...}, ...]} (from Pipeline Config Generator) — raw "
+            "columns with PBI's own implicit aggregation that are drawn/filtered "
+            "directly in a report visual with no named DAX measure behind them."
+        ),
+    )
     catalog: Optional[str] = Field(None, description="Target UC catalog name")
     schema_name: Optional[str] = Field(None, description="Target UC schema name")
     inner_dim_joins: bool = Field(False, description="Use INNER JOIN for dimensions")
@@ -150,6 +159,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "relationships_json",
             "scan_data_json",
             "visual_usage_index",
+            "implicit_column_measures",
             "config_json",
             "catalog",
             "schema_name",
@@ -208,6 +218,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "relationships_json",
             "scan_data_json",
             "visual_usage_index",
+            "implicit_column_measures",
         )
 
         def _get_json(key):
@@ -239,6 +250,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         relationships_raw = _get_json("relationships_json")
         scan_raw = _get_json("scan_data_json")
         visual_usage_raw = _get_json("visual_usage_index")
+        implicit_column_measures_raw = _get_json("implicit_column_measures")
         config_raw = _get_json("config_json") or "{}"
         # Diagnostic: what arrived via flow injection/kwargs BEFORE any API-mode
         # extraction or DB fallback runs below, and whether the DB fallback ends
@@ -255,6 +267,21 @@ class UCMetricViewGeneratorTool(BaseTool):
             ),
             "preinject_config_json_chars": (
                 len(config_raw) if isinstance(config_raw, str) else None
+            ),
+            # Same shape as the three above, added after visual usage tags and
+            # the PBI<->UCMV mapping showed up empty in a run where
+            # config/measures/mquery all arrived intact — this is what tells
+            # the difference between "the flow handoff dropped this one field"
+            # and "Pipeline Config Generator's own report-definition extraction
+            # legitimately came back empty this run" (both look like 0
+            # annotations downstream, only this shows which one happened).
+            "preinject_visual_usage_index_chars": (
+                len(visual_usage_raw) if isinstance(visual_usage_raw, str) else None
+            ),
+            "preinject_implicit_column_measures_chars": (
+                len(implicit_column_measures_raw)
+                if isinstance(implicit_column_measures_raw, str)
+                else None
             ),
             "db_fallback_fired_for": [],
             "db_fallback_extraction_id": None,
@@ -480,6 +507,22 @@ class UCMetricViewGeneratorTool(BaseTool):
             config = _parse_json_input(config_raw, {})
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
+
+        # Implicit visual-column measures (from Pipeline Config Generator) ride
+        # inside `config`, same bucket shape as switch_decompositions — merge
+        # rather than overwrite in case config_json already carried one (e.g.
+        # a manually-supplied config in a standalone/JSON-mode run).
+        if implicit_column_measures_raw:
+            try:
+                _icm = _parse_json_input(implicit_column_measures_raw, {})
+                if isinstance(_icm, dict) and _icm:
+                    config.setdefault("implicit_column_measures", {})
+                    for _tbl, _entries in _icm.items():
+                        config["implicit_column_measures"].setdefault(
+                            _tbl, []
+                        ).extend(_entries)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[UCMV] Failed to parse implicit_column_measures: {e}")
 
         # ── Raw Power Query M → SQL source recovery (opt-in) ────────────────
         # When a table's source is raw M (`let ... in ...`) with no embedded

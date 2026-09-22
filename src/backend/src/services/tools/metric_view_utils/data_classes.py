@@ -93,6 +93,7 @@ class MetricViewSpec:
     base_measure_count: int = 0
     dax_measure_count: int = 0
     switch_measure_count: int = 0
+    implicit_measure_count: int = 0
     source_filter: str = ""  # MQuery WHERE → UC MV filter: key
     source_sql: str = ""  # Inline SQL for source: |-
 
