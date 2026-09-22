@@ -198,21 +198,60 @@ const extractReferencedBy = (comment?: string): number | null => {
   return m ? parseInt(m[1], 10) : null;
 };
 
-/** Extract the report page(s) a measure is drawn/filtered on, from the
- *  "· Used on: <page>, <page> (+N more)" suffix the backend appends
- *  (yaml_emitter._visual_usage_suffix). This is the visual-reference signal
- *  reviewers use to judge which measures actually matter — a measure shown on a
- *  report page is business-relevant; one referenced by nothing and drawn nowhere
- *  is likely an intermediate building block. Returns [] when absent (the suffix
- *  is always last on the comment, so it captures to end of string). */
-const extractUsedOn = (comment?: string): string[] => {
-  if (!comment) return [];
-  const m = comment.match(/Used on:\s*(.+)$/);
-  if (!m) return [];
-  return m[1]
+/** One report page a measure is used on, with HOW (drawn vs filter) and WHERE
+ *  (the visual type(s) on that page). */
+interface UsedOnEntry {
+  page: string;
+  types: string[];
+  role: 'drawn' | 'filter' | '';
+}
+interface UsedOnInfo {
+  /** HOW OFTEN — the visual-occurrence count from the suffix. */
+  count: number;
+  entries: UsedOnEntry[];
+}
+
+/** Parse the measure comment's visual-usage suffix
+ *  (yaml_emitter._visual_usage_suffix). This is the signal reviewers use to
+ *  judge which measures actually matter — a measure shown on a report page is
+ *  business-relevant; one referenced by nothing and drawn nowhere is likely an
+ *  intermediate building block.
+ *
+ *  Current format carries count + per-page type/role, e.g.
+ *    "· Used on 3 visuals: OTC Scorecard (card/tableEx·drawn), OTC NPS (slicer·filter) (+1 more)"
+ *  Also tolerates the older bare form "· Used on: OTC Scorecard, OTC NPS" (no
+ *  count, no annotation) from pre-enrichment runs. The suffix is always last on
+ *  the comment, so the page list captures to end of string. */
+const extractUsedOn = (comment?: string): UsedOnInfo => {
+  if (!comment) return { count: 0, entries: [] };
+  const m = comment.match(/Used on(?: (\d+) visuals?)?:\s*(.+)$/);
+  if (!m) return { count: 0, entries: [] };
+  let list = m[2].trim();
+  const more = list.match(/\s*\(\+\d+ more\)\s*$/);
+  if (more?.index != null) list = list.slice(0, more.index).trim();
+  const entries: UsedOnEntry[] = list
     .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
+    .map((tok) => tok.trim())
+    .filter(Boolean)
+    .map((tok) => {
+      const am = tok.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+      if (!am) return { page: tok, types: [], role: '' as const };
+      const [typesPart, rolePart] = am[2].split('·');
+      const role = rolePart === 'filter' || rolePart === 'drawn' ? rolePart : '';
+      // With no "·", a bare "(drawn)"/"(filter)" is a role, anything else is types.
+      const types =
+        rolePart === undefined
+          ? typesPart === 'drawn' || typesPart === 'filter'
+            ? []
+            : typesPart.split('/').filter(Boolean)
+          : typesPart.split('/').filter(Boolean);
+      const soleRole =
+        rolePart === undefined && (typesPart === 'drawn' || typesPart === 'filter')
+          ? (typesPart as 'drawn' | 'filter')
+          : role;
+      return { page: am[1].trim(), types, role: soleRole };
+    });
+  return { count: m[1] ? parseInt(m[1], 10) : entries.length, entries };
 };
 
 const FieldTable: React.FC<{
@@ -224,14 +263,15 @@ const FieldTable: React.FC<{
   const showUsage = !!showFormat && fields.some((f) => extractReferencedBy(f.comment) !== null);
   // Same, for the visual-usage "Used on" column (report pages the measure appears
   // on) — only for measures, only when at least one carries it.
-  const showUsedOn = !!showFormat && fields.some((f) => extractUsedOn(f.comment).length > 0);
-  // Sort measures so the highest-impact surface first: measures drawn on a visual
-  // rank above those that aren't, then by how many other measures reference them.
+  const showUsedOn = !!showFormat && fields.some((f) => extractUsedOn(f.comment).entries.length > 0);
+  // Sort measures so the highest-impact surface first: measures used on more
+  // visuals rank above those used on fewer, then by how many other measures
+  // reference them.
   const rows =
     showUsage || showUsedOn
       ? [...fields].sort((a, b) => {
-          const va = extractUsedOn(a.comment).length > 0 ? 1 : 0;
-          const vb = extractUsedOn(b.comment).length > 0 ? 1 : 0;
+          const va = extractUsedOn(a.comment).count;
+          const vb = extractUsedOn(b.comment).count;
           if (va !== vb) return vb - va;
           return (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1);
         })
@@ -271,12 +311,37 @@ const FieldTable: React.FC<{
               )}
               {showUsedOn && (
                 <TableCell sx={{ fontSize: '0.8rem' }}>
-                  {usedOn.length > 0 ? (
-                    <Box display="flex" gap={0.5} flexWrap="wrap">
-                      {usedOn.map((page) => (
-                        <Chip key={page} size="small" label={page} variant="outlined" color="info"
-                          sx={{ height: 18, fontSize: '0.7rem' }} />
-                      ))}
+                  {usedOn.entries.length > 0 ? (
+                    <Box display="flex" flexDirection="column" gap={0.5} alignItems="flex-start">
+                      {/* HOW OFTEN — visual-occurrence count. */}
+                      <Chip
+                        size="small"
+                        color="info"
+                        variant="filled"
+                        label={`${usedOn.count} visual${usedOn.count !== 1 ? 's' : ''}`}
+                        sx={{ height: 18, fontSize: '0.7rem' }}
+                      />
+                      {/* WHERE + HOW — page, visual type(s), and drawn vs filter. */}
+                      <Box display="flex" gap={0.5} flexWrap="wrap">
+                        {usedOn.entries.map((e) => {
+                          const typeLabel = e.types.length ? ` · ${e.types.join('/')}` : '';
+                          const roleWord =
+                            e.role === 'filter' ? 'used as a filter' : e.role === 'drawn' ? 'drawn (shown)' : '';
+                          return (
+                            <Chip
+                              key={e.page}
+                              size="small"
+                              variant="outlined"
+                              color={e.role === 'filter' ? 'default' : 'info'}
+                              label={`${e.page}${typeLabel}`}
+                              title={[roleWord, e.types.length ? `in ${e.types.join(', ')}` : '']
+                                .filter(Boolean)
+                                .join(' ')}
+                              sx={{ height: 18, fontSize: '0.7rem', maxWidth: '100%' }}
+                            />
+                          );
+                        })}
+                      </Box>
                     </Box>
                   ) : (
                     '—'

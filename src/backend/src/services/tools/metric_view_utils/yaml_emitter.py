@@ -207,33 +207,66 @@ def _usage_suffix(referenced_by: int) -> str:
 
 
 def _visual_usage_suffix(measure) -> str:
-    """Business-usage annotation for a measure comment: which report page(s)
-    this measure is actually drawn on or filtered by (PROP-8).
+    """Business-usage annotation for a measure comment: HOW OFTEN, HOW and
+    WHERE this measure is actually used in the report (PROP-8).
 
     Distinct from `_usage_suffix` (measure→measure DAX references) — this is
     dashboard/visual usage, from `TranslationResult.used_in_visuals`
-    (`visual_usage_annotator.annotate_visual_usage`). Empty when the field
-    wasn't found in any visual (common — many measures exist only as
-    intermediate building blocks for other measures) or when no
-    visual_usage_index was supplied at all (report_id omitted, or the run
-    predates this feature) — both cases are silent, not flagged as an error.
-    Collapses multiple occurrences on the same page to one mention; caps at 3
-    pages named explicitly, then "+N more" so a measure used everywhere
-    doesn't produce an unreadable comment line.
+    (`visual_usage_annotator.annotate_visual_usage`), a list of
+    `{page, visual_type, role}` occurrences. Empty when the field wasn't found
+    in any visual (common — many measures exist only as intermediate building
+    blocks for other measures) or when no visual_usage_index was supplied at
+    all (report_id omitted, or the run predates this feature) — both cases are
+    silent, not flagged as an error.
+
+    Emits a single readable, machine-parseable line (the review UI's "Used on"
+    column parses it back out):
+
+        · Used on 3 visuals: OTC Scorecard (card/tableEx·drawn), OTC NPS (slicer·filter) (+1 more)
+
+    - the leading count is HOW OFTEN — the number of visual occurrences;
+    - per page: the visual type(s) (WHERE) and whether the field is drawn
+      (shown) or only used as a filter (HOW), as `<types>·<role>`;
+    - caps at 3 pages named explicitly, then "+N more" (remaining PAGES) so a
+      measure used everywhere doesn't produce an unreadable comment line.
+
+    Annotations never contain a comma (types are `/`-joined, role after `·`) so
+    the comma stays a clean page separator for the parser. Defensive against
+    occurrences missing `visual_type`/`role`.
     """
     usage = getattr(measure, "used_in_visuals", None)
     if not usage:
         return ""
-    pages_seen: list[str] = []
+    # Aggregate occurrences per page, preserving first-seen order.
+    per_page: dict[str, dict] = {}
+    order: list[str] = []
     for occ in usage:
         page = occ.get("page")
-        if page and page not in pages_seen:
-            pages_seen.append(page)
-    if not pages_seen:
+        if not page:
+            continue
+        if page not in per_page:
+            per_page[page] = {"types": [], "drawn": False}
+            order.append(page)
+        vt = occ.get("visual_type")
+        if vt and vt not in per_page[page]["types"]:
+            per_page[page]["types"].append(vt)
+        # "drawn" (or a missing role) means the field is shown; only "filter"
+        # occurrences alone keep a page marked filter-only.
+        if occ.get("role") != "filter":
+            per_page[page]["drawn"] = True
+    if not order:
         return ""
-    shown = pages_seen[:3]
-    suffix = "Used on: " + ", ".join(shown)
-    remaining = len(pages_seen) - len(shown)
+    total = len(usage)  # HOW OFTEN — visual occurrences across the report
+    shown = order[:3]
+    parts: list[str] = []
+    for page in shown:
+        info = per_page[page]
+        role = "drawn" if info["drawn"] else "filter"
+        types = "/".join(info["types"])
+        annot = f"{types}·{role}" if types else role
+        parts.append(f"{page} ({annot})")
+    suffix = f"Used on {total} visual{'s' if total != 1 else ''}: " + ", ".join(parts)
+    remaining = len(order) - len(shown)
     if remaining > 0:
         suffix += f" (+{remaining} more)"
     return f" · {suffix}"

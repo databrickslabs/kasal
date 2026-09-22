@@ -62,36 +62,61 @@ measures:
   });
 });
 
+// Enriched suffix: HOW OFTEN (count), HOW (drawn/filter), WHERE (page + type).
 const yamlWithVisualUsage = `version: '1.1'
 source: cat.sch.fact_test
 
 measures:
   - name: on_scorecard
     expr: SUM(source.a)
-    comment: "PBI: A · Used on: OTC Scorecard"
-  - name: on_two_pages
+    comment: "PBI: A · Used on 1 visual: OTC Scorecard (card·drawn)"
+  - name: on_many
     expr: SUM(source.b)
-    comment: "PBI: B — referenced by 2 measures · Used on: OTC NPS, DCC Score"
+    comment: "PBI: B — referenced by 2 measures · Used on 4 visuals: OTC NPS (matrix·drawn), DCC Score (slicer·filter)"
   - name: nowhere
     expr: SUM(source.c)
     comment: "Leaf measure, not on any visual"
 `;
 
 describe('UCMVResultViewer — Used on (visual reference) column', () => {
-  it('renders a Used on column with each report page the measure appears on', () => {
+  it('renders a Used on column with the page(s) and visual type each measure appears on', () => {
     render(<UCMVResultViewer result={makeResult(yamlWithVisualUsage)} />);
     expect(screen.getByText('Used on')).toBeInTheDocument();
-    // Page names surfaced as chips (parsed from the "· Used on: …" suffix).
-    expect(screen.getByText('OTC Scorecard')).toBeInTheDocument();
-    expect(screen.getByText('OTC NPS')).toBeInTheDocument();
-    expect(screen.getByText('DCC Score')).toBeInTheDocument();
+    // Page + visual type surfaced as chips (parsed from the enriched suffix).
+    expect(screen.getByText('OTC Scorecard · card')).toBeInTheDocument();
+    expect(screen.getByText('OTC NPS · matrix')).toBeInTheDocument();
+    expect(screen.getByText('DCC Score · slicer')).toBeInTheDocument();
   });
 
-  it('ranks measures drawn on a visual above those drawn nowhere', () => {
+  it('shows HOW OFTEN — the visual-occurrence count', () => {
+    render(<UCMVResultViewer result={makeResult(yamlWithVisualUsage)} />);
+    expect(screen.getByText('1 visual')).toBeInTheDocument();
+    expect(screen.getByText('4 visuals')).toBeInTheDocument();
+  });
+
+  it('ranks measures used on more visuals above those used on fewer / none', () => {
     render(<UCMVResultViewer result={makeResult(yamlWithVisualUsage)} />);
     const html = document.body.innerHTML;
+    // on_many (4) before on_scorecard (1) before nowhere (0)
+    expect(html.indexOf('on_many')).toBeLessThan(html.indexOf('on_scorecard'));
     expect(html.indexOf('on_scorecard')).toBeLessThan(html.indexOf('nowhere'));
-    expect(html.indexOf('on_two_pages')).toBeLessThan(html.indexOf('nowhere'));
+  });
+
+  it('still parses the older bare "Used on: <page>" form (pre-enrichment runs)', () => {
+    const legacy = `version: '1.1'
+source: cat.sch.fact_test
+
+measures:
+  - name: legacy
+    expr: SUM(source.a)
+    comment: "PBI: L · Used on: OTC Scorecard, OTC NPS"
+`;
+    render(<UCMVResultViewer result={makeResult(legacy)} />);
+    expect(screen.getByText('Used on')).toBeInTheDocument();
+    expect(screen.getByText('OTC Scorecard')).toBeInTheDocument();
+    expect(screen.getByText('OTC NPS')).toBeInTheDocument();
+    // No explicit count in the legacy form → falls back to the page count.
+    expect(screen.getByText('2 visuals')).toBeInTheDocument();
   });
 
   it('omits the Used on column entirely when no measure is used on a visual', () => {

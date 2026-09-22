@@ -165,4 +165,6 @@ class TestImplicitColumnMeasureStep:
         yaml_text = emit_yaml(spec)
         assert "Aggregated Column Measures" in yaml_text
         assert "nps_contribution_per_driver" in yaml_text
-        assert "Used on: NPS Overview" in yaml_text
+        # The suffix now carries HOW OFTEN (count), HOW (drawn/filter) and WHERE
+        # (page + visual type): "Used on 1 visual: NPS Overview (card·drawn)".
+        assert "Used on 1 visual: NPS Overview (card·drawn)" in yaml_text
