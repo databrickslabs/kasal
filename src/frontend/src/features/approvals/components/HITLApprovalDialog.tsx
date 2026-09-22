@@ -119,6 +119,14 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
     }
   }, [approval?.previous_crew_output]);
 
+  // Memoized on executionId so typing in the comment / reason field does NOT
+  // re-render this heavy fetch-backed panel (UCMV/config viewers) on every
+  // keystroke — that made the comment box laggy.
+  const biArtifactsNode = useMemo(
+    () => (executionId ? <BIArtifactsView jobId={executionId} /> : null),
+    [executionId],
+  );
+
   // Config-gen's extracted arrays (measures_json/mquery_json/relationships_json)
   // are STRIPPED from the gate's 'ui' payload, so to download the real JSON we
   // re-fetch the FULL approval on click (getApproval without view=ui) and save
@@ -590,7 +598,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
             execution_id instead (config-gen JSON + "Review & edit config" here at
             the gate; UCMV YAML/SQL once that step has run). Renders nothing when
             there are none. */}
-        {executionId && <BIArtifactsView jobId={executionId} />}
+        {biArtifactsNode}
 
         {/* Output still lazy-loading (status omits it; fetched via getApproval) */}
         {outputLoading && !approval.previous_crew_output && (
