@@ -90,8 +90,9 @@ const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId, onDecision
           approvalId: Number(data.approval_id),
         },
       });
-    } catch {
-      setError('Could not open the config for review.');
+    } catch (e) {
+      console.error('[ReviewConfig] failed to open config', e);
+      setError(`Could not open the config for review${e instanceof Error ? ': ' + e.message : ''}.`);
     } finally {
       setLoadingCfg(false);
     }
