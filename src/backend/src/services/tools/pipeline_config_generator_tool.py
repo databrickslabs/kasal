@@ -1186,6 +1186,19 @@ class PipelineConfigGeneratorTool(BaseTool):
                 in (m.get("expression") or m.get("dax_expression") or "").upper()
             )
 
+            def _build_extract_arrays() -> dict:
+                """M-Query + relationships for the download bundle (best-effort)."""
+                extra: dict = {}
+                try:
+                    extra["mquery_json"] = self._build_ucmv_mquery(admin_tables)
+                except Exception:
+                    pass
+                try:
+                    extra["relationships_json"] = relationships or []
+                except Exception:
+                    pass
+                return extra
+
             history_data = ConversionHistoryCreate(
                 execution_id=self._resolve_execution_id(),
                 source_format="powerbi_config",
@@ -1201,7 +1214,16 @@ class PipelineConfigGeneratorTool(BaseTool):
                     f"{len(measures)} measures ({with_dax} with DAX, "
                     f"{switch_cnt} SELECTEDVALUE+SWITCH)"
                 )[:500],
-                output_data={"proposed_config": config},
+                # Persist the extracted arrays alongside the config so the UI can
+                # offer them as downloads by execution_id (the crew's answer is a
+                # markdown summary, not this JSON). measures also live in
+                # input_data.measures; mquery/relationships are added here so all
+                # four artifacts are downloadable. Best-effort — never fail the save.
+                output_data={
+                    "proposed_config": config,
+                    "measures_json": measures,
+                    **_build_extract_arrays(),
+                },
                 output_summary=(
                     f"config: {len(config.get('switch_decompositions', {}))} switch tables, "
                     f"{len(config.get('measure_resolutions', {}))} measure resolutions"
