@@ -198,15 +198,17 @@ const extractReferencedBy = (comment?: string): number | null => {
   return m ? parseInt(m[1], 10) : null;
 };
 
-/** One report page a measure is used on, with HOW (drawn vs filter) and WHERE
- *  (the visual type(s) on that page). */
+/** One report page a measure is used on: how many visuals on that page (count),
+ *  HOW (drawn vs filter) and WHERE (the visual type(s) on that page). */
 interface UsedOnEntry {
   page: string;
   types: string[];
   role: 'drawn' | 'filter' | '';
+  /** Number of visuals on this page (the "×N" tally; 1 when not shown). */
+  count: number;
 }
 interface UsedOnInfo {
-  /** HOW OFTEN — the visual-occurrence count from the suffix. */
+  /** HOW OFTEN — total visuals across the report (from the suffix). */
   count: number;
   entries: UsedOnEntry[];
 }
@@ -217,11 +219,12 @@ interface UsedOnInfo {
  *  business-relevant; one referenced by nothing and drawn nowhere is likely an
  *  intermediate building block.
  *
- *  Current format carries count + per-page type/role, e.g.
- *    "· Used on 3 visuals: OTC Scorecard (card/tableEx·drawn), OTC NPS (slicer·filter) (+1 more)"
- *  Also tolerates the older bare form "· Used on: OTC Scorecard, OTC NPS" (no
- *  count, no annotation) from pre-enrichment runs. The suffix is always last on
- *  the comment, so the page list captures to end of string. */
+ *  Current format carries a total count + per-page "×N" tally + type/role, e.g.
+ *    "· Used on 7 visuals: OTC Scorecard ×7 (pivotTable/clusteredBarChart·filter)"
+ *    "· Used on 3 visuals: OTC Scorecard ×2 (card/tableEx·drawn), OTC NPS (slicer·filter) (+1 more)"
+ *  Also tolerates earlier forms: no per-page "×N", and the bare
+ *  "· Used on: OTC Scorecard, OTC NPS" (no count/annotation). The suffix is
+ *  always last on the comment, so the page list captures to end of string. */
 const extractUsedOn = (comment?: string): UsedOnInfo => {
   if (!comment) return { count: 0, entries: [] };
   const m = comment.match(/Used on(?: (\d+) visuals?)?:\s*(.+)$/);
@@ -234,24 +237,32 @@ const extractUsedOn = (comment?: string): UsedOnInfo => {
     .map((tok) => tok.trim())
     .filter(Boolean)
     .map((tok) => {
-      const am = tok.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
-      if (!am) return { page: tok, types: [], role: '' as const };
-      const [typesPart, rolePart] = am[2].split('·');
-      const role = rolePart === 'filter' || rolePart === 'drawn' ? rolePart : '';
-      // With no "·", a bare "(drawn)"/"(filter)" is a role, anything else is types.
+      // Peel the trailing "(annotation)", then a trailing "×N", leaving the page.
+      const paren = tok.match(/\(([^)]*)\)\s*$/);
+      const annot = paren ? paren[1] : '';
+      let prefix = paren?.index != null ? tok.slice(0, paren.index).trim() : tok.trim();
+      const tally = prefix.match(/[×x](\d+)$/);
+      const count = tally ? parseInt(tally[1], 10) : 1;
+      if (tally?.index != null) prefix = prefix.slice(0, tally.index).trim();
+      const [typesPart, rolePart] = annot.split('·');
+      const role =
+        rolePart === 'filter' || rolePart === 'drawn'
+          ? rolePart
+          : typesPart === 'drawn' || typesPart === 'filter'
+            ? (typesPart as 'drawn' | 'filter')
+            : '';
       const types =
         rolePart === undefined
-          ? typesPart === 'drawn' || typesPart === 'filter'
+          ? typesPart === 'drawn' || typesPart === 'filter' || typesPart === ''
             ? []
             : typesPart.split('/').filter(Boolean)
           : typesPart.split('/').filter(Boolean);
-      const soleRole =
-        rolePart === undefined && (typesPart === 'drawn' || typesPart === 'filter')
-          ? (typesPart as 'drawn' | 'filter')
-          : role;
-      return { page: am[1].trim(), types, role: soleRole };
+      return { page: prefix, types, role, count };
     });
-  return { count: m[1] ? parseInt(m[1], 10) : entries.length, entries };
+  const total = m[1]
+    ? parseInt(m[1], 10)
+    : entries.reduce((sum, e) => sum + e.count, 0);
+  return { count: total, entries };
 };
 
 const FieldTable: React.FC<{
@@ -324,6 +335,10 @@ const FieldTable: React.FC<{
                       {/* WHERE + HOW — page, visual type(s), and drawn vs filter. */}
                       <Box display="flex" gap={0.5} flexWrap="wrap">
                         {usedOn.entries.map((e) => {
+                          // "×N" on the page chip so a count of 7 all on one page
+                          // reads as "OTC Scorecard ×7" instead of looking like a
+                          // mismatch with the total.
+                          const tally = e.count > 1 ? ` ×${e.count}` : '';
                           const typeLabel = e.types.length ? ` · ${e.types.join('/')}` : '';
                           const roleWord =
                             e.role === 'filter' ? 'used as a filter' : e.role === 'drawn' ? 'drawn (shown)' : '';
@@ -333,10 +348,14 @@ const FieldTable: React.FC<{
                               size="small"
                               variant="outlined"
                               color={e.role === 'filter' ? 'default' : 'info'}
-                              label={`${e.page}${typeLabel}`}
-                              title={[roleWord, e.types.length ? `in ${e.types.join(', ')}` : '']
+                              label={`${e.page}${tally}${typeLabel}`}
+                              title={[
+                                e.count > 1 ? `${e.count} visuals on this page` : '',
+                                roleWord,
+                                e.types.length ? `in ${e.types.join(', ')}` : '',
+                              ]
                                 .filter(Boolean)
-                                .join(' ')}
+                                .join(' · ')}
                               sx={{ height: 18, fontSize: '0.7rem', maxWidth: '100%' }}
                             />
                           );

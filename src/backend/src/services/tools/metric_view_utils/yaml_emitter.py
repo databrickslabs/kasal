@@ -237,7 +237,10 @@ def _visual_usage_suffix(measure) -> str:
     usage = getattr(measure, "used_in_visuals", None)
     if not usage:
         return ""
-    # Aggregate occurrences per page, preserving first-seen order.
+    # Aggregate occurrences per page, preserving first-seen order. Each
+    # occurrence is one visual the field appears in, so per-page `count` is the
+    # number of visuals on that page (reconciles the total with the page list:
+    # "7 visuals" all on one page shows as that page ×7).
     per_page: dict[str, dict] = {}
     order: list[str] = []
     for occ in usage:
@@ -245,8 +248,9 @@ def _visual_usage_suffix(measure) -> str:
         if not page:
             continue
         if page not in per_page:
-            per_page[page] = {"types": [], "drawn": False}
+            per_page[page] = {"types": [], "drawn": False, "count": 0}
             order.append(page)
+        per_page[page]["count"] += 1
         vt = occ.get("visual_type")
         if vt and vt not in per_page[page]["types"]:
             per_page[page]["types"].append(vt)
@@ -256,7 +260,9 @@ def _visual_usage_suffix(measure) -> str:
             per_page[page]["drawn"] = True
     if not order:
         return ""
-    total = len(usage)  # HOW OFTEN — visual occurrences across the report
+    # HOW OFTEN — total visuals across the report (sum of the per-page counts,
+    # so it always equals the sum of the "×N" tallies shown below).
+    total = sum(info["count"] for info in per_page.values())
     shown = order[:3]
     parts: list[str] = []
     for page in shown:
@@ -264,7 +270,9 @@ def _visual_usage_suffix(measure) -> str:
         role = "drawn" if info["drawn"] else "filter"
         types = "/".join(info["types"])
         annot = f"{types}·{role}" if types else role
-        parts.append(f"{page} ({annot})")
+        # Per-page visual count, shown only when >1 (a lone visual needs no ×1).
+        tally = f" ×{info['count']}" if info["count"] > 1 else ""
+        parts.append(f"{page}{tally} ({annot})")
     suffix = f"Used on {total} visual{'s' if total != 1 else ''}: " + ", ".join(parts)
     remaining = len(order) - len(shown)
     if remaining > 0:

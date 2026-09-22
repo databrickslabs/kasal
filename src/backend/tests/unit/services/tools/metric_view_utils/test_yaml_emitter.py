@@ -1038,15 +1038,30 @@ class TestVisualUsageSuffix:
 
     def test_counts_every_occurrence_and_dedupes_pages_with_multiple_types(self):
         # Three occurrences (HOW OFTEN=3) across two pages; the first page has
-        # two visual types collapsed with "/".
+        # two visuals (×2) of two types collapsed with "/", the second a lone
+        # visual (no ×1).
         s = self._suffix([
             {"page": "OTC Scorecard", "visual_type": "card", "role": "drawn"},
             {"page": "OTC Scorecard", "visual_type": "tableEx", "role": "drawn"},
             {"page": "OTC NPS", "visual_type": "slicer", "role": "filter"},
         ])
         assert s == (
-            " · Used on 3 visuals: OTC Scorecard (card/tableEx·drawn), "
+            " · Used on 3 visuals: OTC Scorecard ×2 (card/tableEx·drawn), "
             "OTC NPS (slicer·filter)"
+        )
+
+    def test_all_occurrences_on_one_page_show_the_page_tally(self):
+        # The confusing case from the field: 7 visuals, all on one page → the
+        # page chip carries ×7 so the total and the single chip reconcile.
+        s = self._suffix([
+            {"page": "OTC Scorecard", "visual_type": "pivotTable", "role": "filter"}
+            for _ in range(6)
+        ] + [
+            {"page": "OTC Scorecard", "visual_type": "clusteredBarChart", "role": "filter"}
+        ])
+        assert s == (
+            " · Used on 7 visuals: OTC Scorecard ×7 "
+            "(pivotTable/clusteredBarChart·filter)"
         )
 
     def test_filter_only_page_is_marked_filter(self):
