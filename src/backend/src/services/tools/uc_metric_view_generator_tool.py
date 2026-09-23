@@ -650,13 +650,17 @@ class UCMetricViewGeneratorTool(BaseTool):
         # — mutates pipeline.all_specs in place, so it must run before emission
         # to reach the YAML comment, migration report, and JSON output alike.
         visual_usage_annotated = 0
+        # Hoisted so the none_allocated catch-all can reuse it to annotate its own
+        # (freshly-translated) measures with the same visual reference.
+        visual_usage_obj: dict | None = None
         if visual_usage_raw:
             try:
-                visual_usage_obj = (
+                _parsed_vu = (
                     json.loads(visual_usage_raw)
                     if isinstance(visual_usage_raw, str)
                     else visual_usage_raw
                 )
+                visual_usage_obj = _parsed_vu if isinstance(_parsed_vu, dict) else None
                 if isinstance(visual_usage_obj, dict):
                     from src.services.tools.metric_view_utils.visual_usage_annotator import (
                         annotate_visual_usage,
@@ -746,6 +750,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 yaml_output,  # rendered real views: covered == actually in the export
                 pipeline.translator,
                 pipeline._PBI_ARTIFACT_PATTERNS,
+                visual_usage_index=visual_usage_obj,
             )
         except Exception as _na_err:
             logger.warning(
@@ -1025,6 +1030,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                         # (proposal artifact, never an emitted measure).
                         "source_view_sql_draft": m.get("source_view_sql_draft"),
                         "used_in_visuals": m.get("used_in_visuals") or [],
+                        # Backtraced usage: a visual-placed KPI references this
+                        # non-emitted measure — surfaced in the review panel too.
+                        "indirect_visual_usage": m.get("indirect_visual_usage") or [],
                     }
                 )
         items.sort(key=lambda x: x.get("referenced_by", 0), reverse=True)

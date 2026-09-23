@@ -905,6 +905,9 @@ class MetricViewPipeline:
                         # visual(s) draw or filter on this measure — see
                         # `visual_usage_annotator.annotate_visual_usage`.
                         "used_in_visuals": m.used_in_visuals,
+                        # Backtraced (indirect) usage: a visual-placed KPI
+                        # references this measure — see annotate_indirect_visual_usage.
+                        "indirect_visual_usage": getattr(m, "indirect_visual_usage", []),
                     }
                     for m in spec.measures
                 ],
@@ -945,6 +948,7 @@ class MetricViewPipeline:
                             fact_table=spec.fact_table_key,
                         ),
                         "used_in_visuals": m.used_in_visuals,
+                        "indirect_visual_usage": getattr(m, "indirect_visual_usage", []),
                     }
                     for m in spec.untranslatable
                 ],

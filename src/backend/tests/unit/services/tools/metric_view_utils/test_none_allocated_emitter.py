@@ -140,3 +140,23 @@ def test_yaml_emits_and_carries_view_name_and_dax():
     assert yaml_text and "none_allocated_measures" in yaml_text
     assert "SUM(source.a)" in yaml_text          # translated measure present
     assert "fx_SparkLineSVG" in yaml_text         # documented orphan's DAX preserved
+
+
+def test_visual_usage_index_annotates_the_catch_all_measures():
+    """The catch-all's own measures are translated fresh here, so they miss the
+    pipeline's annotation pass — passing visual_usage_index stamps direct usage
+    on them too, so they carry the same '· Used on …' reference as real views."""
+    universe = _mapping()  # includes the translatable "Good Ratio"
+    vu = {"Good Ratio": [{"page": "OTC Scorecard", "visual_type": "card", "role": "drawn"}]}
+    yaml_text = build_none_allocated_yaml(
+        universe, {}, {}, _FakeTranslator(), _ARTIFACT_RE, visual_usage_index=vu
+    )
+    assert yaml_text is not None
+    assert "Used on 1 visual: OTC Scorecard (card·drawn)" in yaml_text
+
+
+def test_no_visual_usage_index_leaves_catch_all_unannotated():
+    universe = _mapping()
+    yaml_text = build_none_allocated_yaml(universe, {}, {}, _FakeTranslator(), _ARTIFACT_RE)
+    assert yaml_text is not None
+    assert "Used on" not in yaml_text

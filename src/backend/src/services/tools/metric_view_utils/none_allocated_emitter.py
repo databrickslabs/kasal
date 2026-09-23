@@ -202,14 +202,37 @@ def build_none_allocated_yaml(
     emitted_yaml,
     translator,
     artifact_patterns,
+    visual_usage_index: dict | None = None,
 ) -> str | None:
     """Emit the catch-all view's YAML text, or ``None`` when nothing is orphaned
-    (or emission fails — the caller treats this as best-effort)."""
+    (or emission fails — the caller treats this as best-effort).
+
+    ``visual_usage_index`` (optional) lets the catch-all's own measures carry the
+    same visual reference the real views do: its measures are translated fresh
+    here, so they miss the pipeline's annotation pass. When supplied, we stamp
+    DIRECT usage on them and re-run the INDIRECT backtrace over the combined
+    spec set — so an orphaned sub-KPI referenced by a visual-placed KPI still
+    gets its "· Indirectly used via …" comment. Fail-open.
+    """
     spec = build_none_allocated_spec(
         reference_measures, all_specs, emitted_yaml, translator, artifact_patterns
     )
     if spec is None:
         return None
+    if visual_usage_index:
+        try:
+            from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                annotate_indirect_visual_usage,
+                annotate_visual_usage,
+            )
+
+            annotate_visual_usage({spec.fact_table_key: spec}, visual_usage_index)
+            # Combined graph so both directions reach the catch-all: its measures
+            # as roots (direct usage → their deps) and as targets (referenced by
+            # a visual-placed measure in a real view). Dedup-safe on re-run.
+            annotate_indirect_visual_usage({**all_specs, spec.fact_table_key: spec})
+        except Exception:
+            pass
     try:
         return emit_yaml(spec)
     except Exception:
