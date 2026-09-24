@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, IconButton, Tooltip } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DownloadIcon from '@mui/icons-material/Download';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
@@ -16,12 +17,13 @@ interface Props {
   published: boolean;
   onPublished: (published: boolean) => void;
   onOptimize: () => void;
+  onDuplicate: (event: React.MouseEvent) => void;
   onExport: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
 }
 
 export default function CrewCatalogActions({
-  crew, canEdit, canDelete, mlflowEnabled, published, onPublished, onOptimize, onExport, onDelete,
+  crew, canEdit, canDelete, mlflowEnabled, published, onPublished, onOptimize, onDuplicate, onExport, onDelete,
 }: Props) {
   const [deployOpen, setDeployOpen] = useState(false);
   return <Box
@@ -49,6 +51,13 @@ export default function CrewCatalogActions({
       <Tooltip title="Deploy to Databricks Apps">
         <IconButton size="small" aria-label="Deploy to Databricks Apps" onClick={() => setDeployOpen(true)}>
           <RocketLaunchIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )}
+    {canEdit && (
+      <Tooltip title="Duplicate Crew">
+        <IconButton size="small" aria-label="Duplicate Crew" onClick={onDuplicate}>
+          <ContentCopyIcon fontSize="small" />
         </IconButton>
       </Tooltip>
     )}
