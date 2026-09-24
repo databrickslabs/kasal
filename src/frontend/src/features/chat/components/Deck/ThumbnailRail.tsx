@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Copy, Loader2, Plus, Trash2 } from 'lucide-react';
 import ScaledFrame from '../Chat/ScaledFrame';
 import { SLIDE_W, stageFor } from '../../utils/htmlDeck';
@@ -36,27 +36,79 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
   onRemove,
   onAddAt,
 }) => {
-  const [dragging, setDragging] = useState<number | null>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef<number | null>(null);
+  const [gap, setGap] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    const slide = selectedRef.current;
+    if (!rail || !slide) return;
+    const reveal = () => {
+      if (dragging.current !== null) return;
+      const viewport = rail.getBoundingClientRect();
+      const bounds = slide.getBoundingClientRect();
+      const top = viewport.top + rail.clientTop;
+      const bottom = top + rail.clientHeight;
+      // Scroll only this rail, by the minimum needed; don't move keyboard focus
+      // or the surrounding chat. Already-visible thumbnails stay in place.
+      if (bounds.top < top) rail.scrollTop += bounds.top - top;
+      else if (bounds.bottom > bottom) rail.scrollTop += Math.min(bounds.bottom - bottom, bounds.top - top);
+    };
+    reveal();
+    // Iframes fit asynchronously; earlier thumbnails can change this one's position.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(rail);
+    rail.querySelectorAll('[role="listitem"]').forEach(row => observer.observe(row));
+    return () => observer.disconnect();
+  }, [selected, slides.length]);
+
+  const resetDrag = () => {
+    dragging.current = null;
+    setOver(null);
+    setGap(null);
+  };
+  const acceptDrag = (event: React.DragEvent) => {
+    if (locked || dragging.current === null) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    return true;
+  };
+  const drop = (event: React.DragEvent, to: number) => {
+    const from = dragging.current;
+    if (!acceptDrag(event) || from === null) { resetDrag(); return; }
+    resetDrag();
+    if (from !== to) onMove(from, to);
+  };
 
   const insertButton = (at: number) => (
     <button
       type="button"
       key={`add-${at}`}
       className="group/add flex h-4 w-full items-center justify-center opacity-0 transition-opacity hover:opacity-100 focus:opacity-100"
+      style={{ opacity: gap === at ? 1 : undefined }}
+      onDragEnter={event => { if (acceptDrag(event)) { setGap(at); setOver(null); } }}
+      onDragOver={event => { if (acceptDrag(event)) { setGap(at); setOver(null); } }}
+      onDragLeave={() => setGap(null)}
+      onDrop={event => drop(event, at > (dragging.current ?? at) ? at - 1 : at)}
       title="Add a slide here"
       aria-label={`Add a slide at position ${at + 1}`}
       disabled={locked}
       onClick={() => onAddAt(at)}
     >
-      <span className="h-px flex-1" style={{ background: 'var(--border-color)' }} />
-      <Plus size={12} style={{ color: 'var(--text-secondary)' }} />
-      <span className="h-px flex-1" style={{ background: 'var(--border-color)' }} />
+      <span className="pointer-events-none h-px flex-1" style={{ background: gap === at ? 'var(--accent)' : 'var(--border-color)' }} />
+      <Plus className="pointer-events-none" size={12} style={{ color: 'var(--text-secondary)' }} />
+      <span className="pointer-events-none h-px flex-1" style={{ background: gap === at ? 'var(--accent)' : 'var(--border-color)' }} />
     </button>
   );
 
   return (
     <div
+      ref={railRef}
       className="flex h-full w-56 flex-col overflow-y-auto px-3 py-3"
       // scrollbar-gutter: stable reserves the scrollbar's width whether or not it
       // shows. Without it, a width-consuming scrollbar (macOS with a mouse, or
@@ -76,27 +128,29 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
         return (
           <React.Fragment key={i}>
             <div
+              ref={isSelected ? selectedRef : undefined}
               role="listitem"
               aria-label={`Slide ${i + 1}`}
               aria-busy={isWorking}
               aria-current={isSelected ? 'true' : undefined}
               draggable={!locked}
-              onDragStart={() => setDragging(i)}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setOver(i);
+              onDragStart={event => {
+                if (locked) { event.preventDefault(); resetDrag(); return; }
+                event.stopPropagation();
+                dragging.current = i;
+                // Give native drag a payload (required by some browsers), but
+                // trust only our local source ref when accepting a drop.
+                if (event.dataTransfer) {
+                  event.dataTransfer.setData('text/plain', String(i));
+                  event.dataTransfer.effectAllowed = 'move';
+                }
               }}
-              onDragLeave={() => setOver((o) => (o === i ? null : o))}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (!locked && dragging !== null && dragging !== i) onMove(dragging, i);
-                setDragging(null);
-                setOver(null);
+              onDragOver={event => {
+                if (acceptDrag(event)) { setOver(i); setGap(null); }
               }}
-              onDragEnd={() => {
-                setDragging(null);
-                setOver(null);
-              }}
+              onDragLeave={() => setOver(o => o === i ? null : o)}
+              onDrop={event => drop(event, i)}
+              onDragEnd={resetDrag}
               className="group relative flex cursor-pointer gap-2"
             >
               <div className="flex w-5 shrink-0 flex-col items-center gap-1 pt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -151,6 +205,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                   type="button"
                   className="absolute inset-0 h-full w-full"
                   aria-label={`Select slide ${i + 1}`}
+                  draggable={!locked}
                   onPointerDown={() => onSelect(i)}
                   onClick={() => onSelect(i)}
                 />
@@ -195,6 +250,8 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
         className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md border !px-2 !py-1.5 text-xs hover:bg-[var(--bg-rail-hover)]"
         style={{ borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}
         disabled={locked}
+        onDragOver={event => { if (acceptDrag(event)) setGap(slides.length); }}
+        onDrop={event => drop(event, slides.length - 1)}
         onClick={() => onAddAt(slides.length)}
       >
         <Plus size={13} /> Add slide

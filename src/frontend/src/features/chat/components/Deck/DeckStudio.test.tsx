@@ -195,6 +195,25 @@ describe('DeckStudio', () => {
     expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
   });
 
+  it('scrolls the thumbnail rail to keep keyboard selection visible without moving focus', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const rail = screen.getByRole('list', { name: 'Slides' });
+    const dialog = screen.getByRole('dialog', { name: 'Deck studio' });
+    const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 200, width: 200, height: bottom - top, x: 0, y: top, toJSON() {} });
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(rect(100, 400));
+    Object.defineProperty(rail, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(screen.getByRole('listitem', { name: 'Slide 2' }), 'getBoundingClientRect').mockReturnValue(rect(220, 320));
+    vi.spyOn(screen.getByRole('listitem', { name: 'Slide 3' }), 'getBoundingClientRect').mockReturnValue(rect(420, 520));
+    vi.spyOn(screen.getByRole('listitem', { name: 'Slide 1' }), 'getBoundingClientRect').mockReturnValue(rect(-20, 80));
+    fireEvent.keyDown(dialog, { key: 'ArrowDown' });
+    expect(rail.scrollTop).toBe(0); // Already visible: no jumping.
+    fireEvent.keyDown(dialog, { key: 'End' });
+    expect(rail.scrollTop).toBe(120);
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Home' });
+    expect(rail.scrollTop).toBe(0);
+  });
+
   it('downloads the presentation as HTML', () => {
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
     fireEvent.click(screen.getByTitle('Download'));
@@ -213,6 +232,32 @@ describe('DeckStudio', () => {
     act(() => useThemeStore.setState({ isDarkMode: false }));
     expect(root).toHaveAttribute('data-theme', 'light');
     expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('accepts consecutive thumbnail and between-slide drops with a fresh native drag each time', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const transfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
+    const drag = (from: number, target: HTMLElement) => {
+      const source = screen.getByLabelText(`Select slide ${from}`);
+      expect(source).toHaveAttribute('draggable', 'true');
+      fireEvent.dragStart(source, { dataTransfer: transfer });
+      expect(transfer.setData).toHaveBeenLastCalledWith('text/plain', String(from - 1));
+      expect(transfer.effectAllowed).toBe('move');
+      fireEvent.dragOver(target, { dataTransfer: transfer });
+      fireEvent.drop(target, { dataTransfer: transfer });
+      fireEvent.dragEnd(source);
+    };
+    drag(3, screen.getByLabelText('Add a slide at position 1'));
+    expect(deckInMessage()).toEqual(['Three', 'Cover', 'Two']);
+    drag(1, screen.getByLabelText('Add a slide at position 4'));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+    drag(2, screen.getByLabelText('Select slide 1'));
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']);
+    // A cancelled drag or a foreign drop cannot reuse the last source index.
+    fireEvent.dragStart(screen.getByLabelText('Select slide 1'), { dataTransfer: transfer });
+    fireEvent.dragEnd(screen.getByLabelText('Select slide 1'));
+    fireEvent.drop(screen.getByLabelText('Select slide 3'), { dataTransfer: transfer });
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']);
   });
 
   it('moves slides with the arrow buttons, preserves selection, and supports undo', async () => {
