@@ -1127,6 +1127,18 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 return function_calls, usage, LLMCallType.TOOL_CALL
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
+                if not self.auto_chain:
+                    # Without previous_response_id, replay the model's output
+                    # before results: call IDs alone are not conversation state.
+                    # Preserve reasoning items alongside the calls they produced.
+                    conversation.extend(
+                        (
+                            item
+                            if isinstance(item, dict)
+                            else item.model_dump(exclude_none=True)
+                        )
+                        for item in response.output
+                    )
                 # Same degenerate-loop breaker as the chat path.
                 repeats = repeat_guard.observe(function_calls)
                 if repeats >= 2:

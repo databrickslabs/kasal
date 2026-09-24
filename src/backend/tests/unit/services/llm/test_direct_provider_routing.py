@@ -152,9 +152,53 @@ async def test_gpt6_uses_responses_with_reasoning_and_tools(model, monkeypatch):
     service = AsyncMock()
     service.get_model_config.return_value = DEFAULT_MODELS[model]
     requests = []
+    round_outputs = []
 
     def respond(request):
         requests.append(request)
+        if len(requests) <= 2:
+            number = len(requests)
+            output = [
+                {
+                    "type": "reasoning",
+                    "id": f"rs_{number}",
+                    "summary": [],
+                    "encrypted_content": f"opaque-reasoning-{number}",
+                },
+                {
+                    "type": "function_call",
+                    "id": f"fc_{number}",
+                    "call_id": f"call_{number}",
+                    "name": "lookup",
+                    "arguments": "{}",
+                    "status": "completed",
+                },
+            ]
+            round_outputs.append(output)
+            return httpx.Response(
+                200,
+                json={
+                    "id": f"resp_{number}",
+                    "object": "response",
+                    "created_at": 1,
+                    "status": "completed",
+                    "model": model,
+                    "output": output,
+                    "usage": {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+                },
+            )
+        # Validate the conversation at the wire boundary, as the server does.
+        inputs = json.loads(request.content)["input"]
+        for output in round_outputs:
+            call = output[1]
+            assert call in inputs, "Tool result has no matching model function_call"
+            index = inputs.index(call)
+            assert inputs[index - 1] == output[0], "Reasoning must accompany the call"
+            assert inputs[index + 1] == {
+                "type": "function_call_output",
+                "call_id": call["call_id"],
+                "output": "ok",
+            }
         return httpx.Response(
             200,
             json={
@@ -217,3 +261,5 @@ async def test_gpt6_uses_responses_with_reasoning_and_tools(model, monkeypatch):
     assert body["reasoning"]["effort"] == "medium"
     assert body["tools"][0]["type"] == "function"
     assert "temperature" not in body
+
+    assert len(requests) == 3
