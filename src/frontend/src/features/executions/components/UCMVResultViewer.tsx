@@ -48,6 +48,7 @@ import UndoIcon from '@mui/icons-material/Undo';
 import DownloadIcon from '@mui/icons-material/Download';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Button from '@mui/material/Button';
 import { Highlight, themes } from 'prism-react-renderer';
 import yaml from 'js-yaml';
@@ -112,6 +113,29 @@ export interface UCMVResult {
    *  AnalysisServices.Database) — the transpiler can't resolve these, so the UI
    *  flags which semantic model/table to parse. {view_name: {server, database, table}}. */
   live_connections?: Record<string, { server: string; database: string; table: string }>;
+  /** Source layer DDL: per-table CREATE VIEW for the base source layer UCMVs read from. */
+  source_layer_ddl?: Record<string, {
+    ddl: string;
+    todo_steps: string[];
+    error: string | null;
+  }>;
+  /** Tables sourced from non-SQL files (Excel, SharePoint, Web, typed) — need a snapshot
+   *  ingestion pipeline before the metric views can read them. */
+  pbi_only_ingestion_tasks?: Array<{
+    table: string;
+    uc_target: string;
+    kind: string;
+    source_description: string;
+    recommended_approach: string;
+    snapshot_loader_stub: string;
+  }>;
+  /** Validation loop outcome. */
+  pbi_validation?: {
+    status: 'skipped' | 'ran' | 'error';
+    reason?: string;
+    candidate_views?: string[];
+    views?: Record<string, string>;
+  };
 }
 
 export interface FallbackExtractRow {
@@ -544,6 +568,32 @@ const Section: React.FC<{
 );
 
 /* ------------------------------------------------------------------ */
+/*  Copy button (used by DDL blocks and snapshot stubs)               */
+/* ------------------------------------------------------------------ */
+
+const CopyButton: React.FC<{ content: string }> = ({ content }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (non-https or restricted env)
+    }
+  }, [content]);
+  return (
+    <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
+      <IconButton size="small" onClick={handleCopy} sx={{ p: 0.25 }}>
+        {copied
+          ? <CheckCircleIcon sx={{ fontSize: 14 }} color="success" />
+          : <ContentCopyIcon sx={{ fontSize: 14 }} />}
+      </IconButton>
+    </Tooltip>
+  );
+};
+
+/* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -820,6 +870,14 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
   const hasMapping =
     !!result.pbi_ucmv_mapping && Object.keys(result.pbi_ucmv_mapping).length > 0;
 
+  // New artifact fields
+  const sourceLayerEntries = useMemo(
+    () => (result.source_layer_ddl ? Object.entries(result.source_layer_ddl) : []),
+    [result.source_layer_ddl],
+  );
+  const hasIngestionTasks =
+    Array.isArray(result.pbi_only_ingestion_tasks) && result.pbi_only_ingestion_tasks.length > 0;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
       {/* Header */}
@@ -930,6 +988,167 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
             ))}
           </Box>
         </Alert>
+      )}
+
+      {/* PBI-only ingestion tasks: tables sourced from non-SQL files that need
+          a snapshot ingestion pipeline before their metric views can run. */}
+      {hasIngestionTasks && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            PBI-only tables need ingestion ({result.pbi_only_ingestion_tasks!.length})
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            These tables are sourced from non-SQL files (Excel, SharePoint, Web, or typed data)
+            and require a snapshot ingestion pipeline before the metric views can read them.
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {result.pbi_only_ingestion_tasks!.map((task) => (
+              <Box key={task.table}>
+                <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap" mb={0.25}>
+                  <Typography variant="caption" fontFamily="monospace" fontWeight={600}>
+                    {task.table}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">→</Typography>
+                  <Chip
+                    size="small"
+                    label={task.kind}
+                    color="warning"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: '0.7rem' }}
+                  />
+                  {task.uc_target && (
+                    <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+                      {task.uc_target}
+                    </Typography>
+                  )}
+                </Box>
+                {task.recommended_approach && (
+                  <Typography variant="caption" sx={{ display: 'block', mb: 0.25 }}>
+                    {task.recommended_approach}
+                  </Typography>
+                )}
+                {task.snapshot_loader_stub && (
+                  <Accordion
+                    defaultExpanded={false}
+                    disableGutters
+                    variant="outlined"
+                    sx={{ mt: 0.5, '&:before': { display: 'none' } }}
+                  >
+                    <AccordionSummary
+                      expandIcon={<ExpandMoreIcon sx={{ fontSize: 14 }} />}
+                      sx={{ minHeight: 28, '& .MuiAccordionSummary-content': { my: 0.5 } }}
+                    >
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <Typography variant="caption">Snapshot loader stub</Typography>
+                        <Box onClick={(e) => e.stopPropagation()}>
+                          <CopyButton content={task.snapshot_loader_stub} />
+                        </Box>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ p: 0 }}>
+                      <SQLBlock code={task.snapshot_loader_stub} language="python" />
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Alert>
+      )}
+
+      {/* Source layer DDL: CREATE VIEW per PBI table — the base views that
+          metric views read from. Each entry shows DDL, an optional copy button,
+          TODO steps (if any manual work remains), and an error chip on failure. */}
+      {sourceLayerEntries.length > 0 && (
+        <Section
+          title={`Source layer (${sourceLayerEntries.length} view${sourceLayerEntries.length !== 1 ? 's' : ''})`}
+          icon={<CodeIcon fontSize="small" color="action" />}
+          defaultExpanded={false}
+        >
+          <Box sx={{ p: 1.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {sourceLayerEntries.map(([tableName, entry]) => (
+              <Box key={tableName}>
+                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                  <Typography
+                    variant="body2"
+                    fontFamily="monospace"
+                    fontWeight={600}
+                    sx={{ flexGrow: 1 }}
+                  >
+                    {tableName}
+                  </Typography>
+                  {entry.error && (
+                    <Chip
+                      size="small"
+                      color="error"
+                      label={entry.error}
+                      variant="outlined"
+                      sx={{ maxWidth: 260, fontSize: '0.7rem', height: 20 }}
+                    />
+                  )}
+                  <CopyButton content={entry.ddl} />
+                </Box>
+                <SQLBlock code={entry.ddl} />
+                {Array.isArray(entry.todo_steps) && entry.todo_steps.length > 0 && (
+                  <Alert severity="warning" sx={{ mt: 0.75 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
+                      TODO steps:
+                    </Typography>
+                    <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                      {entry.todo_steps.map((step, i) => (
+                        <li key={i}>
+                          <Typography variant="caption">{step}</Typography>
+                        </li>
+                      ))}
+                    </Box>
+                  </Alert>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Section>
+      )}
+
+      {/* Validation status: compact chip row + optional per-view result list. */}
+      {result.pbi_validation && (
+        <Box sx={{ mb: 1.5 }}>
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Validation:
+            </Typography>
+            <Chip
+              size="small"
+              label={result.pbi_validation.status}
+              color={
+                result.pbi_validation.status === 'error'
+                  ? 'error'
+                  : result.pbi_validation.status === 'ran'
+                    ? 'success'
+                    : 'default'
+              }
+              variant="outlined"
+              sx={{ height: 20, fontSize: '0.75rem' }}
+            />
+            {result.pbi_validation.reason && (
+              <Typography variant="caption" color="text.secondary">
+                {result.pbi_validation.reason}
+              </Typography>
+            )}
+          </Box>
+          {result.pbi_validation.views && Object.keys(result.pbi_validation.views).length > 0 && (
+            <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+              {Object.entries(result.pbi_validation.views).map(([view, detail]) => (
+                <li key={view}>
+                  <Typography variant="caption">
+                    <Box component="span" fontFamily="monospace">{view}</Box>
+                    {': '}
+                    {detail}
+                  </Typography>
+                </li>
+              ))}
+            </Box>
+          )}
+        </Box>
       )}
 
       {/* Migration Report (collapsible) */}

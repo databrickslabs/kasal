@@ -60,6 +60,30 @@ const BIArtifactsView: React.FC<BIArtifactsViewProps> = ({ jobId }) => {
             live_connections: ucmvRec.output_data.live_connections as
               | Record<string, { server: string; database: string; table: string }>
               | undefined,
+            // Source layer DDL — CREATE VIEW per PBI table.
+            source_layer_ddl: ucmvRec.output_data.source_layer_ddl as
+              | Record<string, { ddl: string; todo_steps: string[]; error: string | null }>
+              | undefined,
+            // PBI-only ingestion tasks (Excel/SharePoint/Web/typed tables).
+            pbi_only_ingestion_tasks: ucmvRec.output_data.pbi_only_ingestion_tasks as
+              | Array<{
+                  table: string;
+                  uc_target: string;
+                  kind: string;
+                  source_description: string;
+                  recommended_approach: string;
+                  snapshot_loader_stub: string;
+                }>
+              | undefined,
+            // Validation loop outcome.
+            pbi_validation: ucmvRec.output_data.pbi_validation as
+              | {
+                  status: 'skipped' | 'ran' | 'error';
+                  reason?: string;
+                  candidate_views?: string[];
+                  views?: Record<string, string>;
+                }
+              | undefined,
           });
         }
         if (cfgRec) {
