@@ -13,6 +13,7 @@ import type { RunStep } from '../Preview/traceEventStep';
 import type { TraceEntryData } from '../Chat/ChatMessage';
 import { DeckService } from '../../../../api/chat/DeckService';
 import { useAppStore } from '../../store/appStore';
+import { useThemeStore } from '../../../../store/theme';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
@@ -24,7 +25,7 @@ import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx, sanitizeDeckDocume
  * The deck studio: independent slide edits, merged into the latest deck.
  *
  * Thumbnails on the left (select, drag to reorder, duplicate, delete, add
- * between), the selected slide large on a dark stage, and under it the
+ * between), the selected slide large on a themed stage, and under it the
  * instruction bar. An instruction sends ONLY that slide through the one-slide
  * generation call; the thumbnail pulses while it works, the slide swaps in
  * place, and Undo puts the previous deck back. Structural edits are instant.
@@ -59,6 +60,7 @@ const readTextFile = (file: File): Promise<string> => {
 };
 
 const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model }) => {
+  const dark = useThemeStore(s => s.isDarkMode);
   const writeBack = useCallback((next: string, previous: string) => {
     if (onDeckChange) return onDeckChange(next, previous);
     if (!messageId) return;
@@ -283,7 +285,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   };
 
   const btn =
-    'inline-flex items-center gap-1.5 rounded-md !px-2.5 !py-1.5 text-xs font-medium transition-colors hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent';
+    'inline-flex items-center gap-1.5 rounded-md !px-2.5 !py-1.5 text-xs font-medium transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-40 disabled:hover:bg-transparent';
   const lastEdit = history[history.length - 1];
 
   // Portaled to <body> so its z-index counts in the ROOT stacking context —
@@ -293,7 +295,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   // that class on a wrapper; without it `fixed inset-0` would not apply and
   // the studio would land as a giant static block at the end of the page.
   return createPortal(
-    <div className="kasal-chat-root">
+    <div className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'} style={{ colorScheme: dark ? 'dark' : 'light' }}>
       <div
         role="dialog"
         aria-label="Deck studio"
@@ -308,14 +310,19 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
         // key handler — from ever running.
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onDeckKey}
-        style={{ background: '#111', color: '#e5e5e5' }}
+        style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
       >
-        <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid #222' }}>
+        <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--border-color)' }}>
           <span className="text-sm font-medium">Deck</span>
-          <span className="text-xs" style={{ color: '#8a8a8a' }}>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
             {count} slide{count === 1 ? '' : 's'}
             {history.length > 0 ? ` · ${history.length} edit${history.length === 1 ? '' : 's'}` : ''}
           </span>
+          {(working.size > 0 || saving) && (
+            <span role="status" className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+              Reordering available after slide edits finish saving
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <input
               ref={importRef}
@@ -353,21 +360,21 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
               {menu && (
                 <div
                   className="absolute right-0 z-10 mt-1 min-w-[10rem] overflow-hidden rounded-md border py-1 shadow-lg"
-                  style={{ background: '#1c1c1c', borderColor: '#333' }}
+                  style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-color)' }}
                 >
-                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('html')}>
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-[var(--bg-rail-hover)]" onClick={() => runExport('html')}>
                     Download HTML
                   </button>
-                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('pdf')}>
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-[var(--bg-rail-hover)]" onClick={() => runExport('pdf')}>
                     Download PDF
                   </button>
-                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-white/10" onClick={() => runExport('pptx')}>
+                  <button type="button" className="block w-full !px-3 !py-1.5 text-left text-xs hover:bg-[var(--bg-rail-hover)]" onClick={() => runExport('pptx')}>
                     Download PowerPoint
                   </button>
                 </div>
               )}
             </div>
-            <button type="button" className={btn} onClick={onClose} title="Done (Esc)" style={{ background: '#2a2a2a' }}>
+            <button type="button" className={btn} onClick={onClose} title="Done (Esc)" style={{ background: 'var(--bg-active-chip)' }}>
               <X size={14} /> Done
             </button>
           </div>
@@ -402,12 +409,12 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
                   contain
                   upscale
                   pad={0}
-                  background="#000"
+                  background="transparent"
                   title={`Slide ${shown + 1}`}
                 />
               </div>
             </div>
-            {activity && <div className="kasal-chat-root overflow-auto px-3" data-theme="dark"
+            {activity && <div className="overflow-auto px-3"
               style={{ maxHeight: '30vh', flexShrink: 0 }} aria-label="Slide edit activity">
               {activityStep ? <>
                 <button type="button" className={btn} onClick={() => setActivityStep(null)}>Back to run activity</button>

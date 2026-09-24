@@ -47,9 +47,9 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
   const chips = mode === 'fill' ? FILL_CHIPS : REFINE_CHIPS;
 
   return (
-    <div className="flex flex-col gap-2 px-6 py-3" style={{ background: '#161616', color: '#e5e5e5' }}>
-      <div className="flex items-center gap-2 text-xs" style={{ color: '#9a9a9a' }}>
-        <span className="font-medium" style={{ color: '#e5e5e5' }}>
+    <div className="flex flex-col gap-2 px-6 py-3" style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+      <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+        <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
           {mode === 'fill' ? `New slide ${slideNumber} — what should it cover?` : `Slide ${slideNumber}`}
         </span>
         {mode === 'fill' && (
@@ -58,7 +58,7 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
           </button>
         )}
         {error && (
-          <span role="alert" className="ml-auto" style={{ color: '#ff8a80' }}>
+          <span role="alert" className="ml-auto" style={{ color: 'hsl(var(--a2-destructive))' }}>
             {error}
           </span>
         )}
@@ -79,7 +79,7 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
           placeholder={mode === 'fill' ? 'Describe the new slide' : 'What should change on this slide?'}
           aria-label={mode === 'fill' ? 'New slide instruction' : 'Slide instruction'}
           className="flex-1 resize-none rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/60"
-          style={{ background: '#242424', color: '#f2f2f2', border: '1px solid #333' }}
+          style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
         />
         <button
           type="button"
@@ -101,7 +101,7 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
             disabled={working}
             onClick={() => submit(chip)}
             className="rounded-full border !px-2.5 !py-1 text-xs hover:opacity-90 disabled:opacity-40"
-            style={{ borderColor: '#3a3a3a', color: '#cfcfcf', background: 'transparent' }}
+            style={{ borderColor: 'var(--border-color)', color: 'var(--text-secondary)', background: 'transparent' }}
           >
             {chip}
           </button>

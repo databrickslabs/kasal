@@ -6,6 +6,7 @@ import { fetchEnabledModels } from '../../api/models';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
 import { downloadDeckHtml } from '../../utils/deckExport';
+import { useThemeStore } from '../../../../store/theme';
 
 vi.mock('../../api/models', () => ({ fetchEnabledModels: vi.fn() }));
 
@@ -44,6 +45,7 @@ const deckInMessage = () => {
 describe('DeckStudio', () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
+    useThemeStore.setState({ isDarkMode: false });
     refineSlide.mockReset();
     useAppStore.setState({ selectedModel: 'chat-model', models: [] });
     vi.mocked(fetchEnabledModels).mockResolvedValue([
@@ -118,6 +120,49 @@ describe('DeckStudio', () => {
     fireEvent.click(screen.getByTitle('Download'));
     fireEvent.click(screen.getByRole('button', { name: 'Download HTML' }));
     expect(downloadDeckHtml).toHaveBeenCalledWith(DECK);
+  });
+
+  it('follows Kasal theme changes without changing the slide content', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const root = screen.getByRole('dialog', { name: 'Deck studio' }).parentElement;
+    expect(root).toHaveAttribute('data-theme', 'light');
+    expect(root).toHaveStyle({ colorScheme: 'light' });
+    act(() => useThemeStore.setState({ isDarkMode: true }));
+    expect(root).toHaveAttribute('data-theme', 'dark');
+    expect(root).toHaveStyle({ colorScheme: 'dark' });
+    act(() => useThemeStore.setState({ isDarkMode: false }));
+    expect(root).toHaveAttribute('data-theme', 'light');
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('moves slides with the arrow buttons, preserves selection, and supports undo', async () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    expect(screen.getByLabelText('Move slide 1 up')).toBeDisabled();
+    expect(screen.getByLabelText('Move slide 3 down')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Move slide 2 up'));
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']);
+    expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
+    fireEvent.click(screen.getByLabelText('Move slide 1 down'));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(deckInMessage()).toEqual(['Two', 'Cover', 'Three']));
+  });
+
+  it('explains the reorder lock and unlocks the arrows after generation finishes', async () => {
+    let resolve!: (result: { section: string }) => void;
+    refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve' } });
+    fireEvent.click(screen.getByText('Apply'));
+    expect(screen.getByLabelText('Move slide 2 up')).toBeDisabled();
+    expect(screen.getByLabelText('Move slide 2 down')).toBeDisabled();
+    expect(screen.getByText('Reordering available after slide edits finish saving')).toBeInTheDocument();
+    await act(async () => resolve({ section: slide('Updated') }));
+    expect(screen.getByLabelText('Move slide 2 up')).toBeEnabled();
+    expect(screen.queryByText('Reordering available after slide edits finish saving')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Move slide 2 up'));
+    expect(deckInMessage()).toEqual(['Two', 'Updated', 'Three']);
   });
 
   it('imports a standalone HTML presentation through the existing save path', async () => {

@@ -28,7 +28,7 @@ export default function DeckModelPicker({ value, onChange, disabled }: Props) {
   }, []);
 
   return (
-    <label className="mr-2 inline-flex max-w-full items-center gap-2 text-xs" style={{ color: '#cfcfcf' }}>
+    <label className="mr-2 inline-flex max-w-full items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
       Model
       <select
         aria-label="Slide edit model"
@@ -38,7 +38,7 @@ export default function DeckModelPicker({ value, onChange, disabled }: Props) {
         // Arrow keys select a model; Escape closes the native menu, not the studio.
         onKeyDown={(event) => event.stopPropagation()}
         className="min-w-0 max-w-[16rem] rounded-md border px-2 py-1 focus:ring-2 focus:ring-blue-500/60 disabled:opacity-40"
-        style={{ background: '#242424', color: '#f2f2f2', borderColor: '#3a3a3a' }}
+        style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}
       >
         <option value="">Workspace default</option>
         {value && !models.some((item) => item.key === value) && <option value={value}>{value}</option>}

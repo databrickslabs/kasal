@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Loader2, Plus, Trash2 } from 'lucide-react';
 import ScaledFrame from '../Chat/ScaledFrame';
 import { SLIDE_W, stageFor } from '../../utils/htmlDeck';
 import { hasPendingAssets } from '../../utils/assetRefs';
@@ -49,9 +49,9 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
       disabled={locked}
       onClick={() => onAddAt(at)}
     >
-      <span className="h-px flex-1" style={{ background: '#3a3a3a' }} />
-      <Plus size={12} style={{ color: '#bbb' }} />
-      <span className="h-px flex-1" style={{ background: '#3a3a3a' }} />
+      <span className="h-px flex-1" style={{ background: 'var(--border-color)' }} />
+      <Plus size={12} style={{ color: 'var(--text-secondary)' }} />
+      <span className="h-px flex-1" style={{ background: 'var(--border-color)' }} />
     </button>
   );
 
@@ -65,7 +65,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
       // thumbnail, which changes the total height, which re-toggles the
       // scrollbar — the rail shakes forever. A reserved gutter keeps the inner
       // width constant, so a fit happens once and settles.
-      style={{ background: '#0d0d0d', borderRight: '1px solid #222', scrollbarGutter: 'stable' }}
+      style={{ background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border-color)', scrollbarGutter: 'stable' }}
       role="list"
       aria-label="Slides"
     >
@@ -99,17 +99,36 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
               }}
               className="group relative flex cursor-pointer gap-2"
             >
-              <span className="w-4 pt-1 text-right text-[11px] tabular-nums" style={{ color: isSelected ? '#fff' : '#777' }}>
-                {i + 1}
-              </span>
+              <div className="flex w-5 shrink-0 flex-col items-center gap-1 pt-1" style={{ color: 'var(--text-secondary)' }}>
+                <span className="text-[11px] tabular-nums" style={{ color: isSelected ? 'var(--text-primary)' : undefined }}>{i + 1}</span>
+                <button
+                  type="button"
+                  className="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[var(--bg-rail-hover)] focus-visible:outline disabled:text-[var(--text-muted)]"
+                  title={locked ? 'Wait for slide edits to finish saving' : 'Move slide up'}
+                  aria-label={`Move slide ${i + 1} up`}
+                  disabled={locked || i === 0}
+                  onClick={() => onMove(i, i - 1)}
+                >
+                  <ChevronUp size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[var(--bg-rail-hover)] focus-visible:outline disabled:text-[var(--text-muted)]"
+                  title={locked ? 'Wait for slide edits to finish saving' : 'Move slide down'}
+                  aria-label={`Move slide ${i + 1} down`}
+                  disabled={locked || i === slides.length - 1}
+                  onClick={() => onMove(i, i + 1)}
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </div>
               <div
                 className="relative flex-1 overflow-hidden rounded-md transition-shadow"
                 style={{
-                  outline: isSelected ? '2px solid #e5734a' : over === i ? '2px dashed #666' : '1px solid #2a2a2a',
+                  outline: isSelected ? '2px solid var(--accent)' : over === i ? '2px dashed var(--text-secondary)' : '1px solid var(--border-color)',
                   outlineOffset: 1,
-                  // Dark until the frame has fitted its slide (a few hundred ms per
-                  // thumbnail): a white flash read as an empty, broken rail.
-                  background: '#1a1a1a',
+                  // Match the rail while the slide frame is fitting.
+                  background: 'var(--bg-secondary)',
                 }}
               >
                 <ScaledFrame
@@ -119,7 +138,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                   baseWidth={SLIDE_W}
                   fill={false}
                   pad={0}
-                  background="#1a1a1a"
+                  background="transparent"
                   title={`Slide ${i + 1} thumbnail`}
                 />
                 {/* The iframe swallows clicks; a transparent catcher over it selects.
@@ -173,8 +192,8 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
       {/* The "+" between slides only shows on hover; this one is always there. */}
       <button
         type="button"
-        className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md border !px-2 !py-1.5 text-xs hover:bg-white/10"
-        style={{ borderColor: '#333', color: '#cfcfcf' }}
+        className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md border !px-2 !py-1.5 text-xs hover:bg-[var(--bg-rail-hover)]"
+        style={{ borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}
         disabled={locked}
         onClick={() => onAddAt(slides.length)}
       >
