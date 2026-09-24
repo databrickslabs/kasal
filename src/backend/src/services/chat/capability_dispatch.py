@@ -145,8 +145,18 @@ async def route_and_dispatch(
     # instruction. Best-effort: no session, or a failed read, and the router
     # decides exactly as it did before.
     turns = await recent_turns(session, session_id, group_ids, exclude_message=message)
+    from src.services.decisions.routing import routing_candidates
+
+    route_candidates = await routing_candidates(
+        message,
+        capabilities,
+        turns,
+        getattr(group_context, "primary_group_id", None),
+    )
     parsed, used_model, attempted = await ask_models(
-        build_route_messages(message, capabilities, system_prompt, render_turns(turns))
+        build_route_messages(
+            message, route_candidates, system_prompt, render_turns(turns)
+        )
     )
 
     if parsed is None:
@@ -169,7 +179,7 @@ async def route_and_dispatch(
     )
 
     continued = False
-    decision = parse_route_response(parsed, message, capabilities)
+    decision = parse_route_response(parsed, message, route_candidates)
     if decision is None or not decision.is_confident:
         # Before declining: is a capability mid-conversation here? A flow that
         # holds a conversation expects the next turn ITSELF, and a follow-up to
@@ -241,6 +251,13 @@ async def route_and_dispatch(
     # against the turns actually rendered, so a number the model could not have
     # read binds nothing — the same stance as a value whose span is not in the
     # message.
+    from src.services.decisions.routing import follow_up_target
+
+    target = await follow_up_target(
+        message, turns, getattr(group_context, "primary_group_id", None)
+    )
+    if target is not None:
+        decision.refers_to = target[0] if target else None
     referenced = turn_by_index(turns, decision.refers_to)
     if decision.refers_to is not None and referenced is None:
         logger.warning(

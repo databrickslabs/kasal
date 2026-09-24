@@ -62,6 +62,23 @@ async def build_a2a_tools(
                 names = {str(n) for n in wanted}
                 rows = [r for r in rows if r.name in names]
             elif len(rows) > MAX_UNSELECTED:
+                from src.services.decisions.context import request_goal
+                from src.services.decisions.policies import rank
+
+                if request_goal.get():
+                    rows = await rank(
+                        "remote_agent_selection",
+                        request_goal.get(),
+                        rows,
+                        [
+                            {
+                                "name": r.name,
+                                "description": getattr(r, "description", ""),
+                            }
+                            for r in rows
+                        ],
+                        group_id=group_ids[0] if len(group_ids) == 1 else None,
+                    )
                 # One tool is built PER remote so its description can name that
                 # remote's skills. The cost is that an unselected workspace with
                 # twenty remotes hands the agent twenty delegation tools, which

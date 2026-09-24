@@ -470,6 +470,15 @@ class WorkflowRecipeService:
         # group. Ordering only — a 'bad'/'hidden' recipe never reaches this point,
         # the retrieval query already dropped it.
         relevant.sort(key=lambda pair: getattr(pair[0], "curation", None) != "good")
+        from src.services.decisions.policies import rank
+
+        relevant = await rank(
+            "recipe_reuse",
+            prompt,
+            relevant,
+            [r.intent_text for r, _ in relevant],
+            group_id=group_ids[0] if len(group_ids) == 1 else None,
+        )
 
         return [
             self.to_summary(recipe, similarity=round(score, 4))

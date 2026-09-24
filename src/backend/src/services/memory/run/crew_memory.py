@@ -645,6 +645,9 @@ class CrewMemoryService:
         # of the scope either (it changes per prompt and would wall each run off).
         group_id = self.config.get("group_id") or "default"
         kwargs["root_scope"] = f"/{group_id}"
+        from src.services.decisions.memory import MemoryDecisions
+
+        kwargs["decision_policy"] = MemoryDecisions(group_id)
 
         tuning = getattr(memory_config, "cognitive_config", None)
         tuning_dict = (
@@ -753,7 +756,9 @@ class CrewMemoryService:
                 group_id,
             )
             return llm
-        except Exception as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
             logger.warning(
                 "Could not build memory analysis LLM '%s' (%s); "
                 "falling back to the crew's LLM instance",

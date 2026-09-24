@@ -131,13 +131,16 @@ def supersede_outdated_facts(memory: Any, scope: str | None = None) -> dict[str,
         for index, record in enumerate(records)
     ]
     try:
-        reply = call(_PROMPT.format(records="\n".join(lines)))
+        policy = getattr(memory, "decision_policy", None)
+        groups = policy.supersession(records) if policy is not None else None
+        if groups is None:
+            groups = _extract_json_array(call(_PROMPT.format(records="\n".join(lines))))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Supersession LLM call failed: %s", exc)
         return stats
 
     retired: set[int] = set()
-    for group in _extract_json_array(reply):
+    for group in groups:
         if not isinstance(group, dict):
             continue
         current = group.get("current")

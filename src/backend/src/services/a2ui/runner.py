@@ -540,7 +540,21 @@ async def compose_surface(
     # and leaves the result as a plain string. The agent goal / crew purpose is
     # folded into the intent signal so a rich deliverable in the purpose fires
     # even when the user's chat prompt itself carries no rich-intent keyword.
-    if not wants_rich_surface(text, f"{query}\n{purpose}"):
+    from src.services.decisions.output import surface_kind
+
+    kind = (
+        await surface_kind(query, purpose, text, group_id=group_id)
+        if not hint
+        else None
+    )
+    rich = (
+        wants_rich_surface(text, f"{query}\n{purpose}")
+        if kind is None
+        else kind != "plain"
+    )
+    if kind and kind != "plain":
+        guidance += f"\nRequested deliverable: {kind}."
+    if not rich:
         await _retract_shell()
         _skip(
             "no_rich_intent",

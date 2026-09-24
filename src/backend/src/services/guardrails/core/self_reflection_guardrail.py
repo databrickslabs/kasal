@@ -109,13 +109,17 @@ class SelfReflectionGuardrail(BaseGuardrail):
             return self._cache[cache_key]
 
         try:
-            verdict = _run_completion(
-                self._model_name,
-                [
-                    {"role": "system", "content": _REVIEWER_SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-            )
+            from src.services.decisions.output import completion_verdict
+
+            verdict = completion_verdict(self._task_description, text)
+            if verdict is None:
+                verdict = _run_completion(
+                    self._model_name,
+                    [
+                        {"role": "system", "content": _REVIEWER_SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
             if isinstance(verdict, str) and verdict.strip().upper() == "FAIL":
                 logger.warning(
                     "[SECURITY] SelfReflectionGuardrail: FAIL verdict (model=%s)",

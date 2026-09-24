@@ -72,6 +72,15 @@ async def inject_skills(
 
         async with get_isolated_db_session() as session:
             skills = await resolve_for_agent(names, group_ids, session)
+            from src.services.decisions.policies import rank
+
+            skills = await rank(
+                "skill_recommendation",
+                spec.get("goal") or label,
+                skills,
+                [{"name": s.name, "description": s.description} for s in skills],
+                group_id=group_id,
+            )
             section = build_prompt_section(skills)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[skills] not attached to agent '%s': %s", label, exc)

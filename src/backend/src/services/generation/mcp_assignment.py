@@ -91,6 +91,11 @@ async def assign_mcps_to_tasks(
 ) -> dict[str, list[str]]:
     if not capabilities or not tasks:
         return {}
+    from src.services.decisions.policies import assign
+
+    assigned = await assign(tasks, capabilities)
+    if assigned is not None:
+        return assigned
     allowed = {item["name"] for item in capabilities}
     messages = [
         {

@@ -38,6 +38,13 @@ async def finish_slide(
     log(
         "Slide output incomplete; attempting one tool-free finalization using collected evidence"
     )
+    from src.services.decisions.output import evidence_guidance
+    from src.services.decisions.policies import rank
+
+    evidence = await rank(
+        "research_triage", prompt, evidence, evidence, group_id=group_id
+    )
+    review = await evidence_guidance(prompt, answer, evidence, group_id=group_id)
     evidence_text = "\n\n".join(evidence) or "No tool results were captured."
     messages = [
         {"role": "user", "content": prompt},
@@ -59,6 +66,7 @@ async def finish_slide(
                 "or other actions. Cite only sources actually present in the evidence. Do not "
                 "invent facts to fill gaps in excerpts. If the requested research could not be "
                 "completed, explain that limitation instead of fabricating a researched slide."
+                + (f"\n{review}" if review else "")
             ),
         },
     ]

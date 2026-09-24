@@ -284,15 +284,18 @@ async def build_agent_with_tools(
     if mcp_config is not None:
         tools.extend(await add_mcp_tools(mcp_config, label, mcp_call_config))
 
-    tools.extend(
-        await resolve_agent_tools(
-            tool_ids or [],
-            tool_factory,
-            tool_configs=tool_configs,
-            tool_service=tool_service,
-            label=label,
+    from src.services.decisions.context import task_goal
+
+    with task_goal(spec.get("goal") or label):
+        tools.extend(
+            await resolve_agent_tools(
+                tool_ids or [],
+                tool_factory,
+                tool_configs=tool_configs,
+                tool_service=tool_service,
+                label=label,
+            )
         )
-    )
 
     if tools:
         logger.info(f"Agent {label} will have access to {len(tools)} tool(s)")

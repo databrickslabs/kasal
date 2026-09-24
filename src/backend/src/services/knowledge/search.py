@@ -92,7 +92,15 @@ class KnowledgeSearch:
                 user_token=self.user_token,
                 created_by=self.user_email,
             )
-        return results or []
+        from src.services.decisions.policies import rank
+
+        return await rank(
+            "knowledge_ranking",
+            query,
+            results or [],
+            [r.get("content", "") for r in results or []],
+            group_id=self.group_id,
+        )
 
     async def search(
         self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None

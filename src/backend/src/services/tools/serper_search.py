@@ -204,6 +204,14 @@ class SerperDevTool(BaseTool):
             }
         }
         formatted_results.update(self._process_search_results(results, search_type))
+        from src.services.decisions.policies import rank_sync
+
+        for key in ("organic", "news"):
+            candidates = formatted_results.get(key)
+            if candidates:
+                formatted_results[key] = rank_sync(
+                    "research_triage", search_query, candidates, candidates
+                )
         formatted_results["credits"] = results.get("credits", 1)
 
         if save_file:

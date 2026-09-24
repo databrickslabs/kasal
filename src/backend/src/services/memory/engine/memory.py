@@ -294,6 +294,7 @@ class Memory(BaseModel):
     read_only: bool = False
     root_scope: str | None = None
     save_hooks: list[Any] = Field(default_factory=list, exclude=True)
+    decision_policy: Any = Field(default=None, exclude=True)
     analyze_on_save: bool = Field(
         default=True,
         description=(
@@ -469,7 +470,12 @@ class Memory(BaseModel):
             if payload is None:
                 logger.debug("memory analysis returned no JSON object: %.200r", raw)
                 return None
-            return MemoryAnalysis.model_validate(payload)
+            analysis = MemoryAnalysis.model_validate(payload)
+            return (
+                self.decision_policy.label(text, analysis)
+                if self.decision_policy
+                else analysis
+            )
         except Exception:  # noqa: BLE001 — labelling must never break a save
             logger.warning("memory analysis failed; saving unlabelled", exc_info=True)
             return None
