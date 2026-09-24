@@ -1,17 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect } from 'react';
+import { useDeckState, type DeckStudioStore } from './deckStudioStore';
 
-interface HistoryEntry { label: string; prev: string }
 type DeckUpdate = string | ((current: string) => string);
 
 /** Generate slides concurrently, but serialize whole-deck writes and rebase each edit. */
-export function useDeckHistory(code: string, writeBack: (next: string, previous: string) => void | Promise<void>) {
-  const [deck, setDeck] = useState(code);
-  const current = useRef(code);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [saving, setSaving] = useState(false);
-  const pending = useRef<Promise<void> | null>(null);
+export function useDeckHistory(store: DeckStudioStore, code: string, writeBack: (next: string, previous: string) => void | Promise<void>) {
+  const [deck, setDeck] = useDeckState(store, 'deck');
+  const [history, setHistory] = useDeckState(store, 'history');
+  const [saving, setSaving] = useDeckState(store, 'saving');
+  const { current, pending } = store.getState();
 
-  useEffect(() => { current.current = code; setDeck(code); }, [code]);
+  useEffect(() => {
+    // Reopening with the same prop must not overwrite work completed while closed.
+    if (store.getState().source === code) return;
+    current.current = code;
+    store.setState({ source: code, deck: code });
+  }, [store, code, current]);
 
   const save = useCallback((update: DeckUpdate, done: (next: string, previous: string) => void): Promise<void> => {
     const run = () => {
@@ -38,18 +42,18 @@ export function useDeckHistory(code: string, writeBack: (next: string, previous:
     } catch (error) {
       return Promise.reject(error);
     }
-  }, [writeBack]);
+  }, [writeBack, current, pending, setDeck, setSaving]);
 
   const commit = useCallback((update: DeckUpdate, label: string, done?: () => void) => save(update, (_, previous) => {
     setHistory(h => [...h, { label, prev: previous }]);
     done?.();
-  }), [save]);
+  }), [save, setHistory]);
 
   const undo = useCallback(() => {
     const last = history[history.length - 1];
     if (!last || pending.current) return Promise.resolve();
     return save(last.prev, () => setHistory(h => h.slice(0, -1)));
-  }, [history, save]);
+  }, [history, save, pending, setHistory]);
 
   return { deck, current, history, saving, pending, commit, undo };
 }

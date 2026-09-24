@@ -7,6 +7,7 @@ import ThumbnailRail from './ThumbnailRail';
 import SlideInstructionBar from './SlideInstructionBar';
 import DeckModelPicker from './DeckModelPicker';
 import { useDeckHistory } from './useDeckHistory';
+import { createDeckStudioStore, useDeckState, type DeckStudioStore } from './deckStudioStore';
 import RunProgress from '../Chat/RunProgress';
 import StepContent from '../Preview/StepContent';
 import type { RunStep } from '../Preview/traceEventStep';
@@ -42,12 +43,11 @@ interface DeckStudioProps {
   /** The chat message the deck lives in — where edits are written back. */
   messageId?: string;
   initialIndex?: number;
+  session?: DeckStudioStore;
   onDeckChange?: (next: string, previous: string) => Promise<void>;
   model?: string;
   onClose: () => void;
 }
-
-interface SlideActivity { startedAt: number; jobId?: string; step: TraceEntryData }
 
 const readTextFile = (file: File): Promise<string> => {
   if (typeof file.text === 'function') return file.text();
@@ -59,7 +59,9 @@ const readTextFile = (file: File): Promise<string> => {
   });
 };
 
-const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model }) => {
+const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex = 0, onClose, onDeckChange, model, session }) => {
+  const [localSession] = useState(() => session ?? createDeckStudioStore(code));
+  const deckSession = session ?? localSession;
   const dark = useThemeStore(s => s.isDarkMode);
   const writeBack = useCallback((next: string, previous: string) => {
     if (onDeckChange) return onDeckChange(next, previous);
@@ -68,7 +70,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     const msg = store.messages.find((m) => m.id === messageId);
     if (msg) store.updateMessage(messageId, { content: replaceDeckInContent(msg.content, next) });
   }, [messageId, onDeckChange]);
-  const { deck, current, history, saving, pending: savingRef, commit, undo: undoDeck } = useDeckHistory(code, writeBack);
+  const { deck, current, history, saving, pending: savingRef, commit, undo: undoDeck } = useDeckHistory(deckSession, code, writeBack);
   const slides = useMemo(() => splitSlides(deck), [deck]);
   const count = slides.length;
   // What the rail, the stage and the exports SHOW: the deck with its
@@ -77,12 +79,12 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const resolvedDeck = useResolvedAssetHtml(deck);
   const viewSlides = useMemo(() => splitSlides(resolvedDeck), [resolvedDeck]);
   const [selected, setSelected] = useState(() => Math.max(0, Math.min(initialIndex, count - 1)));
-  const active = useRef(new Set<number>());
-  const [working, setWorking] = useState<ReadonlySet<number>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<number, string | null>>({});
-  const [activities, setActivities] = useState<Record<number, SlideActivity>>({});
-  const [activitySteps, setActivitySteps] = useState<Record<number, RunStep | null>>({});
+  const { active } = deckSession.getState();
+  const [working, setWorking] = useDeckState(deckSession, 'working');
+  const [error, setError] = useDeckState(deckSession, 'error');
+  const [errors, setErrors] = useDeckState(deckSession, 'errors');
+  const [activities, setActivities] = useDeckState(deckSession, 'activities');
+  const [activitySteps, setActivitySteps] = useDeckState(deckSession, 'activitySteps');
   // The bar revises the selected slide, or writes a just-inserted blank one.
   const [barMode, setBarMode] = useState<{ kind: 'refine' } | { kind: 'fill'; at: number }>({ kind: 'refine' });
   const [present, setPresent] = useState(false);

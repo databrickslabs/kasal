@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2, SquarePen } from 'lucide-react';
 import { SLIDE_W, refinedSlideIndex, splitSlides, stageFor } from '../../utils/htmlDeck';
 import DeckStudio from '../Deck/DeckStudio';
+import { createDeckStudioStore } from '../Deck/deckStudioStore';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { hasPendingAssets } from '../../utils/assetRefs';
 import { useThrottledPreview } from '../../utils/scaledFrame';
@@ -56,6 +57,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   const [idx, setIdx] = useState(() => Math.max(0, refinedSlideIndex(code)));
   const [full, setFull] = useState(false);
   const [studio, setStudio] = useState(false);
+  const [studioSession] = useState(() => createDeckStudioStore(code));
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState<'' | 'pdf' | 'pptx'>('');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -237,7 +239,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         <div className="absolute inset-0" aria-hidden="true" />
       </div>
       {studio && (
-        <DeckStudio code={code} messageId={messageId} onDeckChange={onDeckChange} model={model} initialIndex={shown} onClose={() => setStudio(false)} />
+        <DeckStudio session={studioSession} code={code} messageId={messageId} onDeckChange={onDeckChange} model={model} initialIndex={shown} onClose={() => setStudio(false)} />
       )}
       {full && (
         // Presentation mode: the slide fills the screen on black, arrow keys

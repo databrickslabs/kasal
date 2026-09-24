@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DeckStudio from './DeckStudio';
+import HtmlDeckBlock from '../Chat/HtmlDeckBlock';
 import { useAppStore } from '../../store/appStore';
 import { fetchEnabledModels } from '../../api/models';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
@@ -113,6 +114,85 @@ describe('DeckStudio', () => {
     // inside it — as a real keypress with focus in the studio does.
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Deck studio' }), { key: 'ArrowLeft' });
     expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('reattaches to running edits after closing and reopening, including parallel saves', async () => {
+    const runs = [deferred<{ section: string; job_id: string }>(), deferred<{ section: string; job_id: string }>()];
+    refineSlide.mockImplementation((_request, started) => {
+      const index = refineSlide.mock.calls.length - 1;
+      started(`job-${index}`);
+      return runs[index].promise;
+    });
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    submitSlide(1, 'Improve cover');
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'job-0');
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'true');
+    submitSlide(2, 'Improve second');
+    await act(async () => runs[0].resolve({ section: slide('New cover'), job_id: 'job-0' }));
+    await act(async () => runs[1].resolve({ section: slide('New second'), job_id: 'job-1' }));
+    expect(refineSlide).toHaveBeenCalledTimes(2);
+    expect(deckInMessage()).toEqual(['New cover', 'New second', 'Three']);
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    expect(screen.getByText('3 slides · 2 edits')).toBeInTheDocument();
+  });
+
+  it('keeps completed results and undo history when a run finishes while closed', async () => {
+    const run = deferred<{ section: string }>();
+    refineSlide.mockReturnValue(run.promise);
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    submitSlide(1, 'Improve cover');
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    await act(async () => run.resolve({ section: slide('Updated while closed') }));
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    expect(screen.getByText('3 slides · 1 edit')).toBeInTheDocument();
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'false');
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    fireEvent.click(screen.getByLabelText('Move slide 1 down'));
+    expect(deckInMessage()).toEqual(['Two', 'Updated while closed', 'Three']);
+  });
+
+  it('shares the pending save queue across editor mounts in builder mode', async () => {
+    const save = deferred<void>();
+    const onDeckChange = vi.fn().mockReturnValueOnce(save.promise).mockResolvedValue(undefined);
+    refineSlide.mockResolvedValueOnce({ section: slide('New cover') }).mockResolvedValueOnce({ section: slide('New second') });
+    render(<HtmlDeckBlock code={DECK} onDeckChange={onDeckChange} />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    submitSlide(1);
+    await waitFor(() => expect(onDeckChange).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    expect(screen.getByLabelText('Move slide 2 up')).toBeDisabled();
+    submitSlide(2);
+    await waitFor(() => expect(refineSlide).toHaveBeenCalledTimes(2));
+    expect(onDeckChange).toHaveBeenCalledTimes(1);
+    await act(async () => save.resolve());
+    await waitFor(() => expect(onDeckChange).toHaveBeenCalledTimes(2));
+    expect(titles(onDeckChange.mock.calls[1][1])).toEqual(['New cover', 'Two', 'Three']);
+    expect(titles(onDeckChange.mock.calls[1][0])).toEqual(['New cover', 'New second', 'Three']);
+    expect(screen.getByLabelText('Move slide 2 up')).toBeEnabled();
+  });
+
+  it('keeps failures visible after reopening without leaking them into another deck', async () => {
+    const run = deferred<{ section: string }>();
+    refineSlide.mockReturnValue(run.promise);
+    render(<><HtmlDeckBlock code={DECK} messageId="m1" /><HtmlDeckBlock code={slide('Other deck')} /></>);
+    fireEvent.click(screen.getAllByTitle('Edit deck')[0]);
+    submitSlide(1, 'Improve');
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    await act(async () => run.reject(new Error('Provider unavailable')));
+    fireEvent.click(screen.getAllByTitle('Edit deck')[1]);
+    expect(screen.queryByText('Provider unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('slide-run')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    fireEvent.click(screen.getAllByTitle('Edit deck')[0]);
+    expect(screen.getByRole('alert')).toHaveTextContent('Provider unavailable');
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
   });
 
   it('downloads the presentation as HTML', () => {
