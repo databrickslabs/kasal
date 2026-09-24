@@ -400,6 +400,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             # NOT fatal: on failure we fall back to Fabric TMDL (which a Service
             # Account CAN read), mirroring the Semantic Model Fetcher.
             admin_tables = {}
+            # Raw TMDL parts kept for S6/S9/rec#9 enrichment when available.
+            _tmdl_parts: list[dict] = []
             # Set only if an Admin Scan actually runs below (API 3 tiers) — fed
             # to discover_report_id as a reliable, already-fetched source of
             # report/dataset bindings when the SA-only classic REST call 401s.
@@ -470,6 +472,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                         fabric_token, workspace_id, dataset_id
                     )
                     if tmdl_parts:
+                        _tmdl_parts = tmdl_parts  # keep for S6/S9/rec#9 enrichment
                         if not admin_tables:
                             admin_tables = gen.parse_tmdl_to_admin_tables(
                                 tmdl_parts, dataset_id=dataset_id
@@ -780,6 +783,64 @@ class PipelineConfigGeneratorTool(BaseTool):
                         }
                     )
 
+            # TMDL enrichment (S6/S9/rec#9) — fail-open. When only the Admin
+            # Scanner ran (no TMDL yet), try a Fabric TMDL fetch just for the
+            # calculated-column / fiscal / metadata signals it uniquely carries.
+            if not _tmdl_parts and admin_tables:
+                try:
+                    _enrich_fabric_token = gen.get_fabric_token(
+                        tenant_id,
+                        client_id,
+                        client_secret,
+                        username=username,
+                        password=password,
+                    )
+                    _enrich_parts = gen.fetch_tmdl_parts(
+                        _enrich_fabric_token, workspace_id, dataset_id
+                    )
+                    if _enrich_parts:
+                        _tmdl_parts = _enrich_parts
+                except Exception as _te:
+                    logger.debug(
+                        f"[PipelineConfigGen] TMDL enrichment-only fetch skipped: {_te}"
+                    )
+
+            _calculated_columns: dict = {}
+            _fiscal_calendars: dict = {}
+            _measure_metadata: dict = {}
+            if _tmdl_parts:
+                try:
+                    from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                        detect_fiscal_calendar_tables,
+                        extract_calculated_columns_from_tmdl,
+                        harvest_measure_metadata_from_tmdl,
+                    )
+
+                    _calculated_columns = extract_calculated_columns_from_tmdl(
+                        _tmdl_parts
+                    )
+                    _fiscal_calendars = detect_fiscal_calendar_tables(
+                        _tmdl_parts, _calculated_columns
+                    )
+                    _measure_metadata = harvest_measure_metadata_from_tmdl(_tmdl_parts)
+                except Exception as _ee:
+                    logger.warning(
+                        f"[PipelineConfigGen] TMDL enrichment failed (non-fatal): {_ee}"
+                    )
+
+            if _calculated_columns:  # S6
+                config["calculated_columns"] = _calculated_columns
+
+            if _fiscal_calendars:  # S9
+                _td = config.setdefault("time_dimension", {})
+                if isinstance(_td, dict) and "pbi_period_format" not in _td:
+                    _td["pbi_period_format"] = "date_to_fiscper"
+                    _td["fiscal_calendar_tables"] = sorted(_fiscal_calendars.keys())
+                config["fiscal_calendar_tables"] = {
+                    tbl: info.get("indicators", [])
+                    for tbl, info in _fiscal_calendars.items()
+                }
+
             # Summary stats
             config_json = json.dumps(config, default=str)
             auto_count = 0
@@ -803,6 +864,20 @@ class PipelineConfigGeneratorTool(BaseTool):
                 measures, admin_tables=admin_tables, config=config
             )
             ucmv_mquery = self._build_ucmv_mquery(admin_tables, expressions)
+
+            # rec#9: inject description/display_name/comment (PBI measure: tag)
+            # into ucmv_measures from the harvested TMDL metadata.
+            if _measure_metadata:
+                try:
+                    from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                        enrich_ucmv_measures_with_metadata,
+                    )
+
+                    enrich_ucmv_measures_with_metadata(ucmv_measures, _measure_metadata)
+                except Exception as _me:
+                    logger.warning(
+                        f"[PipelineConfigGen] measure metadata enrichment failed: {_me}"
+                    )
 
             # Implicit-aggregation columns used directly in a visual, with no
             # named PBI measure behind them (PBI applies the column's own
@@ -904,6 +979,27 @@ class PipelineConfigGeneratorTool(BaseTool):
                 and (_t.get("mquery_expression") or _t.get("mquery"))
             }
 
+            # rec#10: dqa/kpi_reconciliation scaffolds — one per fact, direct binding.
+            _rec_scaffolds: list[dict] = []
+            try:
+                from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                    build_reconciliation_mapping_scaffolds,
+                )
+
+                _rec_scaffolds = build_reconciliation_mapping_scaffolds(
+                    ucmv_measures,
+                    config,
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    catalog=catalog,
+                    schema=schema,
+                    fiscal_calendars=_fiscal_calendars,
+                )
+            except Exception as _rse:
+                logger.warning(
+                    f"[PipelineConfigGen] reconciliation scaffold build failed (non-fatal): {_rse}"
+                )
+
             output = {
                 "proposed_config": config,
                 # Consumed by the flow handoff → UCMV JSON mode.
@@ -913,6 +1009,8 @@ class PipelineConfigGeneratorTool(BaseTool):
                 # Measures ranked by how many other measures reference them —
                 # reviewers use this to prioritize which gaps/TODOs to fix first.
                 "measure_usage_ranking": usage_ranking,
+                # rec#10: direct-binding reconciliation scaffolds (ucmv_table is TODO:)
+                "reconciliation_mapping_scaffolds": _rec_scaffolds,
                 # {original_measure_name: [{page, visual_type, role}, ...]} —
                 # consumed by the flow handoff → UCMV JSON mode, same as
                 # measures_json/mquery_json/relationships_json, to tag each
@@ -937,6 +1035,10 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "measures_referenced_by_others": len(usage_ranking),
                     "mquery_tables_for_ucmv": len(ucmv_mquery),
                     "admin_tables_scanned": len(admin_tables),
+                    "calculated_column_tables": len(_calculated_columns),  # S6
+                    "fiscal_calendar_tables_detected": len(_fiscal_calendars),  # S9
+                    "measures_with_tmdl_description": len(_measure_metadata),  # rec#9
+                    "reconciliation_scaffolds_emitted": len(_rec_scaffolds),  # rec#10
                     "admin_tables_source": admin_tables_source,
                     "expressions_captured": len(expressions),
                     "expressions_source": expressions_source,

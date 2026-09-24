@@ -1058,6 +1058,17 @@ def emit_yaml(
                 if m.original_name != m.measure_name:
                     dax_comment = f"PBI: {m.original_name}"
                 dax_comment += _provenance_suffix(m)
+                # M11: a semi-additive (latest-period) measure is NOT additive over
+                # its order column — flag it so a reviewer/Genie doesn't sum it
+                # across periods. The `window: semiadditive: last` below enforces it;
+                # the caveat explains why the value is a point-in-time snapshot.
+                if m.window_spec and m.window_spec.get("semiadditive"):
+                    dax_comment += (
+                        f" · CAVEAT: non-additive — value taken at the "
+                        f"{m.window_spec.get('semiadditive', 'last')} "
+                        f"{m.window_spec.get('order', 'period')} of the selected "
+                        f"period (semi-additive snapshot; do not sum across periods)"
+                    )
             dax_comment += _usage_suffix(m.referenced_by)
             dax_comment += _visual_usage_suffix(m)
             dax_comment += _indirect_visual_usage_suffix(m)

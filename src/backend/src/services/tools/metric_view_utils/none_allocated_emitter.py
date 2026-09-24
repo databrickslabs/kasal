@@ -111,9 +111,41 @@ def build_none_allocated_spec(
 
         is_artifact = bool(artifact_patterns.search(dax)) if dax else False
 
+        # M10: a measure the column allocator flagged as referencing a column
+        # that exists in NO table is broken in the PBI model itself — document
+        # it, never emit it as a valid measure (any SQL would be invalid).
+        broken = m.get("_allocation_broken")
+        if broken:
+            untranslatable.append(
+                TranslationResult(
+                    measure_name=to_snake_case(orig),
+                    original_name=orig,
+                    sql_expr=None,
+                    is_translatable=False,
+                    skip_reason=(
+                        "TODO — not emitted (broken in PBI): "
+                        + str(broken.get("reason", "references a non-existent column"))
+                    ),
+                    dax_expression=dax,
+                    confidence="none",
+                    category="broken_reference",
+                )
+            )
+            continue
+
+        # M6 cross-fact ratio: columns span two facts with no single owner.
+        # Document with the contributing facts + shared grain rather than a
+        # vague "spans multiple facts", so a reviewer can build a shared-grain
+        # view/column instead of dropping it.
+        cross = m.get("_allocation_cross_fact")
+
         # Normalise the keys translate() reads, so both entry shapes work.
-        translate_input = {**m, "measure_name": name, "original_name": orig,
-                           "dax_expression": dax}
+        translate_input = {
+            **m,
+            "measure_name": name,
+            "original_name": orig,
+            "dax_expression": dax,
+        }
         try:
             res = translator.translate(translate_input, _VIEW_KEY)
         except Exception as e:  # translator must never break the catch-all
@@ -139,6 +171,11 @@ def build_none_allocated_spec(
                 reason = res.skip_reason or ""
                 res.skip_reason = (reason + " · " if reason else "") + (
                     "visual/formatting/slicer artifact — no Genie/analytical form"
+                )
+            if cross:
+                reason = res.skip_reason or ""
+                res.skip_reason = (reason + " · " if reason else "") + str(
+                    cross.get("reason", "cross-fact ratio")
                 )
             res.is_translatable = False
             if not res.dax_expression:

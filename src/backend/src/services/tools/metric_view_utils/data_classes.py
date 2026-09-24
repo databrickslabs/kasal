@@ -86,6 +86,18 @@ class TableInfo:
     raw_transpiled_sql: str = ""  # full transpiled SQL for scan enrichment
     dim_source_tables: dict[str, str] = field(default_factory=dict)
     static_filters: list[str] = field(default_factory=list)
+    # S4: full SQL captured verbatim from a `Value.NativeQuery(<src>, "<SQL>")`
+    # source in the table's Power Query M. The transpiled SQL discards the native
+    # query's derived columns (`TO_DATE(...) fiscper_date`, window functions),
+    # CASE remaps and WHERE filters and keeps only the FROM table, so downstream
+    # (source-SQL emission) should prefer this over `SELECT * FROM <source_table>`
+    # when present. Empty when the source is not a native query.
+    native_query_sql: str = ""
+    # S5: M transform steps (Table.Distinct, Table.Combine appended rows,
+    # Table.Group, buffer/cross-table Table.SelectRows) that could not be
+    # translated deterministically to SQL. Surfaced as `-- TODO:` notes in the
+    # emitted source so a step is never silently dropped.
+    transform_todos: list[str] = field(default_factory=list)
 
 
 @dataclass

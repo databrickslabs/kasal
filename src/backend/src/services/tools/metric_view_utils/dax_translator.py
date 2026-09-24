@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from . import dax_patterns
 from .constants import (
     RE_AVERAGEX_FILTER,
     RE_COUNTX_FILTER,
@@ -14,6 +15,7 @@ from .constants import (
 )
 from .data_classes import TranslationResult
 from .join_detector import _sanitize_alias
+from .sql_measure_sanitizer import sanitize_measure_name
 from .utils import to_snake_case
 
 
@@ -55,7 +57,18 @@ class DaxTranslator:
 
     def _register_patterns(self):
         """Register translation patterns in priority order. First match wins."""
-        self._patterns = [
+        # ── Defect-class matchers (IDOR/DQA post-mortem M1–M5, M9, M11) ──
+        # Prepended FIRST so they win over the generic catch-alls AND before
+        # quick_reject (M4's `IF(ISBLANK(...), BLANK(), 1 - x)` would otherwise be
+        # dropped as an "ISBLANK+BLANK guard"). Each returns None unless it fully
+        # parses its shape, so anything else falls straight through. Logic lives in
+        # dax_patterns (keeps this module from growing); translate_fn is bound to
+        # this translator so it can read _measure_resolutions.
+        defect = [
+            (name, mfn, (lambda m, d, tk, _tf=tfn: _tf(m, d, tk, self)))
+            for name, mfn, tfn in dax_patterns.DEFECT_PATTERNS
+        ]
+        self._patterns = defect + [
             ("quick_reject", self._match_quick_reject, self._translate_noop),
             (
                 "sameperiodlastyear",
@@ -145,7 +158,10 @@ class DaxTranslator:
     # In llm_first mode, only these patterns run as the regex fast-path (Step 3.8):
     # display-artifact rejects + the trivial single-column, high-confidence
     # aggregations. Everything else falls through to the LLM-first translator.
-    _TRIVIAL_FAST_PATH = frozenset(
+    # Defect-class matchers (dax_patterns.DEFECT_FAST_PATH) join the fast-path via
+    # the union below — deterministic, exact, reproducible, so they run in
+    # llm_first mode instead of burning an LLM call.
+    _TRIVIAL_FAST_PATH = dax_patterns.DEFECT_FAST_PATH | frozenset(
         {
             "quick_reject",
             "simple_sum",
@@ -203,7 +219,10 @@ class DaxTranslator:
         name = measure.get("measure_name", "")
         dax = self._preclean_dax(measure.get("dax_expression", ""))
         original_name = measure.get("original_name", name)
-        snake = to_snake_case(original_name)
+        # M8: guarantee a valid [a-z0-9_] identifier (dots, parens, &, commas out).
+        # to_snake_case already does this; sanitize_measure_name makes the invariant
+        # explicit and holds even if an upstream name path changes.
+        snake = sanitize_measure_name(to_snake_case(original_name))
 
         for pattern_name, match_fn, translate_fn in self._patterns:
             if trivial_only and pattern_name not in self._TRIVIAL_FAST_PATH:
@@ -238,6 +257,11 @@ class DaxTranslator:
                         "range": "trailing 12 month",
                         "semiadditive": "last",
                     }
+                elif skip_reason.startswith("__WINDOW__:"):
+                    # M11: a latest-period semi-additive measure — the matcher emits
+                    # `__WINDOW__:order=<col>;range=<r>;semiadditive=<s>`.
+                    window_spec = dax_patterns.parse_window_sentinel(skip_reason)
+                    skip_reason = ""
                 return TranslationResult(
                     measure_name=snake,
                     original_name=original_name,

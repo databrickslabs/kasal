@@ -202,6 +202,32 @@ class MetricViewPipeline:
         Returns:
             Dict mapping fact_table_key -> MetricViewSpec
         """
+        # ── Phase 0: column-based allocation (KASAL_FIXES M6/M7/M10) ──────
+        # Home each measure on the fact whose COLUMNS its DAX references, before
+        # grouping — so the existing routing places rescued/re-homed measures on
+        # the right fact and keeps broken/cross-fact ones out of every fact.
+        # Conservative: a correctly-homed measure is left untouched. Default on;
+        # set allocate_by_columns=False for the exact prior behaviour.
+        if self.config.get("allocate_by_columns", True):
+            from .measure_allocator import reallocate_by_columns
+
+            self._allocation_report = reallocate_by_columns(
+                self.mapping, self.mquery_tables, config=self.config
+            )
+            _r = self._allocation_report
+            if any(_r.get(k) for k in ("rescued", "rehomed", "broken", "cross_fact")):
+                self._limitations["measure_allocation"] = _r
+                logger.info(
+                    "[MetricViewPipeline] column-based allocation: "
+                    "%d rescued, %d re-homed, %d broken, %d cross-fact",
+                    len(_r.get("rescued", [])),
+                    len(_r.get("rehomed", [])),
+                    len(_r.get("broken", [])),
+                    len(_r.get("cross_fact", [])),
+                )
+        else:
+            self._allocation_report = None
+
         measure_groups = self._group_by_table()
 
         # Phase 1: Process all tables and collect specs
@@ -907,7 +933,9 @@ class MetricViewPipeline:
                         "used_in_visuals": m.used_in_visuals,
                         # Backtraced (indirect) usage: a visual-placed KPI
                         # references this measure — see annotate_indirect_visual_usage.
-                        "indirect_visual_usage": getattr(m, "indirect_visual_usage", []),
+                        "indirect_visual_usage": getattr(
+                            m, "indirect_visual_usage", []
+                        ),
                     }
                     for m in spec.measures
                 ],
@@ -948,7 +976,9 @@ class MetricViewPipeline:
                             fact_table=spec.fact_table_key,
                         ),
                         "used_in_visuals": m.used_in_visuals,
-                        "indirect_visual_usage": getattr(m, "indirect_visual_usage", []),
+                        "indirect_visual_usage": getattr(
+                            m, "indirect_visual_usage", []
+                        ),
                     }
                     for m in spec.untranslatable
                 ],
