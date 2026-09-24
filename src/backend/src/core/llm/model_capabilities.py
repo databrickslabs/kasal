@@ -55,7 +55,7 @@ assuming a family default.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 #: Verified 2026-09-07 against current Databricks and provider documentation;
@@ -332,6 +332,14 @@ _GPT6_ASTRA = ModelCapability(
     note="GPT-6 Astra always reasons; none and minimal are rejected.",
 )
 
+# Direct GPT-6 Sol/Luna support disabling reasoning, unlike Astra.
+_GPT6_SOL_LUNA = replace(
+    _GPT6_ASTRA,
+    efforts=("none", "low", "medium", "high", "xhigh", "max"),
+    source="https://developers.openai.com/api/docs/models/gpt-6-sol",
+    note="Direct GPT-6 Sol/Luna: use Responses for tool calls with reasoning.",
+)
+
 # ── Gemini 3.x on Databricks ────────────────────────────────────────────────
 
 #: Gemini 3.7 rejects "none", "minimal", "xhigh" and "max".
@@ -462,6 +470,8 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("claude-haiku-4-5", _MANUAL),
     # OpenAI reasoning models, longest fragment first.
     ("gpt-6-astra", _GPT6_ASTRA),
+    ("gpt-6-sol", _GPT6_SOL_LUNA),
+    ("gpt-6-luna", _GPT6_SOL_LUNA),
     ("gpt-5-5-pro", _GPT55_PRO),
     ("gpt-5.5-pro", _GPT55_PRO),
     ("gpt-5-5", _GPT55),
@@ -479,6 +489,7 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("gpt-5", _GPT5_MINIMAL),
     # Gemini 3.7/3.8 reject minimal; earlier Gemini 3 endpoints accept it.
     ("gemini-3-8", _GEMINI_38),
+    ("gemini-3.8", _GEMINI_38),
     ("gemini-3-7", _GEMINI_37),
     ("gemini-3", _GEMINI_3),
     # Other documented Databricks reasoning endpoints.

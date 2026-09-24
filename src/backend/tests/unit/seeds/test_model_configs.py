@@ -32,6 +32,27 @@ class TestDefaultModelsDataStructure:
         """Test that MODEL_CONFIGS is an alias for DEFAULT_MODELS."""
         assert MODEL_CONFIGS is DEFAULT_MODELS
 
+    @pytest.mark.parametrize(
+        "key,provider",
+        [
+            ("gpt-6-astra", "openai"),
+            ("gpt-6-sol", "openai"),
+            ("gpt-6-luna", "openai"),
+            ("gpt-5.6-sol", "openai"),
+            ("gpt-5.6-terra", "openai"),
+            ("gpt-5.6-luna", "openai"),
+            ("claude-opus-5-5", "anthropic"),
+            ("claude-fable-5-1", "anthropic"),
+            ("claude-sonnet-5", "anthropic"),
+            ("gemini-3.8-flash", "gemini"),
+            ("gemini-3.5-flash-lite", "gemini"),
+        ],
+    )
+    def test_current_direct_models_preserve_existing_choices(self, key, provider):
+        assert DEFAULT_MODELS[key]["provider"] == provider
+        assert DEFAULT_MODELS[key]["name"] == key
+        assert key not in REMOVED_MODEL_KEYS
+
     def test_specific_models_exist(self):
         """Test that the current model keys are present.
 

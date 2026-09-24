@@ -24,6 +24,31 @@ DEFAULT_MODELS = {
     #   o3-deep-research / o4-mini-deep-research  shut down 2026-07-23
     #   gpt-5                                shuts down 2026-12-11
     #   gpt-5.2-chat-latest                  shuts down 2026-08-10
+    # GPT-6 direct API, verified against the OpenAI model catalog 2026-09-24.
+    "gpt-6-astra": {
+        "name": "gpt-6-astra",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-6-sol": {
+        "name": "gpt-6-sol",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-6-luna": {
+        "name": "gpt-6-luna",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
     "gpt-5.6-sol": {
         "name": "gpt-5.6-sol",
         "temperature": 1,
@@ -53,6 +78,14 @@ DEFAULT_MODELS = {
     # .../latest-model. Only STABLE ids are seeded — the previous entries pointed
     # at `-preview` suffixes (gemini-3-pro-preview, gemini-3-flash-preview) and
     # gemini-2.0-flash, all of which Google now lists as Shut down.
+    # Latest stable direct Flash model, verified 2026-09-24.
+    "gemini-3.8-flash": {
+        "name": "gemini-3.8-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
     "gemini-3.6-flash": {
         "name": "gemini-3.6-flash",
         "temperature": 1,
@@ -75,13 +108,23 @@ DEFAULT_MODELS = {
         "max_output_tokens": 65536,
     },
     # --- Anthropic ---
-    # Verified 2026-07-25 against the anthropics/skills model reference. The
-    # previous entries were the Claude 4.0 dated snapshots
-    # (claude-opus-4-20250514 / claude-sonnet-4-20250514), both now deprecated.
-    # Claude 5 is the current generation; Haiku 4.5 stays as the small/fast tier
-    # (there is no Haiku 5). Mythos is deliberately not seeded here (limited
-    # access). Fable is not seeded on this DIRECT-Anthropic path either — it is
-    # served via Databricks instead, see "databricks-claude-fable-5" below.
+    # Current direct Claude API models, verified 2026-09-24:
+    # https://platform.claude.com/docs/en/models/overview
+    # Preserve older model keys for saved workflows; new versions are separate.
+    "claude-opus-5-5": {
+        "name": "claude-opus-5-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "claude-fable-5-1": {
+        "name": "claude-fable-5-1",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
     "claude-opus-5": {
         "name": "claude-opus-5",
         "temperature": 0.7,
