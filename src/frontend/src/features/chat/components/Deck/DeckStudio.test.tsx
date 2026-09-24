@@ -299,6 +299,114 @@ describe('DeckStudio', () => {
     expect(screen.getByText('Slide 2')).toBeInTheDocument();
   });
 
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  };
+  const submitSlide = (number: number, instruction = 'Improve this slide') => {
+    fireEvent.click(screen.getByLabelText(`Select slide ${number}`));
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: instruction } });
+    fireEvent.click(screen.getByText('Apply'));
+  };
+
+  it.each([[0, 1], [1, 0]])('merges parallel edits completing in order %s then %s, preserving focus and undo', async (first, second) => {
+    const runs = [deferred<{ section: string; job_id: string }>(), deferred<{ section: string; job_id: string }>()];
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    submitSlide(1);
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    submitSlide(2);
+    expect(refineSlide).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByLabelText('Delete slide 3')).toBeDisabled();
+    expect(screen.getByLabelText('Duplicate slide 1')).toBeDisabled();
+    expect(screen.getByText('Add slide')).toBeDisabled();
+    act(() => {
+      refineSlide.mock.calls[0][1]('job-1');
+      refineSlide.mock.calls[1][1]('job-2');
+    });
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'job-2');
+    fireEvent.click(screen.getByLabelText('Select slide 1'));
+    expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'job-1');
+    fireEvent.click(screen.getByLabelText('Select slide 3'));
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    expect(screen.queryByTestId('slide-run')).not.toBeInTheDocument();
+    const replacements = ['Cover updated', 'Two updated'];
+    await act(async () => runs[first].resolve({ section: slide(replacements[first]), job_id: `job-${first + 1}` }));
+    expect(screen.getByRole('listitem', { name: `Slide ${second + 1}` })).toHaveAttribute('aria-busy', 'true');
+    const intermediate = deckInMessage();
+    await act(async () => runs[second].resolve({ section: slide(replacements[second]), job_id: `job-${second + 1}` }));
+    expect(deckInMessage()).toEqual(['Cover updated', 'Two updated', 'Three']);
+    expect(screen.getByRole('listitem', { name: 'Slide 3' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('3 slides · 2 edits')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(`Undo: Refined slide ${second + 1}`));
+    expect(deckInMessage()).toEqual(intermediate);
+    await act(async () => {});
+    fireEvent.click(screen.getByTitle(`Undo: Refined slide ${first + 1}`));
+    expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
+  });
+
+  it('queues overlapping saves and rebases the second save onto the first saved deck', async () => {
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    const saves = [deferred<void>(), deferred<void>()];
+    const onDeckChange = vi.fn().mockReturnValueOnce(saves[0].promise).mockReturnValueOnce(saves[1].promise);
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} onDeckChange={onDeckChange} onClose={() => {}} />);
+    submitSlide(1);
+    submitSlide(2);
+    await act(async () => {
+      runs[0].resolve({ section: slide('Cover updated') });
+      runs[1].resolve({ section: slide('Two updated') });
+    });
+    expect(onDeckChange).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Slide instruction')).toBeDisabled();
+    await act(async () => saves[0].resolve());
+    expect(onDeckChange).toHaveBeenCalledTimes(2);
+    const [next, previous] = onDeckChange.mock.calls[1];
+    expect(titles(previous)).toEqual(['Cover updated', 'Two', 'Three']);
+    expect(titles(next)).toEqual(['Cover updated', 'Two updated', 'Three']);
+    await act(async () => saves[1].resolve());
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+  });
+
+  it('a failed save does not block another slide or appear in its activity', async () => {
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    const firstSave = deferred<void>();
+    const onDeckChange = vi.fn().mockReturnValueOnce(firstSave.promise).mockResolvedValueOnce(undefined);
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} onDeckChange={onDeckChange} onClose={() => {}} />);
+    submitSlide(1);
+    submitSlide(2);
+    await act(async () => {
+      runs[0].resolve({ section: slide('Cover updated') });
+      runs[1].resolve({ section: slide('Two updated') });
+    });
+    await act(async () => firstSave.reject(new Error('Save unavailable')));
+    expect(titles(onDeckChange.mock.calls[1][0])).toEqual(['Cover', 'Two updated', 'Three']);
+    expect(onDeckChange.mock.calls[1][1]).toBe(DECK);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Select slide 1'));
+    expect(screen.getByRole('alert')).toHaveTextContent('Save unavailable');
+    expect(screen.getByLabelText('Slide instruction')).toBeEnabled();
+    expect(screen.getByText('3 slides · 1 edit')).toBeInTheDocument();
+  });
+
+  it('rejects a stale result if the target changed externally during generation', async () => {
+    const run = deferred<{ section: string }>();
+    const onDeckChange = vi.fn().mockResolvedValue(undefined);
+    refineSlide.mockReturnValue(run.promise);
+    const { rerender } = render(<DeckStudio code={DECK} onDeckChange={onDeckChange} onClose={() => {}} />);
+    submitSlide(1);
+    rerender(<DeckStudio code={[slide('External edit'), slide('Two'), slide('Three')].join('\n')}
+      onDeckChange={onDeckChange} onClose={() => {}} />);
+    await act(async () => run.resolve({ section: slide('Stale edit') }));
+    expect(onDeckChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('changed while the edit was running');
+  });
+
   it('Escape closes', () => {
     const onClose = vi.fn();
     render(<DeckStudio code={DECK} onClose={onClose} />);

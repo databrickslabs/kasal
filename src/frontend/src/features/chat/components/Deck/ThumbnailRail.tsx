@@ -14,8 +14,9 @@ import { hasPendingAssets } from '../../utils/assetRefs';
 interface ThumbnailRailProps {
   slides: string[];
   selected: number;
-  /** Index of the slide a model call is rewriting, if any. */
-  working: number | null;
+  /** Slides with generation or saving in progress. */
+  working: ReadonlySet<number>;
+  locked: boolean;
   onSelect: (index: number) => void;
   onMove: (from: number, to: number) => void;
   onDuplicate: (index: number) => void;
@@ -28,6 +29,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
   slides,
   selected,
   working,
+  locked,
   onSelect,
   onMove,
   onDuplicate,
@@ -44,6 +46,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
       className="group/add flex h-4 w-full items-center justify-center opacity-0 transition-opacity hover:opacity-100 focus:opacity-100"
       title="Add a slide here"
       aria-label={`Add a slide at position ${at + 1}`}
+      disabled={locked}
       onClick={() => onAddAt(at)}
     >
       <span className="h-px flex-1" style={{ background: '#3a3a3a' }} />
@@ -69,14 +72,15 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
       {insertButton(0)}
       {slides.map((slide, i) => {
         const isSelected = i === selected;
-        const isWorking = working === i;
+        const isWorking = working.has(i);
         return (
           <React.Fragment key={i}>
             <div
               role="listitem"
               aria-label={`Slide ${i + 1}`}
+              aria-busy={isWorking}
               aria-current={isSelected ? 'true' : undefined}
-              draggable
+              draggable={!locked}
               onDragStart={() => setDragging(i)}
               onDragOver={(e) => {
                 e.preventDefault();
@@ -85,7 +89,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
               onDragLeave={() => setOver((o) => (o === i ? null : o))}
               onDrop={(e) => {
                 e.preventDefault();
-                if (dragging !== null && dragging !== i) onMove(dragging, i);
+                if (!locked && dragging !== null && dragging !== i) onMove(dragging, i);
                 setDragging(null);
                 setOver(null);
               }}
@@ -132,7 +136,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                   onClick={() => onSelect(i)}
                 />
                 {isWorking && (
-                  <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
                     <Loader2 size={18} className="animate-spin" style={{ color: '#fff' }} />
                   </div>
                 )}
@@ -143,6 +147,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                     style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}
                     title="Duplicate slide"
                     aria-label={`Duplicate slide ${i + 1}`}
+                    disabled={locked}
                     onClick={() => onDuplicate(i)}
                   >
                     <Copy size={12} />
@@ -153,7 +158,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                     style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}
                     title="Delete slide"
                     aria-label={`Delete slide ${i + 1}`}
-                    disabled={slides.length <= 1}
+                    disabled={locked || slides.length <= 1}
                     onClick={() => onRemove(i)}
                   >
                     <Trash2 size={12} />
@@ -170,6 +175,7 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
         type="button"
         className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md border !px-2 !py-1.5 text-xs hover:bg-white/10"
         style={{ borderColor: '#333', color: '#cfcfcf' }}
+        disabled={locked}
         onClick={() => onAddAt(slides.length)}
       >
         <Plus size={13} /> Add slide
