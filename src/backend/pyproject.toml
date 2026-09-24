@@ -107,6 +107,7 @@ dependencies = [
     "wheel",
     "ollama>=0.6.2",
     "gepa>=0.1.4",
+    "anthropic>=1.8.0",
 ]
 
 [dependency-groups]

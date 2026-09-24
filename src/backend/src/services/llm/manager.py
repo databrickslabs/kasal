@@ -889,6 +889,8 @@ class LLMManager:
             api_key = await ApiKeysService.get_provider_api_key(
                 provider, group_id=group_id
             )
+            # Direct Claude uses the native Messages API, including adaptive thinking.
+            api_base = os.getenv("ANTHROPIC_API_BASE") or "https://api.anthropic.com"
             prefixed_model = f"anthropic/{model_name_value}"
         elif provider == ModelProvider.OLLAMA:
             api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
@@ -1130,6 +1132,9 @@ class LLMManager:
                 # Help Instructor pick the right model family when no key is set.
                 os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
 
+            api_base = os.getenv("GEMINI_API_BASE") or (
+                "https://generativelanguage.googleapis.com/v1beta/openai"
+            )
             prefixed_model = f"gemini/{model_name_value}"
         else:
             # Default fallback for other providers
@@ -1149,6 +1154,13 @@ class LLMManager:
             "model": prefixed_model,
             "timeout": 300,
         }
+        if provider == ModelProvider.OPENAI and model_name_value in {
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+        }:
+            # GPT-6 tool calls with reasoning use the Responses API.
+            llm_params["api"] = "responses"
 
         # Temperature is OMITTED — never merely "dropped later" — for models whose
         # endpoint rejects it. There is no drop_params safety net any more:

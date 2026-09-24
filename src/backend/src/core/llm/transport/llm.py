@@ -10,14 +10,39 @@ since every kasal endpoint speaks the OpenAI protocol.
 
 from typing import Any
 
-from pydantic import model_validator
+from pydantic import ConfigDict, model_validator
 
 from .completion import OpenAICompletion
 
-_KNOWN_PREFIXES = ("openai", "databricks", "azure", "hosted_vllm", "custom")
+_KNOWN_PREFIXES = (
+    "openai",
+    "databricks",
+    "anthropic",
+    "gemini",
+    "azure",
+    "hosted_vllm",
+    "custom",
+)
 
 
 class LLM(OpenAICompletion):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    @property
+    def client(self) -> Any:
+        if self.provider != "anthropic":
+            return super().client
+        if self._client is None:
+            from .anthropic_client import AnthropicClient
+
+            self._client = AnthropicClient(
+                api_key=self.api_key,
+                base_url=self.base_url or self.api_base,
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+            )
+        return self._client
+
     @model_validator(mode="before")
     @classmethod
     def _split_provider_prefix(cls, data: Any) -> Any:
@@ -37,4 +62,14 @@ class LLM(OpenAICompletion):
                     # ENDPOINT_NOT_FOUND on /serving-endpoints (400 on the gateway).
                     if prefix in ("openai", "databricks"):
                         data["model"] = model.partition("/")[2]
+            if data.get("provider") in ("anthropic", "gemini"):
+                data = dict(data)
+                provider = data["provider"]
+                label = provider.capitalize()
+                # Also normalize when the caller supplies an explicit provider.
+                data["model"] = str(data["model"]).removeprefix(f"{provider}/")
+                if not (data.get("base_url") or data.get("api_base")):
+                    raise ValueError(f"{label} requires an explicit API endpoint")
+                if not data.get("api_key"):
+                    raise ValueError(f"{label} requires its own API key")
         return data
