@@ -603,3 +603,12 @@ class ToolUsageStartedEvent(ToolUsageEvent):
     """Engine replacement for crewai.events.types.tool_usage_events.ToolUsageStartedEvent"""
 
     type: Literal["tool_usage_started"] = "tool_usage_started"
+
+
+class DecisionEvaluatedEvent(BaseEvent):
+    type: Literal["decision_evaluated"] = "decision_evaluated"
+    output: str
+    policy: str
+    model: str
+    status: str
+    duration_ms: float

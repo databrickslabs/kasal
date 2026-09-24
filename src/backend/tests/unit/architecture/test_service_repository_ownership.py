@@ -54,6 +54,7 @@ _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"
 #: Derived from where the write path lives, not from name similarity — `knowledge`
 #: owns `documentation_embedding` even though the names share nothing.
 _OWNED = {
+    "decisions": {"decision_config"},
     "billing": {"model_billing_rate"},
     "a2a": {"a2a_agent", "a2a_push_config"},
     "a2ui": {"ui_config"},

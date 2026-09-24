@@ -24,6 +24,7 @@ from src.models.crew import Crew, Plan
 # Database configuration models
 from src.models.database_config import LakebaseConfig
 from src.models.databricks_config import DatabricksConfig
+from src.models.decision_config import DecisionConfig
 
 # Documentation models
 from src.models.documentation_embedding import (
@@ -82,6 +83,7 @@ from src.models.workflow_recipe_trial import WorkflowRecipeTrial
 
 # This ensures all models are registered with SQLAlchemy metadata
 __all__ = [
+    "DecisionConfig",
     "Base",
     "Agent",
     "Task",

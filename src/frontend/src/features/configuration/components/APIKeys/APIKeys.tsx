@@ -97,6 +97,7 @@ function APIKeys(): JSX.Element {
     'ANTHROPIC_API_KEY',
     'QWEN_API_KEY',
     'DEEPSEEK_API_KEY',
+    'JEV_API_KEY',
     'GROK_API_KEY',
     'GEMINI_API_KEY',
     'KIMI_API_KEY',
@@ -113,6 +114,7 @@ function APIKeys(): JSX.Element {
       'databricks': 'DATABRICKS_API_KEY',
       'qwen': 'QWEN_API_KEY',
       'deepseek': 'DEEPSEEK_API_KEY',
+      'jev': 'JEV_API_KEY',
       'grok': 'GROK_API_KEY',
       'gemini': 'GEMINI_API_KEY',
       'kimi': 'KIMI_API_KEY'
@@ -602,4 +604,4 @@ function APIKeys(): JSX.Element {
   );
 }
 
-export default APIKeys; 
+export default APIKeys;

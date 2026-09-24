@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # code (see the migration that rewrites execution_trace.span_name). An
 # unmigrated database is the one case where an old row no longer maps.
 SPAN_NAME_MAP: Dict[str, str] = {
+    "kasal.decision.evaluate": "decision_evaluated",
     # Crew lifecycle
     "kasal.crew.kickoff": "crew_started",
     "kasal.crew.complete": "crew_completed",

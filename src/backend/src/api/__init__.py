@@ -22,6 +22,7 @@ from src.api.database_management_router import router as database_management_rou
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.databricks_router import router as databricks_router
 from src.api.databricks_secrets_router import router as databricks_secrets_router
+from src.api.decision_config_router import router as decision_config_router
 from src.api.decks_router import router as decks_router
 from src.api.dispatcher_router import router as dispatcher_router
 from src.api.documentation_embeddings_router import (
@@ -92,6 +93,7 @@ api_router.include_router(chat_assets_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(ui_config_router)
+api_router.include_router(decision_config_router)
 api_router.include_router(databricks_knowledge_router)
 api_router.include_router(powerbi_router)
 api_router.include_router(flows_router)

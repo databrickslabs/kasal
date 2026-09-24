@@ -145,3 +145,7 @@ async def _ensure_hot_polling_indexes(conn) -> None:
                 f"Could not ensure polling index ({stmt.split(' ON ', 1)[0]}): {e}"
             )
     logger.info("Ensured hot-polling indexes on executionhistory/execution_trace")
+
+
+async def _ensure_decision_config_table(conn) -> None:
+    await ensure_table(conn, "src.models.decision_config", "DecisionConfig")

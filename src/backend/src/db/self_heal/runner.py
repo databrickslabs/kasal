@@ -36,6 +36,7 @@ from src.db.self_heal.tables import (
     _ensure_chat_sessions_table,
     _ensure_crew_feedback_table,
     _ensure_crew_publications_table,
+    _ensure_decision_config_table,
     _ensure_event_choreography_tables,
     _ensure_hot_polling_indexes,
     _ensure_memory_maintenance_table,
@@ -103,6 +104,7 @@ async def run_schema_self_heal(conn) -> None:
         await enable_pgvector_async(conn)
 
     steps = (
+        _ensure_decision_config_table,
         _ensure_documentation_embeddings_columns,
         _ensure_databricks_config_columns,
         _ensure_chat_assets_table,
