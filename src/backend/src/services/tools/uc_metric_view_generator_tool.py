@@ -66,6 +66,15 @@ class UCMetricViewGeneratorSchema(BaseModel):
     use_llm_fallback: bool = Field(
         False, description="Enable LLM fallback for unmatched DAX patterns (opt-in)"
     )
+    validate_against_pbi: bool = Field(
+        False,
+        description=(
+            "Opt-in: run the rec#4 validation loop against Power BI. Requires "
+            "access_token + workspace_id + dataset_id; compares each measure/view "
+            "against PBI EVALUATE. Off by default so a normal generation run makes "
+            "no live network calls."
+        ),
+    )
     translation_mode: Optional[str] = Field(
         None,
         description="'llm_first' (default when LLM enabled — skill-corpus-driven) or 'regex_first' (regex patterns primary)",
@@ -166,6 +175,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "inner_dim_joins",
             "unflatten_tables",
             "use_llm_fallback",
+            "validate_against_pbi",
             "translation_mode",
             "llm_model",
             "llm_workspace_url",
@@ -914,12 +924,34 @@ class UCMetricViewGeneratorTool(BaseTool):
 
             _mq_exprs = getattr(pipeline, "_mquery_expressions", {}) or {}
             source_layer_ddl = build_source_layer(
-                pipeline.all_specs, mquery_tables, config, catalog, schema
+                pipeline.all_specs,
+                mquery_tables,
+                config,
+                catalog,
+                schema,
+                mquery_expressions=_mq_exprs,
             )
             pbi_only_ingestion_tasks = detect_pbi_only_tables(
                 _mq_exprs, catalog, schema
             )
-            pbi_validation_report = run_pbi_validation(pipeline.all_specs, yaml_output)
+            # rec#4: only build a live PBI callback when explicitly opted in (and
+            # creds are present) — otherwise run_pbi_validation reports "skipped"
+            # and makes no network calls.
+            _evaluate_fn = None
+            if _get("validate_against_pbi"):
+                from src.services.tools.metric_view_utils.source_artifacts import (
+                    build_pbi_evaluate_fn,
+                )
+
+                _evaluate_fn = build_pbi_evaluate_fn(
+                    _get("access_token"),
+                    _get("workspace_id"),
+                    _get("dataset_id"),
+                    base_url=_get("pbi_api_base_url"),
+                )
+            pbi_validation_report = run_pbi_validation(
+                pipeline.all_specs, yaml_output, evaluate_fn=_evaluate_fn
+            )
             if source_layer_ddl or pbi_only_ingestion_tasks:
                 logger.info(
                     f"[UCMVGenerator] source layer: {len(source_layer_ddl)} view(s); "
@@ -1034,6 +1066,10 @@ class UCMetricViewGeneratorTool(BaseTool):
                     untranslatable_items=output.get("untranslatable_items") or [],
                     pbi_ucmv_mapping=output.get("pbi_ucmv_mapping") or {},
                     live_connections=output.get("live_connections") or {},
+                    source_layer_ddl=output.get("source_layer_ddl") or {},
+                    pbi_only_ingestion_tasks=output.get("pbi_only_ingestion_tasks")
+                    or [],
+                    pbi_validation=output.get("pbi_validation") or {},
                 )
             )
         except Exception as _hist_err:
@@ -1443,6 +1479,9 @@ class UCMetricViewGeneratorTool(BaseTool):
         untranslatable_items: Optional[list] = None,
         pbi_ucmv_mapping: Optional[dict] = None,
         live_connections: Optional[dict] = None,
+        source_layer_ddl: Optional[dict] = None,
+        pbi_only_ingestion_tasks: Optional[list] = None,
+        pbi_validation: Optional[dict] = None,
     ) -> None:
         """Persist the full raw DAX extract to conversion_history (fail-open).
 
@@ -1529,6 +1568,14 @@ class UCMetricViewGeneratorTool(BaseTool):
                     # Live-connection flag (which semantic model/table to parse),
                     # persisted so the UI note is retrievable by execution_id.
                     "live_connections": live_connections or {},
+                    # Source-layer DDL (rec#3): {table: {ddl, todo_steps, error}}
+                    # — persisted so the UI can show the base views a run proposes.
+                    "source_layer_ddl": source_layer_ddl or {},
+                    # PBI-only ingestion tasks (S8): tables needing a snapshot
+                    # loader rather than a SQL source.
+                    "pbi_only_ingestion_tasks": pbi_only_ingestion_tasks or [],
+                    # Validation-loop status (rec#4): skipped/ran/error + detail.
+                    "pbi_validation": pbi_validation or {},
                 },
                 output_summary=(
                     f"Generated {view_count} UC metric view(s)"

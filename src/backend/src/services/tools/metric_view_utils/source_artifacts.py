@@ -36,13 +36,20 @@ def build_source_layer(
     config: dict | None,
     catalog: str,
     schema: str,
+    mquery_expressions: dict | None = None,
 ) -> dict:
     """One source-layer UC view per fact/dim table (rec #3).
 
-    Reproduces the physical read each metric view sits on: the verbatim
-    ``Value.NativeQuery`` SQL when the M carried one (``TableInfo.native_query_sql``,
-    which preserves derived columns / filters), otherwise a passthrough over the
-    resolved ``source_table``. DAX calculated columns from config-gen enrichment
+    Reproduces the physical read each metric view sits on:
+    - a ``Value.NativeQuery`` fact keeps its verbatim SQL
+      (``TableInfo.native_query_sql``, derived columns / filters preserved);
+    - a dimension (no native SQL) reads ``SELECT * FROM <source_table>`` with the
+      M transformation steps that follow the source (filters, code remaps, dedup)
+      FOLDED in via ``MTransformFolder.fold_from_mquery`` — so a dim view carries
+      its transforms too, not just a bare passthrough. Any untranslatable step is
+      surfaced as a TODO, never silently dropped.
+
+    DAX calculated columns from config-gen enrichment
     (``config['calculated_columns']``) are attached as ``todo`` calc columns —
     surfaced as ``-- TODO`` rather than emitted as (untranslated) SQL.
 
@@ -60,6 +67,8 @@ def build_source_layer(
         return {}
 
     calc_cfg = (config or {}).get("calculated_columns") or {}
+    mq_exprs = mquery_expressions or {}
+    fold_todos: dict[str, list] = {}  # table -> untranslatable M steps (surfaced)
     specs: list = []
     for key, spec in (all_specs or {}).items():
         ti = (mquery_tables or {}).get(key)
@@ -69,6 +78,23 @@ def build_source_layer(
         )
         if not native and not src_tbl:
             continue  # nothing resolvable to read from — skip (not a stub)
+        # Dimension (no native SQL): fold the M transform steps onto the base read
+        # so filters/remaps/dedup are reproduced, not dropped (S5). Fail-open to a
+        # plain passthrough.
+        if not native and src_tbl and mq_exprs.get(key):
+            try:
+                from .m_transform_folder import MTransformFolder
+
+                _folder = MTransformFolder()
+                _base = f"SELECT * FROM {_bq(src_tbl)}"
+                _cols = getattr(ti, "group_by_columns", None) if ti else None
+                _folded = _folder.fold_from_mquery(_base, mq_exprs[key], _cols)
+                if _folded and _folded.strip() != _base.strip():
+                    native = _folded
+                if getattr(_folder, "transform_todos", None):
+                    fold_todos[key] = list(_folder.transform_todos)
+            except Exception as _fe:
+                logger.debug(f"[source_layer] transform fold failed for {key}: {_fe}")
         try:
             source = (
                 TableSource(native_sql=native)
@@ -107,7 +133,9 @@ def build_source_layer(
     return {
         e.table_name: {
             "ddl": e.ddl,
-            "todo_steps": e.todo_steps,
+            # emitter TODOs (calc columns) + any untranslatable M transform steps
+            # folded in above — so a dropped/uncertain step is always visible.
+            "todo_steps": list(e.todo_steps) + fold_todos.get(e.table_name, []),
             "error": e.error,
         }
         for e in emitted
@@ -151,6 +179,71 @@ def detect_pbi_only_tables(
         except Exception as e:
             logger.debug(f"[pbi_only] detection failed for {table}: {e}")
     return tasks
+
+
+def build_pbi_evaluate_fn(
+    access_token: Optional[str],
+    workspace_id: Optional[str],
+    dataset_id: Optional[str],
+    *,
+    base_url: Optional[str] = None,
+    uc_sql_fn: Optional[Callable[[str], Any]] = None,
+) -> Optional[Callable[[str], list]]:
+    """Build the ``evaluate_fn`` the validation loop (rec#4) needs, or ``None``
+    when the PBI credentials required to run it aren't present.
+
+    The returned callable routes by query shape, which is exactly the contract
+    ``pbi_validation.validate_view`` / ``validate_measure`` expect:
+    - a DAX query (``EVALUATE`` / ``DEFINE``) → Power BI ``executeQueries`` REST
+      call against the dataset (the reference side);
+    - anything else (the generated UC SQL) → ``uc_sql_fn`` when supplied (a
+      Databricks SQL executor for the deployed view), else ``[]`` — so the view
+      is reported *unverified* rather than crashing when it isn't deployed yet.
+
+    Synchronous (httpx.Client) so it drops straight into the tool's sync
+    post-processing. Fail-soft: a failed PBI call returns ``[]``.
+    """
+    if not (access_token and workspace_id and dataset_id):
+        return None
+    api_base = (base_url or "https://api.powerbi.com/v1.0/myorg").rstrip("/")
+    url = f"{api_base}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
+
+    def _evaluate(query: str) -> list:
+        q = (query or "").strip()
+        if not q.upper().startswith(("EVALUATE", "DEFINE")):
+            # Generated UC SQL — needs a live warehouse + deployed view.
+            if uc_sql_fn is None:
+                return []
+            try:
+                return list(uc_sql_fn(query) or [])
+            except Exception as e:
+                logger.debug(f"[pbi_validation] uc_sql_fn failed: {e}")
+                return []
+        try:
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "queries": [{"query": q}],
+                "serializerSettings": {"includeNulls": True},
+            }
+            with httpx.Client(timeout=120.0) as client:
+                resp = client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            if isinstance(data, dict) and "error" in data:
+                logger.debug(f"[pbi_validation] PBI error: {data['error']}")
+                return []
+            tables = (data.get("results", [{}]) or [{}])[0].get("tables", [])
+            return tables[0].get("rows", []) if tables else []
+        except Exception as e:
+            logger.debug(f"[pbi_validation] executeQueries failed: {e}")
+            return []
+
+    return _evaluate
 
 
 def run_pbi_validation(

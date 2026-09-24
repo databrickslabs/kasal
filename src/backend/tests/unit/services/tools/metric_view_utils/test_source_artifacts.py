@@ -4,6 +4,7 @@ PBI-only ingestion tasks, and the validation hook (rec#3 / S8 / rec#4 wiring).""
 from types import SimpleNamespace
 
 from src.services.tools.metric_view_utils.source_artifacts import (
+    build_pbi_evaluate_fn,
     build_source_layer,
     detect_pbi_only_tables,
     run_pbi_validation,
@@ -83,3 +84,65 @@ class TestRunPbiValidation:
 
         rep = run_pbi_validation({}, {"v1": "SELECT 1"}, evaluate_fn=fake_eval)
         assert rep["status"] in ("ran", "error")
+
+
+class TestBuildPbiEvaluateFn:
+    def test_none_without_credentials(self):
+        assert build_pbi_evaluate_fn(None, "ws", "ds") is None
+        assert build_pbi_evaluate_fn("tok", None, "ds") is None
+
+    def test_sql_routes_to_uc_fn(self):
+        fn = build_pbi_evaluate_fn("tok", "ws", "ds", uc_sql_fn=lambda q: [{"n": 3}])
+        assert fn is not None
+        assert fn("SELECT count(*) FROM v") == [{"n": 3}]
+
+    def test_sql_without_uc_fn_returns_empty(self):
+        fn = build_pbi_evaluate_fn("tok", "ws", "ds")
+        assert fn("SELECT 1") == []
+
+    def test_evaluate_routes_to_pbi(self, monkeypatch):
+        import httpx
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": [{"tables": [{"rows": [{"v": 74.37}]}]}]}
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                return _Resp()
+
+        monkeypatch.setattr(httpx, "Client", _Client)
+        fn = build_pbi_evaluate_fn("tok", "ws", "ds")
+        assert fn('EVALUATE ROW("v", 1)') == [{"v": 74.37}]
+
+
+class TestDimTransformFold:
+    def test_dim_replace_value_folded_into_source_view(self):
+        from types import SimpleNamespace
+
+        specs = {"Dim_Country": SimpleNamespace(source_table="dc.udm.dim_company")}
+        mq = {
+            "Dim_Country": (
+                "let\n"
+                "  Source = dc.udm.dim_company,\n"
+                '  Replaced = Table.ReplaceValue(Source,"GB","NIR",'
+                'Replacer.ReplaceText,{"country"})\n'
+                "in\n  Replaced"
+            )
+        }
+        out = build_source_layer(specs, {}, {}, "c", "s", mquery_expressions=mq)
+        # The GB→NIR remap must appear in the emitted DDL (folded, not dropped).
+        assert "Dim_Country" in out
+        assert "replace(" in out["Dim_Country"]["ddl"].lower()
