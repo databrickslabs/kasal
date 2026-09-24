@@ -1011,3 +1011,110 @@ class TestSourceSqlDangerousDrop:
         # inline SQL dropped → falls back to plain source_table, no DROP in output
         assert "DROP TABLE" not in y
         assert "source: cat.sch.tbl" in y or "source: `cat`" in y or "source:" in y
+
+
+class TestVisualUsageSuffix:
+    """The measure comment's "Used on" annotation carries HOW OFTEN (count),
+    HOW (drawn/filter) and WHERE (page + visual type). The review UI's "Used on"
+    column parses it back out, so the format is a contract."""
+
+    @staticmethod
+    def _suffix(used_in_visuals):
+        from types import SimpleNamespace
+
+        from src.services.tools.metric_view_utils.yaml_emitter import (
+            _visual_usage_suffix,
+        )
+
+        return _visual_usage_suffix(SimpleNamespace(used_in_visuals=used_in_visuals))
+
+    def test_empty_when_no_usage(self):
+        assert self._suffix([]) == ""
+        assert self._suffix(None) == ""
+
+    def test_single_visual_carries_count_type_and_role(self):
+        s = self._suffix([{"page": "OTC Scorecard", "visual_type": "card", "role": "drawn"}])
+        assert s == " · Used on 1 visual: OTC Scorecard (card·drawn)"
+
+    def test_counts_every_occurrence_and_dedupes_pages_with_multiple_types(self):
+        # Three occurrences (HOW OFTEN=3) across two pages; the first page has
+        # two visuals (×2) of two types collapsed with "/", the second a lone
+        # visual (no ×1).
+        s = self._suffix([
+            {"page": "OTC Scorecard", "visual_type": "card", "role": "drawn"},
+            {"page": "OTC Scorecard", "visual_type": "tableEx", "role": "drawn"},
+            {"page": "OTC NPS", "visual_type": "slicer", "role": "filter"},
+        ])
+        assert s == (
+            " · Used on 3 visuals: OTC Scorecard ×2 (card/tableEx·drawn), "
+            "OTC NPS (slicer·filter)"
+        )
+
+    def test_all_occurrences_on_one_page_show_the_page_tally(self):
+        # The confusing case from the field: 7 visuals, all on one page → the
+        # page chip carries ×7 so the total and the single chip reconcile.
+        s = self._suffix([
+            {"page": "OTC Scorecard", "visual_type": "pivotTable", "role": "filter"}
+            for _ in range(6)
+        ] + [
+            {"page": "OTC Scorecard", "visual_type": "clusteredBarChart", "role": "filter"}
+        ])
+        assert s == (
+            " · Used on 7 visuals: OTC Scorecard ×7 "
+            "(pivotTable/clusteredBarChart·filter)"
+        )
+
+    def test_filter_only_page_is_marked_filter(self):
+        s = self._suffix([{"page": "P", "visual_type": "slicer", "role": "filter"}])
+        assert "(slicer·filter)" in s
+
+    def test_caps_at_three_pages_then_plus_n_more(self):
+        s = self._suffix([
+            {"page": f"Page {i}", "visual_type": "card", "role": "drawn"}
+            for i in range(5)
+        ])
+        assert "Used on 5 visuals:" in s
+        assert "(+2 more)" in s
+        # Only the first three pages are named explicitly.
+        assert "Page 0" in s and "Page 2" in s and "Page 3" not in s
+
+    def test_missing_type_still_emits_role(self):
+        s = self._suffix([{"page": "P", "role": "drawn"}])
+        assert s == " · Used on 1 visual: P (drawn)"
+
+
+class TestIndirectVisualUsageSuffix:
+    """The '· Indirectly used via [Parent] on: <pages>' clause — backtraced
+    sub-KPI usage, kept separate from the direct 'Used on' suffix."""
+
+    @staticmethod
+    def _suffix(indirect):
+        from types import SimpleNamespace
+
+        from src.services.tools.metric_view_utils.yaml_emitter import (
+            _indirect_visual_usage_suffix,
+        )
+
+        return _indirect_visual_usage_suffix(
+            SimpleNamespace(indirect_visual_usage=indirect)
+        )
+
+    def test_empty(self):
+        assert self._suffix([]) == ""
+        assert self._suffix(None) == ""
+
+    def test_single_via_lists_its_pages(self):
+        s = self._suffix([
+            {"page": "OTC Scorecard", "via": "OTC Health Score", "role": "drawn"},
+            {"page": "Exec Summary", "via": "OTC Health Score", "role": "drawn"},
+        ])
+        assert s == " · Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary"
+
+    def test_caps_parents_at_two_then_plus_more(self):
+        s = self._suffix([
+            {"page": "P", "via": f"KPI {i}"} for i in range(4)
+        ])
+        assert "Indirectly used via [KPI 0]" in s
+        assert "[KPI 1]" in s
+        assert "[KPI 2]" not in s
+        assert "(+2 more)" in s

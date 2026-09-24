@@ -74,6 +74,45 @@ export class CrewService {
     }
   }
 
+  /**
+   * Duplicate an existing crew as a brand-new one under a different name.
+   *
+   * A crew is fully described by its nodes/edges plus execution config (agent
+   * role/goal/backstory and task description/expected_output are embedded in
+   * `node.data`), so a duplicate is just the source crew re-POSTed with a fresh
+   * name — the backend assigns a new id. The copy references the same underlying
+   * Agent/Task rows via `agent_ids`/`task_ids`, same as loading and re-saving a
+   * crew does. `newName` must be unique (POST /crews returns 409 on a name clash
+   * unless overwrite=true); the caller computes a non-colliding "… (copy)" name
+   * from the catalog it already holds.
+   */
+  static async duplicateCrew(id: string, newName: string): Promise<CrewResponse> {
+    try {
+      const source = await this.getCrew(id);
+      const payload: CrewCreate = {
+        name: newName,
+        agent_ids: source.agent_ids ?? [],
+        task_ids: source.task_ids ?? [],
+        nodes: source.nodes ?? [],
+        edges: source.edges ?? [],
+        process: source.process,
+        reasoning: source.reasoning,
+        reasoning_llm: source.reasoning_llm,
+        reasoning_config: source.reasoning_config,
+        manager_llm: source.manager_llm,
+        tool_configs: source.tool_configs,
+        memory: source.memory,
+        verbose: source.verbose,
+        max_rpm: source.max_rpm,
+      };
+      const response = await API.post('/crews', payload);
+      return response.data;
+    } catch (error) {
+      console.error('Error duplicating crew:', error);
+      throw error;
+    }
+  }
+
   static async getTasks(crewId: string): Promise<CrewTask[]> {
     try {
       const response = await API.get(`/crews/${crewId}`);

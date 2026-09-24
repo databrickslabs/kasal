@@ -45,6 +45,10 @@ export interface UntranslatableItem {
   /** Labeled, UNVERIFIED CREATE VIEW scaffold for cross-fact / multi-stage cases
    *  (proposal artifact, never an emitted measure). Also present in the YAML. */
   source_view_sql_draft?: string | null;
+  /** Report visual(s) this non-emitted measure is drawn/filtered on directly. */
+  used_in_visuals?: Array<{ page?: string; visual_type?: string; role?: string }>;
+  /** Backtraced usage: visual-placed KPIs that reference this measure. */
+  indirect_visual_usage?: Array<{ page?: string; via?: string }>;
 }
 
 /** Triage status a reviewer can assign to a non-transpiled item. */
@@ -124,7 +128,8 @@ export const NonTranspiledPanel: React.FC<{
             <TableCell sx={{ fontWeight: 600, width: '15%' }}>Measure</TableCell>
             <TableCell sx={{ fontWeight: 600, width: '24%' }}>DAX</TableCell>
             <TableCell sx={{ fontWeight: 600, width: '14%' }}>Reason</TableCell>
-            <TableCell sx={{ fontWeight: 600, width: '16%' }} title="Suggested next step for handling this measure">Proposed approach</TableCell>
+            <TableCell sx={{ fontWeight: 600, width: '13%' }} title="Suggested next step for handling this measure">Proposed approach</TableCell>
+            <TableCell sx={{ fontWeight: 600, width: '13%' }} title="Report page(s) this measure is drawn/filtered on, or the visual-placed KPI that references it">Used on</TableCell>
             <TableCell sx={{ fontWeight: 600, width: '6%' }} align="right" title="How many other measures reference this one">Used by</TableCell>
             <TableCell sx={{ fontWeight: 600, width: '13%' }}>Status</TableCell>
             <TableCell sx={{ fontWeight: 600, width: '12%' }}>Note</TableCell>
@@ -156,6 +161,32 @@ export const NonTranspiledPanel: React.FC<{
                       {item.proposal}
                     </Typography>
                   ) : '—'}
+                </TableCell>
+                <TableCell sx={{ fontSize: '0.75rem' }}>
+                  {(() => {
+                    // Direct pages this non-emitted measure is drawn/filtered on…
+                    const pages = Array.from(
+                      new Set((item.used_in_visuals ?? []).map((o) => o.page).filter(Boolean)),
+                    ) as string[];
+                    // …and the visual-placed KPIs that reference it (backtraced).
+                    const vias = Array.from(
+                      new Set((item.indirect_visual_usage ?? []).map((o) => o.via).filter(Boolean)),
+                    ) as string[];
+                    if (!pages.length && !vias.length) return '—';
+                    return (
+                      <Box display="flex" gap={0.5} flexWrap="wrap">
+                        {pages.map((p) => (
+                          <Chip key={`p-${p}`} size="small" variant="outlined" color="info"
+                            label={p} sx={{ height: 18, fontSize: '0.7rem' }} />
+                        ))}
+                        {vias.map((v) => (
+                          <Chip key={`v-${v}`} size="small" variant="outlined" label={`↳ via ${v}`}
+                            title={`Referenced by the visual-placed KPI [${v}]`}
+                            sx={{ height: 18, fontSize: '0.7rem', borderStyle: 'dashed', color: 'text.secondary' }} />
+                        ))}
+                      </Box>
+                    );
+                  })()}
                 </TableCell>
                 <TableCell sx={{ fontSize: '0.8rem' }} align="right">
                   {item.referenced_by > 0 ? item.referenced_by : '—'}

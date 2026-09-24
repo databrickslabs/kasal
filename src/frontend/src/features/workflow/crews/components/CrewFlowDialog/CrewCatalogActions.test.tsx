@@ -10,7 +10,7 @@ vi.mock('../../../export/components/ExportCrewDialog', () => ({
 }));
 
 const crew = { id: 'catalog-crew', name: 'Saved research crew', nodes: [] } as unknown as CrewResponse;
-const props = { crew, canEdit: true, canDelete: true, mlflowEnabled: false, published: false, onPublished: vi.fn(), onOptimize: vi.fn(), onExport: vi.fn(), onDelete: vi.fn() };
+const props = { crew, canEdit: true, canDelete: true, mlflowEnabled: false, published: false, onPublished: vi.fn(), onOptimize: vi.fn(), onDuplicate: vi.fn(), onExport: vi.fn(), onDelete: vi.fn() };
 
 describe('crew catalog deployment', () => {
   it('opens deployment for the clicked crew without loading it onto the canvas', () => {
@@ -29,5 +29,19 @@ describe('crew catalog deployment', () => {
     render(<CrewCatalogActions {...props} canEdit={false} canDelete={false} />);
     expect(screen.queryByRole('button', { name: 'Deploy to Databricks Apps' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Publish' })).not.toBeInTheDocument();
+  });
+
+  it('duplicates the clicked crew without loading it onto the canvas', () => {
+    const load = vi.fn();
+    const onDuplicate = vi.fn();
+    render(<div onClick={load}><CrewCatalogActions {...props} onDuplicate={onDuplicate} /></div>);
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate Crew' }));
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('hides Duplicate from operators (create requires edit)', () => {
+    render(<CrewCatalogActions {...props} canEdit={false} canDelete={false} />);
+    expect(screen.queryByRole('button', { name: 'Duplicate Crew' })).not.toBeInTheDocument();
   });
 });

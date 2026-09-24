@@ -14,6 +14,29 @@ logger = logging.getLogger(__name__)
 _RE_SAFE_ALIAS = re.compile(r"^[a-zA-Z_]\w*$")
 
 
+def _is_placeholder_source(source: str) -> bool:
+    """True when ``source`` is a stub rather than a resolved physical table.
+
+    The generation-time M parser can fail to resolve a *parametric* source
+    (``Databricks.Catalogs(ServerHostName, HTTP_Path, …)``, where the catalog is
+    a model parameter) and leave a bare table name, which the target-catalog
+    default then prefixes into ``main.default.<name>``. A real UC source is a
+    3-level ``catalog.schema.table``. ``join_key_map[dim].source_table``, filled
+    during config-gen enrichment (which HAS the model parameters), is the
+    authoritative value to prefer over such a stub — so a dimension join never
+    ships pointing at ``main.default.*``.
+    """
+    if not source or not source.strip():
+        return True
+    t = source.strip()
+    low = t.lower()
+    if low.startswith("todo") or low.startswith("main.default."):
+        return True
+    if "(" in t:  # an inline subquery / pivot source is real, not a stub
+        return False
+    return t.count(".") < 2  # not a 3-level catalog.schema.table
+
+
 def _sanitize_alias(alias: str) -> str:
     """Sanitize a SQL alias to prevent injection. Only allow alphanumeric + underscore."""
     if not _RE_SAFE_ALIAS.match(alias):
@@ -80,9 +103,16 @@ class JoinDetector:
                     ):
                         source = fact_src
                         break
-            if not source:
-                # Fallback: use source_table from join_key_map config
-                source = jk.get("source_table", "")
+            # join_key_map[dim].source_table is filled during config-gen
+            # enrichment, which resolves parametric sources using the model's
+            # expressions the generation-time parser may lack. Prefer it whenever
+            # what we resolved above is empty or a `main.default.*` placeholder,
+            # so the join points at the real table instead of a stub.
+            jk_source = jk.get("source_table", "")
+            if _is_placeholder_source(source) and not _is_placeholder_source(jk_source):
+                source = jk_source
+            elif not source:
+                source = jk_source
             if not source:
                 continue
 
@@ -193,6 +223,22 @@ class JoinDetector:
         joins = []
         for fact_name in sorted(referenced_facts):
             fj = self._fact_join_map[fact_name]
+            # S7: a table already used as a DIMENSION (present in join_key_map) must
+            # not also be emitted as a plain fact join — that produced OTC's
+            # duplicate calendar445 join (once as the real dim, once as a fact on a
+            # non-existent `.Date` key). Special fact-join modes (pivot / union /
+            # source_embed) are genuinely fact-shaped and are left alone.
+            is_plain_join = not (
+                fj.get("pivot_col") or fj.get("source_embed") or fj.get("union_mode")
+            )
+            if is_plain_join and fact_name in self._join_key_map:
+                logger.info(
+                    "[%s] Skipping fact join '%s' — already joined as a dimension "
+                    "(join_key_map); a dim must not double as a fact join (S7)",
+                    fact_table_key,
+                    fact_name,
+                )
+                continue
             fact_table_info = self.mquery_tables.get(fact_name)
             source_table = ""
             if fact_table_info and fact_table_info.source_table:
@@ -217,6 +263,7 @@ class JoinDetector:
             # Build join ON clause
             if "join_on_expr" in fj:
                 join_on = fj["join_on_expr"].format(alias=alias)
+                missing_key = False
                 for src_ref in re.findall(r"\bsource\.(\w+)", join_on):
                     if src_ref not in fact_info.group_by_columns:
                         for calc in fact_info.calculated_columns:
@@ -233,11 +280,31 @@ class JoinDetector:
                                 )
                                 break
                         else:
+                            # S7: the ON clause names a fact-side column that the
+                            # fact does not have (OTC's calendar445 join on
+                            # `source.date` when the raw column is `date_id`). Only
+                            # trust this when we actually know the fact's columns
+                            # (non-empty group_by and not present in the raw SQL) —
+                            # otherwise keep the join rather than risk a regression.
+                            known_cols = bool(fact_info.group_by_columns)
+                            in_sql = src_ref in (fact_info.full_sql or "")
+                            if known_cols and not in_sql:
+                                logger.info(
+                                    "[%s] Dropping fact join '%s' — join key "
+                                    "source.%s does not exist on the fact (S7)",
+                                    fact_table_key,
+                                    fact_name,
+                                    src_ref,
+                                )
+                                missing_key = True
+                                break
                             logger.warning(
                                 "[JOIN] source.%s referenced in join_on_expr but "
                                 "not found in group_by_columns or calculated_columns",
                                 src_ref,
                             )
+                if missing_key:
+                    continue
             elif "join_key" in fj:
                 join_keys = (
                     fj["join_key"]
@@ -394,7 +461,27 @@ class JoinDetector:
                     "_pbi_name": fact_name,
                 }
             )
-        return joins
+        return self._dedup_joins(joins)
+
+    @staticmethod
+    def _dedup_joins(joins: list[dict]) -> list[dict]:
+        """Drop duplicate joins (same alias, or same source + ON clause).
+
+        S7: keeps the first occurrence so a fact is never joined to the same table
+        twice (which would fan out rows or raise a duplicate-alias error). Special
+        join modes without a plain ``source``/``join_on`` (pivot/union/embed) are
+        keyed on their alias alone."""
+        seen: set[tuple] = set()
+        out: list[dict] = []
+        for j in joins:
+            key = (j.get("name"), j.get("source", ""), j.get("join_on", ""))
+            if key in seen or (j.get("name"),) in seen:
+                logger.info("Dropping duplicate join '%s' (S7 dedup)", j.get("name"))
+                continue
+            seen.add(key)
+            seen.add((j.get("name"),))
+            out.append(j)
+        return out
 
     def get_dim_dimensions(self, joins: list[dict], fact_info: TableInfo) -> list[dict]:
         """Get extra dimensions from joined dimension tables."""

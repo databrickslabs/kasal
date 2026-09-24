@@ -85,8 +85,11 @@ class MetricViewPipeline:
         self._mquery_expressions: dict[str, str] = dict(mquery_expressions or {})
         if not self._mquery_expressions and self.scan_data:
             for _k, _si in self.scan_data.items():
-                _m = (_si.get("raw_m_expression") or _si.get("m_expression")
-                      if isinstance(_si, dict) else getattr(_si, "raw_m_expression", None))
+                _m = (
+                    _si.get("raw_m_expression") or _si.get("m_expression")
+                    if isinstance(_si, dict)
+                    else getattr(_si, "raw_m_expression", None)
+                )
                 if _m:
                     self._mquery_expressions[_k] = _m
         # Fallback: config-gen ships the raw M per table in the config (no scan_data
@@ -199,6 +202,32 @@ class MetricViewPipeline:
         Returns:
             Dict mapping fact_table_key -> MetricViewSpec
         """
+        # ── Phase 0: column-based allocation (KASAL_FIXES M6/M7/M10) ──────
+        # Home each measure on the fact whose COLUMNS its DAX references, before
+        # grouping — so the existing routing places rescued/re-homed measures on
+        # the right fact and keeps broken/cross-fact ones out of every fact.
+        # Conservative: a correctly-homed measure is left untouched. Default on;
+        # set allocate_by_columns=False for the exact prior behaviour.
+        if self.config.get("allocate_by_columns", True):
+            from .measure_allocator import reallocate_by_columns
+
+            self._allocation_report = reallocate_by_columns(
+                self.mapping, self.mquery_tables, config=self.config
+            )
+            _r = self._allocation_report
+            if any(_r.get(k) for k in ("rescued", "rehomed", "broken", "cross_fact")):
+                self._limitations["measure_allocation"] = _r
+                logger.info(
+                    "[MetricViewPipeline] column-based allocation: "
+                    "%d rescued, %d re-homed, %d broken, %d cross-fact",
+                    len(_r.get("rescued", [])),
+                    len(_r.get("rehomed", [])),
+                    len(_r.get("broken", [])),
+                    len(_r.get("cross_fact", [])),
+                )
+        else:
+            self._allocation_report = None
+
         measure_groups = self._group_by_table()
 
         # Phase 1: Process all tables and collect specs
@@ -362,25 +391,32 @@ class MetricViewPipeline:
         # (KASAL_FIXES Gaps 1-3). Fail-open — unresolved identifiers are left as-is.
         if self._mquery_expressions:
             from .physical_name_resolver import resolve_physical_names
+
             _res = resolve_physical_names(
-                self.all_specs, self.mquery_tables, self._mquery_expressions)
+                self.all_specs, self.mquery_tables, self._mquery_expressions
+            )
             if _res.get("generated_tables"):
                 self._limitations["generated_tables"] = _res["generated_tables"]
                 # Gap 3 materialization: emit CREATE VIEW SQL for generated calendars
                 # (List.Dates etc.) so the reviewer can create the missing source.
                 from .generated_table_emitter import emit_view_sql
+
                 _gen_sql = {}
                 for _t in _res["generated_tables"]:
                     _sql = emit_view_sql(
                         self._mquery_expressions.get(_t, ""),
-                        f"{{catalog}}.{{schema}}.{to_snake_case(_t)}")
+                        f"{{catalog}}.{{schema}}.{to_snake_case(_t)}",
+                    )
                     if _sql:
                         _gen_sql[_t] = _sql
                 if _gen_sql:
                     self._limitations["generated_view_sql"] = _gen_sql
                     logger.info(
                         "[MetricViewPipeline] emitted CREATE VIEW SQL for %d generated "
-                        "table(s): %s", len(_gen_sql), ", ".join(sorted(_gen_sql)))
+                        "table(s): %s",
+                        len(_gen_sql),
+                        ", ".join(sorted(_gen_sql)),
+                    )
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
         for spec in self.all_specs.values():
@@ -415,6 +451,7 @@ class MetricViewPipeline:
                     "base": 0,
                     "dax": 0,
                     "switch": 0,
+                    "implicit_column": 0,
                     "manual_override": 0,
                     "skipped": True,
                     "skip_reason": "All measures dropped by validation (no deployable measures)",
@@ -432,6 +469,7 @@ class MetricViewPipeline:
                 "base": spec.base_measure_count,
                 "dax": spec.dax_measure_count,
                 "switch": spec.switch_measure_count,
+                "implicit_column": spec.implicit_measure_count,
                 "manual_override": sum(
                     1
                     for m in spec.measures
@@ -598,6 +636,11 @@ class MetricViewPipeline:
         ]
         if spec.switch_measure_count:
             lines.append(f"{spec.switch_measure_count} SWITCH-decomposed measures")
+        if spec.implicit_measure_count:
+            lines.append(
+                f"{spec.implicit_measure_count} aggregated-column measures "
+                "(used in visuals, no named PBI measure)"
+            )
         lines.append(
             f"{len(spec.untranslatable)} untranslatable DAX measures (documented below)"
         )
@@ -703,7 +746,7 @@ class MetricViewPipeline:
         if "raw_expr" in defn:
             return TranslationResult(
                 measure_name=defn["name"],
-                original_name=defn["name"],
+                original_name=defn.get("original_name") or defn["name"],
                 sql_expr=defn["raw_expr"],
                 is_translatable=True,
                 skip_reason=defn.get("comment", "SWITCH decomposition"),
@@ -711,6 +754,12 @@ class MetricViewPipeline:
                 confidence="high",
                 category="switch_decomposition",
                 window_spec=defn.get("window"),
+                # PBI-reconciliation provenance (priority 3) — present only
+                # when the entry actually resolved (a TODO skeleton carries
+                # none of these); see data_classes.py's field docstrings.
+                pbi_kind=defn.get("pbi_kind"),
+                pbi_sources=defn.get("pbi_sources") or [],
+                pbi_operator=defn.get("pbi_operator"),
             )
 
         num = defn["num"]
@@ -741,7 +790,7 @@ class MetricViewPipeline:
 
         return TranslationResult(
             measure_name=defn["name"],
-            original_name=defn["name"],
+            original_name=defn.get("original_name") or defn["name"],
             sql_expr=sql_expr,
             is_translatable=True,
             skip_reason=defn.get("comment", "SWITCH decomposition"),
@@ -841,6 +890,7 @@ class MetricViewPipeline:
         """Return pipeline results as a serializable dict."""
         from .recovery_recommender import draft_source_view as _draft_source_view
         from .recovery_recommender import recommend as _recovery_recipe
+
         # Tables reachable only via a skipped many:many/bidirectional relationship
         # — used to recommend an EXISTS-precompute recovery (Gap 4) instead of a
         # generic decline.
@@ -877,6 +927,15 @@ class MetricViewPipeline:
                         "dax_expression": m.dax_expression,
                         "confidence": m.confidence,
                         "category": m.category,
+                        # Business-usage signal (PROP-8): which report page(s)/
+                        # visual(s) draw or filter on this measure — see
+                        # `visual_usage_annotator.annotate_visual_usage`.
+                        "used_in_visuals": m.used_in_visuals,
+                        # Backtraced (indirect) usage: a visual-placed KPI
+                        # references this measure — see annotate_indirect_visual_usage.
+                        "indirect_visual_usage": getattr(
+                            m, "indirect_visual_usage", []
+                        ),
                     }
                     for m in spec.measures
                 ],
@@ -899,17 +958,27 @@ class MetricViewPipeline:
                         # shape matches; else the class-based default.
                         "proposal": build_proposal(
                             m.dax_class,
-                            getattr(m, "explanation", None) or _recovery_recipe(
-                                m.dax_expression, fact_table=spec.fact_table_key,
+                            getattr(m, "explanation", None)
+                            or _recovery_recipe(
+                                m.dax_expression,
+                                fact_table=spec.fact_table_key,
                                 m2n_tables=_m2n_tables,
-                                join_tables={j.get("name") for j in (spec.joins or [])}),
-                            m.skip_reason),
+                                join_tables={j.get("name") for j in (spec.joins or [])},
+                            ),
+                            m.skip_reason,
+                        ),
                         # Best-effort, UNVERIFIED source-view SQL scaffold for cross-fact /
                         # multi-stage measures — a proposal starting point, never an emitted
                         # measure. Clearly labeled DRAFT; complete + verify against PBI.
                         "source_view_sql_draft": _draft_source_view(
-                            m.dax_expression, measure_name=m.measure_name,
-                            fact_table=spec.fact_table_key),
+                            m.dax_expression,
+                            measure_name=m.measure_name,
+                            fact_table=spec.fact_table_key,
+                        ),
+                        "used_in_visuals": m.used_in_visuals,
+                        "indirect_visual_usage": getattr(
+                            m, "indirect_visual_usage", []
+                        ),
                     }
                     for m in spec.untranslatable
                 ],

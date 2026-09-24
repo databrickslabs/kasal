@@ -48,6 +48,7 @@ import UndoIcon from '@mui/icons-material/Undo';
 import DownloadIcon from '@mui/icons-material/Download';
 import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Button from '@mui/material/Button';
 import { Highlight, themes } from 'prism-react-renderer';
 import yaml from 'js-yaml';
@@ -104,6 +105,37 @@ export interface UCMVResult {
   untranslatable_items?: UntranslatableItem[];
   /** Persisted reviewer triage annotations, keyed by untranslatableKey(item). */
   untranslatable_review?: Record<string, ReviewAnnotation>;
+  /** Deterministic PBI<->UCMV reconciliation mapping draft, one YAML-text
+   *  entry per view (keyed by view name), from pbi_ucmv_mapping.py. Feeds the
+   *  downstream KPI-reconciliation pipeline once reviewed. */
+  pbi_ucmv_mapping?: Record<string, string>;
+  /** Views backed by a LIVE connection to a semantic model (M-Query
+   *  AnalysisServices.Database) — the transpiler can't resolve these, so the UI
+   *  flags which semantic model/table to parse. {view_name: {server, database, table}}. */
+  live_connections?: Record<string, { server: string; database: string; table: string }>;
+  /** Source layer DDL: per-table CREATE VIEW for the base source layer UCMVs read from. */
+  source_layer_ddl?: Record<string, {
+    ddl: string;
+    todo_steps: string[];
+    error: string | null;
+  }>;
+  /** Tables sourced from non-SQL files (Excel, SharePoint, Web, typed) — need a snapshot
+   *  ingestion pipeline before the metric views can read them. */
+  pbi_only_ingestion_tasks?: Array<{
+    table: string;
+    uc_target: string;
+    kind: string;
+    source_description: string;
+    recommended_approach: string;
+    snapshot_loader_stub: string;
+  }>;
+  /** Validation loop outcome. */
+  pbi_validation?: {
+    status: 'skipped' | 'ran' | 'error';
+    reason?: string;
+    candidate_views?: string[];
+    views?: Record<string, string>;
+  };
 }
 
 export interface FallbackExtractRow {
@@ -194,6 +226,107 @@ const extractReferencedBy = (comment?: string): number | null => {
   return m ? parseInt(m[1], 10) : null;
 };
 
+/** One report page a measure is used on: how many visuals on that page (count),
+ *  HOW (drawn vs filter) and WHERE (the visual type(s) on that page). */
+interface UsedOnEntry {
+  page: string;
+  types: string[];
+  role: 'drawn' | 'filter' | '';
+  /** Number of visuals on this page (the "×N" tally; 1 when not shown). */
+  count: number;
+}
+interface UsedOnInfo {
+  /** HOW OFTEN — total visuals across the report (from the suffix). */
+  count: number;
+  entries: UsedOnEntry[];
+}
+
+/** Parse the measure comment's visual-usage suffix
+ *  (yaml_emitter._visual_usage_suffix). This is the signal reviewers use to
+ *  judge which measures actually matter — a measure shown on a report page is
+ *  business-relevant; one referenced by nothing and drawn nowhere is likely an
+ *  intermediate building block.
+ *
+ *  Current format carries a total count + per-page "×N" tally + type/role, e.g.
+ *    "· Used on 7 visuals: OTC Scorecard ×7 (pivotTable/clusteredBarChart·filter)"
+ *    "· Used on 3 visuals: OTC Scorecard ×2 (card/tableEx·drawn), OTC NPS (slicer·filter) (+1 more)"
+ *  Also tolerates earlier forms: no per-page "×N", and the bare
+ *  "· Used on: OTC Scorecard, OTC NPS" (no count/annotation). The suffix is
+ *  always last on the comment, so the page list captures to end of string. */
+const extractUsedOn = (comment?: string): UsedOnInfo => {
+  if (!comment) return { count: 0, entries: [] };
+  const m = comment.match(/Used on(?: (\d+) visuals?)?:\s*(.+)$/);
+  if (!m) return { count: 0, entries: [] };
+  // The indirect-usage clause ("· Indirectly used via …") can follow the direct
+  // one on the same comment — stop before it so its text isn't parsed as pages.
+  let list = m[2].split(/\s*·\s*Indirectly used/)[0].trim();
+  const more = list.match(/\s*\(\+\d+ more\)\s*$/);
+  if (more?.index != null) list = list.slice(0, more.index).trim();
+  const entries: UsedOnEntry[] = list
+    .split(',')
+    .map((tok) => tok.trim())
+    .filter(Boolean)
+    .map((tok) => {
+      // Peel the trailing "(annotation)", then a trailing "×N", leaving the page.
+      const paren = tok.match(/\(([^)]*)\)\s*$/);
+      const annot = paren ? paren[1] : '';
+      let prefix = paren?.index != null ? tok.slice(0, paren.index).trim() : tok.trim();
+      const tally = prefix.match(/[×x](\d+)$/);
+      const count = tally ? parseInt(tally[1], 10) : 1;
+      if (tally?.index != null) prefix = prefix.slice(0, tally.index).trim();
+      const [typesPart, rolePart] = annot.split('·');
+      const role =
+        rolePart === 'filter' || rolePart === 'drawn'
+          ? rolePart
+          : typesPart === 'drawn' || typesPart === 'filter'
+            ? (typesPart as 'drawn' | 'filter')
+            : '';
+      const types =
+        rolePart === undefined
+          ? typesPart === 'drawn' || typesPart === 'filter' || typesPart === ''
+            ? []
+            : typesPart.split('/').filter(Boolean)
+          : typesPart.split('/').filter(Boolean);
+      return { page: prefix, types, role, count };
+    });
+  const total = m[1]
+    ? parseInt(m[1], 10)
+    : entries.reduce((sum, e) => sum + e.count, 0);
+  return { count: total, entries };
+};
+
+/** One backtraced indirect-usage entry: a visual-placed measure (`via`) whose
+ *  DAX reaches this measure, and the report page(s) it's shown on. */
+interface IndirectUsedOnEntry {
+  via: string;
+  pages: string[];
+}
+
+/** Parse the measure comment's indirect-usage clause
+ *  (yaml_emitter._indirect_visual_usage_suffix):
+ *    "· Indirectly used via [OTC Health Score] on: OTC Scorecard, Exec Summary; [X] on: P (+1 more)"
+ *  Returns one entry per `via` measure. Empty when the measure has no indirect
+ *  usage (the common case). This measure isn't drawn in a visual itself — a
+ *  visual-placed KPI depends on it — so it's shown distinctly from direct use. */
+const extractIndirectUsedOn = (comment?: string): IndirectUsedOnEntry[] => {
+  if (!comment) return [];
+  const m = comment.match(/Indirectly used via (.+)$/);
+  if (!m) return [];
+  let rest = m[1].trim();
+  const more = rest.match(/\s*\(\+\d+ more\)\s*$/);
+  if (more?.index != null) rest = rest.slice(0, more.index).trim();
+  return rest
+    .split(';')
+    .map((tok) => tok.trim())
+    .filter(Boolean)
+    .map((tok) => {
+      const vm = tok.match(/^\[([^\]]+)\](?:\s*on:\s*(.+))?$/);
+      if (!vm) return { via: tok.replace(/^\[|\]$/g, ''), pages: [] };
+      const pages = vm[2] ? vm[2].split(',').map((p) => p.trim()).filter(Boolean) : [];
+      return { via: vm[1].trim(), pages };
+    });
+};
+
 const FieldTable: React.FC<{
   fields: Array<{ name: string; expr?: string; comment?: string; format?: string }>;
   showFormat?: boolean;
@@ -201,25 +334,50 @@ const FieldTable: React.FC<{
   // Only show the "Used by" column for measures (showFormat) and only when at
   // least one measure carries a usage count — keeps dimension tables unchanged.
   const showUsage = !!showFormat && fields.some((f) => extractReferencedBy(f.comment) !== null);
-  // Sort measures by usage desc so the highest-impact ones surface first.
-  const rows = showUsage
-    ? [...fields].sort(
-        (a, b) => (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1),
-      )
-    : fields;
+  // Same, for the visual-usage "Used on" column (report pages the measure appears
+  // on) — only for measures, only when at least one carries DIRECT or INDIRECT
+  // (backtraced) usage, so a sub-KPI that's only referenced by a visual KPI
+  // still shows up.
+  const showUsedOn =
+    !!showFormat &&
+    fields.some(
+      (f) =>
+        extractUsedOn(f.comment).entries.length > 0 ||
+        extractIndirectUsedOn(f.comment).length > 0,
+    );
+  // Sort measures so the highest-impact surface first: measures used on more
+  // visuals rank above those used on fewer, then by how many other measures
+  // reference them.
+  const rows =
+    showUsage || showUsedOn
+      ? [...fields].sort((a, b) => {
+          const va = extractUsedOn(a.comment).count;
+          const vb = extractUsedOn(b.comment).count;
+          if (va !== vb) return vb - va;
+          return (extractReferencedBy(b.comment) ?? -1) - (extractReferencedBy(a.comment) ?? -1);
+        })
+      : fields;
+  // Column widths depend on which optional columns are present (all measures
+  // carry a Comment column via showFormat; dimensions never show usage/usedOn).
+  const nameW = showUsedOn && showUsage ? '20%' : showUsage || showUsedOn ? '24%' : showFormat ? '30%' : '30%';
+  const exprW = !showFormat ? '70%' : showUsedOn && showUsage ? '26%' : showUsage || showUsedOn ? '32%' : '40%';
+  const commentW = showUsedOn && showUsage ? '22%' : showUsedOn ? '26%' : '30%';
   return (
     <Table size="small" sx={{ tableLayout: 'fixed' }}>
       <TableHead>
         <TableRow>
-          <TableCell sx={{ fontWeight: 600, width: showUsage ? '24%' : '30%' }}>Name</TableCell>
-          <TableCell sx={{ fontWeight: 600, width: showFormat ? (showUsage ? '34%' : '40%') : '70%' }}>Expression</TableCell>
-          {showFormat && <TableCell sx={{ fontWeight: 600, width: showUsage ? '30%' : '30%' }}>Comment / Format</TableCell>}
+          <TableCell sx={{ fontWeight: 600, width: nameW }}>Name</TableCell>
+          <TableCell sx={{ fontWeight: 600, width: exprW }}>Expression</TableCell>
+          {showFormat && <TableCell sx={{ fontWeight: 600, width: commentW }}>Comment / Format</TableCell>}
+          {showUsedOn && <TableCell sx={{ fontWeight: 600, width: '20%' }} title="Report page(s) this measure is drawn on or filtered by">Used on</TableCell>}
           {showUsage && <TableCell sx={{ fontWeight: 600, width: '12%' }} align="right" title="How many other measures reference this measure">Used by</TableCell>}
         </TableRow>
       </TableHead>
       <TableBody>
         {rows.map((f) => {
           const usage = extractReferencedBy(f.comment);
+          const usedOn = extractUsedOn(f.comment);
+          const indirect = extractIndirectUsedOn(f.comment);
           return (
             <TableRow key={f.name} hover>
               <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-word' }}>
@@ -231,6 +389,79 @@ const FieldTable: React.FC<{
               {showFormat && (
                 <TableCell sx={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>
                   {f.comment || f.format || '—'}
+                </TableCell>
+              )}
+              {showUsedOn && (
+                <TableCell sx={{ fontSize: '0.8rem' }}>
+                  {usedOn.entries.length > 0 || indirect.length > 0 ? (
+                    <Box display="flex" flexDirection="column" gap={0.5} alignItems="flex-start">
+                      {usedOn.entries.length > 0 && (
+                        <>
+                          {/* HOW OFTEN — visual-occurrence count. */}
+                          <Chip
+                            size="small"
+                            color="info"
+                            variant="filled"
+                            label={`${usedOn.count} visual${usedOn.count !== 1 ? 's' : ''}`}
+                            sx={{ height: 18, fontSize: '0.7rem' }}
+                          />
+                          {/* WHERE + HOW — page, visual type(s), and drawn vs filter. */}
+                          <Box display="flex" gap={0.5} flexWrap="wrap">
+                            {usedOn.entries.map((e) => {
+                              // "×N" on the page chip so a count of 7 all on one page
+                              // reads as "OTC Scorecard ×7" instead of looking like a
+                              // mismatch with the total.
+                              const tally = e.count > 1 ? ` ×${e.count}` : '';
+                              const typeLabel = e.types.length ? ` · ${e.types.join('/')}` : '';
+                              const roleWord =
+                                e.role === 'filter' ? 'used as a filter' : e.role === 'drawn' ? 'drawn (shown)' : '';
+                              return (
+                                <Chip
+                                  key={e.page}
+                                  size="small"
+                                  variant="outlined"
+                                  color={e.role === 'filter' ? 'default' : 'info'}
+                                  label={`${e.page}${tally}${typeLabel}`}
+                                  title={[
+                                    e.count > 1 ? `${e.count} visuals on this page` : '',
+                                    roleWord,
+                                    e.types.length ? `in ${e.types.join(', ')}` : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                  sx={{ height: 18, fontSize: '0.7rem', maxWidth: '100%' }}
+                                />
+                              );
+                            })}
+                          </Box>
+                        </>
+                      )}
+                      {/* INDIRECT — backtraced: a visual-placed KPI depends on this
+                          measure. Distinct style (dashed, muted, "↳ via …") so it
+                          never reads as direct usage. */}
+                      {indirect.map((ind) => (
+                        <Chip
+                          key={`via-${ind.via}`}
+                          size="small"
+                          variant="outlined"
+                          label={`↳ via ${ind.via}`}
+                          title={
+                            `Indirectly used — [${ind.via}] references this measure` +
+                            (ind.pages.length ? ` · shown on ${ind.pages.join(', ')}` : '')
+                          }
+                          sx={{
+                            height: 18,
+                            fontSize: '0.7rem',
+                            maxWidth: '100%',
+                            borderStyle: 'dashed',
+                            color: 'text.secondary',
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  ) : (
+                    '—'
+                  )}
                 </TableCell>
               )}
               {showUsage && (
@@ -335,6 +566,32 @@ const Section: React.FC<{
     <AccordionDetails sx={{ p: 0, overflow: 'auto' }}>{children}</AccordionDetails>
   </Accordion>
 );
+
+/* ------------------------------------------------------------------ */
+/*  Copy button (used by DDL blocks and snapshot stubs)               */
+/* ------------------------------------------------------------------ */
+
+const CopyButton: React.FC<{ content: string }> = ({ content }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (non-https or restricted env)
+    }
+  }, [content]);
+  return (
+    <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
+      <IconButton size="small" onClick={handleCopy} sx={{ p: 0.25 }}>
+        {copied
+          ? <CheckCircleIcon sx={{ fontSize: 14 }} color="success" />
+          : <ContentCopyIcon sx={{ fontSize: 14 }} />}
+      </IconButton>
+    </Tooltip>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
@@ -590,8 +847,36 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
     URL.revokeObjectURL(url);
   }, []);
 
+  // Download each view's PBI<->UCMV reconciliation mapping draft as its OWN
+  // .mapping_candidates.yml file, staggered like the YAML/SQL downloads.
+  const handleDownloadAllMappings = useCallback(() => {
+    const mapping = result.pbi_ucmv_mapping || {};
+    const entries = Object.entries(mapping).filter(([, v]) => v && v.trim());
+    entries.forEach(([name, yamlContent], idx) => {
+      setTimeout(() => {
+        const blob = new Blob([yamlContent], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${name}.mapping_candidates.yml`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }, idx * 150);
+    });
+  }, [result.pbi_ucmv_mapping]);
+
   const hasDax = Array.isArray(result.measures_with_dax) && result.measures_with_dax.length > 0;
   const hasMquery = Array.isArray(result.mquery_raw) && result.mquery_raw.length > 0;
+  const hasMapping =
+    !!result.pbi_ucmv_mapping && Object.keys(result.pbi_ucmv_mapping).length > 0;
+
+  // New artifact fields
+  const sourceLayerEntries = useMemo(
+    () => (result.source_layer_ddl ? Object.entries(result.source_layer_ddl) : []),
+    [result.source_layer_ddl],
+  );
+  const hasIngestionTasks =
+    Array.isArray(result.pbi_only_ingestion_tasks) && result.pbi_only_ingestion_tasks.length > 0;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
@@ -648,6 +933,18 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
               </Button>
             </Tooltip>
           )}
+          {hasMapping && (
+            <Tooltip title="Download the deterministic PBI<->UCMV measure mapping draft (one file per view) for the KPI-reconciliation pipeline">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadAllMappings}
+              >
+                Download Mapping
+              </Button>
+            </Tooltip>
+          )}
           {hasMquery && (
             <Tooltip title="Download the original M-Query source as JSON">
               <Button
@@ -662,6 +959,197 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           )}
         </Box>
       </Box>
+
+      {/* Live-connection note: these views are backed by a live connection to a
+          semantic model, so the transpiler can't resolve them — tell the team
+          which model/table to parse. */}
+      {result.live_connections && Object.keys(result.live_connections).length > 0 && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Live connection to a semantic model — parse the upstream model to complete these
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            These view(s) are sourced from a live connection (AnalysisServices.Database), not a
+            warehouse table, so their measures/columns can't be resolved here. Parse the semantic
+            model below to finish the mapping.
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, fontSize: '0.8rem' }}>
+            {Object.entries(result.live_connections).map(([view, lc]) => (
+              <li key={view}>
+                <Box component="span" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{view}</Box>
+                {' → semantic model '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.database}</Box>
+                {' (table '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.table}</Box>
+                {', server '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>{lc.server}</Box>
+                {')'}
+              </li>
+            ))}
+          </Box>
+        </Alert>
+      )}
+
+      {/* PBI-only ingestion tasks: tables sourced from non-SQL files that need
+          a snapshot ingestion pipeline before their metric views can run. */}
+      {hasIngestionTasks && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            PBI-only tables need ingestion ({result.pbi_only_ingestion_tasks!.length})
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            These tables are sourced from non-SQL files (Excel, SharePoint, Web, or typed data)
+            and require a snapshot ingestion pipeline before the metric views can read them.
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {result.pbi_only_ingestion_tasks!.map((task) => (
+              <Box key={task.table}>
+                <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap" mb={0.25}>
+                  <Typography variant="caption" fontFamily="monospace" fontWeight={600}>
+                    {task.table}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">→</Typography>
+                  <Chip
+                    size="small"
+                    label={task.kind}
+                    color="warning"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: '0.7rem' }}
+                  />
+                  {task.uc_target && (
+                    <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+                      {task.uc_target}
+                    </Typography>
+                  )}
+                </Box>
+                {task.recommended_approach && (
+                  <Typography variant="caption" sx={{ display: 'block', mb: 0.25 }}>
+                    {task.recommended_approach}
+                  </Typography>
+                )}
+                {task.snapshot_loader_stub && (
+                  <Accordion
+                    defaultExpanded={false}
+                    disableGutters
+                    variant="outlined"
+                    sx={{ mt: 0.5, '&:before': { display: 'none' } }}
+                  >
+                    <AccordionSummary
+                      expandIcon={<ExpandMoreIcon sx={{ fontSize: 14 }} />}
+                      sx={{ minHeight: 28, '& .MuiAccordionSummary-content': { my: 0.5 } }}
+                    >
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <Typography variant="caption">Snapshot loader stub</Typography>
+                        <Box onClick={(e) => e.stopPropagation()}>
+                          <CopyButton content={task.snapshot_loader_stub} />
+                        </Box>
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ p: 0 }}>
+                      <SQLBlock code={task.snapshot_loader_stub} language="python" />
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Alert>
+      )}
+
+      {/* Source layer DDL: CREATE VIEW per PBI table — the base views that
+          metric views read from. Each entry shows DDL, an optional copy button,
+          TODO steps (if any manual work remains), and an error chip on failure. */}
+      {sourceLayerEntries.length > 0 && (
+        <Section
+          title={`Source layer (${sourceLayerEntries.length} view${sourceLayerEntries.length !== 1 ? 's' : ''})`}
+          icon={<CodeIcon fontSize="small" color="action" />}
+          defaultExpanded={false}
+        >
+          <Box sx={{ p: 1.5, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {sourceLayerEntries.map(([tableName, entry]) => (
+              <Box key={tableName}>
+                <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                  <Typography
+                    variant="body2"
+                    fontFamily="monospace"
+                    fontWeight={600}
+                    sx={{ flexGrow: 1 }}
+                  >
+                    {tableName}
+                  </Typography>
+                  {entry.error && (
+                    <Chip
+                      size="small"
+                      color="error"
+                      label={entry.error}
+                      variant="outlined"
+                      sx={{ maxWidth: 260, fontSize: '0.7rem', height: 20 }}
+                    />
+                  )}
+                  <CopyButton content={entry.ddl} />
+                </Box>
+                <SQLBlock code={entry.ddl} />
+                {Array.isArray(entry.todo_steps) && entry.todo_steps.length > 0 && (
+                  <Alert severity="warning" sx={{ mt: 0.75 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
+                      TODO steps:
+                    </Typography>
+                    <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                      {entry.todo_steps.map((step, i) => (
+                        <li key={i}>
+                          <Typography variant="caption">{step}</Typography>
+                        </li>
+                      ))}
+                    </Box>
+                  </Alert>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Section>
+      )}
+
+      {/* Validation status: compact chip row + optional per-view result list. */}
+      {result.pbi_validation && (
+        <Box sx={{ mb: 1.5 }}>
+          <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Validation:
+            </Typography>
+            <Chip
+              size="small"
+              label={result.pbi_validation.status}
+              color={
+                result.pbi_validation.status === 'error'
+                  ? 'error'
+                  : result.pbi_validation.status === 'ran'
+                    ? 'success'
+                    : 'default'
+              }
+              variant="outlined"
+              sx={{ height: 20, fontSize: '0.75rem' }}
+            />
+            {result.pbi_validation.reason && (
+              <Typography variant="caption" color="text.secondary">
+                {result.pbi_validation.reason}
+              </Typography>
+            )}
+          </Box>
+          {result.pbi_validation.views && Object.keys(result.pbi_validation.views).length > 0 && (
+            <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+              {Object.entries(result.pbi_validation.views).map(([view, detail]) => (
+                <li key={view}>
+                  <Typography variant="caption">
+                    <Box component="span" fontFamily="monospace">{view}</Box>
+                    {': '}
+                    {detail}
+                  </Typography>
+                </li>
+              ))}
+            </Box>
+          )}
+        </Box>
+      )}
 
       {/* Migration Report (collapsible) */}
       {result.migration_report && (

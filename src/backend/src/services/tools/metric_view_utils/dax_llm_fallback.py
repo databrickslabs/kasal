@@ -109,7 +109,16 @@ CRITICAL SQL rules for every "sql_expr" (see skill corpus §0 for detail):
    Only source and declared join aliases are valid namespaces. If a measure needs a
    table that is neither source nor a declared join, set success=false with
    dax_class="architecture_change" and explain the source-view change needed — do
-   NOT fabricate a cross-table subquery."""
+   NOT fabricate a cross-table subquery.
+3. DAX BLANK inequality semantics: DAX `col <> "X"` is TRUE for BLANK rows, but
+   SQL `col <> 'X'` DROPS NULLs (so the filter silently returns 0). Preserve DAX
+   semantics with the NULL-aware form: `(source.col IS NULL OR source.col <> 'X')`.
+   (`col = "X"` needs no such guard — both DAX and SQL exclude the blank/NULL row.)
+4. Group-then-aggregate (SUMMARIZE + DISTINCTCOUNT): a measure that groups by a
+   score and counts distinct ids per group, then sums, is counting DISTINCT
+   (score, id) PAIRS — emit
+   `COUNT(DISTINCT CASE WHEN <cond> THEN concat(CAST(source.score AS STRING),'|',CAST(source.id AS STRING)) END)`,
+   never a row-level SUM or a product of counts."""
 
 # The JSON output contract (shared by corpus + fallback prompts). Adds the
 # 7-category `dax_class` provenance label alongside the existing fields.

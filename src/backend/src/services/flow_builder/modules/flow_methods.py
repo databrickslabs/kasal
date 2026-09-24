@@ -1480,25 +1480,56 @@ class FlowMethodFactory:
                 import json as _json
 
                 def _extract_json(raw: str) -> dict | None:
-                    """Try to extract a JSON dict from a string (handles agent narrative wrapping)."""
+                    """Extract the first complete top-level JSON object from a
+                    string that may wrap it in agent narrative ("Here is the
+                    full output: {...}").
+
+                    Balanced-brace scan from the first ``{``, string-literal
+                    aware, instead of a fixed-nesting-depth regex. The prior
+                    regex (``\\{[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}``) only tolerates
+                    ONE level of nested braces, so on a 3+-level-deep tool
+                    payload (config_json's own switch_decompositions ->
+                    {table: [{...}, ...]} is already 3 levels) it silently
+                    matched an INNER sub-object instead of the real top-level
+                    one — confirmed live: on a Pipeline Config Generator
+                    result it extracted {"Fact_OTC": [...]} instead of the
+                    full {"proposed_config": ..., "measures_json": ...,
+                    "mquery_json": ...} payload, so has_ucmv_handoff /
+                    is_bare_pipeline_config both read False below and the
+                    flow handoff silently injected nothing into the next
+                    crew at all — the measures_json/mquery_json/config_json
+                    UCMV received were empty defaults, not the real data.
+                    """
                     if not raw or not isinstance(raw, str):
                         return None
-                    s = raw.strip()
-                    # Direct JSON
-                    if s.startswith("{"):
-                        try:
-                            return _json.loads(s)
-                        except _json.JSONDecodeError:
-                            pass
-                    # Extract JSON from "Final Answer: {...}" or narrative wrapping
-                    import re as _re
-
-                    match = _re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", s)
-                    if match:
-                        try:
-                            return _json.loads(match.group(0))
-                        except _json.JSONDecodeError:
-                            pass
+                    start = raw.find("{")
+                    if start == -1:
+                        return None
+                    depth = 0
+                    in_string = False
+                    escape = False
+                    for i in range(start, len(raw)):
+                        ch = raw[i]
+                        if in_string:
+                            if escape:
+                                escape = False
+                            elif ch == "\\":
+                                escape = True
+                            elif ch == '"':
+                                in_string = False
+                            continue
+                        if ch == '"':
+                            in_string = True
+                        elif ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                candidate = raw[start : i + 1]
+                                try:
+                                    return _json.loads(candidate)
+                                except _json.JSONDecodeError:
+                                    return None
                     return None
 
                 # Build a list of all parsed outputs from flow state + current results
@@ -1532,7 +1563,31 @@ class FlowMethodFactory:
                 try:
                     injected_count = 0
                     for agent in agents:
-                        for tool in agent.tools or []:
+                        for _raw_tool in agent.tools or []:
+                            # Under the CrewAI harness, `agent.tools` holds
+                            # `KasalToolAdapter` wrappers (harnesses/crewai/tools.py)
+                            # — the real Kasal tool with `_default_config` sits on
+                            # `.kasal_tool`, not on the adapter itself. Without this
+                            # unwrap, `hasattr(tool, "_default_config")` is always
+                            # False under CrewAI (the default harness), so this
+                            # whole injection loop silently no-ops: UCMV never
+                            # receives the previous crew's config/measures/mquery
+                            # and falls back to its own weaker direct-API
+                            # extraction, which skips fx_OTCKPI resolution and
+                            # measure re-homing.
+                            # Only unwrap when the inner object genuinely carries a
+                            # real dict `_default_config` — a plain MagicMock() tool
+                            # fixture (no `spec=`) auto-fabricates a truthy
+                            # `.kasal_tool` child mock too, and unconditionally
+                            # preferring it would shadow a mock's own directly-set
+                            # `_default_config` in tests that predate the CrewAI
+                            # harness.
+                            _inner = getattr(_raw_tool, "kasal_tool", None)
+                            tool = (
+                                _inner
+                                if isinstance(getattr(_inner, "_default_config", None), dict)
+                                else _raw_tool
+                            )
                             if not hasattr(tool, "_default_config") or not isinstance(
                                 tool._default_config, dict
                             ):
@@ -1615,6 +1670,8 @@ class FlowMethodFactory:
                                         "measures_json",
                                         "mquery_json",
                                         "relationships_json",
+                                        "visual_usage_index",
+                                        "implicit_column_measures",
                                     ):
                                         payload = prev_data.get(_hk)
                                         if not payload:

@@ -169,6 +169,26 @@ class PipelineConfigGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
+    def _resolve_execution_id(self) -> Optional[str]:
+        """Job id used as the provenance key on persisted extraction rows.
+
+        Prefers this instance's attached ``trace_context`` job_id, then falls
+        back to the process-scoped current execution id. The fallback is what
+        makes the handoff reliable: ToolFactory can rebuild this tool at
+        task-execution time — after ``attach_tools_trace_context`` tagged an
+        earlier instance — leaving ``self.trace_context`` empty. Without it the
+        powerbi_extraction row is saved with a NULL execution_id and the UC
+        Metric View Generator's DB-fallback cannot find it (0 views).
+        """
+        try:
+            from src.services.execution.kernel.trace_context import (
+                resolve_tool_execution_id,
+            )
+
+            return resolve_tool_execution_id(self)
+        except Exception:
+            return (getattr(self, "trace_context", None) or {}).get("job_id")
+
     def _run(self, **kwargs: Any) -> str:
         """Execute the pipeline config generation."""
 
@@ -380,6 +400,12 @@ class PipelineConfigGeneratorTool(BaseTool):
             # NOT fatal: on failure we fall back to Fabric TMDL (which a Service
             # Account CAN read), mirroring the Semantic Model Fetcher.
             admin_tables = {}
+            # Raw TMDL parts kept for S6/S9/rec#9 enrichment when available.
+            _tmdl_parts: list[dict] = []
+            # Set only if an Admin Scan actually runs below (API 3 tiers) — fed
+            # to discover_report_id as a reliable, already-fetched source of
+            # report/dataset bindings when the SA-only classic REST call 401s.
+            scan_result: Optional[dict] = None
             # {name: raw_M} of the model's named/shared expressions — parsed
             # from the SAME scan_result/tmdl_parts as admin_tables (no extra
             # API calls). Needed for two M shapes a table's own mquery_
@@ -446,6 +472,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                         fabric_token, workspace_id, dataset_id
                     )
                     if tmdl_parts:
+                        _tmdl_parts = tmdl_parts  # keep for S6/S9/rec#9 enrichment
                         if not admin_tables:
                             admin_tables = gen.parse_tmdl_to_admin_tables(
                                 tmdl_parts, dataset_id=dataset_id
@@ -607,7 +634,9 @@ class PipelineConfigGeneratorTool(BaseTool):
             # dataset; if none is found, proceed but warn loudly.
             report_def = None
             if not report_id:
-                discovered = gen.discover_report_id(token, workspace_id, dataset_id)
+                discovered = gen.discover_report_id(
+                    token, workspace_id, dataset_id, scan_result=scan_result
+                )
                 if discovered:
                     report_id = discovered
                     logger.info(
@@ -623,6 +652,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                     )
                     logger.warning(f"[PipelineConfigGen] {msg}")
                     warnings.append(msg)
+            visual_usage_index: dict = {}
             if report_id:
                 logger.info("[PipelineConfigGen] API 4: Report Definition...")
                 report_def = gen.extract_report_definition(
@@ -633,6 +663,25 @@ class PipelineConfigGeneratorTool(BaseTool):
                     client_id=client_id,
                     client_secret=client_secret,
                 )
+                # Business-usage signal (PROP-8): which page(s)/visual(s) each
+                # measure is actually drawn on or filtered by — same PBIR parts
+                # API 4 already fetched, no extra call. Never fatal: a report
+                # this can't parse (e.g. no report_def) just yields an empty
+                # index, same as "no usage data available" downstream.
+                try:
+                    from src.services.powerbi.visual_usage import (
+                        derive_visual_usage_index,
+                    )
+
+                    visual_usage_index = derive_visual_usage_index(report_def)
+                    logger.info(
+                        f"[PipelineConfigGen]   → visual usage for "
+                        f"{len(visual_usage_index)} field(s)"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[PipelineConfigGen] Visual usage extraction failed: {e}"
+                    )
 
             # Build config
             logger.info("[PipelineConfigGen] Building config...")
@@ -734,6 +783,64 @@ class PipelineConfigGeneratorTool(BaseTool):
                         }
                     )
 
+            # TMDL enrichment (S6/S9/rec#9) — fail-open. When only the Admin
+            # Scanner ran (no TMDL yet), try a Fabric TMDL fetch just for the
+            # calculated-column / fiscal / metadata signals it uniquely carries.
+            if not _tmdl_parts and admin_tables:
+                try:
+                    _enrich_fabric_token = gen.get_fabric_token(
+                        tenant_id,
+                        client_id,
+                        client_secret,
+                        username=username,
+                        password=password,
+                    )
+                    _enrich_parts = gen.fetch_tmdl_parts(
+                        _enrich_fabric_token, workspace_id, dataset_id
+                    )
+                    if _enrich_parts:
+                        _tmdl_parts = _enrich_parts
+                except Exception as _te:
+                    logger.debug(
+                        f"[PipelineConfigGen] TMDL enrichment-only fetch skipped: {_te}"
+                    )
+
+            _calculated_columns: dict = {}
+            _fiscal_calendars: dict = {}
+            _measure_metadata: dict = {}
+            if _tmdl_parts:
+                try:
+                    from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                        detect_fiscal_calendar_tables,
+                        extract_calculated_columns_from_tmdl,
+                        harvest_measure_metadata_from_tmdl,
+                    )
+
+                    _calculated_columns = extract_calculated_columns_from_tmdl(
+                        _tmdl_parts
+                    )
+                    _fiscal_calendars = detect_fiscal_calendar_tables(
+                        _tmdl_parts, _calculated_columns
+                    )
+                    _measure_metadata = harvest_measure_metadata_from_tmdl(_tmdl_parts)
+                except Exception as _ee:
+                    logger.warning(
+                        f"[PipelineConfigGen] TMDL enrichment failed (non-fatal): {_ee}"
+                    )
+
+            if _calculated_columns:  # S6
+                config["calculated_columns"] = _calculated_columns
+
+            if _fiscal_calendars:  # S9
+                _td = config.setdefault("time_dimension", {})
+                if isinstance(_td, dict) and "pbi_period_format" not in _td:
+                    _td["pbi_period_format"] = "date_to_fiscper"
+                    _td["fiscal_calendar_tables"] = sorted(_fiscal_calendars.keys())
+                config["fiscal_calendar_tables"] = {
+                    tbl: info.get("indicators", [])
+                    for tbl, info in _fiscal_calendars.items()
+                }
+
             # Summary stats
             config_json = json.dumps(config, default=str)
             auto_count = 0
@@ -757,6 +864,54 @@ class PipelineConfigGeneratorTool(BaseTool):
                 measures, admin_tables=admin_tables, config=config
             )
             ucmv_mquery = self._build_ucmv_mquery(admin_tables, expressions)
+
+            # rec#9: inject description/display_name/comment (PBI measure: tag)
+            # into ucmv_measures from the harvested TMDL metadata.
+            if _measure_metadata:
+                try:
+                    from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                        enrich_ucmv_measures_with_metadata,
+                    )
+
+                    enrich_ucmv_measures_with_metadata(ucmv_measures, _measure_metadata)
+                except Exception as _me:
+                    logger.warning(
+                        f"[PipelineConfigGen] measure metadata enrichment failed: {_me}"
+                    )
+
+            # Implicit-aggregation columns used directly in a visual, with no
+            # named PBI measure behind them (PBI applies the column's own
+            # SummarizeBy). Only worth the extra DAX query when there's
+            # visual usage data to check against at all.
+            implicit_column_measures: dict = {}
+            if visual_usage_index:
+                try:
+                    from src.services.powerbi.column_metadata import (
+                        extract_column_summarize_by,
+                    )
+                    from src.services.powerbi.implicit_column_measures import (
+                        derive_implicit_column_measures,
+                    )
+
+                    column_summarize_by = extract_column_summarize_by(
+                        token, workspace_id, dataset_id
+                    )
+                    implicit_column_measures = derive_implicit_column_measures(
+                        visual_usage_index,
+                        ucmv_measures,
+                        column_summarize_by,
+                        fact_tables=set(config.get("fact_join_map", {}).keys()),
+                    )
+                    if implicit_column_measures:
+                        logger.info(
+                            f"[PipelineConfigGen]   → {sum(len(v) for v in implicit_column_measures.values())} "
+                            f"implicit visual-column measure(s) across "
+                            f"{len(implicit_column_measures)} table(s)"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[PipelineConfigGen] Implicit column measure detection failed: {e}"
+                    )
 
             # Diagnostic split: how many tables resolve via the DIRECT path alone
             # (resolve_mquery_to_sql — no `expressions` needed) vs how many the
@@ -824,6 +979,27 @@ class PipelineConfigGeneratorTool(BaseTool):
                 and (_t.get("mquery_expression") or _t.get("mquery"))
             }
 
+            # rec#10: dqa/kpi_reconciliation scaffolds — one per fact, direct binding.
+            _rec_scaffolds: list[dict] = []
+            try:
+                from src.services.tools.metric_view_utils.tmdl_enrichment import (
+                    build_reconciliation_mapping_scaffolds,
+                )
+
+                _rec_scaffolds = build_reconciliation_mapping_scaffolds(
+                    ucmv_measures,
+                    config,
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    catalog=catalog,
+                    schema=schema,
+                    fiscal_calendars=_fiscal_calendars,
+                )
+            except Exception as _rse:
+                logger.warning(
+                    f"[PipelineConfigGen] reconciliation scaffold build failed (non-fatal): {_rse}"
+                )
+
             output = {
                 "proposed_config": config,
                 # Consumed by the flow handoff → UCMV JSON mode.
@@ -833,6 +1009,19 @@ class PipelineConfigGeneratorTool(BaseTool):
                 # Measures ranked by how many other measures reference them —
                 # reviewers use this to prioritize which gaps/TODOs to fix first.
                 "measure_usage_ranking": usage_ranking,
+                # rec#10: direct-binding reconciliation scaffolds (ucmv_table is TODO:)
+                "reconciliation_mapping_scaffolds": _rec_scaffolds,
+                # {original_measure_name: [{page, visual_type, role}, ...]} —
+                # consumed by the flow handoff → UCMV JSON mode, same as
+                # measures_json/mquery_json/relationships_json, to tag each
+                # measure with WHERE it's actually seen in the report.
+                "visual_usage_index": visual_usage_index,
+                # {table: [{name, original_name, raw_expr, comment, used_in_visuals,
+                # ...}, ...]} — consumed by the flow handoff → UCMV JSON mode, same
+                # as switch_decompositions: raw columns with PBI's own implicit
+                # aggregation that are actually drawn/filtered in a visual, with no
+                # named DAX measure behind them.
+                "implicit_column_measures": implicit_column_measures,
                 "summary": {
                     "total_keys": len(config),
                     "auto_filled": auto_count,
@@ -846,17 +1035,34 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "measures_referenced_by_others": len(usage_ranking),
                     "mquery_tables_for_ucmv": len(ucmv_mquery),
                     "admin_tables_scanned": len(admin_tables),
+                    "calculated_column_tables": len(_calculated_columns),  # S6
+                    "fiscal_calendar_tables_detected": len(_fiscal_calendars),  # S9
+                    "measures_with_tmdl_description": len(_measure_metadata),  # rec#9
+                    "reconciliation_scaffolds_emitted": len(_rec_scaffolds),  # rec#10
                     "admin_tables_source": admin_tables_source,
                     "expressions_captured": len(expressions),
                     "expressions_source": expressions_source,
                     "mquery_resolved_direct_only": _direct_resolved,
                     "mquery_resolved_with_context": _context_resolved,
+                    "implicit_column_measures_found": sum(
+                        len(v) for v in implicit_column_measures.values()
+                    ),
                 },
                 "warnings": warnings,
                 # Additive-enrichment audit trail (source_table parse, warehouse
                 # filter_sets, cross-fact drafts). Surfaced in the Config Editor so
                 # a reviewer sees WHAT was auto-filled and what still needs review.
                 "enrichment_log": enrichment_log,
+                # Same diagnostic as UC Metric View Generator's own
+                # "trace_context_seen" — compare the two on one run to see
+                # whether the SAME job_id reaches both tools (the powerbi_
+                # extraction row this tool saves is keyed by this same
+                # value, and UCMV's DB fallback looks it up by it).
+                "trace_context_seen": (
+                    dict(getattr(self, "trace_context", None) or {})
+                    if isinstance(getattr(self, "trace_context", None), dict)
+                    else getattr(self, "trace_context", None)
+                ),
             }
 
             logger.info(
@@ -1052,7 +1258,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         return out
 
     @staticmethod
-    def _build_ucmv_mquery(admin_tables: dict, expressions: dict | None = None) -> list[dict]:
+    def _build_ucmv_mquery(
+        admin_tables: dict, expressions: dict | None = None
+    ) -> list[dict]:
         """Convert admin_tables into the UCMV `mquery_json` shape.
 
         Both `parse_admin_tables` and `parse_tmdl_to_admin_tables` populate
@@ -1166,8 +1374,21 @@ class PipelineConfigGeneratorTool(BaseTool):
                 in (m.get("expression") or m.get("dax_expression") or "").upper()
             )
 
+            def _build_extract_arrays() -> dict:
+                """M-Query + relationships for the download bundle (best-effort)."""
+                extra: dict = {}
+                try:
+                    extra["mquery_json"] = self._build_ucmv_mquery(admin_tables)
+                except Exception:
+                    pass
+                try:
+                    extra["relationships_json"] = relationships or []
+                except Exception:
+                    pass
+                return extra
+
             history_data = ConversionHistoryCreate(
-                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                execution_id=self._resolve_execution_id(),
                 source_format="powerbi_config",
                 target_format="pipeline_config",
                 input_data={
@@ -1181,7 +1402,16 @@ class PipelineConfigGeneratorTool(BaseTool):
                     f"{len(measures)} measures ({with_dax} with DAX, "
                     f"{switch_cnt} SELECTEDVALUE+SWITCH)"
                 )[:500],
-                output_data={"proposed_config": config},
+                # Persist the extracted arrays alongside the config so the UI can
+                # offer them as downloads by execution_id (the crew's answer is a
+                # markdown summary, not this JSON). measures also live in
+                # input_data.measures; mquery/relationships are added here so all
+                # four artifacts are downloadable. Best-effort — never fail the save.
+                output_data={
+                    "proposed_config": config,
+                    "measures_json": measures,
+                    **_build_extract_arrays(),
+                },
                 output_summary=(
                     f"config: {len(config.get('switch_decompositions', {}))} switch tables, "
                     f"{len(config.get('measure_resolutions', {}))} measure resolutions"
@@ -1267,7 +1497,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 pass
 
             data = PowerBIExtractionCreate(
-                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                execution_id=self._resolve_execution_id(),
                 workspace_id=workspace_id or None,
                 dataset_id=dataset_id or None,
                 report_id=report_id or None,
@@ -1304,7 +1534,9 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _enrich_source_tables_from_mquery(
-        config: dict, admin_tables: dict, expressions: dict | None = None,
+        config: dict,
+        admin_tables: dict,
+        expressions: dict | None = None,
     ) -> list[dict]:
         """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
         Power Query M source (deterministic — no warehouse, no LLM).
@@ -1334,9 +1566,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 continue  # human/derived value — never overwrite
             tinfo = admin_tables.get(dim) or {}
             mquery = tinfo.get("mquery_expression") or tinfo.get("mquery") or ""
-            resolved = (
-                extract_source_table(mquery, expressions) if mquery else None
-            )
+            resolved = extract_source_table(mquery, expressions) if mquery else None
             if resolved:
                 entry["source_table"] = resolved
                 log.append(
