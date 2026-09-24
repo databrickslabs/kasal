@@ -243,3 +243,68 @@ class TestExtractSourceTable:
     def test_none_and_empty_input(self):
         assert self._E(None) is None
         assert self._E("") is None
+
+    def test_commented_out_synapse_source_is_ignored(self):
+        """A disabled `// Source = Sql.Database(...)` / `//... Item="..."` block
+        left over from a Synapse→Databricks migration must not be read as the live
+        source. The real source here is the Value.NativeQuery below the comments.
+        Regression for OTC Fact_NPS (resolved to the commented `datalake…v2`)."""
+        m = (
+            "let\n"
+            '   // Source = Sql.Database("sql-datamesh...azuresynapse.net", "datalake"),\n'
+            '   // udm_x = Source{[Schema="udm_datamart_cust_exp",Item="cust_exp_fact_data_v2"]}[Data],\n'
+            '     Source = Value.NativeQuery(Databricks.Catalogs("h","p",'
+            '[Catalog="udm_datamart_cust_exp", Database=null]){[Name="udm_datamart_cust_exp",Kind="Database"]}[Data], '
+            '"SELECT * FROM `dc_datalake_prod_001`.`udm_datamart_cust_exp`.`cust_exp_drivers_nps_contribution`")\n'
+            "in Source"
+        )
+        assert (
+            self._E(m)
+            == "dc_datalake_prod_001.udm_datamart_cust_exp.cust_exp_drivers_nps_contribution"
+        )
+
+    def test_block_comment_source_is_ignored(self):
+        m = (
+            "let\n"
+            '  /* Source = Sql.Database("s","olddb"){[Schema="dbo",Item="Stale"]} */\n'
+            '  Source = Value.NativeQuery(db, "SELECT a FROM real_cat.real_sch.real_tbl")\n'
+            "in Source"
+        )
+        assert self._E(m) == "real_cat.real_sch.real_tbl"
+
+    def test_native_query_slashes_in_sql_survive_comment_strip(self):
+        """A `//` or `/*` INSIDE the NativeQuery SQL string must NOT be stripped —
+        only real M comments are. Here the SQL divides columns."""
+        m = (
+            "let Source = Value.NativeQuery(db, "
+            '"SELECT a/b AS ratio FROM cat.sch.tbl") in Source'
+        )
+        assert self._E(m) == "cat.sch.tbl"
+
+
+class TestStripMComments:
+    def _S(self, m):
+        from src.services.tools.metric_view_utils.mquery_parser import strip_m_comments
+
+        return strip_m_comments(m)
+
+    def test_line_comment_removed_newline_kept(self):
+        assert self._S("a // drop me\nb") == "a \nb"
+
+    def test_block_comment_removed(self):
+        assert self._S("a /* drop\nme */ b") == "a  b"
+
+    def test_slashes_inside_string_preserved(self):
+        # A // inside a double-quoted M string is data, not a comment.
+        assert (
+            self._S('x = "http://not-a-comment" // real')
+            == 'x = "http://not-a-comment" '
+        )
+
+    def test_escaped_quote_inside_string(self):
+        # M escapes a quote as "" — the string doesn't end mid-way.
+        assert self._S('"he said ""// hi""" // c') == '"he said ""// hi""" '
+
+    def test_noop_when_no_comments(self):
+        s = "let Source = X in Source"
+        assert self._S(s) is s or self._S(s) == s

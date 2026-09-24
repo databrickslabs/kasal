@@ -14,6 +14,29 @@ logger = logging.getLogger(__name__)
 _RE_SAFE_ALIAS = re.compile(r"^[a-zA-Z_]\w*$")
 
 
+def _is_placeholder_source(source: str) -> bool:
+    """True when ``source`` is a stub rather than a resolved physical table.
+
+    The generation-time M parser can fail to resolve a *parametric* source
+    (``Databricks.Catalogs(ServerHostName, HTTP_Path, …)``, where the catalog is
+    a model parameter) and leave a bare table name, which the target-catalog
+    default then prefixes into ``main.default.<name>``. A real UC source is a
+    3-level ``catalog.schema.table``. ``join_key_map[dim].source_table``, filled
+    during config-gen enrichment (which HAS the model parameters), is the
+    authoritative value to prefer over such a stub — so a dimension join never
+    ships pointing at ``main.default.*``.
+    """
+    if not source or not source.strip():
+        return True
+    t = source.strip()
+    low = t.lower()
+    if low.startswith("todo") or low.startswith("main.default."):
+        return True
+    if "(" in t:  # an inline subquery / pivot source is real, not a stub
+        return False
+    return t.count(".") < 2  # not a 3-level catalog.schema.table
+
+
 def _sanitize_alias(alias: str) -> str:
     """Sanitize a SQL alias to prevent injection. Only allow alphanumeric + underscore."""
     if not _RE_SAFE_ALIAS.match(alias):
@@ -80,9 +103,16 @@ class JoinDetector:
                     ):
                         source = fact_src
                         break
-            if not source:
-                # Fallback: use source_table from join_key_map config
-                source = jk.get("source_table", "")
+            # join_key_map[dim].source_table is filled during config-gen
+            # enrichment, which resolves parametric sources using the model's
+            # expressions the generation-time parser may lack. Prefer it whenever
+            # what we resolved above is empty or a `main.default.*` placeholder,
+            # so the join points at the real table instead of a stub.
+            jk_source = jk.get("source_table", "")
+            if _is_placeholder_source(source) and not _is_placeholder_source(jk_source):
+                source = jk_source
+            elif not source:
+                source = jk_source
             if not source:
                 continue
 

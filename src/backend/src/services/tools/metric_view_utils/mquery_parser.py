@@ -82,7 +82,9 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
     """
     if not mquery or not isinstance(mquery, str):
         return ("unknown", "empty source expression")
-    m = mquery
+    # Classify on the ACTIVE source only — a disabled `// …Excel.Workbook…` or
+    # `// Source = Sql.Database(…)` comment must not decide the category.
+    m = strip_m_comments(mquery)
     mu = m.upper()
     if re.search(r"Table\.FromRows\s*\(\s*Json\.Document\s*\(\s*Binary\.Decompress", m):
         return (
@@ -141,6 +143,60 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
     return ("unknown", "unrecognized M source shape")
 
 
+def strip_m_comments(mquery: str) -> str:
+    """Remove M ``//`` line and ``/* */`` block comments, preserving newlines.
+
+    String-literal aware: a ``//`` or ``/*`` INSIDE a double-quoted M string is
+    left untouched — critical because a ``Value.NativeQuery(src, "<SQL>")`` source
+    carries the whole SQL as a string literal (which may legitimately contain
+    ``/``), and that text is exactly what we must keep. M escapes a quote inside a
+    string by doubling it (``""``), which this honours.
+
+    Why this matters: a Power BI table migrated off Synapse routinely keeps the old
+    ``// Source = Sql.Database(…)`` / ``//… Source{[Schema=…,Item=…]}`` lines as
+    disabled comments above the live source. Parsing those as code makes the
+    resolver read a stale table (OTC Fact_NPS resolved to the commented
+    ``datalake…cust_exp_fact_data_v2`` instead of its real ``Value.NativeQuery``
+    source). Stripping first is the generic fix.
+    """
+    if not mquery or "//" not in mquery and "/*" not in mquery:
+        return mquery
+    out: list[str] = []
+    i, n, in_str = 0, len(mquery), False
+    while i < n:
+        c = mquery[i]
+        if in_str:
+            if c == '"':
+                if i + 1 < n and mquery[i + 1] == '"':  # "" = escaped quote
+                    out.append('""')
+                    i += 2
+                    continue
+                in_str = False
+            out.append(c)
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and mquery[i + 1] == "/":
+            j = mquery.find("\n", i)
+            if j == -1:
+                break
+            i = j  # keep the newline for the next iteration
+            continue
+        if c == "/" and i + 1 < n and mquery[i + 1] == "*":
+            j = mquery.find("*/", i + 2)
+            if j == -1:
+                break
+            i = j + 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 # 3-level UC name: catalog.schema.table (identifiers, optionally back-quoted).
 _FQN_RE = re.compile(
     r"([A-Za-z_][\w]*|`[^`]+`)\."
@@ -173,6 +229,11 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
     """
     if not mquery or not isinstance(mquery, str):
         return None
+    # Drop disabled `// Source = …` / `/* */` lines before any pattern match, so a
+    # stale commented-out source (common after a Synapse→Databricks migration)
+    # can't be read as the live one. String-literal aware, so a NativeQuery's
+    # embedded SQL survives intact.
+    mquery = strip_m_comments(mquery)
 
     # Parameter-driven source: resolve the let block to literal SQL first, then pull
     # the FROM target out of the resolved SQL. Only when expressions are supplied.

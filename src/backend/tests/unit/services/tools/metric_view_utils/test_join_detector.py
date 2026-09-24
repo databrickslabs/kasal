@@ -163,6 +163,70 @@ class TestJoinDetectorDimJoins:
         joins = detector.detect("fact", measures, tables["fact"])
         assert joins == []
 
+    def test_placeholder_source_replaced_by_join_key_map(self):
+        """S1 regression: when the generation-time parser only produced a
+        `main.default.*` placeholder for a parametric dim source, the resolved
+        `join_key_map[dim].source_table` (from config-gen enrichment) must win —
+        the join must not ship pointing at `main.default.*`."""
+        tables = {
+            "fact": _make_table("fact", "cat.sch.fact", ["country_id"]),
+            "Dim_Country": _make_table(
+                "Dim_Country",
+                "main.default.cust_exp_dim_company_v1",  # unresolved parametric stub
+                ["country_id", "region"],
+                agg=[],
+                is_fact=False,
+            ),
+        }
+        config = {
+            "join_key_map": {
+                "Dim_Country": {
+                    "alias": "dim_country",
+                    "join_key": "country_id",
+                    "dim_columns": ["region"],
+                    # authoritative path resolved during enrichment
+                    "source_table": "dc_datalake_prod_001.udm_datamart_cust_exp.cust_exp_dim_company",
+                },
+            }
+        }
+        detector = JoinDetector(tables, config)
+        measures = [{"dax_expression": "Dim_Country[region]"}]
+        joins = detector.detect("fact", measures, tables["fact"])
+        assert len(joins) == 1
+        assert (
+            joins[0]["source"]
+            == "dc_datalake_prod_001.udm_datamart_cust_exp.cust_exp_dim_company"
+        )
+
+    def test_real_source_not_overridden_by_join_key_map(self):
+        """The override only fires for placeholders — a real resolved dim source
+        is kept even when join_key_map also carries a source_table."""
+        tables = {
+            "fact": _make_table("fact", "cat.sch.fact", ["key"]),
+            "Dim_X": _make_table(
+                "Dim_X",
+                "real_cat.real_sch.dim_x",
+                ["key", "label"],
+                agg=[],
+                is_fact=False,
+            ),
+        }
+        config = {
+            "join_key_map": {
+                "Dim_X": {
+                    "alias": "dim_x",
+                    "join_key": "key",
+                    "dim_columns": ["label"],
+                    "source_table": "other_cat.other_sch.other_dim",
+                },
+            }
+        }
+        detector = JoinDetector(tables, config)
+        measures = [{"dax_expression": "Dim_X[label]"}]
+        joins = detector.detect("fact", measures, tables["fact"])
+        assert len(joins) == 1
+        assert joins[0]["source"] == "real_cat.real_sch.dim_x"
+
     def test_inner_join_type(self):
         tables = {
             "fact": _make_table("fact", "cat.sch.fact", ["key"]),
