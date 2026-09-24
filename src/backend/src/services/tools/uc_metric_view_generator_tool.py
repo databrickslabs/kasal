@@ -525,9 +525,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                 if isinstance(_icm, dict) and _icm:
                     config.setdefault("implicit_column_measures", {})
                     for _tbl, _entries in _icm.items():
-                        config["implicit_column_measures"].setdefault(
-                            _tbl, []
-                        ).extend(_entries)
+                        config["implicit_column_measures"].setdefault(_tbl, []).extend(
+                            _entries
+                        )
             except (json.JSONDecodeError, TypeError) as e:
                 logger.warning(f"[UCMV] Failed to parse implicit_column_measures: {e}")
 
@@ -894,7 +894,41 @@ class UCMetricViewGeneratorTool(BaseTool):
         # Surface the catch-all as its own downloadable file
         # (none_allocated_measures.yaml), alongside the real views.
         if none_allocated_yaml:
-            yaml_output = {**yaml_output, "none_allocated_measures": none_allocated_yaml}
+            yaml_output = {
+                **yaml_output,
+                "none_allocated_measures": none_allocated_yaml,
+            }
+
+        # Source-layer views (rec#3), PBI-only ingestion tasks (S8) and the
+        # PBI-validation hook (rec#4). Each fail-open, each its own output key —
+        # the bridge lives in source_artifacts so this tool doesn't carry the glue.
+        source_layer_ddl: dict = {}
+        pbi_only_ingestion_tasks: list = []
+        pbi_validation_report: dict = {}
+        try:
+            from src.services.tools.metric_view_utils.source_artifacts import (
+                build_source_layer,
+                detect_pbi_only_tables,
+                run_pbi_validation,
+            )
+
+            _mq_exprs = getattr(pipeline, "_mquery_expressions", {}) or {}
+            source_layer_ddl = build_source_layer(
+                pipeline.all_specs, mquery_tables, config, catalog, schema
+            )
+            pbi_only_ingestion_tasks = detect_pbi_only_tables(
+                _mq_exprs, catalog, schema
+            )
+            pbi_validation_report = run_pbi_validation(pipeline.all_specs, yaml_output)
+            if source_layer_ddl or pbi_only_ingestion_tasks:
+                logger.info(
+                    f"[UCMVGenerator] source layer: {len(source_layer_ddl)} view(s); "
+                    f"PBI-only ingestion tasks: {len(pbi_only_ingestion_tasks)}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[UCMVGenerator] source-layer/ingestion/validation step skipped: {e}"
+            )
 
         output = {
             "yaml": yaml_output,
@@ -950,6 +984,18 @@ class UCMetricViewGeneratorTool(BaseTool):
             # connection to a semantic model; the UI flags these as a note
             # telling the team which model/table to parse to complete them.
             "live_connections": live_connections,
+            # rec#3: one CREATE VIEW per PBI table reproducing the physical read
+            # (native-query SQL / passthrough + calc columns) the metric views sit
+            # on. {table: {ddl, todo_steps, error}}.
+            "source_layer_ddl": source_layer_ddl,
+            # S8: tables sourced from Excel/SharePoint/Web/typed literals — need an
+            # ingestion snapshot, not a SQL translation. [{table, uc_target, kind,
+            # recommended_approach, snapshot_loader_stub}].
+            "pbi_only_ingestion_tasks": pbi_only_ingestion_tasks,
+            # rec#4: validation-loop hook. "skipped" until a live PBI EVALUATE
+            # callback (service-account executeQueries) is wired; the mechanism is
+            # ready in pbi_validation.
+            "pbi_validation": pbi_validation_report,
             "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
