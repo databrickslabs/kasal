@@ -302,6 +302,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
         role="dialog"
         aria-label="Deck studio"
         aria-modal="true"
+        tabIndex={-1}
         className="kasal-deck-studio fixed inset-0 z-[1200] flex flex-col"
         // A portal still bubbles React events up the COMPONENT tree: a click in
         // the instruction bar reached the deck card's onClick, which focuses the

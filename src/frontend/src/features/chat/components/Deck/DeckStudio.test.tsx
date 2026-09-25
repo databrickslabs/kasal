@@ -214,6 +214,33 @@ describe('DeckStudio', () => {
     expect(rail.scrollTop).toBe(0);
   });
 
+  it('keeps real keyboard focus inside the studio while navigating running slides', async () => {
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const dialog = screen.getByRole('dialog', { name: 'Deck studio' });
+    submitSlide(1);
+    expect(dialog).toHaveFocus();
+    // Dispatch to actual focus, not directly to the dialog: body focus would
+    // bypass its handler and produce the user's intermittent page scrolling.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+    submitSlide(2);
+    expect(dialog).toHaveFocus();
+    for (const [key, number] of [['ArrowUp', 1], ['ArrowDown', 2], ['ArrowDown', 3], ['ArrowUp', 2]] as const) {
+      fireEvent.keyDown(document.activeElement!, { key });
+      expect(screen.getByRole('listitem', { name: `Slide ${number}` })).toHaveAttribute('aria-current', 'true');
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+    await act(async () => runs[1].resolve({ section: slide('Updated second') }));
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(dialog).toHaveFocus();
+    await act(async () => runs[0].resolve({ section: slide('Updated cover') }));
+    expect(screen.getByLabelText('Slide instruction')).toHaveFocus();
+  });
+
   it('downloads the presentation as HTML', () => {
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
     fireEvent.click(screen.getByTitle('Download'));

@@ -35,8 +35,16 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
   // A new target (slide or mode) starts a fresh instruction.
   useEffect(() => {
     setValue('');
-    ref.current?.focus();
   }, [slideNumber, mode]);
+
+  useEffect(() => {
+    // A disabled textarea cannot keep focus. Without a modal fallback, arrow
+    // keys go to the page and scroll it instead of navigating running slides.
+    const target = working
+      ? ref.current?.closest<HTMLElement>('[role="dialog"]')
+      : ref.current;
+    target?.focus({ preventScroll: true });
+  }, [slideNumber, mode, working]);
 
   const submit = (text: string) => {
     const t = text.trim();
