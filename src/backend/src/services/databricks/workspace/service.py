@@ -318,11 +318,10 @@ class DatabricksService:
                 # Storage roots belong to the installation; object paths below
                 # them remain scoped by the existing teamspace storage services.
                 if installation.output_volume:
-                    result.volume_enabled = bool(self.group_id and not namespace.error)
+                    group_id = self.group_id if not namespace.error else None
+                    result.volume_enabled = bool(group_id)
                     result.volume_path = (
-                        installation.output_path(self.group_id)
-                        if result.volume_enabled
-                        else None
+                        installation.output_path(group_id) if group_id else None
                     )
                 return result
 

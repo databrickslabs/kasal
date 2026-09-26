@@ -915,7 +915,11 @@ class MetricViewPipeline:
                                 m.dax_expression,
                                 fact_table=spec.fact_table_key,
                                 m2n_tables=_m2n_tables,
-                                join_tables={j.get("name") for j in (spec.joins or [])},
+                                join_tables={
+                                    n
+                                    for j in (spec.joins or [])
+                                    if (n := j.get("name"))
+                                },
                             ),
                             m.skip_reason,
                         ),
