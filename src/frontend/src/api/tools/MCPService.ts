@@ -45,6 +45,10 @@ export interface DatabricksMcpCatalog {
   workspace_url: string;
   external: DatabricksMcpOption[];
   managed: DatabricksManagedMcpType[];
+  /** Registrations still on the legacy `/api/2.0/mcp/external/` proxy URL.
+   *  Migrating them is an explicit admin action (migrateLegacyExternalUrls),
+   *  never a side effect of loading the catalog. */
+  legacy_external_count?: number;
 }
 
 /**
@@ -280,26 +284,41 @@ export class MCPService {
    */
   async getDatabricksCatalog(): Promise<DatabricksMcpCatalog> {
     try {
-      const response = await apiClient.get<
-        Partial<DatabricksMcpCatalog> & { legacy_external_count?: number }
-      >('/mcp/databricks/available');
-      // The GET is read-only; it reports registrations still on the legacy
-      // external-MCP proxy and the migration is an explicit POST.
-      if ((response.data.legacy_external_count ?? 0) > 0) {
-        try {
-          await apiClient.post('/mcp/databricks/migrate-external-urls');
-        } catch (migrateError) {
-          console.warn('Could not migrate legacy external MCP registrations', migrateError);
-        }
-      }
+      const response = await apiClient.get<Partial<DatabricksMcpCatalog>>(
+        '/mcp/databricks/available',
+      );
+      // Read-only: the GET only REPORTS registrations still on the legacy
+      // external-MCP proxy. It used to fire the migration POST from here on
+      // every load with pending rows, i.e. a write on view (which also re-ran
+      // the full UC discovery). The admin now migrates explicitly.
       return {
         workspace_url: response.data.workspace_url ?? '',
         external: response.data.external ?? [],
         managed: response.data.managed ?? [],
+        legacy_external_count: response.data.legacy_external_count ?? 0,
       };
     } catch (error) {
       const axiosError = error as AxiosError<ErrorResponse>;
       throw new Error(axiosError.response?.data?.detail || 'Error fetching Databricks MCP catalog');
+    }
+  }
+
+  /**
+   * Re-point this workspace's legacy external-MCP registrations at their UC MCP
+   * Service URL (admin-only on the backend). An explicit admin action.
+   * @returns How many registrations were migrated
+   */
+  async migrateLegacyExternalUrls(): Promise<number> {
+    try {
+      const response = await apiClient.post<{ migrated?: number }>(
+        '/mcp/databricks/migrate-external-urls',
+      );
+      return response.data?.migrated ?? 0;
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(
+        axiosError.response?.data?.detail || 'Error migrating legacy MCP registrations',
+      );
     }
   }
 
