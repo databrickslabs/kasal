@@ -85,8 +85,14 @@ access token for Databricks calls, but it does **not** establish identity.
 | --- | --- |
 | No trusted identity header | `401` |
 | An identity that maps to no workspace (for example a name without `@`) | `401` |
-| `group_id` is not one of your workspaces, or cannot be resolved | `403` |
+| `group_id` is not one of your workspaces, or cannot be resolved | `403`, with fixed detail text (below) |
 | The workspace resolver fails unexpectedly | `503` (retry) |
+
+A `403` from this check never echoes the requested group or the resolver's
+reason. Its `detail` is one of two fixed strings: `Access denied: no access to
+group` when `group_id` is not one of your workspaces (the frontend matches this
+phrase to drop a stale saved workspace), or `Access denied: workspace could not
+be resolved` for any other refusal. The reason is logged server-side.
 
 Only public routes such as the health checks skip this dependency.
 

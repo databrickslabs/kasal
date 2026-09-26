@@ -146,6 +146,7 @@ Paths in this section are relative to `src/frontend/src/`.
 | `features/configuration/`, `features/tools/`, `features/memory/`, `features/groups/` | Domain settings, tool configuration selectors, memory and workspace selection |
 | `features/conversion/`, `features/help/` | Conversion tools, documentation, tutorials and best practices |
 | `shared/api/` | Single Axios transport, workspace-header recovery and error publication |
+| `shared/errors/` | `ErrorBoundary` and lazy-chunk failure detection (`chunkErrors.ts`) |
 | `shared/ui/` | Domain-independent presentation shared across features |
 | `shared/lib/collections.ts` | Generic first-occurrence indexing and deduplication |
 | `types/ui/layout.ts` | Application-wide workspace panel/layout state contract |
@@ -162,9 +163,17 @@ API clients, contracts and pure processing libraries must not import UI views.
 The flat ESLint configuration enforces the boundaries already established.
 
 `shared/api/client.ts` reads `VITE_API_URL`, defaulting to
-`http://localhost:8000/api/v1` in development and `/api/v1` in production.
+`http://localhost:<port>/api/v1` in development (the port comes from
+`shared/api/backendOrigin.ts`, which follows `KASAL_PORT`) and `/api/v1` in production.
 `config/api/ApiConfig.ts` is a compatibility re-export. App startup registers the
 deduplicated database-outage toast; the transport does not import UI libraries.
+
+Every `Suspense` that wraps `lazy()` components sits inside a
+`ErrorBoundary` (`shared/errors/ErrorBoundary.tsx`), so one failed render does not blank the whole
+app. A lazy chunk that fails to load, usually because a redeploy changed the
+chunk names while the tab was open, shows a prompt to reload the page instead
+of a generic error. The boundary has `page`, `section` and `dialog` variants and
+clears itself when one of its `resetKeys` (a route or a tab) changes.
 
 Crew representations are separate: `types/workflow/crew.ts` holds API contracts,
 `crewPayload.ts` serialized inputs and

@@ -11,6 +11,7 @@ The environment variables that Kasal's backend, launch scripts and frontend read
 - [Security and API limits](#security-and-api-limits)
 - [Execution and LLM tuning](#execution-and-llm-tuning)
 - [Chat, A2UI and generation](#chat-a2ui-and-generation)
+- [Decisions (Jev)](#decisions-jev)
 - [Memory, knowledge and recipes](#memory-knowledge-and-recipes)
 - [Event triggers](#event-triggers)
 - [Logging](#logging)
@@ -50,19 +51,19 @@ The server variables are:
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `KASAL_BIND_HOST` | `127.0.0.1` | Interface uvicorn binds to. Any value other than `127.0.0.1`, `localhost` or `::1` prints a warning, and a louder one when `LOCAL_DEV_AUTH` is on, because anyone who can reach the port then acts as the development user | `src/backend/run.sh` |
-| `KASAL_PORT` | `8000` | Port uvicorn listens on | `src/backend/run.sh` |
+| `KASAL_PORT` | `8000` | Port uvicorn listens on. The Vite dev server reads it too, for its `/api` proxy and for the API client | `src/backend/run.sh`, `src/frontend/vite.config.ts` |
 | `KASAL_KILL_PORT_OWNER` | `false` | If the port is held by something that is not a Kasal server from this checkout, `run.sh` refuses to start. Set to `true` to send it SIGTERM instead | `src/backend/run.sh` |
 | `FRONTEND_STATIC_DIR` | `src/frontend_static` | Directory of built frontend assets the production entrypoint serves | `src/entrypoint.py` |
 
-`KASAL_PORT` only moves the backend. The Vite dev server still proxies `/api` to port 8000 (`src/frontend/vite.config.ts`) and the API client still defaults to `http://localhost:8000/api/v1` in development, so a backend on another port also needs `VITE_API_URL` (see [Frontend](#frontend)).
+`KASAL_PORT` moves the backend and, in development, the frontend's target. `src/frontend/vite.config.ts` reads `VITE_KASAL_PORT`, else `KASAL_PORT`, else `8000`, points the `/api` proxy at that port and exposes it to the browser, where the API client builds `http://localhost:<port>/api/v1` (`src/frontend/src/shared/api/backendOrigin.ts`). Start both with the same value, for example `KASAL_PORT=8001 ./run.sh` and `KASAL_PORT=8001 npm start`.
 
-`run.sh` also exports these on your behalf: `DATABASE_TYPE` and `SQLITE_DB_PATH` (see [Database](#database)), `LOCAL_DEV_AUTH=true` unless already set, `KASAL_LOG_LEVEL=INFO` and `KASAL_LOG_THIRD_PARTY=WARNING` unless already set, `USE_NULLPOOL=true` and `CREWAI_DISABLE_TELEMETRY=true`. Its `-q`, `-v`, `-d`, `--no-console` and `--no-file` flags set the logging variables described under [Logging](#logging).
+`run.sh` changes into `src/backend` before it starts, whatever directory you call it from. It also exports these on your behalf: `DATABASE_TYPE` (see [Database](#database)), `LOCAL_DEV_AUTH=true` unless already set, `KASAL_LOG_LEVEL=INFO` and `KASAL_LOG_THIRD_PARTY=WARNING` unless already set, `USE_NULLPOOL=true` and `CREWAI_DISABLE_TELEMETRY=true`. Its `-q`, `-v`, `-d`, `--no-console` and `--no-file` flags set the logging variables described under [Logging](#logging).
 
 The production entrypoint `src/entrypoint.py` (used by `src/app.yaml`) takes `--db-type`, `--db-url`, `--port` (default `8000`), `--reload`, `--debug` and `--environment dev|prod` flags rather than variables. `--environment dev` sets `KASAL_DEPLOYMENT_MODE=local` and `DATABRICKS_APP_NAME=kasal-local-test`.
 
 ## Local development identity
 
-Every protected API route depends on `get_group_context` (`src/backend/src/dependencies/providers.py`), which fails closed: a request with no identity gets **401**, an identity that resolves to no workspace gets 401, a workspace the user may not use gets 403, and a resolver failure gets 503. Outside Databricks Apps there is no proxy to supply `X-Forwarded-Email`, so a local run needs a development identity:
+Every protected API route depends on `get_group_context` (`src/backend/src/dependencies/providers.py`), which fails closed: a request with no identity gets **401**, an identity that resolves to no workspace gets 401, a workspace the user may not use gets 403, and a resolver failure gets 503. A 403 carries fixed detail text, never the resolver's reason or the requested group ID: `Access denied: no access to group` when the selected workspace is not one of the caller's (the frontend matches that phrase to drop a stale saved workspace), and `Access denied: workspace could not be resolved` for any other refusal. Outside Databricks Apps there is no proxy to supply `X-Forwarded-Email`, so a local run needs a development identity:
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
@@ -75,22 +76,22 @@ If you start uvicorn yourself instead of through `run.sh`, export `LOCAL_DEV_AUT
 
 ## Database
 
-Kasal uses SQLite or PostgreSQL through async SQLAlchemy, or Lakebase inside Databricks Apps. The default depends on the entry point, so check which one you are using:
+Kasal uses SQLite or PostgreSQL through async SQLAlchemy, or Lakebase inside Databricks Apps. The default depends on the entry point:
 
-- **`Settings` (`src/backend/src/config/settings.py`)**, which applies to anything that does not go through `run.sh` or the entrypoint, such as `alembic` or `python run_seeders.py`: `DATABASE_TYPE` defaults to `postgres`. When set to `sqlite`, `SQLITE_DB_PATH` defaults to the absolute path `src/backend/app.db`.
-- **`run.sh`**: defaults to SQLite (`./run.sh postgres` switches) and exports `SQLITE_DB_PATH=./app.db`, relative to the directory you run it from. Run it from `src/backend` so it opens `src/backend/app.db`.
+- **`Settings` (`src/backend/src/config/settings.py`)**, which `run.sh`, `uvicorn`, `alembic` (`src/backend/migrations/env.py`) and `python run_seeders.py` all go through: `DATABASE_TYPE` defaults to `sqlite`, and `SQLITE_DB_PATH` defaults to the absolute path `src/backend/app.db`, so the working directory does not matter and every command opens the same file.
+- **`run.sh`**: defaults to SQLite (`./run.sh postgres` switches) and exports only `DATABASE_TYPE`. It does not set `SQLITE_DB_PATH`, so it uses the `Settings` default or the value you exported.
 - **`src/entrypoint.py`**: `--db-type` defaults to `sqlite` with `SQLITE_DB_PATH` defaulting to `src/kasal.db`, and it exports `DATABASE_URI`/`DATABASE_URL` directly. With `--db-type postgres` and no `--db-url`, it falls back to a local `postgres` database on `localhost:5432`.
 - **The `kasal` command from the pip package (`packaging/kasal/cli.py`)**: defaults `DATABASE_TYPE` to `sqlite` and `SQLITE_DB_PATH` to `~/.kasal/kasal.db` (or `<--data-dir>/kasal.db`), without overriding values already in the environment. It does not set `LOCAL_DEV_AUTH`. For more information, see [installing Kasal with pip](./PIP_PACKAGE.md).
 - **Databricks Apps with a Lakebase resource attached**: when `PGHOST`, `PGDATABASE` and `PGUSER` are injected by the platform, `init_db` uses the Lakebase resource and the variables above do not apply.
 
-To make `alembic` and the seeders target the same SQLite file as `run.sh`, prefix them with `DATABASE_TYPE=sqlite`.
+To use PostgreSQL or another SQLite file locally, set `DATABASE_TYPE=postgres` (with the `POSTGRES_*` variables) or `SQLITE_DB_PATH` on every command you run, not only on the server.
 
 The database variables are:
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `DATABASE_TYPE` | `postgres` (`run.sh`: `sqlite`) | `sqlite` or `postgres`; selects how `DATABASE_URI` is assembled | `src/backend/src/config/settings.py` |
-| `SQLITE_DB_PATH` | `src/backend/app.db` (`run.sh`: `./app.db`; entrypoint: `src/kasal.db`; pip `kasal`: `~/.kasal/kasal.db`) | SQLite database file | `src/backend/src/config/settings.py`, `src/entrypoint.py` |
+| `DATABASE_TYPE` | `sqlite` | `sqlite` or `postgres`; selects how `DATABASE_URI` is assembled | `src/backend/src/config/settings.py` |
+| `SQLITE_DB_PATH` | `src/backend/app.db`, absolute (entrypoint: `src/kasal.db`; pip `kasal`: `~/.kasal/kasal.db`) | SQLite database file | `src/backend/src/config/settings.py`, `src/entrypoint.py` |
 | `DATABASE_URI` | Assembled from the fields above | Full async SQLAlchemy URI; when set, it wins over `DATABASE_TYPE` | `src/backend/src/config/settings.py` |
 | `POSTGRES_SERVER` | `localhost` | PostgreSQL host | `src/backend/src/config/settings.py` |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port | `src/backend/src/config/settings.py` |
@@ -195,6 +196,16 @@ These tune the chat surface, generative UI and the crew/task generators:
 | `AGENT_MODEL`, `CREW_MODEL`, `CONNECTION_MODEL`, `DEFAULT_TASK_MODEL`, `TASK_MODEL`, `DEFAULT_IMPROVE_MODEL`, `PROMPT_IMPROVE_MODEL` | `DEFAULT_LLM_MODEL` | Fallbacks for the generators when the request names no model. Prefer choosing the model in the UI | `src/backend/src/services/generation/` |
 | `DAX_LLM_BATCH_SIZE` | `12` | Measures per LLM call in the DAX fallback translator | `src/backend/src/services/tools/metric_view_utils/dax_llm_fallback.py` |
 
+## Decisions (Jev)
+
+The Jev decisions provider is off unless the deployment configures its endpoint:
+
+| Variable | Default | What it does | Read in |
+|---|---|---|---|
+| `JEV_API_BASE` | Unset | Base URL of the Jev decisions API, for example `https://jev.example.com`. Unset means Jev is not configured: decisions stay off for every workspace, the runtime reads no credentials, and an admin cannot enable Jev (the save is refused with `400`). When set, each workspace still opts in and stores its key as `JEV_API_KEY` under **Configuration → API Keys** | `src/backend/src/config/settings.py`, `src/backend/src/services/decisions/provider.py` |
+
+It is deployment-owned configuration and has no built-in default; a prompt or tool result never supplies it.
+
 ## Memory, knowledge and recipes
 
 Memory maintenance runs in the background; these control it and the knowledge store:
@@ -271,12 +282,13 @@ The frontend reads these at build or dev-server time from the environment or fro
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `VITE_API_URL` | `http://localhost:8000/api/v1` in dev, `/api/v1` in a build | Base URL of the backend API | `src/frontend/src/shared/api/client.ts` |
+| `VITE_KASAL_PORT` | `KASAL_PORT`, else `8000` | Port of the local backend in development: the `/api` proxy target and the port the API client and chat streams call. Not used in a build | `src/frontend/vite.config.ts`, `src/frontend/src/shared/api/backendOrigin.ts` |
+| `VITE_API_URL` | `http://localhost:<VITE_KASAL_PORT>/api/v1` in dev, `/api/v1` in a build | Overrides the base URL of the backend API. You do not need it to change the port | `src/frontend/src/shared/api/client.ts` |
 | `VITE_KASAL_API_URL` | `/api/v1` | API base for the chat app store | `src/frontend/src/features/chat/store/appStore.ts` |
 | `VITE_DEV_USER_EMAIL` | `dev@localhost` | Email the dev server sends as `X-Forwarded-Email`, and as `_sse_email` on loopback event streams. Development builds only | `src/frontend/src/shared/api/client.ts`, `src/frontend/src/shared/api/sseContext.ts` |
 | `ANALYZE` | Unset | `true` opens a bundle-size report after `vite build` | `src/frontend/vite.config.ts` |
 
-The Vite dev server runs on port 3000 and proxies `/api` to `http://localhost:8000`; that target is not configurable by a variable.
+The Vite dev server runs on port 3000 and proxies `/api` to `http://localhost:<port>`, where the port is `VITE_KASAL_PORT`, else `KASAL_PORT`, else `8000`.
 
 ## Testing and CI
 

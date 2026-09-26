@@ -176,7 +176,7 @@ Important toggles that affect developer and runtime experience. See the [configu
 
 - `DOCS_ENABLED`: enables the FastAPI `/api-docs` pages.
 - `AUTO_SEED_DATABASE`: runs the seeders in the background after database initialization.
-- `DATABASE_TYPE`: `sqlite` (with `SQLITE_DB_PATH`) or `postgres`.
+- `DATABASE_TYPE`: `sqlite` (the default, with `SQLITE_DB_PATH` defaulting to `src/backend/app.db`) or `postgres`.
 
 ## Related
 

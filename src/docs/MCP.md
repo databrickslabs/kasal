@@ -30,7 +30,12 @@ The managed types are:
 
 ### Move registrations off the legacy external proxy
 
-Registrations made before UC MCP Services existed point at `/api/2.0/mcp/external/{connection}`. When the workspace's UC MCP Services listing has a service with the same name, the registration can be re-pointed at its `/ai-gateway/mcp-services/` URL:
+Registrations made before UC MCP Services existed point at `/api/2.0/mcp/external/{connection}`. When the workspace's UC MCP Services listing has a service with the same name, the registration can be re-pointed at its `/ai-gateway/mcp-services/` URL.
+
+The migration is an explicit admin action. It no longer runs when the catalog loads, so opening **Configuration → MCP** never rewrites a registration. When registrations are pending, admins see a notice in the Databricks MCP catalog with a **Migrate** button; it reports how many registrations were migrated, shows the error and lets you retry if the call fails, and reloads the server list on success (`src/frontend/src/features/configuration/components/MCP/LegacyMcpUrlNotice.tsx`).
+
+The two endpoints behind it are:
+
 
 - `GET /mcp/databricks/available` is read-only. It reports `legacy_external_count`, the number of registrations that would change, and never rewrites anything.
 - `POST /mcp/databricks/migrate-external-urls` performs the rewrite and returns `{"migrated": <count>}`. Only workspace admins and system admins can call it (403 otherwise); it returns 503 when the workspace connection cannot be authenticated.

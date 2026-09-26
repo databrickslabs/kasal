@@ -30,8 +30,10 @@ Inside Databricks Apps, `UntrustedIdentityHeadersMiddleware` (registered last in
 | --- | --- |
 | No trusted identity header | `401 Authentication required` |
 | An identity that resolves to no workspace (for example a name without `@`) | `401` |
-| The requested `group_id` is not one of the caller's workspaces, or cannot be resolved | `403` |
+| The requested `group_id` is not one of the caller's workspaces, or cannot be resolved | `403`, with fixed detail text |
 | The workspace resolver fails unexpectedly | `503`, retry |
+
+A `403` carries one of two fixed messages, `Access denied: no access to group` or `Access denied: workspace could not be resolved`, and never the requested group ID or the resolver's reason, which go to the server log only. The frontend matches the phrase `access to group` to drop a stale saved workspace.
 
 Routes that must stay public (health checks) do not depend on it; `src/backend/tests/unit/architecture/test_api_routes_require_identity.py` keeps that list explicit.
 
