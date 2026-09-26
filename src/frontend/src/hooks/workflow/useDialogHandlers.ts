@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback } from 'react';
 import { Node, Edge } from 'reactflow';
 import { useErrorStore } from '../../store/error';
@@ -28,7 +29,10 @@ export const useDialogHandlers = ({
   setSuccessMessage,
   setShowSuccess
 }: UseDialogHandlersProps) => {
-  const errorStore = useErrorStore();
+  const errorStore = useErrorStore(useShallow(state => ({
+    setErrorMessage: state.setErrorMessage,
+    showErrorMessage: state.showErrorMessage,
+  })));
 
   const handleChangeLLM = useCallback(() => {
     const agentNodes = nodes.filter(node => node.type === 'agentNode');

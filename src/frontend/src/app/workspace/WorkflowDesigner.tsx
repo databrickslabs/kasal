@@ -1,4 +1,5 @@
 import { useFlowStateStore } from '../../store/flowState';
+import { useShallow } from 'zustand/react/shallow';
 import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -113,7 +114,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       controlsVisible: _controlsVisible
     },
     setUIState: _setUIState
-  } = useWorkflowStore();
+  } = useWorkflowStore(useShallow(state => ({ hasSeenHandlebar: state.hasSeenHandlebar, setHasSeenTutorial: state.setHasSeenTutorial, setHasSeenHandlebar: state.setHasSeenHandlebar, uiState: state.uiState, setUIState: state.setUIState })));
 
   // Canvas state belongs to the selected shared session.
   const {
@@ -121,10 +122,18 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     updateCanvasExecutionStatus,
     updateCanvasFlowNodes,
     updateCanvasFlowEdges,
-  } = useBuilderCanvasStore();
+  } = useBuilderCanvasStore(useShallow(state => ({
+    getActiveCanvas: state.getActiveCanvas,
+    updateCanvasExecutionStatus: state.updateCanvasExecutionStatus,
+    updateCanvasFlowNodes: state.updateCanvasFlowNodes,
+    updateCanvasFlowEdges: state.updateCanvasFlowEdges,
+  })));
+  // Subscribe to the active canvas itself (a stable reference until it
+  // changes) so render-time reads stay reactive without the whole store.
+  const activeCanvas = useBuilderCanvasStore(state => state.getActiveCanvas());
 
   // Use run status store for job monitoring (SSE-based, no polling needed)
-  const { runHistory } = useRunStatusStore();
+  const runHistory = useRunStatusStore(state => state.runHistory);
 
   // Use flow store for node/edge management (crew canvas)
   const {
@@ -143,7 +152,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // CRITICAL: Flow Canvas state from tab manager (persisted per tab)
   // Get the active tab's flow nodes/edges
-  const activeTab = getActiveCanvas();
+  const activeTab = activeCanvas;
   const flowNodes = activeTab?.flowNodes || [];
   const flowEdges = activeTab?.flowEdges || [];
 
@@ -292,7 +301,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     panelPosition,
     areFlowsVisible,
     appMode,
-  } = useUILayoutStore();
+  } = useUILayoutStore(useShallow(state => ({ updateScreenDimensions: state.updateScreenDimensions, setChatPanelVisible: state.setChatPanelVisible, setExecutionHistoryVisible: state.setExecutionHistoryVisible, setPanelPosition: state.setPanelPosition, setAreFlowsVisible: state.setAreFlowsVisible, leftSidebarBaseWidth: state.leftSidebarBaseWidth, rightSidebarWidth: state.rightSidebarWidth, executionHistoryHeight: state.executionHistoryHeight, chatPanelVisible: state.chatPanelVisible, executionHistoryVisible: state.executionHistoryVisible, assistantPanelVisible: state.assistantPanelVisible, flowPanelTab: state.flowPanelTab, assistantPanelSide: state.assistantPanelSide, setAssistantPanelVisible: state.setAssistantPanelVisible, assistantResponseFocused: state.assistantResponseFocused, assistantPanelRatio: state.assistantPanelRatio, setAssistantPanelRatio: state.setAssistantPanelRatio, panelPosition: state.panelPosition, areFlowsVisible: state.areFlowsVisible, appMode: state.appMode })));
 
   useBuilderSessionMode();
   const sessionSidebarOpen = useChatAppStore(state => state.sidebarOpen);
@@ -437,7 +446,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     trifectaAssessment,
     handleTrifectaProceed,
     handleTrifectaCancel,
-  } = useCrewExecutionStore();
+  } = useCrewExecutionStore(useShallow(state => ({ isExecuting: state.isExecuting, selectedModel: state.selectedModel, reasoningEnabled: state.reasoningEnabled, setSelectedModel: state.setSelectedModel, setReasoningEnabled: state.setReasoningEnabled, handleRunClick: state.handleRunClick, executeFlow: state.executeFlow, setNodes: state.setNodes, setEdges: state.setEdges, showInputVariablesDialog: state.showInputVariablesDialog, setShowInputVariablesDialog: state.setShowInputVariablesDialog, executeWithVariables: state.executeWithVariables, pendingVariableExecution: state.pendingVariableExecution, showTrifectaDialog: state.showTrifectaDialog, trifectaAssessment: state.trifectaAssessment, handleTrifectaProceed: state.handleTrifectaProceed, handleTrifectaCancel: state.handleTrifectaCancel })));
 
   // Debug logging for running tab
   React.useEffect(() => {
@@ -570,7 +579,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const prevCrewEdgeIdsRef = React.useRef<string>('');
 
   // Get task execution store methods
-  const { loadTaskStates, clearTaskStates } = useTaskExecutionStore();
+  const { loadTaskStates, clearTaskStates } = useTaskExecutionStore(useShallow(state => ({ loadTaskStates: state.loadTaskStates, clearTaskStates: state.clearTaskStates })));
 
   // Listen for job created events to track the executing job
   useEffect(() => {
@@ -1244,7 +1253,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                     }, 100);
                   }}
                   onToggleCollapse={() => setChatPanelVisible(false)}
-                  chatSessionId={getActiveCanvas()?.chatSessionId} onOpenLogs={handleShowExecutionLogs} />
+                  chatSessionId={activeCanvas?.chatSessionId} onOpenLogs={handleShowExecutionLogs} />
               </Box>
             )}
           </Box>

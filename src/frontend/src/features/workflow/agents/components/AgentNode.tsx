@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { kasalNodeSurface, kasalNodePalette } from '../../../../theme/kasalSurfaces';
 import { getDefaultModel } from '../../../../config/defaultModel';
 import React, { useCallback, useState, useEffect } from 'react';
@@ -71,7 +72,10 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const { markCurrentTabDirty } = useBuilderDirtyState();
 
   // Use agent store instead of local state
-  const { getAgent, updateAgent } = useAgentStore();
+  const { getAgent, updateAgent } = useAgentStore(useShallow(state => ({
+    getAgent: state.getAgent,
+    updateAgent: state.updateAgent,
+  })));
   const [agentData, setAgentData] = useState<Agent | null>(null);
 
   // Get current layout orientation and process type

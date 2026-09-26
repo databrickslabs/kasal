@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect } from 'react';
 import { usePermissionStore } from '../store/permissions';
 
@@ -6,7 +7,11 @@ import { usePermissionStore } from '../store/permissions';
  * This hook should be used at the app level to ensure permissions are always loaded
  */
 export const usePermissionLoader = () => {
-  const { loadPermissions, userRole, isLoading } = usePermissionStore();
+  const { loadPermissions, userRole, isLoading } = usePermissionStore(useShallow(state => ({
+    loadPermissions: state.loadPermissions,
+    userRole: state.userRole,
+    isLoading: state.isLoading,
+  })));
 
   useEffect(() => {
     // Load permissions on mount

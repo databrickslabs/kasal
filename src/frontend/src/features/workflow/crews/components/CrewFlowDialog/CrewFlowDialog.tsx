@@ -165,7 +165,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const firstTaskCardRef = useRef<HTMLDivElement>(null);
   
   // Get flow configuration to check if CrewAI flows are enabled
-  const { kasalFlowEnabled } = useFlowConfigStore();
+  const kasalFlowEnabled = useFlowConfigStore(state => state.kasalFlowEnabled);
 
   // Operators may run what is in the catalog, not change it. The authoring
   // actions on a card (optimize, publish, edit, delete) are editor/admin only,

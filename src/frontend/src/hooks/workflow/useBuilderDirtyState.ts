@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback } from 'react';
 import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
 
@@ -5,7 +6,10 @@ import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
  * Hook to manage tab dirty state when nodes are modified
  */
 export const useBuilderDirtyState = () => {
-  const { getActiveCanvas, markCanvasDirty } = useBuilderCanvasStore();
+  const { getActiveCanvas, markCanvasDirty } = useBuilderCanvasStore(useShallow(state => ({
+    getActiveCanvas: state.getActiveCanvas,
+    markCanvasDirty: state.markCanvasDirty,
+  })));
 
   /**
    * Mark the currently active tab as dirty

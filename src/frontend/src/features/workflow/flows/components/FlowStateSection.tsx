@@ -17,6 +17,7 @@
  * a conversation.
  */
 
+import { useShallow } from 'zustand/react/shallow';
 import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   Alert,
@@ -58,7 +59,10 @@ const CONVERSATION_CHANNELS = [
 const FlowStateSection: React.FC = () => {
   const activeCanvasId = useBuilderCanvasStore((state) => state.activeCanvasId);
   const declared = useFlowStateStore((state) => state.declared);
-  const { setReducer, setConversational } = useFlowStateStore();
+  const { setReducer, setConversational } = useFlowStateStore(useShallow(state => ({
+    setReducer: state.setReducer,
+    setConversational: state.setConversational,
+  })));
 
   // Hydrate from the SAVED flow when this tab has no declaration yet.
   //

@@ -53,7 +53,10 @@ vi.mock('../store/chatMessagesStore', () => {
     messagesBySession: {}, setMessages: vi.fn(), addMessage: vi.fn(),
     removeMessage: vi.fn(), getMessagesForSession: vi.fn().mockReturnValue([]),
   };
-  return { useChatMessagesStore: Object.assign(() => state, { getState: () => state }) };
+  return { useChatMessagesStore: Object.assign(
+    (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state),
+    { getState: () => state },
+  ) };
 });
 
 describe('useExecutionMonitoring', () => {

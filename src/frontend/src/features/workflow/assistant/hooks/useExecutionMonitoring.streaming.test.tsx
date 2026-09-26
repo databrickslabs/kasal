@@ -62,7 +62,10 @@ const storeState = {
   getMessagesForSession: vi.fn().mockReturnValue([]),
 };
 vi.mock('../store/chatMessagesStore', () => ({
-  useChatMessagesStore: Object.assign(() => storeState, { getState: () => storeState }),
+  useChatMessagesStore: Object.assign(
+    (selector?: (s: typeof storeState) => unknown) => (selector ? selector(storeState) : storeState),
+    { getState: () => storeState },
+  ),
 }));
 
 import { useExecutionMonitoring } from './useExecutionMonitoring';

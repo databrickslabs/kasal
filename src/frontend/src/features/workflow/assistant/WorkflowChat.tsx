@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useGroupStore } from '../../../store/groups';
 import { usePlanGenerationStore, planGenerationKey, startPlanGeneration, resumePlanGeneration, consumePlanGeneration } from './store/planGenerationStore';
 import { applyCrewDispatchResult } from './utils/applyCrewDispatchResult';
@@ -158,24 +159,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [pendingExecutionType, setPendingExecutionType] = useState<'crew' | 'flow'>('crew');
 
   // Use Zustand store for knowledge configuration
-  const {
-    isMemoryBackendConfigured,
-    isKnowledgeSourceEnabled,
-    checkConfiguration,
-  } = useKnowledgeConfigStore();
+  const { isMemoryBackendConfigured, isKnowledgeSourceEnabled, checkConfiguration } = useKnowledgeConfigStore(useShallow(s => ({
+    isMemoryBackendConfigured: s.isMemoryBackendConfigured, isKnowledgeSourceEnabled: s.isKnowledgeSourceEnabled, checkConfiguration: s.checkConfiguration })));
 
   // Use Zustand store for model configuration
-  const { refreshKey } = useModelConfigStore();
+  const refreshKey = useModelConfigStore(s => s.refreshKey);
 
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Lets the composer's "+" menu open the knowledge-file picker, whose input
   // and chips live inside KnowledgeFileUpload.
   const knowledgeUploadRef = useRef<KnowledgeFileUploadHandle>(null);
-  const { setNodes, setEdges } = useWorkflowStore();
-  const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
+  const { setNodes, setEdges } = useWorkflowStore(useShallow(s => ({ setNodes: s.setNodes, setEdges: s.setEdges })));
+  const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore(useShallow(s => ({
+    setInputMode: s.setInputMode, inputMode: s.inputMode, setInputVariables: s.setInputVariables, executeCrew: s.executeCrew, executeFlow: s.executeFlow })));
   const uiLayoutState = useUILayoutState();
-  const { chatPanelSide, setChatPanelSide } = useUILayoutStore();
+  const { chatPanelSide, setChatPanelSide } = useUILayoutStore(useShallow(s => ({ chatPanelSide: s.chatPanelSide, setChatPanelSide: s.setChatPanelSide })));
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
@@ -203,10 +202,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   );
 
   // Use Zustand store for messages
-  const {
-    setMessages: setZustandMessages,
-    setCurrentSession,
-  } = useChatMessagesStore();
+  const { setMessages: setZustandMessages, setCurrentSession } = useChatMessagesStore(useShallow(s => ({
+    setMessages: s.setMessages, setCurrentSession: s.setCurrentSession })));
 
   // Use extracted hooks (excluding messages which are now handled by Zustand)
   const {

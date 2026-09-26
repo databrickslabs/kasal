@@ -3,6 +3,7 @@ import { Node, Edge, ReactFlowInstance } from 'reactflow';
 import { ShortcutConfig } from '../../types/config/shortcuts';
 import { useRunResult } from './useExecutionResult';
 import { useRunHistory } from './useExecutionHistory';
+import { useShallow } from 'zustand/react/shallow';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import shortcutManager from '../../utils/shortcutManager';
@@ -133,17 +134,34 @@ const useShortcuts = ({
   const { runs, fetchRuns } = useRunHistory();
 
   // Get workflow state and actions from the store if enabled
-  const workflowStore = useWorkflowStore();
-  const { nodes: workflowNodes, edges: workflowEdges, setNodes, setEdges, clearWorkflow } = workflowStore;
+  // Pick only the fields used here: a whole-store subscription re-rendered
+  // both canvases on every unrelated workflow/crew-execution update.
+  const {
+    nodes: workflowNodes,
+    edges: workflowEdges,
+    setNodes,
+    setEdges,
+    clearWorkflow,
+  } = useWorkflowStore(useShallow(state => ({
+    nodes: state.nodes,
+    edges: state.edges,
+    setNodes: state.setNodes,
+    setEdges: state.setEdges,
+    clearWorkflow: state.clearWorkflow,
+  })));
 
-  // Get crew execution state and actions
-  const crewExecutionStore = useCrewExecutionStore();
+  // Get crew execution actions
   const {
     executeCrew: executeCrewAction,
     executeFlow: executeFlowAction,
     setErrorMessage,
     setShowError
-  } = crewExecutionStore;
+  } = useCrewExecutionStore(useShallow(state => ({
+    executeCrew: state.executeCrew,
+    executeFlow: state.executeFlow,
+    setErrorMessage: state.setErrorMessage,
+    setShowError: state.setShowError,
+  })));
 
   // Memoize nodes and edges to prevent unnecessary re-renders
   const nodes = useMemo(() => workflowNodes, [workflowNodes]);

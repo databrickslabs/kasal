@@ -25,6 +25,9 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // Production builds strip console.log/info/debug; use utils/logger for
+      // debug output and keep console.warn/error for real problems.
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },
   {

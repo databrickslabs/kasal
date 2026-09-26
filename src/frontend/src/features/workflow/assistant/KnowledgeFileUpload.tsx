@@ -110,7 +110,7 @@ export const KnowledgeFileUpload = React.forwardRef<
   const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydrated = useRef(false);
-  const { updateAgent } = useAgentStore();
+  const updateAgent = useAgentStore(state => state.updateAgent);
 
   React.useImperativeHandle(ref, () => ({ open: () => fileInputRef.current?.click() }), []);
 

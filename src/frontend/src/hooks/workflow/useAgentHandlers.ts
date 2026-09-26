@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback } from 'react';
 import { Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import { Agent } from '../../types/workflow/agent';
@@ -21,7 +22,10 @@ export const useAgentHandlers = ({
   setShowSuccess,
   fetchAgents
 }: UseAgentHandlersProps) => {
-  const errorStore = useErrorStore();
+  const errorStore = useErrorStore(useShallow(state => ({
+    setErrorMessage: state.setErrorMessage,
+    setShowError: state.setShowError,
+  })));
 
   const handleAgentGenerated = useCallback(async (agent: Agent) => {
     try {

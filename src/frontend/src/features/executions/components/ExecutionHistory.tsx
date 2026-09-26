@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef, useRef } from 'react';
+import React, { Suspense, useState, useEffect, forwardRef, useRef } from 'react';
 import {
   Box,
   Card,
@@ -21,13 +21,12 @@ import RunActivityRow from './RunActivityRow';
 import RunActivityOverview, { matchesRunFilter, type RunFilter } from './RunActivityOverview';
 import ExecutionHistorySkeleton from './ExecutionHistorySkeleton';
 import { refreshRecipeIndexIfStale } from './recipeIndexCache';
-import RecipeEffectivenessDialog from './RecipeEffectivenessDialog';
 import { Run } from '../../../api/execution/ExecutionHistoryService';
 import { ScheduleService } from '../../../api/execution/ScheduleService';
-import ShowTraceTimeline from './ShowTraceTimeline';
-import ShowResult from './ShowResult';
 import { ResultValue } from '../../../types/execution/result';
-import ShowLogs from './ShowLogs';
+import {
+  LazyShowResult, LazyShowTraceTimeline, LazyShowLogs, LazyRecipeEffectivenessDialog, MountWhenOpened,
+} from './lazyRunDialogs';
 import { executionLogService } from '../../../api/execution/ExecutionLogs';
 import type { LogMessage, LogEntry } from '../../../api/execution/ExecutionLogs';
 import { useTranslation } from 'react-i18next';
@@ -561,26 +560,30 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
           </Box>}
 
           {selectedRunId && (
-            <ShowTraceTimeline
-              open={showTraceOpen}
-              onClose={handleCloseTrace}
-              runId={selectedRunId}
-              run={selectedRunForTrace || undefined}
-              onViewResult={handleShowResult}
-              onShowLogs={handleShowLogs}
-            />
+            <Suspense fallback={null}>
+              <LazyShowTraceTimeline
+                open={showTraceOpen}
+                onClose={handleCloseTrace}
+                runId={selectedRunId}
+                run={selectedRunForTrace || undefined}
+                onViewResult={handleShowResult}
+                onShowLogs={handleShowLogs}
+              />
+            </Suspense>
           )}
 
 
           {showLogsDialog && selectedJobId && (
-            <ShowLogs
-              open={showLogsDialog}
-              onClose={handleCloseLogs}
-              logs={selectedJobLogs}
-              jobId={selectedJobId}
-              isConnecting={isConnecting}
-              connectionError={connectionError}
-            />
+            <Suspense fallback={null}>
+              <LazyShowLogs
+                open={showLogsDialog}
+                onClose={handleCloseLogs}
+                logs={selectedJobLogs}
+                jobId={selectedJobId}
+                isConnecting={isConnecting}
+                connectionError={connectionError}
+              />
+            </Suspense>
           )}
 
           <RunDialogs
@@ -606,17 +609,21 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
             onCronExpressionChange={(e) => setCronExpression(e.target.value)}
           />
 
-          <ShowResult
-            open={isOpen && !!selectedRun}
-            onClose={closeRunResult}
-            result={memoizedResult}
-            run={selectedRun || undefined}
-          />
+          <MountWhenOpened open={isOpen && !!selectedRun}>
+            <LazyShowResult
+              open={isOpen && !!selectedRun}
+              onClose={closeRunResult}
+              result={memoizedResult}
+              run={selectedRun || undefined}
+            />
+          </MountWhenOpened>
 
-          <RecipeEffectivenessDialog
-            open={recipesDialogOpen}
-            onClose={() => setRecipesDialogOpen(false)}
-          />
+          <MountWhenOpened open={recipesDialogOpen}>
+            <LazyRecipeEffectivenessDialog
+              open={recipesDialogOpen}
+              onClose={() => setRecipesDialogOpen(false)}
+            />
+          </MountWhenOpened>
         </CardContent>
       </Card>
     </>

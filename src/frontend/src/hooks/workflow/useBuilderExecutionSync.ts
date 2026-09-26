@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useCallback } from 'react';
 import { useBuilderCanvasStore, CanvasExecutionConfig } from '../../app/sessions/builderCanvasStore';
 import { useCrewExecutionStore } from '../../store/crewExecution';
@@ -14,7 +15,11 @@ export const useBuilderExecutionSync = () => {
     activeCanvasId,
     updateCanvasExecutionConfig,
     getCanvasExecutionConfig
-  } = useBuilderCanvasStore();
+  } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    updateCanvasExecutionConfig: state.updateCanvasExecutionConfig,
+    getCanvasExecutionConfig: state.getCanvasExecutionConfig,
+  })));
 
   const {
     processType,
@@ -30,7 +35,21 @@ export const useBuilderExecutionSync = () => {
     setManagerLLM,
     setSelectedModel,
     isLoadingCrew
-  } = useCrewExecutionStore();
+  } = useCrewExecutionStore(useShallow(state => ({
+    processType: state.processType,
+    reasoningEnabled: state.reasoningEnabled,
+    reasoningLLM: state.reasoningLLM,
+    reasoningConfig: state.reasoningConfig,
+    managerLLM: state.managerLLM,
+    selectedModel: state.selectedModel,
+    setProcessType: state.setProcessType,
+    setReasoningEnabled: state.setReasoningEnabled,
+    setReasoningLLM: state.setReasoningLLM,
+    setReasoningConfig: state.setReasoningConfig,
+    setManagerLLM: state.setManagerLLM,
+    setSelectedModel: state.setSelectedModel,
+    isLoadingCrew: state.isLoadingCrew,
+  })));
 
   // Track the last active tab to detect tab switches
   const lastActiveTabIdRef = useRef<string | null>(null);

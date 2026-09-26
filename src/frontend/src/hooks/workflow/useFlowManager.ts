@@ -10,6 +10,7 @@ import {
   applyNodeChanges
 } from 'reactflow';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 import { useWorkflowStore } from '../../store/workflow';
 
 
@@ -37,7 +38,25 @@ export const useFlowManager = ({ showErrorMessage }: UseFlowManagerProps) => {
     clearCanvas: storeClearCanvas,
     deleteEdge,
     addEdge: storeAddEdge
-  } = useWorkflowStore();
+  } = useWorkflowStore(useShallow(state => ({
+    nodes: state.nodes,
+    edges: state.edges,
+    setNodes: state.setNodes,
+    setEdges: state.setEdges,
+    selectedEdges: state.selectedEdges,
+    setSelectedEdges: state.setSelectedEdges,
+    contextMenu: state.contextMenu,
+    setContextMenu: state.setContextMenu,
+    flowConfig: state.flowConfig,
+    setFlowConfig: state.setFlowConfig,
+    draggedNodeIds: state.draggedNodeIds,
+    setDraggedNodeIds: state.setDraggedNodeIds,
+    manuallyPositionedNodes: state.manuallyPositionedNodes,
+    setManuallyPositionedNodes: state.setManuallyPositionedNodes,
+    clearCanvas: state.clearCanvas,
+    deleteEdge: state.deleteEdge,
+    addEdge: state.addEdge,
+  })));
 
   // Create local Set objects from store arrays with useMemo to avoid recreating on every render
   const draggedNodeIds = useMemo(() => new Set(storeNodeIds), [storeNodeIds]);
