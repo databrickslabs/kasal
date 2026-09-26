@@ -67,6 +67,11 @@ jobs:
       - run: uv sync --frozen
       - name: black, isort, ruff, mypy baseline, import-linter
         run: uv run python run_tests.py --lint-only
+      # The architecture tests are also the ruff/size/detail ratchets; run them
+      # here too so a ratchet failure shows up next to the lint result, without
+      # waiting for the full test job.
+      - name: Architecture and ratchet tests
+        run: uv run pytest -q tests/unit/architecture
 
   migrations:
     name: Migrations and schema on PostgreSQL
