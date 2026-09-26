@@ -223,7 +223,7 @@ forms.
 key. This is what a flow that declares no schema runs on.
 
 **Typed.** When `flow_config.state.model` declares a schema, the builder
-compiles it into a real class (`modules/flow_state_model.py`) and installs it as
+compiles it into a real class (`conversation/state_model.py`) and installs it as
 `initial_state`. A typed state has a closed set of fields, so an input naming a
 field it does not have RAISES at kickoff instead of vanishing:
 
@@ -241,7 +241,7 @@ the dict form, so a state that answered only to attributes would break every
 existing flow.
 
 **Channels and reducers.** Each declared field is a channel, and may name a
-merge policy (`modules/flow_state_channels.py`):
+merge policy (`conversation/channels.py`):
 
 | Reducer | Merge rule |
 |---|---|

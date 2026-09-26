@@ -58,14 +58,19 @@ with its domain rather than being copied into each adapter.
 Selected execution and integration entry points:
 
 - `services/execution/service.py`: execution lifecycle facade.
-- `services/execution/engine_service.py`: engine dispatch.
+- `services/execution/engine_service.py`: `KasalEngineService`, the hub that resolves the Chat, Agent Builder or Flow Builder path and delegates.
 - `services/execution/finalization.py`: terminal outcomes and persistence retries.
 - `services/execution/serialization.py`, `flow_name_inputs.py`: payload serialization and flow naming inputs behind the execution facade.
 - `services/execution/logs/file_ingestion.py`: shared crew/flow file-log persistence; each executor retains its own failure policy.
 - `services/groups/forwarded_identity.py`: fallback identity provisioning through the user repository, with transaction scope owned by the service.
-- `services/execution/runtime/`: Kasal agent runtime.
-- `services/execution/harnesses/`: runtime bindings, including CrewAI.
-- `services/execution/kernel/`: shared agent/task construction and tooling.
+- `services/execution/runtime/`: Kasal agent runtime (agent, task, crew and the tool-call loop).
+- `services/execution/harnesses/`: runtime bindings (`binding.py`, `selection.py`), with `kasal/` and `crewai/` implementations.
+- `services/execution/kernel/`: shared agent/task construction and tooling, used by both subprocess paths.
+- `services/execution/checkpointing/`: crash-resume shared by the crew and flow paths.
+- `services/execution/process_tree.py`: terminates only the process trees this server spawned.
+- `services/execution/blocking_pools.py`: bounded thread pools for the subprocess paths' blocking waits and event relay.
+- `core/llm/transport/`: the OpenAI-compatible LLM transport and tool-round loop; `core/events/`: the run event bus.
+- `services/chat/`: the in-process Chat path.
 - `services/agent_builder/`: crew preparation, execution and subprocess entry point.
 - `services/flow_builder/`: flow assembly, execution, checkpoints and subprocess entry point.
 - `services/execution/history.py`, `services/execution/logs/`: history and execution logs.

@@ -94,7 +94,7 @@ product, not two — with one addition, `reducer`:
 }
 ```
 
-Four reducers exist (`modules/flow_state_channels.py`):
+Four reducers exist (`conversation/channels.py`):
 
 | Reducer | Merge rule | Typical channel |
 |---|---|---|
@@ -118,7 +118,7 @@ Three behaviours are worth knowing because they are not obvious:
 ## The state class
 
 `build_state_model(schema, name, base)` compiles a schema into a pydantic class
-(`modules/flow_state_model.py`). Returns `None` for anything unusable, so a
+(`conversation/state_model.py`). Returns `None` for anything unusable, so a
 malformed schema leaves the flow on a dict rather than failing its kickoff.
 
 **It answers to dict access.** Every condition ever written for a flow uses it —
@@ -152,7 +152,7 @@ forgot it would make the flow unresumable.
 ## Threads
 
 A thread is a checkpoint lineage, and its key is derived rather than stored
-(`flow_builder/flow_thread.py`):
+(`flow_builder/conversation/thread.py`):
 
 ```python
 thread_state_uuid(session_id, flow_id, group_id)
@@ -192,7 +192,7 @@ Two runtime details make threading work at all:
 ## The turn contract
 
 A conversational flow's state is built on `ConversationState`
-(`modules/flow_conversation.py`), whose field names follow CrewAI's so a flow
+(`conversation/turn.py`), whose field names follow CrewAI's so a flow
 author reading either project's docs does not have to translate:
 
 | Channel | Reducer | Meaning |
@@ -223,17 +223,18 @@ bounded. The turn that just ran keeps everything it reasoned over.
 
 | File | Responsibility |
 |---|---|
-| `services/flow_builder/modules/flow_state_channels.py` | The four reducers, name normalisation |
-| `services/flow_builder/modules/flow_state_model.py` | `DictLikeState`, `build_state_model` |
-| `services/flow_builder/modules/flow_conversation.py` | `ConversationState`, `turn_inputs`, `close_turn`, `trim_messages` |
-| `services/flow_builder/flow_thread.py` | `thread_state_uuid` |
+| `services/flow_builder/conversation/channels.py` | The four reducers, name normalisation (`apply_reducer`, `normalize_reducer`) |
+| `services/flow_builder/conversation/state_model.py` | `DictLikeState`, `build_state_model` |
+| `services/flow_builder/conversation/turn.py` | `ConversationState`, `turn_inputs`, `close_turn` / `close_turn_async`, `trim_messages` |
+| `services/flow_builder/conversation/thread.py` | `thread_state_uuid` |
+| `services/flow_builder/conversation/lifecycle.py`, `reuse.py`, `retrieval.py`, `outcomes.py`, `interrupt.py` | Folding long threads and detecting colliding turns, reusing earlier crew output, answering from work already done, choosing what a turn must produce, and delivering approval decisions |
 | `services/flow_builder/runtime/flow.py` | `begin_turn`, id adoption, reducer-aware `_merge_inputs`, `save_checkpoint` |
 | `services/flow_builder/backend_flow.py` | `_state_config`, `_thread_id`, `_kickoff_inputs`, `_close_turn` |
 | `services/flow_builder/modules/flow_builder.py` | Chooses the state base and installs it as `initial_state` |
 | `schemas/execution.py`, `services/execution/service.py` | `session_id` and `user_message` on the wire |
-| `frontend/src/utils/flowStateSchema.ts` | Derives channel NAMES from the canvas |
-| `frontend/src/store/flowState.ts` | Stores the DECLARED half — reducers, conversational |
-| `frontend/src/components/Flow/FlowStateDialog.tsx` | The authoring panel |
+| `src/frontend/src/utils/flowStateSchema.ts` | Derives channel NAMES from the canvas |
+| `src/frontend/src/store/flowState.ts` | Stores the DECLARED half — reducers, conversational |
+| `src/frontend/src/features/workflow/flows/components/FlowStateSection.tsx` | The authoring panel |
 
 **The split between derived and declared is the load-bearing idea on the
 frontend.** Channel names come from the canvas — router conditions and
@@ -272,8 +273,10 @@ in the chat rather than re-running the crew.
 
 ## Make a flow conversational
 
-1. Open the flow in the Flow Builder and click **Flow state and conversation**
-   in the right sidebar.
+1. Open the flow in the Flow Builder and open any connection between two crews
+   (the **Configure Connection Logic** dialog). The flow state section sits
+   below the checkpoint switch. It applies to the whole flow, whichever
+   connection you open it from.
 2. Turn on **Hold a conversation across turns**. The four conversation channels
    appear in the list.
 3. Set a reducer for any channel that should accumulate. Leave the rest on

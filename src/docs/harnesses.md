@@ -151,6 +151,26 @@ bundle README; it is never a refusal.
 
 ## For developers
 
+### Where the runtime lives
+
+Paths are relative to `src/backend/src/`:
+
+| Piece | Location |
+| --- | --- |
+| Kasal runtime: `Agent`, `Task`, `Crew`, the executor and the agent plan | `services/execution/runtime/` |
+| Harness interface, capability list and selection | `services/execution/harnesses/binding.py`, `harnesses/selection.py` |
+| Kasal and CrewAI bindings | `services/execution/harnesses/kasal/`, `harnesses/crewai/` |
+| Path-agnostic build logic both subprocess paths share | `services/execution/kernel/` |
+| LLM transport and the tool-round loop | `core/llm/transport/` |
+| Run event bus | `core/events/` |
+
+The Agent Builder and Flow Builder paths run each build in a spawned subprocess. Two modules keep those subprocesses from harming the server:
+
+- `services/execution/process_tree.py` stops a run by terminating only the process tree this server spawned for it: the `multiprocessing.Process` the executor holds and its descendants. If that handle is gone, it falls back to descendants of this server whose `KASAL_EXECUTION_ID` matches the execution ID exactly. It never scans the whole host.
+- `services/execution/blocking_pools.py` runs the long blocking waits (joining the run, reading its event queue) on two dedicated, bounded thread pools, so concurrent builds cannot starve Chat turns on the event loop's default executor, and waits cannot block the event relay a child needs in order to exit.
+
+### The binding interface
+
 The binding is one interface: `HarnessBinding` in
 `services/execution/harnesses/binding.py` — `build_agent`, `build_task`,
 `build_crew`, `build_llm`, `adapt_tools`, `guardrail`, `process`, `crew_memory`,

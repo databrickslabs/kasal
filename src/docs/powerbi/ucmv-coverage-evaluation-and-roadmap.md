@@ -94,7 +94,7 @@ resolution (above) over best-effort whenever the base model is reachable.**
 ### 3. Honest not-emitted documentation (reuse SC machinery)
 - Extend `_build_fallback_extract(...)` to also render the SC-style
   `# ─── Not emitted as measures (N) — grouped by reason ───` block per source, so
-  the existing `evaluate_ucmv.py` coverage counter scores PAAT/DCC for free. Reason
+  the `evaluate_ucmv` coverage counter (an evaluation script kept outside this repository) scores PAAT/DCC for free. Reason
   buckets: `selector logic`, `unresolved ref`, `measure-on-measure`,
   `disconnected/no source`, `text/format`.
 
@@ -109,7 +109,7 @@ resolution (above) over best-effort whenever the base model is reachable.**
   measure-on-measure KPI models prove a common customer pattern.
 
 ### 5. Automated evaluation harness (adopt as CI, no product code)
-- `evaluate_ucmv.py` (measure-vs-measure vs a validated set) is the eval. Gates:
+- The `evaluate_ucmv` script (kept outside this repository; measure-vs-measure vs a validated set) is the eval. Gates:
   **correctness** `recall==100 && mismatch==0` (never emit wrong SQL) and
   **coverage never-regress** `coverage_pct >= previous`. Coverage <100% is expected
   (untranslatable DAX); the gate is that it must not drop.

@@ -26,7 +26,7 @@ Tools are assigned to agents, not to tasks. In an agent's configuration you list
 }
 ```
 
-At execution time the tool factory (`src/services/execution/tools/tool_factory.py`) looks up each name in the seeded tool registry, builds the tool with its configuration, and hands it to the agent. Each tool is configured automatically with the values it needs for tenant isolation and authentication, such as `group_id`, `execution_id`, and a user token for On-Behalf-Of (OBO) auth where supported.
+At execution time the tool factory (`src/backend/src/services/tools/tool_factory.py`) looks up each name in the seeded tool registry, builds the tool with its configuration, and hands it to the agent. Each tool is configured automatically with the values it needs for tenant isolation and authentication, such as `group_id`, `execution_id`, and a user token for On-Behalf-Of (OBO) auth where supported.
 
 ### The registry
 
@@ -34,8 +34,10 @@ The set of available tools is seeded into the `tools` table from `src/backend/sr
 
 ### Native vs custom tools
 
-- Native tools wrap capabilities provided by the CrewAI framework or third-party SDKs (for example `SerperDevTool`, `ScrapeWebsiteTool`, `Dall-E Tool`).
-- Custom tools are implemented in this codebase under `src/backend/src/services/tools/` (for example the Genie, Knowledge Search, Agent Bricks, Gmail, Databricks Jobs, and Power BI tools). They follow CrewAI's `BaseTool` interface and call into Kasal's own service layer.
+- Built-in tools cover general capabilities such as web search (`SerperDevTool`, `serper_search.py`), scraping (`ScrapeWebsiteTool`, `scrape_website.py`) and image generation (`Dall-E Tool`, `image_generation.py`). Kasal does not depend on `crewai-tools`; these are first-party implementations.
+- Domain tools cover Databricks and Power BI work (for example the Genie, Knowledge Search, Agent Bricks, Gmail, Databricks Jobs, and Power BI tools).
+
+Both kinds live under `src/backend/src/services/tools/`, subclass Kasal's `BaseTool` (`services/tools/base.py`), and call into Kasal's own service layer. The active harness adapts them onto its runtime, so the same tool runs on the Kasal and CrewAI harnesses.
 
 ## Tool categories
 
@@ -73,7 +75,7 @@ The tool is configured automatically with `group_id`, `execution_id`, and a user
 
 ## Agent Bricks
 
-`AgentBricksTool` calls a Databricks Agent Bricks (Mosaic AI Agent Bricks) serving endpoint. Agent Bricks is Databricks' no-code agent builder, so this tool lets a CrewAI agent delegate a subtask to a pre-built, domain-specific Databricks agent and use its answer. It supports OBO, PAT, and Service Principal authentication, returns the endpoint response as the agent's answer (`result_as_answer` is true by default), and has a configurable `timeout`. Use it to compose Kasal's orchestration with specialized agents already running in your Databricks workspace.
+`AgentBricksTool` calls a Databricks Agent Bricks (Mosaic AI Agent Bricks) serving endpoint. Agent Bricks is Databricks' no-code agent builder, so this tool lets a Kasal agent delegate a subtask to a pre-built, domain-specific Databricks agent and use its answer. It supports OBO, PAT, and Service Principal authentication, returns the endpoint response as the agent's answer (`result_as_answer` is true by default), and has a configurable `timeout`. Use it to compose Kasal's orchestration with specialized agents already running in your Databricks workspace.
 
 ## Web search
 
