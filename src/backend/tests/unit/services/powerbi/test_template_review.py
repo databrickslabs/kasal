@@ -87,8 +87,9 @@ async def test_workspace_user_may_not_review(maker):
 def test_script_prints_the_rows(maker, monkeypatch, capsys):
     import json
 
-    import src.db.session as db_session
     from scripts.maintenance import list_unreviewed_powerbi_templates as script
+
+    import src.db.session as db_session
 
     @asynccontextmanager
     async def routed():

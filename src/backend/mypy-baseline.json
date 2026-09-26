@@ -99,11 +99,6 @@
     },
     {
       "file": "src/api/chat_history_router.py",
-      "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 16
-    },
-    {
-      "file": "src/api/chat_history_router.py",
       "message": "Missing named argument \"data\" for \"SessionPreviewResponse\"  [call-arg]",
       "count": 1
     },
@@ -223,11 +218,6 @@
       "count": 1
     },
     {
-      "file": "src/api/databricks_router.py",
-      "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 9
-    },
-    {
       "file": "src/api/databricks_secrets_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 14
@@ -235,16 +225,6 @@
     {
       "file": "src/api/databricks_secrets_router.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/api/databricks_secrets_router.py",
-      "message": "Need type annotation for \"databricks_secrets\" (hint: \"databricks_secrets: list[<type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/api/decks_router.py",
-      "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
     },
     {
@@ -480,16 +460,6 @@
     {
       "file": "src/api/group_router.py",
       "message": "Argument \"assigned_by_email\" to \"assign_user_to_group\" of \"GroupService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument \"created_by_email\" to \"create_group\" of \"GroupService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument \"description\" to \"create_group\" of \"GroupService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -749,16 +719,6 @@
     },
     {
       "file": "src/api/mcp_router.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/mcp_router.py",
-      "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 2
-    },
-    {
-      "file": "src/api/mcp_router.py",
       "message": "Incompatible default for argument \"group_context\" (default has type \"None\", argument has type \"GroupContext\")  [assignment]",
       "count": 22
     },
@@ -914,11 +874,6 @@
     },
     {
       "file": "src/api/memory_backend/records_router.py",
-      "message": "Argument 1 to \"get_active_config\" of \"MemoryBackendService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/api/memory_backend/records_router.py",
       "message": "Argument 1 to \"get_memory_stats\" of \"MemoryBackendService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 1
     },
@@ -1065,7 +1020,7 @@
     {
       "file": "src/api/users_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 7
+      "count": 1
     },
     {
       "file": "src/api/workflow_recipe_router.py",
@@ -1423,11 +1378,6 @@
       "count": 1
     },
     {
-      "file": "src/db/self_heal/columns.py",
-      "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 12
-    },
-    {
       "file": "src/db/self_heal/data.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 4
@@ -1449,13 +1399,8 @@
     },
     {
       "file": "src/db/self_heal/tables.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/db/self_heal/tables.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 18
+      "count": 2
     },
     {
       "file": "src/db/self_heal/vectors.py",
@@ -1983,11 +1928,6 @@
       "count": 1
     },
     {
-      "file": "src/repositories/api_key_repository.py",
-      "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/repositories/billing_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
       "count": 1
@@ -2295,7 +2235,7 @@
     {
       "file": "src/repositories/execution_history_repository.py",
       "message": "Incompatible default for argument \"group_ids\" (default has type \"None\", argument has type \"list[str]\")  [assignment]",
-      "count": 8
+      "count": 7
     },
     {
       "file": "src/repositories/execution_history_repository.py",
@@ -2304,17 +2244,7 @@
     },
     {
       "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible return value type (got \"tuple[Sequence[ExecutionHistory], int]\", expected \"tuple[list[ExecutionHistory], int]\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
       "message": "Incompatible types in assignment (expression has type \"Column[Any] | dict[Any, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"BinaryExpression[bool]\")  [assignment]",
       "count": 1
     },
     {
@@ -2386,11 +2316,6 @@
       "file": "src/repositories/execution_logs_repository.py",
       "message": "Returning Any from function declared to return \"int\"  [no-any-return]",
       "count": 3
-    },
-    {
-      "file": "src/repositories/execution_repository.py",
-      "message": "Argument 1 to \"where\" of \"Select\" has incompatible type \"bool\"; expected \"ColumnElement[bool] | _HasClauseElement[bool] | SQLCoreOperations[bool] | ExpressionElementRole[bool] | TypedColumnsClauseRole[bool] | Callable[[], ColumnElement[bool]] | LambdaElement\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/repositories/execution_repository.py",
@@ -3319,23 +3244,13 @@
     },
     {
       "file": "src/services/agent_builder/process_executor.py",
-      "message": "\"dict[str, object]\" has no attribute \"returncode\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
-      "message": "\"dict[str, object]\" has no attribute \"stdout\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
       "message": "Cannot find implementation or library stub for module named \"openinference.instrumentation.crewai\"  [import-not-found]",
       "count": 1
     },
     {
       "file": "src/services/agent_builder/process_executor.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 8
+      "count": 5
     },
     {
       "file": "src/services/agent_builder/process_executor.py",
@@ -3346,21 +3261,6 @@
       "file": "src/services/agent_builder/process_executor.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
-      "message": "Incompatible types in assignment (expression has type \"CompletedProcess[str]\", variable has type \"dict[str, object]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
-      "message": "Incompatible types in assignment (expression has type \"Process\", variable has type \"SpawnProcess\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
-      "message": "Incompatible types in assignment (expression has type \"SpawnProcess\", target has type \"Process\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/services/agent_builder/process_executor.py",
@@ -3375,11 +3275,6 @@
     {
       "file": "src/services/agent_builder/process_executor.py",
       "message": "Incompatible types in assignment (expression has type \"object\", target has type \"int\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
-      "message": "Library stubs not installed for \"psutil\"  [import-untyped]",
       "count": 1
     },
     {
@@ -4479,11 +4374,6 @@
     },
     {
       "file": "src/services/converters/formats/uc_metrics/authentication.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/authentication.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 1
     },
@@ -4500,16 +4390,6 @@
     {
       "file": "src/services/converters/formats/uc_metrics/connector.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/connector.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/connector.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -4715,26 +4595,6 @@
     {
       "file": "src/services/databricks/analytics/export.py",
       "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
-      "message": "Name \"encodings\" already defined on line 300  [no-redef]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
-      "message": "Name \"frame\" already defined on line 297  [no-redef]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
-      "message": "Name \"title\" already defined on line 298  [no-redef]",
       "count": 1
     },
     {
@@ -5113,11 +4973,6 @@
       "count": 1
     },
     {
-      "file": "src/services/databricks/volumes/volume_callback.py",
-      "message": "Unexpected keyword argument \"content\" for \"upload\" of \"FilesExt\"; did you mean \"contents\"?  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/databricks/workspace/service.py",
       "message": "Argument \"ai_gateway_enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
       "count": 2
@@ -5214,13 +5069,8 @@
     },
     {
       "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument 2 to \"getenv\" has incompatible type \"str\"; expected \"Column[str]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/services/databricks/workspace/service.py",
@@ -5231,21 +5081,6 @@
       "file": "src/services/databricks/workspace/service.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Incompatible types in assignment (expression has type \"ColumnElement[Any] | str\", variable has type \"Column[str] | str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[str]\", variable has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Returning Any from function declared to return \"tuple[dict[str, str], str]\"  [no-any-return]",
-      "count": 1
     },
     {
       "file": "src/services/decks/slide_refine.py",
@@ -5310,11 +5145,6 @@
     {
       "file": "src/services/deployment/crew.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"Agent\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Library stubs not installed for \"pandas\"  [import-untyped]",
       "count": 1
     },
     {
@@ -5574,11 +5404,6 @@
     },
     {
       "file": "src/services/execution/config/embedder_config_builder.py",
-      "message": "Argument \"auth_headers\" to \"DatabricksEmbeddingFunction\" has incompatible type \"dict[str, str] | None\"; expected \"dict[Any, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/config/embedder_config_builder.py",
       "message": "Argument \"group_id\" to \"get_provider_api_key\" of \"ApiKeysService\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
       "count": 3
     },
@@ -5605,11 +5430,6 @@
     {
       "file": "src/services/execution/config/embedder_config_builder.py",
       "message": "Incompatible default for argument \"api_key\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/config/embedder_config_builder.py",
-      "message": "Incompatible default for argument \"auth_headers\" (default has type \"None\", argument has type \"dict[Any, Any]\")  [assignment]",
       "count": 1
     },
     {
@@ -5661,16 +5481,6 @@
       "file": "src/services/execution/config_adapter.py",
       "message": "Need type annotation for \"normalized\" (hint: \"normalized: dict[<type>, <type>] = ...\")  [var-annotated]",
       "count": 1
-    },
-    {
-      "file": "src/services/execution/config_adapter.py",
-      "message": "No overload variant of \"__setitem__\" of \"list\" matches argument types \"str\", \"Any\"  [call-overload]",
-      "count": 3
-    },
-    {
-      "file": "src/services/execution/config_adapter.py",
-      "message": "Unsupported target for indexed assignment (\"dict[str, bool | dict[str, Any] | dict[str, dict[str, Any]] | str | None] | str | dict[str, bool | Any | str] | list[Any] | list[dict[str, Any]] | Any | int | None\")  [index]",
-      "count": 3
     },
     {
       "file": "src/services/execution/engine_factory.py",
@@ -6239,11 +6049,6 @@
     },
     {
       "file": "src/services/execution/service.py",
-      "message": "Argument \"group_ids\" to \"get_execution_history\" of \"ExecutionRepository\" has incompatible type \"list[Any] | None\"; expected \"list[str]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
       "message": "Argument \"group_ids\" to \"get_execution_summary_by_job_id\" of \"ExecutionHistoryRepository\" has incompatible type \"list[str] | None\"; expected \"list[str]\"  [arg-type]",
       "count": 1
     },
@@ -6255,11 +6060,6 @@
     {
       "file": "src/services/execution/service.py",
       "message": "Argument 1 to \"_mask_inputs_sensitive_data\" of \"ExecutionService\" has incompatible type \"Column[Any] | Any\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 1 to \"_mask_inputs_sensitive_data\" of \"ExecutionService\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any]\"  [arg-type]",
       "count": 1
     },
     {
@@ -6320,7 +6120,7 @@
     {
       "file": "src/services/execution/service.py",
       "message": "Incompatible default for argument \"group_context\" (default has type \"None\", argument has type \"GroupContext\")  [assignment]",
-      "count": 5
+      "count": 4
     },
     {
       "file": "src/services/execution/service.py",
@@ -6370,11 +6170,6 @@
     {
       "file": "src/services/execution/service.py",
       "message": "Item \"None\" of \"ExecutionHistory | None\" has no attribute \"inputs\"  [union-attr]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Library stubs not installed for \"psutil\"  [import-untyped]",
       "count": 1
     },
     {
@@ -6480,11 +6275,6 @@
     {
       "file": "src/services/export/databricks_app_exporter.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/export/databricks_app_exporter.py",
-      "message": "Library stubs not installed for \"aiofiles\"  [import-untyped]",
       "count": 1
     },
     {
@@ -6853,11 +6643,6 @@
       "count": 1
     },
     {
-      "file": "src/services/flow_builder/flow_runner_service.py",
-      "message": "Name \"flow_repo\" is not defined  [name-defined]",
-      "count": 2
-    },
-    {
       "file": "src/services/flow_builder/flow_service.py",
       "message": "Argument 1 to \"force_delete_flow_with_executions\" of \"FlowService\" has incompatible type \"Column[Any]\"; expected \"UUID\"  [arg-type]",
       "count": 1
@@ -6960,7 +6745,7 @@
     {
       "file": "src/services/flow_builder/modules/flow_builder.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 9
+      "count": 7
     },
     {
       "file": "src/services/flow_builder/modules/flow_conditions.py",
@@ -7099,11 +6884,6 @@
     },
     {
       "file": "src/services/flow_builder/process_executor.py",
-      "message": "Argument 2 to \"run_in_executor\" of \"AbstractEventLoop\" has incompatible type \"Callable[[str, Process, Queue[Any], float | None], dict[str, Any]]\"; expected \"Callable[[str, SpawnProcess, Queue[Any], float | None], dict[str, Any]]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/process_executor.py",
       "message": "Cannot find implementation or library stub for module named \"openinference.instrumentation.crewai\"  [import-not-found]",
       "count": 1
     },
@@ -7124,22 +6904,7 @@
     },
     {
       "file": "src/services/flow_builder/process_executor.py",
-      "message": "Incompatible types in assignment (expression has type \"SpawnProcess\", target has type \"Process\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/process_executor.py",
       "message": "Incompatible types in assignment (expression has type \"def <lambda>(*a: Any, **k: Any) -> str\", variable has type overloaded function)  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/process_executor.py",
-      "message": "Library stubs not installed for \"psutil\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/process_executor.py",
-      "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 1
     },
     {
@@ -7454,11 +7219,6 @@
     },
     {
       "file": "src/services/generation/crew/progressive.py",
-      "message": "Argument \"model\" to \"generate_agent\" of \"AgentGenerationService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/generation/crew/progressive.py",
       "message": "Argument \"response\" to \"create_log\" of \"LLMLogService\" has incompatible type \"str | tuple[str, str]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
@@ -7466,11 +7226,6 @@
       "file": "src/services/generation/crew/progressive.py",
       "message": "Argument 2 to \"get_effective_template_content\" of \"TemplateService\" has incompatible type \"GroupContext | None\"; expected \"GroupContext\"  [arg-type]",
       "count": 2
-    },
-    {
-      "file": "src/services/generation/crew/progressive.py",
-      "message": "Argument 3 to \"_generate_crew_plan\" of \"ProgressiveGenerationMixin\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/generation/crew/progressive.py",
@@ -7659,16 +7414,6 @@
     },
     {
       "file": "src/services/groups/groups.py",
-      "message": "Incompatible default for argument \"created_by_email\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Incompatible default for argument \"description\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
       "message": "Incompatible return value type (got \"Group | None\", expected \"Group\")  [return-value]",
       "count": 1
     },
@@ -7781,11 +7526,6 @@
       "file": "src/services/groups/users.py",
       "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
       "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Unexpected keyword argument \"filters\" for \"list\" of \"BaseRepository\"  [call-arg]",
-      "count": 2
     },
     {
       "file": "src/services/guardrails/core/human_review_guardrail.py",
@@ -8138,11 +7878,6 @@
       "count": 1
     },
     {
-      "file": "src/services/knowledge/databricks_service.py",
-      "message": "Library stubs not installed for \"openpyxl\"  [import-untyped]",
-      "count": 1
-    },
-    {
       "file": "src/services/knowledge/embedding_queue.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 8
@@ -8158,18 +7893,8 @@
       "count": 4
     },
     {
-      "file": "src/services/knowledge/embedding_session.py",
-      "message": "Argument 1 to \"get_active_config\" of \"MemoryConfigService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/services/knowledge/retention.py",
       "message": "Argument \"model\" to \"DocumentationEmbeddingRepository\" has incompatible type \"type[KnowledgeEmbedding]\"; expected \"type[DocumentationEmbedding]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/knowledge/search.py",
-      "message": "Argument \"user_token\" to \"knowledge_service\" of \"ToolSessionProvider\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -8270,7 +7995,7 @@
     {
       "file": "src/services/llm/manager.py",
       "message": "Argument \"type\" to \"enable_cache\" has incompatible type \"str\"; expected \"LiteLLMCacheType | None\"  [arg-type]",
-      "count": 3
+      "count": 2
     },
     {
       "file": "src/services/llm/manager.py",
@@ -8494,11 +8219,6 @@
     },
     {
       "file": "src/services/memory/config/backend_service.py",
-      "message": "Incompatible default for argument \"group_id\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/memory/config/backend_service.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 5
     },
@@ -8511,11 +8231,6 @@
       "file": "src/services/memory/config/config_service.py",
       "message": "Argument \"custom_config\" to \"MemoryBackendConfig\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any] | None\"  [arg-type]",
       "count": 2
-    },
-    {
-      "file": "src/services/memory/config/config_service.py",
-      "message": "Incompatible default for argument \"group_id\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/services/memory/config/lakebase_service.py",
@@ -8560,11 +8275,6 @@
     {
       "file": "src/services/memory/run/crew_memory.py",
       "message": "Argument 1 to \"build_litellm_embedder\" has incompatible type \"Any | None\"; expected \"dict[Any, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/memory/run/crew_memory.py",
-      "message": "Argument 1 to \"get_active_config\" of \"MemoryBackendService\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -8724,11 +8434,6 @@
     },
     {
       "file": "src/services/mlflow/evaluation_runner.py",
-      "message": "Library stubs not installed for \"pandas\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/mlflow/evaluation_runner.py",
       "message": "Module has no attribute \"from_pandas\"  [attr-defined]",
       "count": 1
     },
@@ -8780,11 +8485,6 @@
     {
       "file": "src/services/mlflow/service.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/mlflow/service.py",
-      "message": "Name \"trace_id\" already defined on line 514  [no-redef]",
       "count": 1
     },
     {
@@ -8841,16 +8541,6 @@
       "file": "src/services/powerbi/context_config.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Argument \"group_id\" to \"find_by_group\" of \"ConversionHistoryRepository\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/services/powerbi/conversions.py",
@@ -9130,11 +8820,6 @@
     {
       "file": "src/services/prompt_optimization/gepa/memalign_bridge.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/memalign_bridge.py",
-      "message": "Skipping analyzing \"dspy\": module is installed, but missing library stubs or py.typed marker  [import-untyped]",
       "count": 1
     },
     {
@@ -10270,7 +9955,7 @@
     {
       "file": "src/services/tools/databricks_dashboard_creator_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/services/tools/databricks_dashboard_creator_tool.py",
@@ -10460,7 +10145,7 @@
     {
       "file": "src/services/tools/genie_space_generator_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/services/tools/genie_space_generator_tool.py",
@@ -10730,7 +10415,7 @@
     {
       "file": "src/services/tools/metric_view_deployer_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/services/tools/metric_view_deployer_tool.py",
@@ -10993,11 +10678,6 @@
       "count": 2
     },
     {
-      "file": "src/services/tools/metric_view_utils/yaml_emitter.py",
-      "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
       "file": "src/services/tools/metric_view_validation_utils/data_input_handler.py",
       "message": "Incompatible return value type (got \"None\", expected \"list[dict[Any, Any]]\")  [return-value]",
       "count": 2
@@ -11180,7 +10860,7 @@
     {
       "file": "src/services/tools/pbi_visual_ucmv_mapper_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 3
+      "count": 2
     },
     {
       "file": "src/services/tools/pbi_visual_ucmv_mapper_tool.py",
@@ -11900,21 +11580,6 @@
     {
       "file": "src/services/tools/tool_session_provider.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/tool_session_provider.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/tool_session_provider.py",
-      "message": "Incompatible default for argument \"user_token\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
     },
     {
@@ -11975,7 +11640,7 @@
     {
       "file": "src/services/tools/ucmv_genie_config_generator_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 3
+      "count": 2
     },
     {
       "file": "src/services/tools/ucmv_genie_config_generator_tool.py",
@@ -12451,11 +12116,6 @@
       "file": "src/utils/telemetry.py",
       "message": "Incompatible default for argument \"product\" (default has type \"None\", argument has type \"str\")  [assignment]",
       "count": 2
-    },
-    {
-      "file": "src/utils/telemetry.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
     },
     {
       "file": "src/utils/telemetry.py",

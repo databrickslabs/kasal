@@ -30,7 +30,7 @@ import logging
 import os
 from typing import Any, List
 
-import psutil  # type: ignore[import-untyped]
+import psutil
 
 logger = logging.getLogger(__name__)
 

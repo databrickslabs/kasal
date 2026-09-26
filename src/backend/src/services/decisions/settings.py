@@ -95,8 +95,8 @@ class DecisionSettingsService:
         try:
             return EncryptionUtils.decrypt_value(cast(str, key.encrypted_value))
         except Exception as exc:
-            # Never log the value or the ciphertext.
-            logger.error(
+            # Never log the value or the ciphertext, so no traceback either.
+            logger.error(  # noqa: TRY400 — a traceback could carry the ciphertext
                 "Could not decrypt %s for workspace %s (%s); decisions are off "
                 "for it until the key is re-entered",
                 JEV_KEY_NAME,

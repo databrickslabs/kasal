@@ -115,7 +115,7 @@
   "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py::PowerBISemanticModelDaxTool._build_enriched_semantic_context": 267,
   "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py::PowerBISemanticModelDaxTool._execute_dax_pipeline": 409,
   "src/backend/src/services/tools/powerbi_semantic_model_fetcher_tool.py::PowerBISemanticModelFetcherTool._execute_fetcher_pipeline": 588,
-  "src/backend/src/services/tools/tool_factory.py::ToolFactory._create_tool_impl": 1629,
+  "src/backend/src/services/tools/tool_factory.py::ToolFactory._create_tool_impl": 1617,
   "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 612,
   "src/backend/src/utils/databricks_auth.py::get_auth_context": 297
 }

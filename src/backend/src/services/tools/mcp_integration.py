@@ -529,12 +529,9 @@ class MCPIntegration:
                     user_token=user_token, group_id=group_id
                 )
                 if auth_context and auth_context.token:
-                    # SECURITY (SSRF / confused deputy): the server_url is
-                    # tenant-configured. A Databricks credential goes only to the
-                    # workspace it was issued for, or to a Databricks App of that
-                    # workspace — not to any *.databricks.com / *.databricksapps.com
-                    # host, which includes workspaces and apps an attacker owns
-                    # (audit V3-2).
+                    # SECURITY (SSRF): the URL is tenant-configured, so a Databricks
+                    # credential goes only to its own workspace or that workspace's
+                    # Apps, never any *.databricks(apps).com host (audit V3-2).
                     try:
                         assert_mcp_server_host(auth_context, server_url)
                     except ForbiddenError:
@@ -543,13 +540,12 @@ class MCPIntegration:
                             server_url=server_url,
                             detail=(
                                 f"MCP server '{server_name}': refusing to send Databricks "
-                                f"credentials to '{server_url}'. Databricks authentication "
-                                f"is only permitted for this workspace's own host or its "
-                                f"Databricks Apps. Use api_key authentication for any "
-                                f"other MCP server."
+                                f"credentials to '{server_url}': only this workspace's host "
+                                f"or its Databricks Apps may receive them. Use api_key "
+                                f"authentication for any other MCP server."
                             ),
                         )
-                        logger.error(mcp_err.detail)
+                        logger.error(mcp_err.detail)  # noqa: TRY400 — refusal
                         MCPIntegration.add_warning(mcp_err.detail)
                         return []
                     server_params["headers"][

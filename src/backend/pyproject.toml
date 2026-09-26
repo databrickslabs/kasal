@@ -450,8 +450,5 @@ source_modules = [
 ]
 forbidden_modules = ["src.services.decisions"]
 allow_indirect_imports = true
-# SHRINK-ONLY: the known shipped bug (audit V1). Fix by injecting the ranker from
-# tool_factory, then delete this line.
-ignore_imports = [
-    "src.services.tools.serper_search -> src.services.decisions.policies",
-]
+# serper_search loads the ranker lazily and falls back to unranked results when
+# the decisions package is absent (fix/tests-green), so no static edge remains.
