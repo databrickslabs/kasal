@@ -33,7 +33,7 @@ def _no_local_backend(monkeypatch):
     from src.services.mlflow import mlflow_setup
 
     monkeypatch.setattr(
-        mlflow_setup, "_configured_local_uri", AsyncMock(return_value=None)
+        mlflow_setup, "_configured_local_target", AsyncMock(return_value=None)
     )
 
 
@@ -95,8 +95,8 @@ async def test_unreachable_local_server_skips_without_importing_mlflow(monkeypat
 
     monkeypatch.setattr(
         mlflow_setup,
-        "_configured_local_uri",
-        AsyncMock(return_value="http://127.0.0.1:1"),
+        "_configured_local_target",
+        AsyncMock(return_value=("http://127.0.0.1:1", "kasal")),
     )
     monkeypatch.setattr(local, "is_reachable", lambda uri, timeout=2.0: False)
 
