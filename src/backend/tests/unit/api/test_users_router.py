@@ -12,7 +12,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.dependencies.providers import get_group_context
 from src.models.enums import UserRole, UserStatus
+from src.utils.user_context import GroupContext
 
 
 # Mock user model
@@ -49,6 +51,10 @@ class MockExternalIdentity:
         self.profile_data = None
         self.created_at = datetime.now()
         self.last_login = None
+
+
+def _group_context():
+    return GroupContext(group_ids=["g1"], group_email="current@example.com")
 
 
 @pytest.fixture
@@ -101,6 +107,9 @@ def client(mock_current_user, mock_session):
     app.dependency_overrides[get_admin_user] = lambda: mock_current_user
     app.dependency_overrides[get_system_admin_user] = lambda: mock_current_user
     app.dependency_overrides[get_db] = lambda: mock_session
+    # The API refuses a request with no identity (401); these tests replace
+    # the identity lookup, so supply the resolved workspace as well.
+    app.dependency_overrides[get_group_context] = _group_context
 
     return TestClient(app)
 
@@ -521,6 +530,7 @@ class TestGlobalUserRoutesAreSystemAdminOnly:
         app.include_router(router)
         register_exception_handlers(app)
         app.dependency_overrides[get_db] = lambda: mock_session
+        app.dependency_overrides[get_group_context] = _group_context
         return TestClient(app)
 
     def _as(self, user):

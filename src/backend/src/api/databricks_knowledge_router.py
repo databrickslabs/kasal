@@ -85,7 +85,7 @@ async def upload_knowledge_file(
     logger.info(f"[API] File: {file.filename} ({file.content_type})")
     logger.info(f"[API] Volume config: {volume_config}")
     logger.info(f"[API] Agent IDs raw: '{agent_ids}' (type: {type(agent_ids)})")
-    logger.info(f"[API] Group: {group_context.primary_group_id}")
+    logger.info(f"[API] Group: {getattr(group_context, 'primary_group_id', None)}")
 
     try:
         # Extract user token for OBO authentication
