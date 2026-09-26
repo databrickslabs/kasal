@@ -1,6 +1,5 @@
 """Comprehensive unit tests for process_flow_executor.py."""
 
-import asyncio
 import os
 import sys
 from io import StringIO
@@ -206,50 +205,6 @@ class TestGetMetrics:
             assert v == 0
 
 
-class TestWaitForResult:
-    def test_queue(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        assert (
-            ProcessFlowExecutor()._wait_for_result(
-                "e1", FakeProcess(), FakeQueue([{"status": "COMPLETED"}]), 10
-            )["status"]
-            == "COMPLETED"
-        )
-
-    def test_empty(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        r = ProcessFlowExecutor()._wait_for_result("e1", FakeProcess(), FakeQueue(), 10)
-        assert r["status"] == "FAILED" and "exit_code" in r
-
-    def test_timeout_term(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        p = MagicMock()
-        p.is_alive.side_effect = [True, True, False]
-        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 1)
-        assert r["status"] == "FAILED"
-        p.terminate.assert_called_once()
-
-    def test_timeout_kill(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        p = MagicMock()
-        p.is_alive.side_effect = [True, True, True]
-        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 1)
-        assert r["status"] == "FAILED"
-        p.kill.assert_called_once()
-
-    def test_exc(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        p = MagicMock()
-        p.join.side_effect = RuntimeError("boom")
-        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 10)
-        assert r["status"] == "FAILED" and "boom" in r["error"]
-
-
 class TestRunFlowWrapper:
     def test_ok(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
@@ -297,7 +252,10 @@ class TestRunFlowIsolated:
     @pytest.mark.asyncio
     async def test_completed(self):
         e = self._mk()
-        with patch.object(e, "_wait_for_result", return_value={"status": "COMPLETED"}):
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
+        ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 r = await e.run_flow_isolated("e1", {"n": []}, _gc())
         assert (
@@ -307,8 +265,9 @@ class TestRunFlowIsolated:
     @pytest.mark.asyncio
     async def test_failed(self):
         e = self._mk()
-        with patch.object(
-            e, "_wait_for_result", return_value={"status": "FAILED", "error": "x"}
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "FAILED", "error": "x"}]),
         ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 r = await e.run_flow_isolated("e1", {"n": []}, _gc())
@@ -317,18 +276,33 @@ class TestRunFlowIsolated:
     @pytest.mark.asyncio
     async def test_exc(self):
         e = self._mk()
-        with patch("asyncio.get_event_loop") as ml:
-            f = asyncio.Future()
-            f.set_exception(RuntimeError("err"))
-            ml.return_value.run_in_executor = MagicMock(return_value=f)
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(side_effect=RuntimeError("err")),
+        ):
             r = await e.run_flow_isolated("e1", {"n": []}, _gc())
         assert r["status"] == "FAILED" and "err" in r["error"]
+
+    @pytest.mark.asyncio
+    async def test_no_result_reports_exit_code(self):
+        """A child that exits without a result is FAILED with its exit code."""
+        e = self._mk()
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[]),
+        ):
+            with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
+                r = await e.run_flow_isolated("e1", {"n": []}, _gc())
+        assert r["status"] == "FAILED" and r["exit_code"] == 0
 
     @pytest.mark.asyncio
     async def test_group_ctx(self):
         e = self._mk()
         fc = {"n": []}
-        with patch.object(e, "_wait_for_result", return_value={"status": "COMPLETED"}):
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
+        ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 await e.run_flow_isolated("e1", fc, _gc("g1", "t1"))
         assert (
@@ -341,7 +315,10 @@ class TestRunFlowIsolated:
     async def test_no_gc(self):
         e = self._mk()
         fc = {"n": []}
-        with patch.object(e, "_wait_for_result", return_value={"status": "COMPLETED"}):
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
+        ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 await e.run_flow_isolated("e1", fc, None)
         assert fc["execution_id"] == "e1" and "group_id" not in fc
@@ -350,7 +327,10 @@ class TestRunFlowIsolated:
     async def test_env_restored(self):
         e = self._mk()
         old = os.environ.get("KASAL_EXECUTION_ID")
-        with patch.object(e, "_wait_for_result", return_value={"status": "COMPLETED"}):
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
+        ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 await e.run_flow_isolated("e1", {"n": []}, _gc())
         assert os.environ.get("KASAL_EXECUTION_ID") == old
@@ -360,7 +340,10 @@ class TestRunFlowIsolated:
         e = self._mk()
         gc = MagicMock(spec=[])
         fc = {"n": []}
-        with patch.object(e, "_wait_for_result", return_value={"status": "COMPLETED"}):
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
+        ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 await e.run_flow_isolated("e1", fc, gc)
         assert "group_id" not in fc
@@ -368,7 +351,10 @@ class TestRunFlowIsolated:
     @pytest.mark.asyncio
     async def test_cleanup(self):
         e = self._mk()
-        with patch.object(e, "_wait_for_result", return_value={"status": "COMPLETED"}):
+        with patch(
+            "src.services.flow_builder.process_executor.collect_result",
+            new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
+        ):
             with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                 await e.run_flow_isolated("e1", {"n": []}, _gc())
         assert "e1" not in e._running_processes
@@ -381,7 +367,8 @@ class TestTerminateExecution:
 
         e = ProcessFlowExecutor()
         p = MagicMock(pid=1)
-        p.is_alive.side_effect = [True, True, False]
+        # logged alive; alive; gone after the graceful join; still gone
+        p.is_alive.side_effect = [True, True, False, False]
         e._running_processes["e1"] = p
         assert await e.terminate_execution("e1", graceful=True) is True
         p.terminate.assert_called_once()
@@ -392,7 +379,8 @@ class TestTerminateExecution:
 
         e = ProcessFlowExecutor()
         p = MagicMock(pid=2)
-        p.is_alive.side_effect = [True, True, True]
+        # logged alive; alive; ignores SIGTERM; gone after SIGKILL
+        p.is_alive.side_effect = [True, True, True, False]
         e._running_processes["e1"] = p
         assert await e.terminate_execution("e1", graceful=True) is True
         p.kill.assert_called_once()
@@ -439,15 +427,13 @@ class TestTerminateExecution:
 
     @pytest.mark.asyncio
     async def test_non_graceful(self):
-        """Non-graceful: skips SIGTERM, goes straight to is_alive check then kill.
-        is_alive calls: line 1182 (logging), line 1184 (if alive), line 1196 (still alive?) -> True so kill.
-        """
+        """Non-graceful: skips SIGTERM and sends SIGKILL straight away."""
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
         e = ProcessFlowExecutor()
         p = MagicMock(pid=5)
-        # 3 calls: line 1182 (True), line 1184 (True), line 1196 (True -> triggers kill)
-        p.is_alive.side_effect = [True, True, True]
+        # logged alive; alive -> SIGKILL; gone when re-checked
+        p.is_alive.side_effect = [True, True, False]
         e._running_processes["e1"] = p
         assert await e.terminate_execution("e1", graceful=False) is True
         p.kill.assert_called_once()
@@ -471,9 +457,8 @@ class TestTerminateExecution:
         p = MagicMock(pid=7)
         p.is_alive.return_value = False
         e._running_processes["e1"] = p
-        e._running_futures["e1"] = MagicMock()
         await e.terminate_execution("e1")
-        assert "e1" not in e._running_processes and "e1" not in e._running_futures
+        assert "e1" not in e._running_processes
 
     @pytest.mark.asyncio
     async def test_tracked_kill_error_and_nothing_owned(self):
@@ -935,10 +920,8 @@ class TestGlobalInstance:
     def test_exists(self):
         from src.services.flow_builder.process_executor import process_flow_executor
 
-        assert (
-            process_flow_executor is not None
-            and process_flow_executor._max_concurrent == 2
-        )
+        assert process_flow_executor is not None
+        assert process_flow_executor._running_processes == {}
 
 
 # ===============================================================
@@ -1443,23 +1426,25 @@ class TestRunFlowIsolatedEdge:
 
     @pytest.mark.asyncio
     async def test_timeout_error(self):
+        """A child still alive at the deadline is stopped and reported timed out."""
         e = self._mk()
+        e._ctx._process._alive = True  # never exits on its own
         with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
-            with patch("asyncio.get_event_loop") as ml:
-                f = asyncio.Future()
-                f.set_exception(asyncio.TimeoutError())
-                ml.return_value.run_in_executor = MagicMock(return_value=f)
-                with patch.object(e, "terminate_execution", new_callable=AsyncMock):
-                    r = await e.run_flow_isolated("e1", {"n": []}, _gc())
+            with patch.object(
+                e, "terminate_execution", new_callable=AsyncMock
+            ) as terminate:
+                r = await e.run_flow_isolated("e1", {"n": []}, _gc(), timeout=0.05)
         assert r["status"] == "FAILED" and "timed out" in r.get("error", "").lower()
+        terminate.assert_awaited_once_with("e1")
 
     @pytest.mark.asyncio
     async def test_env_restored_when_old_exists(self):
         e = self._mk()
         os.environ["KASAL_EXECUTION_ID"] = "old_value"
         try:
-            with patch.object(
-                e, "_wait_for_result", return_value={"status": "COMPLETED"}
+            with patch(
+                "src.services.flow_builder.process_executor.collect_result",
+                new=AsyncMock(return_value=[{"status": "COMPLETED"}]),
             ):
                 with patch.object(e, "_process_log_queue", new_callable=AsyncMock):
                     await e.run_flow_isolated("e1", {"n": []}, _gc())

@@ -43,16 +43,11 @@ Targets uncovered lines:
   1501-1521 _process_log_queue error path
   1541-1542 shutdown with running processes
   1557-1558 shutdown psutil cleanup
-  1780   ExecutionMode.should_use_process require_isolation
-  1805   ExecutionMode.should_use_process expected_duration
-  1838-1843 ExecutionMode.should_use_process experimental
-  1849-1850 ExecutionMode.should_use_process default False
   1878   global process_crew_executor instance
   1881   __enter__/__exit__
   1885   __exit__
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,14 +57,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_executor(max_concurrent=4):
+def _make_executor():
     with patch(
         "src.services.agent_builder.process_executor.mp.get_context"
     ) as mock_ctx:
         mock_ctx.return_value = MagicMock()
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
-        executor = ProcessCrewExecutor(max_concurrent=max_concurrent)
+        executor = ProcessCrewExecutor()
     executor._ctx = MagicMock()
     return executor
 
@@ -384,14 +379,16 @@ class TestRunCrewIsolated:
                 new_callable=AsyncMock,
                 return_value=False,
             ),
-            patch.object(executor, "terminate_execution", new_callable=AsyncMock),
-            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch.object(
+                executor, "terminate_execution", new_callable=AsyncMock
+            ) as terminate,
         ):
             result = await executor.run_crew_isolated(
-                "exec-timeout", {}, group_ctx, timeout=1.0
+                "exec-timeout", {}, group_ctx, timeout=0.05
             )
 
         assert result["status"] == "TIMEOUT"
+        terminate.assert_awaited_once_with("exec-timeout")
 
     @pytest.mark.asyncio
     async def test_metrics_updated_correctly_on_completed(self):
@@ -455,7 +452,8 @@ class TestTerminateExecution:
         """Terminates a process that is alive."""
         executor = _make_executor()
         mock_process = MagicMock()
-        mock_process.is_alive.side_effect = [True, False]  # alive, then dead
+        # alive; dead after the graceful join; still dead when re-checked
+        mock_process.is_alive.side_effect = [True, False, False]
         mock_process.terminate = MagicMock()
         mock_process.join = MagicMock()
         mock_process.kill = MagicMock()
@@ -639,18 +637,13 @@ class TestShutdown:
 
     def test_shutdown_clears_all_tracking(self):
         executor = _make_executor()
-        executor._running_futures["exec-1"] = MagicMock()
-        executor._running_executors["exec-1"] = MagicMock()
+        finished = MagicMock()
+        finished.is_alive.return_value = False
+        executor._running_processes["exec-1"] = finished
 
-        with (
-            patch("psutil.Process") as mock_psutil,
-            patch("psutil.wait_procs", return_value=([], [])),
-        ):
-            mock_psutil.return_value.children.return_value = []
-            executor.shutdown()
+        executor.shutdown()
 
-        assert len(executor._running_futures) == 0
-        assert len(executor._running_executors) == 0
+        assert executor._running_processes == {}
 
     def test_shutdown_handles_psutil_import_error(self):
         executor = _make_executor()
@@ -681,167 +674,3 @@ class TestContextManager:
         with patch.object(executor, "shutdown"):
             result = executor.__exit__(None, None, None)
         assert result is False
-
-
-# ---------------------------------------------------------------------------
-# ExecutionMode
-# ---------------------------------------------------------------------------
-
-
-class TestExecutionMode:
-
-    def test_should_use_process_require_isolation(self):
-        from src.services.agent_builder.process_executor import ExecutionMode
-
-        assert ExecutionMode.should_use_process({"require_isolation": True}) is True
-
-    def test_should_use_process_long_duration(self):
-        from src.services.agent_builder.process_executor import ExecutionMode
-
-        assert (
-            ExecutionMode.should_use_process({"expected_duration_minutes": 15}) is True
-        )
-
-    def test_should_use_process_exactly_10_minutes_returns_false(self):
-        from src.services.agent_builder.process_executor import ExecutionMode
-
-        assert (
-            ExecutionMode.should_use_process({"expected_duration_minutes": 10}) is False
-        )
-
-    def test_should_use_process_experimental(self):
-        from src.services.agent_builder.process_executor import ExecutionMode
-
-        assert ExecutionMode.should_use_process({"experimental": True}) is True
-
-    def test_should_use_process_default_false(self):
-        from src.services.agent_builder.process_executor import ExecutionMode
-
-        assert ExecutionMode.should_use_process({}) is False
-
-    def test_thread_and_process_constants(self):
-        from src.services.agent_builder.process_executor import ExecutionMode
-
-        assert ExecutionMode.THREAD == "thread"
-        assert ExecutionMode.PROCESS == "process"
-
-
-# ---------------------------------------------------------------------------
-# Global instance
-# ---------------------------------------------------------------------------
-
-
-class TestGlobalInstance:
-
-    def test_global_process_crew_executor_exists(self):
-        from src.services.agent_builder.process_executor import (
-            ProcessCrewExecutor,
-            process_crew_executor,
-        )
-
-        assert isinstance(process_crew_executor, ProcessCrewExecutor)
-
-
-# ---------------------------------------------------------------------------
-# _relay_task_events
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# _process_log_queue
-# ---------------------------------------------------------------------------
-
-
-class TestProcessLogQueue:
-
-    @pytest.mark.asyncio
-    async def test_no_crew_log_file_returns_early(self):
-        """When crew.log doesn't exist, returns without error."""
-        executor = _make_executor()
-        mock_queue = MagicMock()
-
-        with patch("os.path.exists", return_value=False):
-            await executor._process_log_queue(mock_queue, "exec-nolog", None)
-        # Should complete without raising
-
-    @pytest.mark.asyncio
-    async def test_crew_log_exists_writes_logs(self):
-        """When crew.log exists, reads and writes relevant lines."""
-        executor = _make_executor()
-        mock_queue = MagicMock()
-
-        execution_id = "abcd1234-full-execution-id"
-        log_lines = [
-            f"2025-01-01 [CREW] INFO - {execution_id[:8]} Starting crew\n",
-            "2025-01-01 [CREW] INFO - different-exec Info line\n",
-            f"2025-01-01 [CREW] INFO - {execution_id[:8]} Task completed\n",
-        ]
-
-        mock_repo = AsyncMock()
-        mock_session = AsyncMock()
-        mock_session.commit = AsyncMock()
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp-1"
-        group_ctx.group_email = "user@example.com"
-
-        async def mock_smart_session():
-            yield mock_session
-
-        from unittest.mock import mock_open
-
-        m = mock_open(read_data="".join(log_lines))
-
-        with (
-            patch("os.path.exists", return_value=True),
-            patch("builtins.open", m),
-            patch(
-                "src.db.database_router.get_smart_db_session",
-                return_value=mock_smart_session(),
-            ),
-            patch(
-                "src.services.execution.logs.writer.ExecutionLogsRepository",
-                return_value=mock_repo,
-            ),
-        ):
-            await executor._process_log_queue(mock_queue, execution_id, group_ctx)
-
-    @pytest.mark.asyncio
-    async def test_error_in_log_processing_is_caught(self):
-        """Errors during log processing are caught and logged, not raised."""
-        executor = _make_executor()
-        mock_queue = MagicMock()
-
-        with patch("os.path.exists", side_effect=RuntimeError("fs error")):
-            # Should not raise
-            await executor._process_log_queue(mock_queue, "exec-logerr", None)
-
-
-# ---------------------------------------------------------------------------
-# Helper coroutines for testing
-# ---------------------------------------------------------------------------
-
-
-async def _coro_that_raises_cancelled():
-    """Coroutine that immediately raises CancelledError."""
-    raise asyncio.CancelledError()
-
-
-# ---------------------------------------------------------------------------
-# run_crew_in_process — module-level import paths
-# ---------------------------------------------------------------------------
-
-
-class TestModuleLevelImports:
-
-    def test_module_imports_without_error(self):
-        """The module should be importable without raising."""
-
-    def test_kasal_noinput_global_returns_n(self):
-        """The suppression function returns 'n' for any prompt."""
-        # Access the patched builtins.input behavior
-        import builtins
-
-        result = builtins.input("test prompt")
-        # It was overridden at module import time to return "n"
-        assert result == "n"

@@ -1,20 +1,14 @@
 """
-Coverage tests for process_crew_executor.py - Part 6.
+The finally block of run_crew_isolated, and shutdown's error handling.
 
-Targets the finally block of run_crew_isolated (lines 2015-2130):
-  2015-2029  terminate exception → psutil fallback
-  2047-2063  psutil cleanup: orphaned process by cmdline
-  2085-2090  psutil cleanup: orphaned Python orphan (ppid=1)
-  2166-2170  relay_task_events general exception handling
-
-Also targets:
-  1541-1542  shutdown with alive processes
-  1552-1574  shutdown with ERROR on process terminate
+Cleanup stops only the tracked tree (``terminate_process_tree``); nothing here
+scans the host, so there is no ``psutil.process_iter`` to patch.
 """
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import psutil
 import pytest
 
 
@@ -40,43 +34,28 @@ async def _always_cancel():
 
 
 class TestRunCrewIsolatedFinallyTerminateError:
+    """A failure while stopping the tree must not turn a finished run into an error."""
+
+    @staticmethod
+    def _executor(pid):
+        executor = _make_executor()
+        mock_process = MagicMock()
+        mock_process.pid = pid
+        mock_process.exitcode = 0
+        mock_process.is_alive = MagicMock(return_value=False)
+        mock_q = MagicMock()
+        mock_q.get = MagicMock(return_value={"status": "COMPLETED"})
+        executor._ctx.Queue = MagicMock(side_effect=[mock_q, MagicMock()])
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+        return executor, mock_process
 
     @pytest.mark.asyncio
-    async def test_terminate_exception_uses_psutil_fallback(self):
-        """When process.terminate() raises in finally, psutil.Process(pid).kill() is used."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 12345
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        # is_alive returns True in finally block check (process still alive)
-        # First call: in result check block (process.exitcode != -15/-9, so check queue)
-        # Second call: in finally block (True → trigger terminate)
-        # Third call: after terminate (still alive → kill)
-        mock_process.is_alive = MagicMock(side_effect=[False, True, True, False])
-        mock_process.terminate = MagicMock(side_effect=OSError("no permission"))
-        mock_process.kill = MagicMock()
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        mock_psutil_proc = MagicMock()
-        mock_psutil_proc.kill = MagicMock()
-
-        psutil_call_count = {"n": 0}
-
-        def psutil_process_side_effect(pid):
-            psutil_call_count["n"] += 1
-            return mock_psutil_proc
+    @pytest.mark.parametrize(
+        "error", [OSError("no permission"), psutil.AccessDenied(12345)]
+    )
+    async def test_stop_failure_in_finally_is_logged_not_raised(self, error):
+        executor, mock_process = self._executor(12345)
+        group_ctx = MagicMock(primary_group_id="grp", access_token=None)
 
         with (
             patch(
@@ -85,50 +64,16 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.Process", side_effect=psutil_process_side_effect),
-            patch("psutil.process_iter", return_value=[]),
+            patch(
+                "src.services.agent_builder.process_executor.terminate_process_tree",
+                side_effect=error,
+            ) as stop_tree,
         ):
             result = await executor.run_crew_isolated("exec-term-err", {}, group_ctx)
 
-        # psutil.Process was called and kill was attempted
-        # Either mock_psutil_proc.kill was called, or the exception was caught gracefully
-        assert result is not None
-
-    @pytest.mark.asyncio
-    async def test_cleanup_error_logged_not_raised(self):
-        """Exception during cleanup is logged, not raised."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 104
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.exitcode = 0
-        mock_process.is_alive = MagicMock(return_value=False)
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        with (
-            patch(
-                "src.db.database_router.is_lakebase_enabled",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", side_effect=RuntimeError("psutil crashed")),
-        ):
-            result = await executor.run_crew_isolated("exec-cleanup-err", {}, group_ctx)
-
-        # Should complete without raising
-        assert result is not None
+        stop_tree.assert_called_once_with(mock_process)
+        assert result["status"] == "COMPLETED"
+        assert "exec-term-err" not in executor._running_processes
 
 
 # ---------------------------------------------------------------------------

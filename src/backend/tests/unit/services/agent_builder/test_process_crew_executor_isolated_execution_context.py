@@ -2,10 +2,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.services.agent_builder.process_executor import (
-    ExecutionMode,
-    ProcessCrewExecutor,
-)
+from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
 # Test ProcessCrewExecutor - based on actual code inspection
 
@@ -22,26 +19,9 @@ class TestProcessCrewExecutorInit:
 
         executor = ProcessCrewExecutor()
 
-        assert executor._max_concurrent == 4  # Default value
         assert executor._ctx == mock_ctx
         assert isinstance(executor._running_processes, dict)
-        assert isinstance(executor._running_futures, dict)
-        assert isinstance(executor._running_executors, dict)
         assert isinstance(executor._metrics, dict)
-        mock_get_context.assert_called_once_with("spawn")
-
-    @patch("src.services.agent_builder.process_executor.mp.get_context")
-    @patch("src.services.agent_builder.process_executor.os.environ", {})
-    def test_process_crew_executor_init_custom_concurrent(self, mock_get_context):
-        """Test ProcessCrewExecutor __init__ with custom max_concurrent"""
-        mock_ctx = Mock()
-        mock_get_context.return_value = mock_ctx
-        max_concurrent = 8
-
-        executor = ProcessCrewExecutor(max_concurrent)
-
-        assert executor._max_concurrent == max_concurrent
-        assert executor._ctx == mock_ctx
         mock_get_context.assert_called_once_with("spawn")
 
     @patch("src.services.agent_builder.process_executor.mp.get_context")
@@ -54,8 +34,6 @@ class TestProcessCrewExecutorInit:
         executor = ProcessCrewExecutor()
 
         assert len(executor._running_processes) == 0
-        assert len(executor._running_futures) == 0
-        assert len(executor._running_executors) == 0
 
     @patch("src.services.agent_builder.process_executor.mp.get_context")
     @patch("src.services.agent_builder.process_executor.os.environ", {})
@@ -209,52 +187,6 @@ class TestProcessCrewExecutorContextManager:
             mock_shutdown.assert_called_once_with(wait=True)
 
 
-class TestExecutionMode:
-    """Test ExecutionMode class"""
-
-    def test_execution_mode_constants(self):
-        """Test ExecutionMode class constants"""
-        assert ExecutionMode.THREAD == "thread"
-        assert ExecutionMode.PROCESS == "process"
-
-    def test_should_use_process_basic(self):
-        """Test should_use_process with basic crew config"""
-        crew_config = {"agents": [], "tasks": []}
-
-        result = ExecutionMode.should_use_process(crew_config)
-
-        # Should return a boolean
-        assert isinstance(result, bool)
-
-    def test_should_use_process_empty_config(self):
-        """Test should_use_process with empty config"""
-        crew_config = {}
-
-        result = ExecutionMode.should_use_process(crew_config)
-
-        # Should return a boolean
-        assert isinstance(result, bool)
-
-    def test_should_use_process_none_config(self):
-        """Test should_use_process with None config"""
-        # This might raise an exception or handle gracefully
-        try:
-            result = ExecutionMode.should_use_process(None)
-            assert isinstance(result, bool)
-        except (AttributeError, TypeError):
-            # Expected if the method doesn't handle None gracefully
-            pass
-
-    def test_should_use_process_is_static_method(self):
-        """Test should_use_process is a static method"""
-        # Can be called on class without instance
-        crew_config = {"test": "value"}
-
-        result = ExecutionMode.should_use_process(crew_config)
-
-        assert isinstance(result, bool)
-
-
 class TestProcessCrewExecutorAttributes:
     """Test ProcessCrewExecutor attribute access"""
 
@@ -269,49 +201,17 @@ class TestProcessCrewExecutorAttributes:
 
         # Check all required attributes exist
         assert hasattr(executor, "_ctx")
-        assert hasattr(executor, "_max_concurrent")
         assert hasattr(executor, "_running_processes")
-        assert hasattr(executor, "_running_futures")
-        assert hasattr(executor, "_running_executors")
         assert hasattr(executor, "_metrics")
 
         # Check attribute types
         assert executor._ctx == mock_ctx
-        assert isinstance(executor._max_concurrent, int)
         assert isinstance(executor._running_processes, dict)
-        assert isinstance(executor._running_futures, dict)
-        assert isinstance(executor._running_executors, dict)
         assert isinstance(executor._metrics, dict)
-
-    @patch("src.services.agent_builder.process_executor.mp.get_context")
-    @patch("src.services.agent_builder.process_executor.os.environ", {})
-    def test_executor_tracking_dictionaries_are_separate(self, mock_get_context):
-        """Test that tracking dictionaries are separate instances"""
-        mock_ctx = Mock()
-        mock_get_context.return_value = mock_ctx
-
-        executor = ProcessCrewExecutor()
-
-        # Should be separate dictionary instances
-        assert executor._running_processes is not executor._running_futures
-        assert executor._running_processes is not executor._running_executors
-        assert executor._running_futures is not executor._running_executors
 
 
 class TestProcessCrewExecutorStaticMethods:
     """Test ProcessCrewExecutor static methods"""
-
-    def test_subprocess_initializer_is_static(self):
-        """Test _subprocess_initializer is a static method"""
-        # Should be callable without instance
-        try:
-            ProcessCrewExecutor._subprocess_initializer()
-            # If it doesn't raise an exception, it's working
-            assert True
-        except Exception:
-            # Some static methods might have dependencies that aren't available in tests
-            # This is acceptable for this test
-            assert True
 
 
 class TestProcessCrewExecutorConstants:
@@ -323,13 +223,6 @@ class TestProcessCrewExecutorConstants:
 
         assert process_crew_executor is not None
         assert isinstance(process_crew_executor, ProcessCrewExecutor)
-
-    def test_execution_mode_class_exists(self):
-        """Test that ExecutionMode class is properly defined"""
-        assert ExecutionMode is not None
-        assert hasattr(ExecutionMode, "THREAD")
-        assert hasattr(ExecutionMode, "PROCESS")
-        assert hasattr(ExecutionMode, "should_use_process")
 
 
 class TestProcessCrewExecutorShutdown:
@@ -376,16 +269,12 @@ class TestProcessCrewExecutorShutdown:
 
         # Add some mock data
         executor._running_processes["test"] = Mock()
-        executor._running_futures["test"] = Mock()
-        executor._running_executors["test"] = Mock()
 
         try:
             executor.shutdown(wait=False)
 
             # Should clear all tracking
             assert len(executor._running_processes) == 0
-            assert len(executor._running_futures) == 0
-            assert len(executor._running_executors) == 0
         except Exception as e:
             # If it fails due to missing dependencies, that's acceptable
             assert "psutil" in str(e) or "import" in str(e).lower()
@@ -550,32 +439,16 @@ class TestProcessCrewExecutorRunCrewIsolated:
         group_context = Mock()
 
         initial_total = self.executor._metrics.get("total_executions", 0)
+        self._setup_ctx_mocks(
+            exitcode=0, queue_result={"success": True, "result": "Test result"}
+        )
 
-        with patch.object(self.executor, "_running_processes", {}):
-            with patch(
-                "src.services.agent_builder.process_executor.mp.Queue"
-            ) as mock_queue:
-                with patch(
-                    "src.services.agent_builder.process_executor.mp.Process"
-                ) as mock_process:
-                    mock_queue_instance = Mock()
-                    mock_process_instance = Mock()
-                    mock_queue.return_value = mock_queue_instance
-                    mock_process.return_value = mock_process_instance
-                    mock_process_instance.is_alive.return_value = False
-                    mock_process_instance.exitcode = 0
+        with patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock):
+            await self.executor.run_crew_isolated(
+                execution_id, crew_config, group_context
+            )
 
-                    mock_queue_instance.get.return_value = {
-                        "success": True,
-                        "result": "Test result",
-                    }
-
-                    await self.executor.run_crew_isolated(
-                        execution_id, crew_config, group_context
-                    )
-
-                    # Metrics should be updated
-                    assert self.executor._metrics["total_executions"] >= initial_total
+        assert self.executor._metrics["total_executions"] == initial_total + 1
 
 
 class TestProcessCrewExecutorTerminateExecution:
@@ -615,10 +488,8 @@ class TestProcessCrewExecutorTerminateExecution:
         """Test terminate_execution with graceful termination"""
         execution_id = "test-execution-id"
         mock_process = Mock()
-        mock_process.is_alive.side_effect = [
-            True,
-            False,
-        ]  # Alive first, then terminated
+        # Alive first, then terminated (and still gone when re-checked)
+        mock_process.is_alive.side_effect = [True, False, False]
         mock_process.pid = 12345
 
         self.executor._running_processes[execution_id] = mock_process
@@ -634,7 +505,8 @@ class TestProcessCrewExecutorTerminateExecution:
         """Test terminate_execution with force kill when graceful fails"""
         execution_id = "test-execution-id"
         mock_process = Mock()
-        mock_process.is_alive.return_value = True  # Always alive (stubborn process)
+        # Ignores SIGTERM, dies on SIGKILL
+        mock_process.is_alive.side_effect = [True, True, False]
         mock_process.pid = 12345
 
         self.executor._running_processes[execution_id] = mock_process
@@ -651,13 +523,11 @@ class TestProcessCrewExecutorTerminateExecution:
         """Test terminate_execution cleans up tracking dictionaries"""
         execution_id = "test-execution-id"
         mock_process = Mock()
-        mock_process.is_alive.side_effect = [True, False]
+        mock_process.is_alive.side_effect = [True, False, False]
         mock_process.pid = 12345
 
         # Set up tracking
         self.executor._running_processes[execution_id] = mock_process
-        self.executor._running_futures[execution_id] = Mock()
-        self.executor._running_executors[execution_id] = Mock()
 
         result = await self.executor.terminate_execution(execution_id)
 
@@ -667,49 +537,29 @@ class TestProcessCrewExecutorTerminateExecution:
         # Other tracking dictionaries are cleaned up elsewhere, not in terminate_execution
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.process_executor.psutil", create=True)
-    async def test_terminate_execution_with_exception(self, mock_psutil):
-        """Test terminate_execution handles exceptions gracefully"""
+    async def test_terminate_execution_with_exception(self):
+        """A stop that raises is reported as not stopped, and tracking is dropped."""
         execution_id = "test-execution-id"
         mock_process = Mock()
         mock_process.is_alive.return_value = True
         mock_process.pid = 12345
-        mock_process.terminate.side_effect = Exception("Termination failed")
-
-        # Make psutil fallback also fail so terminated stays False
-        mock_psutil.Process.side_effect = Exception("No such process")
-        mock_psutil.process_iter.return_value = []
+        mock_process.terminate.side_effect = OSError("Termination failed")
 
         self.executor._running_processes[execution_id] = mock_process
 
-        result = await self.executor.terminate_execution(execution_id)
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ) as owned:
+            result = await self.executor.terminate_execution(execution_id)
 
-        # Should handle exception and still clean up
         assert result is False
+        owned.assert_called_once_with(execution_id)
         assert execution_id not in self.executor._running_processes
 
 
 class TestProcessCrewExecutorAdvancedStaticMethods:
     """Test ProcessCrewExecutor advanced static methods"""
-
-    def test_subprocess_initializer(self):
-        """Test _subprocess_initializer static method"""
-        # Should not raise an exception
-        try:
-            ProcessCrewExecutor._subprocess_initializer()
-            assert True
-        except Exception:
-            # If it fails due to missing dependencies, that's acceptable
-            assert True
-
-    def test_should_use_process_static_method(self):
-        """Test should_use_process static method from ExecutionMode"""
-        config = {"agents": [], "tasks": []}
-
-        # The method is actually in ExecutionMode class
-        result = ExecutionMode.should_use_process(config)
-
-        assert isinstance(result, bool)
 
     def test_run_crew_wrapper_signature(self):
         """Test _run_crew_wrapper static method signature"""

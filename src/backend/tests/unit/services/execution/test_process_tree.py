@@ -113,7 +113,7 @@ class TestOwnershipIsByProcessTree:
         """A handle whose pid is not our child (reused pid, test double) must
         not lead to signalling someone else's children."""
         handle = MagicMock(pid=1)
-        handle.is_alive.side_effect = [True, False]
+        handle.is_alive.side_effect = [True, False, False]
         with patch("psutil.Process") as proc:
             proc.return_value.ppid.return_value = 0
             terminate_process_tree(handle)
@@ -186,3 +186,80 @@ class TestExecutorsLeaveUnrelatedProcessesAlone:
 
         assert result["status"] == "COMPLETED"
         assert _alive(unrelated_canary)
+
+
+class TestOwnedFallbackStopsTheRun:
+    """The reload case: the handle is gone, the owned child must still stop."""
+
+    def test_owned_untracked_child_is_terminated(self, execution_id, unrelated_canary):
+        env = {**os.environ, "KASAL_EXECUTION_ID": execution_id}
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(120)"], env=env
+        )
+        try:
+            assert _wait_until(
+                lambda: [p.pid for p in find_owned_processes(execution_id)]
+                == [child.pid]
+            )
+
+            assert terminate_owned_processes(execution_id, grace_timeout=2) == 1
+
+            assert child.wait(timeout=5) is not None
+            assert _alive(unrelated_canary)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+
+    def test_a_survivor_is_not_counted_as_stopped(self, execution_id):
+        stubborn = MagicMock(pid=424242)
+        stubborn.children.return_value = []
+        stubborn.is_running.return_value = True
+        stubborn.status.return_value = psutil.STATUS_RUNNING
+        with (
+            patch(
+                "src.services.execution.process_tree.find_owned_processes",
+                return_value=[stubborn],
+            ),
+            patch("psutil.wait_procs", side_effect=lambda procs, timeout: ([], procs)),
+        ):
+            assert terminate_owned_processes(execution_id) == 0
+        stubborn.kill.assert_called()
+
+
+class TestFailuresAreNotSwallowed:
+    def test_root_that_outlives_sigkill_reports_false(self):
+        handle = MagicMock(pid=None)
+        handle.is_alive.return_value = True
+        assert terminate_process_tree(handle, grace_timeout=0) is False
+        handle.kill.assert_called()
+
+    def test_access_denied_is_logged_not_raised(self, caplog):
+        proc = MagicMock(pid=77)
+        proc.terminate.side_effect = psutil.AccessDenied(77)
+        from src.services.execution.process_tree import _signal_all
+
+        _signal_all([proc], graceful=True)
+        assert "could not signal process 77" in caplog.text
+
+    def test_already_gone_is_quiet(self, caplog):
+        proc = MagicMock(pid=78)
+        proc.kill.side_effect = psutil.NoSuchProcess(78)
+        from src.services.execution.process_tree import _signal_all
+
+        _signal_all([proc], graceful=False)
+        assert "could not signal" not in caplog.text
+
+    def test_non_psutil_errors_propagate(self):
+        """Only psutil failures are handled; a bug must not read as 'stopped'."""
+        proc = MagicMock(pid=79)
+        proc.terminate.side_effect = RuntimeError("bug")
+        from src.services.execution.process_tree import _signal_all
+
+        with pytest.raises(RuntimeError):
+            _signal_all([proc], graceful=True)
+
+    def test_unreadable_process_table_matches_nothing(self, execution_id, caplog):
+        with patch("psutil.Process", side_effect=psutil.AccessDenied(os.getpid())):
+            assert find_owned_processes(execution_id) == []
+        assert "cannot list this server's children" in caplog.text

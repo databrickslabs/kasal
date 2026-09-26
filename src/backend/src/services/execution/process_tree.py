@@ -19,11 +19,18 @@ Nothing in this module iterates ``psutil.process_iter()``.
 
 This runs in the parent only. The functions block (they wait for exit), so
 async callers run them off the event loop.
+
+Errors are narrowed to ``psutil.Error`` on purpose. ``psutil`` is imported at
+module level so a broken install fails loudly at import instead of every
+lookup quietly returning "nothing to stop", and a stop that did not happen is
+reported as not having happened.
 """
 
 import logging
 import os
 from typing import Any, List
+
+import psutil  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +50,17 @@ def _descendants(pid: int) -> List[Any]:
     ``multiprocessing.Process`` always is one; anything else (a stale pid the
     OS has since reused, a test double's made-up pid) is not ours to walk.
     """
+    if not isinstance(pid, int):
+        return []
     try:
-        import psutil
-
         root = psutil.Process(pid)
         if root.ppid() != os.getpid():
             return []
-        return root.children(recursive=True)
-    except Exception:
+        return list(root.children(recursive=True))
+    except psutil.NoSuchProcess:
+        return []  # already exited: there is no tree left to walk
+    except psutil.Error as e:
+        logger.warning("[process_tree] cannot list descendants of %s: %s", pid, e)
         return []
 
 
@@ -58,8 +68,14 @@ def _signal_all(procs: List[Any], graceful: bool) -> None:
     for proc in procs:
         try:
             proc.terminate() if graceful else proc.kill()
-        except Exception:
-            pass  # already gone, or not ours to signal
+        except (psutil.NoSuchProcess, ProcessLookupError):
+            pass  # already gone
+        except psutil.Error as e:
+            logger.warning(
+                "[process_tree] could not signal process %s: %s",
+                getattr(proc, "pid", "?"),
+                e,
+            )
 
 
 def _reap_descendants(procs: List[Any], timeout: float) -> None:
@@ -67,14 +83,18 @@ def _reap_descendants(procs: List[Any], timeout: float) -> None:
     if not procs:
         return
     try:
-        import psutil
-
         _, alive = psutil.wait_procs(procs, timeout=timeout)
         _signal_all(alive, graceful=False)
         if alive:
-            psutil.wait_procs(alive, timeout=1)
-    except Exception as e:
-        logger.debug(f"[process_tree] waiting for descendants failed: {e}")
+            _, alive = psutil.wait_procs(alive, timeout=1)
+        if alive:
+            logger.warning(
+                "[process_tree] %d descendant(s) survived SIGKILL: %s",
+                len(alive),
+                [p.pid for p in alive],
+            )
+    except psutil.Error as e:
+        logger.warning("[process_tree] waiting for descendants failed: %s", e)
 
 
 def terminate_process_tree(
@@ -100,7 +120,9 @@ def terminate_process_tree(
             ``wait=False``).
 
     Returns:
-        True once the root has been stopped (SIGKILL as the last resort).
+        True once the root has exited (SIGKILL as the last resort). False when
+        it is still alive: ``wait=False`` was passed, or it outlived SIGKILL
+        (a process stuck in uninterruptible I/O).
     """
     pid = getattr(process, "pid", None)
     if not process.is_alive():
@@ -117,11 +139,12 @@ def terminate_process_tree(
 
     process.join(timeout=grace_timeout if graceful else 1)
     if graceful and process.is_alive():
-        logger.warning(f"[process_tree] force killing process {pid}")
+        logger.warning("[process_tree] force killing process %s", pid)
         process.kill()
         process.join(timeout=1)
-    # Stopped either way: SIGKILL, sent above or up front, cannot be caught.
-    stopped = True
+    stopped = not process.is_alive()
+    if not stopped:
+        logger.error("[process_tree] process %s is still alive after SIGKILL", pid)
 
     _reap_descendants(descendants, grace_timeout)
     return stopped
@@ -137,10 +160,9 @@ def find_owned_processes(execution_id: str) -> List[Any]:
     if not execution_id or not isinstance(execution_id, str):
         return []
     try:
-        import psutil
-
         own_tree = psutil.Process(os.getpid()).children(recursive=True)
-    except Exception:
+    except psutil.Error as e:
+        logger.warning("[process_tree] cannot list this server's children: %s", e)
         return []
 
     matches = []
@@ -148,8 +170,12 @@ def find_owned_processes(execution_id: str) -> List[Any]:
         try:
             if proc.environ().get(EXECUTION_ID_ENV) == execution_id:
                 matches.append(proc)
-        except Exception:
-            continue  # exited meanwhile, or environ unreadable
+        except psutil.NoSuchProcess:
+            continue  # exited meanwhile
+        except psutil.Error as e:
+            logger.warning(
+                "[process_tree] cannot read the environment of %s: %s", proc.pid, e
+            )
     # A match's own children inherit the variable; keep only the topmost,
     # since terminating it takes its subtree with it.
     matched_pids = {p.pid for p in matches}
@@ -159,7 +185,7 @@ def find_owned_processes(execution_id: str) -> List[Any]:
 def _parent_pid(proc: Any) -> Any:
     try:
         return proc.ppid()
-    except Exception:
+    except psutil.Error:
         return None
 
 
@@ -176,13 +202,35 @@ def terminate_owned_processes(
     for proc in matches:
         try:
             subtree = proc.children(recursive=True)
-        except Exception:
+        except psutil.NoSuchProcess:
+            continue  # exited between the lookup and now: nothing to stop
+        except psutil.Error as e:
+            logger.warning("[process_tree] cannot list children of %s: %s", proc.pid, e)
             subtree = []
         _signal_all(subtree + [proc], graceful)
         _reap_descendants(subtree + [proc], grace_timeout)
+        if _still_running(proc):
+            logger.error(
+                "[process_tree] process %s for %s survived termination",
+                proc.pid,
+                execution_id,
+            )
+            continue
         terminated += 1
         logger.info(
-            f"[process_tree] terminated process {proc.pid} "
-            f"(+{len(subtree)} descendants) for {execution_id}"
+            "[process_tree] terminated process %s (+%d descendants) for %s",
+            proc.pid,
+            len(subtree),
+            execution_id,
         )
     return terminated
+
+
+def _still_running(proc: Any) -> bool:
+    """True while ``proc`` exists and is not a zombie awaiting its reaper."""
+    try:
+        return bool(proc.is_running()) and proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+    except psutil.Error:
+        return True  # cannot tell: do not report a stop that may not have happened

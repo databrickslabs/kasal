@@ -400,9 +400,8 @@ async def _relay_loop(
     group_id: Any,
     group_email: Any,
 ) -> None:
-    from src.services.execution.blocking_pools import EVENT_RELAY_EXECUTOR
+    from src.services.execution.blocking_pools import EVENT_RELAY_EXECUTOR, run_in_pool
 
-    loop = asyncio.get_running_loop()
     invalid_streak = 0
     if group_id:
         # Everything relayed from the subprocess belongs to this workspace.
@@ -411,9 +410,7 @@ async def _relay_loop(
         try:
             # Its own bounded pool: a read per running execution, forever,
             # must not occupy the default executor Chat turns run on.
-            frame = await loop.run_in_executor(
-                EVENT_RELAY_EXECUTOR, lambda: queue.get(block=True, timeout=0.5)
-            )
+            frame = await run_in_pool(EVENT_RELAY_EXECUTOR, queue.get, True, 0.5)
         except Empty:
             invalid_streak = 0
             continue
