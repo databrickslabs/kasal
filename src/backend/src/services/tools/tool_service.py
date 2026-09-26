@@ -168,7 +168,7 @@ class ToolService:
         )
 
     async def get_enabled_tools_for_group(
-        self, group_context: GroupContext
+        self, group_context: Optional[GroupContext]
     ) -> ToolListResponse:
         """
         Return tools eligible for the CURRENT workspace (primary group) under the new model:
@@ -199,7 +199,7 @@ class ToolService:
         return result
 
     async def _build_enabled_tools_for_group(
-        self, group_context: GroupContext
+        self, group_context: Optional[GroupContext]
     ) -> ToolListResponse:
         # Get all globally enabled tools
         enabled_tools = await self.repository.find_enabled()

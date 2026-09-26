@@ -314,6 +314,8 @@ async def select_outcome(
     try:
         from src.services.llm.manager import LLMManager
 
+        if not model:  # reported as "model unavailable" by the handler below
+            raise ValueError("no model to select the outcome with")
         response = await LLMManager.completion(
             messages=build_outcome_messages(
                 question,

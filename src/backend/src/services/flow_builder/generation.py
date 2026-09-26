@@ -309,7 +309,7 @@ class FlowGenerationService:
     async def generate(
         self, request: FlowGenerationRequest, group_context: Optional[GroupContext]
     ) -> FlowGenerationResponse:
-        group_ids = group_context.group_ids[:1] if group_context else []
+        group_ids = (group_context.group_ids or [])[:1] if group_context else []
         crews = await self.crews.find_by_group(group_ids)
         tasks = {
             str(task.id): task for task in await self.tasks.find_by_group_ids(group_ids)

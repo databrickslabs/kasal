@@ -73,6 +73,7 @@ async def analyze_flow_intent(
                     "content": "Return a JSON object with a nonempty stages array describing only the original request.",
                 }
             )
+    raise RuntimeError("unreachable: the last attempt returns or raises")
 
 
 def validate_stage_assignments(plan: "FlowPlanningStep", intent: FlowIntent) -> None:

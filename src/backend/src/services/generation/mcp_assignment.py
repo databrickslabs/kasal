@@ -159,7 +159,7 @@ def task_mcp_configs(servers: list[str]) -> dict:
 
 
 async def describe_selected_tools(
-    ids: Optional[Sequence[str]], group_context: GroupContext
+    ids: Optional[Sequence[str]], group_context: Optional[GroupContext]
 ) -> list[dict]:
     if not ids:
         return []

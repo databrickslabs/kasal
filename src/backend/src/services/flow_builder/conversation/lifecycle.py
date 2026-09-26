@@ -97,6 +97,8 @@ async def fold_thread_history(
         prompt = build_summary_prompt(
             getattr(state, SUMMARY_CHANNEL, None) or None, render_transcript(to_fold)
         )
+        if not model_name:  # logged and skipped by the handler below
+            raise ValueError("no model to fold the thread history with")
         response = await LLMManager.completion(messages=prompt, model=model_name)
         summary = (
             response["choices"][0]["message"]["content"]

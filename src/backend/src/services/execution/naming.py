@@ -190,9 +190,12 @@ Tasks: {", ".join(task_names)}"""
             # For models without reasoning tokens, we'll truncate to ensure concise names.
             from src.utils.telemetry import KasalProduct, get_user_agent_header
 
+            model = request.model
+            if not model:  # handled below like any failed call: a timestamp name
+                raise ValueError("No model to generate the execution name with")
             name = await LLMManager.completion(
                 messages=messages,
-                model=request.model,
+                model=model,
                 temperature=0.7,
                 max_tokens=100,
                 extra_headers=get_user_agent_header(KasalProduct.NAME_GENERATION),
@@ -213,7 +216,7 @@ Tasks: {", ".join(task_names)}"""
                     endpoint="generate-execution-name",
                     prompt=f"System: {system_message}\nUser: {prompt}",
                     response=name,
-                    model=request.model,
+                    model=model,
                 )
             except Exception as e:
                 # Just log the error, don't fail the request
