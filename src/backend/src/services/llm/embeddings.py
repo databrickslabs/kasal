@@ -111,6 +111,8 @@ async def get_embeddings(
         endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(
             auth.workspace_url, embedding_model
         )
+        if endpoint_url is None:  # already logged; every batch would fail the same way
+            return [None] * len(texts)
 
         import aiohttp
 
@@ -297,6 +299,8 @@ async def get_embedding(
                 endpoint_url, body_model = DatabricksURLUtils.construct_embeddings_url(
                     workspace_url, embedding_model
                 )
+                if endpoint_url is None:  # already logged; the request could not go out
+                    return None
 
                 # Use OAuth headers if available, otherwise fall back to API key
                 if headers:

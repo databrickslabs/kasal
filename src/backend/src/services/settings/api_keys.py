@@ -315,7 +315,9 @@ class ApiKeysService(BaseService):
                 return None
 
     @classmethod
-    async def get_provider_api_key(cls, provider: str, group_id: str) -> Optional[str]:
+    async def get_provider_api_key(
+        cls, provider: str, group_id: Optional[str]
+    ) -> Optional[str]:
         """
         Get API key for a specific provider using the repository pattern.
         This method handles encryption/decryption and doesn't require a db session.

@@ -13,7 +13,10 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional, Union, cast
+
+#: A log directory given as a string or a path.
+StrPath = Union[str, "os.PathLike[str]"]
 
 # Standard Python LogRecord attributes that may legitimately be None
 # (e.g. exc_info, exc_text, stack_info) and should never be stripped.
@@ -111,14 +114,14 @@ class LoggerManager:
             self._initialized = True
 
     @classmethod
-    def get_instance(cls, log_dir: Optional[str] = None) -> "LoggerManager":
+    def get_instance(cls, log_dir: Optional[StrPath] = None) -> "LoggerManager":
         """Get or create a LoggerManager instance and initialize it with the given log directory."""
         instance = cls()
         if log_dir:
             instance.initialize(log_dir)
         return instance
 
-    def initialize(self, log_dir: Optional[str] = None) -> None:
+    def initialize(self, log_dir: Optional[StrPath] = None) -> None:
         """Initialize all domain-specific loggers with both file and console handlers."""
         # Set up log directory - always prefer the environment variable if set
         if log_dir:
