@@ -228,6 +228,30 @@ def isolate_databricks_and_mlflow_env():
 
 
 @pytest.fixture(autouse=True)
+def restore_multiprocessing_contexts():
+    """Undo attribute patches on the process-wide multiprocessing contexts.
+
+    The executors keep ``self._ctx = multiprocessing.get_context("spawn")``, a
+    singleton, and many executor tests do ``executor._ctx.Queue = MagicMock(...)``.
+    That replaces ``Queue`` on the shared context for every later test in the
+    worker, so a test that spawns a real child (test_run_wait) got a MagicMock
+    queue whenever such a file ran before it on the same xdist worker.
+    """
+    import multiprocessing
+
+    contexts = [multiprocessing.get_context(m) for m in ("spawn", "fork")]
+    saved = [dict(vars(ctx)) for ctx in contexts]
+    yield
+    for ctx, before in zip(contexts, saved):
+        current = vars(ctx)
+        for name in [n for n in current if n not in before]:
+            delattr(ctx, name)
+        for name, value in before.items():
+            if current.get(name) is not value:
+                setattr(ctx, name, value)
+
+
+@pytest.fixture(autouse=True)
 def no_leaked_databricks_auth_window(request):
     """Fail a test that leaves a Databricks auth window (sp_auth._pinned) open.
 
