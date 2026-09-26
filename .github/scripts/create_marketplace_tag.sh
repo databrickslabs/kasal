@@ -212,15 +212,18 @@ done
 rm -rf docs
 echo "  ✓ Kept canonical app docs/images; removed repo-only top-level docs/"
 
-# Test configuration files - be careful with conftest.py as it might be needed
-find . -name "jest.config.*" -o -name ".coverage" -o -name "pytest.ini" -type f -delete 2>/dev/null || true
+# Test configuration files - be careful with conftest.py as it might be needed.
+# As above: the -o alternatives MUST be grouped in \( \), otherwise -type and
+# the action bind only to the last alternative and the rest are never removed.
+find . \( -name "jest.config.*" -o -name ".coverage" -o -name ".coverage.*" -o -name "pytest.ini" \) -type f -delete 2>/dev/null || true
 echo "  ✓ Removed test configuration files"
 
 # Only remove conftest.py from test directories
-find . -path "*/tests/conftest.py" -o -path "*/test/conftest.py" -type f -delete 2>/dev/null || true
+find . \( -path "*/tests/conftest.py" -o -path "*/test/conftest.py" \) -type f -delete 2>/dev/null || true
 
-# Coverage and cache directories
-find . -name "coverage" -o -name ".pytest_cache" -o -name "__pycache__" -o -name ".coverage.*" -type d -exec rm -rf {} + 2>/dev/null || true
+# Coverage and cache directories (-prune: don't descend into a directory
+# that is about to be removed).
+find . -type d \( -name "coverage" -o -name ".pytest_cache" -o -name "__pycache__" \) -prune -exec rm -rf {} + 2>/dev/null || true
 echo "  ✓ Removed coverage and cache directories"
 
 # Remove specific test directories (not generic "test" to avoid false positives)
@@ -234,41 +237,28 @@ if [ -f "src/backend/run_tests.py" ]; then
     echo "  ✓ Removed run_tests.py"
 fi
 
-# Dependency install for the marketplace payload: ship a fully-pinned
-# src/requirements.txt (pip) and no app-root uv manifests. The marketplace
-# payload uses the pip deployment path for compatibility with Apps builders
-# that do not support this lockfile revision. Export from the selected source
-# snapshot, never from the contributor's working directory. Normal uv-based
-# deployments keep their existing manifests and are unaffected.
-echo "📦 Generating pinned requirements.txt from uv.lock (pip install path)..."
-if command -v uv >/dev/null 2>&1 && [ -f "src/backend/uv.lock" ]; then
-    # Export from the exported source lock (in TEMP_DIR/src/backend), where the lock is
-    # still present, into the marketplace payload's src/requirements.txt.
-    # --no-emit-project: don't list the app itself as a dependency.
-    # --no-dev: runtime deps only. --no-hashes: the Apps builder pip has no
-    # network-pinned hash support and hashes just bloat the file.
-    if uv export --frozen --no-hashes --no-emit-project --no-dev \
-        --project "$TEMP_DIR/src/backend" \
-        -o "$TEMP_DIR/src/requirements.txt" 2>"$TEMP_DIR/uv-export-err.log"; then
-        rm -f "$TEMP_DIR/uv-export-err.log"
-        REQ_LINES=$(grep -cvE '^\s*(#|$)' "$TEMP_DIR/src/requirements.txt" || echo "?")
-        echo "  ✓ Wrote src/requirements.txt ($REQ_LINES pinned packages)"
-    else
-        echo "  ❌ uv export failed:"
-        sed 's/^/     /' "$TEMP_DIR/uv-export-err.log"
-        echo "  Aborting: cannot produce a dependency manifest for the tag."
-        exit 1
-    fi
-else
-    echo "  ❌ uv not on PATH or src/backend/uv.lock missing — cannot generate requirements.txt"
-    echo "     (install uv and regenerate src/backend/uv.lock before tagging)"
+# Dependency contract for the marketplace payload: ship backend/pyproject.toml
+# AND backend/uv.lock together, and NO requirements.txt. This is the same
+# contract as src/deploy.py and CLAUDE.md ("there is no requirements.txt").
+#
+# At startup on Databricks, src/entrypoint.py (_dependency_project) requires a
+# COMPLETE manifest pair in the app root or backend/ and then execs
+# `uv run --locked --no-dev --project backend`. The Apps builder therefore never
+# has to understand the lockfile revision itself: uv inside the app does. A
+# pyproject.toml without its uv.lock makes the entrypoint exit with
+# "DEP-v1: Incomplete dependency files", and a requirements.txt would make the
+# builder pip-install a second, unused copy of every dependency.
+echo "📦 Checking the uv dependency manifests (backend/pyproject.toml + backend/uv.lock)..."
+if [ ! -f "src/backend/pyproject.toml" ] || [ ! -f "src/backend/uv.lock" ]; then
+    echo "  ❌ src/backend/pyproject.toml and src/backend/uv.lock must both be present"
+    echo "     (run 'cd src/backend && uv lock' and commit the lockfile before tagging)"
     exit 1
 fi
-
-# Remove the uv manifests from the payload so the Apps builder uses the pip
-# path (requirements.txt) above, NOT uv sync.
-rm -f src/uv.lock src/backend/uv.lock src/pyproject.toml
-echo "  ✓ Removed uv manifests (src/uv.lock, src/backend/uv.lock, src/pyproject.toml) — using pip + requirements.txt"
+# The app root (src/) must not carry a half pair either: entrypoint.py checks
+# it before backend/. Neither file is expected there, so drop any strays and
+# any requirements.txt that would divert the Apps builder to pip.
+rm -f src/uv.lock src/pyproject.toml src/requirements.txt src/backend/requirements.txt
+echo "  ✓ Shipping backend/pyproject.toml + backend/uv.lock (uv run --locked at startup)"
 
 # Count files after cleanup
 FILES_AFTER=$(find . -type f | wc -l)
@@ -303,6 +293,8 @@ CRITICAL_FILES=(
     "src/backend/src/main.py"
     "src/frontend/package.json"
     "src/backend/pyproject.toml"
+    "src/backend/uv.lock"
+    "src/entrypoint.py"
 )
 
 MISSING_CRITICAL=0
