@@ -22,9 +22,9 @@ def client(chat_db):
     """Create test client for integration tests.
 
     LocalDevAuthMiddleware is stripped so that requests without auth headers
-    resolve to a genuinely empty group context (HTTP 400), exercising the
-    real "missing group context" API contract instead of the local-dev
-    convenience fallback that injects a synthetic dev@localhost identity.
+    carry no identity at all, exercising the real contract -- get_group_context
+    fails closed with HTTP 401 -- instead of the local-dev convenience fallback
+    that injects a synthetic dev@localhost identity.
     """
     original_middleware = list(app.user_middleware)
     app.user_middleware = [
@@ -342,7 +342,9 @@ class TestChatHistoryWorkflowIntegration:
             },
             # No headers provided
         )
-        assert response.status_code == 400  # Bad request
+        # No identity: get_group_context fails closed.
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Authentication required"
 
         # Test deleting non-existent session
         response = client.delete(
@@ -561,7 +563,9 @@ class TestChatHistoryWorkflowIntegration:
         """Test scenarios with missing or invalid group context."""
         # Test with completely missing headers
         response = client.post("/api/v1/chat-history/sessions/new")
-        assert response.status_code == 400
+        # No identity: get_group_context fails closed.
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Authentication required"
 
         # Test with partial headers (email only - this should work as it creates individual group)
         partial_headers = {"X-Auth-Request-Email": "user@company.com"}
