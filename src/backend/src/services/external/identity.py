@@ -9,8 +9,8 @@ That is why it is one module shared by both adapters rather than a helper in
 each: the cross-tenant tests are written once, against this, and neither adapter
 is allowed its own resolution path.
 
-The chain deliberately mirrors ``src/core/dependencies.py`` — the same headers,
-in the same order, that the browser-facing API already trusts. An external
+The adapters pick the headers with ``src.utils.request_identity`` — the same
+resolver, and so the same headers, that the browser-facing API trusts. An external
 surface that authenticated differently from the rest of the app would be a
 second security model to reason about.
 

@@ -19,6 +19,7 @@ from src.schemas.documentation_embedding import (
     DocumentationEmbeddingCreate,
 )
 from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
+from src.utils.request_identity import resolve_request_identity
 
 logger = LoggerManager.get_instance().api
 
@@ -71,8 +72,11 @@ async def create_documentation_embedding(
         raise ForbiddenError(
             "Only editors and admins can create documentation embeddings"
         )
-    # Extract user token from headers (OAuth2-Proxy takes priority)
-    user_token = x_auth_request_access_token or x_forwarded_access_token
+    # Shared resolver: X-Forwarded-* only inside Databricks Apps.
+    user_token = resolve_request_identity(
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_access_token=x_auth_request_access_token,
+    ).access_token
     result = await service.create_documentation_embedding(
         embedding, user_token=user_token
     )

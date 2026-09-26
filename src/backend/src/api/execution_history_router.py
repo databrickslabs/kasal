@@ -5,14 +5,14 @@ This module provides API endpoints for retrieving, managing, and deleting
 execution history records and related data.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.config.settings import settings
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, RequestEmailDep, SessionDep
 from src.schemas.execution_history import (
     DeleteResponse,
     ExecutionHistoryItem,
@@ -39,8 +39,7 @@ router = APIRouter(prefix="/executions", tags=["Execution History"])
 @router.get("/history/debug-groups")
 async def debug_execution_groups(
     session: SessionDep,
-    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
-    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
+    user_email: RequestEmailDep,
 ) -> Dict[str, Any]:
     """
     Debug endpoint to see all unique group_ids in execution_history table
@@ -48,22 +47,18 @@ async def debug_execution_groups(
     """
     if not settings.DEBUG_MODE:
         raise HTTPException(status_code=404)
-    # Get user email from headers
-    user_email = x_auth_request_email or x_forwarded_email
 
     # Get all unique group_ids from execution_history table via service
     history_service = ExecutionHistoryService(session)
     all_group_ids = await history_service.get_execution_groups_with_counts()
 
-    # Get user's groups if email provided
     user_groups = []
-    if user_email:
-        user_service = UserService(session)
-        user = await user_service.get_or_create_user_by_email(user_email)
-        if user:
-            group_service = GroupService(session)
-            groups = await group_service.get_user_groups(user.id)
-            user_groups = [{"id": g.id, "name": g.name} for g in groups]
+    user_service = UserService(session)
+    user = await user_service.get_or_create_user_by_email(user_email)
+    if user:
+        group_service = GroupService(session)
+        groups = await group_service.get_user_groups(user.id)
+        user_groups = [{"id": g.id, "name": g.name} for g in groups]
 
     return {
         "user_email": user_email,
@@ -78,10 +73,9 @@ async def debug_execution_groups(
 @router.get("/history/all-groups", response_model=ExecutionHistoryList)
 async def get_all_groups_execution_history(
     session: SessionDep,
+    user_email: RequestEmailDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
-    x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
     service: ExecutionHistoryService = Depends(get_execution_history_service),
 ):
     """
@@ -94,20 +88,12 @@ async def get_all_groups_execution_history(
         session: Database session
         limit: Maximum number of executions to return (1-100)
         offset: Pagination offset
-        x_forwarded_email: User email from Databricks Apps
-        x_auth_request_email: User email from OAuth2-Proxy
+        user_email: Caller identity from the shared resolver (401 if absent)
         service: ExecutionHistoryService instance
 
     Returns:
         ExecutionHistoryList with paginated execution history from all user's groups
     """
-    # Get user email from headers (prefer OAuth2-Proxy over direct)
-    user_email = x_auth_request_email or x_forwarded_email
-
-    if not user_email:
-        logger.warning("No user email found in headers, returning empty list")
-        return ExecutionHistoryList(executions=[], total=0, offset=offset, limit=limit)
-
     # Get all groups the user belongs to
     user_service = UserService(session)
     user = await user_service.get_or_create_user_by_email(user_email)
@@ -122,31 +108,20 @@ async def get_all_groups_execution_history(
     # Extract group IDs
     group_ids = [group.id for group in user_groups]
 
-    logger.info(f"User {user_email} belongs to {len(user_groups)} groups")
-    for group in user_groups:
-        logger.info(f"  - Group: {group.id} ({group.name})")
+    logger.debug(f"User {user_email} belongs to {len(user_groups)} groups")
 
     personal_group_id = GroupContext.personal_workspace_id_of(user, user_email)
     if personal_group_id not in group_ids:
         group_ids.append(personal_group_id)
 
-    logger.info(
-        f"Fetching executions for user {user_email} from {len(group_ids)} total groups: {group_ids}"
+    logger.debug(
+        f"Fetching executions for user {user_email} from {len(group_ids)} groups"
     )
 
     # Fetch executions from all groups
     result = await service.get_execution_history(limit, offset, group_ids=group_ids)
 
-    logger.info(f"Found {result.total} total executions across all groups")
-    if result.executions:
-        logger.info(
-            f"Returning {len(result.executions)} executions (offset={offset}, limit={limit})"
-        )
-        # Log first few execution group_ids to debug
-        for i, exec in enumerate(result.executions[:5]):
-            logger.info(
-                f"  - Execution {i+1}: job_id={exec.job_id}, status={exec.status}"
-            )
+    logger.debug(f"Found {result.total} total executions across all groups")
 
     return result
 

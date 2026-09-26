@@ -4,14 +4,19 @@ import logging
 import os
 from typing import Annotated, Callable, Optional, Type
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
+from src.core.exceptions import KasalError, UnauthorizedError
 from src.db.base import Base
 from src.db.database_router import get_smart_db_session
 from src.db.session import get_db, get_local_db
+from src.utils.request_identity import (
+    resolve_request_identity,
+    running_in_databricks_apps,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger("src.core.dependencies")
@@ -45,44 +50,38 @@ async def get_group_context(
     x_group_id: Optional[str] = Header(None, alias="group_id"),
     x_group_domain: Optional[str] = Header(None, alias="X-Group-Domain"),
 ) -> GroupContext:
-    """
-    Extract group context from Databricks Apps or OAuth2-Proxy headers.
+    """Resolve the caller's workspace (GroupContext), or refuse the request.
+
+    Identity comes from :func:`src.utils.request_identity.resolve_request_identity`:
+    inside Databricks Apps only the ``X-Forwarded-*`` headers the platform proxy
+    sets are trusted; elsewhere oauth2-proxy's ``X-Auth-Request-*`` headers are
+    preferred with ``X-Forwarded-*`` as the fallback. ``group_id`` selects the
+    workspace and is validated against the user's memberships.
+
+    FAILS CLOSED. Every protected API route depends on this, so it is the
+    identity gate for the API:
+
+    - no identity                              -> 401
+    - identity that resolves to no workspace   -> 401 (e.g. a non-email name)
+    - workspace not permitted / not resolvable -> 403
+    - unexpected resolver failure              -> 503
+
+    It used to return an empty ``GroupContext`` in the first, second and last
+    cases, and some repositories read "no groups" as "no filter" (audit M1).
+    Routes that must stay public (health checks) simply do not depend on it;
+    ``tests/unit/architecture/test_api_routes_require_identity.py`` keeps that
+    list explicit.
 
     PERFORMANCE: Uses request-scoped caching to avoid repeated database queries
-    when multiple endpoints/dependencies need the GroupContext in the same request.
-
-    For Databricks Apps deployment with OAuth2-Proxy, this extracts group information from:
-    - group_id: Explicit group ID from frontend group selector (matches database column name)
-    - X-Group-Domain: Explicit group domain from frontend group selector
-    - X-Auth-Request-Email: User email from OAuth2-Proxy (preferred)
-    - X-Forwarded-Email: User email from Databricks Apps (fallback)
-    - X-Auth-Request-Access-Token: Access token from OAuth2-Proxy (preferred)
-    - X-Forwarded-Access-Token: Access token from Databricks Apps (fallback)
-
-    Args:
-        request: FastAPI request object
-        x_forwarded_email: User email from Databricks Apps
-        x_forwarded_access_token: Access token from Databricks Apps
-        x_auth_request_email: User email from OAuth2-Proxy
-        x_auth_request_user: Username from OAuth2-Proxy
-        x_auth_request_access_token: Access token from OAuth2-Proxy
-        x_group_id: Explicit group ID from frontend (from group_id header, matches database column name)
-        x_group_domain: Explicit group domain from frontend
-
-    Returns:
-        GroupContext: Extracted group context with group_id, email, etc.
+    when multiple dependencies need the GroupContext in the same request.
     """
-    import logging
-
-    logger = logging.getLogger("src.core.dependencies")
-
     # Native EventSource cannot attach the local-development headers used by
     # the Axios client. Direct loopback SSE URLs therefore carry the same email
     # and selected workspace as query parameters. Never honor those parameters
     # in Databricks Apps, production, non-SSE routes, or non-loopback requests.
     path = getattr(getattr(request, "url", None), "path", "")
     client_host = getattr(getattr(request, "client", None), "host", "")
-    production = bool(os.getenv("DATABRICKS_APP_NAME")) or os.getenv(
+    production = running_in_databricks_apps() or os.getenv(
         "ENVIRONMENT", ""
     ).strip().lower() in ("production", "prod")
     local_sse = (
@@ -95,69 +94,88 @@ async def get_group_context(
     sse_email = query.get("_sse_email") if local_sse else None
     sse_group_id = query.get("_sse_group_id") if local_sse else None
 
-    # Prefer OAuth2-Proxy headers over direct headers. Query values are local
-    # SSE fallbacks only; real proxy/header identity always wins.
-    user_email = x_auth_request_email or x_forwarded_email or sse_email
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email,
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_email=x_auth_request_email,
+        auth_request_user=x_auth_request_user,
+        auth_request_access_token=x_auth_request_access_token,
+    )
+    # Query values are local SSE fallbacks only; header identity always wins.
+    user_email = identity.email or sse_email
     x_group_id = x_group_id or sse_group_id
-    access_token = x_auth_request_access_token or x_forwarded_access_token
+    access_token = identity.access_token
 
-    # =========================================================================
-    # REQUEST-SCOPED CACHE: Check if GroupContext already exists for this request
-    # =========================================================================
-    # Create a cache key that includes email and group_id to handle group switching
+    if not user_email:
+        logger.debug("Request to %s carries no identity; refusing with 401", path)
+        raise UnauthorizedError("Authentication required")
+
+    # Request-scoped cache: keyed by email and group_id to handle switching.
     cache_key = f"group_context:{user_email}:{x_group_id}"
-
-    if hasattr(request.state, "_group_context_cache"):
-        cached = request.state._group_context_cache.get(cache_key)
+    cache = getattr(request.state, "_group_context_cache", None)
+    if isinstance(cache, dict):
+        cached = cache.get(cache_key)
         if cached is not None:
-            logger.info(f"[CACHE HIT] Returning cached GroupContext for {user_email}")
             return cached
 
-    logger.debug("get_group_context called with:")
-    logger.debug(f"  X-Auth-Request-Email: {x_auth_request_email}")
-    logger.debug(f"  X-Forwarded-Email: {x_forwarded_email}")
-    logger.debug(f"  group_id: {x_group_id}")
-    logger.debug(f"  X-Group-Domain: {x_group_domain}")
-    logger.debug(f"  Final email: {user_email}")
+    try:
+        group_context = await GroupContext.from_email(
+            email=user_email,
+            access_token=access_token,
+            group_id=x_group_id,  # Pass the selected group ID from header
+        )
+    except ValueError as e:
+        # SECURITY: unauthorized workspace, or one that could not be resolved.
+        logger.warning(f"Unauthorized group access attempt: {e}")
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        # An unexpected failure must not become an empty context: that reads
+        # as "no tenant filter" in some queries. Tell the client to retry.
+        logger.error(f"Error resolving group context for {user_email}: {e}")
+        raise KasalError(
+            "Could not resolve the caller's workspace; try again", status_code=503
+        )
 
-    # Get group context with the specific group_id if provided
-    if user_email:
-        try:
-            group_context = await GroupContext.from_email(
-                email=user_email,
-                access_token=access_token,
-                group_id=x_group_id,  # Pass the selected group ID from header
-            )
-            logger.debug(
-                f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}"
-            )
+    if not group_context.group_ids:
+        # from_email returns an empty context for an identity it cannot map to
+        # a workspace (no "@"). That is not an authenticated tenant.
+        logger.warning("Identity from %s resolved to no workspace", identity.source)
+        raise UnauthorizedError("Authentication required")
 
-            # =========================================================================
-            # CACHE: Store in request.state for subsequent accesses in this request
-            # =========================================================================
-            if not hasattr(request.state, "_group_context_cache"):
-                request.state._group_context_cache = {}
-            request.state._group_context_cache[cache_key] = group_context
-            logger.debug(f"[CACHE SET] Cached GroupContext for {user_email}")
+    logger.debug(
+        "Resolved group context: primary_group_id=%s, group_ids=%s, role=%s",
+        group_context.primary_group_id,
+        group_context.group_ids,
+        group_context.user_role,
+    )
+    if not isinstance(cache, dict):
+        cache = {}
+        request.state._group_context_cache = cache
+    cache[cache_key] = group_context
+    return group_context
 
-            return group_context
-        except ValueError as e:
-            # SECURITY: Unauthorized group access attempt
-            logger.error(f"Unauthorized group access attempt: {e}")
-            from fastapi import HTTPException
 
-            raise HTTPException(status_code=403, detail=str(e))
-        except Exception as e:
-            # Database or other unexpected errors during group resolution.
-            # Return empty GroupContext so the endpoint's own ForbiddenError
-            # check can cleanly return 403 instead of crashing with 500.
-            logger.error(f"Error resolving group context for {user_email}: {e}")
-            return GroupContext()
+async def get_request_email(
+    x_forwarded_email: Annotated[
+        Optional[str], Header(alias="X-Forwarded-Email")
+    ] = None,
+    x_auth_request_email: Annotated[
+        Optional[str], Header(alias="X-Auth-Request-Email")
+    ] = None,
+) -> str:
+    """The caller's email, via the shared resolver; 401 when there is none.
 
-    # Fallback: No group context available
-    logger.debug("No email header found, returning empty group context")
-    return GroupContext()
+    For the few routes that need the bare identity rather than a workspace.
+    """
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email, auth_request_email=x_auth_request_email
+    )
+    if not identity.email:
+        raise UnauthorizedError("Authentication required")
+    return identity.email
 
+
+RequestEmailDep = Annotated[str, Depends(get_request_email)]
 
 # Type definitions for group-aware dependencies
 GroupContextDep = Annotated[GroupContext, Depends(get_group_context)]

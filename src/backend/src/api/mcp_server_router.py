@@ -30,6 +30,7 @@ from src.services.external.identity import (
 from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp.mcp_server import server as mcp_server
 from src.services.mcp.mcp_server.tools import UnknownCapabilityError, UnknownRunError
+from src.utils.request_identity import resolve_request_identity
 
 router = APIRouter(
     prefix="/mcp/v1",
@@ -70,16 +71,23 @@ async def get_external_caller(
 ) -> ExternalCaller:
     """Resolve the caller, or refuse the request.
 
-    Same header chain as ``core/dependencies.get_group_context`` — OAuth2-Proxy
-    headers preferred, Databricks Apps headers as fallback. An external surface
-    that authenticated differently from the rest of the app would be a second
-    security model to reason about.
+    Same header chain as ``dependencies.providers.get_group_context``, through
+    the shared ``resolve_request_identity``: inside Databricks Apps only the
+    ``X-Forwarded-*`` headers are trusted; elsewhere OAuth2-Proxy headers are
+    preferred. An external surface that authenticated differently from the
+    rest of the app would be a second security model to reason about.
     """
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email,
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_email=x_auth_request_email,
+        auth_request_access_token=x_auth_request_access_token,
+    )
     try:
         return await resolve_caller(
             protocol="mcp",
-            email=x_auth_request_email or x_forwarded_email,
-            access_token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            access_token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:

@@ -37,6 +37,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import Request
 
+from src.utils.request_identity import identity_from_headers
+
 logger = logging.getLogger(__name__)
 
 # Context variable to store the current user's access token
@@ -681,14 +683,16 @@ async def extract_group_context_from_request(
         GroupContext object if group can be determined, None otherwise
     """
     try:
-        # Extract email from Databricks Apps header
-        email = request.headers.get("X-Forwarded-Email")
+        # Same resolver as the get_group_context dependency, so the request
+        # context and the route never disagree about who is calling (and
+        # X-Auth-Request-* is ignored inside Databricks Apps).
+        identity = identity_from_headers(request.headers)
+        email = identity.email
         if not email:
-            logger.debug("No X-Forwarded-Email header found")
+            logger.debug("No identity header found")
             return None
 
-        # Extract access token
-        access_token = extract_user_token_from_request(request)
+        access_token = identity.access_token or extract_user_token_from_request(request)
 
         # Honor the explicitly selected workspace from the `group_id` header.
         # WITHOUT this, from_email() ignores the selection and returns the UNION of
@@ -736,8 +740,7 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
         if user_token:
             context["access_token"] = user_token
 
-        # Extract Databricks Apps email
-        email = request.headers.get("X-Forwarded-Email")
+        email = identity_from_headers(request.headers).email
         if email:
             context["email"] = email
 
