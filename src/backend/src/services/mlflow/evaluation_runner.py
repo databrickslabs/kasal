@@ -49,8 +49,8 @@ class MLflowEvaluationRunner:
             judge_model_defaulted: Whether judge model is using default value
             experiment_name: The crew-traces experiment to evaluate against,
                 resolved from the MLflow configuration (Configuration.tsx) by the
-                async caller — the source of truth. Falls back to the env/default
-                when not supplied (None) so out-of-band callers still work.
+                async caller — the source of truth. Without one, the
+                per-teamspace fallback (``fallback_trace_experiment``).
         """
         self.exec_obj = exec_obj
         self.job_id = job_id
@@ -84,9 +84,7 @@ class MLflowEvaluationRunner:
             # experiment (Configuration.tsx) is the source of truth; env/default
             # only when the caller supplied nothing.
             mlflow.set_tracking_uri("databricks")
-            eval_exp_name = self.experiment_name or os.getenv(
-                "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
-            )
+            eval_exp_name = self._experiment()
 
             mlflow.set_experiment(eval_exp_name)
 
@@ -192,10 +190,7 @@ class MLflowEvaluationRunner:
             try:
                 search_traces = getattr(mlflow, "search_traces", None)
                 if callable(search_traces):
-                    traces_exp_name = self.experiment_name or os.getenv(
-                        "MLFLOW_CREW_TRACES_EXPERIMENT",
-                        "/Shared/kasal-crew-execution-traces",
-                    )
+                    traces_exp_name = self._experiment()
 
                     traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
 
@@ -400,6 +395,24 @@ class MLflowEvaluationRunner:
             mlflow.log_text(self.prediction_text or "", artifact_file="prediction.txt")
         except Exception:
             pass
+
+    def _experiment(self) -> str:
+        """The configured experiment, else the per-teamspace fallback.
+
+        Never the old shared ``/Shared/kasal-crew-execution-traces``: it was
+        readable by every workspace user and shared by every teamspace.
+        """
+        from src.core.databricks_app import fallback_trace_experiment
+
+        name = self.experiment_name or fallback_trace_experiment(
+            getattr(self.exec_obj, "group_id", None)
+        )
+        if not name:
+            raise ValueError(
+                "No MLflow experiment is configured for this teamspace: set one "
+                "in Configuration -> MLflow"
+            )
+        return name
 
     #: Non-secret endpoint URLs the judge path reads from the environment.
     _URL_ENV_KEYS = (

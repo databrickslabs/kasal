@@ -42,3 +42,14 @@ def test_production_accepts_real_email(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     m = GroupUserCreateRequest(user_email="user@company.com")
     assert m.user_email == "user@company.com"
+
+
+@pytest.mark.parametrize("environment", ["development", "local", ""])
+def test_databricks_apps_is_production_whatever_environment_says(
+    monkeypatch, environment
+):
+    """Inside Databricks Apps local-dev leniency never applies."""
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    monkeypatch.setenv("DATABRICKS_APP_NAME", "kasal")
+    with pytest.raises(ValidationError):
+        GroupUserCreateRequest(user_email="dev@localhost")

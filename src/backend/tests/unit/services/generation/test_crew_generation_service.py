@@ -3492,10 +3492,10 @@ class TestProgressiveGeneration:
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_lakebase_no_config(self, monkeypatch):
-        """When lakebase config is None, uses env var fallback for instance name."""
+        """When lakebase config is None, the Apps binding names the instance."""
         request = self._make_progressive_request()
         gen_id = "gen-lakebase-noconf"
-        monkeypatch.delenv("LAKEBASE_INSTANCE_NAME", raising=False)
+        monkeypatch.setenv("KASAL_LAKEBASE_RESOURCE", "bound-instance")
 
         with self._progressive_patches():
             with patch(
@@ -3521,7 +3521,7 @@ class TestProgressiveGeneration:
                         await self.service.create_crew_progressive(
                             request, None, gen_id
                         )
-                        # Should fall back to env var or "kasal-lakebase".
+                        # Falls back to the Apps binding (never an invented name).
                         # Asserted on the ARGUMENT, not the call count: the
                         # generation opens more than one private-connection
                         # session (the recipe lookup takes a short-lived one of
@@ -3529,7 +3529,7 @@ class TestProgressiveGeneration:
                         # resolve the same instance name. A count assertion here
                         # would fail for a reason that has nothing to do with
                         # the env-var fallback this test exists to check.
-                        mock_get_lb.assert_called_with("kasal-lakebase")
+                        mock_get_lb.assert_called_with("bound-instance")
                         assert mock_get_lb.call_count >= 1
 
     # ------------------------------------------------------------------

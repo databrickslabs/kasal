@@ -24,7 +24,9 @@ async def get_config(repository: DatabaseConfigRepository) -> Dict[str, Any]:
         if config:
             return {
                 "enabled": config.value.get("enabled", False),
-                "instance_name": config.value.get("instance_name", "kasal-lakebase"),
+                # No invented name for a saved row: an unnamed one is resolved
+                # (Apps binding or error) where a connection is made.
+                "instance_name": config.value.get("instance_name"),
                 "capacity": config.value.get("capacity", "CU_1"),
                 "retention_days": config.value.get("retention_days", 14),
                 "node_count": config.value.get("node_count", 1),
@@ -34,7 +36,9 @@ async def get_config(repository: DatabaseConfigRepository) -> Dict[str, Any]:
                 "database_type": config.value.get("database_type", "lakebase"),
             }
         else:
-            # Return default configuration
+            # Nothing saved: a DISABLED form default. "kasal-lakebase" is only
+            # the suggested name for an instance the user is about to CREATE;
+            # nothing connects to it (Lakebase is off without a saved config).
             return {
                 "enabled": False,
                 "instance_name": "kasal-lakebase",

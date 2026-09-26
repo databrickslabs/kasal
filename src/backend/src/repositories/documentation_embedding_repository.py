@@ -434,10 +434,12 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
                 if bind:
                     dialect_name = bind.dialect.name.lower()
                     return dialect_name
-            # Fallback: try to detect from settings
-            from src.config.settings import settings
+            # Fallback: where this process's data lives (Lakebase is Postgres),
+            # not the base engine's DATABASE_TYPE.
+            from src.db.database_router import effective_database_type
 
-            return settings.DATABASE_TYPE.lower()
+            kind = effective_database_type()
+            return "postgresql" if kind in ("lakebase", "postgres") else kind
         except Exception:
             # Default to postgres if detection fails
             return "postgresql"

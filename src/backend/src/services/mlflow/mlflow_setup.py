@@ -520,8 +520,8 @@ async def configure_mlflow_in_subprocess(
         # NOTE this supersedes rather than renames: runs already traced to
         # /Shared/kasal-crew-execution-traces stay there, and new ones land in
         # the per-teamspace experiment. Nothing is lost, but history splits.
-        # Set MLFLOW_CREW_TRACES_EXPERIMENT (or the workspace's configured
-        # experiment name) to keep everything in one place.
+        # Configure the experiment name (Configuration -> MLflow) to keep
+        # everything in one place.
         experiment_name = f"/Shared/{_local_slug(teamspace_name)}"
         uc_catalog = None
         uc_schema = None
@@ -1092,7 +1092,9 @@ async def capture_trace_and_update_execution(
         last_trace_id = _get_last_id()
         if last_trace_id:
             alog.info(f"[SUBPROCESS] - Last active trace id: {last_trace_id}")
-            exp = experiment_name or "/Shared/kasal-crew-execution-traces"
+            from src.core.databricks_app import fallback_trace_experiment
+
+            exp = experiment_name or fallback_trace_experiment(group_id) or ""
             await _update_trace(
                 execution_id=execution_id,
                 trace_id=last_trace_id,

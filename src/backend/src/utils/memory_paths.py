@@ -14,8 +14,10 @@ the store across locations and left the memory browser reading a different place
 than the runtime wrote.
 
 We pin an **absolute** root *outside* the source tree so the writer and the
-browser always agree, and so production (Linux) uses a known data folder.
-Override the root with the ``KASAL_MEMORY_DIR`` environment variable.
+browser always agree. Local dev: ``~/.kasal/memory``. Inside Databricks Apps the
+default is app-relative (``core.databricks_app.apps_data_dir``) — and a warning
+is logged, because that filesystem does not survive a redeploy: configure the
+Lakebase memory backend there. ``KASAL_MEMORY_DIR`` overrides both.
 
 Storage model mirrors ChatMode / Lakebase: ONE store per group
 (``kasal_default_<group_id>``). Session scoping is NOT a separate directory — it
@@ -23,9 +25,12 @@ is encoded in each record's scope path (``/<group_id>/<session_id>/...``), so a
 session record is visible both workspace-wide (group) and session-scoped.
 """
 
+import logging
 import os
 import re
 from pathlib import Path
+
+from src.core.databricks_app import apps_data_dir
 
 # Default root when KASAL_MEMORY_DIR is unset. Outside the backend source tree
 # and writable on Linux; set KASAL_MEMORY_DIR to your data folder in production.
@@ -40,17 +45,49 @@ def sanitize_dir_component(value: str) -> str:
 def local_memory_root() -> Path:
     """Absolute base dir holding every group's local SQLite memory store.
 
-    ``KASAL_MEMORY_DIR`` overrides the default ``~/.kasal/memory``. The base dir
-    is created if missing so the store can be written underneath it.
+    ``KASAL_MEMORY_DIR`` overrides the default (``~/.kasal/memory`` locally,
+    app-relative inside Databricks Apps). The base dir is created if missing so
+    the store can be written underneath it.
     """
     override = os.environ.get("KASAL_MEMORY_DIR")
-    root = (
-        Path(override).expanduser()
-        if override
-        else Path.home() / _DEFAULT_MEMORY_DIRNAME
-    )
+    apps_dir = apps_data_dir("memory")
+    if override:
+        root = Path(override).expanduser()
+    elif apps_dir is not None:
+        root = apps_dir
+    else:
+        root = Path.home() / _DEFAULT_MEMORY_DIRNAME
+    if apps_dir is not None:
+        _warn_local_memory_in_apps(root)
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+_warned_in_apps = False
+
+
+def warn_if_local_memory_is_ephemeral() -> None:
+    """Startup check: inside Databricks Apps, warn where local memory would go.
+
+    Any teamspace without the Lakebase memory backend uses the local store, and
+    the app filesystem does not survive a redeploy. A no-op outside Apps.
+    """
+    if apps_data_dir("memory") is not None:
+        local_memory_root()
+
+
+def _warn_local_memory_in_apps(root: Path) -> None:
+    """Once per process: local memory inside Apps is lost on redeploy."""
+    global _warned_in_apps
+    if _warned_in_apps:
+        return
+    _warned_in_apps = True
+    logging.getLogger(__name__).warning(
+        "Local (DEFAULT) memory is in use inside Databricks Apps at %s. The app "
+        "filesystem does not survive a redeploy, so this memory will be lost: "
+        "configure the Lakebase memory backend for durable memory.",
+        root,
+    )
 
 
 def local_memory_store_dir(group_id: str) -> Path:

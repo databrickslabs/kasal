@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Mapping, Optional
 
 
@@ -74,6 +75,43 @@ def is_databricks_app() -> bool:
     return DatabricksAppInstallation.from_env().hosted
 
 
+def on_databricks_apps() -> bool:
+    """Running on the Databricks Apps platform, for SAFETY decisions.
+
+    Broader than :func:`is_databricks_app` (which also needs the workspace id
+    and port for installation-scoped defaults): the platform's own
+    ``DATABRICKS_APP_NAME`` alone is enough to refuse development behaviour,
+    so a partial environment fails closed.
+    """
+    return bool(os.getenv("DATABRICKS_APP_NAME", "").strip()) or is_databricks_app()
+
+
+def is_production() -> bool:
+    """Whether Kasal must behave as production.
+
+    DERIVED inside Databricks Apps, never configured: there Kasal is production
+    whatever ``ENVIRONMENT`` says (the platform sets ``DATABRICKS_APP_NAME``;
+    ``ENVIRONMENT`` is not in app.yaml, and its "development" default used to
+    put every deployment in local-dev mode). Outside Apps,
+    ``ENVIRONMENT=production``/``prod`` opts in.
+    """
+    if on_databricks_apps():
+        return True
+    return os.getenv("ENVIRONMENT", "").strip().lower() in ("production", "prod")
+
+
+def is_local_dev() -> bool:
+    """A developer's machine: never inside Apps, and ENVIRONMENT (default
+    ``development``) is development/dev/local."""
+    if is_production():
+        return False
+    return os.getenv("ENVIRONMENT", "development").strip().lower() in (
+        "development",
+        "dev",
+        "local",
+    )
+
+
 @dataclass(frozen=True)
 class LakebaseAppResource:
     host: str
@@ -112,6 +150,78 @@ class LakebaseAppResource:
             "database_name": self.database,
             "installation_managed": True,
         }
+
+
+def fallback_trace_experiment(group_id: Optional[str]) -> Optional[str]:
+    """The crew-traces experiment when the MLflow configuration names none.
+
+    Callers use the configured experiment first (``mlflow_config`` /
+    ``MLflowService.configured_crew_traces_experiment``). Without one:
+
+    - inside Databricks Apps, the per-teamspace installation experiment
+      (:meth:`DatabricksAppInstallation.experiment_name`) — private to the
+      teamspace, unlike the old shared ``/Shared/kasal-crew-execution-traces``
+      that every workspace user could read;
+    - in local dev only, ``MLFLOW_CREW_TRACES_EXPERIMENT`` (moving to the
+      Configuration UI);
+    - otherwise ``None``: the caller skips or reports it, never invents a path.
+    """
+    installation = DatabricksAppInstallation.from_env()
+    if installation.hosted:
+        return installation.experiment_name(group_id) if group_id else None
+    if on_databricks_apps():
+        return None
+    return os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "").strip() or None
+
+
+def apps_data_dir(name: str) -> Optional[Path]:
+    """App-relative data directory inside Databricks Apps, else ``None``.
+
+    The home directory of an Apps container is not where an app keeps data
+    (and is recreated with it), so inside Apps local stores default under the
+    app's own tree instead of ``~``. This is still the container's filesystem:
+    it does NOT survive a redeploy — anything that must persist belongs in
+    Lakebase or a Unity Catalog volume.
+    """
+    if not on_databricks_apps():
+        return None
+    from src.core.paths import BACKEND_ROOT
+
+    return BACKEND_ROOT / "data" / name
+
+
+def resolve_lakebase_instance_name(configured: Optional[str] = None) -> str:
+    """The Lakebase instance to connect to. The ONE place this is decided.
+
+    1. ``configured``: the database setting (the ``database_configs`` Lakebase
+       row, or a memory backend's ``lakebase_config.instance_name``);
+    2. the Databricks Apps binding: ``KASAL_LAKEBASE_RESOURCE``, else the bound
+       resource's ``PGHOST``.
+
+    There is no invented fallback (it used to be ``"kasal-lakebase"``, which
+    matched nothing a user created): with neither, this raises
+    :class:`~src.core.exceptions.LakebaseNotConfiguredError`.
+    """
+    name = (configured or "").strip()
+    if name:
+        return name
+    binding = os.getenv("KASAL_LAKEBASE_RESOURCE", "").strip()
+    if binding:
+        return binding
+    installed = LakebaseAppResource.from_env()
+    if installed is not None:
+        return installed.endpoint or installed.host
+    from src.core.exceptions import LakebaseNotConfiguredError
+
+    raise LakebaseNotConfiguredError()
+
+
+def lakebase_instance_from_config(config: Optional[Mapping[str, object]]) -> str:
+    """:func:`resolve_lakebase_instance_name` for a Lakebase config dict."""
+    configured = (config or {}).get("instance_name")
+    return resolve_lakebase_instance_name(
+        configured if isinstance(configured, str) else None
+    )
 
 
 # ---------------------------------------------------------------------------

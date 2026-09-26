@@ -234,8 +234,10 @@ async def preflight_via_service(
     """
     try:
         if not instance_name:
+            from src.core.databricks_app import lakebase_instance_from_config
+
             config = await service.get_config()
-            instance_name = config.get("instance_name", "kasal-lakebase")
+            instance_name = lakebase_instance_from_config(config)
         instance = await service.get_instance(instance_name)
         if not instance or instance.get("state") == "NOT_FOUND":
             return {

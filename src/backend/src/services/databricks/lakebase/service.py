@@ -54,6 +54,7 @@ from src.config.settings import (  # noqa: E402 - import follows module initiali
 from src.core.base_service import (  # noqa: E402 - import follows module initialization
     BaseService,
 )
+from src.core.databricks_app import lakebase_instance_from_config  # noqa: E402
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
 )
@@ -364,7 +365,7 @@ class LakebaseService(BaseService):
                 # Return a minimal config showing it's disabled
                 return {
                     "enabled": False,
-                    "instance_name": config.get("instance_name", "kasal-lakebase"),
+                    "instance_name": config.get("instance_name"),
                     "instance_status": "NOT_CREATED",
                     "message": "Lakebase disabled - using PostgreSQL/SQLite",
                 }
@@ -1641,9 +1642,8 @@ class LakebaseService(BaseService):
                     "error": "Lakebase features not available in current environment",
                 }
 
-            # Get instance name from config
             config = await self.get_config()
-            instance_name = config.get("instance_name", "kasal-lakebase")
+            instance_name = lakebase_instance_from_config(config)
             logger.info(f"Checking tables in Lakebase instance {instance_name}")
 
             # Get instance details

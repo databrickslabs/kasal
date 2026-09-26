@@ -4,7 +4,6 @@ The API owns header parsing; this service owns the existing role, username and
 transaction behavior when normal identity lookup cannot supply a user.
 """
 
-import os
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +19,7 @@ async def get_or_create_forwarded_user(
     """
     Create a user from X-Forwarded-Email header and track the source.
 
-    This function works in both development and production modes.
+    New users are always created with the REGULAR role.
 
     Args:
         session: Database session
@@ -34,11 +33,6 @@ async def get_or_create_forwarded_user(
     from datetime import datetime
 
     logger = logging.getLogger("src.dependencies.admin_auth")
-    is_local_dev = os.getenv("ENVIRONMENT", "development").lower() in (
-        "development",
-        "dev",
-        "local",
-    )
 
     try:
         # Check if user already exists
@@ -69,18 +63,12 @@ async def get_or_create_forwarded_user(
             username = f"{sanitized_username}_{domain_part}"
             logger.info(f"Username {sanitized_username} exists, using {username}")
 
-        # Determine user role based on configuration
-        default_role = UserRole.REGULAR  # Default for production
-        if is_local_dev:
-            # In development, check if this is a known admin email
-            admin_emails = os.getenv("ADMIN_EMAILS", "").split(",")
-            admin_patterns = ["admin@localhost", "admin@", "testadmin@"]
-
-            if email in admin_emails or any(
-                pattern in email for pattern in admin_patterns
-            ):
-                default_role = UserRole.ADMIN
-                logger.info(f"Assigning admin role to {email} in development")
+        # Always REGULAR. There used to be a development-only promotion to
+        # ADMIN for ADMIN_EMAILS and any email containing "admin@" — keyed on
+        # ENVIRONMENT, whose "development" default made it live in every
+        # Databricks Apps deployment. Nothing needs it: group admin rights come
+        # from group membership (GroupUserRole), not from this column.
+        default_role = UserRole.REGULAR
 
         # Create user
         user = User(

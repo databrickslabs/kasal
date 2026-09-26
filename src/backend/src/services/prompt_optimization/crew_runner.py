@@ -13,6 +13,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
+from src.core.databricks_app import fallback_trace_experiment
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.crew_doc import (
     _distill_requirements,
@@ -162,13 +163,12 @@ class CrewRunnerMixin:
                 if local_mode
                 else (
                     crew_traces_experiment
-                    or os.getenv(
-                        "MLFLOW_CREW_TRACES_EXPERIMENT",
-                        "/Shared/kasal-crew-execution-traces",
+                    or fallback_trace_experiment(
+                        getattr(group_context, "primary_group_id", None)
                     )
                 )
             )
-            try:
+            try:  # None (nothing configured) raises and is logged, never invented
                 mlflow.set_experiment(exp_name)
             except Exception as exp_err:
                 logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")

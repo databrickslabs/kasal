@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
@@ -271,10 +271,8 @@ class TriggerQueueConsumerService:
         # UnsafeUrlError is a ValueError, so a blocked URL dead-letters
         # immediately instead of burning retries. Local dev can opt out to
         # deliver to a localhost receiver.
-        _allow_private = os.getenv(
-            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
-        ).lower() in ("1", "true", "yes")
-        if not _allow_private:
+        # Refused inside Databricks Apps (config/settings.py).
+        if not settings.KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS:
             from src.utils.url_security import assert_safe_outbound_url
 
             await assert_safe_outbound_url(url)
@@ -318,9 +316,7 @@ class TriggerQueueConsumerService:
         from src.utils.safe_http import PublicResolver
         from src.utils.url_security import check_url_structure
 
-        allow_private = os.getenv(
-            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
-        ).lower() in ("1", "true", "yes")
+        allow_private = settings.KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS
         if not allow_private:
             check_url_structure(url)
         # The connector uses the resolver's returned IPs directly. Literal IPs

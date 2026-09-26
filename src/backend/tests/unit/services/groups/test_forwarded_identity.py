@@ -134,7 +134,10 @@ class TestCreateUserFromForwardedEmailBranches:
         session.rollback.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_create_user_admin_email_in_dev(self):
+    @pytest.mark.parametrize("environment", ["development", "production"])
+    async def test_an_admin_looking_email_is_never_promoted(self, environment):
+        """The ADMIN_EMAILS / "admin@" promotion is gone, in every environment
+        (its "development" default made it live inside Databricks Apps)."""
         from src.services.groups.forwarded_identity import get_or_create_forwarded_user
 
         session = _make_session()
@@ -143,16 +146,11 @@ class TestCreateUserFromForwardedEmailBranches:
         username_result = MagicMock()
         username_result.scalars.return_value.first.return_value = None
         session.execute.side_effect = [missing, username_result]
-        with patch.dict(os.environ, {"ENVIRONMENT": "development"}):
+        env = {"ENVIRONMENT": environment, "ADMIN_EMAILS": "admin@localhost"}
+        with patch.dict(os.environ, env):
             result = await get_or_create_forwarded_user(session, "admin@localhost")
         assert result.email == "admin@localhost"
-        assert result.username == "admin"
-        assert result.role == UserRole.ADMIN
-        session.add.assert_called_once_with(result)
-        session.flush.assert_awaited_once()
-        session.commit.assert_awaited_once()
-        session.refresh.assert_awaited_once_with(result)
-        session.rollback.assert_not_awaited()
+        assert result.role == UserRole.REGULAR
 
     @pytest.mark.asyncio
     async def test_create_user_exception_returns_none(self):

@@ -14,6 +14,7 @@ import traceback
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from src.core.databricks_app import lakebase_instance_from_config
 from src.core.exceptions import BadRequestError, KasalError
 from src.core.llm.robust_json import robust_json_parser
 from src.core.sse_manager import SSEEvent, sse_manager
@@ -403,10 +404,9 @@ class ProgressiveGenerationMixin:
                 # are already per-connection, so the helper falls through to them.)
                 if await is_lakebase_enabled():
                     lb_config = await get_lakebase_config_from_db()
-                    lb_instance = (lb_config or {}).get(
-                        "instance_name"
-                    ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
-                    _session_ctx = get_lakebase_session(lb_instance)
+                    _session_ctx = get_lakebase_session(
+                        lakebase_instance_from_config(lb_config)
+                    )
                 else:
                     _session_ctx = get_isolated_db_session()
 
