@@ -9,10 +9,7 @@ Author: Kasal Team
 Date: 2026
 """
 
-import asyncio
-import contextvars
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional, Type
 
 import httpx
@@ -23,27 +20,21 @@ from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
 logger = logging.getLogger(__name__)
 
-_EXECUTOR = ThreadPoolExecutor(max_workers=5)
-
 
 def _run_async_in_sync_context(coro):
+    """Run ``coro`` from this tool's synchronous code.
+
+    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
+    copies the caller's ContextVars (group, OBO token, execution id) into the
+    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through. The copy that lived here caught
+    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
+    the coroutine was mistaken for "no running loop" and the spent coroutine
+    was run a second time, and it waited forever.
     """
-    Safely run an async coroutine from a synchronous context.
-    Handles nested event loop scenarios (e.g., FastAPI).
-    Propagates contextvars (like execution_id) to worker threads.
-    """
-    try:
-        asyncio.get_running_loop()
-        ctx = contextvars.copy_context()
-        future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
-        return future.result()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+    from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
+
+    return run_async_with_context(coro, timeout=DEFAULT_TIMEOUT)
 
 
 class PowerBIDaxExecutorSchema(BaseModel):

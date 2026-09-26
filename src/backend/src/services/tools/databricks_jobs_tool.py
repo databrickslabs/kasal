@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, ClassVar, Dict, List, Optional, Type, Union
 from urllib.parse import urlencode
@@ -19,8 +18,6 @@ from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
 
-# Thread pool executor for running async operations from sync context
-_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
 # Global execution tracking dictionaries (outside of class to avoid Pydantic field interpretation)
 _GLOBAL_RUN_EXECUTIONS: Dict[str, str] = {}
@@ -51,38 +48,19 @@ DISABLED_ACTIONS = ("create", "submit")
 
 
 def _run_async_in_sync_context(coro):
+    """Run ``coro`` from this tool's synchronous code.
+
+    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
+    copies the caller's ContextVars (group, OBO token, execution id) into the
+    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through. The copy that lived here caught
+    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
+    the coroutine was mistaken for "no running loop" and the spent coroutine
+    was run a second time, and it waited forever.
     """
-    Safely run an async coroutine from a synchronous context.
+    from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
-    This handles the case where we're already in an event loop (e.g., FastAPI)
-    and need to execute async code from a sync function (e.g., CrewAI tool's _run method).
-
-    Args:
-        coro: The coroutine to execute
-
-    Returns:
-        The result of the coroutine execution
-    """
-    try:
-        # Try to get the current running loop
-        asyncio.get_running_loop()
-        # Already in an async context — run in executor with the caller's
-        # ContextVars copied in (UserContext group/token must propagate).
-        logger.debug("Detected running event loop, using ThreadPoolExecutor")
-        import contextvars
-
-        ctx = contextvars.copy_context()
-        future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
-        return future.result()
-    except RuntimeError:
-        # No event loop running, we can safely create one
-        logger.debug("No running event loop detected, creating new loop")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+    return run_async_with_context(coro, timeout=DEFAULT_TIMEOUT)
 
 
 class DatabricksJobsToolSchema(BaseModel):
