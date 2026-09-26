@@ -22,14 +22,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _make_executor(max_concurrent=4):
+def _make_executor():
     with patch(
         "src.services.agent_builder.process_executor.mp.get_context"
     ) as mock_ctx:
         mock_ctx.return_value = MagicMock()
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
-        executor = ProcessCrewExecutor(max_concurrent=max_concurrent)
+        executor = ProcessCrewExecutor()
     executor._ctx = MagicMock()
     return executor
 
@@ -289,32 +289,26 @@ class TestRunCrewWrapperError:
 
 
 class TestRunCrewIsolatedFinallyCleanup:
+    """The finally block stops the tracked tree and releases what the run held."""
+
+    @staticmethod
+    def _executor_with_exited_process(pid):
+        executor = _make_executor()
+        mock_process = MagicMock()
+        mock_process.pid = pid
+        mock_process.is_alive = MagicMock(return_value=False)
+        mock_process.exitcode = 0
+        mock_q = MagicMock()
+        mock_q.get = MagicMock(return_value={"status": "COMPLETED"})
+        executor._ctx.Queue = MagicMock(side_effect=[mock_q, MagicMock()])
+        executor._ctx.Process = MagicMock(return_value=mock_process)
+        return executor, mock_process
 
     @pytest.mark.asyncio
-    async def test_alive_process_in_finally_is_terminated(self):
-        """In the finally block, alive processes are terminated."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 111
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        # is_alive: False when checking result, True in finally block
-        is_alive_calls = [False, True, False]
-        mock_process.is_alive = MagicMock(side_effect=is_alive_calls + [False] * 10)
-        mock_process.exitcode = 0
-        mock_process.terminate = MagicMock()
-        mock_process.kill = MagicMock()
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
+    async def test_tracked_process_is_stopped_through_process_tree(self):
+        """Cleanup goes through terminate_process_tree with the tracked handle."""
+        executor, mock_process = self._executor_with_exited_process(111)
+        group_ctx = MagicMock(primary_group_id="grp", access_token=None)
 
         with (
             patch(
@@ -323,38 +317,21 @@ class TestRunCrewIsolatedFinallyCleanup:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", return_value=[]),
+            patch(
+                "src.services.agent_builder.process_executor.terminate_process_tree",
+                return_value=True,
+            ) as stop_tree,
         ):
             result = await executor.run_crew_isolated("exec-alive", {}, group_ctx)
 
-        # Execution completed successfully
-        assert result is not None
+        assert result["status"] == "COMPLETED"
+        stop_tree.assert_called_once_with(mock_process)
 
     @pytest.mark.asyncio
-    async def test_futures_and_executors_cleaned_up(self):
-        """In the finally block, _running_futures and _running_executors are cleaned."""
-        executor = _make_executor()
-
-        mock_process = MagicMock()
-        mock_process.pid = 222
-        mock_process.start = MagicMock()
-        mock_process.join = MagicMock()
-        mock_process.is_alive = MagicMock(return_value=False)
-        mock_process.exitcode = 0
-
-        mock_q = MagicMock()
-        mock_q.empty = MagicMock(return_value=True)
-        mock_log_q = MagicMock()
-        executor._ctx.Queue = MagicMock(side_effect=[mock_q, mock_log_q])
-        executor._ctx.Process = MagicMock(return_value=mock_process)
-
-        group_ctx = MagicMock()
-        group_ctx.primary_group_id = "grp"
-        group_ctx.access_token = None
-
-        # Add stale entries that should be cleaned up
-        executor._running_futures["exec-clean"] = MagicMock()
-        executor._running_executors["exec-clean"] = MagicMock()
+    async def test_tracking_and_run_slot_released(self, isolated_run_gate):
+        """After the run, the process is untracked and its run slot is free."""
+        executor, _ = self._executor_with_exited_process(222)
+        group_ctx = MagicMock(primary_group_id="grp", access_token=None)
 
         with (
             patch(
@@ -363,12 +340,11 @@ class TestRunCrewIsolatedFinallyCleanup:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch("psutil.process_iter", return_value=[]),
         ):
             await executor.run_crew_isolated("exec-clean", {}, group_ctx)
 
-        assert "exec-clean" not in executor._running_futures
-        assert "exec-clean" not in executor._running_executors
+        assert "exec-clean" not in executor._running_processes
+        assert isolated_run_gate.active_count == 0
 
 
 # ---------------------------------------------------------------------------

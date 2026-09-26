@@ -80,14 +80,24 @@ import multiprocessing as mp
 import os
 import signal
 import traceback
-from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime
+from multiprocessing.process import BaseProcess
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.process_tree import (
     terminate_owned_processes,
     terminate_process_tree,
+)
+from src.services.execution.run_admission import (
+    RunCancelledWhileQueued,
+    queue_status_callbacks,
+    run_admission,
+    stopped_while_queued,
+)
+from src.services.execution.run_wait import (
+    collect_result,
+    flush_queues_before_exit,
+    run_deadline,
 )
 from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
 
@@ -1270,7 +1280,7 @@ class ProcessFlowExecutor:
 
     Features:
         - One process per execution (no shared pool)
-        - Concurrent execution management with configurable limits
+        - One concurrent-run limit shared with Agent Builder (run_admission)
         - Graceful and forceful termination support
         - Child process tracking and cleanup (including crew subprocesses)
         - Async/await interface for non-blocking operations
@@ -1279,13 +1289,10 @@ class ProcessFlowExecutor:
     Attributes:
         _ctx: Multiprocessing context using 'spawn' for better isolation
         _running_processes: Dictionary tracking active processes by execution ID
-        _running_futures: Dictionary of asyncio futures for execution results
-        _running_executors: Dictionary of process pool executors
-        _max_concurrent: Maximum number of concurrent flow executions
         _metrics: Dictionary tracking execution statistics
 
     Example:
-        >>> executor = ProcessFlowExecutor(max_concurrent=2)
+        >>> executor = ProcessFlowExecutor()
         >>> result = await executor.run_flow_isolated(
         ...     execution_id="exec_123",
         ...     flow_config=config
@@ -1294,15 +1301,11 @@ class ProcessFlowExecutor:
         >>> stopped = await executor.terminate_execution("exec_123")
     """
 
-    def __init__(self, max_concurrent: int = 2):
-        """Initialize the process executor with concurrency control.
+    def __init__(self) -> None:
+        """Initialize the process executor.
 
-        Sets up the multiprocessing context, tracking structures, and
-        concurrency management primitives.
-
-        Args:
-            max_concurrent: Maximum number of concurrent flow executions.
-                Defaults to 2 to balance resource usage (flows can spawn multiple crews).
+        How many runs may go at once is not decided here: flow and crew runs
+        share one limit, ``run_admission`` in ``services/execution``.
 
         Note:
             Uses 'spawn' context instead of 'fork' for better isolation
@@ -1316,15 +1319,10 @@ class ProcessFlowExecutor:
         os.environ["CREWAI_VERBOSE"] = "false"
 
         # NO POOL - we create individual processes per execution
-        self._max_concurrent = max_concurrent
-
-        # Track running processes and their executors
-        self._running_processes: Dict[str, mp.Process] = {}
-        self._running_futures: Dict[str, Any] = {}
-        self._running_executors: Dict[str, ProcessPoolExecutor] = {}
+        self._running_processes: Dict[str, BaseProcess] = {}
 
         # Metrics
-        self._metrics = {
+        self._metrics: Dict[str, int] = {
             "total_executions": 0,
             "active_executions": 0,
             "completed_executions": 0,
@@ -1332,9 +1330,7 @@ class ProcessFlowExecutor:
             "terminated_executions": 0,
         }
 
-        logger.info(
-            f"ProcessFlowExecutor initialized for per-execution processes (max concurrent: {max_concurrent})"
-        )
+        logger.info("ProcessFlowExecutor initialized for per-execution processes")
 
     @staticmethod
     def _run_flow_wrapper(
@@ -1384,6 +1380,11 @@ class ProcessFlowExecutor:
             except Exception:
                 pass
 
+            # put() only hands the result to a feeder thread; os._exit kills
+            # that thread wherever it is. Flush both queues first (the parent
+            # is reading them) or the result can be lost or cut short.
+            flush_queues_before_exit(result_queue, log_queue)
+
             # CRITICAL: Use os._exit(0) instead of sys.exit(0)
             # os._exit(0) forcefully terminates without waiting for non-daemon threads
             # This is necessary because HITL flows leave background tasks running
@@ -1403,12 +1404,16 @@ class ProcessFlowExecutor:
         """
         Run a flow in an isolated process using direct Process control.
 
+        Waits for a run slot first (``run_admission``). While queued the run
+        is PENDING and holds no thread; a stop request removes it from the
+        queue. ``timeout`` counts from when the subprocess starts.
+
         Args:
             execution_id: Unique identifier for the execution
             flow_config: Configuration to build the flow
             group_context: Group context for tenant isolation (MANDATORY)
             inputs: Optional inputs for the flow
-            timeout: Optional timeout in seconds
+            timeout: Optional timeout in seconds of run time
 
         Returns:
             Dictionary with execution results
@@ -1416,11 +1421,28 @@ class ProcessFlowExecutor:
         logger.info(
             f"[ProcessFlowExecutor] run_flow_isolated called for {execution_id}"
         )
+        try:
+            async with run_admission.slot(
+                execution_id, "flow", **queue_status_callbacks(execution_id)
+            ):
+                return await self._run_admitted(
+                    execution_id, flow_config, group_context, inputs, timeout
+                )
+        except RunCancelledWhileQueued:
+            self._metrics["terminated_executions"] += 1
+            return stopped_while_queued(execution_id)
 
+    async def _run_admitted(
+        self,
+        execution_id: str,
+        flow_config: Dict[str, Any],
+        group_context: Any,
+        inputs: Optional[Dict[str, Any]],
+        timeout: Optional[float],
+    ) -> Dict[str, Any]:
+        """Spawn and supervise one flow run that holds a run slot."""
         self._metrics["total_executions"] += 1
         self._metrics["active_executions"] += 1
-
-        datetime.now()
 
         # Use multiprocessing.Queue to get results from the subprocess
         result_queue = self._ctx.Queue()
@@ -1521,8 +1543,10 @@ class ProcessFlowExecutor:
             # Store the process
             self._running_processes[execution_id] = process
 
-            # Start the process
+            # Start the process. The run clock starts here, not before the
+            # run was admitted: time spent queued is not run time.
             process.start()
+            deadline = run_deadline(timeout)
             logger.info(
                 f"[ProcessFlowExecutor] Started flow process {process.pid} for execution {execution_id}"
             )
@@ -1548,21 +1572,6 @@ class ProcessFlowExecutor:
             if old_lakebase_instance is not None:
                 os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
-        # Wait for result in background, on the bounded run-wait pool rather
-        # than the default executor Chat turns share.
-        from src.services.execution.blocking_pools import RUN_WAIT_EXECUTOR
-
-        loop = asyncio.get_event_loop()
-        future = loop.run_in_executor(
-            RUN_WAIT_EXECUTOR,
-            self._wait_for_result,
-            execution_id,
-            process,
-            result_queue,
-            timeout,
-        )
-        self._running_futures[execution_id] = future
-
         # Live event relay (LLM token chunks + lifecycle trace frames → SSE).
         # The flow path never had a child→parent reader; the crew path's
         # relay is reused here.
@@ -1573,7 +1582,10 @@ class ProcessFlowExecutor:
         )
 
         try:
-            result = await future
+            # Read the result while the child runs, then wait for its exit;
+            # never join first (see services/execution/run_wait.py).
+            drained = await collect_result(process, result_queue, deadline)
+            result = drained[0] if drained else self._no_result(execution_id, process)
 
             # The child has exited; append a parent-side EOF so the relay
             # drains the final frames and stops deterministically.
@@ -1627,9 +1639,13 @@ class ProcessFlowExecutor:
                     pass
 
             self._metrics["active_executions"] -= 1
-            # Clean up tracking
-            self._running_processes.pop(execution_id, None)
-            self._running_futures.pop(execution_id, None)
+            # Clean up tracking; a timed-out or failed run may still be alive.
+            tracked = self._running_processes.pop(execution_id, None)
+            if tracked is not None and tracked.is_alive():
+                try:
+                    await asyncio.to_thread(terminate_process_tree, tracked)
+                except Exception as e:
+                    logger.error(f"Error terminating flow process {execution_id}: {e}")
 
             # CRITICAL: Close the per-execution multiprocessing queues so their
             # internal semaphores (rlock/wlock/sem -> 3 named POSIX semaphores
@@ -1658,51 +1674,20 @@ class ProcessFlowExecutor:
         except Exception as e:
             logger.debug(f"[ProcessFlowExecutor] Error closing queue: {e}")
 
-    def _wait_for_result(
-        self,
-        execution_id: str,
-        process: mp.Process,
-        result_queue: mp.Queue,
-        timeout: Optional[float],
-    ) -> Dict[str, Any]:
-        """
-        Wait for process to complete and return result.
-
-        This runs in a thread pool executor.
-        """
-        try:
-            # Wait for process to finish
-            process.join(timeout=timeout)
-
-            if process.is_alive():
-                # Timeout occurred
-                logger.warning(
-                    f"Flow process {process.pid} for {execution_id} still running after timeout"
-                )
-                terminate_process_tree(process, grace_timeout=5)
-                raise TimeoutError(f"Flow execution timed out after {timeout} seconds")
-
-            # Get result from queue
-            if not result_queue.empty():
-                result = result_queue.get(timeout=1)
-                return result
-            else:
-                # No result in queue - process ended without producing result
-                # This typically happens when the process was stopped/killed
-                exit_code = process.exitcode
-                logger.info(
-                    f"[_wait_for_result] Process {process.pid} ended without result. Exit code: {exit_code}. This is normal if the flow was stopped."
-                )
-                return {
-                    "status": "FAILED",
-                    "execution_id": execution_id,
-                    "error": "Process ended without producing result (may have been stopped)",
-                    "exit_code": exit_code,
-                }
-
-        except Exception as e:
-            logger.error(f"Error waiting for flow result: {e}")
-            return {"status": "FAILED", "execution_id": execution_id, "error": str(e)}
+    @staticmethod
+    def _no_result(execution_id: str, process: Any) -> Dict[str, Any]:
+        """The result for a child that exited without writing one."""
+        exit_code = process.exitcode
+        logger.info(
+            f"Flow process {process.pid} ended without a result (exit code "
+            f"{exit_code}). This is normal if the flow was stopped."
+        )
+        return {
+            "status": "FAILED",
+            "execution_id": execution_id,
+            "error": "Process ended without producing result (may have been stopped)",
+            "exit_code": exit_code,
+        }
 
     async def terminate_execution(
         self, execution_id: str, graceful: bool = False
@@ -1724,6 +1709,9 @@ class ProcessFlowExecutor:
         Returns:
             True if termination successful, False otherwise
         """
+        if run_admission.cancel_waiting(execution_id):
+            logger.info(f"[FLOW_STOP] {execution_id} was queued; removed it")
+            return True
         logger.info("[FLOW_STOP] ========== FLOW STOP REQUESTED ==========")
         logger.info(f"[FLOW_STOP] execution_id: {execution_id}")
         logger.info(f"[FLOW_STOP] graceful: {graceful}")
@@ -1734,20 +1722,18 @@ class ProcessFlowExecutor:
 
         # First, the tracked process and its own descendants (the flow's crews)
         process = self._running_processes.pop(execution_id, None)
-        self._running_futures.pop(execution_id, None)
         if process is not None:
             logger.info(
                 f"[FLOW_STOP] Found process in tracking: PID={process.pid}, alive={process.is_alive()}"
             )
             try:
-                await asyncio.to_thread(
+                terminated = await asyncio.to_thread(
                     terminate_process_tree,
                     process,
                     graceful=graceful,
                     grace_timeout=5,
                 )
-                logger.info(f"[FLOW_STOP] Terminated process {process.pid}")
-                terminated = True
+                logger.info(f"[FLOW_STOP] Process {process.pid} stopped: {terminated}")
             except Exception as e:
                 logger.error(f"[FLOW_STOP] Error terminating tracked process: {e}")
         else:
@@ -1858,12 +1844,10 @@ class ProcessFlowExecutor:
                 logger.error(f"Error terminating flow process for {execution_id}: {e}")
 
         self._running_processes.clear()
-        self._running_futures.clear()
-        self._running_executors.clear()
         logger.info(
             f"ProcessFlowExecutor shutdown complete. Final metrics: {self.get_metrics()}"
         )
 
 
 # Global executor instance
-process_flow_executor = ProcessFlowExecutor(max_concurrent=2)
+process_flow_executor = ProcessFlowExecutor()

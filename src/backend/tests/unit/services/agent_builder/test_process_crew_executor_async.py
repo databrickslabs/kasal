@@ -18,8 +18,8 @@ import pytest
 class TestProcessCrewExecutorInit:
     """Test ProcessCrewExecutor initialization."""
 
-    def test_init_default_max_concurrent(self):
-        """Test initialization with default max_concurrent."""
+    def test_init_tracks_no_processes(self):
+        """A new executor tracks nothing; the run limit lives in run_admission."""
         with patch(
             "src.services.agent_builder.process_executor.mp.get_context"
         ) as mock_ctx:
@@ -29,23 +29,8 @@ class TestProcessCrewExecutorInit:
 
             executor = ProcessCrewExecutor()
 
-            assert executor._max_concurrent == 4
             assert executor._running_processes == {}
-            assert executor._running_futures == {}
-            assert executor._running_executors == {}
-
-    def test_init_custom_max_concurrent(self):
-        """Test initialization with custom max_concurrent."""
-        with patch(
-            "src.services.agent_builder.process_executor.mp.get_context"
-        ) as mock_ctx:
-            mock_ctx.return_value = MagicMock()
-
-            from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-            executor = ProcessCrewExecutor(max_concurrent=8)
-
-            assert executor._max_concurrent == 8
+            assert not hasattr(executor, "_max_concurrent")
 
     def test_init_sets_environment_variables(self):
         """Test that initialization sets required environment variables."""
@@ -90,20 +75,6 @@ class TestProcessCrewExecutorInit:
             assert executor._metrics["completed_executions"] == 0
             assert executor._metrics["failed_executions"] == 0
             assert executor._metrics["terminated_executions"] == 0
-
-
-class TestProcessCrewExecutorSubprocessInitializer:
-    """Test subprocess initialization."""
-
-    def test_subprocess_initializer_sets_env_vars(self):
-        """Test that subprocess initializer sets environment variables."""
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        # Call the initializer
-        ProcessCrewExecutor._subprocess_initializer()
-
-        assert os.environ.get("PYTHONUNBUFFERED") == "0"
-        assert os.environ.get("CREWAI_VERBOSE") == "false"
 
 
 class TestRunCrewInProcess:
@@ -205,6 +176,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = 0
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True
@@ -235,6 +207,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = 0
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True
@@ -267,6 +240,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = -15  # SIGTERM
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True
@@ -297,6 +271,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = -9  # SIGKILL
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True
@@ -322,6 +297,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = 1  # Error exit
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         # The drain thread does result_queue.get(timeout=...); raising → no result,
@@ -349,6 +325,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = 0
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         # The drain thread reads the result via result_queue.get(timeout=...).
@@ -382,6 +359,7 @@ class TestRunCrewIsolated:
         mock_process.exitcode = 0
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True
@@ -434,8 +412,8 @@ class TestTerminateExecution:
         """Test that terminate_execution terminates the process."""
         executor, mock_process = executor_with_process
 
-        # Mock is_alive to return False after terminate
-        mock_process.is_alive.side_effect = [True, False]
+        # alive; dead after the graceful join; still dead when re-checked
+        mock_process.is_alive.side_effect = [True, False, False]
 
         result = await executor.terminate_execution("test-exec")
 
@@ -539,16 +517,6 @@ class TestProcessTracking:
         """Test that running processes dict is initialized."""
         assert executor._running_processes == {}
         assert isinstance(executor._running_processes, dict)
-
-    def test_running_futures_dict_exists(self, executor):
-        """Test that running futures dict is initialized."""
-        assert executor._running_futures == {}
-        assert isinstance(executor._running_futures, dict)
-
-    def test_running_executors_dict_exists(self, executor):
-        """Test that running executors dict is initialized."""
-        assert executor._running_executors == {}
-        assert isinstance(executor._running_executors, dict)
 
     def test_can_add_process_to_tracking(self, executor):
         """Test that processes can be added to tracking."""
@@ -823,6 +791,7 @@ class TestGroupContextHandling:
         mock_process.exitcode = 0
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True
@@ -856,6 +825,7 @@ class TestGroupContextHandling:
         mock_process.exitcode = 0
         mock_process.start = MagicMock()
         mock_process.join = MagicMock()
+        mock_process.is_alive.return_value = False  # already exited
 
         mock_queue = MagicMock()
         mock_queue.empty.return_value = True

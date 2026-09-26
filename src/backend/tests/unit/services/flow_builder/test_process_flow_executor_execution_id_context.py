@@ -12,20 +12,13 @@ import pytest
 class TestProcessFlowExecutorInit:
     """Tests for ProcessFlowExecutor initialization."""
 
-    def test_init_default_max_concurrent(self):
-        """Test initialization with default max_concurrent value."""
+    def test_init_tracks_no_processes(self):
+        """A new executor tracks nothing; the run limit lives in run_admission."""
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
         executor = ProcessFlowExecutor()
-        assert executor._max_concurrent == 2
         assert executor._running_processes == {}
-
-    def test_init_custom_max_concurrent(self):
-        """Test initialization with custom max_concurrent value."""
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        executor = ProcessFlowExecutor(max_concurrent=5)
-        assert executor._max_concurrent == 5
+        assert not hasattr(executor, "_max_concurrent")
 
     def test_init_metrics_structure(self):
         """Test initialization creates proper metrics."""
@@ -205,12 +198,13 @@ class TestProcessFlowExecutorExecutionIdHandling:
 
         executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
 
-        # Mock log queue processing and _wait_for_result
+        # Mock log queue processing and the result collection
         with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
-            with patch.object(
-                executor,
-                "_wait_for_result",
-                return_value={"status": "COMPLETED", "result": "flow_result"},
+            with patch(
+                "src.services.flow_builder.process_executor.collect_result",
+                new=AsyncMock(
+                    return_value=[{"status": "COMPLETED", "result": "flow_result"}]
+                ),
             ):
                 try:
                     await executor.run_flow_isolated(
@@ -252,12 +246,13 @@ class TestProcessFlowExecutorExecutionIdHandling:
 
         executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
 
-        # Mock log queue processing and _wait_for_result
+        # Mock log queue processing and the result collection
         with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
-            with patch.object(
-                executor,
-                "_wait_for_result",
-                return_value={"status": "COMPLETED", "result": "flow_result"},
+            with patch(
+                "src.services.flow_builder.process_executor.collect_result",
+                new=AsyncMock(
+                    return_value=[{"status": "COMPLETED", "result": "flow_result"}]
+                ),
             ):
                 try:
                     await executor.run_flow_isolated(
@@ -300,12 +295,13 @@ class TestProcessFlowExecutorExecutionIdHandling:
 
         executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
 
-        # Mock log queue processing and _wait_for_result
+        # Mock log queue processing and the result collection
         with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
-            with patch.object(
-                executor,
-                "_wait_for_result",
-                return_value={"status": "COMPLETED", "result": "flow_result"},
+            with patch(
+                "src.services.flow_builder.process_executor.collect_result",
+                new=AsyncMock(
+                    return_value=[{"status": "COMPLETED", "result": "flow_result"}]
+                ),
             ):
                 try:
                     await executor.run_flow_isolated(
@@ -350,12 +346,13 @@ class TestProcessFlowExecutorExecutionIdHandling:
         # Store original env var value
         original_value = os.environ.get("KASAL_EXECUTION_ID")
 
-        # Mock log queue processing and _wait_for_result
+        # Mock log queue processing and the result collection
         with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
-            with patch.object(
-                executor,
-                "_wait_for_result",
-                return_value={"status": "COMPLETED", "result": "flow_result"},
+            with patch(
+                "src.services.flow_builder.process_executor.collect_result",
+                new=AsyncMock(
+                    return_value=[{"status": "COMPLETED", "result": "flow_result"}]
+                ),
             ):
                 try:
                     await executor.run_flow_isolated(
@@ -398,12 +395,13 @@ class TestProcessFlowExecutorExecutionIdHandling:
 
         executor._ctx.Queue = MagicMock(return_value=mock_result_queue)
 
-        # Mock log queue processing and _wait_for_result
+        # Mock log queue processing and the result collection
         with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
-            with patch.object(
-                executor,
-                "_wait_for_result",
-                return_value={"status": "COMPLETED", "result": "flow_result"},
+            with patch(
+                "src.services.flow_builder.process_executor.collect_result",
+                new=AsyncMock(
+                    return_value=[{"status": "COMPLETED", "result": "flow_result"}]
+                ),
             ):
                 try:
                     await executor.run_flow_isolated(

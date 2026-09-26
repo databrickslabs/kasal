@@ -80,14 +80,21 @@ import logging
 import multiprocessing as mp
 import os
 import signal
-from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from multiprocessing.process import BaseProcess
 from typing import Any, Dict, Optional
 
 from src.services.execution.process_tree import (
     terminate_owned_processes,
     terminate_process_tree,
 )
+from src.services.execution.run_admission import (
+    RunCancelledWhileQueued,
+    queue_status_callbacks,
+    run_admission,
+    stopped_while_queued,
+)
+from src.services.execution.run_wait import collect_result, run_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -1798,32 +1805,6 @@ def run_crew_in_process(
             logger.error(f"Error during final cleanup: {cleanup_error}")
 
 
-def _drain_result_queue(result_queue, sink: list, child_exited, max_wait: float):
-    """Read the run's single result so the child's pipe never fills.
-
-    Polls in short slices and stops shortly after ``child_exited`` is set,
-    instead of blocking for the whole run timeout when the child died without
-    putting a result (stop, OOM, crash).
-    """
-    import queue as _queue
-    import time as _time
-
-    deadline = _time.monotonic() + max_wait
-    last_read = False
-    while _time.monotonic() < deadline:
-        # Decide BEFORE reading: a child flushes its queue before it exits,
-        # so one read that starts after the exit is conclusive.
-        last_read = child_exited.is_set()
-        try:
-            sink.append(result_queue.get(timeout=0.5))
-            return
-        except _queue.Empty:
-            if last_read:
-                return
-        except Exception:
-            return
-
-
 class ProcessCrewExecutor:
     """High-performance process-based executor for isolated CrewAI execution.
 
@@ -1839,7 +1820,7 @@ class ProcessCrewExecutor:
 
     Features:
         - One process per execution (no shared pool)
-        - Concurrent execution management with configurable limits
+        - One concurrent-run limit shared with Flow Builder (run_admission)
         - Graceful and forceful termination support
         - Child process tracking and cleanup
         - Async/await interface for non-blocking operations
@@ -1847,14 +1828,10 @@ class ProcessCrewExecutor:
 
     Attributes:
         _ctx: Multiprocessing context using 'spawn' for better isolation
-        _processes: Dictionary tracking active processes by execution ID
-        _futures: Dictionary of asyncio futures for execution results
-        _executor: Thread pool for managing process lifecycle
-        _semaphore: Asyncio semaphore for concurrency control
-        _lock: Asyncio lock for thread-safe operations
+        _running_processes: Dictionary tracking active processes by execution ID
 
     Example:
-        >>> executor = ProcessCrewExecutor(max_concurrent=4)
+        >>> executor = ProcessCrewExecutor()
         >>> result = await executor.execute_crew_async(
         ...     execution_id="exec_123",
         ...     crew_config=config
@@ -1863,15 +1840,11 @@ class ProcessCrewExecutor:
         >>> stopped = await executor.stop_execution("exec_123")
     """
 
-    def __init__(self, max_concurrent: int = 4):
-        """Initialize the process executor with concurrency control.
+    def __init__(self) -> None:
+        """Initialize the process executor.
 
-        Sets up the multiprocessing context, tracking structures, and
-        concurrency management primitives.
-
-        Args:
-            max_concurrent: Maximum number of concurrent crew executions.
-                Defaults to 4 to balance resource usage and parallelism.
+        How many runs may go at once is not decided here: crew and flow runs
+        share one limit, ``run_admission`` in ``services/execution``.
 
         Note:
             Uses 'spawn' context instead of 'fork' for better isolation
@@ -1886,15 +1859,10 @@ class ProcessCrewExecutor:
         os.environ["CREWAI_VERBOSE"] = "false"
 
         # NO POOL - we create individual processes per execution
-        self._max_concurrent = max_concurrent
-
-        # Track running processes and their executors
-        self._running_processes: Dict[str, mp.Process] = {}
-        self._running_futures: Dict[str, Any] = {}
-        self._running_executors: Dict[str, ProcessPoolExecutor] = {}
+        self._running_processes: Dict[str, BaseProcess] = {}
 
         # Metrics
-        self._metrics = {
+        self._metrics: Dict[str, int] = {
             "total_executions": 0,
             "active_executions": 0,
             "completed_executions": 0,
@@ -1902,30 +1870,7 @@ class ProcessCrewExecutor:
             "terminated_executions": 0,
         }
 
-        logger.info(
-            f"ProcessCrewExecutor initialized for per-execution processes (max concurrent: {max_concurrent})"
-        )
-
-    @staticmethod
-    def _subprocess_initializer():
-        """
-        Initialize subprocess environment to suppress output.
-        This runs once when each worker process is created.
-        """
-        import logging
-        import os
-
-        # Suppress all output in subprocess
-        os.environ["PYTHONUNBUFFERED"] = "0"
-        os.environ["CREWAI_VERBOSE"] = "false"
-
-        # Configure logging to suppress console output
-        logging.basicConfig(level=logging.WARNING)
-
-        # Suppress warnings
-        import warnings
-
-        warnings.filterwarnings("ignore")
+        logger.info("ProcessCrewExecutor initialized for per-execution processes")
 
     @staticmethod
     def _run_crew_wrapper(
@@ -1965,15 +1910,39 @@ class ProcessCrewExecutor:
         """
         Run a crew in an isolated process using direct Process control.
 
+        Waits for a run slot first (``run_admission``). While queued the run
+        is PENDING and holds no thread; a stop request removes it from the
+        queue. ``timeout`` counts from when the subprocess starts.
+
         Args:
             execution_id: Unique identifier for the execution
             crew_config: Configuration to build the crew
             inputs: Optional inputs for the crew
-            timeout: Optional timeout in seconds
+            timeout: Optional timeout in seconds of run time
 
         Returns:
             Dictionary with execution results
         """
+        try:
+            async with run_admission.slot(
+                execution_id, "crew", **queue_status_callbacks(execution_id)
+            ):
+                return await self._run_admitted(
+                    execution_id, crew_config, group_context, inputs, timeout
+                )
+        except RunCancelledWhileQueued:
+            self._metrics["terminated_executions"] += 1
+            return stopped_while_queued(execution_id)
+
+    async def _run_admitted(
+        self,
+        execution_id: str,
+        crew_config: Dict[str, Any],
+        group_context: Any,
+        inputs: Optional[Dict[str, Any]],
+        timeout: Optional[float],
+    ) -> Dict[str, Any]:
+        """Spawn and supervise one crew run that holds a run slot."""
         logger.info(
             f"[ProcessCrewExecutor] run_crew_isolated called for {execution_id}"
         )
@@ -2122,8 +2091,10 @@ class ProcessCrewExecutor:
             # Store the process for tracking and termination
             self._running_processes[execution_id] = process
 
-            # Start the process
+            # Start the process. The run clock starts here, not before the
+            # run was admitted: time spent queued is not run time.
             process.start()
+            deadline = run_deadline(timeout)
             logger.info(f"Started process {process.pid} for execution {execution_id}")
         except Exception:
             # Spawning failed before the main try/finally below could run; close
@@ -2158,46 +2129,10 @@ class ProcessCrewExecutor:
         )
 
         try:
-            # Wait for the process to complete, draining result_queue concurrently.
-            #
-            # CRITICAL: Never call process.join() before draining result_queue.
-            # The subprocess calls result_queue.put(result) which uses a pipe
-            # internally. On Linux the pipe buffer is ~65 KB. If the result is
-            # larger (e.g. a 149 KB LLM response), put() BLOCKS until the
-            # reader consumes data — but if the main process is sitting on
-            # process.join(), nobody reads → classic deadlock.
-            #
-            # Fix: drain the result_queue in a background thread while joining.
-            # Both waits run off the event loop, on the bounded run-wait pool,
-            # so they neither freeze the loop nor starve Chat's default pool.
-            import threading as _threading
-
-            from src.services.execution.blocking_pools import (
-                RUN_WAIT_EXECUTOR,
-                run_in_pool,
-            )
-
-            drained_result: list = []
-            child_exited = _threading.Event()
-            drain_thread = _threading.Thread(
-                target=_drain_result_queue,
-                args=(result_queue, drained_result, child_exited, timeout or 3700),
-                daemon=True,
-            )
-            drain_thread.start()
-
-            try:
-                future = run_in_pool(RUN_WAIT_EXECUTOR, process.join, timeout)
-                if timeout:
-                    await asyncio.wait_for(future, timeout=timeout)
-                else:
-                    await future
-            finally:
-                # The child's data is flushed before it exits, so the drain
-                # thread needs only one more short read to finish.
-                child_exited.set()
-
-            await run_in_pool(RUN_WAIT_EXECUTOR, drain_thread.join, 10)
+            # Wait for the child to exit while reading its result: joining
+            # first would deadlock on a result larger than the pipe buffer.
+            # See services/execution/run_wait.py.
+            drained_result = await collect_result(process, result_queue, deadline)
 
             # The child has exited, so everything it wrote is already in the
             # queue. Append a parent-side EOF so the relay drains the final
@@ -2301,19 +2236,12 @@ class ProcessCrewExecutor:
             # CRITICAL: Terminate the process to prevent zombie processes.
             # Only the tree this executor started is touched — the tracked
             # Process and its own descendants, never a host-wide scan.
-            process = self._running_processes.pop(execution_id, None)
-            if process is not None:
+            tracked = self._running_processes.pop(execution_id, None)
+            if tracked is not None:
                 try:
-                    await asyncio.to_thread(terminate_process_tree, process)
+                    await asyncio.to_thread(terminate_process_tree, tracked)
                 except Exception as e:
                     logger.error(f"Error terminating process for {execution_id}: {e}")
-
-            # Cleanup tracking
-            if execution_id in self._running_futures:
-                del self._running_futures[execution_id]
-            if execution_id in self._running_executors:
-                # Should already be deleted above, but ensure cleanup
-                del self._running_executors[execution_id]
 
             # The event relay must be finished before log_queue closes —
             # error paths (timeout/exception) skip the graceful drain above.
@@ -2407,17 +2335,21 @@ class ProcessCrewExecutor:
         """
         Forcefully terminate a running execution process.
 
-        Stops the tracked Process and its own descendants. When the handle is
-        no longer tracked, falls back to this server's descendants whose
-        ``KASAL_EXECUTION_ID`` equals ``execution_id`` exactly. It never scans
-        processes this server did not start.
+        A run still queued for a slot is removed from the queue and never
+        spawns. Otherwise stops the tracked Process and its own descendants.
+        When the handle is no longer tracked, falls back to this server's
+        descendants whose ``KASAL_EXECUTION_ID`` equals ``execution_id``
+        exactly. It never scans processes this server did not start.
 
         Args:
             execution_id: The execution to terminate
 
         Returns:
-            True if terminated, False if not found
+            True if terminated, False if not found or still alive
         """
+        if run_admission.cancel_waiting(execution_id):
+            return True
+
         terminated = False
 
         process = self._running_processes.pop(execution_id, None)
@@ -2426,10 +2358,9 @@ class ProcessCrewExecutor:
                 logger.info(
                     f"Terminating process {process.pid} for execution {execution_id}"
                 )
-                await asyncio.to_thread(
+                terminated = await asyncio.to_thread(
                     terminate_process_tree, process, grace_timeout=0.5
                 )
-                terminated = True
             except Exception as e:
                 logger.error(f"Error terminating process for {execution_id}: {e}")
 
@@ -2482,10 +2413,7 @@ class ProcessCrewExecutor:
             except Exception as e:
                 logger.error(f"Error terminating process for {execution_id}: {e}")
 
-        # Clear all tracking
         self._running_processes.clear()
-        self._running_futures.clear()
-        self._running_executors.clear()
 
         logger.info(
             f"ProcessCrewExecutor shutdown complete. Final metrics: {self.get_metrics()}"
@@ -2503,57 +2431,3 @@ class ProcessCrewExecutor:
 
 # Global instance
 process_crew_executor = ProcessCrewExecutor()
-
-
-# Configuration to choose execution mode
-class ExecutionMode:
-    """Configuration for selecting crew execution mode.
-
-    This class defines execution modes and provides logic for determining
-    whether to use thread-based or process-based execution based on the
-    crew configuration and requirements.
-
-    Attributes:
-        THREAD: Thread pool execution mode - faster but less isolation
-        PROCESS: Process pool execution mode - complete isolation but slower
-
-    Note:
-        Process mode is recommended for:
-        - Long-running executions that need termination capability
-        - Untrusted or potentially unstable code
-        - Memory-intensive operations requiring isolation
-        - Multi-tenant scenarios requiring strict separation
-    """
-
-    THREAD = "thread"  # Default: Use thread pool (faster, less isolation)
-    PROCESS = "process"  # Use process pool (slower, complete isolation)
-
-    @staticmethod
-    def should_use_process(crew_config: Dict[str, Any]) -> bool:
-        """Determine if process isolation should be used for execution.
-
-        Analyzes the crew configuration to decide whether process-based
-        execution is necessary for safety, isolation, or termination needs.
-
-        Args:
-            crew_config: The crew configuration
-
-        Returns:
-            True if process isolation should be used
-        """
-        # Use process isolation for:
-        # 1. Untrusted or experimental crews
-        # 2. Long-running crews (>10 minutes expected)
-        # 3. Crews marked as requiring isolation
-
-        if crew_config.get("require_isolation", False):
-            return True
-
-        if crew_config.get("expected_duration_minutes", 0) > 10:
-            return True
-
-        if crew_config.get("experimental", False):
-            return True
-
-        # Default to thread execution
-        return False
