@@ -17,26 +17,50 @@ If you prefer a custom installation from source, you can deploy to your workspac
 
 ```bash
 python src/build.py
-python src/deploy.py
+python src/deploy.py --app-name <app-name> --user-name <your-email>
 ```
 
-`build.py` produces the frontend static assets, and `deploy.py` ships the app to your Databricks workspace. For managed Lakebase PostgreSQL so that crews, agents, tasks, and run history survive app restarts, see [./lakebase-deployment.md](./lakebase-deployment.md).
+`build.py` produces the frontend static assets, and `deploy.py` ships the app to your Databricks workspace (run `python src/deploy.py -h` for the profile, host and OAuth-scope options). For managed Lakebase PostgreSQL so that crews, agents, tasks, and run history survive app restarts, see [./lakebase-deployment.md](./lakebase-deployment.md).
 
 ## Run locally
 
-For testing and development you can run Kasal on your own machine. You need Python 3.11 (the backend pins `>=3.11,<3.12`) and Node.js 22. The backend uses `uv` for dependencies and auto-reloads on changes; the frontend uses hot module replacement.
+For testing and development you can run Kasal on your own machine.
+
+### Before you begin
+
+- Python 3.11. The backend pins `>=3.11,<3.12`.
+- [uv](https://docs.astral.sh/uv/), which installs the Python dependencies from `src/backend/uv.lock`. There is no `requirements.txt`.
+- Node.js 22, the version CI uses.
+
+### Start the backend and frontend
+
+Start the backend from `src/backend`:
 
 ```bash
-git clone https://github.com/databrickslabs/kasal
-
-# Start the backend (uv syncs dependencies automatically)
-cd kasal/src/backend && ./run.sh
-
-# In another terminal, start the frontend
-cd kasal/src/frontend && npm install && npm start
+git clone https://github.com/nehmetohme/kasal.git
+cd kasal/src/backend
+./run.sh
 ```
 
-The app is served at `http://localhost:3000`. For deeper setup and configuration, see the [developer guide](./DEVELOPER_GUIDE.md).
+`run.sh` runs `uv sync --frozen`, then serves the API at `http://127.0.0.1:8000` with auto-reload. By default it uses a SQLite file, `app.db`, in the directory you start it from, so always start it from `src/backend`.
+
+In another terminal, start the frontend:
+
+```bash
+cd kasal/src/frontend
+npm ci
+npm start
+```
+
+The app is served at `http://localhost:3000`.
+
+### What run.sh sets up for you
+
+- **Loopback only.** The server binds to `127.0.0.1`. Set `KASAL_BIND_HOST=0.0.0.0` only if you mean to expose it, and read the warning `run.sh` prints first.
+- **A development identity.** `run.sh` sets `LOCAL_DEV_AUTH=true`, so a request without an identity header runs as `LOCAL_DEV_USER_EMAIL` (default `dev@localhost`). If you start `uvicorn` yourself without it, every API call returns 401.
+- **A safe port check.** If port 8000 is held by something other than a Kasal server from this checkout, `run.sh` refuses to start. Use `KASAL_PORT=<port>`, or set `KASAL_KILL_PORT_OWNER=true` to terminate the owner.
+
+Run `./run.sh -h` for the logging flags and `./run.sh postgres` to use PostgreSQL instead. For the full list of settings, see the [configuration reference](./CONFIGURATION.md); for day-to-day development, see the [developer guide](./DEVELOPER_GUIDE.md).
 
 ## Build your first workflow
 
@@ -54,4 +78,7 @@ For a complete, screenshot-ready walkthrough that builds a multi-agent blog-prod
 - [Why Kasal](./WHY_KASAL.md): the problems Kasal solves and who it is for on Databricks.
 - [Solution architecture guide](./ARCHITECTURE_GUIDE.md): platform layers, request lifecycle, and the security model.
 - [Developer guide](./DEVELOPER_GUIDE.md): local setup, configuration, and extension patterns.
+- [Configuration reference](./CONFIGURATION.md): the environment variables operators and developers set.
 - [End-user tutorial catalog](./END_USER_TUTORIAL_CATALOG.md): build and run your first workflow step by step.
+
+Back to the [documentation hub](./README.md).

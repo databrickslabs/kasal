@@ -14,8 +14,8 @@ Every page serves exactly one of four needs. Do not blend them in one page — a
 |------|-------------|---------|----------------|
 | **Get started / Tutorials** | Learn by doing | "Teach me, I'm new" | `END_USER_TUTORIAL_CATALOG.md`, `powerbi/02-simple-migration-story.md`, the "Getting started in 30 seconds" block |
 | **How-to guides** | Reach a specific goal | "How do I do X?" | `crew-export-deployment.md`, `lakebase-deployment.md`, `mlflow-tracing-setup.md`, `powerbi/01-authentication-setup.md`, `powerbi/ucmv-migration-guide.md` |
-| **Reference** | Look up exact facts | "What are the exact params/flags/errors?" | `api_endpoints.md`, `powerbi/README.md` + the `tool-*.md` set, `CODE_STRUCTURE_GUIDE.md`, `UCMV_PIPELINE_CONFIG_GUIDE.md` |
-| **Concepts / Explanation** | Understand the why | "Why is it built this way?" | `WHY_KASAL.md`, `ARCHITECTURE_GUIDE.md`, `crewai-engine-refactor-proposal.md` |
+| **Reference** | Look up exact facts | "What are the exact params/flags/errors?" | `api_endpoints.md`, `CONFIGURATION.md`, `powerbi/README.md` + the `tool-*.md` set, `CODE_STRUCTURE_GUIDE.md`, `UCMV_PIPELINE_CONFIG_GUIDE.md` |
+| **Concepts / Explanation** | Understand the why | "Why is it built this way?" | `WHY_KASAL.md`, `ARCHITECTURE_GUIDE.md`, `harnesses.md` |
 
 Quick test for an existing page ([Diátaxis compass](https://diataxis.fr/compass/)): is it **action or cognition**? Is it for **studying or working**? Action+study = tutorial; action+work = how-to; cognition+work = reference; cognition+study = explanation.
 
@@ -34,7 +34,7 @@ Don't build empty four-bucket scaffolding for its own sake — improve pages one
 
 Every page follows this skeleton:
 
-1. **One H1 title** (`# Title`), sentence case, matching the topic. Exactly one H1 per page; the body starts at H2. (Note: `DEVELOPER_GUIDE.md` currently opens at H2 — fix when you touch it.)
+1. **One H1 title** (`# Title`), sentence case, matching the topic. Exactly one H1 per page; the body starts at H2.
 2. **One-line summary** directly under the H1: what this page is and who it's for. Don't just restate the title.
 3. **Optional TOC** for long pages (roughly more than one screen of H2s): a bullet list of `[Section](#slug)` links placed after the summary, before the first H2.
 4. **Body**, organized by H2/H3 per the mode rules above.

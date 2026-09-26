@@ -38,6 +38,13 @@ Use the deployment script in this repository for custom installations. Ideal for
 ### Local Development
 A quick setup for testing and development — requires Python 3.11 (pinned `>=3.11,<3.12`), [uv](https://docs.astral.sh/uv/) and Node.js 22.
 
+```bash
+cd src/backend && ./run.sh          # API on http://127.0.0.1:8000, SQLite by default
+cd src/frontend && npm ci && npm start   # UI on http://localhost:3000
+```
+
+`run.sh` syncs dependencies with `uv`, binds to loopback, and enables a local development identity (`LOCAL_DEV_AUTH`). See the [Quick Start](src/docs/QUICK_START.md#run-locally) for details.
+
 ## See It in Action
 
 ![Kasal UI Screenshot](./src/frontend/public/kasal-ui-screenshot.png)
@@ -61,11 +68,14 @@ Create your first agent workflow in under two minutes:
 | **[Code Structure](src/docs/CODE_STRUCTURE_GUIDE.md)** | Where things live and how to navigate the repo |
 | **[Developer Guide](src/docs/DEVELOPER_GUIDE.md)** | Local setup, config, and extension patterns |
 | **[API Reference](src/docs/api_endpoints.md)** | REST endpoints, payloads, and errors |
+| **[Configuration](src/docs/CONFIGURATION.md)** | Environment variables, defaults, and where they are read |
 
 ### More Documentation
 - **[Docs Hub](src/docs/README.md)** - Documentation index
 - **[End‑User Tutorial Catalog](src/docs/END_USER_TUTORIAL_CATALOG.md)** - Screenshot-ready walkthroughs
 - **[Testing Guide](src/backend/tests/README.md)** - Testing strategy and coverage
+- **[Continuous Integration](src/docs/continuous-integration.md)** - CI workflows and how to run the checks locally
+- **[Contributing](CONTRIBUTING.md)** - How to set up, test, and submit a change
 
 ---
 
@@ -75,16 +85,7 @@ Kasal follows a clean, layered architecture designed for scalability and maintai
 
 **Frontend (React)** → **API (FastAPI)** → **Services** → **Repositories** → **Database**
 
-The CrewAI engine plugs in at the service layer to drive intelligent agent orchestration.
-
-## Known Limitations
-
-### Entity Memory with Specific Models
-Entity extraction in memory backends has known compatibility issues with:
-- **Databricks Claude** (`databricks-claude-*`) — JSON schema validation errors
-- **Databricks GPT-OSS** (`databricks-gpt-oss-*`) — empty response errors
-
-**Automatic fallback:** When these models are detected, Kasal transparently uses `databricks-llama-4-maverick` for entity extraction while keeping your chosen model for every other agent task.
+Agents run on Kasal's own runtime (`src/backend/src/services/execution/runtime/`), with CrewAI available as an alternative harness. See [Harnesses](src/docs/harnesses.md).
 
 ## License
 
