@@ -103,3 +103,46 @@ class TestSettingsUpdateSchema:
     def test_out_of_range_values_are_rejected(self, field, value):
         with pytest.raises(ValidationError):
             MLflowSettingsUpdate(**{field: value})
+
+
+class TestLocalTrackingServer:
+    """Configuration → MLflow local server (was MCP_SERVER_ENABLED +
+    MLFLOW_TRACKING_URI at launch, which the UI could not set)."""
+
+    def _svc(self, monkeypatch, stored, hosted=False):
+        monkeypatch.setattr(mlflow_service_mod, "is_databricks_app", lambda: hosted)
+        svc = _service()
+        svc.repo.get_local_tracking_uri = AsyncMock(return_value=stored)
+        svc.repo.set_local_tracking_uri = AsyncMock(return_value=True)
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_configured_server_is_used(self, monkeypatch):
+        svc = self._svc(monkeypatch, "http://127.0.0.1:5555/")
+        assert await svc.configured_local_uri() == "http://127.0.0.1:5555"
+
+    @pytest.mark.asyncio
+    async def test_nothing_configured_means_no_local_server(self, monkeypatch):
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
+        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
+        svc = self._svc(monkeypatch, None)
+        assert await svc.configured_local_uri() is None
+
+    @pytest.mark.asyncio
+    async def test_never_inside_databricks_apps(self, monkeypatch):
+        svc = self._svc(monkeypatch, "http://127.0.0.1:5555", hosted=True)
+        assert await svc.configured_local_uri() is None
+        with pytest.raises(ValueError, match="Databricks Apps"):
+            await svc._set_local_tracking_uri("http://127.0.0.1:5555")
+
+    @pytest.mark.asyncio
+    async def test_save_validates_and_clears(self, monkeypatch):
+        svc = self._svc(monkeypatch, None)
+        with pytest.raises(ValueError, match="http"):
+            await svc._set_local_tracking_uri("file:///tmp/mlruns")
+        await svc._set_local_tracking_uri(" http://127.0.0.1:5555 ")
+        svc.repo.set_local_tracking_uri.assert_awaited_with(
+            "http://127.0.0.1:5555", group_id="group-1"
+        )
+        await svc._set_local_tracking_uri("")
+        svc.repo.set_local_tracking_uri.assert_awaited_with(None, group_id="group-1")

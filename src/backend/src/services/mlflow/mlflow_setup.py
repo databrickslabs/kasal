@@ -178,6 +178,24 @@ def _databricks_configured() -> bool:
     )
 
 
+async def _configured_local_uri(group_id: Optional[str]) -> Optional[str]:
+    """The workspace's local MLflow server (Configuration → MLflow), or None.
+
+    None when a Databricks workspace is configured (it wins) or inside
+    Databricks Apps (never a local server there)."""
+    if not group_id or _databricks_configured() or is_databricks_app():
+        return None
+    from src.db.session import routed_scoped_session
+    from src.repositories.mlflow_repository import MLflowRepository
+    from src.services.mlflow import local as _local
+
+    async with routed_scoped_session() as session:
+        configured = await MLflowRepository(session).get_local_tracking_uri(
+            group_id=group_id
+        )
+    return _local.local_tracking_uri(configured)
+
+
 def _setup_local_mlflow(
     *,
     uri: str,
@@ -343,9 +361,7 @@ async def configure_mlflow_in_subprocess(
     # timeout on every execution.
     # -------------------------------------------------------
     try:
-        from src.services.mlflow import local as _local
-
-        local_uri = None if _databricks_configured() else _local.local_tracking_uri()
+        local_uri = await _configured_local_uri(group_id)
     except Exception as exc:  # noqa: BLE001 — never break a run over tracing
         alog.warning("[SUBPROCESS] Local MLflow resolution failed: %s", exc)
         local_uri = None

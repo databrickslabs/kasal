@@ -11,7 +11,7 @@ This module is the other backend. Which one a run uses is DERIVED, never
 configured by hand:
 
     Databricks configured  -> tracking_uri "databricks", /Shared/<experiment>
-    else local server      -> tracking_uri <this>,       <experiment>
+    else local server set  -> tracking_uri <that URL>,   <experiment>
     else                   -> tracing off
 
 Three rules this deliberately keeps:
@@ -21,17 +21,17 @@ Three rules this deliberately keeps:
   scatters ``mlruns/`` directories through the tree. A server URI creates none;
   a ``file://`` store does. Accepting only http(s) keeps that intent instead of
   quietly undoing it.
-* **The launch value is the source of truth.** Because of that same override,
-  the live ``MLFLOW_TRACKING_URI`` always reads "databricks" and cannot answer
-  "is this a local run?" — only ``KASAL_LAUNCH_MLFLOW_TRACKING_URI``, which
-  ``main.py`` stashes before overwriting, can.
+* **Configured, not launched.** The server is the workspace's
+  ``mlflowconfig.local_tracking_uri`` (Configuration → MLflow). It used to be
+  the MLFLOW_TRACKING_URI the backend was launched with (plus
+  MCP_SERVER_ENABLED), which nothing in the UI could set — and which
+  ``main.py``'s "databricks" override hid unless it had been stashed first.
 * **Fail soft.** A tracing backend that is unreachable must disable tracing, not
   fail the run — the same rule the A2UI and guardrail paths already follow.
   ``is_reachable`` exists so a dev machine with no server running degrades to
   "no tracing" instead of paying a connect timeout on every crew execution.
 """
 
-import os
 import re
 from typing import Optional
 from urllib.parse import urlparse
@@ -40,10 +40,8 @@ from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().system
 
-#: Where a dev machine's MLflow server is expected. Used when nothing else says
-#: otherwise AND no Databricks workspace is configured, so a deployed app cannot
-#: be redirected here by accident.
-DEFAULT_LOCAL_URI = "http://127.0.0.1:5555"
+#: What the Configuration → MLflow form suggests for a local server.
+SUGGESTED_LOCAL_URI = "http://127.0.0.1:5555"
 
 #: Seconds to wait when checking the server is actually there. Short on purpose:
 #: this runs before every traced execution, and a dev server either answers
@@ -51,31 +49,18 @@ DEFAULT_LOCAL_URI = "http://127.0.0.1:5555"
 REACHABILITY_TIMEOUT = 2.0
 
 
-def local_tracking_uri() -> Optional[str]:
-    """The OSS MLflow server to trace to, or None if this is not a local setup.
+def local_tracking_uri(configured: Optional[str]) -> Optional[str]:
+    """The OSS MLflow server to trace to, from Configuration → MLflow, or None.
 
-    Reads the value the process was LAUNCHED with (see the module docstring for
-    why the live env var cannot be trusted), falling back to the dev default.
-    Returns None for a Databricks-schemed value or anything that is not an
-    http(s) URL.
+    Only an http(s) server counts (see the module docstring); anything else —
+    unset, a file store, a Databricks URI — means "no local server".
     """
-    raw = (
-        os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI")
-        or os.getenv("MLFLOW_TRACKING_URI")
-        or ""
-    ).strip()
-
-    if raw.startswith("databricks"):
-        # An explicit Databricks tracking URI is not a local setup.
-        return None
+    raw = (configured or "").strip()
     if raw.startswith(("http://", "https://")):
         return raw.rstrip("/")
     if raw:
-        # A file store or some other scheme: not something with a UI to link to,
-        # and not something we want creating directories.
         logger.debug("[mlflow-local] ignoring non-http tracking URI %r", raw)
-        return None
-    return DEFAULT_LOCAL_URI
+    return None
 
 
 def experiment_slug(teamspace: Optional[str]) -> str:

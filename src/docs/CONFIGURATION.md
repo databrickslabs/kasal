@@ -33,7 +33,7 @@ Kasal reads configuration from three places:
 - **Vite `.env` files in `src/frontend/`.** Only `VITE_*` variables reach the browser bundle.
 
 > [!IMPORTANT]
-> `src/backend/src/main.py` overwrites some variables at import time: `USE_NULLPOOL=true`, `CREWAI_DISABLE_TELEMETRY=true`, `SEED_DEBUG=True`, `LOG_DIR=<backend>/logs`, and `MLFLOW_TRACKING_URI=databricks` (after saving your value as `KASAL_LAUNCH_MLFLOW_TRACKING_URI`). Setting these yourself has no effect on the server process.
+> `src/backend/src/main.py` overwrites some variables at import time: `USE_NULLPOOL=true`, `CREWAI_DISABLE_TELEMETRY=true`, `SEED_DEBUG=True`, `LOG_DIR=<backend>/logs`, and `MLFLOW_TRACKING_URI=databricks` (a local MLflow server is set in Configuration → MLflow). Setting these yourself has no effect on the server process.
 
 ## What is not configured here
 
@@ -239,8 +239,7 @@ Workspace MLflow and telemetry settings are configured in the UI. These variable
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `MLFLOW_TRACKING_URI` | Forced to `databricks` | Set it at launch to a local `http(s)` MLflow server; `main.py` saves your value as `KASAL_LAUNCH_MLFLOW_TRACKING_URI` before overwriting it | `src/backend/src/main.py`, `src/backend/src/services/mlflow/local.py` |
-| `MCP_SERVER_ENABLED` | Empty | With a local `MLFLOW_TRACKING_URI`, registers judges and prompts on that local server | `src/backend/src/services/prompt_optimization/gepa/mlflow_session.py` |
+| `MLFLOW_TRACKING_URI` | Forced to `databricks` | Not a way to configure MLflow: `main.py` overwrites it so nothing writes a local `mlruns/`. A local MLflow server is set per workspace in **Configuration → MLflow → Local MLflow server** | `src/backend/src/main.py` |
 | `MLFLOW_CREW_TRACES_EXPERIMENT` | Derived from the workspace | Experiment for crew traces on a local server | `src/backend/src/services/mlflow/local.py` |
 | `MLFLOW_TRACING_SQL_WAREHOUSE_ID` | Unset (`src/app.yaml`: the `sql-warehouse` resource) | Warehouse for trace storage in Unity Catalog | `src/backend/src/services/prompt_optimization/gepa/mlflow_session.py` |
 | `MLFLOW_EVAL_MAX_ROWS` | `200` | Row cap for an evaluation run | `src/backend/src/services/mlflow/evaluation_runner.py` |
@@ -280,7 +279,6 @@ These only matter for tests and CI:
 Kasal sets these itself, mostly for spawned crew and flow subprocesses. Do not set them:
 
 - `CREW_SUBPROCESS_MODE`, `FLOW_SUBPROCESS_MODE`, `KASAL_EXECUTION_ID`, `LAKEBASE_ACTIVE`: mark and configure a child interpreter.
-- `KASAL_LAUNCH_MLFLOW_TRACKING_URI`: your launch-time `MLFLOW_TRACKING_URI`, saved by `main.py`.
 - `KASAL_LOCKED_ENTRYPOINT`: guards against re-executing `src/entrypoint.py`.
 - `USE_NULLPOOL`, `LOG_DIR`, `CREWAI_DISABLE_TELEMETRY`, `CREWAI_VERBOSE`, `PYTHONUNBUFFERED`: forced by `main.py`, `run.sh` or the subprocess bootstrap.
 - `DATABRICKS_ENABLE_AI_GATEWAY`, and `DATABRICKS_HOST`/`DATABRICKS_TOKEN` inside a run: set from the UI configuration and the caller's credentials before a run starts.

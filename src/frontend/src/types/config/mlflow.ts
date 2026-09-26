@@ -20,6 +20,8 @@ export interface MLflowSettings {
   // Advanced, with the built-in defaults filled in by the backend.
   evaluation_max_rows?: number;
   optimization_judge_samples?: number;
+  // The local (OSS) MLflow server this workspace traces to; null when unset.
+  local_tracking_uri?: string | null;
   // The backend a run WILL use (derived, not chosen).
   backend: MLflowBackend;
   // Every backend the environment offers, so Databricks / Local / None can be
@@ -35,4 +37,6 @@ export type MLflowSettingsPatch = Partial<
   evaluation_judge_model?: string;
   evaluation_max_rows?: number | null;
   optimization_judge_samples?: number | null;
+  // An empty string clears the local server.
+  local_tracking_uri?: string;
 };

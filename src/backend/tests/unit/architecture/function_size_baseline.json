@@ -78,7 +78,7 @@
   "src/backend/src/services/llm/manager.py::LLMManager.configure_kasal_llm": 526,
   "src/backend/src/services/memory/config/lakebase_service.py::LakebaseMemoryService.initialize_tables": 205,
   "src/backend/src/services/mlflow/evaluation_runner.py::MLflowEvaluationRunner.complete_evaluation": 589,
-  "src/backend/src/services/mlflow/mlflow_setup.py::configure_mlflow_in_subprocess": 750,
+  "src/backend/src/services/mlflow/mlflow_setup.py::configure_mlflow_in_subprocess": 748,
   "src/backend/src/services/otel_tracing/event_bridge.py::OTelEventBridge._emit_span": 263,
   "src/backend/src/services/otel_tracing/event_bridge.py::OTelEventBridge._set_extra_attributes": 495,
   "src/backend/src/services/otel_tracing/mlflow_exporter.py::KasalMLflowSpanExporter._build_mlflow_trace": 333,

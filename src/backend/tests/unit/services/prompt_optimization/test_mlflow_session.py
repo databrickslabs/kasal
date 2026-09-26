@@ -16,9 +16,11 @@ from src.services.prompt_optimization.gepa.registry_errors import (
 class TestResolveBackend:
     @pytest.mark.asyncio
     async def test_local_wins_when_local_server_configured(self, monkeypatch):
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
-        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
-        monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
+        """The workspace's local server in Configuration → MLflow."""
+        monkeypatch.setattr(
+            "src.services.mlflow.service.MLflowService.configured_local_uri",
+            AsyncMock(return_value="http://127.0.0.1:5555"),
+        )
         with (
             patch("src.services.mlflow.local.is_reachable", return_value=True),
             patch.object(
@@ -37,29 +39,29 @@ class TestResolveBackend:
     async def test_local_none_when_no_server_is_listening(self, monkeypatch):
         """A configured-but-down local server is no backend at all — the 2 s
         probe fails instead of mlflow's minutes-long retry storm."""
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
-        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
-        monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
+        monkeypatch.setattr(
+            "src.services.mlflow.service.MLflowService.configured_local_uri",
+            AsyncMock(return_value="http://127.0.0.1:5555"),
+        )
         with patch(
             "src.services.mlflow.local.is_reachable", return_value=False
         ) as probe:
-            backend = await ms.resolve_mlflow_backend(MagicMock(), None)
+            backend = await ms.resolve_mlflow_backend(MagicMock(), MagicMock())
         assert backend is None
         probe.assert_called_once_with("http://127.0.0.1:5555")
 
     @pytest.mark.asyncio
     async def test_none_when_no_backend(self, monkeypatch):
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
         # No group_id → cannot resolve a Databricks workspace either.
         backend = await ms.resolve_mlflow_backend(MagicMock(), None)
         assert backend is None
 
     @pytest.mark.asyncio
     async def test_databricks_when_workspace_configured(self, monkeypatch):
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
         group = MagicMock()
         group.primary_group_id = "grp1"
         fake_svc = MagicMock()
+        fake_svc.configured_local_uri = AsyncMock(return_value=None)
         fake_svc._configured_workspace_url = AsyncMock(
             return_value="https://ws.example.com"
         )
@@ -82,10 +84,10 @@ class TestResolveBackend:
 
     @pytest.mark.asyncio
     async def test_databricks_none_when_auth_unavailable(self, monkeypatch):
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
         group = MagicMock()
         group.primary_group_id = "grp1"
         fake_svc = MagicMock()
+        fake_svc.configured_local_uri = AsyncMock(return_value=None)
         fake_svc._configured_workspace_url = AsyncMock(
             return_value="https://ws.example.com"
         )

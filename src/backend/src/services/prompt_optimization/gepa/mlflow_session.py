@@ -3,8 +3,8 @@
 Judges (MLflow scorers) used to be local-server-only. This lets them work on
 whichever backend is actually configured:
 
-* **Local MLflow server** (dev): ``MCP_SERVER_ENABLED=true`` + a non-databricks
-  ``MLFLOW_TRACKING_URI``. Judges register on that server.
+* **Local MLflow server** (dev): the workspace's local server URL in
+  Configuration → MLflow. Judges register on that server.
 * **Databricks managed MLflow** (deployed): a workspace is configured. Judges
   register through ``databricks`` auth (the app SP), the same env-swap the
   tracing + prompt-registry paths use, so they show up in the Databricks MLflow
@@ -15,7 +15,7 @@ blocking MLflow calls run in a worker thread:
 
 * :func:`resolve_mlflow_backend` (async) — decide local vs databricks, resolving
   auth + experiment name. Returns ``None`` when neither backend is available
-  (callers then no-op / raise, exactly as the old ``_local_mlflow_uri`` gate did).
+  (callers then no-op / raise).
 * :func:`mlflow_session` (sync context manager) — set the tracking URI and pin
   the experiment for the chosen backend, restoring both afterwards. Runs inside
   the ``asyncio.to_thread`` body.
@@ -80,37 +80,32 @@ async def resolve_mlflow_backend(
     configured Databricks workspace is used. Auth + experiment resolution for
     the Databricks path reuse :class:`MLflowService`.
     """
-    # 1. Local server (dev): MCP_SERVER_ENABLED + a non-databricks tracking URI.
-    if os.getenv("MCP_SERVER_ENABLED", "").lower() == "true":
-        uri = os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI") or os.getenv(
-            "MLFLOW_TRACKING_URI"
-        )
-        if uri and not uri.startswith("databricks"):
-            from src.services.mlflow import local as _local
-
-            # Same "fail soft" rule the tracing path applies (mlflow_setup): a
-            # dev box with no server listening must fail in the 2 s TCP probe,
-            # not in mlflow's ~4-minute retry storm — which parked one worker
-            # thread per Optimize-dialog poll.
-            if not await asyncio.to_thread(_local.is_reachable, uri):
-                logger.info(
-                    "[judges] no MLflow server at %s; judge operation skipped", uri
-                )
-                return None
-            exp = await configured_experiment(
-                session,
-                (
-                    getattr(group_context, "primary_group_id", None)
-                    if group_context
-                    else None
-                ),
-            )
-            return MLflowBackend(kind="local", experiment=exp, uri=uri)
-
-    # 2. Databricks managed MLflow: a workspace is configured for this group.
+    # 1. Local server (dev): the workspace's local server in Configuration → MLflow.
     group_id = (
         getattr(group_context, "primary_group_id", None) if group_context else None
     )
+    uri = None
+    if group_id:
+        from src.services.mlflow.service import MLflowService
+
+        try:
+            uri = await MLflowService(session, group_id=group_id).configured_local_uri()
+        except Exception as exc:  # noqa: BLE001 — fall through to Databricks
+            logger.debug("[judges] local MLflow server not resolved: %s", exc)
+    if uri:
+        from src.services.mlflow import local as _local
+
+        # Same "fail soft" rule the tracing path applies (mlflow_setup): a
+        # dev box with no server listening must fail in the 2 s TCP probe,
+        # not in mlflow's ~4-minute retry storm — which parked one worker
+        # thread per Optimize-dialog poll.
+        if not await asyncio.to_thread(_local.is_reachable, uri):
+            logger.info("[judges] no MLflow server at %s; judge operation skipped", uri)
+            return None
+        exp = await configured_experiment(session, group_id)
+        return MLflowBackend(kind="local", experiment=exp, uri=uri)
+
+    # 2. Databricks managed MLflow: a workspace is configured for this group.
     if not group_id:
         return None
     try:

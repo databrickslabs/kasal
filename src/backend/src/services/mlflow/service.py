@@ -132,7 +132,7 @@ class MLflowService:
                 self.session, group_id=self.group_id
             ).get_databricks_config()
             resource_error = installed.resource_error if installed else None
-        local_uri = None if is_databricks_app() else local.local_tracking_uri()
+        local_uri = await self.configured_local_uri()
         local_available = bool(local_uri)
         local_backend = {
             "kind": "local",
@@ -172,6 +172,9 @@ class MLflowService:
                 group_id=self.group_id
             ),
             **await self.advanced_settings(),
+            "local_tracking_uri": await self.repo.get_local_tracking_uri(
+                group_id=self.group_id
+            ),
             "backend": backend,
             "available": available,
         }
@@ -183,6 +186,7 @@ class MLflowService:
         experiment_name: Optional[str] = None,
         evaluation_judge_model: Optional[str] = None,
         advanced: Optional[Dict[str, Optional[int]]] = None,
+        local_tracking_uri: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Apply a partial update; an omitted field is left alone.
 
@@ -207,6 +211,8 @@ class MLflowService:
             )
         if advanced:
             await self.repo.set_advanced(advanced, group_id=self.group_id)
+        if local_tracking_uri is not None:
+            await self._set_local_tracking_uri(local_tracking_uri)
 
         # Provision the destination when tracing is enabled or renamed, so the
         # first run can use it. Hosted apps use their volume's namespace and
@@ -264,6 +270,33 @@ class MLflowService:
             logger.warning(
                 f"[MLflowService] Could not create experiment {exp_path}: {exc}"
             )
+
+    async def configured_local_uri(self) -> Optional[str]:
+        """The local MLflow server this workspace traces to, or None.
+
+        Configuration → MLflow (it replaced MCP_SERVER_ENABLED +
+        MLFLOW_TRACKING_URI at launch). Never inside Databricks Apps, where the
+        app's own container is not a place to look for an MLflow server.
+        """
+        from src.services.mlflow import local
+
+        if is_databricks_app():
+            return None
+        return local.local_tracking_uri(
+            await self.repo.get_local_tracking_uri(group_id=self.group_id)
+        )
+
+    async def _set_local_tracking_uri(self, uri: str) -> None:
+        """Save it (an empty string clears it); only http(s), never inside Apps."""
+        value = uri.strip()
+        if value and is_databricks_app():
+            raise ValueError("A local MLflow server cannot be used in Databricks Apps")
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError(
+                "The local MLflow server must be an http(s) URL, "
+                "e.g. http://127.0.0.1:5555"
+            )
+        await self.repo.set_local_tracking_uri(value or None, group_id=self.group_id)
 
     async def configured_judge_model(self) -> Optional[str]:
         """The workspace's judge model key, or None when there is none.
@@ -373,12 +406,14 @@ class MLflowService:
         return str(value) if value else None
 
     def _local_deeplink(
-        self, trace_id: Optional[str], teamspace: Optional[str] = None
+        self,
+        trace_id: Optional[str],
+        teamspace: Optional[str] = None,
+        uri: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Deep link into the local MLflow UI. Runs in a thread — it does I/O."""
         from src.services.mlflow import local
 
-        uri = local.local_tracking_uri()
         if not uri:
             return {
                 "url": None,
@@ -388,8 +423,7 @@ class MLflowService:
                 "workspace_id": None,
                 "message": (
                     "No MLflow backend is configured. Set a Databricks workspace, "
-                    "or start a local MLflow server and launch Kasal with "
-                    "MLFLOW_TRACKING_URI pointing at it."
+                    "or a local MLflow server in Configuration → MLflow."
                 ),
             }
 
@@ -588,7 +622,12 @@ class MLflowService:
         if not await self._configured_workspace_url():
             trace_id = await self._trace_id_for(job_id)
             teamspace = await self._teamspace_name()
-            return await asyncio.to_thread(self._local_deeplink, trace_id, teamspace)
+            return await asyncio.to_thread(
+                self._local_deeplink,
+                trace_id,
+                teamspace,
+                await self.configured_local_uri(),
+            )
 
         # Get workspace URL and ID from unified auth
         workspace_url = ""

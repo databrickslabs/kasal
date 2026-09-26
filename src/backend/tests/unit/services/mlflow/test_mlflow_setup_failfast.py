@@ -10,7 +10,7 @@ import. ``_setup_local_mlflow`` tests reachability with a 2s socket connect
 before importing anything, which is what keeps that true."""
 
 import builtins
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -30,9 +30,11 @@ def _no_local_backend(monkeypatch):
     to have an MLflow server on the default port — which is exactly the kind of
     machine-dependent test that passes on CI and fails on a laptop.
     """
-    from src.services.mlflow import local
+    from src.services.mlflow import mlflow_setup
 
-    monkeypatch.setattr(local, "local_tracking_uri", lambda: None)
+    monkeypatch.setattr(
+        mlflow_setup, "_configured_local_uri", AsyncMock(return_value=None)
+    )
 
 
 @pytest.mark.asyncio
@@ -89,9 +91,13 @@ async def test_unreachable_local_server_skips_without_importing_mlflow(monkeypat
     for var in ("DATABRICKS_HOST", "DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
         monkeypatch.delenv(var, raising=False)
 
-    from src.services.mlflow import local
+    from src.services.mlflow import local, mlflow_setup
 
-    monkeypatch.setattr(local, "local_tracking_uri", lambda: "http://127.0.0.1:1")
+    monkeypatch.setattr(
+        mlflow_setup,
+        "_configured_local_uri",
+        AsyncMock(return_value="http://127.0.0.1:1"),
+    )
     monkeypatch.setattr(local, "is_reachable", lambda uri, timeout=2.0: False)
 
     real_import = builtins.__import__

@@ -268,7 +268,7 @@ class JudgeOperationsMixin:
             raise ValueError(
                 "Judge creation requires MLflow: a Databricks workspace "
                 "(deployed) or a local MLflow server "
-                "(MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI, for dev)."
+                "(Configuration → MLflow, for development)."
             )
         safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name.strip())
         if not safe_name:

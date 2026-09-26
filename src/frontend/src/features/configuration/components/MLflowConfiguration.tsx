@@ -19,6 +19,7 @@ import {
 import { apiClient } from '../../../shared/api/client';
 import { useMLflowStore } from '../../../store/mlflow';
 import type { MLflowBackend, MLflowSettings, MLflowSettingsPatch } from '../../../types/config/mlflow';
+import LocalMlflowServerField from './LocalMlflowServerField';
 import MLflowJudgeAndAdvanced from './MLflowJudgeAndAdvanced';
 
 /**
@@ -298,6 +299,14 @@ const MLflowConfiguration: React.FC = () => {
         </Typography>
       )}
 
+      {!settings.installation_managed && (
+        <LocalMlflowServerField
+          value={settings.local_tracking_uri}
+          saving={saving}
+          onSave={(uri) => void patch({ local_tracking_uri: uri })}
+        />
+      )}
+
       {backend.kind === 'local' && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Databricks is not configured, so traces go to your local MLflow server.
@@ -314,9 +323,8 @@ const MLflowConfiguration: React.FC = () => {
 
       {noBackend && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No MLflow backend is available. Configure a Databricks workspace, or start
-          a local MLflow server and set <code>MLFLOW_TRACKING_URI</code> before
-          launching Kasal.
+          No MLflow backend is available. Configure a Databricks workspace, or set a
+          local MLflow server above.
         </Alert>
       )}
 
