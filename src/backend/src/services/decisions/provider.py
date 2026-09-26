@@ -1,5 +1,7 @@
 """Bounded Jev HTTP transport, independent of storage and decision policy."""
 
+from typing import Any
+
 import httpx
 
 from src.config.settings import settings
@@ -35,4 +37,5 @@ async def evaluate(api_key: str, state: dict, questions: dict) -> dict:
             json={"model": MODEL, "state": state, "questions": questions},
         )
         response.raise_for_status()
-        return response.json()
+        result: dict[Any, Any] = response.json()
+        return result

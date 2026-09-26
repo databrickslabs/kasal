@@ -11,7 +11,7 @@ import copy
 import logging
 import re
 
-from .data_classes import MetricViewSpec
+from .data_classes import MetricViewSpec, TranslationResult
 from .metadata_generator import MetadataGenerator
 from .utils import col_to_readable, spark_sql_compat
 
@@ -106,7 +106,7 @@ def _yaml_scalar(value: str, indent: int = 0) -> str:
     return value
 
 
-def _categorize_untranslatable(measure) -> tuple[str, str]:
+def _categorize_untranslatable(measure: TranslationResult) -> tuple[str, str]:
     """Classify an untranslatable measure into a human-readable CATEGORY + why.
 
     Turns the raw internal skip_reason / DAX shape into one of a few clear buckets
@@ -209,7 +209,7 @@ def _usage_suffix(referenced_by: int) -> str:
 _MAX_EXPLANATION = 140
 
 
-def _provenance_suffix(measure) -> str:
+def _provenance_suffix(measure: TranslationResult) -> str:
     """Provenance annotation for an LLM-translated measure comment.
 
     Makes best-effort output auditable: a reviewer sees the confidence, the

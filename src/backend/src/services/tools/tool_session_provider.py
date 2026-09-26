@@ -28,9 +28,15 @@ querying it, or the tool has re-created the bypass this provider removed.
 
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from src.services.execution.history import ExecutionHistoryService
+    from src.services.knowledge.databricks_service import DatabricksKnowledgeService
+    from src.services.powerbi.conversions import ConverterService
+    from src.services.powerbi.extractions import PowerBIExtractionService
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +87,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def converter_service(group_context=None):
+    async def converter_service(
+        group_context: Any = None,
+    ) -> AsyncGenerator["ConverterService", None]:
         """Yield a ConverterService — the owner of conversion history.
 
         Prefer this over :meth:`conversion_repo`: the service stamps ``group_id``
@@ -101,7 +109,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def execution_history_service():
+    async def execution_history_service() -> (
+        AsyncGenerator["ExecutionHistoryService", None]
+    ):
         """Yield an ExecutionHistoryService — the owner of execution_history rows.
 
         Lets a tool read prior run results (e.g. the UCMV re-evaluation scan) through
@@ -120,7 +130,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def powerbi_extraction_service(group_context=None):
+    async def powerbi_extraction_service(
+        group_context: Any = None,
+    ) -> AsyncGenerator["PowerBIExtractionService", None]:
         """Yield a PowerBIExtractionService — the owner of extraction rows.
 
         Replaced ``conversion_repo``/``powerbi_extraction_repo``, which handed tools a
@@ -138,7 +150,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def knowledge_service(group_id: str = "default", user_token: str = None):
+    async def knowledge_service(
+        group_id: str = "default", user_token: str | None = None
+    ) -> AsyncGenerator["DatabricksKnowledgeService", None]:
         """Yield a DatabricksKnowledgeService with scoped session.
 
         Usage::

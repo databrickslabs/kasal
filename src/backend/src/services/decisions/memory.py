@@ -1,6 +1,7 @@
 """Backend adapter injected into the portable memory engine, never imported by it."""
 
 import asyncio
+from typing import Any
 
 from src.services.decisions.policies import classify_sync, question, rank
 from src.services.decisions.runtime import decide_sync
@@ -10,7 +11,7 @@ class MemoryDecisions:
     def __init__(self, group_id: str):
         self.group_id = group_id
 
-    def label(self, content, analysis):
+    def label(self, content: Any, analysis: Any) -> Any:
         kind = classify_sync(
             "memory_classification",
             {"content": content},
@@ -24,7 +25,7 @@ class MemoryDecisions:
         )
         return analysis.model_copy(update={"kind": kind}) if kind else analysis
 
-    def rank(self, query, records):
+    def rank(self, query: Any, records: list[Any]) -> list[Any]:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -39,7 +40,7 @@ class MemoryDecisions:
             )
         return records
 
-    def supersession(self, records):
+    def supersession(self, records: list[Any]) -> list[dict[str, Any]] | None:
         if not 2 <= len(records) <= 40:
             return None
         questions = {

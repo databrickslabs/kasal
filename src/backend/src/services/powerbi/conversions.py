@@ -15,6 +15,11 @@ from src.core.exceptions import (
     UnauthorizedError,
 )
 from src.core.permissions import is_system_admin
+from src.models.conversion import (
+    ConversionHistory,
+    ConversionJob,
+    SavedConverterConfiguration,
+)
 from src.repositories.conversion_repository import (
     ConversionHistoryRepository,
     ConversionJobRepository,
@@ -80,19 +85,21 @@ class ConverterService:
     def _primary_group_id(self) -> Optional[str]:
         return self.group_context.primary_group_id if self.group_context else None
 
-    async def _get_history_or_404(self, history_id: int):
+    async def _get_history_or_404(self, history_id: int) -> ConversionHistory:
         history = await self.history_repo.get_for_groups(history_id, self._group_ids())
         if not history:
             raise NotFoundError(detail=f"Conversion history {history_id} not found")
         return history
 
-    async def _get_job_or_404(self, job_id: str):
+    async def _get_job_or_404(self, job_id: str) -> ConversionJob:
         job = await self.job_repo.get_for_groups(job_id, self._group_ids())
         if not job:
             raise NotFoundError(detail=f"Conversion job {job_id} not found")
         return job
 
-    async def _get_visible_config_or_404(self, config_id: int):
+    async def _get_visible_config_or_404(
+        self, config_id: int
+    ) -> SavedConverterConfiguration:
         """A template, or a config in the caller's group that is public or theirs."""
         config = await self.config_repo.get_visible_to_groups(
             config_id, self._group_ids()
@@ -103,11 +110,13 @@ class ConverterService:
             or config.is_public
             or (email and config.created_by_email == email)
         )
-        if not visible:
+        if config is None or not visible:
             raise NotFoundError(detail=f"Configuration {config_id} not found")
         return config
 
-    async def _get_owned_config(self, config_id: int, action: str):
+    async def _get_owned_config(
+        self, config_id: int, action: str
+    ) -> SavedConverterConfiguration:
         """The caller's own config (in one of their groups), for update/delete."""
         config = await self._get_visible_config_or_404(config_id)
         email = self.group_context.group_email if self.group_context else None

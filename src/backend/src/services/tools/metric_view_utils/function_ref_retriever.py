@@ -46,7 +46,8 @@ _MAX_RENDER = 40  # cap injected entries per batch (defensive)
 def _load_base() -> dict[str, dict]:
     try:
         with open(_DATA_PATH, encoding="utf-8") as fh:
-            return json.load(fh)
+            data: dict[str, dict] = json.load(fh)
+            return data
     except Exception as e:  # noqa: BLE001
         logger.warning("[FUNC_REF] base data unavailable (%s): %s", _DATA_PATH, e)
         return {}

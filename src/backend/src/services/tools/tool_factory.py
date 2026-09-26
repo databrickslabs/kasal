@@ -192,12 +192,6 @@ except ImportError as e:
     MetricViewValidatorTool = None
     logging.warning(f"Could not import MetricViewValidatorTool: {e}")
 
-try:
-    from .ucmv_reevaluation_tool import UCMVReevaluationTool
-except ImportError as e:
-    UCMVReevaluationTool = None
-    logging.warning(f"Could not import UCMVReevaluationTool: {e}")
-
 # Config Generator Tool
 try:
     from .config_generator_tool import ConfigGeneratorTool
@@ -360,8 +354,12 @@ class ToolFactory:
             self._tool_implementations["Metric View Validator"] = (
                 MetricViewValidatorTool
             )
-        if UCMVReevaluationTool is not None:
+        try:  # imported here so a failed import needs no None-typed module name
+            from .ucmv_reevaluation_tool import UCMVReevaluationTool
+
             self._tool_implementations["UCMV Re-evaluation"] = UCMVReevaluationTool
+        except ImportError as e:
+            logging.warning(f"Could not import UCMVReevaluationTool: {e}")
         if ConfigGeneratorTool is not None:
             self._tool_implementations["Config Generator"] = ConfigGeneratorTool
         if PipelineConfigGeneratorTool is not None:

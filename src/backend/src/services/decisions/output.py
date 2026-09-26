@@ -1,10 +1,12 @@
 """Advisory output checks; structural validators remain authoritative."""
 
+from typing import Any
+
 from src.services.decisions.policies import classify_sync, question
 from src.services.decisions.runtime import decide
 
 
-def completion_verdict(goal, output):
+def completion_verdict(goal: Any, output: Any) -> str | None:
     return classify_sync(
         "completion_check",
         {"goal": goal, "output": output},
@@ -13,7 +15,9 @@ def completion_verdict(goal, output):
     )
 
 
-async def surface_kind(query, purpose, text, *, group_id=None):
+async def surface_kind(
+    query: str, purpose: str, text: str, *, group_id: str | None = None
+) -> str | None:
     import re
 
     from src.services.a2ui.compose import DELIVERABLE_KEYWORDS, html_owned_intent
@@ -40,7 +44,9 @@ async def surface_kind(query, purpose, text, *, group_id=None):
     return answers["kind"].selected if answers is not None else None
 
 
-async def evidence_guidance(prompt, answer, evidence, *, group_id=None):
+async def evidence_guidance(
+    prompt: str, answer: str, evidence: Any, *, group_id: str | None = None
+) -> str:
     if not evidence or not answer:
         return ""
     answers = await decide(

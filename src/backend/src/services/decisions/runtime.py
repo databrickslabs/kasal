@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from time import monotonic
+from typing import Any
 
 from src.services.decisions import provider
 from src.services.decisions.contracts import Choice, choices_from_response
@@ -11,7 +12,7 @@ from src.services.decisions.contracts import Choice, choices_from_response
 logger = logging.getLogger(__name__)
 
 
-def workspace_id(group_id=None):
+def workspace_id(group_id: Any = None) -> str | None:
     if isinstance(group_id, str) and group_id:
         return group_id
     from src.utils.user_context import UserContext
@@ -73,7 +74,9 @@ async def decide(
             record_decision(policy, model, status, (monotonic() - started) * 1000)
 
 
-def decide_sync(policy, state, questions, *, group_id=None):
+def decide_sync(
+    policy: str, state: dict, questions: dict, *, group_id: str | None = None
+) -> dict[str, Choice] | None:
     """Worker-thread callers only; never block an active asyncio event loop."""
     try:
         asyncio.get_running_loop()

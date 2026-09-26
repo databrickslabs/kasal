@@ -1,5 +1,9 @@
 """On-demand advice only: never changes a run's explicit model or effort."""
 
+from typing import Any, cast
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.llm.effort import EFFORT_PROFILES
 from src.schemas.decision_config import DecisionRecommendationResponse
 from src.services.decisions.policies import question
@@ -8,7 +12,9 @@ from src.services.settings.models import ModelConfigService
 from src.utils.model_config import model_supports_reasoning_effort
 
 
-async def recommend(session, group_context, prompt):
+async def recommend(
+    session: AsyncSession, group_context: Any, prompt: str
+) -> DecisionRecommendationResponse:
     models = await ModelConfigService(
         session, group_context.primary_group_id
     ).find_enabled_models_for_group(group_context)
@@ -20,7 +26,9 @@ async def recommend(session, group_context, prompt):
             "provider": m.provider,
             "context_window": m.context_window,
             "max_output_tokens": m.max_output_tokens,
-            "supports_reasoning_effort": model_supports_reasoning_effort(m.key),
+            "supports_reasoning_effort": model_supports_reasoning_effort(
+                cast(str, m.key)
+            ),
         }
         for m in models
     ]
@@ -51,6 +59,6 @@ async def recommend(session, group_context, prompt):
         return DecisionRecommendationResponse()
     selected = answers["model"].selected
     return DecisionRecommendationResponse(
-        model=models[int(selected)].key if selected != "none" else None,
+        model=cast(str, models[int(selected)].key) if selected != "none" else None,
         effort=answers["effort"].selected,
     )

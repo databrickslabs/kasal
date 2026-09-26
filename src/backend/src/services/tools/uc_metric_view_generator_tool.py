@@ -300,7 +300,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             else:
                 try:
 
-                    async def _load_extraction():
+                    async def _load_extraction() -> Any:
                         from src.services.tools.tool_session_provider import (
                             ToolSessionProvider,
                         )
@@ -1058,7 +1058,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         tables/measures that were skipped.
         """
         views: dict = {}
-        report = {
+        report: dict[str, Any] = {
             "mode": "best_effort",
             "warning": (
                 "DRAFT views built from a thin report without validated source "
@@ -1323,7 +1323,7 @@ class UCMetricViewGeneratorTool(BaseTool):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _import_generate_config():
+    def _import_generate_config() -> Any:
         """Load the shared Power BI library through its canonical package."""
         from src.services.powerbi import pipeline_config
 

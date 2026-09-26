@@ -742,14 +742,14 @@ async def translate_batch_with_llm(
                         by_name[nm] = item
                 missing: list[TranslationResult] = []
                 for m in need_llm:
-                    item = by_name.get(m.original_name.strip().lower())
-                    if item is None:
+                    found = by_name.get(m.original_name.strip().lower())
+                    if found is None:
                         missing.append(m)
                         continue
                     if len(run_cache) >= _RUN_CACHE_MAX:
                         run_cache.popitem(last=False)
-                    run_cache[_ck(m)] = item
-                    _apply_parsed(m, item, response.get("usage", {}) or {})
+                    run_cache[_ck(m)] = found
+                    _apply_parsed(m, found, response.get("usage", {}) or {})
                 # Any measure the model dropped from the array → per-measure retry.
                 if missing:
                     logger.warning(
