@@ -33,7 +33,7 @@ import os
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Request
 
@@ -80,6 +80,20 @@ def clear_membership_cache(email: Optional[str] = None) -> None:
         _membership_cache.clear()
     else:
         _membership_cache.pop(email, None)
+
+
+_ROLE_RANK = {"operator": 0, "editor": 1, "admin": 2}
+
+
+def _least_privileged_role(roles: List[Any]) -> Optional[str]:
+    """The lowest of ``roles``; None if any is missing or unknown (fail closed)."""
+    ranked = []
+    for role in roles:
+        rank = _ROLE_RANK.get(str(role or "").lower())
+        if rank is None:
+            return None
+        ranked.append((rank, role))
+    return min(ranked, key=lambda pair: pair[0])[1] if ranked else None
 
 
 @dataclass
@@ -226,11 +240,9 @@ class GroupContext:
                 highest_role = None  # No highest role when not in any groups
             else:
                 # User IS in groups - use group-based groups
-                user_group_ids = []
-                roles_by_group = {}
-                for group, role in user_groups_with_roles:
-                    user_group_ids.append(group.id)
-                    roles_by_group[group.id] = role
+                roles_by_group = {
+                    group.id: role for group, role in user_groups_with_roles
+                }
 
                 # Determine user's highest role across ALL groups (for authorization)
                 highest_role = None
@@ -245,63 +257,13 @@ class GroupContext:
                         user_groups_with_roles[0][1] if user_groups_with_roles else None
                     )
 
-                # Always generate the user's personal workspace ID for inclusion in queries
-                # This ensures users can always access their personal data regardless of selected workspace
                 personal_workspace_id = cls.personal_workspace_id_of(user, email)
 
-                # If a specific group_id was provided, validate it
-                if group_id:
-                    # Check if it's a regular group the user belongs to
-                    if group_id in roles_by_group:
-                        user_role = roles_by_group[group_id]
-                        # Strict workspace isolation: only show data from the selected workspace.
-                        # Personal workspace data is accessible when the user switches back to it.
-                        user_group_ids = [group_id]
-                        logger.debug(
-                            f"Strict isolation: group_ids=['{group_id}'] (personal workspace excluded)"
-                        )
-                    # Check if it's a personal workspace
-                    elif group_id.startswith("user_"):
-                        # Validate that the personal workspace matches the user's email
-                        if group_id != personal_workspace_id:
-                            # SECURITY: Reject unauthorized personal workspace access
-                            logger.warning(
-                                f"SECURITY: User {email} attempted to access unauthorized personal workspace {group_id}"
-                            )
-                            raise ValueError(
-                                f"Access denied: User does not have access to group {group_id}"
-                            )
-
-                        # Personal workspace selected (e.g., user_admin_admin_com)
-                        # For personal workspaces, inherit the highest role for authorization
-                        # but keep data isolated to personal workspace
-                        user_role = highest_role  # Use highest role for authorization
-
-                        # Add the personal workspace as primary for data filtering
-                        # This ensures data isolation to personal workspace
-                        user_group_ids = [group_id] + user_group_ids
-                        logger.info(
-                            f"Personal workspace {group_id} selected for {email}, using highest role: {user_role}"
-                        )
-                    else:
-                        # SECURITY: Reject unauthorized group access
-                        logger.warning(
-                            f"SECURITY: User {email} attempted to access unauthorized group {group_id}"
-                        )
-                        raise ValueError(
-                            f"Access denied: User does not have access to group {group_id}"
-                        )
-                else:
-                    # No specific group_id provided - use the role from the first group
-                    user_role = (
-                        user_groups_with_roles[0][1] if user_groups_with_roles else None
-                    )
-                    # ALWAYS include personal workspace so users can see their personal data
-                    if personal_workspace_id not in user_group_ids:
-                        user_group_ids.append(personal_workspace_id)
-                        logger.debug(
-                            f"Added personal workspace {personal_workspace_id} to group list for data access"
-                        )
+                # The role always describes the scope it authorises (audit M2 /
+                # V3-3); see _scope_for_selection.
+                user_group_ids, user_role = cls._scope_for_selection(
+                    email, group_id, user, roles_by_group, personal_workspace_id
+                )
 
                 logger.info(
                     f"User {email} belongs to groups: {user_group_ids} with role: {user_role}, highest role: {highest_role}"
@@ -330,6 +292,56 @@ class GroupContext:
             raise ValueError(
                 "Access denied: the user's workspace could not be resolved"
             ) from e
+
+    @staticmethod
+    def _scope_for_selection(
+        email: str,
+        group_id: Optional[str],
+        user: Any,
+        roles_by_group: Dict[str, Any],
+        personal_workspace_id: str,
+    ) -> Tuple[list, Optional[str]]:
+        """``(group_ids, user_role)`` for a member of at least one team workspace.
+
+        The role must hold in EVERY workspace the scope covers, or a role check
+        passes for data the user holds a lesser role on (audit M2 / V3-3):
+
+        - A team workspace selected: that workspace only, with its role.
+        - The personal workspace selected: the personal workspace only, and no
+          team role. ``core.permissions.get_effective_role`` gives the personal
+          role (admin for a personal-workspace manager, otherwise editor), as it
+          does for users in no group and as the frontend's permission store does.
+          It used to add every team id with the HIGHEST team role, so a viewer
+          in A and admin in B passed admin checks over A's data.
+        - Nothing selected (identity discovery, and MCP/A2A callers that list
+          every teamspace's publications by identity alone): the union of the
+          user's workspaces, as before, with the LEAST privileged role held
+          across them. The first membership's role used to apply to all of
+          them, and membership order is not even defined.
+        """
+        if group_id:
+            if group_id in roles_by_group:
+                # Strict isolation: only the selected workspace's data.
+                return [group_id], roles_by_group[group_id]
+            if group_id == personal_workspace_id:
+                return [group_id], None
+            logger.warning(
+                f"SECURITY: User {email} attempted to access unauthorized group {group_id}"
+            )
+            raise ValueError(
+                f"Access denied: User does not have access to group {group_id}"
+            )
+        personal_role = (
+            "admin"
+            if getattr(user, "is_system_admin", False)
+            or getattr(user, "is_personal_workspace_manager", False)
+            else "editor"
+        )
+        scope = list(roles_by_group)
+        if personal_workspace_id not in roles_by_group:
+            scope.append(personal_workspace_id)
+        roles = list(roles_by_group.values()) + [personal_role]
+        return scope, _least_privileged_role(roles)
 
     @staticmethod
     def generate_group_id(email_domain: str) -> str:

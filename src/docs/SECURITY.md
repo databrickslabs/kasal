@@ -82,6 +82,18 @@ Hosts compare as normalised hostnames: scheme, case, trailing slash, path and th
 
 Kasal is multi-tenant and group-aware. Resources and permissions are scoped to the teamspace (group) context so that one teamspace's data, executions, and configuration do not leak into another. All LLM and embedding calls route through Databricks model serving endpoints in the Databricks workspace; the platform does not create or use fine-tuned models that could encode sensitive information.
 
+**A role only covers the scope it came with.** `GroupContext.from_email` (`src/backend/src/utils/user_context.py`) resolves the `group_id` header into a scope (`group_ids`) and a role, and the role holds in every teamspace of that scope:
+
+| Selected workspace (`group_id` header) | Scope | Role |
+| --- | --- | --- |
+| A teamspace the user belongs to | That teamspace only | The user's role in it |
+| The user's personal workspace | The personal workspace only | No teamspace role. The effective role is admin for a system admin or personal-workspace manager, otherwise editor (`core/permissions.get_effective_role`) |
+| None (identity discovery, MCP or A2A callers without `X-Group-Id`) | Every teamspace the user belongs to, plus the personal workspace | The least privileged role across that scope; none if any membership has an unknown role |
+
+The cross-teamspace run list, `GET /executions/history/all-groups`, builds its own scope from the user's memberships and does not depend on the selected workspace.
+
+**Background lookups follow the run's teamspace.** Tool-side "latest output" fallbacks (the UCMV, Power BI mapper, Genie config, dashboard and re-evaluation tools) read only rows from the run's own teamspace, taken from the run's `GroupContext` and never from tool input. With no teamspace they find nothing.
+
 ## Secrets and encryption at rest
 
 Sensitive values — provider API keys, MCP server credentials, Databricks personal access tokens, and encrypted tool configurations — are stored encrypted in the application database (SQLite in local development, Databricks Lakebase in production). Only ciphertext is persisted; plaintext secrets are never written to the database, to `.env` files, or to logs.
