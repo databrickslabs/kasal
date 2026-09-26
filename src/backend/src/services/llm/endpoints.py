@@ -11,7 +11,7 @@ ANTHROPIC_API_BASE / GEMINI_API_BASE / DEEPSEEK_ENDPOINT / KIMI_ENDPOINT env
 vars, which a Databricks App never sets.
 """
 
-from typing import Any, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from src.core.databricks_app import on_databricks_apps
 
@@ -24,6 +24,25 @@ HOSTED_DEFAULTS = {
 }
 
 #: Usual local ports of the self-hosted servers — local development only.
+#: ``params`` keys an administrator sets on a model in Configuration → Models
+#: (the endpoint and its tool options). The model seeder must never overwrite
+#: them: it used to replace ``params`` wholesale on every startup, erasing a
+#: saved endpoint each time the server restarted.
+ADMIN_PARAM_KEYS = ("api_base", "supports_tools", "tool_choice", "output_token_cap")
+
+
+def merge_seed_params(
+    seed: Optional[Mapping[str, Any]], existing: Optional[Mapping[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """The seed's params with the administrator's :data:`ADMIN_PARAM_KEYS` kept."""
+    merged: Dict[str, Any] = dict(seed or {})
+    if isinstance(existing, Mapping):
+        for key in ADMIN_PARAM_KEYS:
+            if key in existing:
+                merged[key] = existing[key]
+    return merged or None
+
+
 SELF_HOSTED_DEFAULTS = {
     "vllm": "http://localhost:8081/v1",
     "ollama": "http://localhost:11434",

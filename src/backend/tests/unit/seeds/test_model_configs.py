@@ -310,6 +310,45 @@ class TestSeedAsyncFunction:
         mock_session.add.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_reseeding_keeps_the_endpoint_an_admin_saved(self):
+        """The seeder replaced ``params`` wholesale on every startup, erasing the
+        endpoint entered in Configuration → Models (a KAT model then called
+        127.0.0.1 and failed with "Connection error")."""
+        existing_model = MagicMock()
+        existing_model.params = {
+            "api_base": "https://kat.example.com/v1",
+            "tool_choice": "required",
+            "stale_seed_key": 1,
+        }
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = existing_model
+        mock_session.execute.return_value = mock_result
+        mock_context = AsyncMock()
+        mock_context.__aenter__.return_value = mock_session
+        mock_context.__aexit__.return_value = None
+
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
+            await seed_async()
+
+        assert existing_model.params == {
+            "api_base": "https://kat.example.com/v1",
+            "tool_choice": "required",
+        }
+
+    def test_merge_seed_params(self):
+        from src.services.llm.endpoints import merge_seed_params
+
+        assert merge_seed_params(None, None) is None
+        assert merge_seed_params({"top_p": 0.9}, {"top_p": 0.5}) == {"top_p": 0.9}
+        assert merge_seed_params(
+            {"top_p": 0.9}, {"api_base": "https://x.example.com/v1"}
+        ) == {"top_p": 0.9, "api_base": "https://x.example.com/v1"}
+
+    @pytest.mark.asyncio
     async def test_seed_async_prunes_removed_models(self):
         """Retired models found in the DB are deleted (one delete per removed key)."""
         mock_session = AsyncMock()
