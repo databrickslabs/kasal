@@ -235,6 +235,21 @@ markers = [
     "slow: Slow running tests",
 ]
 
+# ─── Coverage (pytest-cov) ───────────────────────────────────────────────────
+# Run: uv run python run_tests.py --coverage   (CI uploads coverage.xml)
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+# REPORT-ONLY for now: no fail_under floor yet. Follow-up: once the first CI run
+# of the "backend-tests" job has published coverage.xml, set
+#   fail_under = <that measured total, rounded down>
+# here and raise it as coverage improves. Do not pick a number before it has
+# been measured in CI (the suite differs locally: -n auto vs -n 2, dev .env).
+
 # ─── Architecture contracts (import-linter) ──────────────────────────────────
 # Run: .venv/bin/lint-imports
 #
