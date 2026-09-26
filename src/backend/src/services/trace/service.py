@@ -7,7 +7,7 @@ masked when returning traces to prevent credential leakage.
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -61,13 +61,18 @@ class ExecutionTraceService:
         """
         return await self.repository.outputs_containing(job_id, needle)
 
-    async def latest_output_for_span_prefix(self, prefix: str) -> Optional[str]:
-        """The most recent trace ``output`` whose ``span_name`` starts with ``prefix``.
+    async def latest_output_for_span_prefix(
+        self, prefix: str, *, group_ids: Sequence[str]
+    ) -> Optional[str]:
+        """The most recent trace ``output`` in ``group_ids`` whose ``span_name``
+        starts with ``prefix``.
 
         Serves the PowerBI/UCMV tools, which hand a later step the output of an
-        earlier one; they used to build ``ExecutionTraceRepository`` for this.
+        earlier one. Scoped to the caller's groups; no groups, no result.
         """
-        return await self.repository.latest_output_for_span_prefix(prefix)
+        return await self.repository.latest_output_for_span_prefix(
+            prefix, group_ids=group_ids
+        )
 
     async def get_event_shape_by_job_id(self, job_id: str) -> List[Any]:
         """Per-event (source, context, type) rows for a run — the trace SHAPE.

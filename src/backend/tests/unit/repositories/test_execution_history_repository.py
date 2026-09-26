@@ -81,32 +81,18 @@ class TestGetExecutionHistory:
         assert mock_session.execute.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_without_group_filtering(
+    async def test_get_execution_history_without_groups_is_denied(
         self, repository, mock_session
     ):
-        """Test getting execution history without group filtering (admin access)."""
-        mock_executions = [
-            MagicMock(id=1, job_id="job-1"),
-            MagicMock(id=2, job_id="job-2"),
-            MagicMock(id=3, job_id="job-3"),
-        ]
-
-        mock_count_result = MagicMock()
-        mock_count_result.scalar.return_value = 3
-
-        mock_exec_result = MagicMock()
-        mock_exec_result.scalars.return_value.all.return_value = mock_executions
-
-        mock_session.execute = AsyncMock(
-            side_effect=[mock_count_result, mock_exec_result]
-        )
+        """No group scope returns nothing and never queries (audit V2)."""
+        mock_session.execute = AsyncMock()
 
         runs, total = await repository.get_execution_history(
             limit=50, offset=0, full=True
         )
 
-        assert len(runs) == 3
-        assert total == 3
+        assert runs == [] and total == 0
+        mock_session.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_execution_history_pagination(self, repository, mock_session):
@@ -124,7 +110,7 @@ class TestGetExecutionHistory:
         )
 
         runs, total = await repository.get_execution_history(
-            limit=1, offset=2, full=True
+            limit=1, offset=2, group_ids=["group-1"], full=True
         )
 
         assert len(runs) == 1
@@ -142,38 +128,13 @@ class TestGetExecutionHistory:
     async def test_get_execution_history_empty_group_ids(
         self, repository, mock_session
     ):
-        """Test with empty group_ids list (should not filter)."""
-        mock_executions = [MagicMock(id=1)]
-
-        mock_count_result = MagicMock()
-        mock_count_result.scalar.return_value = 1
-
-        mock_exec_result = MagicMock()
-        mock_exec_result.scalars.return_value.all.return_value = mock_executions
-
-        mock_session.execute = AsyncMock(
-            side_effect=[mock_count_result, mock_exec_result]
-        )
+        """An empty group list is no access, not "all tenants" (audit V2)."""
+        mock_session.execute = AsyncMock()
 
         runs, total = await repository.get_execution_history(group_ids=[], full=True)
 
-        assert len(runs) == 1
-
-
-class TestGetExecutionById:
-    """Tests for get_execution_by_id method."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create mock async session."""
-        session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def repository(self, mock_session):
-        """Create repository with mock session."""
-        return ExecutionHistoryRepository(mock_session)
+        assert runs == [] and total == 0
+        mock_session.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_execution_by_id_found(self, repository, mock_session):

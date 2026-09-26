@@ -320,30 +320,6 @@ class ExecutionService:
             limit=limit, status=status
         )
 
-    async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
-        """Most recent run whose ``checkpoint_data`` holds ``key``.
-
-        For the UCMV tools, which look for edits a user saved in an earlier step of
-        a multi-step flow.
-        """
-        from src.repositories.execution_history_repository import (
-            ExecutionHistoryRepository,
-        )
-
-        session = self._require_session("latest_checkpoint_containing")
-        return await ExecutionHistoryRepository(session).latest_checkpoint_containing(
-            key
-        )
-
-    async def latest_result_with_keys(self, keys: List[str]) -> Optional[dict]:
-        """Most recent run whose ``result`` dict holds ALL of ``keys``."""
-        from src.repositories.execution_history_repository import (
-            ExecutionHistoryRepository,
-        )
-
-        session = self._require_session("latest_result_with_keys")
-        return await ExecutionHistoryRepository(session).latest_result_with_keys(keys)
-
     async def get_run_of_type(
         self, execution_id: int, execution_type: str
     ) -> Optional[Any]:

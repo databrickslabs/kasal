@@ -118,17 +118,21 @@ class DatabricksDashboardCreatorTool(BaseTool):
         Same DB-fallback pattern as the UCMV validator / Genie config generator:
         covers resumed flows and runs where flow-state injection did not deliver
         the mapper output. Returns the raw JSON string ('' if none found).
+        Scoped to the run's workspace; it used to read any tenant's (audit V3-1).
         """
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        group_ids = ToolSessionProvider.run_group_ids()
 
         async def _query() -> str:
-            from src.services.tools.tool_session_provider import ToolSessionProvider
-
             async with ToolSessionProvider.session() as session:
                 from src.services.trace.service import ExecutionTraceService
 
                 raw = await ExecutionTraceService(
                     session
-                ).latest_output_for_span_prefix("PBI Visual-UCMV Mapper")
+                ).latest_output_for_span_prefix(
+                    "PBI Visual-UCMV Mapper", group_ids=group_ids
+                )
                 if not raw:
                     return ""
                 data = json.loads(raw)
