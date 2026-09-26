@@ -274,7 +274,6 @@ _PROCESS_ENV_NAMES = frozenset(
 _KASAL_ENV_NAMES = frozenset(
     {
         "SYNC_DATABASE_URI",
-        "MCP_SERVER_ENABLED",
         "ENCRYPTION_KEY",  # the app's at-rest key: children decrypt DB secrets
         "ENVIRONMENT",
         "DEBUG_MODE",

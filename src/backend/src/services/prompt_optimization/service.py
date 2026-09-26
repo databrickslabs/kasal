@@ -35,7 +35,6 @@ JUDGE INTEGRITY (the two properties this module must not lose):
 
 import asyncio
 import logging
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -418,9 +417,8 @@ class PromptOptimizationService(
         """Resolve the MLflow prompt-registry destination and prompt name.
 
         Policy: managed MLflow (Databricks Unity Catalog prompt registry) is
-        the default. A LOCAL MLflow server is used only when explicitly
-        enabled for development: MCP_SERVER_ENABLED=true plus
-        MLFLOW_TRACKING_URI (e.g. http://127.0.0.1:5555).
+        the default. A LOCAL MLflow server is used when the workspace set one in
+        Configuration → MLflow (e.g. http://127.0.0.1:5555), for development.
         """
         group_id = group_context.primary_group_id if group_context else None
         safe_group = "".join(
@@ -428,15 +426,14 @@ class PromptOptimizationService(
         )
         base_name = f"kasal_{template_name}_{safe_group}"
 
-        local_enabled = os.getenv("MCP_SERVER_ENABLED", "").lower() == "true"
-        # main.py force-overwrites MLFLOW_TRACKING_URI to "databricks" at
-        # startup; the value the process was LAUNCHED with is preserved in
-        # KASAL_LAUNCH_MLFLOW_TRACKING_URI. Guard against databricks-schemed
-        # values either way — local mode means a local/OSS server.
-        local_uri = os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI") or os.getenv(
-            "MLFLOW_TRACKING_URI"
+        from src.services.mlflow.service import MLflowService
+
+        local_uri = (
+            await MLflowService(self.session, group_id=group_id).configured_local_uri()
+            if group_id
+            else None
         )
-        if local_enabled and local_uri and not local_uri.startswith("databricks"):
+        if local_uri:
             return local_uri, base_name
 
         # Managed MLflow: UC prompt registry needs a three-level name from the
@@ -454,9 +451,8 @@ class PromptOptimizationService(
             raise ValueError(
                 "Prompt optimization uses the managed MLflow (Unity Catalog) prompt "
                 "registry, which requires a catalog and schema in the Databricks "
-                "configuration. For local development set MCP_SERVER_ENABLED=true and "
-                "MLFLOW_TRACKING_URI (e.g. http://127.0.0.1:5555) to use a local "
-                "MLflow server instead."
+                "configuration. For local development, set a local MLflow server "
+                "(e.g. http://127.0.0.1:5555) in Configuration → MLflow instead."
             )
         return "databricks-uc", f"{catalog}.{schema}.{base_name}"
 
@@ -765,18 +761,6 @@ class PromptOptimizationService(
         return {"run_id": run_id, "status": "pending", "dataset_size": 1}
 
     # -------------------------------------------------- crew eval feedback
-
-    @staticmethod
-    def _local_mlflow_uri() -> Optional[str]:
-        """The local MLflow server URI when local mode is enabled, else None."""
-        if os.getenv("MCP_SERVER_ENABLED", "").lower() != "true":
-            return None
-        uri = os.getenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI") or os.getenv(
-            "MLFLOW_TRACKING_URI"
-        )
-        if uri and not uri.startswith("databricks"):
-            return uri
-        return None
 
     # ----------------------------------------------------------- LLM judges
 

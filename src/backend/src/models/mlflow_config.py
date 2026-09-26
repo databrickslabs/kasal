@@ -64,6 +64,11 @@ class MLflowConfig(Base):
     #: judge per distinct candidate (median of N). NULL = the default.
     optimization_judge_samples = Column(Integer, nullable=True)
 
+    #: A local (OSS) MLflow server to trace to, e.g. http://127.0.0.1:5555.
+    #: NULL = none. Ignored inside Databricks Apps. It replaced launching the
+    #: backend with MCP_SERVER_ENABLED + MLFLOW_TRACKING_URI.
+    local_tracking_uri = Column(String, nullable=True)
+
     # Multi-tenant fields — one row per group, same isolation rule as every
     # other configuration table.
     group_id = Column(String(100), index=True, nullable=True)

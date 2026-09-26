@@ -214,14 +214,16 @@ async def _ensure_memory_backend_columns(conn: AsyncConnection) -> None:
 
 
 async def _ensure_mlflow_config_columns(conn: AsyncConnection) -> None:
-    """mlflowconfig Advanced settings moved out of env vars (MLFLOW_EVAL_MAX_ROWS,
-    GEPA_JUDGE_SAMPLES). Nullable: NULL keeps the built-in default."""
+    """mlflowconfig settings moved out of env vars (MLFLOW_EVAL_MAX_ROWS,
+    GEPA_JUDGE_SAMPLES, MCP_SERVER_ENABLED + MLFLOW_TRACKING_URI). Nullable: NULL
+    keeps the built-in default / no local server."""
     await ensure_columns(
         conn,
         "mlflowconfig",
         [
             ("evaluation_max_rows", "INTEGER", "INTEGER"),
             ("optimization_judge_samples", "INTEGER", "INTEGER"),
+            ("local_tracking_uri", "VARCHAR", "VARCHAR"),
         ],
     )
 

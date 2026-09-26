@@ -115,6 +115,21 @@ class MLflowRepository:
         await self.session.commit()
         return True
 
+    async def get_local_tracking_uri(
+        self, group_id: Optional[str] = None
+    ) -> Optional[str]:
+        cfg = await self._get(group_id)
+        value = getattr(cfg, "local_tracking_uri", None) if cfg else None
+        return value if isinstance(value, str) and value.strip() else None
+
+    async def set_local_tracking_uri(
+        self, uri: Optional[str], group_id: Optional[str] = None
+    ) -> bool:
+        cfg = await self._ensure(group_id)
+        setattr(cfg, "local_tracking_uri", (uri or "").strip().rstrip("/") or None)
+        await self.session.commit()
+        return True
+
     async def set_evaluation_judge_model(
         self, model: Optional[str], group_id: Optional[str] = None
     ) -> bool:

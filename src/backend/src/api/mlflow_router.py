@@ -52,6 +52,7 @@ async def update_mlflow_settings(
             experiment_name=payload.experiment_name,
             evaluation_judge_model=payload.evaluation_judge_model,
             advanced=advanced,
+            local_tracking_uri=payload.local_tracking_uri,
         )
     )
 

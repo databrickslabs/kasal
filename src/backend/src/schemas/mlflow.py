@@ -51,6 +51,8 @@ class MLflowSettings(BaseModel):
     #: Advanced, with the built-in defaults filled in.
     evaluation_max_rows: int = 200
     optimization_judge_samples: int = 3
+    #: The local (OSS) MLflow server this workspace traces to; None when unset.
+    local_tracking_uri: Optional[str] = None
     #: The backend a run WILL use — still derived, never chosen (Databricks when
     #: a workspace is configured, else a local server, else none).
     backend: MLflowBackend
@@ -72,6 +74,8 @@ class MLflowSettingsUpdate(BaseModel):
     #: Advanced. Sending ``null`` resets one to its built-in default.
     evaluation_max_rows: Optional[int] = Field(default=None, ge=1, le=10000)
     optimization_judge_samples: Optional[int] = Field(default=None, ge=1, le=9)
+    #: http(s) URL of a local MLflow server; an empty string clears it.
+    local_tracking_uri: Optional[str] = None
 
 
 class MLflowEvaluateRequest(BaseModel):

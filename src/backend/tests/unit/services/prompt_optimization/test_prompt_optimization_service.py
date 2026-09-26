@@ -614,34 +614,29 @@ class TestChecklistGrade:
         assert _checklist_grade(verdict, 2) == pytest.approx(0.8 * 0.5 + 0.1)
 
 
+def _local_mlflow(monkeypatch, uri):
+    """The workspace's local MLflow server (Configuration → MLflow), or None."""
+    monkeypatch.setattr(
+        "src.services.mlflow.service.MLflowService.configured_local_uri",
+        AsyncMock(return_value=uri),
+    )
+
+
 class TestRegistryResolution:
     @pytest.mark.asyncio
-    async def test_local_mode_requires_both_env_vars(self, monkeypatch):
+    async def test_a_configured_local_server_is_used(self, monkeypatch):
+        """Configuration → MLflow (was MCP_SERVER_ENABLED + MLFLOW_TRACKING_URI)."""
         svc = PromptOptimizationService(MagicMock())
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
-        monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
-        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
+        _local_mlflow(monkeypatch, "http://127.0.0.1:5555")
         uri, name = await svc._resolve_registry("detect_intent", _group())
         assert uri == "http://127.0.0.1:5555"
         assert name == "kasal_detect_intent_grp1"
 
     @pytest.mark.asyncio
-    async def test_launch_value_survives_runtime_override(self, monkeypatch):
-        # main.py overwrites MLFLOW_TRACKING_URI to "databricks" at startup but
-        # preserves the launch value — local mode must use the launch value.
+    async def test_launch_environment_is_not_local_mode(self, monkeypatch):
         svc = PromptOptimizationService(MagicMock())
+        _local_mlflow(monkeypatch, None)
         monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
-        monkeypatch.setenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
-        monkeypatch.setenv("MLFLOW_TRACKING_URI", "databricks")
-        uri, name = await svc._resolve_registry("detect_intent", _group())
-        assert uri == "http://127.0.0.1:5555"
-        assert name == "kasal_detect_intent_grp1"
-
-    @pytest.mark.asyncio
-    async def test_tracking_uri_alone_is_not_local_mode(self, monkeypatch):
-        svc = PromptOptimizationService(MagicMock())
-        monkeypatch.delenv("MCP_SERVER_ENABLED", raising=False)
-        monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
         monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
         fake_db = MagicMock()
         fake_db.get_databricks_config = AsyncMock(
@@ -658,9 +653,7 @@ class TestRegistryResolution:
     @pytest.mark.asyncio
     async def test_managed_without_uc_config_raises(self, monkeypatch):
         svc = PromptOptimizationService(MagicMock())
-        monkeypatch.delenv("MCP_SERVER_ENABLED", raising=False)
-        monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
-        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        _local_mlflow(monkeypatch, None)
         fake_db = MagicMock()
         fake_db.get_databricks_config = AsyncMock(return_value=None)
         with patch(
@@ -921,9 +914,26 @@ def fake_mlflow(monkeypatch):
     monkeypatch.setattr(
         "src.services.mlflow.local.is_reachable", lambda uri, timeout=2.0: True
     )
-    monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
-    monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
+    _local_mlflow(monkeypatch, "http://127.0.0.1:5555")
+    # The local server is a per-workspace setting; the API always passes the
+    # caller's group, these tests mostly do not — supply one.
+    from src.services.prompt_optimization import judges as judges_module
+    from src.services.prompt_optimization.gepa import mlflow_session
+
+    real_resolve = mlflow_session.resolve_mlflow_backend
+
+    async def _with_group(session, group_context):
+        return await real_resolve(session, group_context or _group())
+
+    monkeypatch.setattr(judges_module, "resolve_mlflow_backend", _with_group)
+    real_registry = PromptOptimizationService._resolve_registry
+
+    async def _registry_with_group(self, template_name, group_context):
+        return await real_registry(self, template_name, group_context or _group())
+
+    monkeypatch.setattr(
+        PromptOptimizationService, "_resolve_registry", _registry_with_group
+    )
     # The experiment comes from Configuration → MLflow via MLflowService, which
     # these stubbed-mlflow tests do not load.
     monkeypatch.setattr(
@@ -978,7 +988,7 @@ class TestJudgeLifecycle:
 
     @pytest.mark.asyncio
     async def test_create_requires_local_mode(self, fake_mlflow, monkeypatch):
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
+        _local_mlflow(monkeypatch, None)
         svc = _judge_service()
         with pytest.raises(ValueError, match="local MLflow"):
             await svc.create_judge("x", "y")
@@ -1088,7 +1098,7 @@ class TestJudgeLifecycle:
     async def test_registry_info_explains_a_missing_backend(
         self, fake_mlflow, monkeypatch
     ):
-        monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
+        _local_mlflow(monkeypatch, None)
         svc = _judge_service()
         info = await svc.judge_registry_info()
         assert info["kind"] is None and "No MLflow backend" in info["message"]
