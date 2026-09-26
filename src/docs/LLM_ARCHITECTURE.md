@@ -5,6 +5,7 @@ How an agent's model call is assembled and sent: which layer owns what, why the 
 - [The four layers](#the-four-layers)
 - [What each layer owns](#what-each-layer-owns)
 - [The path of one call](#the-path-of-one-call)
+- [Anthropic prompt caching](#anthropic-prompt-caching)
 - [Why the layering is drawn here](#why-the-layering-is-drawn-here)
 - [litellm is not on the LLM path](#litellm-is-not-on-the-llm-path)
 - [Rules for adding behavior](#rules-for-adding-behavior)
@@ -50,6 +51,7 @@ The engine is where a request becomes HTTP. It is model-agnostic and tenant-agno
 | `response_parsing.py` | Pure helpers that pull token counts, tool calls and reasoning items out of a provider response. |
 | `rpm.py` | Requests-per-minute throttling for the `max_rpm` setting on agents and crews. |
 | `anthropic_client.py`, `anthropic_messages.py` | The native Claude Messages API adapter, reusing the same tool loop, budgets and events. |
+| `prompt_cache.py` | Where Anthropic prompt-caching breakpoints go for each endpoint, and stripping them from endpoints that reject them. See [Anthropic prompt caching](#anthropic-prompt-caching). |
 
 Behavior that belongs here is anything true of *every* model on an OpenAI-compatible endpoint: the tool-call loop, budget enforcement, usage counting, event emission.
 
@@ -111,6 +113,26 @@ Building an LLM for an agent runs down the layers in order:
 4. The right class is chosen: `DatabricksRetryLLM` for Databricks chat models, `DatabricksResponsesLLM` for the Responses API, `VLLMFunctionCallingLLM` for self-hosted vLLM, plain `LLM` otherwise.
 5. The engine sends it: trim the conversation if it approaches the window, clamp the output budget so `prompt + max_tokens` fits, run tool-call rounds, emit `LLMCallStartedEvent` / `LLMCallCompletedEvent`, accumulate usage. If the server still rejects the prompt as too long — the estimate is a chars-per-token guess, and JSON-escaped Cyrillic once measured 1.4 against the assumed 3.4 — the round is retried behind a compaction sized by the server's own count (`ContextCompactionEvent`, strategy `tool_result_stub_after_rejection`); only when nothing is left to stub does `LLMContextLengthExceededError` reach the executor.
 6. `usage_telemetry` sees the completion event and forwards token counts.
+
+## Anthropic prompt caching
+
+Every tool round resends the system prompt, the tool schemas and the whole conversation so far. Claude caches a prompt prefix only where the request marks it with `cache_control: {"type": "ephemeral"}`, so the transport places those markers itself, in `src/backend/src/core/llm/transport/prompt_cache.py`. `cache_mode()` picks the dialect per endpoint:
+
+| Endpoint | Mode | Where the markers go |
+|---|---|---|
+| Native Messages API (provider `anthropic`) | `anthropic` | On the native request built by `anthropic_messages.message_params`, including `tool_result` blocks. Thinking blocks are never marked, and replayed signed blocks are copied rather than changed |
+| Databricks-hosted Claude over the chat-completions API (provider `databricks`, endpoint name containing `claude`) | `databricks` | On text and image content items; when the conversation ends in tool results, on the preceding assistant message's last `tool_calls` entry, because a `tool` message has no documented field |
+| Everything else, and the Responses API | None | No markers. CrewAI's `cache_breakpoint` hints are stripped, because OpenAI-compatible servers return 400 on the unknown field |
+
+A request carries at most 4 breakpoints, Anthropic's limit, and markers the caller already set count against it. In order, they go on:
+
+1. The stable prefix: the last system block. Tools render before the system prompt, so one marker caches both. With no system prompt, the native path marks the last tool definition instead.
+2. The rolling tail: the end of the conversation as sent. The next round's prompt starts with this one, so its marker becomes a read point.
+3. CrewAI's hints: the `cache_breakpoint` key CrewAI sets on the initial task prompt becomes a marker on that user message.
+
+An endpoint that cannot be identified as Claude gets no markers: a marker on a non-Claude endpoint is a 400, while a missing one only costs money. A prefix shorter than the model's minimum cacheable length (512 to 4,096 tokens) is not an error; the server ignores the marker.
+
+Cache usage is counted on both paths. `response_parsing.py` reads cache reads from `prompt_tokens_details.cached_tokens` or, for Databricks-hosted Claude, Anthropic's top-level `cache_read_input_tokens`, and cache writes from `cache_creation_input_tokens`. `BaseLLM` accumulates them as `cached_prompt_tokens` and `cache_creation_tokens`, and `OTelEventBridge` records both on each `llm_response` span as `kasal.extra.cached_prompt_tokens` and `kasal.extra.cache_creation_tokens`. On the native path, `prompt_tokens` is the whole prompt, including both cache buckets.
 
 ## Why the layering is drawn here
 

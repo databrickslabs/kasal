@@ -207,8 +207,8 @@ configuration — there is no per-crew run endpoint.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `POST` | `/executions` | Start a run (crew or flow) and return its `execution_id` |
-| `GET` | `/executions` | List runs (`limit` 1–100, default 50; `offset`) |
-| `GET` | `/executions/{execution_id}` | Full record including the result |
+| `GET` | `/executions` | List runs as summary rows (`limit` 1–100, default 50; `offset`; `include_payload`) |
+| `GET` | `/executions/{execution_id}` | Full record including `result` and `inputs` |
 | `GET` | `/executions/{execution_id}/status` | Status only — the polling endpoint |
 | `POST` | `/executions/{execution_id}/stop` | Ask a run to stop |
 | `POST` | `/executions/{execution_id}/force-stop` | Kill it |
@@ -221,6 +221,13 @@ configuration — there is no per-crew run endpoint.
 
 **Status values:** `PENDING`, `PREPARING`, `RUNNING`, `COMPLETED`, `FAILED`,
 `CANCELLED`, `STOPPED`.
+
+**List rows are summaries.** `GET /executions` returns each run without its
+`result` and `inputs`: ids, status, timestamps, run name, error, group,
+execution type, harness, flow and crew ids, the MLflow and checkpoint fields,
+the model, and `result_preview`, the first 280 characters of the serialized
+result. Read `GET /executions/{execution_id}` for the full result, or pass
+`?include_payload=true` to get full rows in bulk.
 
 There is **no `/executions/{id}/logs`**. Per-step detail is in the traces
 (below); process logs are streamed over SSE.
@@ -269,14 +276,19 @@ either `flow_id` or an inline `nodes` / `edges` definition.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/executions/history` | Paged run history for the teamspace |
-| `GET` | `/executions/history/{execution_id}` | One historical run |
+| `GET` | `/executions/history` | Paged run history for the teamspace, as summary rows (`include_payload`) |
+| `GET` | `/executions/history/{execution_id}` | One historical run, including `result`, `input`, `agents_yaml` and `tasks_yaml` |
 | `DELETE` | `/executions/history/{execution_id}` | Delete one |
 | `DELETE` | `/executions/history` | Delete all history for the teamspace |
-| `GET` | `/executions/history/all-groups` | Across teamspaces (admin) |
+| `GET` | `/executions/history/all-groups` | Across teamspaces (admin), as summary rows (`include_payload`) |
 | `GET` | `/executions/{execution_id}/outputs` | Task outputs recorded for a run |
 | `PATCH` | `/executions/{job_id}/result` | Amend a stored result |
 | `DELETE` | `/executions/{job_id}` | Delete a run record |
+
+Like `GET /executions`, the two history list endpoints omit `result`, `input`,
+`agents_yaml` and `tasks_yaml` from each row and return `result_preview`
+instead. Add `?include_payload=true` for full rows, or read one run from
+`GET /executions/history/{execution_id}`.
 
 ---
 
