@@ -53,12 +53,14 @@ const docSections: DocSection[] = [
       { label: 'LLM Architecture', file: 'LLM_ARCHITECTURE' },
       { label: 'Code Structure', file: 'CODE_STRUCTURE_GUIDE' },
       { label: 'Developer Guide', file: 'DEVELOPER_GUIDE' },
+      { label: 'Continuous Integration', file: 'continuous-integration' },
     ],
   },
   {
     label: 'Reference',
     items: [
       { label: 'API Reference', file: 'api_endpoints' },
+      { label: 'Configuration', file: 'CONFIGURATION' },
       { label: 'Tools', file: 'TOOLS' },
       { label: 'MCP Servers', file: 'MCP' },
       { label: 'Models', file: 'MODELS' },
