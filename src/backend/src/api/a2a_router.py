@@ -28,6 +28,7 @@ from src.services.external.identity import (
     resolve_caller,
 )
 from src.services.external.permissions import ExternalPermissionError
+from src.utils.request_identity import resolve_request_identity
 
 #: Task operations. Mounted under the API prefix like every other router.
 router = APIRouter(tags=["a2a"], responses={404: {"description": "Not found"}})
@@ -66,11 +67,17 @@ async def get_a2a_caller(
     x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
 ) -> ExternalCaller:
     """Resolve the calling agent, or refuse."""
+    identity = resolve_request_identity(
+        forwarded_email=x_forwarded_email,
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_email=x_auth_request_email,
+        auth_request_access_token=x_auth_request_access_token,
+    )
     try:
         return await resolve_caller(
             protocol="a2a",
-            email=x_auth_request_email or x_forwarded_email,
-            access_token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            access_token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:

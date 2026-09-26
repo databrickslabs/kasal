@@ -20,15 +20,15 @@ ${BLUE}Usage:${NC}
     ./run.sh [OPTIONS] [DB_TYPE]
 
 ${BLUE}Database Types:${NC}
-    postgres    Use PostgreSQL database (default)
-                - Connects to external PostgreSQL server
-                - Uses POSTGRES_* environment variables for connection
-                - Better for production and multi-user scenarios
-
-    sqlite      Use SQLite database
+    sqlite      Use SQLite database (default)
                 - Uses local file (./app.db)
                 - No external database server required
                 - Good for development and testing
+
+    postgres    Use PostgreSQL database
+                - Connects to external PostgreSQL server
+                - Uses POSTGRES_* environment variables for connection
+                - Better for production and multi-user scenarios
 
 ${BLUE}Options:${NC}
     -h, --help              Show this help message
@@ -37,6 +37,16 @@ ${BLUE}Options:${NC}
     -d, --debug             Enable debug mode for all loggers (shows DEBUG + SQL queries)
     --no-console            Disable console output (file logging only)
     --no-file               Disable file logging (console output only)
+
+${BLUE}Server Environment Variables:${NC}
+    KASAL_BIND_HOST         Interface to bind (default 127.0.0.1, this machine
+                            only). Set to 0.0.0.0 to expose the server on every
+                            interface: with LOCAL_DEV_AUTH on, anyone who can
+                            reach the port acts as the development user.
+    KASAL_PORT              Port to listen on (default 8000)
+    KASAL_KILL_PORT_OWNER   If the port is held by a process that is not a
+                            Kasal server from this checkout, run.sh refuses to
+                            start. Set to true to terminate that process instead.
 
 ${BLUE}Logging Control Environment Variables:${NC}
 
@@ -72,12 +82,15 @@ ${BLUE}Logging Control Environment Variables:${NC}
 
 ${BLUE}Examples:${NC}
 
-    # Run with PostgreSQL (default)
+    # Run with SQLite (default)
     ./run.sh
+    ./run.sh sqlite
+
+    # Run with PostgreSQL
     ./run.sh postgres
 
-    # Run with SQLite
-    ./run.sh sqlite
+    # Expose the server on the network (explicit opt-in)
+    KASAL_BIND_HOST=0.0.0.0 ./run.sh
 
     # Verbose mode with PostgreSQL (app debug, no SQL)
     ./run.sh -v postgres
@@ -211,9 +224,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Default to SQLite if no DB type specified (change to "postgres" if you prefer PostgreSQL)
+# Default to SQLite if no DB type specified (pass "postgres" for PostgreSQL)
 if [ -z "$DB_TYPE" ]; then
-    DB_TYPE="postgres"
+    DB_TYPE="sqlite"
 fi
 
 # Trap Ctrl+C and kill all child processes
@@ -228,8 +241,9 @@ elif [ "$DB_TYPE" = "postgres" ]; then
     echo -e "${GREEN}Starting application with PostgreSQL database${NC}"
     export DATABASE_TYPE=postgres
 else
-    echo -e "${YELLOW}Invalid database type. Using PostgreSQL as default.${NC}"
-    export DATABASE_TYPE=postgres
+    echo -e "${YELLOW}Invalid database type. Using SQLite as default.${NC}"
+    export DATABASE_TYPE=sqlite
+    export SQLITE_DB_PATH=./app.db
 fi
 
 # Set default log level if not specified
@@ -301,19 +315,37 @@ if [ "$KILLED" -gt 0 ]; then
     kill_stale_kasal -9 >/dev/null  # escalate for anything that ignored SIGTERM
 fi
 
-# Check if port 8000 is already in use and kill any process using it
-# (final guard — catches a server started from another checkout/venv)
-PORT_PID=$(lsof -ti:8000 2>/dev/null)
-if [ -n "$PORT_PID" ]; then
-    echo -e "${YELLOW}Port 8000 is already in use (PID: $PORT_PID). Killing existing process...${NC}"
-    echo "$PORT_PID" | xargs kill -9 2>/dev/null
-    sleep 2
-    # Double-check it's really dead
-    if lsof -ti:8000 >/dev/null 2>&1; then
-        echo -e "${RED}Failed to kill process on port 8000. Please kill it manually.${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}Port 8000 is now free.${NC}"
+KASAL_PORT="${KASAL_PORT:-8000}"
+
+# If the port is still taken, the owner is NOT a Kasal server from this
+# checkout (those were stopped above). It may be anything: another project,
+# a server from another checkout, a database tunnel. Never kill it blindly.
+PORT_PIDS=$(lsof -ti:"$KASAL_PORT" -sTCP:LISTEN 2>/dev/null)
+if [ -n "$PORT_PIDS" ]; then
+    echo -e "${YELLOW}Port $KASAL_PORT is already in use by:${NC}"
+    for pid in $PORT_PIDS; do
+        echo "  PID $pid: $(ps -o command= -p "$pid" 2>/dev/null | cut -c1-160)"
+    done
+    case "$(echo "${KASAL_KILL_PORT_OWNER:-false}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on)
+            echo -e "${YELLOW}KASAL_KILL_PORT_OWNER is set: sending SIGTERM...${NC}"
+            kill $PORT_PIDS 2>/dev/null
+            for _ in 1 2 3 4 5; do
+                lsof -ti:"$KASAL_PORT" -sTCP:LISTEN >/dev/null 2>&1 || break
+                sleep 1
+            done
+            if lsof -ti:"$KASAL_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+                echo -e "${RED}The process on port $KASAL_PORT ignored SIGTERM. Stop it manually.${NC}"
+                exit 1
+            fi
+            echo -e "${GREEN}Port $KASAL_PORT is now free.${NC}"
+            ;;
+        *)
+            echo -e "${RED}Refusing to start. Stop that process, choose another port with${NC}"
+            echo -e "${RED}KASAL_PORT=<port>, or set KASAL_KILL_PORT_OWNER=true to terminate it.${NC}"
+            exit 1
+            ;;
+    esac
 fi
 
 # Create logs directory if it doesn't exist
@@ -325,7 +357,15 @@ mkdir -p logs
 # and rewrites uv.lock with proxy URLs that must never land in the public
 # repo. --frozen installs exactly what the committed lock says.
 echo -e "${BLUE}Syncing dependencies...${NC}"
-uv sync --frozen --quiet 2>/dev/null || echo -e "${YELLOW}Dependency sync skipped (offline or up to date)${NC}"
+if ! SYNC_OUTPUT=$(uv sync --frozen --quiet 2>&1); then
+    echo -e "${YELLOW}Dependency sync failed:${NC}"
+    echo "$SYNC_OUTPUT" | tail -n 20
+    if [ ! -x .venv/bin/uvicorn ]; then
+        echo -e "${RED}No usable virtualenv at .venv — cannot start. Fix the error above and retry.${NC}"
+        exit 1
+    fi
+    echo -e "${YELLOW}Continuing with the existing .venv; it may not match uv.lock.${NC}"
+fi
 
 echo -e "${GREEN}Starting Kasal backend server...${NC}"
 echo -e "${BLUE}Logs will be written to ./logs/${NC}"
@@ -354,5 +394,25 @@ echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}\n"
 # so opt in to the development identity (see main.LocalDevAuthMiddleware).
 # Production refuses this regardless of the value.
 export LOCAL_DEV_AUTH="${LOCAL_DEV_AUTH:-true}"
-exec .venv/bin/uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000 \
+
+# Bind to loopback by default. With no proxy in front, EVERY identity header
+# is client-controlled and LOCAL_DEV_AUTH turns an anonymous request into the
+# development user, so a network-reachable server is an open door (audit H3).
+# Exposing it is an explicit choice: KASAL_BIND_HOST=0.0.0.0.
+KASAL_BIND_HOST="${KASAL_BIND_HOST:-127.0.0.1}"
+case "$KASAL_BIND_HOST" in
+    127.0.0.1|localhost|::1) ;;
+    *)
+        echo -e "${RED}WARNING: binding to $KASAL_BIND_HOST exposes this server beyond this machine.${NC}"
+        case "$(echo "$LOCAL_DEV_AUTH" | tr '[:upper:]' '[:lower:]')" in
+            1|true|yes|on)
+                echo -e "${RED}LOCAL_DEV_AUTH is on: anyone who can reach port $KASAL_PORT acts as the${NC}"
+                echo -e "${RED}development user, and can claim any identity with a header.${NC}"
+                ;;
+        esac
+        ;;
+esac
+echo -e "${BLUE}Listening on http://$KASAL_BIND_HOST:$KASAL_PORT${NC}"
+
+exec .venv/bin/uvicorn src.main:app --reload --reload-dir src --host "$KASAL_BIND_HOST" --port "$KASAL_PORT" \
     --timeout-graceful-shutdown 5

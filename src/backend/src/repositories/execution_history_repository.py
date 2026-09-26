@@ -1014,7 +1014,8 @@ class ExecutionHistoryRepository:
         """
         try:
             filters = [ExecutionHistory.job_id == job_id]
-            if group_ids:
+            # None = trusted system caller; [] = empty tenant, which matches nothing.
+            if group_ids is not None:
                 filters.append(ExecutionHistory.group_id.in_(group_ids))
             result = await self.session.execute(
                 select(ExecutionHistory).where(*filters)
@@ -1055,7 +1056,8 @@ class ExecutionHistoryRepository:
         """
         try:
             filters = [ExecutionHistory.job_id == job_id]
-            if group_ids:
+            # None = trusted system caller; [] = empty tenant, which matches nothing.
+            if group_ids is not None:
                 filters.append(ExecutionHistory.group_id.in_(group_ids))
 
             result = await self.session.execute(

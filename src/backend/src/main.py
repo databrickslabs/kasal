@@ -904,6 +904,13 @@ class SecurityHeadersMiddleware:
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+# Added LAST so it is OUTERMOST: inside Databricks Apps it drops the
+# client-supplied X-Auth-Request-* headers before the rate limiter, the context
+# middleware or any dependency can read them (audit C1).
+from src.utils.request_identity import UntrustedIdentityHeadersMiddleware  # noqa: E402
+
+app.add_middleware(UntrustedIdentityHeadersMiddleware)
+
 
 # ---------------------------------------------------------------------------
 # Global exception handlers

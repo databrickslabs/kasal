@@ -37,6 +37,7 @@ from src.services.external.identity import (
 from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp.mcp_server import server as mcp_server
 from src.services.mcp.mcp_server import sessions
+from src.utils.request_identity import resolve_request_identity
 
 router = APIRouter(tags=["mcp-server"])
 
@@ -245,9 +246,15 @@ async def mcp_endpoint(
         return JSONResponse(_error(None, _PARSE_ERROR, "Invalid JSON"), status_code=400)
 
     try:
+        identity = resolve_request_identity(
+            forwarded_email=x_forwarded_email,
+            forwarded_access_token=x_forwarded_access_token,
+            auth_request_email=x_auth_request_email,
+            auth_request_access_token=x_auth_request_access_token,
+        )
         caller = await _resolve(
-            email=x_auth_request_email or x_forwarded_email,
-            token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:
@@ -348,9 +355,15 @@ async def mcp_endpoint_get(
         )
 
     try:
+        identity = resolve_request_identity(
+            forwarded_email=x_forwarded_email,
+            forwarded_access_token=x_forwarded_access_token,
+            auth_request_email=x_auth_request_email,
+            auth_request_access_token=x_auth_request_access_token,
+        )
         caller = await _resolve(
-            email=x_auth_request_email or x_forwarded_email,
-            token=x_auth_request_access_token or x_forwarded_access_token,
+            email=identity.email,
+            token=identity.access_token,
             group_id=x_group_id,
         )
     except ExternalAuthError as exc:

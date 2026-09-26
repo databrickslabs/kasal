@@ -144,3 +144,37 @@ class TestSetCheckpointStatus:
     async def test_db_error_returns_false(self, repository, mock_session):
         mock_session.execute.side_effect = Exception("boom")
         assert await repository.set_checkpoint_status("job-1", "expired") is False
+
+
+def _where_sql(mock_session) -> str:
+    stmt = mock_session.execute.await_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    return sql.split("WHERE", 1)[1]
+
+
+class TestEmptyTenantFailsClosed:
+    """Audit M1: an empty group list is an empty tenant, never "no filter"."""
+
+    @pytest.mark.asyncio
+    async def test_get_with_empty_group_ids_keeps_the_group_filter(
+        self, repository, mock_session
+    ):
+        set_lookup_result(mock_session, None)
+        await repository.get_checkpoint_data("job-1", group_ids=[])
+        assert "group_id" in _where_sql(mock_session)
+
+    @pytest.mark.asyncio
+    async def test_set_status_with_empty_group_ids_keeps_the_group_filter(
+        self, repository, mock_session
+    ):
+        set_lookup_result(mock_session, None)
+        await repository.set_checkpoint_status("job-1", "paused", group_ids=[])
+        assert "group_id" in _where_sql(mock_session)
+
+    @pytest.mark.asyncio
+    async def test_system_caller_without_groups_is_unscoped(
+        self, repository, mock_session
+    ):
+        set_lookup_result(mock_session, None)
+        await repository.get_checkpoint_data("job-1")
+        assert "group_id" not in _where_sql(mock_session)

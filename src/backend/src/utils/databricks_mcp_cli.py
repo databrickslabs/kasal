@@ -53,7 +53,7 @@ async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
             logger.info("Successfully obtained JWT token from CLI for MCP")
             return access_token, None
         else:
-            logger.warning(f"Token doesn't look like JWT: {access_token[:20]}...")
+            logger.warning("CLI token is not a JWT; using it as-is (value not logged)")
             return access_token, None
 
     except subprocess.CalledProcessError as e:

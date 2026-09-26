@@ -243,7 +243,10 @@ class SchedulerService:
         Returns:
             ScheduleListResponse with list of schedules
         """
-        logger.debug(f"get_all_schedules called with group_context: {group_context}")
+        logger.debug(
+            "get_all_schedules called for group %s",
+            getattr(group_context, "primary_group_id", None),
+        )
         if group_context and group_context.primary_group_id:
             logger.debug(f"Filtering by group_id: {group_context.primary_group_id}")
             schedules = await self.repository.find_by_group(
