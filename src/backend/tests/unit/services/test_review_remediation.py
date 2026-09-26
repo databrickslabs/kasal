@@ -91,11 +91,16 @@ async def test_history_uses_allocated_scope_and_returns_nonempty_result():
         )
         Groups.return_value.get_user_groups = AsyncMock(return_value=[])
         result = await router.get_all_groups_execution_history(
-            None, 50, 0, context.group_email, None, service
+            session=None,
+            user_email=context.group_email,
+            limit=50,
+            offset=0,
+            include_payload=True,
+            service=service,
         )
     assert result.executions[0].result == {"content": "own"}
     service.history_repo.get_execution_history.assert_awaited_once_with(
-        limit=50, offset=0, group_ids=["user_allocated_a"]
+        limit=50, offset=0, group_ids=["user_allocated_a"], full=True
     )
 
 
