@@ -122,6 +122,8 @@ Inside Databricks Apps the platform injects the app variables below. Kasal treat
 | `KASAL_DEFAULT_MODEL` | Empty | Default model endpoint, injected from the `serving-endpoint` app resource. Wins over `DEFAULT_LLM_MODEL` | `src/backend/src/core/databricks_app.py`, `src/backend/src/utils/model_config.py` |
 | `DATABRICKS_ENABLE_AI_GATEWAY` | `false` | Routes LLM and embedding traffic through the AI Gateway instead of `/serving-endpoints`. Set by Kasal from the UI's Databricks configuration; do not set it by hand | `src/backend/src/utils/databricks_url_utils.py` |
 
+The workspace URL you save in the UI's Databricks configuration (`POST /databricks/config`) is validated on save: it must use `https`, and its host must equal the credentialed host, which is the installation host inside Databricks Apps and the auth context's workspace elsewhere. Kasal only ever sends a Databricks credential to that host, including from a tool's `databricks_host` argument. For more information, see [Databricks credential hosts](./SECURITY.md#databricks-credential-hosts).
+
 For more information, see the [Databricks App installation guide](./databricks-app-installation.md).
 
 ## Security and API limits

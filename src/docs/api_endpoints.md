@@ -412,7 +412,7 @@ in the OpenAPI schema rather than repeated here:
 | `memory-backend` | 22 | Memory backends, Databricks Vector Search, indices |
 | `database-management` | 21 | Connections, migrations, maintenance |
 | `mcp` | 20 | MCP servers, tools, connection testing; the Databricks MCP catalog and the admin-only `POST /mcp/databricks/migrate-external-urls` |
-| `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`) |
+| `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`); creating a template configuration (`is_template: true`), or updating or deleting one, is system-admin only |
 | `chat-history` | 16 | Chat sessions and their messages |
 | `prompt optimization` | 15 | GEPA prompt optimisation |
 | `databricks-secrets` | 14 | Secret scopes and values |
@@ -422,9 +422,9 @@ in the OpenAPI schema rather than repeated here:
 | `skills` | 10 | Skill definitions attached to agents |
 | `templates` | 9 | Prompt templates |
 | `mlflow` | 9 | Experiments, traces, evaluation |
-| `databricks` | 9 | Workspace configuration and auth; the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for the configured workspace |
+| `databricks` | 9 | Workspace configuration and auth. `POST /databricks/config` refuses a `workspace_url` that is not `https` or whose host is not the credentialed workspace (`403`); the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for that same workspace |
 | `a2a` / `a2a-agents` | 17 | Agent-to-agent protocol |
-| `crews-export` | 8 | Export a crew as a standalone Databricks App or Model Serving endpoint; deleting an endpoint is admin-only and limited to endpoints serving that crew |
+| `crews-export` | 8 | Export a crew as a standalone Databricks App or Model Serving endpoint. `GET /crews/{crew_id}/deployment/status` (editors and admins) and `DELETE /crews/{crew_id}/deployment/{endpoint_name}` (admins) only act on an endpoint that serves that crew in your group, and answer `404` for any other |
 | `users` | 7 | Users and permissions |
 | `Server-Sent Events` | 6 | Live run streaming |
 | `schemas` | 6 | Structured-output schema definitions |

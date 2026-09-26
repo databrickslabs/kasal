@@ -5,6 +5,7 @@ Kasal runs AI agent workflows against your enterprise data, so security spans id
 - [Identity and request authentication](#identity-and-request-authentication)
 - [Authorization boundaries](#authorization-boundaries)
 - [Identity and on-behalf-of (OBO)](#identity-and-on-behalf-of-obo)
+- [Databricks credential hosts](#databricks-credential-hosts)
 - [Teamspace isolation](#teamspace-isolation)
 - [Secrets and encryption at rest](#secrets-and-encryption-at-rest)
 - [Agent guardrails](#agent-guardrails)
@@ -47,10 +48,12 @@ Beyond the tenant filter, these routes carry their own role or ownership checks.
 
 | Route | Who may call it | Refusal | Source |
 | --- | --- | --- | --- |
-| `GET /databricks/warehouses`, `/databricks/catalogs`, `/databricks/schemas` with `?host=` | Workspace admins and editors; the host must normalise to the configured Databricks workspace and use `https` | `403` for another role, another host or a non-https scheme | `api/databricks_router.py`, `services/databricks/workspace/host_guard.py` |
+| `GET /databricks/warehouses`, `/databricks/catalogs`, `/databricks/schemas` with `?host=` | Workspace admins and editors; the host must normalise to the credentialed workspace (see [Databricks credential hosts](#databricks-credential-hosts)) and use `https` | `403` for another role, another host or a non-https scheme | `api/databricks_router.py`, `services/databricks/workspace/host_guard.py` |
 | `POST /models`, `PUT` and `DELETE /models/{model_key}`, `POST /models/enable-all`, `POST /models/disable-all`, `PATCH /models/global/{model_key}/toggle` | System admins only: model rows are the global catalog every workspace sees | `403` | `api/models_router.py` |
 | `PATCH /models/{model_key}/toggle` | Workspace admins; writes a per-workspace override, not the shared row | `403` | `api/models_router.py` |
-| `/api/converters/*` (Power BI conversion history, jobs and saved configurations) | Callers in the owning group. Saved configurations are visible when they are a system template, or in the caller's group and public or their own; update and delete require ownership | `404` across groups, `403` on update or delete of someone else's configuration | `services/powerbi/conversions.py`, `repositories/conversion_repository.py` |
+| `POST /databricks/config` | Workspace admins. The `workspace_url` must use `https` and name the credentialed workspace; on a fresh install with no workspace yet, only a well-known Databricks domain is accepted | `403` for another role, another host or a non-https scheme | `api/databricks_router.py`, `services/databricks/workspace/host_guard.py` |
+| `/api/converters/*` (Power BI conversion history, jobs and saved configurations) | Callers in the owning group. Saved configurations are visible when they are a system template, or in the caller's group and public or their own; update and delete require ownership. A template configuration (`is_template: true`) is visible to every workspace, so only a system admin may create, update or delete one; a workspace admin is not enough | `404` across groups, `403` on update or delete of someone else's configuration and on any template write by a non-system-admin | `services/powerbi/conversions.py`, `repositories/conversion_repository.py` |
+| `GET /crews/{crew_id}/deployment/status` | Workspace editors and admins, and only for an endpoint that serves that crew, in the caller's group. The read uses the app's credential, so without the check it would expose any serving endpoint's state and creator | `403` for another role, `404` for an endpoint that does not serve this group's crew | `api/crews_export_router.py`, `services/deployment/crew.py`, `services/deployment/endpoint_ownership.py` |
 | `DELETE /crews/{crew_id}/deployment/{endpoint_name}` | Workspace admins, and only for an endpoint that serves that crew, in the caller's group | `403` for non-admins, `404` for an endpoint that does not serve this group's crew | `api/crews_export_router.py`, `services/deployment/endpoint_ownership.py` |
 | `POST /mcp/databricks/migrate-external-urls` | Workspace admins or system admins. Re-points this workspace's MCP registrations from the legacy external-MCP proxy URL to the Unity Catalog MCP service URL; a system admin's call also migrates the global rows. `GET /mcp/databricks/available` only reports the pending count (`legacy_external_count`) and no longer rewrites anything | `403`; `503` when the Databricks workspace connection cannot be authenticated | `api/mcp_router.py` |
 
@@ -61,6 +64,19 @@ The Power BI converter routes are mounted at `/api/v1/api/converters/...` becaus
 Every action runs as the signed-in user. All Databricks resource access (Unity Catalog, Vector Search, Genie) uses on-behalf-of (OBO) user authorization, so agents operate within the scope of the user's own token rather than elevated service principal credentials. An agent can only read what the user is already authorized to view, and Kasal does not grant tools permissions beyond the specific API calls they wrap. Because Kasal relies on OBO, it does not store long-lived Databricks tokens in `.env` files, and API keys are stored encrypted in the database rather than as plain environment variables.
 
 See [security compliance](./README_SECURITY_COMPLIANCE.md) (design items D1 to D4) for details.
+
+## Databricks credential hosts
+
+A Databricks credential (the user's OBO token, the workspace's personal access token or the app's service-principal token) is valid only on the workspace it was issued for, so Kasal sends it only to that host: the **credentialed host**. Inside Databricks Apps that is the installation host; elsewhere it is the auth context's workspace (`DATABRICKS_HOST`, the SDK profile or the system-level configuration), never a workspace's own stored `workspace_url`. The rules live in `src/backend/src/services/databricks/workspace/host_guard.py`.
+
+Every other source of a host is untrusted and checked against the credentialed host before any header is attached:
+
+- **The stored workspace URL.** `POST /databricks/config` validates `workspace_url` on save: it must use `https` and its host must equal the credentialed host (`403` otherwise). On a fresh install with no workspace configured yet, only a well-known Databricks domain is accepted. Inside Databricks Apps the stored value is ignored for host resolution.
+- **Every send.** The warehouse, catalog and schema listings, the workspace auth lookup and the connection check assert that the target host is the credentialed host before sending, so a URL stored before this check cannot receive a token either.
+- **The `?host=` override** on the listing endpoints, which must name the same host.
+- **A tool's `databricks_host`.** LLM-facing tool arguments and tool configurations can name a host, so every override goes through `src/backend/src/services/tools/databricks_tool_utils/` (`resolve_tool_auth`, `apply_host_override`, `assert_tool_host`). An override may only re-spell the credentialed host; any other host fails the tool's authentication. The Genie space generator, dashboard creator, Power BI visual-to-UCMV mapper, UCMV Genie config generator, metric view deployer and Databricks Jobs tools, and the metric view Unity Catalog query helper, all use it.
+
+Hosts compare as normalised hostnames: scheme, case, trailing slash, path and the default port do not matter, a different host or port does, and a non-`https` scheme is refused outright.
 
 ## Teamspace isolation
 
