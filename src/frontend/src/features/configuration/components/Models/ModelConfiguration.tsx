@@ -46,7 +46,7 @@ import { ModelService } from '../../../../api/config/ModelService';
 import { ModelConfig, Models } from '../../../../types/config/models';
 import ThinkingFields from '../../models/components/ThinkingFields';
 import { useModelConfig } from '../../../../hooks/global/useModelConfig';
-import { useSnackbar } from 'notistack';
+import toast from 'react-hot-toast';
 
 interface ModelEditDialogProps {
   open: boolean;
@@ -436,7 +436,6 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
     setError,
     incrementRefreshKey,
   } = useModelConfig();
-  const { enqueueSnackbar } = useSnackbar();
   const [modelToDelete, setModelToDelete] = React.useState<string | null>(null);
 
   const [providerFilter, setProviderFilter] = React.useState<string>('all');
@@ -552,9 +551,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setModels(refreshed);
 
       // Show success message
-      enqueueSnackbar(
-        t('configuration.models.modelDeleted', { defaultValue: 'Model deleted successfully' }),
-        { variant: 'success' }
+      toast.success(
+        t('configuration.models.modelDeleted', { defaultValue: 'Model deleted successfully' })
       );
 
       // Notify other components that models have changed
@@ -577,9 +575,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       console.error('Error deleting model:', err);
       setError(err instanceof Error ? err.message : 'Failed to delete model');
 
-      enqueueSnackbar(
-        t('configuration.models.deleteFailed', { defaultValue: 'Failed to delete model' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.deleteFailed', { defaultValue: 'Failed to delete model' })
       );
     } finally {
       setSaving(false);
@@ -613,11 +610,10 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
         setModels(filtered);
       }
 
-      enqueueSnackbar(
+      toast.success(
         enabled
           ? t('configuration.models.modelEnabled', { defaultValue: 'Model enabled successfully' })
-          : t('configuration.models.modelDisabled', { defaultValue: 'Model disabled successfully' }),
-        { variant: 'success' }
+          : t('configuration.models.modelDisabled', { defaultValue: 'Model disabled successfully' })
       );
 
       // Notify other components that models have changed
@@ -625,9 +621,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
     } catch (err) {
       console.error(`Error toggling model ${key}:`, err);
       setError(err instanceof Error ? err.message : 'Failed to update model status');
-      enqueueSnackbar(
-        t('configuration.models.toggleFailed', { defaultValue: 'Failed to toggle model status' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.toggleFailed', { defaultValue: 'Failed to toggle model status' })
       );
     } finally {
       setSaving(false);
@@ -643,9 +638,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setError(null);
 
       // Show success feedback to the user
-      enqueueSnackbar(
-        t('configuration.models.allModelsEnabled', { defaultValue: 'All models have been enabled' }),
-        { variant: 'success' }
+      toast.success(
+        t('configuration.models.allModelsEnabled', { defaultValue: 'All models have been enabled' })
       );
 
       // Notify other components that models have changed
@@ -655,9 +649,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setError(err instanceof Error ? err.message : 'Failed to enable all models');
 
       // Show error feedback
-      enqueueSnackbar(
-        t('configuration.models.enableAllFailed', { defaultValue: 'Failed to enable all models' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.enableAllFailed', { defaultValue: 'Failed to enable all models' })
       );
     } finally {
       setSaving(false);
@@ -673,9 +666,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setError(null);
 
       // Show success feedback to the user
-      enqueueSnackbar(
-        t('configuration.models.allModelsDisabled', { defaultValue: 'All models have been disabled' }),
-        { variant: 'success' }
+      toast.success(
+        t('configuration.models.allModelsDisabled', { defaultValue: 'All models have been disabled' })
       );
 
       // Notify other components that models have changed
@@ -685,9 +677,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setError(err instanceof Error ? err.message : 'Failed to disable all models');
 
       // Show error feedback
-      enqueueSnackbar(
-        t('configuration.models.disableAllFailed', { defaultValue: 'Failed to disable all models' }),
-        { variant: 'error' }
+      toast.error(
+        t('configuration.models.disableAllFailed', { defaultValue: 'Failed to disable all models' })
       );
     } finally {
       setSaving(false);
