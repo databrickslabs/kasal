@@ -1457,7 +1457,6 @@ class ExecutionService:
                         and config.nodes is not None
                         and len(config.nodes) > 0
                     )
-                    hasattr(config, "edges") and config.edges is not None
 
                     if has_nodes:
                         # Ad-hoc flow execution with nodes from canvas (no database save required)
@@ -1475,7 +1474,8 @@ class ExecutionService:
                     from src.services.flow_builder.flow_service import FlowService
 
                     # Resolve authorization before persisting inputs or queuing work.
-                    await FlowService(self.session).get_flow_for_execution(
+                    flow_session = cast(AsyncSession, self.session)  # router-injected
+                    await FlowService(flow_session).get_flow_for_execution(
                         flow_id, group_context, allow_unsaved=bool(config.nodes)
                     )
 

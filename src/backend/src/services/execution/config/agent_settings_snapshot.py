@@ -1,6 +1,6 @@
 """Freeze saved agent settings before the execution record and worker diverge."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,8 @@ async def snapshot_agent_settings(
 ) -> None:
     if not group_context or not group_context.primary_group_id:
         return
-    service = AgentService(session)
+    # Only reached from ExecutionService.create_execution, whose session is set.
+    service = AgentService(cast(AsyncSession, session))
     agents: Dict[str, Any] = {}
     for key, original in config.agents_yaml.items():
         spec = dict(original)
