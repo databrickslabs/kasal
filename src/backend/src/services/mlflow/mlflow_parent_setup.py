@@ -250,7 +250,7 @@ def _setup_sync(
 
             mlflow.tracing.set_destination(
                 # mlflow's stub types the legacy Databricks destination out.
-                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))  # type: ignore[arg-type]
+                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))  # type: ignore[arg-type]  # stub gap
             )
         mlflow.tracing.enable()
     except Exception as te:

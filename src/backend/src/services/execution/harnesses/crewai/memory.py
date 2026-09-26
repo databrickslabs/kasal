@@ -71,14 +71,14 @@ def kasal_memory_crew_class() -> type:
         def context_providers(self) -> List[Any]:
             if not hasattr(self, "_context_providers"):
                 object.__setattr__(self, "_context_providers", [])
-            providers: List[Any] = self._context_providers  # type: ignore[attr-defined]
+            providers: List[Any] = self._context_providers  # type: ignore[attr-defined]  # set via object.__setattr__ above
             return providers
 
         @property
         def output_sinks(self) -> List[Any]:
             if not hasattr(self, "_output_sinks"):
                 object.__setattr__(self, "_output_sinks", [])
-            sinks: List[Any] = self._output_sinks  # type: ignore[attr-defined]
+            sinks: List[Any] = self._output_sinks  # type: ignore[attr-defined]  # set via object.__setattr__ above
             return sinks
 
         def _get_context(self, task: Any, task_outputs: List[Any]) -> str:

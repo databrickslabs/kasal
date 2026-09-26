@@ -109,7 +109,7 @@ class LakebaseService(BaseService):
         else:
             # For operations that don't need database session (like migration with own engines)
             # Session-less mode only runs engine-based migration paths.
-            self.session = None  # type: ignore[assignment]
+            self.session = cast(AsyncSession, None)  # no session in this mode
             self.config_repository = None
         self.user_token = user_token
         self.user_email = user_email

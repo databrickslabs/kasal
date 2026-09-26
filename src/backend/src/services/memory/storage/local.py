@@ -297,7 +297,7 @@ class LocalStorageBackend:
                 (f"{scope_prefix or ''}%", limit, offset),
             )
             # typeshed types row_factory as a callable; sqlite3.Row is the stdlib one.
-            cursor.row_factory = sqlite3.Row  # type: ignore[assignment]
+            cursor.row_factory = sqlite3.Row  # type: ignore[assignment]  # typeshed types row_factory too narrowly for sqlite3.Row
             rows = [dict(row) for row in self._as_dict_rows(cursor)]
         return [self._row_to_record(row) for row in rows]
 

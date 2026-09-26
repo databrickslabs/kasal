@@ -614,14 +614,14 @@ class LoggerManager:
             litellm_logger.propagate = True
             litellm_logger.addHandler(
                 # A Logger has handle(), the only thing MemoryHandler calls on it.
-                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)  # type: ignore[arg-type]
+                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)  # type: ignore[arg-type]  # a Logger flushes like a Handler (.handle)
             )
 
             llm_config_logger = logging.getLogger("backendcrew.llm_config")
             llm_config_logger.handlers = []
             llm_config_logger.propagate = True
             llm_config_logger.addHandler(
-                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)  # type: ignore[arg-type]
+                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)  # type: ignore[arg-type]  # a Logger flushes like a Handler (.handle)
             )
 
         # Special handling for scheduler logger
