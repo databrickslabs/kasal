@@ -6,7 +6,7 @@ Backend-specific instructions for Claude Code when working in the backend direct
 
 ### Development
 - **Dependencies are managed with `uv`** (not Poetry). Install/sync: `uv sync` (or `uv sync --frozen`). The venv lives at `src/backend/.venv`.
-- **Start server**: `./run.sh` (defaults to PostgreSQL) or `./run.sh sqlite` for SQLite. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`.
+- **Start server**: `./run.sh` (defaults to SQLite) or `./run.sh postgres` for PostgreSQL. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`, bound to `127.0.0.1` (set `KASAL_BIND_HOST=0.0.0.0` to expose it; see `./run.sh -h`).
 - **Run tests**: `python run_tests.py` (all tests + linting; **parallel by default**)
 - **Run specific tests**: `python run_tests.py --type unit` or `python run_tests.py --type integration`
 - **Run tests with coverage**: `python run_tests.py --coverage --html-coverage`

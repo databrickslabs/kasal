@@ -88,7 +88,7 @@ Backend typing debt and dependency exposure are documented in [Validation and se
 ```bash
 # Start development server (run.sh runs `uv sync` for you)
 cd src/backend
-./run.sh sqlite  # or ./run.sh for PostgreSQL
+./run.sh sqlite  # or ./run.sh postgres for PostgreSQL
 
 # Code quality (run before committing)
 uv run black src tests && uv run isort src tests
