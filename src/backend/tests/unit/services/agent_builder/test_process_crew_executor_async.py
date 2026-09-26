@@ -470,9 +470,10 @@ class TestTerminateExecution:
 
             executor = ProcessCrewExecutor()
 
-            # Mock _terminate_orphaned_process to return False
-            with patch.object(
-                executor, "_terminate_orphaned_process", return_value=False
+            # Nothing of ours carries this execution id
+            with patch(
+                "src.services.agent_builder.process_executor.terminate_owned_processes",
+                return_value=0,
             ):
                 result = await executor.terminate_execution("nonexistent")
 

@@ -85,6 +85,10 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
+from src.services.execution.process_tree import (
+    terminate_owned_processes,
+    terminate_process_tree,
+)
 from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
 
 # Use the flow logger for all flow-related operations
@@ -1544,10 +1548,18 @@ class ProcessFlowExecutor:
             if old_lakebase_instance is not None:
                 os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
-        # Wait for result in background
+        # Wait for result in background, on the bounded run-wait pool rather
+        # than the default executor Chat turns share.
+        from src.services.execution.blocking_pools import RUN_WAIT_EXECUTOR
+
         loop = asyncio.get_event_loop()
         future = loop.run_in_executor(
-            None, self._wait_for_result, execution_id, process, result_queue, timeout
+            RUN_WAIT_EXECUTOR,
+            self._wait_for_result,
+            execution_id,
+            process,
+            result_queue,
+            timeout,
         )
         self._running_futures[execution_id] = future
 
@@ -1667,11 +1679,7 @@ class ProcessFlowExecutor:
                 logger.warning(
                     f"Flow process {process.pid} for {execution_id} still running after timeout"
                 )
-                process.terminate()
-                process.join(timeout=5)
-                if process.is_alive():
-                    process.kill()
-                    process.join()
+                terminate_process_tree(process, grace_timeout=5)
                 raise TimeoutError(f"Flow execution timed out after {timeout} seconds")
 
             # Get result from queue
@@ -1703,9 +1711,11 @@ class ProcessFlowExecutor:
         Terminate a running flow execution.
 
         This method handles termination in multiple ways:
-        1. First tries the in-memory process tracking (for non-reloaded servers)
-        2. Falls back to psutil to find orphaned processes by execution_id
-           (handles server reloads where tracking is lost)
+        1. The tracked process and its own descendants (the flow's crews)
+        2. When untracked, this server's own subprocesses whose
+           KASAL_EXECUTION_ID equals execution_id exactly. A process left
+           behind by a previous server (e.g. after a reload) is not ours to
+           find, and is not touched.
 
         Args:
             execution_id: ID of the execution to terminate
@@ -1722,68 +1732,41 @@ class ProcessFlowExecutor:
         )
         terminated = False
 
-        # First, try to terminate via in-memory tracking
-        process = self._running_processes.get(execution_id)
-        if process:
+        # First, the tracked process and its own descendants (the flow's crews)
+        process = self._running_processes.pop(execution_id, None)
+        self._running_futures.pop(execution_id, None)
+        if process is not None:
             logger.info(
                 f"[FLOW_STOP] Found process in tracking: PID={process.pid}, alive={process.is_alive()}"
             )
             try:
-                if process.is_alive():
-                    pid = process.pid
-                    logger.info(f"[FLOW_STOP] Process {pid} is alive, terminating...")
-
-                    if graceful:
-                        # Send SIGTERM for graceful shutdown
-                        process.terminate()
-                        logger.info(f"[FLOW_STOP] Sent SIGTERM to flow process {pid}")
-                        # Wait a bit for graceful shutdown
-                        process.join(timeout=5)
-
-                    # Force kill if still alive
-                    if process.is_alive():
-                        process.kill()
-                        logger.info(f"[FLOW_STOP] Sent SIGKILL to flow process {pid}")
-                        process.join(timeout=2)
-
-                    logger.info(f"[FLOW_STOP] ✅ Successfully terminated process {pid}")
-                    terminated = True
-                else:
-                    logger.info(f"[FLOW_STOP] Process {process.pid} already terminated")
-                    terminated = True
-
+                await asyncio.to_thread(
+                    terminate_process_tree,
+                    process,
+                    graceful=graceful,
+                    grace_timeout=5,
+                )
+                logger.info(f"[FLOW_STOP] Terminated process {process.pid}")
+                terminated = True
             except Exception as e:
                 logger.error(f"[FLOW_STOP] Error terminating tracked process: {e}")
-                # Try psutil as fallback for the tracked process
-                try:
-                    import psutil
-
-                    if process.pid:
-                        psutil_proc = psutil.Process(process.pid)
-                        psutil_proc.kill()
-                        logger.info(
-                            f"[FLOW_STOP] ✅ Force killed process {process.pid} using psutil"
-                        )
-                        terminated = True
-                except Exception as psutil_err:
-                    logger.warning(
-                        f"[FLOW_STOP] psutil fallback for tracked process failed: {psutil_err}"
-                    )
-
-            # Clean up tracking
-            self._running_processes.pop(execution_id, None)
-            self._running_futures.pop(execution_id, None)
         else:
             logger.info(
                 "[FLOW_STOP] Process NOT found in tracking (server may have reloaded)"
             )
 
-        # If not found in tracking (e.g., server reloaded), search ALL processes
+        # Untracked: only this server's own subprocesses whose
+        # KASAL_EXECUTION_ID equals execution_id exactly. Never a host-wide scan.
         if not terminated:
-            logger.info(
-                f"[FLOW_STOP] Searching ALL processes for orphaned flow with execution_id {execution_id}..."
-            )
-            terminated = await self._terminate_orphaned_process(execution_id, graceful)
+            try:
+                terminated = (
+                    await asyncio.to_thread(
+                        terminate_owned_processes, execution_id, graceful=graceful
+                    )
+                    > 0
+                )
+            except Exception as e:
+                logger.error(f"[FLOW_STOP] Error terminating owned processes: {e}")
 
         if terminated:
             self._metrics["terminated_executions"] += 1
@@ -1794,163 +1777,6 @@ class ProcessFlowExecutor:
             )
 
         return terminated
-
-    async def _terminate_orphaned_process(
-        self, execution_id: str, graceful: bool = False
-    ) -> bool:
-        """
-        Find and terminate orphaned flow processes by searching all running processes.
-
-        This handles the case where the server was reloaded and we lost the process reference.
-        It searches for processes that have the execution_id in their command line or environment.
-
-        Args:
-            execution_id: The execution ID to search for
-            graceful: If True, try SIGTERM first
-
-        Returns:
-            True if a matching process was found and terminated
-        """
-        try:
-            import psutil
-
-            # Use short execution_id for matching (first 8 chars is common in logs)
-            exec_id_short = execution_id[:8]
-            killed_count = 0
-            python_processes_checked = 0
-
-            logger.info(
-                f"[FLOW_STOP] Searching for orphaned processes with KASAL_EXECUTION_ID={exec_id_short}..."
-            )
-
-            # Search ALL processes, not just children of current process
-            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-                try:
-                    # Skip non-Python processes for efficiency
-                    proc_name = proc.info.get("name", "").lower()
-                    if "python" not in proc_name:
-                        continue
-
-                    python_processes_checked += 1
-
-                    # Check command line for execution_id
-                    cmdline = proc.info.get("cmdline", [])
-                    cmdline_str = " ".join(cmdline) if cmdline else ""
-
-                    # Check environment variables for process identification
-                    kasal_exec_id = None
-                    is_flow_subprocess = False
-                    try:
-                        env = proc.environ()
-                        kasal_exec_id = env.get("KASAL_EXECUTION_ID", "")
-                        # Also check FLOW_SUBPROCESS_MODE for legacy processes (before KASAL_EXECUTION_ID was added)
-                        is_flow_subprocess = (
-                            env.get("FLOW_SUBPROCESS_MODE", "") == "true"
-                        )
-                    except (psutil.AccessDenied, psutil.NoSuchProcess):
-                        pass
-
-                    # Check if this process matches our execution
-                    # Priority: KASAL_EXECUTION_ID env var > cmdline match
-                    is_match = False
-                    if kasal_exec_id:
-                        is_match = (
-                            kasal_exec_id == execution_id
-                            or kasal_exec_id.startswith(exec_id_short)
-                        )
-                        if is_match:
-                            logger.info(
-                                f"[FLOW_STOP] Found process {proc.info['pid']} with matching KASAL_EXECUTION_ID={kasal_exec_id}"
-                            )
-                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
-                        is_match = True
-                        logger.info(
-                            f"[FLOW_STOP] Found process {proc.info['pid']} with execution_id in cmdline"
-                        )
-                    elif is_flow_subprocess and not kasal_exec_id:
-                        # Log legacy processes for visibility (but don't kill them - can't identify which execution)
-                        logger.warning(
-                            f"[FLOW_STOP] Found legacy flow subprocess {proc.info['pid']} without KASAL_EXECUTION_ID - cannot verify execution match"
-                        )
-
-                    if is_match:
-                        pid = proc.info["pid"]
-                        logger.info(
-                            f"[FLOW_STOP] Terminating orphaned process {pid}..."
-                        )
-
-                        # Also kill all children of this process (crews spawned by flow)
-                        try:
-                            parent = psutil.Process(pid)
-                            children = parent.children(recursive=True)
-                            logger.info(
-                                f"[FLOW_STOP] Process {pid} has {len(children)} child processes"
-                            )
-
-                            # Terminate children first
-                            for child in children:
-                                try:
-                                    if graceful:
-                                        child.terminate()
-                                    else:
-                                        child.kill()
-                                    logger.info(
-                                        f"[FLOW_STOP] Terminated child process {child.pid}"
-                                    )
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-
-                            # Give children time to terminate
-                            if children:
-                                psutil.wait_procs(children, timeout=2)
-
-                            # Now terminate the parent
-                            if graceful:
-                                parent.terminate()
-                                try:
-                                    parent.wait(timeout=5)
-                                except psutil.TimeoutExpired:
-                                    parent.kill()
-                            else:
-                                parent.kill()
-
-                            logger.info(
-                                f"[FLOW_STOP] ✅ Successfully terminated orphaned process {pid}"
-                            )
-                            killed_count += 1
-
-                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                            logger.warning(
-                                f"[FLOW_STOP] Could not terminate process {pid}: {e}"
-                            )
-
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-            logger.info(
-                f"[FLOW_STOP] Checked {python_processes_checked} Python processes"
-            )
-            if killed_count > 0:
-                logger.info(
-                    f"[FLOW_STOP] ✅ Terminated {killed_count} orphaned processes for {execution_id}"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"[FLOW_STOP] No orphaned processes found for {execution_id}"
-                )
-                return False
-
-        except ImportError:
-            logger.error(
-                "[ProcessFlowExecutor] psutil not available for orphaned process cleanup"
-            )
-            return False
-        except Exception as e:
-            logger.error(
-                f"[ProcessFlowExecutor] Error searching for orphaned processes: {e}"
-            )
-            return False
 
     async def _process_log_queue(
         self, log_queue, execution_id: str, group_context=None
@@ -2024,16 +1850,10 @@ class ProcessFlowExecutor:
         logger.info("Shutting down ProcessFlowExecutor")
         for execution_id, process in list(self._running_processes.items()):
             try:
-                if process.is_alive():
-                    logger.info(
-                        f"Terminating flow process {process.pid} for execution {execution_id}"
-                    )
-                    process.terminate()
-                    if wait:
-                        process.join(timeout=2)
-                        if process.is_alive():
-                            process.kill()
-                            process.join(timeout=1)
+                logger.info(
+                    f"Terminating flow process {process.pid} for execution {execution_id}"
+                )
+                terminate_process_tree(process, wait=wait)
             except Exception as e:
                 logger.error(f"Error terminating flow process for {execution_id}: {e}")
 

@@ -98,7 +98,10 @@ class TestTerminateExecution:
 
         executor = ProcessFlowExecutor()
 
-        with patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.flow_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await executor.terminate_execution("nonexistent_id")
             assert isinstance(result, bool)
 

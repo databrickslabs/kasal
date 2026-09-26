@@ -400,6 +400,8 @@ async def _relay_loop(
     group_id: Any,
     group_email: Any,
 ) -> None:
+    from src.services.execution.blocking_pools import EVENT_RELAY_EXECUTOR
+
     loop = asyncio.get_running_loop()
     invalid_streak = 0
     if group_id:
@@ -407,8 +409,10 @@ async def _relay_loop(
         sse_manager.register_job_owner(execution_id, group_id)
     while True:
         try:
+            # Its own bounded pool: a read per running execution, forever,
+            # must not occupy the default executor Chat turns run on.
             frame = await loop.run_in_executor(
-                None, lambda: queue.get(block=True, timeout=0.5)
+                EVENT_RELAY_EXECUTOR, lambda: queue.get(block=True, timeout=0.5)
             )
         except Empty:
             invalid_streak = 0

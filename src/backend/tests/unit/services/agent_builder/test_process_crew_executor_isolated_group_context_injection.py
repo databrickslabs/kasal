@@ -303,7 +303,10 @@ class TestTerminateExecution:
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             ex = ProcessCrewExecutor()
         # No running process with this ID — search orphaned processes too
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("nonexistent-id")
         assert result is False
 
@@ -321,7 +324,10 @@ class TestTerminateExecution:
         mock_process.pid = 5555
         ex._running_processes["exec-stop"] = mock_process
 
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("exec-stop")
 
         mock_process.terminate.assert_called()
@@ -344,7 +350,10 @@ class TestTerminateExecution:
         mock_process.pid = 6666
         ex._running_processes["exec-kill"] = mock_process
 
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("exec-kill")
 
         mock_process.terminate.assert_called()
@@ -363,7 +372,10 @@ class TestTerminateExecution:
         mock_process.pid = 7777
         ex._running_processes["exec-dead"] = mock_process
 
-        with patch.object(ex, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await ex.terminate_execution("exec-dead")
         assert result is True
 
