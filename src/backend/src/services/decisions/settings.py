@@ -4,6 +4,7 @@ import logging
 from typing import cast
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import BadRequestError, ConflictError
 from src.repositories.decision_config_repository import DecisionConfigRepository
@@ -18,7 +19,7 @@ JEV_KEY_NAME = "JEV_API_KEY"
 
 
 class DecisionSettingsService:
-    def __init__(self, session, group_id: str):
+    def __init__(self, session: AsyncSession, group_id: str) -> None:
         if not group_id:
             raise BadRequestError("A workspace is required")
         self.session = session

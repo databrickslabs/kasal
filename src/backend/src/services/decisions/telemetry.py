@@ -3,7 +3,7 @@
 import logging
 
 
-def record_decision(policy: str, model: str, status: str, duration_ms: float):
+def record_decision(policy: str, model: str, status: str, duration_ms: float) -> None:
     from src.core.events.bus import event_bus
     from src.core.events.types import DecisionEvaluatedEvent
 

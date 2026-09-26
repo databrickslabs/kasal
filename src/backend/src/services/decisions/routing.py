@@ -1,9 +1,16 @@
 """Jev chooses among published capabilities; the LLM still extracts arguments."""
 
+from typing import Any, Sequence
+
 from src.services.decisions.policies import select
 
 
-async def routing_candidates(message, capabilities, turns, group_id=None):
+async def routing_candidates(
+    message: str,
+    capabilities: list[Any],
+    turns: Sequence[Any],
+    group_id: str | None = None,
+) -> list[Any]:
     choice = await select(
         "workflow_dispatch",
         {
@@ -21,7 +28,9 @@ async def routing_candidates(message, capabilities, turns, group_id=None):
     return [] if choice == -1 else [capabilities[choice]]
 
 
-async def follow_up_target(message, turns, group_id=None):
+async def follow_up_target(
+    message: str, turns: Sequence[Any], group_id: str | None = None
+) -> list[int] | None:
     answers = [t for t in turns if t.role == "assistant"]
     choice = await select(
         "follow_up_target",
