@@ -38,7 +38,7 @@ class CurrencyConverter:
         "DKK",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.exchange_rate_table = "ExchangeRates"  # Default exchange rate table name
 
     def get_kbi_currency_recursive(
@@ -140,7 +140,7 @@ class CurrencyConverter:
     def generate_dax_conversion(
         self,
         value_expression: str,
-        source_currency: str,
+        source_currency: Optional[str],
         target_currency: str,
         currency_type: str = "fixed",
         currency_column: Optional[str] = None,

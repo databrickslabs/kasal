@@ -138,7 +138,10 @@ class SQLExpressionEngine:
             context = {}
 
         if agg_type in self.aggregation_builders:
-            return self.aggregation_builders[agg_type](column_name, table_name, context)
+            expr: str = self.aggregation_builders[agg_type](
+                column_name, table_name, context
+            )
+            return expr
         else:
             # Fallback to SUM
             self.logger.warning(
@@ -529,7 +532,7 @@ class SQLExpressionEngine:
 
 
 def detect_aggregation_type(
-    formula: str, aggregation_hint: str = None
+    formula: str, aggregation_hint: Optional[str] = None
 ) -> SQLAggregationType:
     """
     Detect SQL aggregation type from formula or hint.

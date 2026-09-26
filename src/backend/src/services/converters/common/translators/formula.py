@@ -5,7 +5,7 @@ from ...base.models import KPI, KPIDefinition
 
 
 class FormulaTranslator:
-    def __init__(self):
+    def __init__(self) -> None:
         # Common SAP BW field patterns to DAX aggregation mapping
         self.aggregation_mappings = {
             "volume": "SUM",

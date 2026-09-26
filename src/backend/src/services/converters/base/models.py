@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class KPIFilter(BaseModel):
@@ -75,6 +75,10 @@ class KPI(BaseModel):
         None  # Conversion preset type (e.g., "mass", "length", "volume")
     )
     target_uom: Optional[str] = None  # Target unit for conversion
+
+    # Transpilation metadata set by the Power BI connector. No default on
+    # purpose: it stays unset (hasattr() is False) for KPIs from other sources.
+    _advanced_parsing: Dict[str, Any] = PrivateAttr()
 
 
 class QueryFilter(BaseModel):

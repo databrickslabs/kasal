@@ -7,7 +7,7 @@ from ...base.models import KPI, KPIDefinition, QueryFilter, Structure
 
 
 class YAMLKPIParser:
-    def __init__(self):
+    def __init__(self) -> None:
         self.parsed_definitions: List[KPIDefinition] = []
 
     def parse_file(self, file_path: Union[str, Path]) -> KPIDefinition:

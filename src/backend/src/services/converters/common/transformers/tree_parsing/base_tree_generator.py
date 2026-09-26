@@ -12,7 +12,7 @@ This pattern can be used by:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, Set, TypeVar
+from typing import Any, Dict, Generic, List, Optional, Set, TypeVar
 
 from ....base.models import KPI, KPIDefinition
 from ...translators.dependencies import DependencyResolver
@@ -34,7 +34,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
     Subclasses must implement format-specific generation methods.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize dependency resolver."""
         self.dependency_resolver = DependencyResolver()
 
@@ -85,7 +85,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         return measures
 
     def generate_measure_with_separate_dependencies(
-        self, definition: KPIDefinition, target_measure_name: str
+        self, definition: KPIDefinition, target_measure_name: Optional[str]
     ) -> List[TMeasure]:
         """
         Generate a target measure along with all its dependencies as separate measures.
@@ -105,7 +105,10 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         """
         self.dependency_resolver.register_measures(definition)
 
-        if target_measure_name not in self.dependency_resolver.measure_registry:
+        if (
+            target_measure_name is None
+            or target_measure_name not in self.dependency_resolver.measure_registry
+        ):
             raise ValueError(f"Measure '{target_measure_name}' not found")
 
         # Get all dependencies for the target measure
@@ -152,7 +155,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         """
         self.dependency_resolver.register_measures(definition)
 
-        analysis = {
+        analysis: Dict[str, Any] = {
             "total_measures": len(definition.kpis),
             "dependency_graph": dict(self.dependency_resolver.dependency_graph),
             "dependency_order": self.dependency_resolver.get_dependency_order(),
@@ -189,7 +192,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         # Compute shared subgraphs once for this definition. The report has
         # historically tolerated cycles, so keep its path-sensitive fallback
         # when there is no topological order.
-        depths = {}
+        depths: Dict[str, int] = {}
         try:
             order = self.dependency_resolver.get_dependency_order()
         except ValueError:
@@ -203,15 +206,14 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
                 default=0,
             )
 
-        report = {
-            "measures": {},
-            "summary": {
-                "leaf_measures": 0,
-                "calculated_measures": 0,
-                "max_dependency_depth": 0,
-                "most_complex_measure": None,
-            },
+        measures: Dict[str, Dict[str, Any]] = {}
+        summary: Dict[str, Any] = {
+            "leaf_measures": 0,
+            "calculated_measures": 0,
+            "max_dependency_depth": 0,
+            "most_complex_measure": None,
         }
+        report: Dict[str, Any] = {"measures": measures, "summary": summary}
 
         for kpi in definition.kpis:
             if kpi.technical_name:
@@ -238,22 +240,22 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
                     "is_leaf": len(dependencies) == 0,
                 }
 
-                report["measures"][kpi.technical_name] = measure_info
+                measures[kpi.technical_name] = measure_info
 
                 # Update summary
                 if measure_info["is_leaf"]:
-                    report["summary"]["leaf_measures"] += 1
+                    summary["leaf_measures"] += 1
                 else:
-                    report["summary"]["calculated_measures"] += 1
+                    summary["calculated_measures"] += 1
 
-                if depth > report["summary"]["max_dependency_depth"]:
-                    report["summary"]["max_dependency_depth"] = depth
-                    report["summary"]["most_complex_measure"] = kpi.technical_name
+                if depth > summary["max_dependency_depth"]:
+                    summary["max_dependency_depth"] = depth
+                    summary["most_complex_measure"] = kpi.technical_name
 
         return report
 
     def _calculate_dependency_depth(
-        self, measure_name: str, visited: Set[str] = None
+        self, measure_name: str, visited: Optional[Set[str]] = None
     ) -> int:
         """
         Calculate the maximum depth of dependencies for a measure.

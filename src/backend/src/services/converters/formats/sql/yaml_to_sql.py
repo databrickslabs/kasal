@@ -4,7 +4,7 @@ Converts KPI definitions to SQL queries for various SQL dialects
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ...base.models import KPIDefinition
 from .helpers.sql_structures import SQLStructureExpander
@@ -68,7 +68,7 @@ class SQLGenerator:
         return f"{quote_start}{identifier}{quote_end}"
 
     def generate_sql_from_kbi_definition(
-        self, definition: KPIDefinition, options: SQLTranslationOptions = None
+        self, definition: KPIDefinition, options: Optional[SQLTranslationOptions] = None
     ) -> SQLTranslationResult:
         """
         Generate SQL translation from KPI definition using improved structure processor

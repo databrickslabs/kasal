@@ -23,7 +23,7 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
     - DAX formula generation and syntax handling (from DAXGenerator)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Initialize both parent classes
         BaseTreeParsingGenerator.__init__(self)
         DAXGenerator.__init__(self)
@@ -64,7 +64,7 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
         )
 
         # Apply filters and constant selection if specified
-        resolved_filters = self.filter_resolver.resolve_filters(definition, kpi)
+        resolved_filters = self.filter_resolver.resolve_filters(kpi, definition)
         dax_formula = self._add_filters_to_dax(
             resolved_formula, resolved_filters, kpi.source_table or "Table", kpi
         )
@@ -103,7 +103,7 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
         # Get dependencies
         formula = kpi.formula
         dependencies = self.dependency_resolver.dependency_graph.get(
-            kpi.technical_name, []
+            kpi.technical_name or "", []
         )
 
         # Replace measure names with DAX measure references
@@ -121,7 +121,7 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
             )
 
         # Apply filters and constant selection if specified
-        resolved_filters = self.filter_resolver.resolve_filters(definition, kpi)
+        resolved_filters = self.filter_resolver.resolve_filters(kpi, definition)
         dax_formula = self._add_filters_to_dax(
             resolved_formula, resolved_filters, kpi.source_table or "Table", kpi
         )

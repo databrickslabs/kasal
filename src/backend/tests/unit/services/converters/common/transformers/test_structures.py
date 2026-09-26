@@ -308,6 +308,31 @@ class TestStructureExpander:
         # Note: actual filter combination behavior depends on structure type
         assert isinstance(combined_kpi.filters, list)
 
+    def test_structure_filters_resolved_with_definition_variables(self, expander):
+        """Structure filters are resolved and combined (regression: args swapped)"""
+        structure = Structure(description="Year to Date", display_sign=1)
+        structure.filters = ["fiscyear = $var_year"]
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            default_variables={"year": 2024},
+            structures={"YTD": structure},
+            kpis=[
+                KPI(
+                    description="Sales",
+                    technical_name="sales",
+                    formula="SUM(sales.amount)",
+                    filter=["status = 'active'"],
+                    apply_structures=["YTD"],
+                )
+            ],
+        )
+
+        result = expander.process_definition(definition)
+
+        combined = next(k for k in result.kpis if k.technical_name == "sales_YTD")
+        assert combined.filters == ["status = 'active'", "fiscyear = 2024"]
+
 
 class TestTimeIntelligenceHelper:
     """Tests for TimeIntelligenceHelper class"""

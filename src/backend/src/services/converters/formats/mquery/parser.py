@@ -12,7 +12,7 @@ Date: 2025
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import ExpressionType, MQueryExpression, PowerBITable
 
@@ -264,7 +264,7 @@ class TableFromRowsConverter:
         Returns:
             List of row tuples
         """
-        rows = []
+        rows: List[Tuple[str, ...]] = []
 
         # Find the rows section: Table.FromRows( { {row1}, {row2}, ... }, type table [...] )
         # Match the content between Table.FromRows( { and }, type table
@@ -311,7 +311,7 @@ class TableFromRowsConverter:
         Returns:
             List of (column_name, column_type) tuples
         """
-        columns = []
+        columns: List[Tuple[str, str]] = []
 
         # Find type table [ Column1 = text, Column2 = number, ... ]
         type_table_match = re.search(

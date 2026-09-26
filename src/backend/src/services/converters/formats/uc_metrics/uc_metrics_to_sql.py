@@ -64,7 +64,7 @@ class UCMetricsToSqlTranspiler:
             WHERE year = 2024;
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize UC Metrics to SQL transpiler."""
         self.logger = logging.getLogger(__name__)
 

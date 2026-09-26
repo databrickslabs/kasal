@@ -182,8 +182,9 @@ class AadService:
         # Priority 4: Database credentials (future implementation)
         if self.use_database:
             self.logger.info("Fetching credentials from database")
-            credentials = self._get_credentials_from_database()
-            return self._acquire_token_with_client_credential(credentials)
+            db_credentials = self._get_credentials_from_database()
+            if db_credentials:
+                return self._acquire_token_with_client_credential(db_credentials)
 
         # No valid authentication method found
         raise ValueError(

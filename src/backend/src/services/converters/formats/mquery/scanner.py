@@ -13,7 +13,8 @@ Date: 2025
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from types import TracebackType
+from typing import Any, Dict, List, Optional, Self, Tuple
 
 import httpx
 
@@ -59,7 +60,7 @@ class PowerBIAdminScanner:
         )
         self._client: Optional[httpx.AsyncClient] = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         """Async context manager entry"""
         self._client = httpx.AsyncClient(
             headers={
@@ -70,7 +71,12 @@ class PowerBIAdminScanner:
         )
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Async context manager exit"""
         if self._client:
             await self._client.aclose()
@@ -180,7 +186,8 @@ class PowerBIAdminScanner:
             response = await self._client.get(url)
 
         response.raise_for_status()
-        return response.json()
+        result: Dict[str, Any] = response.json()
+        return result
 
     async def wait_for_scan(
         self, scan_id: str, timeout_seconds: int = 300, poll_interval: int = 5

@@ -14,7 +14,7 @@ class SmartDAXGenerator:
     Automatically detects if measures have dependencies and uses the appropriate generator
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.standard_generator = DAXGenerator()
         self.tree_generator = TreeParsingDAXGenerator()
 
@@ -27,7 +27,10 @@ class SmartDAXGenerator:
             )
             # Return the target measure
             for measure in measures:
-                if measure.original_kbi.technical_name == kpi.technical_name:
+                if (
+                    measure.original_kbi is not None
+                    and measure.original_kbi.technical_name == kpi.technical_name
+                ):
                     return measure
             # Fallback if not found
             return self.standard_generator.generate_dax_measure(definition, kpi)
