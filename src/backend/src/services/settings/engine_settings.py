@@ -1,7 +1,8 @@
 """System settings from Configuration → Engines, readable from synchronous code.
 
 These used to be environment variables a Databricks App never sets
-(JEV_API_BASE, KASAL_AGENT_MAX_EXECUTION_TIME, KASAL_BUDGET_<MODE>_<FIELD>).
+(JEV_API_BASE, KASAL_AGENT_MAX_EXECUTION_TIME, KASAL_BUDGET_<MODE>_<FIELD>, and
+the server-wide memory/knowledge knobs in :data:`SETTINGS`).
 They are ``engine_config`` rows (engine ``kasal``), edited by a system admin.
 
 Some readers are synchronous and run deep in the crew build path — including
@@ -18,7 +19,8 @@ which is exactly the old behaviour with no environment variable set.
 """
 
 import logging
-from typing import Any, Dict, Iterable, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,45 @@ AGENT_MAX_EXECUTION_TIME = "agent_max_execution_time"
 
 #: Built-in defaults (unchanged from the former env defaults).
 DEFAULT_AGENT_MAX_EXECUTION_TIME = 900
+
+
+Scalar = Union[bool, int, float]
+
+
+@dataclass(frozen=True)
+class Setting:
+    """One scalar setting under Configuration → Engines → Advanced."""
+
+    default: Scalar
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    #: What the setting replaced, for the docs and the log line.
+    replaced: str = ""
+
+
+MEMORY_SWEEP_ENABLED = "memory_sweep_enabled"
+MEMORY_SWEEP_INTERVAL_HOURS = "memory_sweep_interval_hours"
+MEMORY_SWEEP_BATCH = "memory_sweep_batch"
+MEMORY_MAINTENANCE_INTERVAL = "memory_maintenance_interval"
+KNOWLEDGE_MIN_SCORE = "knowledge_min_score"
+KNOWLEDGE_MAX_SEARCHES = "knowledge_max_searches"
+KNOWLEDGE_TTL_DAYS = "knowledge_ttl_days"
+
+#: Server-wide scalar settings: they act across every workspace (a background
+#: sweep, a deployment-wide retention), so they are not per-teamspace tuning.
+SETTINGS: Dict[str, Setting] = {
+    MEMORY_SWEEP_ENABLED: Setting(True, replaced="KASAL_MEMORY_SWEEP"),
+    MEMORY_SWEEP_INTERVAL_HOURS: Setting(
+        6.0, 0.25, 24 * 30, "KASAL_MEMORY_SWEEP_INTERVAL_HOURS"
+    ),
+    MEMORY_SWEEP_BATCH: Setting(5, 1, 100, "KASAL_MEMORY_SWEEP_BATCH"),
+    MEMORY_MAINTENANCE_INTERVAL: Setting(
+        900, 0, 24 * 3600, "KASAL_MEMORY_MAINTENANCE_INTERVAL"
+    ),
+    KNOWLEDGE_MIN_SCORE: Setting(0.35, 0.0, 1.0, "KNOWLEDGE_MIN_SCORE"),
+    KNOWLEDGE_MAX_SEARCHES: Setting(8, 0, 100, "KNOWLEDGE_MAX_SEARCHES"),
+    KNOWLEDGE_TTL_DAYS: Setting(7, 0, 3650, "KNOWLEDGE_TTL_DAYS"),
+}
 
 
 def budget_key(mode: str, field: str) -> str:
@@ -60,6 +101,40 @@ def get_int(key: str, default: int, *, minimum: int = 1) -> int:
         logger.warning("Ignoring engine setting %s=%d: below %d", key, number, minimum)
         return default
     return number
+
+
+def parse(key: str, raw: Optional[str]) -> Optional[Scalar]:
+    """``raw`` as the type of ``SETTINGS[key]``, or None when unusable."""
+    spec = SETTINGS[key]
+    if raw is None or raw == "":
+        return None
+    if isinstance(spec.default, bool):
+        lowered = raw.strip().lower()
+        if lowered in ("true", "1", "on"):
+            return True
+        if lowered in ("false", "0", "off"):
+            return False
+        return None
+    try:
+        number: Scalar = int(raw) if isinstance(spec.default, int) else float(raw)
+    except ValueError:
+        return None
+    if spec.minimum is not None and number < spec.minimum:
+        return None
+    if spec.maximum is not None and number > spec.maximum:
+        return None
+    return number
+
+
+def setting(key: str) -> Any:
+    """A :data:`SETTINGS` value: the configured one when usable, else its default."""
+    raw = value(key)
+    parsed = parse(key, raw)
+    if parsed is None:
+        if raw is not None:
+            logger.warning("Ignoring engine setting %s=%r: out of range", key, raw)
+        return SETTINGS[key].default
+    return parsed
 
 
 def agent_max_execution_time() -> int:

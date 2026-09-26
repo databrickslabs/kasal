@@ -280,7 +280,7 @@ async def lifespan(app: FastAPI):
     # Knowledge retention. Expiry was already applied at search time and before
     # each upload, which makes expired uploads unreachable but not gone — a
     # workspace where nobody uploads again keeps them indefinitely. This sweep
-    # is what makes "we keep uploads for KNOWLEDGE_TTL_DAYS" true of the
+    # is what makes "we keep uploads for the knowledge TTL" true of the
     # database rather than only of what search will show.
     async def _knowledge_ttl_loop():
         import asyncio as _a
@@ -307,7 +307,7 @@ async def lifespan(app: FastAPI):
     # scopes that have gone longest without maintenance, so every workspace is
     # eventually reached, and gives the expensive passes (the LLM merge,
     # supersession, forgetting) somewhere to run that is not a user's teardown
-    # path. Kill-switch: KASAL_MEMORY_SWEEP=false.
+    # path. Kill switch: Configuration → Engines → Advanced.
     async def _memory_sweep_loop():
         import asyncio as _a
 

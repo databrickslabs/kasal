@@ -13,7 +13,7 @@ How Kasal gives agents a memory: what a memory record is, how it is written and 
 - [When maintenance runs](#when-maintenance-runs)
 - [Schema management](#schema-management)
 - [Memory browser](#memory-browser)
-- [Environment variables](#environment-variables)
+- [Settings](#settings)
 - [Known limits](#known-limits)
 - [Rules for adding behavior](#rules-for-adding-behavior)
 - [Related](#related)
@@ -131,7 +131,7 @@ The block opens with a header instructing the model to weigh the content as back
 | Recency half-life (days) | 30 | Days for the recency term to halve |
 | Recall score floor | 0.75 · 0.62 with the Ollama embedder | Blended score below which a recall returns nothing — the stopping rule that keeps "nearest" from meaning "near" |
 
-The recall score floor takes a different route: `CrewMemoryService._build_memory_kwargs` sets `Memory.recall_min_score`, and it does so where the embedder is known, because the floor depends on it. 0.75 was calibrated with the Databricks embedder; the local Ollama fallback (`nomic-embed-text`) compresses the cosine scale — a run's own previous task output scores about 0.68 blended against the task description that produced it, unrelated records at most 0.60 — so on Ollama the default is 0.62. Precedence: the teamspace's panel value, then `KASAL_MEMORY_RECALL_MIN_SCORE`, then the embedder default.
+The recall score floor takes a different route: `CrewMemoryService._build_memory_kwargs` sets `Memory.recall_min_score`, and it does so where the embedder is known, because the floor depends on it. 0.75 was calibrated with the Databricks embedder; the local Ollama fallback (`nomic-embed-text`) compresses the cosine scale — a run's own previous task output scores about 0.68 blended against the task description that produced it, unrelated records at most 0.60 — so on Ollama the default is 0.62. Precedence: the teamspace's panel value, then the embedder default.
 
 **Recall depth** — declared fields of the engine's `Memory`, implemented in `engine/recall_planner.py` and applied by `Memory.recall(mode="auto")`, which is what Chat, Agent Builder and Flow Builder all call through `build_memory_preamble` / `make_memory_context_provider` (`run/recall.py`), on either harness:
 
@@ -206,25 +206,37 @@ The browser, and the chat's memory pane beside a finished run, can be scoped to 
 
 Both views read the run's memory rows through `GET /traces/job/{job_id}?event_type_prefix=memory_` so a long run's writes, which land last, are not cut off by the default trace page.
 
-## Environment variables
+## Settings
 
-Behavior that is not configured per teamspace is controlled by environment variables:
+None of these are environment variables any more: a Databricks App never sets them, so they live in the UI.
 
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `KASAL_MEMORY_RECALL_MIN_SCORE` | by embedder | Deployment-wide recall score floor; a teamspace's Memory Tuning value takes precedence over it |
-| `KASAL_MEMORY_WRITE_SCREENING` | `quarantine` | `quarantine` blocks high-severity injection matches; `annotate` records findings without blocking; `off` disables screening |
-| `KASAL_MEMORY_LLM_CONSOLIDATION` | `true` | Set to `false` to disable the LLM merge pass |
-| `KASAL_MEMORY_SUPERSESSION` | `true` | Set to `false` to disable retiring contradicted facts |
-| `KASAL_MEMORY_FORGETTING` | `false` | Set to `true` to enable deletion of records past their retention rule |
-| `KASAL_MEMORY_SUPERSEDED_RETENTION_DAYS` | `90` | How long a retired fact is kept as history |
-| `KASAL_MEMORY_EPISODIC_TTL_DAYS` | `180` | Age past which a low-importance episodic record may be removed |
-| `KASAL_MEMORY_IMPORTANCE_FLOOR` | `0.4` | Records at or above this importance are kept regardless of age |
-| `KASAL_MEMORY_MAINTENANCE_INTERVAL` | `900` | Seconds between chat-triggered maintenance passes for one scope |
-| `KASAL_MEMORY_SWEEP` | `true` | Set to `false` to disable the scheduled sweep |
-| `KASAL_MEMORY_SWEEP_INTERVAL_HOURS` | `6` | How stale a scope must be before the sweep revisits it |
-| `KASAL_MEMORY_SWEEP_BATCH` | `5` | Scopes maintained per tick |
-| `KASAL_MEMORY_DIR` | `~/.kasal/memory` | Root directory for local memory stores |
+**Per teamspace — Configuration → Memory → Memory Tuning → Write screening and retention.** Stored in the backend's `cognitive_config` and forwarded to `engine.Memory` as declared fields:
+
+| Setting | Default | Effect | Replaced |
+|---------|---------|--------|----------|
+| Write screening (`write_screening`) | `quarantine` | `quarantine` blocks high-severity injection matches; `annotate` records findings without blocking; `off` disables screening | `KASAL_MEMORY_WRITE_SCREENING` |
+| Recall cut-off below best match (`recall_max_drop`) | `0.12` | Drops recall candidates scoring this far below the best one | `KASAL_MEMORY_RECALL_MAX_DROP` |
+| Merge near-duplicates between runs (`llm_consolidation_enabled`) | on | The LLM merge pass | `KASAL_MEMORY_LLM_CONSOLIDATION` |
+| Retire contradicted facts (`supersession_enabled`) | on | Supersession | `KASAL_MEMORY_SUPERSESSION` |
+| Forget expired memories (`forgetting_enabled`) | off | Deletion of records past their retention rule | `KASAL_MEMORY_FORGETTING` |
+| Keep replaced facts (`superseded_retention_days`) | `90` | How long a retired fact is kept as history | `KASAL_MEMORY_SUPERSEDED_RETENTION_DAYS` |
+| Keep run and chat memories (`episodic_ttl_days`) | `180` | Age past which a low-importance episodic record may be removed | `KASAL_MEMORY_EPISODIC_TTL_DAYS` |
+| Never forget at importance (`importance_floor`) | `0.4` | Records at or above this importance are kept regardless of age | `KASAL_MEMORY_IMPORTANCE_FLOOR` |
+
+The deployment-wide recall floor override (`KASAL_MEMORY_RECALL_MIN_SCORE`) is gone: the Memory Tuning recall score floor covers it.
+
+**Server-wide — Configuration → Engines → System settings → Advanced** (system administrators). The sweep and its throttle act across every workspace:
+
+| Setting | Default | Effect | Replaced |
+|---------|---------|--------|----------|
+| Background memory sweep | on | The scheduled sweep | `KASAL_MEMORY_SWEEP` |
+| Sweep a workspace every (hours) | `6` | How stale a scope must be before the sweep revisits it | `KASAL_MEMORY_SWEEP_INTERVAL_HOURS` |
+| Workspaces per sweep | `5` | Scopes maintained per tick | `KASAL_MEMORY_SWEEP_BATCH` |
+| Seconds between passes on one scope | `900` | Throttle for the pass that follows a run; `0` runs it every time | `KASAL_MEMORY_MAINTENANCE_INTERVAL` |
+
+The role knowledge search assumes on a Lakebase instance (`SET ROLE`) is **Database role** in the memory backend's Lakebase settings (`lakebase_config.db_role`; default `databricks_superuser`, empty assumes none). It replaced `LAKEBASE_KNOWLEDGE_ROLE`.
+
+`KASAL_MEMORY_DIR` (default `~/.kasal/memory`) is still an environment variable: it is where local stores live on disk, a property of the host.
 
 ## Known limits
 

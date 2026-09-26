@@ -678,6 +678,14 @@ class CrewMemoryService:
             "complex_query_threshold",
             "exploration_budget",
             "query_analysis_threshold",
+            "recall_max_drop",
+            "write_screening",
+            "forgetting_enabled",
+            "superseded_retention_days",
+            "episodic_ttl_days",
+            "importance_floor",
+            "supersession_enabled",
+            "llm_consolidation_enabled",
         ):
             if key in tuning_dict and tuning_dict[key] is not None:
                 kwargs[key] = tuning_dict[key]

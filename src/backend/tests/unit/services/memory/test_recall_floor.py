@@ -11,8 +11,6 @@ flow builder — on either harness — apply the same one.
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendType,
@@ -25,11 +23,6 @@ OLLAMA = {
     "provider": "ollama",
     "config": {"model": "nomic-embed-text", "url": "http://localhost:11434"},
 }
-
-
-@pytest.fixture(autouse=True)
-def _no_env_override(monkeypatch):
-    monkeypatch.delenv("KASAL_MEMORY_RECALL_MIN_SCORE", raising=False)
 
 
 def _memory_kwargs(tuning=None, custom_embedder=None, crew_embedder=None):
@@ -53,14 +46,11 @@ class TestDefaultFloor:
         assert default_recall_min_score("ollama") == 0.62
         assert default_recall_min_score("Ollama") == 0.62
 
-    def test_env_override_wins_over_the_embedder_default(self, monkeypatch):
+    def test_the_environment_is_not_read(self, monkeypatch):
+        """KASAL_MEMORY_RECALL_MIN_SCORE is gone: Memory Tuning sets the floor."""
         monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.5")
-        assert default_recall_min_score("ollama") == 0.5
-        assert default_recall_min_score() == 0.5
-
-    def test_unparseable_env_is_ignored(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "high")
         assert default_recall_min_score("ollama") == 0.62
+        assert default_recall_min_score() == 0.75
 
 
 class TestEmbedderProvider:
@@ -98,12 +88,29 @@ class TestBuildMemoryKwargsFloor:
         tuning = MemoryTuningConfig(recall_min_score=0.5)
         assert _memory_kwargs(tuning, crew_embedder=OLLAMA)["recall_min_score"] == 0.5
 
-    def test_teamspace_tuning_wins_over_the_env_override(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.7")
-        tuning = MemoryTuningConfig(recall_min_score=0.5)
-        assert _memory_kwargs(tuning, crew_embedder=OLLAMA)["recall_min_score"] == 0.5
-        # ...but the env still beats the embedder default when nothing is set.
-        assert _memory_kwargs(crew_embedder=OLLAMA)["recall_min_score"] == 0.7
+    def test_hygiene_and_retention_tuning_reach_memory(self):
+        """The knobs that replaced the KASAL_MEMORY_* env vars are forwarded,
+        and each is a declared Memory field (so pydantic cannot drop it)."""
+        tuning = MemoryTuningConfig(
+            recall_max_drop=0.3,
+            write_screening="annotate",
+            forgetting_enabled=True,
+            superseded_retention_days=30,
+            episodic_ttl_days=60,
+            importance_floor=0.6,
+            supersession_enabled=False,
+            llm_consolidation_enabled=False,
+        )
+        kwargs = _memory_kwargs(tuning)
+        memory = Memory(storage=MagicMock(), **kwargs)
+        assert memory.recall_max_drop == 0.3
+        assert memory.write_screening == "annotate"
+        assert memory.forgetting_enabled is True
+        assert memory.superseded_retention_days == 30
+        assert memory.episodic_ttl_days == 60
+        assert memory.importance_floor == 0.6
+        assert memory.supersession_enabled is False
+        assert memory.llm_consolidation_enabled is False
 
     def test_kwargs_construct_a_memory(self):
         kwargs = _memory_kwargs(crew_embedder=OLLAMA)
@@ -120,8 +127,7 @@ class TestMemoryRecallUsesTheConfiguredFloor:
         storage.search.return_value = []
         return Memory(storage=storage, **kw), storage
 
-    def test_configured_floor_beats_default_and_env(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.7")
+    def test_configured_floor_beats_the_default(self):
         memory, storage = self._memory(recall_min_score=0.62)
         memory.recall("q")
         assert storage.search.call_args.kwargs["score_threshold"] == 0.62

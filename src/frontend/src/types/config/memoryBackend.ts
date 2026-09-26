@@ -47,6 +47,18 @@ export interface MemoryTuningConfig {
   exploration_budget?: number;
   query_analysis_threshold?: number;
 
+  // Hygiene and retention (were KASAL_MEMORY_* environment variables).
+  /** Recall drops candidates scoring more than this below the best one. */
+  recall_max_drop?: number;
+  write_screening?: 'quarantine' | 'annotate' | 'off';
+  /** Opt-in: delete memories past their retention rule. */
+  forgetting_enabled?: boolean;
+  superseded_retention_days?: number;
+  episodic_ttl_days?: number;
+  importance_floor?: number;
+  supersession_enabled?: boolean;
+  llm_consolidation_enabled?: boolean;
+
   // LLM override for memory analysis.
   memory_llm_model?: string;
 }
@@ -87,6 +99,8 @@ export interface LakebaseMemoryConfig {
   // Memory table — one table for every MemoryRecord.
   memory_table?: string;
   tables_initialized?: boolean;
+  /** Role assumed for knowledge search (SET ROLE); unset = databricks_superuser. */
+  db_role?: string;
 }
 
 export interface MemoryBackendConfig {
@@ -148,6 +162,14 @@ export const MEMORY_TUNING_DEFAULTS: Required<
     | 'complex_query_threshold'
     | 'exploration_budget'
     | 'query_analysis_threshold'
+    | 'recall_max_drop'
+    | 'write_screening'
+    | 'forgetting_enabled'
+    | 'superseded_retention_days'
+    | 'episodic_ttl_days'
+    | 'importance_floor'
+    | 'supersession_enabled'
+    | 'llm_consolidation_enabled'
   >
 > = {
   semantic_weight: 0.6,
@@ -165,6 +187,14 @@ export const MEMORY_TUNING_DEFAULTS: Required<
   complex_query_threshold: 0.7,
   exploration_budget: 1,
   query_analysis_threshold: 200,
+  recall_max_drop: 0.12,
+  write_screening: 'quarantine',
+  forgetting_enabled: false,
+  superseded_retention_days: 90,
+  episodic_ttl_days: 180,
+  importance_floor: 0.4,
+  supersession_enabled: true,
+  llm_consolidation_enabled: true,
 };
 
 // Validation helpers

@@ -11,9 +11,9 @@ Everything is best-effort — a broken memory backend must never break a run."""
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
+from src.services.memory.engine.tuning import tuned
 from src.services.memory.run.pending import pending_memory_for
 from src.services.memory.text import normalized_text, says_the_same
 
@@ -49,18 +49,11 @@ _RECALL_OVERSAMPLE = 3
 
 
 # Relative relevance cliff. Absolute floors drift across embedders/backends, so
-# besides Memory.recall's KASAL_MEMORY_RECALL_MIN_SCORE floor, the selection
-# also drops storage candidates that score far below the BEST candidate of the
-# same recall — a big drop marks where "matches the query" ends and "least
-# unrelated filler" begins. Override with KASAL_MEMORY_RECALL_MAX_DROP.
-def _recall_max_drop() -> float:
-    raw = os.getenv("KASAL_MEMORY_RECALL_MAX_DROP")
-    if raw is None:
-        return 0.12
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return 0.12
+# besides Memory.recall's recall_min_score floor, the selection also drops
+# storage candidates that score far below the BEST candidate of the same recall
+# — a big drop marks where "matches the query" ends and "least unrelated
+# filler" begins. A teamspace tunes it as Memory Tuning ``recall_max_drop``.
+_DEFAULT_RECALL_MAX_DROP = 0.12
 
 
 def _similarity(record: Any) -> float | None:
@@ -147,7 +140,9 @@ def _select_records(mem: Any, records: list, limit: int) -> list:
     # exempt by design — they are this run's own output, not a search result.
     sims = [sim for sim in (_similarity(r) for r in storage) if sim is not None]
     if sims:
-        cutoff = max(sims) - _recall_max_drop()
+        cutoff = max(sims) - max(
+            0.0, tuned(mem, "recall_max_drop", _DEFAULT_RECALL_MAX_DROP)
+        )
         storage = [
             r for r in storage if (sim := _similarity(r)) is None or sim >= cutoff
         ]

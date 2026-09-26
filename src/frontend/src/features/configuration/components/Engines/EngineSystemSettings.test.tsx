@@ -17,6 +17,11 @@ function settings(overrides: Partial<EngineSettings> = {}): EngineSettings {
     agent_max_execution_time_default: 900,
     budgets: { deep },
     budget_defaults: { deep },
+    advanced: { memory_sweep_enabled: true, knowledge_min_score: 0.35 },
+    advanced_specs: {
+      memory_sweep_enabled: { default: true, minimum: null, maximum: null },
+      knowledge_min_score: { default: 0.35, minimum: 0, maximum: 1 },
+    },
     ...overrides,
   };
 }
@@ -75,5 +80,27 @@ describe('EngineSystemSettings', () => {
     fireEvent.click(await screen.findByText('Advanced'));
     fireEvent.click(screen.getAllByRole('button', { name: 'Reset to default' })[0]);
     expect(await screen.findByText('deep.max_iter must be at least 1')).toBeInTheDocument();
+  });
+
+  it('turns off the memory sweep and accepts a decimal relevance floor', async () => {
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(settings());
+    render(<EngineSystemSettings />);
+    fireEvent.click(await screen.findByText('Advanced'));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Background memory sweep' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        advanced: { memory_sweep_enabled: false },
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText('Minimum relevance'), { target: { value: '0.5' } });
+    const saves = screen.getAllByRole('button', { name: 'Save' });
+    fireEvent.click(saves[saves.length - 1]);
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        advanced: { knowledge_min_score: 0.5 },
+      }),
+    );
   });
 });

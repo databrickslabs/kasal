@@ -136,7 +136,7 @@ class DatabricksKnowledgeService:
             logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
 
             # TTL sweep: purge expired knowledge BEFORE adding more, so the
-            # embedding store never bloats (KNOWLEDGE_TTL_DAYS; non-fatal).
+            # embedding store never bloats (knowledge_ttl_days(); non-fatal).
             await self.embedding_service.purge_expired(user_token=user_token)
 
             # Stage the raw upload in a LOCAL TEMP FILE — its content is

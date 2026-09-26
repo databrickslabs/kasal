@@ -11,9 +11,8 @@ turn and every finished task. It is the SECOND layer — the recall block header
 patterns miss, and stays.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
-
-import pytest
 
 from src.services.memory.run.write_hygiene import (
     MODE_ANNOTATE,
@@ -31,23 +30,25 @@ _INJECTION = (
 _CLEAN = "The quarterly revenue for the EMEA region was 4.2 million."
 
 
-@pytest.fixture(autouse=True)
-def _default_mode(monkeypatch):
-    monkeypatch.delenv("KASAL_MEMORY_WRITE_SCREENING", raising=False)
+def _tuned(mode):
+    """A memory whose Memory Tuning sets ``write_screening``."""
+    return SimpleNamespace(write_screening=mode)
 
 
 class TestMode:
     def test_defaults_to_quarantine(self):
         assert screening_mode() == MODE_QUARANTINE
 
-    def test_unrecognised_value_falls_back_to_quarantine(self, monkeypatch):
-        """A typo in the env var must not silently disable the defense."""
-        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", "kwarantine")
-        assert screening_mode() == MODE_QUARANTINE
+    def test_unrecognised_value_falls_back_to_quarantine(self):
+        """A bad stored value must not silently disable the defense."""
+        assert screening_mode(_tuned("kwarantine")) == MODE_QUARANTINE
 
-    def test_modes_are_case_insensitive(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", "  OFF ")
-        assert screening_mode() == MODE_OFF
+    def test_modes_are_case_insensitive(self):
+        assert screening_mode(_tuned("  OFF ")) == MODE_OFF
+
+    def test_the_environment_is_not_read(self, monkeypatch):
+        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_OFF)
+        assert screening_mode() == MODE_QUARANTINE
 
 
 class TestVerdict:
@@ -63,16 +64,14 @@ class TestVerdict:
         assert verdict.severity == "high"
         assert verdict.patterns
 
-    def test_annotate_mode_records_without_blocking(self, monkeypatch):
+    def test_annotate_mode_records_without_blocking(self):
         """The measurement mode: see what quarantine WOULD block first."""
-        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_ANNOTATE)
-        verdict = screen_memory_write(_INJECTION)
+        verdict = screen_memory_write(_INJECTION, memory=_tuned(MODE_ANNOTATE))
         assert verdict.persist is True
         assert verdict.flagged is True
 
-    def test_off_mode_screens_nothing(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_OFF)
-        verdict = screen_memory_write(_INJECTION)
+    def test_off_mode_screens_nothing(self):
+        verdict = screen_memory_write(_INJECTION, memory=_tuned(MODE_OFF))
         assert verdict.persist is True
         assert verdict.flagged is False
 
@@ -157,8 +156,8 @@ class TestWriteBoundary:
         from src.services.memory.run.pending import clear_pending_memory
         from src.services.memory.run.persist import remember_async
 
-        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_ANNOTATE)
         memory = self._memory()
+        memory.write_screening = MODE_ANNOTATE
         remember_async(memory, _INJECTION, source="crew_task", metadata={"task": "t1"})
         self._flush()
 
@@ -171,8 +170,8 @@ class TestWriteBoundary:
         from src.services.memory.run.pending import clear_pending_memory
         from src.services.memory.run.persist import remember_async
 
-        monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_OFF)
         memory = self._memory()
+        memory.write_screening = MODE_OFF
         remember_async(memory, _INJECTION, source="crew_task")
         self._flush()
 

@@ -9,14 +9,14 @@ passes, cheapest first:
 2. :func:`merge_similar_memories` — ONE bounded LLM call that spots
    near-duplicate/fragmented records and replaces each cluster with a single
    merged record. Only runs when the scope is big enough to matter and the
-   memory has an LLM configured; ``KASAL_MEMORY_LLM_CONSOLIDATION=false``
+   memory has an LLM configured; Memory Tuning ``llm_consolidation_enabled``
    disables it entirely.
 3. :func:`supersede_outdated_facts` (in ``supersession.py``) — retires facts a
    newer record contradicts. The first two make the store SMALLER; this one
    makes it TRUER, and they pull in opposite directions on the same input, which
    is why the merge prompt is explicitly told to leave contradictions alone.
 4. :func:`forget_expired_memories` (in ``forgetting.py``) — deletes what is past
-   its retention rule. OPT-IN (``KASAL_MEMORY_FORGETTING=true``): it is the only
+   its retention rule. OPT-IN (Memory Tuning ``forgetting_enabled``): it is the only
    pass that removes something a user might still want.
 
 :func:`run_memory_maintenance` orchestrates all four. Everything is
@@ -36,7 +36,7 @@ how often they finish, so they enter through different doors:
   listing (and, past ``_MERGE_MIN_RECORDS``, an LLM call) on EVERY turn. Chat
   goes through :func:`maybe_run_memory_maintenance` /
   :func:`run_maintenance_after_writes`, which claim a per-scope slot at most
-  once per ``KASAL_MEMORY_MAINTENANCE_INTERVAL`` seconds.
+  once per the maintenance interval (Configuration → Engines → Advanced).
 
 The throttle is process-local and deliberately so: it is a rate limiter for a
 long-lived server, not the durable per-scope watermark a scheduled sweep would
@@ -49,7 +49,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -65,6 +64,7 @@ from src.services.memory.engine.consolidation import (
     merge_categories,
     merged_lineage,
 )
+from src.services.memory.engine.tuning import tuned
 from src.services.memory.maintenance.forgetting import forget_expired_memories
 from src.services.memory.maintenance.supersession import supersede_outdated_facts
 
@@ -197,7 +197,7 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
     One bounded LLM call over the newest ``_MERGE_SCAN_LIMIT`` records, using
     the memory's own configured LLM (``Memory.llm`` — the crew's model, never
     an implicit OpenAI default). Gated: skips entirely when disabled via
-    ``KASAL_MEMORY_LLM_CONSOLIDATION=false``, when no LLM is configured, or
+    Memory Tuning ``llm_consolidation_enabled``, when no LLM is configured, or
     when the scope holds fewer than ``_MERGE_MIN_RECORDS`` records.
 
     Returns ``{"scanned": n, "merged_clusters": k, "records_replaced": m}``.
@@ -205,7 +205,7 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
     stats = {"scanned": 0, "merged_clusters": 0, "records_replaced": 0}
     if memory in (None, True, False):
         return stats
-    if os.environ.get("KASAL_MEMORY_LLM_CONSOLIDATION", "true").lower() == "false":
+    if not tuned(memory, "llm_consolidation_enabled", True):
         return stats
     llm = getattr(memory, "llm", None)
     call = getattr(llm, "call", None)
@@ -341,10 +341,9 @@ _throttle_lock = threading.Lock()
 
 def _default_interval() -> float:
     """Minimum seconds between passes over one scope (0 disables throttling)."""
-    try:
-        return float(os.environ.get("KASAL_MEMORY_MAINTENANCE_INTERVAL", "900"))
-    except (TypeError, ValueError):
-        return 900.0
+    from src.services.settings import engine_settings
+
+    return float(engine_settings.setting(engine_settings.MEMORY_MAINTENANCE_INTERVAL))
 
 
 def _scope_key(memory: Any, scope: str | None) -> str:

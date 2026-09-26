@@ -71,7 +71,7 @@
   "src/backend/src/services/generation/tasks.py::TaskGenerationService._generate_task_impl": 278,
   "src/backend/src/services/knowledge/databricks_service.py::DatabricksKnowledgeService.upload_knowledge_file": 228,
   "src/backend/src/services/knowledge/embedding_service.py::KnowledgeEmbeddingService.embed_file": 214,
-  "src/backend/src/services/knowledge/search_service.py::KnowledgeSearchService.search": 270,
+  "src/backend/src/services/knowledge/search_service.py::KnowledgeSearchService.search": 269,
   "src/backend/src/services/llm/embeddings.py::get_embedding": 422,
   "src/backend/src/services/llm/handlers/databricks_responses_llm.py::DatabricksResponsesLLM._handle_responses": 218,
   "src/backend/src/services/llm/handlers/databricks_retry_llm.py::DatabricksRetryLLM.call": 235,

@@ -1199,7 +1199,7 @@ class LightAgentService:
                     )
 
                 # ── Sleep-time maintenance — fire-and-forget, and throttled to
-                # at most one pass per scope per KASAL_MEMORY_MAINTENANCE_INTERVAL.
+                # at most one pass per scope per maintenance interval (Engines settings).
                 # The crew path runs this at teardown; chat never did, so a
                 # workspace that only used chat accumulated duplicate records
                 # forever and they crowded the 6-snippet recall budget. A turn is

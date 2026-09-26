@@ -40,7 +40,21 @@ def _effective(stored: Dict[str, str]) -> Dict[str, Any]:
         "agent_max_execution_time_default": es.DEFAULT_AGENT_MAX_EXECUTION_TIME,
         "budgets": budgets,
         "budget_defaults": defaults,
+        "advanced": {key: _typed(key, stored.get(key)) for key in es.SETTINGS},
+        "advanced_specs": {
+            key: {
+                "default": spec.default,
+                "minimum": spec.minimum,
+                "maximum": spec.maximum,
+            }
+            for key, spec in es.SETTINGS.items()
+        },
     }
+
+
+def _typed(key: str, raw: Optional[str]) -> Any:
+    parsed = es.parse(key, raw)
+    return es.SETTINGS[key].default if parsed is None else parsed
 
 
 def _as_int(raw: Optional[str], default: int, minimum: int = 1) -> int:
@@ -82,4 +96,26 @@ async def update_view(
                 if value is not None and value < 1:
                     raise BadRequestError(f"{mode}.{field} must be at least 1")
                 values[es.budget_key(mode, field)] = "" if value is None else str(value)
+    values.update(_advanced_values(sent.get("advanced") or {}))
     return _effective(await service.save_settings(values))
+
+
+def _advanced_values(sent: Dict[str, Any]) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    for key, value in sent.items():
+        spec = es.SETTINGS.get(key)
+        if spec is None:
+            raise BadRequestError(f"Unknown engine setting '{key}'")
+        if value is None:
+            values[key] = ""
+            continue
+        if isinstance(spec.default, bool) != isinstance(value, bool):
+            raise BadRequestError(f"{key} has the wrong type")
+        if es.parse(key, str(value)) is None:
+            raise BadRequestError(
+                f"{key} must be a "
+                f"{'whole number' if isinstance(spec.default, int) else 'number'}"
+                f" from {spec.minimum:g} to {spec.maximum:g}"
+            )
+        values[key] = str(value)
+    return values
