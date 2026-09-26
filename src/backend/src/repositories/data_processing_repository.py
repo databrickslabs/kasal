@@ -38,8 +38,9 @@ class DataProcessingRepository(BaseRepository):
         if session:
             super().__init__(self.model, session)
         else:
-            # Initialize self.session to None since BaseRepository requires it
-            self.session = None
+            # A sync-only instance has no async session; every async method
+            # checks `if not self.session` before using it.
+            self.session = cast(AsyncSession, None)
 
         # Explicitly set sync_session attribute for sync operations
         self.sync_session = sync_session

@@ -494,7 +494,7 @@ class DatabricksVolumeRepository:
                         else file_content
                     )
                     client.files.upload(
-                        file_path=volume_path, content=content_stream, overwrite=True
+                        file_path=volume_path, contents=content_stream, overwrite=True
                     )
 
                     logger.info(f"Successfully uploaded file to {volume_path}")
