@@ -25,7 +25,7 @@ Beside them, `src/backend/src/core/llm/` holds what hangs off an LLM call withou
 
 ### Why the transport sits in `core/`
 
-The transport used to live in a separate `kasal_engine/` tree next to `src/`. That tree no longer exists: the agent engine is first-party code under `src/backend/src/`, and the transport is `src/core/llm/transport/`.
+The transport is first-party code in `src/backend/src/core/llm/transport/`, next to the agent runtime that calls it (`services/execution/runtime/`). It once shipped as a separate package; that package no longer exists.
 
 What the separate tree bought is kept by the layering instead: **the dependency runs one way**. The transport imports nothing from `services`, `repositories` or `db` — no SQLAlchemy, no tenant context. That is checkable, not a convention: the import-linter contract "`core/` never imports services" (`[tool.importlinter]` in `src/backend/pyproject.toml`, run by `run_tests.py` and in CI) fails the build the moment a `src.services` import slides into the transport. Silent drift of exactly that kind is what produced the duplication described below.
 
@@ -45,6 +45,11 @@ The engine is where a request becomes HTTP. It is model-agnostic and tenant-agno
 | `instructor.py` | `InternalInstructor`: structured output by prompting, with per-call credentials. |
 | `constants.py` | Context-window sizes and the usage ratio. |
 | `exceptions.py` | `CONTEXT_LIMIT_ERRORS` and the context-length exception. |
+| `budget.py`, `request_deadline.py` | The execution budget for one call (tool rounds, `MAX_TOOL_ROUNDS = 15`, and wall clock), and the deadline carried through nested retries and streamed requests. |
+| `tool_rounds.py` | Executing one round of tool calls with the budget check, shared by the Chat Completions and Responses API loops. |
+| `response_parsing.py` | Pure helpers that pull token counts, tool calls and reasoning items out of a provider response. |
+| `rpm.py` | Requests-per-minute throttling for the `max_rpm` setting on agents and crews. |
+| `anthropic_client.py`, `anthropic_messages.py` | The native Claude Messages API adapter, reusing the same tool loop, budgets and events. |
 
 Behavior that belongs here is anything true of *every* model on an OpenAI-compatible endpoint: the tool-call loop, budget enforcement, usage counting, event emission.
 
@@ -67,10 +72,9 @@ Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 |-------|----------------|
 | `DatabricksRetryLLM` | Retry and backoff (with longer waits for rate limits), OBO token refresh, cross-model fallback, and Databricks message sanitization — empty assistant content, Llama message format, Gemini system-prompt merging and `$ref` resolution. |
 | `DatabricksResponsesLLM` | The native OpenAI Responses API for Databricks-hosted OpenAI endpoints, served under a different base URL than chat completions. Preserves the `phase` field on assistant output items across turns, without which Codex degrades into early text-only responses. |
-
-Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it — `databricks_gpt_oss_handler.py` sat in the tree long after the models it existed for were pruned.
-
 | `VLLMFunctionCallingLLM` | Self-hosted vLLM: states `tool_choice="auto"` explicitly when tools are offered, rather than inheriting whatever the endpoint defaults to. Overridable per deployment with `VLLM_TOOL_CHOICE`. |
+
+Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it: a handler named for the GPT-OSS models sat in the tree long after those models were pruned.
 
 ### A handler may declare tool policy; it must not decide for the model
 
@@ -124,7 +128,7 @@ Each layer above therefore owns a concern *completely*. Where two layers appeare
 
 ## litellm is not on the LLM path
 
-litellm remains a dependency, but the engine does not use it. It reaches exactly one function: `LLMManager.completion_with_usage`.
+litellm remains a dependency, but the engine does not use it. On the LLM request path it reaches exactly one function: `LLMManager.completion_with_usage`. Off that path, two other places touch it: the memory storage adapter (`services/memory/storage/adapter.py`) calls `litellm.embedding`, and `DatabricksResponsesLLM` reuses the configured `litellm.cache` object as a plain key/value store for Responses API calls.
 
 Two consequences worth internalizing:
 

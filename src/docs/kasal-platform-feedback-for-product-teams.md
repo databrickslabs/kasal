@@ -1,5 +1,8 @@
 # Kasal → Databricks product teams: field-proven asks
 
+> [!NOTE]
+> **Status: internal.** Written for Databricks product teams, not for Kasal users. File references were updated to the current layout; the rest is unchanged from when it was written.
+
 **Audience:** Databricks product managers (and their leadership) for Lakebase, Vector
 Search, Genie/AI-BI, Model Serving, Unity Catalog, Databricks Apps, MLflow, and Agent
 Bricks / Mosaic AI Agent Framework.
@@ -57,7 +60,7 @@ one backend interface, with three interchangeable backends: **Databricks Vector
 Search**, **Lakebase (Postgres + pgvector)**, and a local fallback. Memory survives
 across runs because the crew identity is a deterministic hash of crew structure, and
 every record is `group_id`-scoped.
-`engines/crewai/memory/{memory_backend_factory,databricks_storage_backend,lakebase_storage_backend,crew_memory_service}.py`
+`services/memory/storage/{factory,lakebase,local}.py`, `services/memory/run/crew_memory.py`
 
 **Why a PM should care.** This is the single biggest driver of Vector Search and
 Lakebase usage in our deployments — memory is *why* a customer provisions them.
@@ -77,7 +80,7 @@ go live. This is a gating requirement, not a nice-to-have.
 **What we built.** Approval gates as nodes inside a flow: execution pauses, an
 approval record is created with an allowed-approver list and a timeout, webhooks fire
 on gate events, and on rejection the flow either fails or retries the prior step.
-`models/hitl_approval.py`, `services/{hitl_service,hitl_webhook_service,hitl_timeout_service}.py`
+`models/hitl_approval.py`, `services/hitl/{service,webhook,timeout}.py`
 
 **Ask.** A platform HITL primitive — pause, approve/reject, timeout, resume — usable
 from any agent product. We believe this is the most commonly requested missing piece
@@ -94,7 +97,7 @@ combine into an exfiltration path.
 severity), secret-leak detection with redaction before persistence, and a **tool
 capability manifest** that flags the "lethal trifecta" (reads sensitive data + ingests
 untrusted content + can communicate externally) plus destructive-operation tools.
-`engines/crewai/security/{scanner_pipeline,prompt_injection_detector,secret_leak_detector,tool_capability_manifest}.py`
+`services/security/{scanner_pipeline,prompt_injection_detector,secret_leak_detector,tool_capability_manifest}.py`
 
 **Honest caveat — important.** These are **log-only**. They detect and warn; they do
 not block. We deliberately did not put a heuristic in a blocking path. So this is
@@ -112,7 +115,7 @@ principal that can see everything defeats Unity Catalog.
 **What we built.** An auth chain (OBO user token → OAuth → PAT → env) threaded down to
 every Databricks call, including through async offloads and spawned subprocesses,
 where the user context is easily lost. `utils/databricks_auth.py`; group isolation in
-`models/group.py` and `services/group_service.py`.
+`models/group.py` and `services/groups/groups.py`.
 
 **Honest caveat.** Keeping OBO alive across async and subprocess boundaries is subtle
 and we have fixed real bugs where the token silently dropped and calls fell back to a
@@ -129,7 +132,7 @@ work with branching, approval gates, and a schedule.
 
 **What we built.** Three execution paths behind one interface — an in-process
 single-agent path for chat latency, and subprocess-isolated crew and flow (DAG) paths
-— plus cron scheduling. `engines/crewai/paths/{light_agent,crew,flow}/`,
+— plus cron scheduling. `services/{chat,agent_builder,flow_builder}/`,
 `models/schedule.py`.
 
 **Ask.** Composable orchestration primitives (graph, gate, schedule, isolation) rather
@@ -144,8 +147,8 @@ review, by both engineering and finance.
 **What we built.** Per-step traces (agent, task, tool) with OTel span structure,
 MLflow autologging with secret redaction before export, live streaming to the UI, and
 token/usage capture per LLM call — all `group_id`-scoped.
-`models/execution_trace.py`, `engines/crewai/infra/mlflow_integration.py`,
-`services/{execution_trace_service,trace_broadcast_service}.py`
+`models/execution_trace.py`, `services/mlflow/integration.py`,
+`services/trace/service.py`, `services/trace/broadcast.py`
 
 **Related field note.** We separately built internal consumption tracking and found
 that per-product agent cost attribution is only cleanly derivable for token-billed
@@ -165,7 +168,7 @@ presentation — not a paragraph of chat.
 agent emits and a renderer draws, covering conversation, document, presentation,
 dashboard, mindmap and other surface kinds, with a component registry (tables, charts,
 maps, embeds). Renderer is vendored into every export so surfaces stay portable.
-`engines/crewai/exporters/templates/databricks_app/frontend/src/a2ui/`
+`services/export/templates/databricks_app/frontend/src/a2ui/`
 
 **Ask.** A standard contract for agent-generated UI, so agent output can render
 consistently across Apps and AI/BI instead of each team inventing one.
@@ -178,12 +181,12 @@ this, can we still run it ourselves?"* Customers commit faster when the answer i
 
 **What we built.** An agent built in Kasal exports to a **deployable Databricks App**
 (with DABs bundle, config YAML, bundled tools, vendored UI), a **Databricks notebook**,
-or a **standalone Python project**. `engines/crewai/exporters/`
+or a **standalone Python project**. `services/export/`
 
 **On Agent Bricks specifically — stated carefully.** We integrate Agent Bricks as a
 callable tool, so a Databricks-native agent can participate in a Kasal workflow
 (`repositories/agentbricks_repository.py`,
-`engines/crewai/tools/custom/agentbricks_tool.py`). What we cannot currently do is the
+`services/tools/agentbricks_tool.py`). What we cannot currently do is the
 reverse: compose Agent Bricks agents into an external orchestration graph as
 first-class citizens, or export one as a customer-owned asset. That asymmetry is a
 recurring adoption objection in our deals — customers ask what happens if they want to
@@ -203,8 +206,8 @@ room. The blocker is never the data; it is thousands of DAX measures.
 Power BI APIs → transpile DAX to SQL (deterministic pattern registry plus a
 skill-corpus LLM path) → resolve measure dependencies → emit **Unity Catalog Metric
 View** YAML and deploy SQL → optionally generate **Lakeview** dashboards and **Genie**
-spaces. `converters/services/powerbi/`, `converters/pipeline.py`,
-`engines/crewai/tools/custom/metric_view_utils/`
+spaces. `services/converters/formats/powerbi/`, `services/converters/pipeline.py`,
+`services/tools/metric_view_utils/`
 
 **Why a PM should care.** This converts a Power BI estate directly into Unity Catalog
 Metric Views, Lakeview dashboards, and Genie spaces — the migration is the adoption

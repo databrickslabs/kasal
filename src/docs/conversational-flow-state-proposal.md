@@ -2,6 +2,9 @@
 
 A proposal for LangGraph-style state across the nodes of a Kasal flow, so a flow can hold a multi-turn conversation instead of running once and forgetting.
 
+> [!NOTE]
+> **Status: internal / proposal.** This is the design record. The spine it proposes has since been built and committed under `src/backend/src/services/flow_builder/conversation/`; for how it works today, read [conversational flow state](./conversational-flow-state.md). The "Implementation status" and "uncommitted typed-state work" sections below describe the tree when the proposal was written.
+
 - [The short version](#the-short-version)
 - [What Kasal already has](#what-kasal-already-has)
 - [How the other systems do it](#how-the-other-systems-do-it)
@@ -322,10 +325,10 @@ this is experimental). What exists:
 
 | Piece | Where | Lines |
 |---|---|---|
-| Reducers (`replace`/`append`/`merge`/`add`) | `flow_builder/modules/flow_state_channels.py` | 107 |
-| Channel compiler + `DictLikeState.merge` | `flow_builder/modules/flow_state_model.py` | 268 |
-| Turn contract (`ConversationState`, `turn_inputs`, `close_turn`) | `flow_builder/modules/flow_conversation.py` | 172 |
-| Derived thread key | `flow_builder/flow_thread.py` | 68 |
+| Reducers (`replace`/`append`/`merge`/`add`) | `flow_builder/conversation/channels.py` | 107 |
+| Channel compiler + `DictLikeState.merge` | `flow_builder/conversation/state_model.py` | 268 |
+| Turn contract (`ConversationState`, `turn_inputs`, `close_turn`) | `flow_builder/conversation/turn.py` | 172 |
+| Derived thread key | `flow_builder/conversation/thread.py` | 68 |
 | `begin_turn`, id adoption, reducer-aware merge, `save_checkpoint` | `flow_builder/runtime/flow.py` | edits |
 | Turn wiring (`_thread_id`, `_kickoff_inputs`, `_close_turn`) | `flow_builder/backend_flow.py` | edits |
 | `session_id` / `user_message` on the wire | `schemas/execution.py`, `execution/service.py`, chat config builder | edits |
@@ -387,7 +390,7 @@ Steps 1–4 are the spine. Step 5 is where you can see it. Steps 6–8 are follo
 ## What to do with the uncommitted typed-state work
 
 There is currently uncommitted work that compiles a declared state schema into a real
-state class (`services/flow_builder/modules/flow_state_model.py`), wires it into the
+state class (now `services/flow_builder/conversation/state_model.py`), wires it into the
 builder, and derives the schema from the canvas on the frontend. It is tested and green,
 but it was designed for a different goal: catching a misspelled input on a one-shot run.
 

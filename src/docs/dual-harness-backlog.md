@@ -1,5 +1,8 @@
 # Dual-harness backlog
 
+> [!NOTE]
+> **Status: internal / backlog.** Engineering backlog, not user documentation.
+
 Open items from running Kasal and CrewAI side by side. Each one is written so it
 can be picked up cold: what was observed, why it matters, and where the work is.
 Nothing here is in progress.
@@ -17,7 +20,7 @@ version is never reached, because we never construct a CrewAI `Flow`.
 CrewAI 1.15.16 ships `crewai/experimental/conversational.py`
 (`Flow(conversational=True)`), whose `ConversationState` is:
 
-```
+```text
 id, messages, current_user_message, last_user_message,
 last_intent, ended, events, agent_threads, session_ready
 ```

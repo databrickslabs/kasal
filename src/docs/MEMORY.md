@@ -133,7 +133,7 @@ The block opens with a header instructing the model to weigh the content as back
 
 The recall score floor takes a different route: `CrewMemoryService._build_memory_kwargs` sets `Memory.recall_min_score`, and it does so where the embedder is known, because the floor depends on it. 0.75 was calibrated with the Databricks embedder; the local Ollama fallback (`nomic-embed-text`) compresses the cosine scale — a run's own previous task output scores about 0.68 blended against the task description that produced it, unrelated records at most 0.60 — so on Ollama the default is 0.62. Precedence: the teamspace's panel value, then `KASAL_MEMORY_RECALL_MIN_SCORE`, then the embedder default.
 
-**Recall depth** — declared fields of the engine's `Memory`, implemented in `engine/recall_planner.py` and applied by `Memory.recall(mode="auto")`, which is what Chat, Agent Builder and Flow Builder all call through `hooks.build_memory_preamble` / `make_memory_context_provider`, on either harness:
+**Recall depth** — declared fields of the engine's `Memory`, implemented in `engine/recall_planner.py` and applied by `Memory.recall(mode="auto")`, which is what Chat, Agent Builder and Flow Builder all call through `build_memory_preamble` / `make_memory_context_provider` (`run/recall.py`), on either harness:
 
 | Control | Default | Effect |
 |---------|---------|--------|
@@ -144,7 +144,7 @@ The recall score floor takes a different route: `CrewMemoryService._build_memory
 | Complex-query threshold | 0.7 | Complexity (0–1, judged by the analysis call) at or above which recall explores even between the two confidence bounds |
 | Memory LLM | The crew's model | Model used for the analysis, exploration and merge calls, classification, and the maintenance passes |
 
-No LLM, an empty store, or a malformed reply degrades every one of these to the shallow search — never to a failed recall. The write-time duplicate check (`hooks._already_remembered`) calls `recall(mode="raw")`: it compares the literal text it is about to write, so distilling it would be wrong. The trace's Memory Read row carries `query`, and when analysis ran, `distilled_query` and `exploration_rounds`.
+No LLM, an empty store, or a malformed reply degrades every one of these to the shallow search — never to a failed recall. The write-time duplicate check (`_already_remembered` in `run/persist.py`) calls `recall(mode="raw")`: it compares the literal text it is about to write, so distilling it would be wrong. The trace's Memory Read row carries `query`, and when analysis ran, `distilled_query` and `exploration_rounds`.
 
 **Save-time consolidation** — `engine/consolidation.py`, run inside `Memory.remember` before the insert:
 
@@ -197,11 +197,11 @@ The local SQLite backend applies the same guarantee in `LocalStorageBackend._mig
 
 ## Memory browser
 
-The Memory Browser (`src/frontend/src/components/MemoryBackend/MemoryRecordsBrowser.tsx`) shows what a teamspace remembers: stored records with their scope and categories, and a concept graph of how memories relate. It reads the configured backend directly rather than through the recall path, so it also shows records recall would filter out.
+The Memory Browser (`src/frontend/src/features/memory/components/MemoryRecordsBrowser.tsx`) shows what a teamspace remembers: stored records with their scope and categories, and a concept graph of how memories relate. It reads the configured backend directly rather than through the recall path, so it also shows records recall would filter out.
 
 The browser, and the chat's memory pane beside a finished run, can be scoped to one run. That scoping is exact, and it is the same on all three execution paths (Chat, Agent Builder, Flow Builder):
 
-- **Saved** — the records the run wrote. A run's `memory_write` traces carry the stored `record_id` (the OTel event bridge stamps it for Agent Builder and Flow Builder runs from `MemorySaveCompletedEvent`; the Chat path stamps it from its save hook), and every record a run writes carries the run's `execution_id` in its metadata (`hooks._persist_task_output` for task outputs, the chat service for turns). A record matching either is the run's, except consolidation output: end-of-run maintenance re-saves merged records under whichever run triggered it, and those are maintenance's, not the run's. Runs traced before the ids existed are matched by the text their write traces recorded. There is no time-window inference: a run whose traces carry no writes shows nothing under Saved. (Windowing was how the browser used to attribute a run's records, and it attributed everything written in the window — chat turns, maintenance merges, and for the oldest run in the database everything ever written — to the selected run.)
+- **Saved** — the records the run wrote. A run's `memory_write` traces carry the stored `record_id` (the OTel event bridge stamps it for Agent Builder and Flow Builder runs from `MemorySaveCompletedEvent`; the Chat path stamps it from its save hook), and every record a run writes carries the run's `execution_id` in its metadata (`_persist_task_output` in `services/memory/run/persist.py` for task outputs, the chat service for turns). A record matching either is the run's, except consolidation output: end-of-run maintenance re-saves merged records under whichever run triggered it, and those are maintenance's, not the run's. Runs traced before the ids existed are matched by the text their write traces recorded. There is no time-window inference: a run whose traces carry no writes shows nothing under Saved. (Windowing was how the browser used to attribute a run's records, and it attributed everything written in the window — chat turns, maintenance merges, and for the oldest run in the database everything ever written — to the selected run.)
 - **Recalled** — the records the run read: the `record_ids` on its `memory_retrieval` traces.
 
 Both views read the run's memory rows through `GET /traces/job/{job_id}?event_type_prefix=memory_` so a long run's writes, which land last, are not cut off by the default trace page.

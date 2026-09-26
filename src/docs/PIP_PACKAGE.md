@@ -5,14 +5,23 @@ in one package, with a `kasal` command that serves both on one port.
 
 ```bash
 pip install kasal        # once published — or: pip install dist/kasal-*.whl
+export LOCAL_DEV_AUTH=true
 kasal                    # UI + API on http://127.0.0.1:8000
 ```
 
-First boot creates `~/.kasal/kasal.db` (SQLite), seeds the model/tool catalog,
-and writes logs to `~/.kasal/logs`. Options:
+Every API call needs an identity, and the `kasal` command does not set one.
+Without a proxy in front, export `LOCAL_DEV_AUTH=true` first so requests run as
+`LOCAL_DEV_USER_EMAIL` (default `dev@localhost`); otherwise every API call
+returns 401. Only do that while the server is bound to loopback: with
+`--host 0.0.0.0`, anyone who can reach the port acts as that user.
 
-```
-kasal --host 0.0.0.0 --port 9000 --data-dir /srv/kasal
+First boot creates `~/.kasal/kasal.db` (SQLite) and seeds the model/tool
+catalog. The command sets `LOG_DIR` to `~/.kasal/logs`, but the app currently
+overrides it at import (`src/backend/src/main.py`), so logs land in a `logs/`
+directory inside the installed package. Options:
+
+```bash
+kasal --host 127.0.0.1 --port 9000 --data-dir /srv/kasal
 ```
 
 Every environment variable the app normally reads still applies — the CLI only
@@ -28,7 +37,7 @@ The backend's top-level import package is `src` (thousands of `from src.…`
 imports), which must never be installed as a top-level module. The wheel
 therefore ships the app **under** the `kasal` package:
 
-```
+```text
 kasal/
   cli.py                  # the `kasal` entry point
   _app/src/…              # the backend, verbatim
@@ -55,3 +64,10 @@ The name `kasal` was unclaimed on PyPI as of 2026-08-30. `dist/` and
 `src/frontend_static/` are gitignored build artifacts; the root
 `pyproject.toml` does not affect the Databricks App deploy (`src/deploy.py`
 stages the backend's own pyproject into its bundle).
+
+## Related
+
+- [Quick start](./QUICK_START.md)
+- [Configuration reference](./CONFIGURATION.md)
+
+Back to the [documentation hub](./README.md).

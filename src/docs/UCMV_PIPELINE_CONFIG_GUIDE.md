@@ -322,7 +322,7 @@ unresolved with a `TODO`.
 
 **2. Review and fill gaps in the Config Editor (`/config-editor`).**
 Open the generated config in the Config Editor. The left sidebar lists every key
-with a color-coded status badge (`getKeyStatus` in `types/configEditor.ts`):
+with a color-coded status badge (`getKeyStatus` in `src/frontend/src/types/config/configEditor.ts`):
 
 | Badge | Meaning |
 |-------|---------|
