@@ -80,6 +80,7 @@ Kasal uses SQLite or PostgreSQL through async SQLAlchemy, or Lakebase inside Dat
 - **`Settings` (`src/backend/src/config/settings.py`)**, which applies to anything that does not go through `run.sh` or the entrypoint, such as `alembic` or `python run_seeders.py`: `DATABASE_TYPE` defaults to `postgres`. When set to `sqlite`, `SQLITE_DB_PATH` defaults to the absolute path `src/backend/app.db`.
 - **`run.sh`**: defaults to SQLite (`./run.sh postgres` switches) and exports `SQLITE_DB_PATH=./app.db`, relative to the directory you run it from. Run it from `src/backend` so it opens `src/backend/app.db`.
 - **`src/entrypoint.py`**: `--db-type` defaults to `sqlite` with `SQLITE_DB_PATH` defaulting to `src/kasal.db`, and it exports `DATABASE_URI`/`DATABASE_URL` directly. With `--db-type postgres` and no `--db-url`, it falls back to a local `postgres` database on `localhost:5432`.
+- **The `kasal` command from the pip package (`packaging/kasal/cli.py`)**: defaults `DATABASE_TYPE` to `sqlite` and `SQLITE_DB_PATH` to `~/.kasal/kasal.db` (or `<--data-dir>/kasal.db`), without overriding values already in the environment. It does not set `LOCAL_DEV_AUTH`. For more information, see [installing Kasal with pip](./PIP_PACKAGE.md).
 - **Databricks Apps with a Lakebase resource attached**: when `PGHOST`, `PGDATABASE` and `PGUSER` are injected by the platform, `init_db` uses the Lakebase resource and the variables above do not apply.
 
 To make `alembic` and the seeders target the same SQLite file as `run.sh`, prefix them with `DATABASE_TYPE=sqlite`.
@@ -89,7 +90,7 @@ The database variables are:
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `DATABASE_TYPE` | `postgres` (`run.sh`: `sqlite`) | `sqlite` or `postgres`; selects how `DATABASE_URI` is assembled | `src/backend/src/config/settings.py` |
-| `SQLITE_DB_PATH` | `src/backend/app.db` (`run.sh`: `./app.db`; entrypoint: `src/kasal.db`) | SQLite database file | `src/backend/src/config/settings.py`, `src/entrypoint.py` |
+| `SQLITE_DB_PATH` | `src/backend/app.db` (`run.sh`: `./app.db`; entrypoint: `src/kasal.db`; pip `kasal`: `~/.kasal/kasal.db`) | SQLite database file | `src/backend/src/config/settings.py`, `src/entrypoint.py` |
 | `DATABASE_URI` | Assembled from the fields above | Full async SQLAlchemy URI; when set, it wins over `DATABASE_TYPE` | `src/backend/src/config/settings.py` |
 | `POSTGRES_SERVER` | `localhost` | PostgreSQL host | `src/backend/src/config/settings.py` |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port | `src/backend/src/config/settings.py` |

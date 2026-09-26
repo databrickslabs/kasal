@@ -60,7 +60,7 @@ one backend interface, with three interchangeable backends: **Databricks Vector
 Search**, **Lakebase (Postgres + pgvector)**, and a local fallback. Memory survives
 across runs because the crew identity is a deterministic hash of crew structure, and
 every record is `group_id`-scoped.
-`engines/crewai/memory/{memory_backend_factory,databricks_storage_backend,lakebase_storage_backend,crew_memory_service}.py`
+`services/memory/storage/{factory,lakebase,local}.py`, `services/memory/run/crew_memory.py`
 
 **Why a PM should care.** This is the single biggest driver of Vector Search and
 Lakebase usage in our deployments — memory is *why* a customer provisions them.
@@ -80,7 +80,7 @@ go live. This is a gating requirement, not a nice-to-have.
 **What we built.** Approval gates as nodes inside a flow: execution pauses, an
 approval record is created with an allowed-approver list and a timeout, webhooks fire
 on gate events, and on rejection the flow either fails or retries the prior step.
-`models/hitl_approval.py`, `services/{hitl_service,hitl_webhook_service,hitl_timeout_service}.py`
+`models/hitl_approval.py`, `services/hitl/{service,webhook,timeout}.py`
 
 **Ask.** A platform HITL primitive — pause, approve/reject, timeout, resume — usable
 from any agent product. We believe this is the most commonly requested missing piece
@@ -97,7 +97,7 @@ combine into an exfiltration path.
 severity), secret-leak detection with redaction before persistence, and a **tool
 capability manifest** that flags the "lethal trifecta" (reads sensitive data + ingests
 untrusted content + can communicate externally) plus destructive-operation tools.
-`engines/crewai/security/{scanner_pipeline,prompt_injection_detector,secret_leak_detector,tool_capability_manifest}.py`
+`services/security/{scanner_pipeline,prompt_injection_detector,secret_leak_detector,tool_capability_manifest}.py`
 
 **Honest caveat — important.** These are **log-only**. They detect and warn; they do
 not block. We deliberately did not put a heuristic in a blocking path. So this is
@@ -132,7 +132,7 @@ work with branching, approval gates, and a schedule.
 
 **What we built.** Three execution paths behind one interface — an in-process
 single-agent path for chat latency, and subprocess-isolated crew and flow (DAG) paths
-— plus cron scheduling. `engines/crewai/paths/{light_agent,crew,flow}/`,
+— plus cron scheduling. `services/{chat,agent_builder,flow_builder}/`,
 `models/schedule.py`.
 
 **Ask.** Composable orchestration primitives (graph, gate, schedule, isolation) rather

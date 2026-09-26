@@ -93,6 +93,7 @@ The default database depends on how you start the backend:
 | `./run.sh` | SQLite | `./app.db`, relative to where you run it; run it from `src/backend` |
 | `uvicorn`, `alembic`, `python run_seeders.py` (through `Settings`) | PostgreSQL (`DATABASE_TYPE` defaults to `postgres`) | `src/backend/app.db` when `DATABASE_TYPE=sqlite` |
 | `python src/entrypoint.py` | SQLite (`--db-type sqlite`) | `src/kasal.db` |
+| `kasal` (pip package) | SQLite | `~/.kasal/kasal.db` |
 
 So if you use `run.sh` with SQLite, prefix the other commands with `DATABASE_TYPE=sqlite`, or they target a PostgreSQL server on `localhost:5432`:
 

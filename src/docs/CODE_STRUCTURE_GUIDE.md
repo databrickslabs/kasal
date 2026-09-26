@@ -140,7 +140,7 @@ Paths in this section are relative to `src/frontend/src/`.
 | `features/executions/trace/components/` | Trace event icons |
 | `features/workflow/canvas/lib/` | Canvas layout calculations and graph indexing |
 | `features/workflow/canvas/components/` | Crew/flow canvases, node/edge registry and controls |
-| `features/workflow/{agents,tasks,crews,flows,planning,scheduling,export}/` | Workflow editing, selection and export views |
+| `features/workflow/{agents,tasks,crews,flows,scheduling,export}/` | Workflow editing, selection and export views |
 | `features/workflow/assistant/` | Workflow conversation views, contracts, hooks and message state |
 | `features/executions/`, `features/approvals/`, `features/triggers/` | Run history/results, approvals and event triggers |
 | `features/configuration/`, `features/tools/`, `features/memory/`, `features/groups/` | Domain settings, tool configuration selectors, memory and workspace selection |
