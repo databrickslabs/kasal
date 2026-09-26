@@ -59,10 +59,10 @@ async def open_child_database() -> bool:
     from the database the server uses. Returns whether Lakebase is active.
     """
     from src.db.database_router import activate_lakebase_in_subprocess
-    from src.services.settings import engine_settings
+    from src.services.settings import engine_settings_loader
 
     lakebase_active = await activate_lakebase_in_subprocess()
-    await engine_settings.load()
+    await engine_settings_loader.load()
     return lakebase_active
 
 

@@ -42,6 +42,9 @@ class UIConfig(Base):
     disabled_components = Column(Text, nullable=True)
     # Renderer style overrides (accent color, density, theme) as JSON.
     style_json = Column(Text, nullable=True)
+    # This workspace's overrides of the system A2UI defaults (JSON object; keys
+    # from services/a2ui/settings.OVERRIDABLE). NULL uses every default.
+    settings_json = Column(Text, nullable=True)
 
     # Multi-tenant fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation

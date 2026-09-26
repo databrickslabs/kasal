@@ -12,9 +12,9 @@ Read-only and best-effort: any failure yields ``""`` and the turn still answers.
 """
 
 import logging
-import os
 from typing import Any, Callable, Optional
 
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ async def build_conversation_preamble(
     next turn refers to — "as a table", "shorter", the same question asked
     again — and a 240-char stub of it left the agent unable to restate a report
     it could not see, so it went and researched it again. That answer is kept
-    whole under its own cap (``CHAT_HISTORY_LAST_ANSWER_CHAR_CAP``, 12k chars,
+    whole under its own cap (``chat_history_last_answer_char_cap``, 12k chars,
     about 3k tokens) and sits outside the budget. Older answers stay stubs: a
     whole transcript of decks and reports would overflow the model window and
     slow every turn, and the compaction summary already carries what they said.
@@ -62,13 +62,13 @@ async def build_conversation_preamble(
     if not group_ids:
         return ""
 
-    # Tunables (env-overridable). Defaults favor keeping user facts.
-    recent_limit = int(os.getenv("CHAT_HISTORY_RECENT_LIMIT", "120"))
-    user_cap = int(os.getenv("CHAT_HISTORY_USER_CHAR_CAP", "500"))
-    assistant_cap = int(os.getenv("CHAT_HISTORY_ASSISTANT_CHAR_CAP", "240"))
-    last_answer_cap = int(os.getenv("CHAT_HISTORY_LAST_ANSWER_CHAR_CAP", "12000"))
-    max_assistant_turns = int(os.getenv("CHAT_HISTORY_MAX_ASSISTANT_TURNS", "8"))
-    max_chars = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "6000"))
+    # Tunables (Engines → Advanced → Chat). Defaults favor keeping user facts.
+    recent_limit = int(engine_setting("chat_history_recent_limit"))
+    user_cap = int(engine_setting("chat_history_user_char_cap"))
+    assistant_cap = int(engine_setting("chat_history_assistant_char_cap"))
+    last_answer_cap = int(engine_setting("chat_history_last_answer_char_cap"))
+    max_assistant_turns = int(engine_setting("chat_history_max_assistant_turns"))
+    max_chars = int(engine_setting("chat_history_max_chars"))
 
     context_summary = None
     summary_upto = None

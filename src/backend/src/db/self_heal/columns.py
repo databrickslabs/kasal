@@ -166,14 +166,20 @@ async def _ensure_ui_config_columns(conn: AsyncConnection) -> None:
     """ui_config: the table itself first — ``init_db`` skips ``create_all`` once
     any table exists, so installs older than ui_config never got it and the UI
     Configurator 500'd with "no such table" — then the Predefined-UI columns
-    (catalog + branding, and the per-component toggles)."""
+    (catalog + branding, the per-component toggles, and the workspace's
+    overrides of the system A2UI defaults)."""
     await ensure_table(conn, "src.models.ui_config", "UIConfig")
     await ensure_columns(
         conn,
         "ui_config",
         [
             (c, "TEXT", "TEXT")
-            for c in ("catalog_json", "style_json", "disabled_components")
+            for c in (
+                "catalog_json",
+                "style_json",
+                "disabled_components",
+                "settings_json",
+            )
         ],
     )
 

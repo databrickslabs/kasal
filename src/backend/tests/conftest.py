@@ -267,6 +267,21 @@ def restore_engine_settings_snapshot():
     engine_settings._snapshot.update(saved)
 
 
+@pytest.fixture
+def engine_setting(monkeypatch):
+    """Set a Configuration → Engines setting for one test: ``engine_setting(key, v)``."""
+    from src.services.settings import engine_settings
+
+    def _set(key, value):
+        monkeypatch.setitem(
+            engine_settings._snapshot,
+            key,
+            str(value).lower() if isinstance(value, bool) else str(value),
+        )
+
+    return _set
+
+
 @pytest.fixture(autouse=True)
 def no_leaked_databricks_auth_window(request):
     """Fail a test that leaves a Databricks auth window (sp_auth._pinned) open.

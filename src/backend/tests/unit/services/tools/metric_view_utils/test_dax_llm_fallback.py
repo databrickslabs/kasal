@@ -498,7 +498,7 @@ class TestLLMFirstCorpus:
             # Force one measure per batch so topo ordering yields distinct calls.
             with (
                 patch.object(d, "_call_llm", new=fake_call),
-                patch.object(d, "_DAX_LLM_BATCH_SIZE", 1),
+                patch.object(d, "_dax_llm_batch_size", return_value=1),
             ):
                 # child listed first, but topo_priority puts parent (rank 0) before child (rank 1)
                 await d.translate_batch_with_llm(

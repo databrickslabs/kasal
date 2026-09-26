@@ -17,7 +17,6 @@ status write, and it back-fills history on first pass.
 import hashlib
 import json
 import logging
-import os
 import random
 import statistics
 from dataclasses import dataclass, field
@@ -37,6 +36,7 @@ from src.repositories.workflow_recipe_repository import WorkflowRecipeRepository
 from src.repositories.workflow_recipe_trial_repository import (
     WorkflowRecipeTrialRepository,
 )
+from src.services.settings.engine_settings import setting as engine_setting
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,10 @@ _MINEABLE_EXECUTION_TYPES = {"crew"}
 # COMPLETED means the crew finished, not that its output was right.
 _MINEABLE_STATUS = "COMPLETED"
 
-_BATCH = int(os.getenv("WORKFLOW_RECIPE_MINE_BATCH", "100"))
+
+def _mine_batch() -> int:
+    return int(engine_setting("workflow_recipe_mine_batch"))
+
 
 # Minimum cosine similarity for a recipe to be offered for reuse.
 #
@@ -64,19 +67,17 @@ _BATCH = int(os.getenv("WORKFLOW_RECIPE_MINE_BATCH", "100"))
 # The absolute scale is MODEL-DEPENDENT: swapping the embedder (dev Ollama vs
 # production databricks-gte-large-en) shifts these numbers, so re-measure before
 # assuming this default transfers. Hence the env override.
-MIN_SIMILARITY = float(os.getenv("WORKFLOW_RECIPE_MIN_SIMILARITY", "0.75"))
+def configured_min_similarity() -> float:
+    return float(engine_setting("workflow_recipe_min_similarity"))
+
 
 # Kill-switch for feeding past crews into generation as few-shot examples. The
 # real gate is curation (only human-blessed recipes are ever used, so this is
-# inert until a workspace curates), but a single env var to turn the whole
+# inert until a workspace curates), but a single switch to turn the whole
 # behaviour off is worth having when diagnosing a generation regression.
-EXEMPLARS_ENABLED = os.getenv(
-    "WORKFLOW_RECIPE_EXEMPLARS", "true"
-).strip().lower() not in (
-    "0",
-    "false",
-    "no",
-)
+def exemplars_enabled() -> bool:
+    return bool(engine_setting("workflow_recipe_exemplars"))
+
 
 # Fraction of ELIGIBLE generations (those that found a blessed, above-threshold
 # match) that are deliberately denied their exemplars and recorded as controls.
@@ -92,9 +93,8 @@ EXEMPLARS_ENABLED = os.getenv(
 # deliberately worse-informed generation — so it is opted into for a measurement
 # window, not left running. 0.2 for a few hundred generations is enough to see a
 # large effect; small effects need more than a single workspace can produce.
-HOLDOUT_FRACTION = max(
-    0.0, min(1.0, float(os.getenv("WORKFLOW_RECIPE_HOLDOUT", "0.0") or 0.0))
-)
+def holdout_fraction() -> float:
+    return float(engine_setting("workflow_recipe_holdout"))
 
 
 @dataclass
@@ -241,7 +241,7 @@ class WorkflowRecipeService:
         away, which is exactly how the sweep failed to converge.
         """
         return await self.execution_service.get_recent_runs(
-            limit=_BATCH, status=_MINEABLE_STATUS
+            limit=_mine_batch(), status=_MINEABLE_STATUS
         )
 
     async def _trace_shape(self, job_id: str) -> Dict[str, Any]:
@@ -459,7 +459,9 @@ class WorkflowRecipeService:
         "closest anyway". A ranked list always has a best row, so a caller that
         forgets to check the score would happily propose an unrelated crew.
         """
-        threshold = MIN_SIMILARITY if min_similarity is None else min_similarity
+        threshold = (
+            configured_min_similarity() if min_similarity is None else min_similarity
+        )
         hits = await self.find_similar_for_prompt(prompt, group_ids, limit=limit)
         relevant = [(r, s) for r, s in hits if s >= threshold]
 
@@ -514,7 +516,7 @@ class WorkflowRecipeService:
         populations the report needs to keep apart.
         """
         decision = ExemplarDecision(prompt=prompt or "")
-        if not EXEMPLARS_ENABLED or not prompt or not group_ids:
+        if not exemplars_enabled() or not prompt or not group_ids:
             return decision
         try:
             hits = await self.find_similar_for_prompt(prompt, group_ids, limit=8)
@@ -540,7 +542,8 @@ class WorkflowRecipeService:
         blessed = [
             (r, s)
             for r, s in hits
-            if getattr(r, "curation", None) == "good" and s >= MIN_SIMILARITY
+            if getattr(r, "curation", None) == "good"
+            and s >= configured_min_similarity()
         ][:limit]
         if not blessed:
             return decision  # arm stays ARM_NONE
@@ -563,14 +566,15 @@ class WorkflowRecipeService:
 
     @staticmethod
     def _assign_to_holdout() -> bool:
-        """Randomly, per generation, at ``HOLDOUT_FRACTION``.
+        """Randomly, per generation, at ``holdout_fraction()``.
 
         Per generation rather than per prompt: assigning by prompt hash would be
         stable, but a workspace repeats a handful of intents, so a hash split
         would put whole intents permanently in one arm and compare different
         WORK rather than different treatment.
         """
-        return HOLDOUT_FRACTION > 0.0 and random.random() < HOLDOUT_FRACTION
+        fraction = holdout_fraction()
+        return fraction > 0.0 and random.random() < fraction
 
     @staticmethod
     def _format_exemplars(blessed: List[Tuple[Any, float]]) -> str:
@@ -910,7 +914,7 @@ class WorkflowRecipeService:
 
         # One scan of recent crew runs, reused across every pending trial —
         # cheaper than a query per trial, and the candidate window is small.
-        executions = await self._recent_crew_executions(limit=_BATCH)
+        executions = await self._recent_crew_executions(limit=_mine_batch())
         by_agent_id: Dict[str, Any] = {}
         for execution in executions:
             inputs = execution.inputs if isinstance(execution.inputs, dict) else {}
@@ -990,8 +994,8 @@ class WorkflowRecipeService:
             "injection_rate": (
                 round(arms[ARM_EXEMPLAR]["generations"] / total, 4) if total else None
             ),
-            "holdout_fraction": HOLDOUT_FRACTION,
-            "min_similarity": MIN_SIMILARITY,
+            "holdout_fraction": holdout_fraction(),
+            "min_similarity": configured_min_similarity(),
             "arms": arms,
             "comparable": (
                 arms[ARM_EXEMPLAR]["generations"] > 0

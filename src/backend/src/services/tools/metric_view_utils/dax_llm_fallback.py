@@ -14,6 +14,8 @@ import os
 import re
 from collections import OrderedDict
 
+from src.services.settings.engine_settings import setting as engine_setting
+
 from .data_classes import TranslationResult
 from .function_ref_retriever import render_function_refs
 
@@ -594,14 +596,16 @@ async def translate_with_llm(
 # most of the cross-measure reference benefit of the old sequential order.
 _DAX_LLM_CONCURRENCY = 6
 
+
 # Number of measures translated per LLM call. The skill-corpus system prefix
 # (~14k tokens) and the shared fact-table context are sent ONCE per call, so a
 # batch of N amortises them across N measures instead of paying them per measure
 # — the single biggest lever on the workspace tokens-per-minute rate limit, since
 # Databricks silently drops Anthropic prompt caching (every call is cache_read=0).
-# Tunable via env for field tuning without a redeploy. Keep modest so one call's
+# Tunable in Tools → Advanced without a redeploy. Keep modest so one call's
 # input+output stays well within context/output limits.
-_DAX_LLM_BATCH_SIZE = max(1, int(os.getenv("DAX_LLM_BATCH_SIZE", "12")))
+def _dax_llm_batch_size() -> int:
+    return int(engine_setting("dax_llm_batch_size"))
 
 
 async def translate_batch_with_llm(
@@ -671,9 +675,10 @@ async def translate_batch_with_llm(
     if topo_priority:
         candidates.sort(key=lambda m: topo_priority.get(m.original_name, 0))
 
+    batch_size = _dax_llm_batch_size()
     logger.info(
         f"[DAX_LLM] Attempting LLM fallback for {len(candidates)} measures in "
-        f"{table_key} (batch_size={_DAX_LLM_BATCH_SIZE})"
+        f"{table_key} (batch_size={batch_size})"
     )
 
     # Run-scoped cache — prevents cross-tenant leakage between pipeline runs and
@@ -691,8 +696,8 @@ async def translate_batch_with_llm(
     # dependencies are ordered into earlier batches (topo_priority) and each
     # batch's successes merge into base_names before the next, so cross-measure
     # MEASURE() references still resolve, and the per-minute token burst stays low.
-    for start in range(0, len(candidates), _DAX_LLM_BATCH_SIZE):
-        batch = candidates[start : start + _DAX_LLM_BATCH_SIZE]
+    for start in range(0, len(candidates), batch_size):
+        batch = candidates[start : start + batch_size]
         snap_names = set(base_names)
 
         # Apply run-cache hits first; only the rest need an LLM call.

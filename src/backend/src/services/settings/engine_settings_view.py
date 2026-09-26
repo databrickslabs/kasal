@@ -109,7 +109,9 @@ def _advanced_values(sent: Dict[str, Any]) -> Dict[str, str]:
         if value is None:
             values[key] = ""
             continue
-        if isinstance(spec.default, bool) != isinstance(value, bool):
+        if isinstance(spec.default, bool) != isinstance(value, bool) or isinstance(
+            spec.default, str
+        ) != isinstance(value, str):
             raise BadRequestError(f"{key} has the wrong type")
         if es.parse(key, str(value)) is None:
             raise BadRequestError(

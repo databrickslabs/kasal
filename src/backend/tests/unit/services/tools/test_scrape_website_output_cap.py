@@ -33,7 +33,6 @@ from src.services.tools.scrape_website import (
     _DEFAULT_MAX_CHARS,
     _DEFAULT_MAX_FETCH_BYTES,
     ScrapeWebsiteTool,
-    _env_int,
 )
 
 #: Captured before any patching — a lambda that calls the patched name recurses.
@@ -140,18 +139,38 @@ class TestConfiguration:
     def test_an_instance_can_override(self):
         assert ScrapeWebsiteTool(max_chars=1234).max_chars == 1234
 
-    def test_the_environment_can_override(self, monkeypatch):
+    def test_the_setting_can_override(self, engine_setting, monkeypatch):
+        """Tools → Advanced (was SCRAPE_WEBSITE_MAX_CHARS, no longer read)."""
         monkeypatch.setenv("SCRAPE_WEBSITE_MAX_CHARS", "4321")
+        assert ScrapeWebsiteTool().max_chars == _DEFAULT_MAX_CHARS
+        engine_setting("scrape_max_chars", 4321)
         assert ScrapeWebsiteTool().max_chars == 4321
 
     @pytest.mark.parametrize("value", ["", "abc", "-5", "0", "1.5"])
-    def test_a_bad_env_value_falls_back_to_the_default(self, monkeypatch, value):
-        """A typo in config must not silently disable the protection."""
-        monkeypatch.setenv("SCRAPE_WEBSITE_MAX_CHARS", value)
+    def test_a_bad_value_falls_back_to_the_default(self, engine_setting, value):
+        """A bad stored value must not silently disable the protection."""
+        engine_setting("scrape_max_chars", value)
         assert ScrapeWebsiteTool().max_chars == _DEFAULT_MAX_CHARS
 
-    def test_env_int_is_positive_only(self):
-        assert _env_int("KASAL_NO_SUCH_VAR_XYZ", 99) == 99
+    def test_registry_defaults_match_the_documented_ones(self):
+        from src.services.settings.engine_settings import SETTINGS
+
+        assert SETTINGS["scrape_max_chars"].default == _DEFAULT_MAX_CHARS
+        assert SETTINGS["scrape_max_fetch_bytes"].default == _DEFAULT_MAX_FETCH_BYTES
+
+
+class TestCookiesNeverReadTheEnvironment:
+    """A cookie value used to NAME an environment variable to read, so a tool
+    config could send any server secret to a website it chose."""
+
+    def test_the_value_is_sent_literally(self, monkeypatch):
+        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "server-secret")
+        tool = ScrapeWebsiteTool(
+            website_url="https://example.com",
+            cookies={"name": "session", "value": "DATABRICKS_CLIENT_SECRET"},
+        )
+        assert tool.cookies == {"session": "DATABRICKS_CLIENT_SECRET"}
+        assert "server-secret" not in str(tool.cookies)
 
 
 class TestSafeFetchStillGuards:

@@ -16,6 +16,7 @@ import pytest
 from src.core.events.bus import event_bus
 from src.core.events.types import A2UISurfaceEvent
 from src.services.a2ui import runner as a2ui_runner
+from src.services.a2ui import settings as _a2ui_settings
 
 
 @pytest.fixture
@@ -143,7 +144,7 @@ class TestEveryGateReportsItself:
     @pytest.mark.asyncio
     async def test_a2ui_disabled_for_the_workspace(self, captured_events, monkeypatch):
         async def _off(group_id, query):
-            return False, None, ""
+            return False, None, "", _a2ui_settings.effective()
 
         monkeypatch.setattr(a2ui_runner, "_resolve_config", _off)
 
@@ -153,7 +154,7 @@ class TestEveryGateReportsItself:
     @pytest.mark.asyncio
     async def test_no_rich_intent(self, captured_events, monkeypatch):
         async def _on(group_id, query):
-            return True, {"components": []}, ""
+            return True, {"components": []}, "", _a2ui_settings.effective()
 
         monkeypatch.setattr(a2ui_runner, "_resolve_config", _on)
         monkeypatch.setattr(a2ui_runner, "wants_rich_surface", lambda *a: False)
@@ -168,7 +169,7 @@ class TestEveryGateReportsItself:
         self, captured_events, monkeypatch
     ):
         async def _on(group_id, query):
-            return True, {"components": []}, ""
+            return True, {"components": []}, "", _a2ui_settings.effective()
 
         async def _llm(*args, **kwargs):
             return object()
@@ -195,7 +196,7 @@ class TestEveryGateReportsItself:
         twice; the skip is deliberate and now says so."""
 
         async def _on(group_id, query):
-            return True, {"components": []}, ""
+            return True, {"components": []}, "", _a2ui_settings.effective()
 
         async def _llm(*args, **kwargs):
             return object()
@@ -223,7 +224,7 @@ class TestEveryGateReportsItself:
         self, captured_events, monkeypatch
     ):
         async def _on(group_id, query):
-            return True, {"components": []}, ""
+            return True, {"components": []}, "", _a2ui_settings.effective()
 
         async def _llm(*args, **kwargs):
             return object()

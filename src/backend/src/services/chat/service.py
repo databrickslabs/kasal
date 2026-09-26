@@ -17,7 +17,6 @@ refactor, so existing callers/tests keep working.
 import asyncio
 import hashlib
 import logging
-import os
 import re
 from typing import Any, Dict, Optional
 
@@ -28,6 +27,7 @@ from src.services.execution.finalization import (
     ExecutionOutcome,
     persist_execution_outcome,
 )
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -462,10 +462,8 @@ class LightAgentService:
                 # Token streaming (chat live-typing): opt the per-run LLM into
                 # streamed completions so the engine emits LLMStreamChunkEvent
                 # per text delta. Both the Chat Completions and Responses API
-                # adapters honor the flag. Kill-switch: CHAT_TOKEN_STREAMING=false.
-                if _agent_llm is not None and os.getenv(
-                    "CHAT_TOKEN_STREAMING", "true"
-                ).strip().lower() not in ("0", "false", "no"):
+                # adapters honor the flag. Kill switch: Engines → Advanced → Chat.
+                if _agent_llm is not None and engine_setting("chat_token_streaming"):
                     try:
                         _agent_llm.stream = True
                     except Exception as stream_err:  # noqa: BLE001
@@ -1279,7 +1277,7 @@ class LightAgentService:
                 # generic handler below keeps the plain answer.)
                 if _html_owned or budget_exhausted:
                     raise _HtmlOwnedSkip()
-                from src.services.a2ui.runner import compose_surface
+                from src.services.a2ui.runner import compose_surface, compose_timeout
 
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
                 # hangs it must NOT block the terminal status — the prose answer has
@@ -1306,8 +1304,8 @@ class LightAgentService:
                     # 60s timed out EVERY presentation. The prose answer has already
                     # streamed, so a generous bound only delays the surface, never the
                     # text. Still bounded so a hung compose can't wedge the terminal
-                    # status; tune with A2UI_COMPOSE_TIMEOUT.
-                    timeout=float(os.getenv("A2UI_COMPOSE_TIMEOUT", "240")),
+                    # status; tune in Output design → Advanced.
+                    timeout=await compose_timeout(group_id),
                 )
                 if surface:
                     result_payload = {"text": answer, "a2ui": surface}

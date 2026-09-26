@@ -366,14 +366,14 @@ class TestLocalFallbackConfig:
         assert out["key"] == "gpt-5-nano"
 
     @pytest.mark.asyncio
-    async def test_env_pin_wins_over_ranking(self, monkeypatch):
+    async def test_env_pin_wins_over_ranking(self, engine_setting, monkeypatch):
         svc = self._svc(
             [
                 mk_model("Qwen3", provider="vllm"),
                 mk_model("gpt-5-nano", provider="openai"),
             ]
         )
-        monkeypatch.setenv("KASAL_FALLBACK_MODEL", "gpt-5-nano")
+        engine_setting("fallback_model", "gpt-5-nano")
         # Reachable self-hosted would normally win — the pin overrides it.
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
@@ -383,9 +383,9 @@ class TestLocalFallbackConfig:
         assert out["key"] == "gpt-5-nano"
 
     @pytest.mark.asyncio
-    async def test_unknown_env_pin_falls_back_to_ranking(self, monkeypatch):
+    async def test_unknown_pin_falls_back_to_ranking(self, engine_setting, monkeypatch):
         svc = self._svc([mk_model("Qwen3", provider="vllm")])
-        monkeypatch.setenv("KASAL_FALLBACK_MODEL", "does-not-exist")
+        engine_setting("fallback_model", "does-not-exist")
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
             AsyncMock(return_value=True),

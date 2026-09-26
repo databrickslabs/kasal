@@ -71,6 +71,13 @@ _MODULES: List[Tuple[Path, str]] = [
     # runtime/{agent,task,executor}.py — the tool contract. Itself has zero
     # ``src.`` imports, which is why the runtime can depend on it standalone.
     (BACKEND_SRC / "services" / "tools" / "base.py", "services/tools/base.py"),
+    # services/tools/scrape_website.py reads its limits from the Configuration
+    # settings snapshot. Stdlib-only; the database loader lives in
+    # engine_settings_loader, so an exported app's snapshot is empty (defaults).
+    (
+        BACKEND_SRC / "services" / "settings" / "engine_settings.py",
+        "services/settings/engine_settings.py",
+    ),
     # The general-purpose tools an exported crew may be configured with. These
     # used to map onto crewai_tools' SerperDevTool / ScrapeWebsiteTool /
     # DallETool because the export could not ship a Kasal BaseTool; now that it
@@ -168,6 +175,11 @@ STUB_INITS: Dict[str, str] = {
         '"""Vendored from Kasal ``src/services/tools`` — deliberately EMPTY.\n\n'
         "Upstream this is a lazy ``__getattr__`` over the full tool catalogue.\n"
         "Only ``base`` is vendored; importing it directly executes nothing else.\n"
+        '"""\n'
+    ),
+    "services/settings/__init__.py": (
+        '"""Vendored from Kasal ``src/services/settings`` — only ``engine_settings``,\n'
+        "the settings snapshot (empty here, so every setting is its default).\n"
         '"""\n'
     ),
     "services/execution/__init__.py": (

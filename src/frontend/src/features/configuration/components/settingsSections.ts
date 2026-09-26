@@ -15,7 +15,7 @@ export const settingsSections = [
   { id: 'skills', title: 'Skills', description: 'Give agents reusable instructions and know-how.', group: 'ai', scopes: ['workspace'], key: 'skills.tab', admin: true },
   { id: 'prompts', title: 'Prompts', description: 'Review, refine, and optimize agent instructions.', group: 'ai', scopes: ['workspace'], key: 'prompts.tab' },
   { id: 'memory', title: 'Memory', description: 'Configure how agents store and retrieve knowledge.', group: 'ai', scopes: ['workspace'], key: 'memoryBackend.tab', admin: true },
-  { id: 'ui', title: 'Output design', description: 'Create reusable layouts for your crew results.', group: 'ai', scopes: ['workspace'], key: 'settings.outputDesign', admin: true },
+  { id: 'ui', title: 'Output design', description: 'Create reusable layouts for your crew results.', group: 'ai', scopes: ['workspace', 'system'], key: 'settings.outputDesign', admin: true },
   { id: 'databricks', title: 'Databricks', description: 'Connect your workspace, data, and storage.', group: 'connections', scopes: ['workspace'], key: 'databricks.tab', admin: true },
   { id: 'mcp', title: 'MCP servers', description: 'Connect external tools and resources through MCP.', group: 'connections', scopes: ['workspace', 'system'], key: 'settings.mcp', admin: true },
   { id: 'remote-agents', title: 'Remote agents', description: 'Connect agents hosted outside this Kasal instance.', group: 'connections', scopes: ['workspace', 'system'], key: 'settings.remoteAgents', admin: true },

@@ -10,6 +10,7 @@ import json
 from types import SimpleNamespace
 
 from src.services.a2ui import runner as R
+from src.services.a2ui import settings as _a2ui_settings
 from src.services.a2ui.compose import (
     MINIMAL_COMPONENTS,
     a2ui_system_prompt,
@@ -199,7 +200,7 @@ def _stub_compose_surface(monkeypatch, surface):
     gate: A2UI enabled, a rich-intent turn, and a composer that returns `surface`."""
 
     async def _resolve(group_id, query):
-        return True, CATALOG, ""
+        return True, CATALOG, "", _a2ui_settings.effective()
 
     monkeypatch.setattr(R, "_resolve_config", _resolve)
     monkeypatch.setattr(R, "wants_rich_surface", lambda text, intent: True)

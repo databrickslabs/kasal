@@ -359,11 +359,10 @@ async def build_agent_llm(
     # engine emits LLMStreamChunkEvent per delta — the event pipe forwards
     # coalesced chunks to the parent's SSE for live typing in the UI. Both the
     # Chat Completions and Responses API adapters honor this flag. Kill-switch:
-    # CREW_TOKEN_STREAMING=false.
+    # Configuration → Engines → Advanced → Chat.
     if (
         os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true"
-        and os.environ.get("CREW_TOKEN_STREAMING", "true").strip().lower()
-        not in ("0", "false", "no")
+        and engine_settings.setting("crew_token_streaming")
         and llm is not None
         and not isinstance(llm, str)
     ):

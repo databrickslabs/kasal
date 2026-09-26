@@ -157,14 +157,14 @@ class EngineSettings(BaseModel):
     budget_defaults: Dict[str, Dict[str, int]]
     #: Server-wide scalar settings (memory sweep, knowledge limits): the
     #: effective value per key, and each key's default and bounds.
-    advanced: Dict[str, Union[bool, int, float]] = Field(default_factory=dict)
+    advanced: Dict[str, Union[bool, int, float, str]] = Field(default_factory=dict)
     advanced_specs: Dict[str, "EngineSettingSpec"] = Field(default_factory=dict)
 
 
 class EngineSettingSpec(BaseModel):
     """Default and bounds of one scalar engine setting (drives the form)."""
 
-    default: Union[bool, int, float]
+    default: Union[bool, int, float, str]
     minimum: Optional[float] = None
     maximum: Optional[float] = None
 
@@ -177,7 +177,7 @@ class EngineSettingsUpdate(BaseModel):
     #: {mode: {field: value}}; a null value resets that field to its default.
     budgets: Optional[Dict[str, Dict[str, Optional[int]]]] = None
     #: {key: value}; a null value resets that setting to its default.
-    advanced: Optional[Dict[str, Optional[Union[bool, int, float]]]] = None
+    advanced: Optional[Dict[str, Optional[Union[bool, int, float, str]]]] = None
 
 
 EngineSettings.model_rebuild()

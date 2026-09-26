@@ -14,7 +14,6 @@ HTML path.)
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from src.services.a2ui.compose import infer_deliverable
@@ -35,11 +34,6 @@ DeltaSink = Callable[[Dict[str, Any]], Awaitable[None]]
 #: WHOLE answer plus the plan, and its prompt already tells it to adjust where
 #: the content cannot fill a slide. Too low and the plan is drawn from an
 #: introduction; this is roughly a third of a typical answer.
-def early_enabled() -> bool:
-    """Kill-switch for both head starts (``A2UI_EARLY=false``)."""
-    return os.getenv("A2UI_EARLY", "true").strip().lower() not in ("0", "false", "no")
-
-
 def shell_kind(query: str) -> Optional[str]:
     """The surfaceKind to frame for this request, or None to frame nothing.
 
@@ -62,15 +56,18 @@ def wants_instant_shell(query: str) -> bool:
 
 
 async def _resolve(group_id, query):
-    """(enabled, guidance) from the workspace's UIConfig — never raises."""
+    """(enabled, guidance, early) from the workspace's UIConfig — never raises.
+
+    ``early`` is the head-start switch: the workspace's Output design override,
+    else the system default (Configuration → Output design)."""
     try:
         from src.services.a2ui.runner import _resolve_config
 
-        enabled, catalog, guidance = await _resolve_config(group_id, query)
-        return bool(enabled and catalog), guidance
+        enabled, catalog, guidance, settings = await _resolve_config(group_id, query)
+        return bool(enabled and catalog), guidance, bool(settings["a2ui_early"])
     except Exception as err:  # noqa: BLE001
         logger.debug(f"[a2ui] early config not resolved: {err}")
-        return False, ""
+        return False, "", False
 
 
 async def _ship(on_delta: DeltaSink, messages: List[Dict[str, Any]]) -> bool:
@@ -96,11 +93,11 @@ async def emit_instant_shell(
     ``compose_surface(shell_shipped=...)`` so a run that ends up NOT producing a
     rich surface retracts the frame instead of stranding it.
     """
-    if not early_enabled() or on_delta is None or not wants_instant_shell(query):
+    if on_delta is None or not wants_instant_shell(query):
         return False
     try:
-        enabled, _guidance = await _resolve(group_id, query)
-        if not enabled:
+        enabled, _guidance, early = await _resolve(group_id, query)
+        if not enabled or not early:
             return False
         kind = shell_kind(query)
         if not kind:

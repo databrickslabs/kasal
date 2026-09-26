@@ -308,7 +308,7 @@ one row per completed method, plus a `turn_end` row per turn.
   actually happened stays intact.
 - **Compaction folds, it no longer truncates.** Past the verbatim window, older
   messages are summarised into a `summary` channel using the same summarizer
-  chat uses (same prompt, same `CHAT_COMPACTION` kill-switch). A flow that does
+  chat uses (same prompt, same summarising switch, Configuration → Engines → Advanced → Chat). A flow that does
   not declare a `summary` channel does not fold — there would be nowhere to put
   the result.
 - **Concurrent turns are detected, not prevented.** Two turns racing on one
