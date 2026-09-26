@@ -13,21 +13,151 @@ concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to full commit SHAs (the comment names the release);
+# Dependabot (.github/dependabot.yml) proposes the bumps.
+
 jobs:
-  backend:
+  backend-tests:
+    name: Backend tests (+ coverage report)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
       run:
         working-directory: src/backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           python-version: '3.11'
+          enable-cache: true
       - run: uv sync --frozen
-      - name: Tests, formatting, lint, typing baseline and architecture
-        run: uv run python run_tests.py --parallel 2
+      # Coverage is REPORT-ONLY: there is no fail_under yet. Follow-up: set
+      # [tool.coverage.report] fail_under in src/backend/pyproject.toml from
+      # the total this job first reports, then ratchet it upwards.
+      - name: Tests with coverage
+        run: uv run python run_tests.py --parallel 2 --skip-lint --coverage
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-coverage
+          path: src/backend/coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Independent of the tests, so a PR with a failing test still gets
+  # formatting / lint / typing / architecture feedback in the same run.
+  backend-lint:
+    name: Backend format, lint, typing baseline, architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: black, isort, ruff, mypy baseline, import-linter
+        run: uv run python run_tests.py --lint-only
+
+  migrations:
+    name: Migrations and schema on PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        # pgvector image: the models declare vector columns, and production
+        # (PostgreSQL / Lakebase) has the extension.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kasal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Read by src/config/settings.py, which migrations/env.py uses to build
+      # the URL (alembic.ini's sqlalchemy.url is overridden there).
+      DATABASE_TYPE: postgres
+      POSTGRES_SERVER: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kasal
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - run: uv sync --frozen
+
+      - name: Alembic has exactly one head
+        run: |
+          set -euo pipefail
+          heads="$(uv run alembic heads)"
+          echo "$heads"
+          count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected 1 Alembic head, found $count. Add a merge revision: alembic merge heads -m 'merge heads'"
+            exit 1
+          fi
+
+      # The schema the app actually runs on: init_db() installs pgvector,
+      # runs Base.metadata.create_all and then the self-heal steps. Alembic is
+      # not run at startup (src/backend/CLAUDE.md, "A migration alone does
+      # nothing at runtime"), so this is the gate that proves the models build
+      # a working schema on PostgreSQL rather than only on the SQLite tests use.
+      - name: App schema builds on an empty PostgreSQL (init_db)
+        run: uv run python -c "import asyncio; from src.db.session import init_db; asyncio.run(init_db())"
+
+      # REPORT-ONLY until the history is replayable. Today `alembic upgrade
+      # head` cannot build a database from empty: the history has four root
+      # revisions and no baseline, and the first one ALTERs a table
+      # ("agents") that no migration creates. Nor does it apply on top of a
+      # create_all schema (convert_crew_id_to_uuid fails on the column type).
+      # Follow-up: add a baseline revision that creates the pre-history schema
+      # (or squash to one), then drop continue-on-error so this gates, and add
+      # `alembic check` for model/migration drift.
+      - name: alembic upgrade head from empty (report-only)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import asyncio
+          from sqlalchemy import text
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from src.config.settings import settings
+
+          async def reset() -> None:
+              engine = create_async_engine(str(settings.DATABASE_URI), isolation_level="AUTOCOMMIT")
+              async with engine.connect() as conn:
+                  await conn.execute(text("DROP SCHEMA public CASCADE"))
+                  await conn.execute(text("CREATE SCHEMA public"))
+                  await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+              await engine.dispose()
+
+          asyncio.run(reset())
+          PY
+          uv run alembic upgrade head
 
   frontend:
     runs-on: ubuntu-latest
@@ -36,8 +166,10 @@ jobs:
       run:
         working-directory: src/frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -46,3 +178,47 @@ jobs:
       - run: npm run test:run
       - run: npm run lint
       - run: npm run build
+
+  # Coverage is a separate, non-blocking job: the test gate above stays exactly
+  # as it was, and v8 instrumentation slows the suite enough that some
+  # interaction tests can hit the 10s per-test timeout (seen locally), which
+  # must not turn the required check red.
+  #
+  # REPORT-ONLY: VITEST_COVERAGE_REPORT_ONLY=1 drops the per-path 100%
+  # thresholds in vitest.config.ts, which the code does not meet today (~85-90%
+  # on the chat globs). Follow-up: set those floors from this job's first
+  # artifact, remove the env switch, then drop continue-on-error.
+  frontend-coverage:
+    name: Frontend coverage report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: src/frontend
+    env:
+      VITEST_COVERAGE_REPORT_ONLY: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+      - run: npm ci
+      - name: Tests with coverage
+        run: >-
+          npx vitest run --coverage --testTimeout=30000
+          --coverage.reporter=text-summary
+          --coverage.reporter=json-summary
+          --coverage.reporter=html
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-coverage
+          path: src/frontend/coverage/
+          if-no-files-found: warn
+          retention-days: 14

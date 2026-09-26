@@ -1,0 +1,39 @@
+# Dependency update PRs. Weekly, grouped, so a week's minor/patch bumps arrive
+# as one PR per ecosystem instead of dozens. Majors stay individual PRs: they
+# are the ones that need reading.
+#
+# CVE detection itself runs in .github/workflows/dependency-audit.yml; this
+# file is about getting the fixes proposed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Python: src/backend/pyproject.toml + uv.lock (the only Python manifest).
+  - package-ecosystem: uv
+    directory: /src/backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /src/frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]

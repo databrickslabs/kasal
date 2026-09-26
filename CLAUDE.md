@@ -102,7 +102,8 @@ one another engineer can name:
 - **Keep the public import path stable.** Re-export from the package
   `__init__.py` / `index.ts` so call sites do not churn.
 
-**Known offenders.** 30 source files are over the 1500 ceiling, so there is no
+**Known offenders.** Roughly 30 source files are over the 1500 ceiling (28 on
+2026-09-26; the number drifts every week), so there is no
 hand-maintained table here — a list that long goes stale the week it is written
 (the previous one named 8 files, three of them under paths that no longer existed).
 Ask the tree instead:
@@ -118,13 +119,13 @@ The `$2 != "total"` matters: `wc -l` emits a `total` row per batch, and without
 it the count reads one too high — which is exactly how the number above was
 previously wrong.
 
-The heaviest are `services/agent_builder/process_executor.py` (3051), the PowerBI
-semantic-model tools (3004 / 2912), `services/execution/service.py` (2735) and
-`services/tools/tool_factory.py` (2709). Do not add to any file already over the
-ceiling; shrink it when you are in it.
+The heaviest are the PowerBI semantic-model tools,
+`services/agent_builder/process_executor.py`, `services/tools/tool_factory.py`
+and `services/execution/service.py` (all roughly 2,500-3,000 lines). Do not add
+to any file already over the ceiling; shrink it when you are in it.
 
-Counts drift with every commit — treat the four above as "which files", not as
-current line numbers, and run the command when the number matters.
+Counts drift with every commit: treat the files above as "which files", not as
+current sizes, and run the command when the number matters.
 
 Check before you commit: `wc -l <files you touched>`.
 

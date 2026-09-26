@@ -184,17 +184,17 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
   choosing a runtime is an operator decision, not something to put in front of
   someone writing a chat message — so the field is reachable from the API only.
 - **One bus still writes traces.** The CrewAI binding bridges
-  `crewai_event_bus` onto `event_bus` (`engines/crewai/events.py`) and nothing
+  `crewai_event_bus` onto `event_bus` (`harnesses/crewai/events.py`) and nothing
   downstream changes. Do NOT bridge events a Kasal subsystem already emits —
   LLM calls, tools, memory and guardrails all reach the bus under both harnesses,
   and bridging them again doubles every trace row.
 - **Both engines call models through Kasal's transport.** The CrewAI binding's
   LLM is a `crewai.BaseLLM` subclass that forwards to
-  `src.core.llm.transport` (`engines/crewai/llm.py`). Keep it that way: it is
+  `src.core.llm.transport` (`harnesses/crewai/llm.py`). Keep it that way: it is
   what makes Databricks auth, retry, the context clamp and token accounting
   identical, and therefore what makes a cross-engine comparison mean anything.
 - **What a harness cannot do is DECLARED, not discovered.** `Capability` in
-  `engines/binding.py` drives the API and greys out the UI. Today CrewAI claims
+  `harnesses/binding.py` drives the API and greys out the UI. Today CrewAI claims
   everything except `AGENT_PLAN` — the `todo` tool is written for Kasal's
   executor, one call per round over a conversation that executor owns. A declared
   capability must be one the binding actually delivers; the parity suite checks
@@ -213,7 +213,7 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
 - **CrewAI probes an LLM for capabilities with `hasattr`.** An omitted
   `supports_function_calling` is read as "cannot", and the agent silently drops
   to a ReAct prose loop — no error, just tool calls that stop parsing. Anything
-  added to `engines/crewai/llm.py` should ask the transport rather than assert a
+  added to `harnesses/crewai/llm.py` should ask the transport rather than assert a
   convenient default.
 - **A tool is invoked through `runtime/executor.wrap_tool` on BOTH engines.**
   That function is where the approval gate, replay, the outcome ledger and all

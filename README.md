@@ -36,7 +36,7 @@ Install directly from the Databricks Apps Marketplace with one click — the bes
 Use the deployment script in this repository for custom installations. Ideal for tailored configurations and advanced setups.
 
 ### Local Development
-A quick setup for testing and development — requires Python 3.9+ and Node.js.
+A quick setup for testing and development — requires Python 3.11 (pinned `>=3.11,<3.12`), [uv](https://docs.astral.sh/uv/) and Node.js 22.
 
 ## See It in Action
 

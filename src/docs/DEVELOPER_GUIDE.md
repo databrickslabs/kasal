@@ -14,13 +14,13 @@ Build, extend, and debug Kasal efficiently. This guide focuses on day-to-day wor
 - **API (FastAPI)**: REST endpoints and validation
 - **Services**: Orchestration and business logic
 - **Repositories**: DB and external I/O (Databricks, Vector, MLflow)
-- **Engines (CrewAI)**: Agent/flow preparation and execution
+- **Execution**: Kasal's own agent runtime (`services/execution/`) behind three paths: Chat, Agent Builder and Flow Builder
 - **Data & Storage**: SQLAlchemy models/sessions, embeddings, volumes
 
 ## Before you begin
 Tools and versions you need before running the stack.
-- Python 3.9+
-- Node.js 18+
+- Python 3.11 (the backend pins `>=3.11,<3.12`) and [uv](https://docs.astral.sh/uv/)
+- Node.js 22 (what CI uses)
 - Postgres (recommended) or SQLite for local dev
 - Databricks access if exercising Databricks features
 
@@ -58,7 +58,7 @@ sequenceDiagram
 
     C->>R: HTTP Request
     R->>S: Validate and delegate
-    S->>U: Use injected session (router owns the transaction)
+    S->>U: Use the injected session (never opens its own)
     S->>Repo: Query/Command
     Repo->>DB: SQLAlchemy operation
     DB-->>Repo: Rows/Status
@@ -66,7 +66,7 @@ sequenceDiagram
         S->>L: Generate/Score
         L-->>S: LLM Result
     end
-    S->>U: Router commits at end of request
+    S->>U: Request dependency commits (or rolls back) at end of request
     S-->>R: DTO/Schema
     R-->>C: HTTP Response
 ```
@@ -81,25 +81,61 @@ sequenceDiagram
 
 ### Example: minimal endpoint wiring
 
-This shows a typical router, service, and repository connection.
+This shows the router, service and repository wiring the backend uses (modelled
+on `api/agents_router.py` and `services/CLAUDE.md`). The session is created once
+per request by the `SessionDep` dependency and flows **down**: router, then
+service, then repository. Nothing below the router acquires a session of its own.
 
 ```python
-# router.py
-@router.get("/items/{item_id}", response_model=ItemOut)
-async def get_item(item_id: UUID, service: ItemService = Depends(...)):
-    return await service.get_item(item_id)
+# api/items_router.py
+async def get_item_service(session: SessionDep) -> ItemService:
+    return ItemService(session=session)
 
-# services/item_service.py
+ItemServiceDep = Annotated[ItemService, Depends(get_item_service)]
+
+@router.get("/{item_id}", response_model=ItemOut)
+async def get_item(item_id: UUID, service: ItemServiceDep, group_context: GroupContextDep):
+    item = await service.get_item(item_id, group_context)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+# services/items/item_service.py  (every service lives in a domain package)
 class ItemService:
-    async def get_item(self, item_id: UUID) -> ItemOut:
-        with self.uow as uow:
-            item = uow.items.get(item_id)
-            return ItemOut.model_validate(item)
+    def __init__(self, session: AsyncSession,
+                 repository_class: Type[ItemRepository] = ItemRepository):
+        self.session = session
+        self.repository = repository_class(session)  # built on the GIVEN session
+
+    async def get_item(self, item_id: UUID, group_context: GroupContext) -> ItemOut | None:
+        item = await self.repository.get_for_group(item_id, group_context.group_ids)
+        return ItemOut.model_validate(item) if item else None
 
 # repositories/item_repository.py
 class ItemRepository(BaseRepository[Item]):
-    ...
+    def __init__(self, session: AsyncSession):
+        super().__init__(Item, session)  # receives a session, never opens one
+
+    async def get_for_group(self, item_id: UUID, group_ids: list[str]) -> Item | None:
+        result = await self.session.execute(
+            select(Item).where(Item.id == item_id, Item.group_id.in_(group_ids))
+        )
+        return result.scalar_one_or_none()
 ```
+
+The rules CI enforces (details in `src/backend/src/services/CLAUDE.md`):
+
+- **A service never builds queries or persists rows.** `select(...)`,
+  `session.execute` and `session.add/delete/merge` belong in a repository; a
+  service holds the session only for transaction control.
+- **A service never opens a session or builds an engine.** Use the injected
+  session inside a request, or `routed_scoped_session()` outside one.
+- **Another domain's data goes through that domain's service**, not its
+  repository, so the owning domain's rules (group scoping, encryption, status
+  transitions) still apply.
+- **There is no Unit of Work.** `src.core.unit_of_work` has been deleted; the
+  session already is the unit of work. Treat any example using `self.uow` or
+  `UnitOfWork` as stale.
 
 ## Frontend architecture
 
