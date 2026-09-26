@@ -19,7 +19,7 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 
 from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 from src.services.mlflow.trace_storage import log_trace_storage, select_experiment
@@ -178,11 +178,15 @@ def _databricks_configured() -> bool:
     )
 
 
-async def _configured_local_uri(group_id: Optional[str]) -> Optional[str]:
-    """The workspace's local MLflow server (Configuration → MLflow), or None.
+async def _configured_local_target(
+    group_id: Optional[str],
+) -> Optional[Tuple[str, str]]:
+    """``(server, experiment)`` from Configuration → MLflow, or None.
 
-    None when a Databricks workspace is configured (it wins) or inside
-    Databricks Apps (never a local server there)."""
+    None when no local server is set, when a Databricks workspace is configured
+    (it wins) or inside Databricks Apps (never a local server there). The
+    experiment is the CONFIGURED one — runs used to ignore it and always trace
+    to the per-teamspace default."""
     if not group_id or _databricks_configured() or is_databricks_app():
         return None
     from src.db.session import routed_scoped_session
@@ -190,18 +194,25 @@ async def _configured_local_uri(group_id: Optional[str]) -> Optional[str]:
     from src.services.mlflow import local as _local
 
     async with routed_scoped_session() as session:
-        configured = await MLflowRepository(session).get_local_tracking_uri(
-            group_id=group_id
+        repo = MLflowRepository(session)
+        uri = _local.local_tracking_uri(
+            await repo.get_local_tracking_uri(group_id=group_id)
         )
-    return _local.local_tracking_uri(configured)
+        if not uri:
+            return None
+        experiment = _local.local_experiment_name(
+            await repo.get_experiment_name(group_id=group_id),
+            await _teamspace_name(session, group_id),
+        )
+    return uri, experiment
 
 
 def _setup_local_mlflow(
     *,
     uri: str,
+    experiment: str,
     execution_id: str,
     group_id: Optional[str],
-    teamspace: Optional[str],
     alog: Any,
 ) -> "MlflowSetupResult":
     """Point tracing at a local OSS MLflow server.
@@ -230,9 +241,9 @@ def _setup_local_mlflow(
         import mlflow
 
         mlflow.set_tracking_uri(uri)
-        name = _local.local_experiment_name(teamspace=teamspace)
-        experiment = mlflow.set_experiment(name)
-        experiment_id = str(getattr(experiment, "experiment_id", "") or "")
+        name = experiment
+        experiment_id = _local.ensure_experiment(uri, name)
+        mlflow.set_experiment(experiment_id=experiment_id)
         alog.info(
             "[SUBPROCESS] MLflow tracing to local server %s, experiment %s (ID: %s)",
             uri,
@@ -361,17 +372,17 @@ async def configure_mlflow_in_subprocess(
     # timeout on every execution.
     # -------------------------------------------------------
     try:
-        local_uri = await _configured_local_uri(group_id)
+        local_target = await _configured_local_target(group_id)
     except Exception as exc:  # noqa: BLE001 — never break a run over tracing
         alog.warning("[SUBPROCESS] Local MLflow resolution failed: %s", exc)
-        local_uri = None
+        local_target = None
 
-    if local_uri:
+    if local_target:
         return _setup_local_mlflow(
-            uri=local_uri,
+            uri=local_target[0],
+            experiment=local_target[1],
             execution_id=execution_id,
             group_id=group_id,
-            teamspace=teamspace_name,
             alog=alog,
         )
 

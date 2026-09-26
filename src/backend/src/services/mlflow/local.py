@@ -188,3 +188,34 @@ def prompt_url(base_uri: str, prompt_name: str) -> str:
     from urllib.parse import quote
 
     return f"{base_uri.rstrip('/')}/#/prompts/{quote(prompt_name, safe='')}"
+
+
+def ensure_experiment(uri: str, name: str) -> str:
+    """Make ``name`` usable on the server at ``uri``; return its experiment id.
+
+    Creates it when missing, and RESTORES it when it was deleted: MLflow refuses
+    to set a deleted experiment active or to create a new one with its name, so
+    an experiment deleted in the MLflow UI otherwise switched tracing off for
+    good ("Cannot set a deleted experiment ... as the active experiment"). It is
+    Kasal's own trace destination, the same one enabling tracing creates.
+
+    Uses a client bound to ``uri`` rather than the global tracking URI, so it is
+    safe to call from the server process. Blocking: run it in a thread.
+    """
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=uri)
+    experiment = client.get_experiment_by_name(name)
+    if experiment is None:
+        experiment_id = str(client.create_experiment(name))
+        logger.info("[mlflow-local] created experiment %s (id=%s)", name, experiment_id)
+        return experiment_id
+    if getattr(experiment, "lifecycle_stage", "") == "deleted":
+        client.restore_experiment(experiment.experiment_id)
+        logger.warning(
+            "[mlflow-local] experiment %s (id=%s) had been deleted; restored it so "
+            "tracing can resume",
+            name,
+            experiment.experiment_id,
+        )
+    return str(experiment.experiment_id)

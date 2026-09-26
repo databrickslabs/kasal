@@ -217,7 +217,7 @@ class MLflowService:
         # Provision the destination when tracing is enabled or renamed, so the
         # first run can use it. Hosted apps use their volume's namespace and
         # existing schema permissions; no experiment resource is required.
-        if experiment_name is not None or enabled is True:
+        if experiment_name is not None or enabled is True or local_tracking_uri:
             await self._ensure_experiment_created()
         return await self.get_settings()
 
@@ -232,7 +232,8 @@ class MLflowService:
 
         workspace_url = await self._configured_workspace_url()
         if not workspace_url:
-            return  # local/OSS backend — nothing to pre-create
+            await self._ensure_local_experiment()
+            return
 
         auth = await self._setup_mlflow_auth()
         if not auth:
@@ -269,6 +270,25 @@ class MLflowService:
         except Exception as exc:  # noqa: BLE001 — saving the name must still succeed
             logger.warning(
                 f"[MLflowService] Could not create experiment {exp_path}: {exc}"
+            )
+
+    async def _ensure_local_experiment(self) -> None:
+        """Create (or restore, if it was deleted) the local server's experiment,
+        so it shows up in the MLflow UI as soon as tracing is enabled."""
+        import asyncio
+
+        from src.services.mlflow import local
+
+        uri = await self.configured_local_uri()
+        if not uri:
+            return
+        name = await self.configured_crew_traces_experiment()
+        try:
+            if await asyncio.to_thread(local.is_reachable, uri):
+                await asyncio.to_thread(local.ensure_experiment, uri, name)
+        except Exception as exc:  # noqa: BLE001 — saving settings must succeed
+            logger.warning(
+                "[MLflowService] Could not ensure local experiment %s: %s", name, exc
             )
 
     async def configured_local_uri(self) -> Optional[str]:
@@ -346,14 +366,17 @@ class MLflowService:
 
         experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
         teamspace = await self._teamspace_name()
-        base = f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
-        # On Databricks the tracer writes to the dedicated -uc experiment; match
-        # it so judges/GEPA/eval see the same traces. Local/OSS uses base as-is.
+        name = local.local_experiment_name(experiment_name, teamspace)
+        # On Databricks the tracer writes to the dedicated -uc experiment under
+        # /Shared/; match it so judges/GEPA/eval see the same traces. A local
+        # server uses the plain name the tracer uses — "/Shared/" is a
+        # Databricks workspace path, and on a local server it made judges and
+        # GEPA watch a different experiment from the one traces land in.
         if await self._configured_workspace_url():
             from src.services.otel_tracing.mlflow_setup import uc_experiment_name
 
-            return uc_experiment_name(base)
-        return base
+            return uc_experiment_name(f"/Shared/{name}")
+        return name
 
     async def _get_uc_trace_config(self) -> tuple:
         """(catalog, schema, warehouse_id) from the Databricks config, for
