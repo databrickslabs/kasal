@@ -29,40 +29,38 @@ Compliance mapping: [security compliance mapping](./README_SECURITY_COMPLIANCE.m
 ### Backend
 
 ```bash
-# From the project root, activate venv first
-source venv/bin/activate
+# Dependencies are managed by uv; `uv run` uses src/backend/.venv
+cd src/backend
+uv sync
 
 # Run all unit tests
-cd src/backend
-python run_tests.py --type unit
+uv run python run_tests.py --type unit
 
 # Run only the Phase 1 security tests
-python -m pytest tests/unit/test_security_headers_middleware.py -v
-python -m pytest tests/unit/services/execution/kernel/test_agent_helpers_security.py -v
+uv run python -m pytest tests/unit/test_security_headers_middleware.py -v
+uv run python -m pytest tests/unit/services/execution/kernel/test_agent_helpers_security.py -v
 
 # Run only the Phase 2 security tests
-python -m pytest tests/unit/services/security/ -v
+uv run python -m pytest tests/unit/services/security/ -v
 
 # Run only the Phase 3 guardrail tests
-python -m pytest tests/unit/services/guardrails/test_llm_injection_guardrail.py -v
-python -m pytest tests/unit/services/guardrails/test_self_reflection_guardrail.py -v
+uv run python -m pytest tests/unit/services/guardrails/test_llm_injection_guardrail.py -v
+uv run python -m pytest tests/unit/services/guardrails/test_self_reflection_guardrail.py -v
 
 # Run only the Phase 4 security tests
-python -m pytest tests/unit/services/security/test_secret_leak_detector.py -v
-python -m pytest tests/unit/services/security/test_tool_capability_manifest_destructive.py -v
-python -m pytest tests/unit/services/flow_builder/test_flow_state_security.py -v
+uv run python -m pytest tests/unit/services/security/test_secret_leak_detector.py -v
+uv run python -m pytest tests/unit/services/security/test_tool_capability_manifest_destructive.py -v
 
 # Run only the Phase 5 optimisation tests
-python -m pytest tests/unit/services/security/test_scanner_pipeline.py -v
-python -m pytest tests/unit/services/guardrails/test_guardrail_caching.py -v
+uv run python -m pytest tests/unit/services/security/test_scanner_pipeline.py -v
+uv run python -m pytest tests/unit/services/guardrails/test_guardrail_caching.py -v
 
 # Run ALL security tests at once (Phases 1 to 5)
-python -m pytest \
+uv run python -m pytest \
   tests/unit/test_security_headers_middleware.py \
   tests/unit/services/execution/kernel/test_agent_helpers_security.py \
   tests/unit/services/security/ \
   tests/unit/services/guardrails/ \
-  tests/unit/services/flow_builder/test_flow_state_security.py \
   -v
 ```
 
@@ -274,8 +272,7 @@ referrer-policy: strict-origin-when-cross-origin
 
 **Expected result in backend logs:**
 ```text
-WARNING  [SECURITY] Prompt injection pattern detected in user input 'my_input'
-         for execution abc-123: patterns=['ignore_previous_instructions'] severity=high
+WARNING  [SECURITY] [user_input:my_input:<execution_id>] Injection detected: severity=high patterns=['...'] excerpt='...'
 ```
 
 **What a passing result looks like:** The warning appears in the logs AND the crew continues to run normally (execution is not blocked).
@@ -419,31 +416,31 @@ The `task_description` field is optional but strongly recommended: it gives the 
 
 **Expected result in backend logs:**
 ```text
-WARNING  [SECURITY] Security scan findings in task_callback:<job_id>:
-         secrets_detected=True secret_types=['databricks_pat']
+WARNING  [SECURITY] [task_callback:<job_id>] Secret leakage detected: types=['databricks_pat']
 ```
 
 **What a passing result looks like:** The warning appears AND the crew completes normally (log-only, non-blocking).
 
 ---
 
-### Area 10: flow trust boundary scanning
+### Area 10: flow crew output scanning
 
-**What was implemented:** In multi-crew flows, the output of one crew is scanned for injection patterns and secrets before being passed to the next crew.
+**What is implemented:** Flow crews get the same execution callbacks as regular crews, so each flow crew's task output is scanned by `task_callback` (injection patterns plus secret leaks, with secrets redacted) as it completes. The scan is log-only: it does not stop one crew's output from reaching the next crew.
+
+The earlier dedicated inter-crew scanner (`FlowStateManager.parse_crew_output()`, log context `flow_state:parse_crew_output`) and its security tests were removed as unused code, so that log context no longer appears.
 
 **How to verify:**
 
 1. Create a multi-crew **Flow** with at least two sequential crews.
 2. Run the flow with normal inputs.
-3. Check backend logs for `flow_state:parse_crew_output` context in `[SECURITY]` entries (should be clean, no warnings for safe content).
+3. Check backend logs for `task_callback:<job_id>` context in `[SECURITY]` entries (should be clean, no warnings for safe content).
 
-**For injection detection:** A crew that ingests untrusted content (e.g., web scrape) may produce output containing injection patterns. The flow boundary scanner catches these.
-
-**Expected log when injection detected at boundary:**
+**Expected log when injection is detected in a flow crew's output:**
 ```text
-WARNING  [SECURITY] Security scan findings in flow_state:parse_crew_output:
-         injection_detected=True severity=high patterns=['...']
+WARNING  [SECURITY] [task_callback:<job_id>] Injection detected: severity=high patterns=['...'] excerpt='...'
 ```
+
+For a blocking check between crews, enable the LLM injection guardrail (Area 3) on the downstream task.
 
 ---
 
@@ -486,7 +483,7 @@ WARNING  [SECURITY] Destructive tool risk detected [crew with N task(s)]:
 
 **What was implemented:** All security scanning (injection detection + secret leak detection) is centralised in `SecurityScannerPipeline`. All call sites use a shared singleton with consistent `[SECURITY]` audit logging.
 
-**How to verify:** This is an infrastructure change. The evidence is that all `[SECURITY]` log entries across `step_callback`, `task_callback`, `flow_state`, and `execution_runner` use the same structured format.
+**How to verify:** This is an infrastructure change. The evidence is that all `[SECURITY]` log entries across `step_callback`, `task_callback`, `execution_runner` and memory write hygiene use the same structured format.
 
 ---
 

@@ -114,12 +114,25 @@ declared in `src/backend/pyproject.toml` and locked (with sha256 hashes) in
 `src/backend/uv.lock`. There is **no `requirements.txt`**.
 
 ```text
-litellm==1.74.9   # pyproject.toml; sha256 hash-pinned for sdist + wheel in uv.lock
+litellm[caching]==1.84.0   # pyproject.toml; sha256 hash-pinned for sdist + wheel in uv.lock
 ```
 
-`1.74.9` predates the compromise window (`1.82.7`/`1.82.8` published March 24, 2026).
-As long as the lock is not bumped past `1.82.6` (the last known-clean release), Kasal is not
-directly exposed.
+At the time of the incident Kasal pinned `1.74.9`, which predates the compromise window
+(`1.82.7`/`1.82.8` published March 24, 2026). The pin has since moved to `1.84.0`, a release
+after the two malicious versions were removed from PyPI; the move was made to clear later
+litellm advisories (see the comment on the pin in `pyproject.toml`). The two compromised
+versions must never appear in `uv.lock`.
+
+The Kasal runtime's own transport (`src/backend/src/core/llm/transport/`) calls providers
+through provider SDK clients (OpenAI-compatible and Anthropic) rather than litellm. litellm is still imported by the CrewAI-harness
+LLM handlers (`services/llm/handlers/`), `services/llm/manager.py`, memory storage and MLflow
+setup, so a compromised litellm release would still execute inside the backend process.
+
+Two CI controls now run on every pull request and weekly
+(`.github/workflows/dependency-audit.yml`): `uv lock --check` fails on drift between
+`pyproject.toml` and `uv.lock`, and `pip-audit` scans the locked set for known advisories.
+Dependabot (`.github/dependabot.yml`) proposes grouped weekly updates. Neither would catch
+a zero-day malicious release: they only report what is already a published advisory.
 
 ### Would our existing security guardrails have caught it
 
@@ -266,7 +279,7 @@ This could be extended to a manifest of critical files across all security-relev
 
 #### 1.4 Dependency diff in PR review
 
-**Problem:** When a developer bumps litellm from `1.74.9` to `1.82.x`, the PR shows the version
+**Problem:** When a developer or Dependabot bumps litellm to a new release, the PR shows the version
 change in `pyproject.toml` plus the regenerated hashes in `uv.lock`. There is no automatic
 visibility into what changed in the package itself, what new transitive dependencies were
 introduced, or whether the maintainer account was recently compromised.
