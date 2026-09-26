@@ -139,7 +139,7 @@ class KasalFlowPersistence(FlowPersistence):
             async with get_isolated_db_session() as session:
                 conn = await session.connection()
                 await conn.run_sync(
-                    lambda sync_conn: FlowState.__table__.create(
+                    lambda sync_conn: FlowState.__table__.create(  # type: ignore[attr-defined]  # a Table at runtime
                         sync_conn, checkfirst=True
                     )
                 )
@@ -231,7 +231,8 @@ class KasalFlowPersistence(FlowPersistence):
         if not state_json:
             return None
         try:
-            return json.loads(state_json)
+            state: dict[str, Any] = json.loads(state_json)
+            return state
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(
                 f"[KasalFlowPersistence] Could not parse persisted state for {flow_uuid}: {e}"

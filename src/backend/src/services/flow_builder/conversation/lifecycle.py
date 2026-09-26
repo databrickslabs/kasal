@@ -34,7 +34,7 @@ KEEP_VERBATIM = 20
 
 
 def split_for_fold(
-    messages: List[Dict[str, Any]], keep: int = KEEP_VERBATIM
+    messages: Optional[List[Dict[str, Any]]], keep: int = KEEP_VERBATIM
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """``(to_fold, verbatim)`` — the older messages, and the ones kept as-is.
 

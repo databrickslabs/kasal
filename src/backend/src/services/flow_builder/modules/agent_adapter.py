@@ -5,6 +5,7 @@ This module handles the configuration of agents for CrewAI flows.
 """
 
 import json
+from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.services.tools.tool_factory import ToolFactory
@@ -20,13 +21,13 @@ class AgentConfig:
 
     @staticmethod
     async def configure_agent_and_tools(
-        agent_data,
-        flow_data=None,
-        repositories=None,
-        group_context=None,
-        crew_tool_configs=None,
-        additional_tool_ids=None,
-    ):
+        agent_data: Any,
+        flow_data: Any = None,
+        repositories: Optional[Dict[str, Any]] = None,
+        group_context: Any = None,
+        crew_tool_configs: Optional[Dict[str, Any]] = None,
+        additional_tool_ids: Optional[List[Any]] = None,
+    ) -> Any:
         """
         Configure an agent with its associated tools.
 
@@ -177,9 +178,9 @@ class AgentConfig:
             return None
 
     @staticmethod
-    def _normalize_tools_list(tools_data):
+    def _normalize_tools_list(tools_data: Any) -> List[str]:
         """Convert tools data to a normalized list of tool IDs"""
-        agent_tools = []
+        agent_tools: List[str] = []
 
         if isinstance(tools_data, list):
             agent_tools = [str(tool_id) for tool_id in tools_data]
@@ -193,7 +194,7 @@ class AgentConfig:
         return agent_tools
 
     @staticmethod
-    def _get_tool_ids_from_flow_nodes(agent_data, flow_data):
+    def _get_tool_ids_from_flow_nodes(agent_data: Any, flow_data: Any) -> List[str]:
         """Extract tool IDS for an agent from the flow graph nodes (flow-specific
         source). The shared builder turns these ids into tool instances."""
         try:
@@ -219,7 +220,7 @@ class AgentConfig:
         return []
 
     @staticmethod
-    def _agent_data_to_spec(agent_data):
+    def _agent_data_to_spec(agent_data: Any) -> Dict[str, Any]:
         """Map a flow agent ORM object to the crew-style spec dict the shared
         agent builder consumes, so flow agents get the SAME LLM build + kwargs
         assembly (and defaults) as crew agents. Only fields present and non-None
@@ -281,10 +282,10 @@ class AgentConfig:
         return spec
 
     @staticmethod
-    def _resolve_agent_config(agent_data):
+    def _resolve_agent_config(agent_data: Any) -> Dict[str, Any]:
         """Flow-only Agent ``config`` dict (crew never sets this), parsed from
         ``agent_data.config`` (dict or JSON string); empty dict by default."""
-        cfg = {}
+        cfg: Dict[str, Any] = {}
         raw = getattr(agent_data, "config", None)
         if raw is None:
             return cfg

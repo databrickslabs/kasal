@@ -30,7 +30,7 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 
-def build_flow_data_access(session) -> Dict[str, Any]:
+def build_flow_data_access(session: Any) -> Dict[str, Any]:
     """The ``repositories`` bundle for a ``BackendFlow``, keyed as before.
 
     The keys are unchanged (``flow``/``task``/``agent``/``crew``/

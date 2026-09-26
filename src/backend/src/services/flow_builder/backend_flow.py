@@ -18,7 +18,7 @@ from typing import (  # noqa: E402 - import follows module initialization
 )
 
 from src.core.llm.transport import (  # noqa: E402 - import follows module initialization
-    LLM,
+    OpenAICompletion,
 )
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
@@ -69,7 +69,7 @@ logger = LoggerManager.get_instance().flow
 RUN_METADATA_INPUTS = frozenset({"flow_id", "run_name", "execution_id", "job_id"})
 
 
-def _extract_flow_uuid(engine_flow) -> Optional[str]:
+def _extract_flow_uuid(engine_flow: Any) -> Optional[str]:
     """Extract CrewAI's flow state id — used as the checkpoint/resume ``flow_uuid``.
 
     CrewAI wraps flow state in a ``StateProxy`` whose ``id`` is NOT exposed as an
@@ -146,25 +146,25 @@ class BackendFlow:
         #: The outcome this turn selected, if narrowing chose one.
         self._turn_outcome: Optional[str] = None
         # Don't store API keys directly, just other configuration
-        self._config = {}
+        self._config: Dict[str, Any] = {}
         # Repository container
-        self._repositories = {}
+        self._repositories: Dict[str, Any] = {}
         logger.info(f"Initializing BackendFlow{' for job ' + job_id if job_id else ''}")
 
     @property
-    def config(self):
+    def config(self) -> Dict[str, Any]:
         return self._config
 
     @config.setter
-    def config(self, value):
+    def config(self, value: Dict[str, Any]) -> None:
         self._config = value
 
     @property
-    def repositories(self):
+    def repositories(self) -> Dict[str, Any]:
         return self._repositories
 
     @repositories.setter
-    def repositories(self, value):
+    def repositories(self, value: Dict[str, Any]) -> None:
         self._repositories = value
 
     async def load_flow(self, repository: Optional[FlowRepository] = None) -> Dict:
@@ -214,7 +214,7 @@ class BackendFlow:
             logger.error(f"Error loading flow data: {e}", exc_info=True)
             raise
 
-    async def _get_llm(self) -> LLM:
+    async def _get_llm(self) -> OpenAICompletion:
         """
         Get a properly configured LLM for CrewAI using LLMManager.
         This ensures API keys are properly set from the database.
@@ -321,7 +321,7 @@ class BackendFlow:
             logger.error(f"Error creating flow: {e}", exc_info=True)
             raise ValueError(f"Failed to create flow: {str(e)}")
 
-    def _init_callbacks(self):
+    def _init_callbacks(self) -> None:
         """
         Initialize callbacks for flow execution.
 
@@ -395,7 +395,7 @@ class BackendFlow:
         instead of starting over. No session means no thread, which is how every
         flow runs today.
         """
-        explicit = self._config.get("resume_from_flow_uuid")
+        explicit: Optional[str] = self._config.get("resume_from_flow_uuid")
         if explicit:
             return explicit
         return thread_state_uuid(

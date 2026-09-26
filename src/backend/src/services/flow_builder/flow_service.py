@@ -2,7 +2,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from src.core.exceptions import (
 from src.models.flow import Flow
 from src.repositories.flow_repository import FlowRepository
 from src.schemas.flow import FlowCreate, FlowUpdate
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,9 @@ class FlowService:
         """
         self.session = session
 
-    async def create_flow_with_group(self, flow_in: FlowCreate, group_context) -> Flow:
+    async def create_flow_with_group(
+        self, flow_in: FlowCreate, group_context: Optional[GroupContext]
+    ) -> Flow:
         """
         Create a new flow with group isolation.
 
@@ -159,7 +162,7 @@ class FlowService:
         return flow
 
     async def get_flow_with_group_check(
-        self, flow_id: uuid.UUID, group_context
+        self, flow_id: uuid.UUID, group_context: Optional[GroupContext]
     ) -> Flow:
         """
         Get a flow by ID with group authorization check.
@@ -188,7 +191,9 @@ class FlowService:
         return flow
 
     @staticmethod
-    def require_execution_access(flow: Flow, group_context) -> None:
+    def require_execution_access(
+        flow: Flow, group_context: Optional[GroupContext]
+    ) -> None:
         """Saved definitions require a resolved owner and caller workspace."""
         group_ids = getattr(group_context, "group_ids", None) or []
         if not flow.group_id or flow.group_id not in group_ids:
@@ -197,7 +202,7 @@ class FlowService:
     async def get_flow_for_execution(
         self,
         flow_id: Union[uuid.UUID, str],
-        group_context,
+        group_context: Optional[GroupContext],
         *,
         allow_unsaved: bool = False,
     ) -> Optional[Flow]:
@@ -213,7 +218,9 @@ class FlowService:
         self.require_execution_access(flow, group_context)
         return flow
 
-    async def get_all_flows_for_group(self, group_context) -> List[Flow]:
+    async def get_all_flows_for_group(
+        self, group_context: Optional[GroupContext]
+    ) -> List[Flow]:
         """
         Get all flows for the user's groups.
 
@@ -230,7 +237,10 @@ class FlowService:
         )
 
     async def update_flow_with_group_check(
-        self, flow_id: uuid.UUID, flow_in: FlowUpdate, group_context
+        self,
+        flow_id: uuid.UUID,
+        flow_in: FlowUpdate,
+        group_context: Optional[GroupContext],
     ) -> Flow:
         """
         Update a flow with group authorization check and name uniqueness validation.
@@ -277,7 +287,9 @@ class FlowService:
         # Delegate to the existing update_flow method
         return await self.update_flow(flow_id, flow_in)
 
-    async def delete_all_flows_for_group(self, group_context) -> None:
+    async def delete_all_flows_for_group(
+        self, group_context: Optional[GroupContext]
+    ) -> None:
         """
         Delete all flows for the user's groups.
 
@@ -392,7 +404,7 @@ class FlowService:
 
             # Update the flow
             updated_flow = await repository.update(flow_id, update_data)
-            return updated_flow
+            return cast(Flow, updated_flow)  # existence checked above
         except KasalError:
             raise
         except Exception as e:
@@ -459,7 +471,7 @@ class FlowService:
             )
 
     async def _withdraw_publication(
-        self, flow_id: uuid.UUID, group_context=None
+        self, flow_id: uuid.UUID, group_context: Optional[GroupContext] = None
     ) -> None:
         """Unpublish a flow that is about to be deleted.
 
@@ -481,7 +493,7 @@ class FlowService:
             logger.warning(f"Could not unpublish deleted flow {flow_id}: {exc}")
 
     async def force_delete_flow_with_executions_with_group_check(
-        self, flow_id: uuid.UUID, group_context
+        self, flow_id: uuid.UUID, group_context: Optional[GroupContext]
     ) -> bool:
         """
         Force delete a flow with group authorization check.

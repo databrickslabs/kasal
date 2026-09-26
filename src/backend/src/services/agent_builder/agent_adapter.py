@@ -43,10 +43,10 @@ from src.services.execution.kernel.agent_security import (  # noqa: E402,F401
 async def create_agent(
     agent_key: str,
     agent_config: Dict,
-    tools: List[Any] = None,
-    config: Dict = None,
-    tool_service=None,
-    tool_factory=None,
+    tools: Optional[List[Any]] = None,
+    config: Optional[Dict] = None,
+    tool_service: Any = None,
+    tool_factory: Any = None,
     agent_id: Optional[str] = None,
 ) -> Any:
     """

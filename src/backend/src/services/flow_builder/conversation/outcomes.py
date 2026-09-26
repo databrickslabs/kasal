@@ -70,7 +70,7 @@ class OutcomeChoice:
     answer_from_state: bool = False
 
 
-def crew_entries(flow_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+def crew_entries(flow_config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Every crew in the flow, as the config describes it."""
     if not isinstance(flow_config, dict):
         return []
@@ -80,7 +80,7 @@ def crew_entries(flow_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [e for e in entries if isinstance(e, dict) and e.get("crewName")]
 
 
-def terminal_crews(flow_config: Dict[str, Any]) -> Set[str]:
+def terminal_crews(flow_config: Optional[Dict[str, Any]]) -> Set[str]:
     """Crews nothing else listens to.
 
     The single definition of "this crew's output is the end of a branch". Both

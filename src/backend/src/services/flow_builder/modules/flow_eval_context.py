@@ -21,7 +21,7 @@ from src.services.flow_builder.modules.flow_conditions import (
 logger = logging.getLogger(__name__)
 
 
-def coerce_scalar_value(val):
+def coerce_scalar_value(val: Any) -> Any:
     """Coerce a string scalar to its natural type for reliable router comparisons.
 
     Booleans first: a crew may return ``has_results: true`` (JSON bool → Python
@@ -47,7 +47,7 @@ def coerce_scalar_value(val):
     return val
 
 
-def extract_embedded_json(text):
+def extract_embedded_json(text: Any) -> Any:
     """Extract a JSON object/array embedded in prose.
 
     Models on the soft output_json path commonly wrap their structured answer in
@@ -100,29 +100,29 @@ def build_eval_context(flow: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
     ConditionState, not raise.
     """
 
-    eval_context = {}
+    eval_context: Dict[str, Any] = {}
 
     # Convert string scalars (bool/int/float) so router conditions
     # compare reliably — see module-level coerce_scalar_value.
-    def auto_convert_value(val):
+    def auto_convert_value(val: Any) -> Any:
         return coerce_scalar_value(val)
 
     # Helper function to convert all string numerics in a dict
-    def auto_convert_dict(d):
+    def auto_convert_dict(d: Any) -> Any:
         """Recursively convert string numerics in a dict."""
         if not isinstance(d, dict):
             return auto_convert_value(d)
         return {k: auto_convert_dict(v) for k, v in d.items()}
 
     # Safe helper functions for condition evaluation
-    def safe_int(val, default=0):
+    def safe_int(val: Any, default: Any = 0) -> Any:
         """Safely convert value to int."""
         try:
             return int(val)
         except (ValueError, TypeError):
             return default
 
-    def safe_float(val, default=0.0):
+    def safe_float(val: Any, default: Any = 0.0) -> Any:
         """Safely convert value to float."""
         try:
             return float(val)
@@ -166,7 +166,7 @@ def build_eval_context(flow: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
     # handler swallowed it and abandoned the whole route evaluation, so a
     # route whose condition was true simply never ran. Observed on a real
     # flow as "cannot access local variable 'strip_code_fences'".
-    def merge_parsed_json(parsed_data, source_label):
+    def merge_parsed_json(parsed_data: Any, source_label: str) -> None:
         if isinstance(parsed_data, dict):
             parsed_data = auto_convert_dict(parsed_data)
             eval_context["state"].update(parsed_data)
@@ -191,7 +191,7 @@ def build_eval_context(flow: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
                 f"Stored {source_label} JSON array with {len(parsed_data)} items in context['items']"
             )
 
-    def strip_code_fences(s):
+    def strip_code_fences(s: str) -> str:
         """Strip markdown code fences (```json ... ```) from a string."""
         s = s.strip()
         if s.startswith("```"):
@@ -202,7 +202,7 @@ def build_eval_context(flow: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
                 s = s.rstrip()[:-3].rstrip()
         return s
 
-    def looks_like_json(s):
+    def looks_like_json(s: str) -> bool:
         s = s.strip()
         return (s.startswith("{") and s.endswith("}")) or (
             s.startswith("[") and s.endswith("]")

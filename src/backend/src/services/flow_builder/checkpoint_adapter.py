@@ -19,7 +19,7 @@ is 1-based for the same reason.
 """
 
 import logging
-from typing import Any, Iterable, Optional, Tuple
+from typing import Any, Iterable, Optional, Set, Tuple
 
 from src.core.events.types import CrewCheckpointRestoredEvent, CrewKickoffCompletedEvent
 from src.services.execution.checkpointing.record import KIND_FLOW, build_unit
@@ -47,7 +47,7 @@ class FlowCrewCheckpointRecorder(CheckpointRecorder):
         meta = {"flow_state_ref": {"flow_uuid": flow_uuid}} if flow_uuid else None
         super().__init__(job_id, unit_count=crew_count, meta=meta)
         self._sequence = 0
-        self._seen_crews = set()
+        self._seen_crews: Set[Optional[str]] = set()
 
     def _subscriptions(self) -> Iterable[Tuple[type, Any]]:
         return (

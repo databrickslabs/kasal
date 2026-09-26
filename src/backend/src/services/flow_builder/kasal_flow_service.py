@@ -53,10 +53,10 @@ class KasalFlowService:
     async def run_flow(
         self,
         flow_id: Optional[Union[uuid.UUID, str]] = None,
-        job_id: str = None,
+        job_id: Optional[str] = None,
         run_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
-        group_context=None,
+        group_context: Any = None,
         user_token: Optional[str] = None,
         resume_from_flow_uuid: Optional[str] = None,
         resume_from_execution_id: Optional[int] = None,
@@ -127,8 +127,8 @@ class KasalFlowService:
                 from src.services.execution.naming import ExecutionNameService
 
                 # Extract agents/tasks from nodes for name generation
-                agents_yaml = {}
-                tasks_yaml = {}
+                agents_yaml: Dict[str, Any] = {}
+                tasks_yaml: Dict[str, Any] = {}
                 nodes = config.get("nodes", [])
 
                 for node in nodes:
