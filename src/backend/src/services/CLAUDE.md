@@ -128,12 +128,13 @@ table without the rules.
 
 `tests/unit/architecture/test_service_repository_ownership.py` enforces this as a
 ratchet: `_OWNED` says which repositories each domain may use freely, and `_BASELINE`
-records what is left. It started at **42** pairs and is down to **6** — all of them
-the `repositories` dict the flow runner injects into `BackendFlow` inside the flow
+records what is left. It started at **42** pairs and is down to **3** (the
+`flow_builder -> agent / crew / task` entries in `_BASELINE`) — all of them the
+`repositories` dict the flow runner injects into `BackendFlow` inside the flow
 SUBPROCESS, which cannot be converted safely from in-process tests. Convert that and
-this becomes a hard ban.
+this becomes a hard ban. Count them in the test, not here, when the number matters.
 
-Closing the other 36 surfaced four real bugs, every one swallowed by an `except`:
+Closing the other 39 surfaced four real bugs, every one swallowed by an `except`:
 GEPA wrote agent/task rows past `get_with_group_check`;
 `TemplateService(template_repository)` passed a repository where a session was
 expected, so `generate_connections` never loaded its prompt; `tool_factory` called
