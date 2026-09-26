@@ -13,8 +13,6 @@ New here? Start with [Why Kasal](./WHY_KASAL.md) for the problem it solves, then
 - [Power BI to Unity Catalog migration](#power-bi-to-unity-catalog-migration)
 - [Security and compliance](#security-and-compliance)
 - [Run Kasal locally](#run-kasal-locally)
-- [Internal notes](#internal-notes)
-- [Archive](#archive)
 - [For contributors](#for-contributors)
 
 ## Get started and tutorials
@@ -94,22 +92,8 @@ cd kasal/src/frontend && npm ci && npm start
 
 The app is served at `http://localhost:3000`. `run.sh` turns on a local development identity (`LOCAL_DEV_AUTH`); without it, API calls get 401. For details, see the [quick start](./QUICK_START.md#run-locally) and the [developer guide](./DEVELOPER_GUIDE.md).
 
-## Internal notes
-
-Engineering proposals, backlogs and records. They ship with the docs but are not user documentation; each carries a status banner.
-
-- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md): historical record of the engine restructure; its paths describe the deleted engines layout.
-- [Conversational flow state proposal](./conversational-flow-state-proposal.md): the design record behind [conversational flow state](./conversational-flow-state.md).
-- [Dual-harness backlog](./dual-harness-backlog.md): open items from running Kasal and CrewAI side by side.
-- [Internal DBU tagging plan](./internal-dbu-tagging-plan.md): a plan, not built, to tag Kasal-created resources for cost attribution.
-- [Platform feedback for product teams](./kasal-platform-feedback-for-product-teams.md): field-proven asks for Databricks product teams.
-
-## Archive
-
-Superseded pages are kept for reference but are no longer maintained.
-
-- [Archived documentation](./archive/README.md): legacy technical, security, and guide docs from before the documentation redesign.
-
 ## For contributors
 
-Writing or editing docs in `src/docs/`? Follow the [documentation style guide](./DOCUMENTATION_STYLE_GUIDE.md), which covers the Diátaxis modes, page anatomy, linking rules, and the per-page checklist. Each subfolder (`powerbi/`, `examples/`, `archive/`, `Blueprints/`) has its own `README.md` index; keep this hub's links in sync when you add or move a page.
+Writing or editing docs in `src/docs/`? Follow the [documentation style guide](./DOCUMENTATION_STYLE_GUIDE.md), which covers the Diátaxis modes, page anatomy, linking rules, and the per-page checklist. Each subfolder (`powerbi/`, `examples/`, `Blueprints/`) has its own `README.md` index; keep this hub's links in sync when you add or move a page.
+
+Engineering proposals, backlogs, reviews and superseded pages also live in `src/docs/` (for example `archive/`), but they are not user documentation and are left out of the app bundle and the pip wheel. The exclusion rules are in `src/scripts/build-tasks.cjs`: the `archive/` and `reviews/` folders, a list of named files, and any page whose opening carries a `**Status: internal` banner. Don't link to those pages from a shipped doc; the build fails if you do.

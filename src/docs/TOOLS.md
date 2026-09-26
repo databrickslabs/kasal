@@ -71,7 +71,7 @@ Input fields:
 - `limit` (optional): maximum number of results (default 5).
 - `file_paths` (optional): restrict results to specific uploaded files.
 
-The tool is configured automatically with `group_id`, `execution_id`, and a user token for OBO authentication, and it returns formatted results with a similarity score and source per match. See the [Knowledge Search tool guide](./archive/guides/knowledge-search-tool.md) and the [UI knowledge tool usage guide](./archive/guides/ui-knowledge-tool-usage.md).
+The tool is configured automatically with `group_id`, `execution_id`, and a user token for OBO authentication, and it returns formatted results with a similarity score and source per match.
 
 ## Agent Bricks
 
