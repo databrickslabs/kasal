@@ -17,18 +17,24 @@ import pytest
 # Point the process at a throwaway database BEFORE anything imports settings.
 #
 # This cannot be a fixture. `config/settings.py` evaluates
-# `os.getenv("SQLITE_DB_PATH", ...)` when the Settings CLASS BODY runs — i.e. at
-# import, during collection — so an autouse `monkeypatch.setenv` further down
-# this file always loses the race. It has been losing it silently: the default
-# used to be the CWD-relative "./app.db", which is how empty app.db files ended
-# up at the repo root and in src/frontend/. The default is absolute now, which
-# makes setting this early MORE important, not less: without it a stray write
-# would land in the real development database instead of a stray file.
-# Only the PATH is set here, deliberately. DATABASE_TYPE is left alone because
-# it is read the same way, and tests assert on its "postgres" default — setting
-# it at import time would bake "sqlite" into the class and break them. The
-# autouse fixture below still sets both for the code that reads them at runtime.
-os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
+# `os.getenv("DATABASE_TYPE", ...)` and `os.getenv("SQLITE_DB_PATH", ...)` when
+# the Settings CLASS BODY runs — i.e. at import, during collection — so an
+# autouse `monkeypatch.setenv` further down this file always loses the race.
+#
+# These are HARD-SET, not `setdefault`. The default path is the absolute
+# BACKEND_ROOT/app.db — the real development database — so a shell that
+# exported SQLITE_DB_PATH=app.db (or DATABASE_TYPE=postgres) used to send the
+# import-time `settings`, and with it the session factory, straight at the dev
+# database; the pollution guard at the bottom of this file only notices NEW
+# files, so writes into an existing app.db passed silently. "sqlite" is also
+# the Settings default, so pinning it bakes nothing unusual into the class.
+# DATABASE_URI / SYNC_DATABASE_URI are dropped because BaseSettings would read
+# an exported one verbatim and bypass both of the above. Tests that need other
+# values construct Settings(...) or patch os.environ themselves.
+os.environ["DATABASE_TYPE"] = "sqlite"
+os.environ["SQLITE_DB_PATH"] = ":memory:"
+os.environ.pop("DATABASE_URI", None)
+os.environ.pop("SYNC_DATABASE_URI", None)
 
 # Everything a test run writes goes in ONE place: tests/.artifacts/. It is
 # git-ignored, safe to delete, and the pollution guard at the bottom of this

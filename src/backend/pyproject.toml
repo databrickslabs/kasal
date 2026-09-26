@@ -114,6 +114,7 @@ dev = [
     "pytest-asyncio>=0.23.5",
     "pytest-xdist>=3.5.0",
     "pytest-mock>=3.12.0",
+    "pytest-timeout>=2.3.1",
     "black>=24.1.1",
     "isort>=5.13.2",
     "mypy>=1.8.0",
@@ -228,6 +229,14 @@ python_files = "test_*.py"
 python_functions = "test_*"
 python_classes = "Test*"
 asyncio_mode = "auto"
+# A hung test must fail, not stall an xdist worker (and CI) indefinitely.
+# 300 s is far above the slowest legitimate test. "signal" raises inside the
+# stuck test and keeps the worker alive, so fixture teardown still runs — that
+# teardown is what reaps the real subprocesses some suites spawn. "thread"
+# would os._exit the whole worker, skip teardown and orphan those children.
+# Override per test with @pytest.mark.timeout(n).
+timeout = 300
+timeout_method = "signal"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
