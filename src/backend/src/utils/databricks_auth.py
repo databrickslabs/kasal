@@ -221,6 +221,9 @@ import httpx
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
 
+# Re-exported: callers and tests reach it as src.utils.databricks_auth.*
+from src.utils.databricks_mcp_cli import get_mcp_access_token
+
 logger = logging.getLogger(__name__)
 
 #: True while this task is already resolving auth, so a DB read made from INSIDE
@@ -1510,52 +1513,6 @@ async def get_workspace_client_with_fallback(
     except Exception as e:
         logger.error(f"[{operation_name}] Error creating workspace client: {e}")
         return None, None
-
-
-async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
-    """
-    Get an MCP access token by calling the Databricks CLI directly.
-    This is the most reliable approach since we know 'databricks auth token -p mcp' works.
-
-    Returns:
-        Tuple[Optional[str], Optional[str]]: (access_token, error_message)
-    """
-    try:
-        import json
-        import subprocess
-
-        logger.info("Getting MCP token using Databricks CLI")
-
-        # Call the CLI command that we know works
-        result = subprocess.run(
-            ["databricks", "auth", "token", "-p", "mcp"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        # Parse the JSON output
-        token_data = json.loads(result.stdout)
-        access_token = token_data.get("access_token")
-
-        if not access_token:
-            return None, "No access token found in CLI response"
-
-        # Verify this is a JWT token (should start with eyJ)
-        if access_token.startswith("eyJ"):
-            logger.info("Successfully obtained JWT token from CLI for MCP")
-            return access_token, None
-        else:
-            logger.warning(f"Token doesn't look like JWT: {access_token[:20]}...")
-            return access_token, None
-
-    except subprocess.CalledProcessError as e:
-        return None, f"CLI command failed: {e.stderr}"
-    except json.JSONDecodeError as e:
-        return None, f"Failed to parse CLI output: {e}"
-    except Exception as e:
-        logger.error(f"Error getting MCP token from CLI: {e}")
-        return None, str(e)
 
 
 async def get_current_databricks_user(

@@ -390,6 +390,7 @@ class TestDeployToEndpoint:
             {
                 "databricks.sdk": mock_wc_module,
                 "databricks.sdk.service.serving": MagicMock(),
+                "databricks.sdk.useragent": MagicMock(),
             },
         ):
             url, status = await service._deploy_to_endpoint("model", "1", config)
@@ -418,6 +419,7 @@ class TestDeployToEndpoint:
             {
                 "databricks.sdk": mock_wc_module,
                 "databricks.sdk.service.serving": MagicMock(),
+                "databricks.sdk.useragent": MagicMock(),
             },
         ):
             url, status = await service._deploy_to_endpoint("model", "2", config)

@@ -2,6 +2,7 @@
 API router for crew export and deployment operations.
 """
 
+import asyncio
 import io
 import logging
 import zipfile
@@ -450,8 +451,10 @@ async def get_deployment_status(
     from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
     with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
-    w = WorkspaceClient()
-    endpoint = w.serving_endpoints.get(endpoint_name)
+    # The SDK is synchronous (client auth resolution included): keep it off the loop.
+    endpoint = await asyncio.to_thread(
+        lambda: WorkspaceClient().serving_endpoints.get(endpoint_name)
+    )
 
     return {
         "endpoint_name": endpoint_name,
@@ -512,8 +515,10 @@ async def delete_deployment(
     from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
     with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
-    w = WorkspaceClient()
-    w.serving_endpoints.delete(endpoint_name)
+    # The SDK is synchronous (client auth resolution included): keep it off the loop.
+    await asyncio.to_thread(
+        lambda: WorkspaceClient().serving_endpoints.delete(endpoint_name)
+    )
 
     logger.info(f"Deleted endpoint {endpoint_name} for crew {crew_id}")
 
