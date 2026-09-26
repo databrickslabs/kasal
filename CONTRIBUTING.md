@@ -37,7 +37,7 @@ npm start  # http://localhost:3000
 
 Kasal follows a clean layered architecture:
 
-```
+```text
 Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ```
 
@@ -55,7 +55,7 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ## Key Directories for Contributors
 
 ### Backend (`src/backend/src/`)
-```
+```text
 ├── api/             # FastAPI route handlers (controllers)
 ├── services/        # Business logic layer (main work area)
 ├── repositories/    # Data access layer (Repository pattern)
@@ -66,7 +66,7 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ```
 
 ### Frontend (`src/frontend/src/`)
-```
+```text
 ├── app/             # Application shell and session workspace
 ├── features/        # Chat, workflow canvas, catalog, activity and configuration
 ├── shared/          # Reusable UI, API client and types

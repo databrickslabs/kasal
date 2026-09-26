@@ -21,7 +21,7 @@ SQL** and **M → source SQL** — feeding one YAML emitter.
 
 ## End-to-end flow
 
-```
+```text
 Power BI REST / scan
         │
         ▼

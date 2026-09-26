@@ -20,7 +20,7 @@ version is never reached, because we never construct a CrewAI `Flow`.
 CrewAI 1.15.16 ships `crewai/experimental/conversational.py`
 (`Flow(conversational=True)`), whose `ConversationState` is:
 
-```
+```text
 id, messages, current_user_message, last_user_message,
 last_intent, ended, events, agent_threads, session_ready
 ```

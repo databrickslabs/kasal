@@ -119,7 +119,7 @@ differently.
 
 ## The execution path
 
-```
+```text
 POST /executions  (execution_type: "flow")
   └─ ExecutionService.create_execution           schemas/execution.py → execution config
       └─ KasalExecutionService.run_flow_execution  loads the flow, adds flow_id / group context
@@ -227,7 +227,7 @@ compiles it into a real class (`conversation/state_model.py`) and installs it as
 `initial_state`. A typed state has a closed set of fields, so an input naming a
 field it does not have RAISES at kickoff instead of vanishing:
 
-```
+```text
 Flow state has no field(s) ['topci']. This state accepts: ['has_results', 'id', 'topic'].
 ```
 
