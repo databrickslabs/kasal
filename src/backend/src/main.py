@@ -74,9 +74,13 @@ os.environ["MLFLOW_TRACKING_URI"] = "databricks"
 log_path = os.path.join(
     os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "logs"
 )
-os.environ["LOG_DIR"] = log_path
+# setdefault, not overwrite: a LOG_DIR the launcher (or the test suite, which
+# points it at tests/.artifacts/logs) already chose must win. Overwriting it made
+# every test after the first in-process ``import src.main`` write log files into
+# src/backend/logs/, which the test-artifact guard then failed on a clean checkout.
+_log_dir = os.environ.setdefault("LOG_DIR", log_path)
 # Create logs directory if it doesn't exist
-os.makedirs(log_path, exist_ok=True)
+os.makedirs(_log_dir, exist_ok=True)
 
 
 def _trigger_interval() -> int:
