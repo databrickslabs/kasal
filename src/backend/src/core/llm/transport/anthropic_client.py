@@ -42,16 +42,16 @@ class AnthropicClient:
             thinking = REDACTED_REASONING
         usage = message.usage
         cached = getattr(usage, "cache_read_input_tokens", 0) or 0
-        prompt = (
-            usage.input_tokens
-            + cached
-            + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
-        )
+        created = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        # Native input_tokens excludes both cache buckets; prompt_tokens is the
+        # whole prompt, as on every OpenAI-compatible endpoint.
+        prompt = usage.input_tokens + cached + created
         tokens = NS(
             prompt_tokens=prompt,
             completion_tokens=usage.output_tokens,
             total_tokens=prompt + usage.output_tokens,
             prompt_tokens_details=NS(cached_tokens=cached),
+            cache_creation_input_tokens=created,
         )
         tool_calls = [
             NS(

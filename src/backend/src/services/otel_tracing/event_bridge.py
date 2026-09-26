@@ -1211,6 +1211,7 @@ class OTelEventBridge:
                 "completion_tokens",
                 "total_tokens",
                 "cached_prompt_tokens",
+                "cache_creation_tokens",
             ):
                 value = usage.get(key)
                 if value is not None:
