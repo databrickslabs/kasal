@@ -491,7 +491,7 @@ class DAXExpressionParser:
         """Extract aggregation functions from hierarchical tree."""
         aggregations = []
 
-        def traverse(node: Dict[str, Any], position: int = 0):
+        def traverse(node: Dict[str, Any], position: int = 0) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
                 # Check if this is an aggregation function
@@ -516,7 +516,7 @@ class DAXExpressionParser:
         """Extract FILTER clauses from hierarchical tree."""
         filters = []
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
 
@@ -556,7 +556,7 @@ class DAXExpressionParser:
         """Extract table[column] references from hierarchical tree."""
         references = set()
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "value" in node:
                 # Check if this value contains a table[column] reference
                 value = node["value"]
@@ -587,7 +587,7 @@ class DAXExpressionParser:
         operations = []
         operations_set = set()
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
 
@@ -628,7 +628,7 @@ class DAXExpressionParser:
             "complexity": "simple",
         }
 
-        def traverse(node: Dict[str, Any]):
+        def traverse(node: Dict[str, Any]) -> None:
             if "function" in node:
                 func_name = node["function"].upper()
 

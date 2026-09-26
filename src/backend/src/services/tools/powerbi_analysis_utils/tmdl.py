@@ -538,7 +538,7 @@ class PowerBITmdlParsingMixin:
                         if " = " in stripped:
                             value_part = stripped.split(" = ", 1)[1].strip()
                             # Remove quotes and clean
-                            value = value_part.strip("\"'")
+                            value: str | List[str] = value_part.strip("\"'")
                         elif " in {" in stripped:
                             # Extract values from set
                             value_part = stripped.split(" in {", 1)[1].split("}")[0]

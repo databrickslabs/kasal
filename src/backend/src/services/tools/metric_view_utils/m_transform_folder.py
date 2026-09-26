@@ -77,7 +77,7 @@ class MTransformFolder:
     def _split_union(sql: str) -> list[str]:
         """Split SQL into UNION arms, preserving UNION ALL vs UNION."""
         arms = []
-        current = []
+        current: list[str] = []
         paren_depth = 0
         tokens = re.split(r"(\bunion\s+all\b|\bunion\b)", sql, flags=re.IGNORECASE)
         for token in tokens:
@@ -146,7 +146,7 @@ class MTransformFolder:
 
         if eq_cols:
 
-            def _remove_redundant_neq(match: re.Match) -> str:
+            def _remove_redundant_neq(match: re.Match[str]) -> str:
                 col = match.group(1).lower()
                 if col in eq_cols:
                     return ""
@@ -443,7 +443,7 @@ class MTransformFolder:
     def _split_select_columns(select_body: str) -> list[str]:
         """Split SELECT column list on commas, respecting parentheses."""
         cols = []
-        current = []
+        current: list[str] = []
         depth = 0
         for char in select_body:
             if char == "(":
@@ -493,8 +493,8 @@ class MTransformFolder:
 
         remove_set: set[str] = set()
         for step in remove_columns:
-            for m in re.finditer(r'"([^"]+)"', step.raw_expression.split("{", 1)[-1]):
-                remove_set.add(m.group(1))
+            for rm in re.finditer(r'"([^"]+)"', step.raw_expression.split("{", 1)[-1]):
+                remove_set.add(rm.group(1))
 
         for step in transforms:
             if step.step_type == "ReplaceValue":

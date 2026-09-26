@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable
+from typing import Any, Callable, Iterable
 
 from .constants import (
     RE_AVERAGEX_FILTER,
@@ -12,7 +12,7 @@ from .constants import (
     RE_SIMPLE_SUMX,
     RE_SUMX_FILTER,
 )
-from .data_classes import TranslationResult
+from .data_classes import TranslateFn, TranslationResult
 from .join_detector import _sanitize_alias
 from .utils import to_snake_case
 
@@ -32,7 +32,7 @@ def _sql_str_literal(value: str) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
-def _sql_in_list(values) -> str:
+def _sql_in_list(values: Iterable[Any]) -> str:
     """Build a safe ``'a', 'b', 'c'`` IN-list from DAX-sourced values (escaped)."""
     return ", ".join(_sql_str_literal(v) for v in values)
 
@@ -43,17 +43,17 @@ class DaxTranslator:
     def __init__(self, config: dict | None = None):
         cfg = config or {}
         self.filter_sets = cfg.get("filter_sets", {})
-        self.column_overrides = cfg.get("column_overrides", {})
+        self.column_overrides: dict[str, str] = cfg.get("column_overrides", {})
         self._fact_join_map_cfg = cfg.get("fact_join_map", {})
-        self._measure_resolutions = cfg.get("measure_resolutions", {})
+        self._measure_resolutions: dict[str, dict] = cfg.get("measure_resolutions", {})
         self._dim_alias_map: dict[str, str] = cfg.get("dim_alias_map", {})
         self._cwc_filter_column: str = cfg.get("cwc_filter_column", "")
         self._fact_joins: list[dict] = []
         self._source_col_map: dict[str, str] = {}
-        self._patterns: list[tuple[str, Callable, Callable]] = []
+        self._patterns: list[tuple[str, Callable, TranslateFn]] = []
         self._register_patterns()
 
-    def _register_patterns(self):
+    def _register_patterns(self) -> None:
         """Register translation patterns in priority order. First match wins."""
         self._patterns = [
             ("quick_reject", self._match_quick_reject, self._translate_noop),
@@ -129,11 +129,11 @@ class DaxTranslator:
             ),
         ]
 
-    def set_fact_joins(self, fact_joins: list[dict]):
+    def set_fact_joins(self, fact_joins: list[dict]) -> None:
         """Set current fact joins for cross-table resolution."""
         self._fact_joins = fact_joins
 
-    def set_source_col_map(self, col_map: dict[str, str]):
+    def set_source_col_map(self, col_map: dict[str, str]) -> None:
         """Map a same-fact physical column to the source SELECT's OUTPUT column.
 
         A pre-aggregating source (``SUM(kbi_value) AS value``) exposes the column
@@ -1468,7 +1468,7 @@ class DaxTranslator:
             return self.column_overrides[override_key]
         return pbi_col
 
-    def _extend_with_implicit_filters(self, filter_parts: list[str], alias: str):
+    def _extend_with_implicit_filters(self, filter_parts: list, alias: str) -> None:
         """Add MQuery implicit filters for a fact join alias."""
         safe_alias = _sanitize_alias(alias)
         for fj in self._fact_joins:
@@ -1688,7 +1688,7 @@ class DaxTranslator:
         resolution = self._measure_resolutions.get(ref_name)
         if not resolution:
             return None
-        base_expr = resolution.get("base_expr", "")
+        base_expr: str = resolution.get("base_expr", "")
         base_filters = list(resolution.get("base_filters", []))
         all_filters = base_filters + extra_filters
         if all_filters:
@@ -1717,11 +1717,11 @@ class DaxTranslator:
     def _resolve_remaining_dax(self, sql: str) -> str:
         """Post-process SQL to resolve bare [MeasureRef] and remaining DIVIDE()."""
 
-        def _resolve_ref(m: re.Match) -> str:
+        def _resolve_ref(m: re.Match[str]) -> str:
             ref_name = m.group(1)
             resolution = self._measure_resolutions.get(ref_name)
             if resolution:
-                base = resolution["base_expr"]
+                base: str = resolution["base_expr"]
                 filters = resolution.get("base_filters", [])
                 if filters:
                     return f"{base} FILTER (WHERE {' AND '.join(filters)})"

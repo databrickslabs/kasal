@@ -87,7 +87,7 @@ class SqlPostProcessor:
             re.IGNORECASE | re.DOTALL,
         )
 
-        def _expand(m: re.Match) -> str:
+        def _expand(m: re.Match[str]) -> str:
             col = m.group(1)
             else_col = m.group(2)
             return (
@@ -205,7 +205,7 @@ class SqlPostProcessor:
     def _unflatten_table_names(sql: str) -> str:
         """Unflatten table names: catalog.schema.cat__sch__tbl → cat.sch.tbl."""
 
-        def _unflatten(m: re.Match) -> str:
+        def _unflatten(m: re.Match[str]) -> str:
             prefix = m.group(1)
             full = m.group(2)
             parts = full.split(".")

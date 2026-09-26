@@ -288,7 +288,7 @@ def _clean_filter_prefixes(
             pbi_to_alias[low] = cfg["alias"]
 
     # Process each FILTER clause independently
-    def _strip_in_filter(m: re.Match) -> str:
+    def _strip_in_filter(m: re.Match[str]) -> str:
         filter_body = m.group(1)
         # 1. Strip source-table prefixes -> bare column names
         for pfx in strip_prefixes:

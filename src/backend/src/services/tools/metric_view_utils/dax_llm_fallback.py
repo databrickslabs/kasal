@@ -243,7 +243,8 @@ def _parse_response(response_text: str) -> dict:
             text = text.split("```json")[1].split("```")[0].strip()
         elif text.startswith("```"):
             text = text.split("```")[1].split("```")[0].strip()
-        return json.loads(text)
+        parsed: dict = json.loads(text)
+        return parsed
     except json.JSONDecodeError:
         return {"success": False, "error": "Failed to parse LLM response"}
 
