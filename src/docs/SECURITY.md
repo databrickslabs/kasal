@@ -76,11 +76,34 @@ Every other source of a host is untrusted and checked against the credentialed h
 - **The `?host=` override** on the listing endpoints, which must name the same host.
 - **A tool's `databricks_host`.** LLM-facing tool arguments and tool configurations can name a host, so every override goes through `src/backend/src/services/tools/databricks_tool_utils/` (`resolve_tool_auth`, `apply_host_override`, `assert_tool_host`). An override may only re-spell the credentialed host; any other host fails the tool's authentication. The Genie space generator, dashboard creator, Power BI visual-to-UCMV mapper, UCMV Genie config generator, metric view deployer and Databricks Jobs tools, and the metric view Unity Catalog query helper, all use it.
 
+- **An MCP server URL.** Workspace admins register MCP servers, so a server using Databricks authentication receives the credential only when its host is the credentialed host or a Databricks App of the same workspace (the app hostname carries the workspace ID). This applies to runs (`services/tools/mcp_integration.py`) and to the connection test. Any other host needs `api_key` authentication.
+
 Hosts compare as normalised hostnames: scheme, case, trailing slash, path and the default port do not matter, a different host or port does, and a non-`https` scheme is refused outright.
 
 ## Teamspace isolation
 
 Kasal is multi-tenant and group-aware. Resources and permissions are scoped to the teamspace (group) context so that one teamspace's data, executions, and configuration do not leak into another. All LLM and embedding calls route through Databricks model serving endpoints in the Databricks workspace; the platform does not create or use fine-tuned models that could encode sensitive information.
+
+**A role only covers the scope it came with.** `GroupContext.from_email` (`src/backend/src/utils/user_context.py`) resolves the `group_id` header into a scope (`group_ids`) and a role, and the role holds in every teamspace of that scope:
+
+| Selected workspace (`group_id` header) | Scope | Role |
+| --- | --- | --- |
+| A teamspace the user belongs to | That teamspace only | The user's role in it |
+| The user's personal workspace | The personal workspace only | No teamspace role. The effective role is admin for a system admin or personal-workspace manager, otherwise editor (`core/permissions.get_effective_role`) |
+| None (identity discovery, MCP or A2A callers without `X-Group-Id`) | Every teamspace the user belongs to, plus the personal workspace | The least privileged role across that scope; none if any membership has an unknown role |
+
+The cross-teamspace run list, `GET /executions/history/all-groups`, builds its own scope from the user's memberships and does not depend on the selected workspace.
+
+**Background lookups follow the run's teamspace.** Tool-side "latest output" fallbacks (the UCMV, Power BI mapper, Genie config, dashboard and re-evaluation tools) read only rows from the run's own teamspace, taken from the run's `GroupContext` and never from tool input. With no teamspace they find nothing.
+
+**Power BI converter templates.** A saved converter configuration marked as a template (`is_template=true`) is visible to every teamspace, so only a system administrator can create, update or delete one. Templates a workspace user created before that rule are still visible everywhere. To review them, run this read-only listing from `src/backend` with the app's environment:
+
+```bash
+.venv/bin/python -m scripts.maintenance.list_unreviewed_powerbi_templates        # table
+.venv/bin/python -m scripts.maintenance.list_unreviewed_powerbi_templates --json # JSON
+```
+
+It lists each template whose `created_by_email` is not a current system administrator (compared case-insensitively), with its id, name, teamspace, formats, use count and creation time, and changes nothing. For each row, check the configuration for teamspace-specific or sensitive content. Then a system administrator either deletes it, or keeps it as a deliberate shared template, or asks its creator to save a private copy first. The same listing is available in code as `ConverterService.list_templates_created_by_non_admins()`, which refuses a caller who is not a system administrator.
 
 ## Secrets and encryption at rest
 

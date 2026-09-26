@@ -6,7 +6,7 @@ This module provides functions for CRUD operations on execution traces.
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import Text, and_, case, cast, delete, func, or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -114,20 +114,27 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         )
         return list(result.scalars().all())
 
-    async def latest_output_for_span_prefix(self, prefix: str) -> Optional[str]:
-        """The most recent trace ``output`` whose ``span_name`` starts with ``prefix``.
+    async def latest_output_for_span_prefix(
+        self, prefix: str, *, group_ids: Sequence[str]
+    ) -> Optional[str]:
+        """The most recent trace ``output`` IN ``group_ids`` whose ``span_name``
+        starts with ``prefix``.
 
         Serves the PowerBI/UCMV tools, which hand later steps the output of an
         earlier one. Returns the raw JSON string, or None when nothing matched.
 
-        Built with typed constructs rather than raw SQL on purpose: the callers'
-        version used ``output::text``, a Postgres-only cast that fails on SQLite,
-        so the tool silently found nothing in local dev. ``like(f"{prefix}%")``
-        parameterises the prefix, and JSON serialisation is left to the caller.
+        ``group_ids`` is required and an empty scope returns None: this read used
+        to span every tenant, so one workspace's run picked up another's output
+        (audit V3-1). Typed constructs, not ``output::text`` (Postgres-only).
         """
+        if not group_ids:
+            return None
         result = await self.session.execute(
             select(ExecutionTrace.output)
-            .where(ExecutionTrace.span_name.like(f"{prefix}%"))
+            .where(
+                ExecutionTrace.span_name.like(f"{prefix}%"),
+                ExecutionTrace.group_id.in_(list(group_ids)),
+            )
             .order_by(ExecutionTrace.created_at.desc())
             .limit(1)
         )

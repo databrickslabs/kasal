@@ -599,3 +599,35 @@ class ConverterService:
             )
 
         return SavedConfigurationResponse.model_validate(updated)
+
+    # ===== TEMPLATE REVIEW (read-only) =====
+
+    async def list_templates_created_by_non_admins(
+        self,
+    ) -> List[SavedConverterConfiguration]:
+        """Template configs whose creator is not a system administrator.
+
+        A template is visible to every tenant. Creating one has required a system
+        admin since the N2 fix, but rows a workspace user created before it are
+        still templates. This lists them for review; it changes nothing. See
+        ``scripts/maintenance/list_unreviewed_powerbi_templates.py``.
+
+        Callable by a system admin, or with no group context by an operator
+        entry point (the maintenance script), which already has database access.
+        """
+        if (
+            self.group_context is not None
+            and is_system_admin(self.group_context) is not True
+        ):
+            raise ForbiddenError(
+                detail="Only system administrators can review template configurations"
+            )
+        from src.services.groups.users import UserService
+
+        admins = await UserService(self.session).get_system_admin_emails()
+        templates = await self.config_repo.find_templates()
+        return [
+            config
+            for config in templates
+            if (config.created_by_email or "").strip().lower() not in admins
+        ]

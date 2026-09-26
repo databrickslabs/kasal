@@ -18,6 +18,7 @@ used only to bootstrap a fresh install that has no workspace configured yet, and
 no credential is bound to a host at that point.
 """
 
+import os
 from typing import Iterable, Optional
 from urllib.parse import urlparse
 
@@ -31,6 +32,8 @@ __all__ = [
     "credentialed_workspace_host",
     "assert_credentialed_host",
     "validate_stored_workspace_url",
+    "is_workspace_app_host",
+    "assert_mcp_credential_host",
 ]
 
 
@@ -129,3 +132,58 @@ async def validate_stored_workspace_url(workspace_url: Optional[str]) -> str:
         if not host or not is_trusted_databricks_host(host):
             raise ForbiddenError(detail=f"{subject} must be a Databricks workspace")
     return f"https://{host}"
+
+
+def _this_workspace_id() -> str:
+    """The numeric id of the workspace Kasal runs in, or ``""`` when unknown.
+
+    Databricks Apps sets ``DATABRICKS_WORKSPACE_ID``; outside Apps it is honoured
+    only if an operator set it. Without it no app host can be verified.
+    """
+    installation = DatabricksAppInstallation.from_env()
+    workspace_id = (
+        installation.workspace_id
+        if installation.hosted
+        else (os.environ.get("DATABRICKS_WORKSPACE_ID") or "").strip()
+    )
+    return workspace_id if workspace_id.isdigit() else ""
+
+
+def is_workspace_app_host(
+    host_or_url: Optional[str], workspace_id: Optional[str] = None
+) -> bool:
+    """Whether ``host_or_url`` is a Databricks App of THIS workspace.
+
+    App URLs are ``https://<app-name>-<workspace-id>.<region>.databricksapps.com``:
+    the workspace id is the last hyphen-separated part of the first label, and
+    Databricks assigns it, so an app in another workspace cannot carry this one's
+    id. Unknown workspace id, a non-default port or plain http: not verified.
+    """
+    workspace_id = workspace_id if workspace_id is not None else _this_workspace_id()
+    if not workspace_id or not workspace_id.isdigit():
+        return False
+    stripped = (host_or_url or "").strip()
+    if "://" in stripped and not stripped.lower().startswith("https://"):
+        return False
+    host = normalize_workspace_host(stripped)
+    if not host or ":" in host or not host.endswith(".databricksapps.com"):
+        return False
+    return host.split(".", 1)[0].endswith(f"-{workspace_id}")
+
+
+def assert_mcp_credential_host(
+    server_url: Optional[str], credential_host: Optional[str]
+) -> str:
+    """Refuse to send a Databricks credential to an MCP server on another host.
+
+    Allowed: the host the credential was issued for (the workspace's managed MCP
+    endpoints), or a Databricks App of the same workspace. Any other host, even
+    another ``*.databricks.com`` workspace or someone else's app, gets no
+    Databricks credential (audit V3-2). Returns the normalised host.
+    """
+    subject = "MCP server URL"
+    if credential_host and is_workspace_app_host(server_url):
+        return normalize_workspace_host(server_url)
+    return assert_host_is_configured_workspace(
+        server_url, (credential_host,), subject=subject
+    )

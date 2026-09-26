@@ -121,6 +121,13 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalar() or 0
 
+    async def find_system_admin_emails(self) -> List[str]:
+        """Emails of every user holding system-admin privileges."""
+        result = await self.session.execute(
+            select(self.model.email).where(self.model.is_system_admin.is_(True))
+        )
+        return [row[0] for row in result.all() if row[0]]
+
     async def count(self) -> int:
         """Get total count of users"""
         query = select(func.count(self.model.id))

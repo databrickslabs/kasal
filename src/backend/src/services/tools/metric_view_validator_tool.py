@@ -510,11 +510,12 @@ class MetricViewValidatorTool(BaseTool):
 
     @staticmethod
     def _fetch_measures_from_db() -> list:
-        """Fetch measures from the latest UCMV Generator execution's stats/migration_report."""
+        """Fetch measures from this workspace's latest UCMV Generator run."""
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        group_ids = ToolSessionProvider.run_group_ids()
 
         async def _query():
-            from src.services.tools.tool_session_provider import ToolSessionProvider
-
             async with ToolSessionProvider.session() as session:
                 # The UCMV tool output contains the full result with yaml/sql/stats
                 # The stats section has per-table measure info, but we need the raw
@@ -523,7 +524,9 @@ class MetricViewValidatorTool(BaseTool):
 
                 raw = await ExecutionTraceService(
                     session
-                ).latest_output_for_span_prefix("UC Metric View Generator")
+                ).latest_output_for_span_prefix(
+                    "UC Metric View Generator", group_ids=group_ids
+                )
                 if not raw:
                     return []
                 data = json.loads(raw)
@@ -581,19 +584,19 @@ class MetricViewValidatorTool(BaseTool):
         user-saved edits (stored in checkpoint_data.edited_config or result field).
 
         Returns the edited UCMV result dict if found, otherwise empty dict.
+        Scoped to the run's workspace (audit V3-1).
         """
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        group_ids = ToolSessionProvider.run_group_ids()
 
         async def _query():
-            from src.services.tools.tool_session_provider import ToolSessionProvider
-
-            async with ToolSessionProvider.session() as session:
-                # Look for the dedicated UCMV yaml edits key written by the
-                # save button in the UI (separate from Config Generator's
-                # edited_config to avoid collisions in a multi-step flow).
-                from src.services.execution.service import ExecutionService
-
-                cp = await ExecutionService(session).latest_checkpoint_containing(
-                    "ucmv_yaml_edits"
+            # Look for the dedicated UCMV yaml edits key written by the save button
+            # in the UI (separate from Config Generator's edited_config to avoid
+            # collisions in a multi-step flow).
+            async with ToolSessionProvider.execution_history_service() as history:
+                cp = await history.latest_checkpoint_containing(
+                    "ucmv_yaml_edits", group_ids=group_ids
                 )
                 if cp:
                     try:
@@ -619,19 +622,24 @@ class MetricViewValidatorTool(BaseTool):
 
     @staticmethod
     def _fetch_latest_ucmv_from_db() -> dict:
-        """Fetch YAML from the latest UCMV Generator execution trace in the DB."""
+        """Fetch YAML from this workspace's latest UCMV Generator run in the DB.
+
+        Scoped to the run's workspace: it used to read any tenant's (audit V3-1).
+        """
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        group_ids = ToolSessionProvider.run_group_ids()
 
         async def _query():
-            from src.services.tools.tool_session_provider import ToolSessionProvider
-
             async with ToolSessionProvider.session() as session:
-                from src.services.execution.service import ExecutionService
                 from src.services.trace.service import ExecutionTraceService
 
                 # Strategy 1: the latest UCMV Generator run span.
                 raw = await ExecutionTraceService(
                     session
-                ).latest_output_for_span_prefix("UC Metric View Generator")
+                ).latest_output_for_span_prefix(
+                    "UC Metric View Generator", group_ids=group_ids
+                )
                 if raw:
                     try:
                         data = json.loads(raw)
@@ -647,10 +655,11 @@ class MetricViewValidatorTool(BaseTool):
                     except Exception:
                         pass
 
-                # Strategy 2: the latest run whose result carries a full UCMV payload
-                # (written by the safety-net status update after the queue-drain fix).
-                inner2 = await ExecutionService(session).latest_result_with_keys(
-                    ["yaml", "sql", "stats"]
+            # Strategy 2: the latest run whose result carries a full UCMV payload
+            # (written by the safety-net status update after the queue-drain fix).
+            async with ToolSessionProvider.execution_history_service() as history:
+                inner2 = await history.latest_result_with_keys(
+                    ["yaml", "sql", "stats"], group_ids=group_ids
                 )
                 if inner2:
                     try:

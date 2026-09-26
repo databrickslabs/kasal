@@ -15,6 +15,7 @@ Python import path without script-specific `sys.path` changes.
 | `scripts.maintenance.fix_prompttemplate_sqlite_rebuild` | Remove an implicit unique constraint on prompt names | Rebuilds the SQLite table, preserving its rows |
 | `scripts.maintenance.drop_prompttemplate_unique_sqlite` | Remove a unique prompt-name index | Changes SQLite indexes |
 | `scripts.maintenance.migrate_roles_to_3tier` | Convert legacy role assignments and definitions | Updates database roles |
+| `scripts.maintenance.list_unreviewed_powerbi_templates` | List Power BI converter templates (visible to every tenant) created by users who are not system admins | Read-only; supports `--json` |
 | `scripts.maintenance.clear_bi_specialist_memory` | Clear a workspace's default local memory store | Deletes local memory; supports `--dry-run` |
 | `scripts.diagnostics.diagnose_prompt_registry` | Diagnose Unity Catalog prompt-registry access | Creates a probe prompt and attempts to delete it |
 

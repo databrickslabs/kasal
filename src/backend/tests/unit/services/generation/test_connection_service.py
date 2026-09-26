@@ -965,18 +965,14 @@ class TestTestApiKeys:
         with patch.dict(os.environ, env, clear=False):
             results = await svc.test_api_keys()
 
-        # OpenAI
+        # Configured / not configured only: no part of any key is returned.
         assert results["openai"]["has_key"] is True
         assert results["openai"]["valid"] is True
-        assert results["openai"]["key_prefix"] == "sk-1..."
-
-        # Anthropic
-        assert results["anthropic"]["has_key"] is True
-        assert results["anthropic"]["key_prefix"] == "ant-..."
-
-        # DeepSeek
-        assert results["deepseek"]["has_key"] is True
-        assert results["deepseek"]["key_prefix"] == "ds-x..."
+        assert results["anthropic"] == {"has_key": True}
+        assert results["deepseek"] == {"has_key": True}
+        flat = repr({k: v for k, v in results.items() if k != "python_info"})
+        for secret in env.values():
+            assert secret[:4] not in flat
 
         # Python info
         assert "version" in results["python_info"]
@@ -1018,7 +1014,10 @@ class TestTestApiKeys:
 
         assert results["openai"]["has_key"] is True
         assert results["openai"]["valid"] is False
-        assert results["openai"]["message"] == "invalid key"
+        # The provider's rejection text (which can echo a masked key) is dropped.
+        assert results["openai"]["message"] == (
+            "API key is configured but was not accepted"
+        )
 
     @pytest.mark.asyncio
     async def test_python_info_populated(self):

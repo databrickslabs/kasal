@@ -9,8 +9,8 @@ def _validate_mcp_server_url(value: Optional[str]) -> Optional[str]:
     """
     Structural validation for an MCP server URL. Rejects non-http(s) schemes
     (e.g. file://, gopher://) and URLs with no host. Note: this does NOT decide
-    whether Databricks credentials may be sent there — that allow-list check is
-    enforced at request time in mcp_integration (see is_trusted_databricks_host).
+    whether Databricks credentials may be sent there — that is enforced at
+    request time in mcp_integration (see host_guard.assert_mcp_credential_host).
     """
     if value is None:
         return value

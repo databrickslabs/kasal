@@ -7,7 +7,7 @@ from the database.
 
 import copy
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -904,18 +904,40 @@ class ExecutionHistoryService:
             )
             raise
 
+    async def latest_checkpoint_containing(
+        self, key: str, *, group_ids: Sequence[str]
+    ) -> Optional[dict]:
+        """Most recent run in ``group_ids`` whose ``checkpoint_data`` holds ``key``.
+
+        For the UCMV tools, which look for edits a user saved in an earlier step
+        of a multi-step flow. No groups, no result (audit V3-1).
+        """
+        found: Optional[dict] = await self.history_repo.latest_checkpoint_containing(
+            key, group_ids=group_ids
+        )
+        return found
+
+    async def latest_result_with_keys(
+        self, keys: List[str], *, group_ids: Sequence[str]
+    ) -> Optional[dict]:
+        """Most recent run in ``group_ids`` whose ``result`` dict holds ALL ``keys``."""
+        found: Optional[dict] = await self.history_repo.latest_result_with_keys(
+            keys, group_ids=group_ids
+        )
+        return found
+
     async def find_recent_results_with_key(
-        self, key: str, limit: int = 20
+        self, key: str, *, group_ids: Sequence[str], limit: int = 20
     ) -> list[dict]:
-        """Recent runs whose stored ``result`` contains ``key``, as plain dicts.
+        """Recent runs in ``group_ids`` whose stored ``result`` contains ``key``.
 
         Serves the UCMV re-evaluation tool: it scans prior runs for those that
         recorded non-transpiled measures (``untranslatable_items``). Returns
-        ``[{job_id, run_name, created_at, result}]`` — the tool decodes the result
-        blob itself. Query construction stays in the repository (this service only
-        orchestrates), keeping the tool free of any direct DB access.
+        ``[{job_id, run_name, created_at, result}]``. No groups, no rows.
         """
-        runs = await self.history_repo.find_recent_results_containing(key, limit=limit)
+        runs = await self.history_repo.find_recent_results_containing(
+            key, group_ids=group_ids, limit=limit
+        )
         out: list[dict] = []
         for run in runs:
             out.append(

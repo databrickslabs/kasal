@@ -7,7 +7,7 @@ This module provides database operations for execution history models.
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import Text, cast, delete, distinct, func, update
@@ -89,18 +89,25 @@ class ExecutionHistoryRepository:
         """Flush pending attribute changes on already-tracked runs."""
         await self.session.flush()
 
-    async def latest_result_with_keys(self, keys: List[str]) -> Optional[dict]:
-        """The most recent run whose ``result`` dict holds ALL of ``keys``.
+    async def latest_result_with_keys(
+        self, keys: List[str], *, group_ids: Sequence[str]
+    ) -> Optional[dict]:
+        """The most recent run IN ``group_ids`` whose ``result`` dict holds ALL of ``keys``.
 
-        Serves the UCMV validator's fallback lookup. Same dialect reasoning as
-        :meth:`latest_checkpoint_containing`: the caller's raw ``result::text LIKE``
-        chain was Postgres-only and matched substrings anywhere in the JSON — a
-        value that merely CONTAINED the word counted as the key being present.
-        Filtering the decoded dict checks real keys and works on every dialect.
+        Serves the UCMV validator's fallback lookup. ``group_ids`` is required and
+        an empty scope returns None: this read used to span every tenant, so one
+        workspace's run picked up another's metric-view YAML (audit V3-1).
+        Filtering the decoded dict (not ``result::text LIKE``) checks real keys
+        and works on every dialect.
         """
+        if not group_ids:
+            return None
         result = await self.session.execute(
             select(ExecutionHistory.result)
-            .where(ExecutionHistory.result.isnot(None))
+            .where(
+                ExecutionHistory.result.isnot(None),
+                ExecutionHistory.group_id.in_(list(group_ids)),
+            )
             .order_by(ExecutionHistory.created_at.desc())
             .limit(50)
         )
@@ -115,19 +122,23 @@ class ExecutionHistoryRepository:
         return None
 
     async def find_recent_results_containing(
-        self, key: str, limit: int = 20
+        self, key: str, *, group_ids: Sequence[str], limit: int = 20
     ) -> List[ExecutionHistory]:
-        """Recent runs whose decoded ``result`` dict contains ``key`` (dialect-portable).
+        """Recent runs IN ``group_ids`` whose decoded ``result`` contains ``key``.
 
         Serves the UCMV re-evaluation tool's scan for prior runs that recorded
-        non-transpiled measures (``untranslatable_items``). Filters the decoded JSON
-        in Python over a bounded, ordered window rather than a Postgres-only
-        ``result::text LIKE`` cast, so it behaves the same on SQLite and Lakebase.
-        Returns the ORM rows (caller reads job_id / run_name / created_at / result).
+        ``untranslatable_items``. Empty ``group_ids`` returns nothing (audit V3-1).
+        Filters in Python over a bounded, ordered window so it behaves the same on
+        SQLite and Lakebase. Returns the ORM rows.
         """
+        if not group_ids:
+            return []
         result = await self.session.execute(
             select(ExecutionHistory)
-            .where(ExecutionHistory.result.isnot(None))
+            .where(
+                ExecutionHistory.result.isnot(None),
+                ExecutionHistory.group_id.in_(list(group_ids)),
+            )
             .order_by(ExecutionHistory.created_at.desc())
             .limit(max(limit * 5, 50))
         )
@@ -141,20 +152,23 @@ class ExecutionHistoryRepository:
                     break
         return out
 
-    async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
-        """The most recent run whose ``checkpoint_data`` holds ``key``.
+    async def latest_checkpoint_containing(
+        self, key: str, *, group_ids: Sequence[str]
+    ) -> Optional[dict]:
+        """The most recent run IN ``group_ids`` whose ``checkpoint_data`` holds ``key``.
 
         Serves the UCMV validator, which looks for edits a user saved in an
-        earlier step of a multi-step flow.
-
-        The caller's version cast ``checkpoint_data::text`` in raw SQL — a
-        Postgres-only cast that fails on SQLite, so this silently found nothing in
-        local dev. Filtering is done in Python over a bounded, ordered window
-        instead, which behaves the same on every dialect.
+        earlier step of a multi-step flow. Empty ``group_ids`` returns None
+        (audit V3-1). Filtered in Python (no Postgres-only ``::text`` cast).
         """
+        if not group_ids:
+            return None
         result = await self.session.execute(
             select(ExecutionHistory.checkpoint_data)
-            .where(ExecutionHistory.checkpoint_data.isnot(None))
+            .where(
+                ExecutionHistory.checkpoint_data.isnot(None),
+                ExecutionHistory.group_id.in_(list(group_ids)),
+            )
             .order_by(ExecutionHistory.created_at.desc())
             .limit(50)
         )
@@ -222,12 +236,12 @@ class ExecutionHistoryRepository:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
         session = self.session
 
-        # Build base query with group filtering
-        if group_ids and len(group_ids) > 0:
-            base_filter = ExecutionHistory.group_id.in_(group_ids)
-        else:
-            # No filtering (fallback for admin/system access)
-            base_filter = True
+        # No scope means no rows, never "all tenants" — the same rule as
+        # ExecutionRepository._history_filter (audit V2). There is no system
+        # caller of this list; cleanup uses ExecutionRepository(system_level=True).
+        if not group_ids:
+            return [], 0
+        base_filter = ExecutionHistory.group_id.in_(group_ids)
 
         # Get total count
         count_stmt = (

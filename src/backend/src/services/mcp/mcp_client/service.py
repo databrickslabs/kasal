@@ -28,6 +28,34 @@ from src.utils.encryption_utils import EncryptionUtils
 logger = logging.getLogger(__name__)
 
 
+def _refuse_foreign_mcp_host(
+    server_url: str, auth_context: Any
+) -> Optional[MCPTestConnectionResponse]:
+    """A failed test result if the workspace credential must not go to ``server_url``.
+
+    Same rule as a run (``mcp_integration``): only the credential's own
+    workspace host or a Databricks App of that workspace (audit V3-2).
+    """
+    if not auth_context or not getattr(auth_context, "token", None):
+        return None
+    from src.core.exceptions import ForbiddenError
+    from src.services.databricks.workspace.host_guard import (
+        assert_mcp_credential_host,
+    )
+
+    try:
+        assert_mcp_credential_host(server_url, auth_context.workspace_url)
+    except ForbiddenError:
+        return MCPTestConnectionResponse(
+            success=False,
+            message=(
+                "Databricks authentication is only sent to this workspace's own "
+                "host or its Databricks Apps; use an API key for this server"
+            ),
+        )
+    return None
+
+
 class MCPService:
     """
     Service for MCP business logic and error handling.
@@ -705,6 +733,9 @@ class MCPService:
 
                 # For SPN, skip OBO (user_token=None); for OBO, would pass user_token
                 auth_context = await get_auth_context(user_token=None)
+                refusal = _refuse_foreign_mcp_host(test_data.server_url, auth_context)
+                if refusal:
+                    return refusal
                 if auth_context and auth_context.token:
                     headers = {
                         "Authorization": f"Bearer {auth_context.token}",
@@ -813,6 +844,9 @@ class MCPService:
                 from src.utils.databricks_auth import get_auth_context
 
                 auth_context = await get_auth_context(user_token=None)
+                refusal = _refuse_foreign_mcp_host(test_data.server_url, auth_context)
+                if refusal:
+                    return refusal
                 if auth_context and auth_context.token:
                     headers = {"Authorization": f"Bearer {auth_context.token}"}
                     logger.debug(

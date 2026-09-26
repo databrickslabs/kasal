@@ -45,6 +45,25 @@ class ToolSessionProvider:
     """Provides DB sessions and ready-to-use services to CrewAI tools."""
 
     @staticmethod
+    def run_group_ids() -> list[str]:
+        """The workspace the current run belongs to, as a ``group_ids`` scope.
+
+        Read from the run's ``GroupContext`` (set by the chat path and by the crew
+        and flow subprocesses before any tool runs), never from tool input, which
+        the model or a tool config controls. Only the PRIMARY group: a run belongs
+        to one workspace, and its "latest output" fallbacks must not read another.
+        Empty when there is no context — callers then find nothing (audit V3-1).
+        """
+        try:
+            from src.utils.user_context import UserContext
+
+            group_context = UserContext.get_group_context()
+        except Exception:  # noqa: BLE001 — no context (e.g. unit tests)
+            return []
+        primary = getattr(group_context, "primary_group_id", None)
+        return [primary] if isinstance(primary, str) and primary else []
+
+    @staticmethod
     @asynccontextmanager
     async def session() -> AsyncGenerator[AsyncSession, None]:
         """Yield a scoped async session for tool DB operations.
@@ -117,6 +136,7 @@ class ToolSessionProvider:
         Lets a tool read prior run results (e.g. the UCMV re-evaluation scan) through
         the owning domain's service instead of querying the table directly, so query
         construction stays in the repository and the tool imports no repository.
+        Its "latest" lookups take ``group_ids``; pass :meth:`run_group_ids`.
         """
         from src.db.session import routed_scoped_session
         from src.services.execution.history import ExecutionHistoryService

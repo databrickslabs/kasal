@@ -109,9 +109,7 @@ class ApiKeyTestResult(BaseModel):
     has_key: bool = Field(..., description="Whether the API key exists")
     valid: Optional[bool] = Field(None, description="Whether the API key is valid")
     message: Optional[str] = Field(None, description="Message about the API key")
-    key_prefix: Optional[str] = Field(
-        None, description="First few characters of the API key"
-    )
+    # No key_prefix: no part of a key is ever returned (audit N4).
 
 
 class PythonInfo(BaseModel):

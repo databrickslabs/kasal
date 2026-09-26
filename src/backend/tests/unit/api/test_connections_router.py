@@ -312,12 +312,8 @@ class TestApiKeyEndpoint:
     def test_test_api_key_success(self, client, mock_connection_service):
         """Test successful API key testing."""
         mock_response = ApiKeyTestResponse(
-            openai=ApiKeyTestResult(
-                has_key=True, valid=True, message="Valid", key_prefix="sk-"
-            ),
-            anthropic=ApiKeyTestResult(
-                has_key=True, valid=True, message="Valid", key_prefix="sk-ant-"
-            ),
+            openai=ApiKeyTestResult(has_key=True, valid=True, message="Valid"),
+            anthropic=ApiKeyTestResult(has_key=True, valid=True, message="Valid"),
             deepseek=ApiKeyTestResult(
                 has_key=False, valid=False, message="API key not configured"
             ),

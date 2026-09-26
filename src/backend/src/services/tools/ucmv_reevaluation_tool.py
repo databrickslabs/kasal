@@ -174,18 +174,25 @@ class UCMVReevaluationTool(BaseTool):
         output the UI renders (`untranslatable_items` included). ConversionHistory
         only ever gets a summary copy, so it is used as a fallback, not the source.
 
-        Deliberately NOT filtered by group_id: historical execution rows frequently
-        have it unset, and filtering would silently discard nearly everything.
+        Scoped to the run's workspace (audit V3-1): this scan used to read every
+        tenant's runs. ``group_id`` from the tool input can only NARROW that scope
+        — it is model- or config-supplied, so it never widens it. Rows with no
+        ``group_id`` (pre-isolation history) are no longer visible here.
         """
         from src.services.tools.tool_session_provider import ToolSessionProvider
 
+        scope = ToolSessionProvider.run_group_ids()
+        if group_id:
+            scope = [g for g in scope if g == group_id]
         out: list[dict] = []
         # Query construction lives in ExecutionHistoryRepository; we go through the
         # owning execution-domain service so this tool holds no direct DB access
         # (architecture: services build no queries; tools import no repositories).
         async with ToolSessionProvider.execution_history_service() as svc:
             rows = await svc.find_recent_results_with_key(
-                "untranslatable_items", limit=max(max_datasets * 2, 20)
+                "untranslatable_items",
+                group_ids=scope,
+                limit=max(max_datasets * 2, 20),
             )
         for run in rows:
             blob = run.get("result")
