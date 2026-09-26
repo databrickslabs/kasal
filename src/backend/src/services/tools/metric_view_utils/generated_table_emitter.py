@@ -132,8 +132,8 @@ def emit_view_sql(m_expr: str, fqn: str) -> str | None:
 
     select = ",\n    ".join(cols)
     header = (
-        f"-- Auto-generated from a Power Query List.Dates calendar (no physical source).\n"
-        f"-- Reproduces the M-computed date dimension so metric views can join it.\n"
+        "-- Auto-generated from a Power Query List.Dates calendar (no physical source).\n"
+        "-- Reproduces the M-computed date dimension so metric views can join it.\n"
     )
     if todo:
         header += f"-- NOTE: {todo} column(s) need manual translation (see /* TODO */ below).\n"

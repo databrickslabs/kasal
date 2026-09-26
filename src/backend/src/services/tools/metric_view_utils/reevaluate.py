@@ -29,7 +29,7 @@ Cost / noise controls:
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable, Optional
+from typing import Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
