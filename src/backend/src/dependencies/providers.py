@@ -4,12 +4,12 @@ import logging
 import os
 from typing import Annotated, Callable, Optional, Type
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
-from src.core.exceptions import KasalError, UnauthorizedError
+from src.core.exceptions import ForbiddenError, KasalError, UnauthorizedError
 from src.db.base import Base
 from src.db.database_router import get_smart_db_session
 from src.db.session import get_db, get_local_db
@@ -34,6 +34,26 @@ LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
 # Always use the LOCAL database (SQLite/PG), bypassing Lakebase swap.
 # Used for bootstrap config tables like database_configs.
 LocalSessionDep = Annotated[AsyncSession, Depends(get_local_db)]
+
+
+#: Returned when the selected workspace (``group_id`` header) is not one of the
+#: caller's. The frontend's API client matches the phrase "access to group" to
+#: drop a stale saved workspace and retry a read, so keep that phrase.
+GROUP_ACCESS_DENIED_DETAIL = "Access denied: no access to group"
+#: Returned for every other authorisation refusal from the workspace resolver.
+WORKSPACE_ACCESS_DENIED_DETAIL = "Access denied: workspace could not be resolved"
+
+
+def _forbidden_detail(error: ValueError) -> str:
+    """The client-facing message for a resolver refusal: fixed text, no details.
+
+    Only the CATEGORY is carried over (a group the caller may not use vs. any
+    other refusal), because the client acts on it. The resolver's own message,
+    which includes the requested group id, stays in the server log.
+    """
+    if "access to group" in str(error).lower():
+        return GROUP_ACCESS_DENIED_DETAIL
+    return WORKSPACE_ACCESS_DENIED_DETAIL
 
 
 async def get_group_context(
@@ -126,15 +146,19 @@ async def get_group_context(
         )
     except ValueError as e:
         # SECURITY: unauthorized workspace, or one that could not be resolved.
-        logger.warning(f"Unauthorized group access attempt: {e}")
-        raise HTTPException(status_code=403, detail=str(e))
+        # The resolver's message names the group id and says why it was refused;
+        # that is for the log, not the client. The client gets a fixed message.
+        logger.warning(
+            "Unauthorized group access attempt (group_id=%s): %s", x_group_id, e
+        )
+        raise ForbiddenError(_forbidden_detail(e)) from e
     except Exception as e:
         # An unexpected failure must not become an empty context: that reads
         # as "no tenant filter" in some queries. Tell the client to retry.
-        logger.error(f"Error resolving group context for {user_email}: {e}")
+        logger.exception("Error resolving group context for %s", user_email)
         raise KasalError(
             "Could not resolve the caller's workspace; try again", status_code=503
-        )
+        ) from e
 
     if not group_context.group_ids:
         # from_email returns an empty context for an identity it cannot map to
