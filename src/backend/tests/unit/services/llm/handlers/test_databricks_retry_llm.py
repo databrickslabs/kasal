@@ -124,7 +124,10 @@ class TestSanitizeMessagesForDatabricks:
         it translates it for Claude and strips it for everything else. Removing
         it here, before the transport sees it, cost Claude a cache breakpoint."""
         original = {"role": "user", "content": "hi", "cache_breakpoint": True}
-        msgs = [{"role": "system", "content": "sys", "cache_breakpoint": True}, original]
+        msgs = [
+            {"role": "system", "content": "sys", "cache_breakpoint": True},
+            original,
+        ]
         DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
         assert msgs[0]["cache_breakpoint"] is True
         assert msgs[1] is original and original["cache_breakpoint"] is True
@@ -151,7 +154,11 @@ def _conversation_with_a_tool_round():
     prompt, and a tail that is NOT the task prompt (so the transport's rolling
     tail marker cannot stand in for the task-prompt breakpoint)."""
     return [
-        {"role": "system", "content": "You are a researcher.", "cache_breakpoint": True},
+        {
+            "role": "system",
+            "content": "You are a researcher.",
+            "cache_breakpoint": True,
+        },
         {"role": "user", "content": "The task prompt.", "cache_breakpoint": True},
         {
             "role": "assistant",
@@ -186,7 +193,9 @@ def _sent_messages(model):
         usage=None,
     )
     create = Mock(return_value=response)
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
     with patch.object(
         OpenAICompletion, "client", new_callable=PropertyMock, return_value=client
     ):

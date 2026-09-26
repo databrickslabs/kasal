@@ -118,7 +118,7 @@ def _raise_for_read_failure(
     Only a real "does not exist" answer becomes 404. The message never carries
     the SDK's text (it can name hosts and principals); the log line does.
     """
-    import requests
+    import requests  # type: ignore[import-untyped]
     from databricks.sdk.errors import (
         DeadlineExceeded,
         NotFound,
