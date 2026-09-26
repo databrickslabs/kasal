@@ -752,7 +752,7 @@ class TestCreateTrace:
 
         with (
             patch("src.services.trace.service.sse_manager") as mock_sse,
-            patch.dict("os.environ", {"CREW_SUBPROCESS_MODE": "true"}, clear=False),
+            patch("src.core.process_role._ROLE", "crew"),
         ):
             # Pre-configure broadcast_to_job as AsyncMock so we can assert on it
             mock_sse.broadcast_to_job = AsyncMock()

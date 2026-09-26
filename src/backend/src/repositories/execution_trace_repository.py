@@ -15,6 +15,7 @@ from sqlalchemy.future import select
 
 from src.core.base_repository import BaseRepository
 from src.core.logger import LoggerManager
+from src.core.process_role import in_run_subprocess
 from src.models.execution_history import ExecutionHistory
 from src.models.execution_trace import ExecutionTrace
 
@@ -558,10 +559,9 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                         (skipped in subprocess mode where the job record may live
                         in Lakebase and not be visible to the local DB connection)
         """
-        import os
 
         job_id = trace_data.get("job_id")
-        is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+        is_subprocess = in_run_subprocess()
 
         if job_id and not is_subprocess and verify_execution_exists:
             # Check if job exists in executionhistory (main process only).

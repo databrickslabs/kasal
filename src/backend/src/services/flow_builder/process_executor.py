@@ -145,7 +145,7 @@ def run_flow_in_process(
         to ensure proper cleanup of child processes (including crew processes) on termination.
 
     Environment Variables Set:
-        - FLOW_SUBPROCESS_MODE: Marks subprocess execution mode
+        - the run-subprocess role (core.process_role): direct DB writes
         - DATABASE_TYPE: Ensures correct database configuration
         - CREWAI_VERBOSE: Controls CrewAI output verbosity
     """

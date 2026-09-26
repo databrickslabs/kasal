@@ -139,7 +139,7 @@ def run_crew_in_process(
         to ensure proper cleanup of child processes on termination.
 
     Environment Variables Set:
-        - CREW_SUBPROCESS_MODE: Marks subprocess execution mode
+        - the run-subprocess role (core.process_role): direct DB writes
         - DATABASE_TYPE: Ensures correct database configuration
         - CREWAI_VERBOSE: Controls CrewAI output verbosity
     """
@@ -500,9 +500,6 @@ def run_crew_in_process(
             os.environ["CREWAI_ANALYTICS_OPT_OUT"] = "1"
             os.environ["CREWAI_CLOUD_TRACING"] = "false"
             os.environ["PYTHONUNBUFFERED"] = "0"
-
-            # Set subprocess mode flag for direct DB writes
-            os.environ["CREW_SUBPROCESS_MODE"] = "true"
 
             # Get logger early for this function
             import logging
@@ -1012,9 +1009,7 @@ def run_crew_in_process(
                     # just below on this same bus.
                     from src.core.events import event_bus
 
-                    async_logger.info(
-                        f"CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled"
-                    )
+                    async_logger.info("[SUBPROCESS] Direct DB writes enabled")
 
                     # Register OTel Event Bridge on the CrewAI event bus
                     # (OTel provider was initialized earlier, before crew preparation)

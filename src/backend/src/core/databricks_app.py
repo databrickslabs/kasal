@@ -307,8 +307,6 @@ CHILD_ENV_PREFIXES = (
     "MLFLOW_",
     "OTEL_",
     "CREWAI_",
-    "CREW_",
-    "FLOW_",
 )
 
 #: A name shaped like a credential. Even under an allowed prefix it is dropped

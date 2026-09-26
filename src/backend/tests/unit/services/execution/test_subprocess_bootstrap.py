@@ -259,7 +259,10 @@ class TestPrepareChildEnvironment:
             prepare_child_environment("exec-1", "crew")
             assert os.environ["SOME_TEST_ONLY_VAR"] == "kept"
             assert os.environ["KASAL_EXECUTION_ID"] == "exec-1"
-            assert os.environ["CREW_SUBPROCESS_MODE"] == "true"
+            from src.core.process_role import in_flow_subprocess, in_run_subprocess
+
+            assert in_run_subprocess() and not in_flow_subprocess()
+            assert "CREW_SUBPROCESS_MODE" not in os.environ
 
     def test_a_spawned_child_applies_the_allow_list(self, monkeypatch):
         from src.services.execution.subprocess_bootstrap import (
@@ -276,6 +279,8 @@ class TestPrepareChildEnvironment:
             ) as restrict,
         ):
             prepare_child_environment("exec-2", "flow")
-            assert os.environ["FLOW_SUBPROCESS_MODE"] == "true"
+            from src.core.process_role import in_flow_subprocess
+
+            assert in_flow_subprocess()
             assert os.environ["CREWAI_DEBUG_TRACING"] == "true"
         restrict.assert_called_once_with()

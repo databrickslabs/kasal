@@ -6,12 +6,12 @@ from the database. Sensitive data (credentials, secrets, tokens) is automaticall
 masked when returning traces to prevent credential leakage.
 """
 
-import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.core.logger import LoggerManager
+from src.core.process_role import in_run_subprocess
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.schemas.execution_trace import (
@@ -489,7 +489,7 @@ class ExecutionTraceService:
             # 1. Subprocess has its own SSE manager instance with no connected clients
             # 2. Clients connect to the main process's SSE manager
             # 3. Broadcasting in subprocess is wasteful and produces misleading logs
-            is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+            is_subprocess = in_run_subprocess()
 
             if is_subprocess:
                 logger.debug(

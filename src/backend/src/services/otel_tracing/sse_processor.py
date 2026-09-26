@@ -1,16 +1,17 @@
 """KasalSSESpanProcessor — broadcasts task lifecycle spans via SSE on on_end().
 
 Only broadcasts task_started/task_completed/task_failed to match the current
-LogWriterTask SSE behavior. Skips SSE in CREW_SUBPROCESS_MODE=true since the
+LogWriterTask SSE behavior. Skips SSE inside a run subprocess since the
 main process TraceBroadcastService handles via DB polling.
 """
 
 import logging
-import os
 from datetime import datetime
 
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
+
+from src.core.process_role import in_run_subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class KasalSSESpanProcessor(SpanProcessor):
 
     def __init__(self, job_id: str):
         self._job_id = job_id
-        self._is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+        self._is_subprocess = in_run_subprocess()
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         pass  # No action needed on start

@@ -13,12 +13,12 @@ MCP servers are only loaded when explicitly configured on agents or tasks.
 No global/automatic loading occurs.
 """
 
-import os
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from src.core.exceptions import MCPConnectionError
 from src.core.logger import LoggerManager
+from src.core.process_role import in_flow_subprocess
 from src.services.mcp.mcp_client.databricks_presets import follow_preset_for
 from src.services.tools.mcp_handler import (
     create_kasal_tool_from_mcp,
@@ -28,7 +28,7 @@ from src.services.tools.mcp_handler import (
 # Get logger from the centralized logging system
 # Use flow logger if running in flow subprocess mode, otherwise use crew logger
 logger_manager = LoggerManager.get_instance()
-if os.environ.get("FLOW_SUBPROCESS_MODE", "false").lower() == "true":
+if in_flow_subprocess():
     logger = logger_manager.flow
 else:
     logger = logger_manager.crew
