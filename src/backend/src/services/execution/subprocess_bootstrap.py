@@ -203,10 +203,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     # Determine which environment variable to check based on process_type
     env_var_name = f"KASAL_LOG_{process_type.upper()}"
 
-    # Support both old KASAL_DEBUG_TRACES and new KASAL_LOG_CREW/KASAL_LOG_FLOW
     debug_enabled = (
-        os.environ.get("KASAL_DEBUG_TRACES", "").lower() in ["true", "1", "yes"]
-        or os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]
+        os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]
         or os.environ.get(env_var_name, "").upper() == "DEBUG"
     )
 

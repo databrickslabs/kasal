@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 _active_provider: Optional[TracerProvider] = None
 
 
-def is_otel_tracing_enabled() -> bool:
-    """Check if OTel tracing is enabled via environment variable."""
-    return os.environ.get("KASAL_OTEL_TRACING", "true").lower() == "true"
-
-
 def create_kasal_tracer_provider(
     job_id: str,
     service_name: str = "kasal-crew-engine",

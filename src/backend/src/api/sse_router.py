@@ -15,8 +15,8 @@ from fastapi.responses import StreamingResponse
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.core.sse_manager import (
+    DEFAULT_HEARTBEAT_SECONDS,
     event_stream_generator,
-    get_heartbeat_seconds,
     sse_manager,
 )
 from src.dependencies.admin_auth import SystemAdminUserDep
@@ -43,12 +43,10 @@ SSE_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 
-# Default heartbeat cadence for the stream endpoints. Env-tunable via
-# SSE_HEARTBEAT_SECONDS (resolved once at import — a deploy-time knob, not a
-# per-request one). An explicit ?heartbeat= query param always wins. The
-# generation endpoint has a tighter le=60 bound, so its default is clamped.
-_DEFAULT_HEARTBEAT = get_heartbeat_seconds(15)
-_DEFAULT_GEN_HEARTBEAT = min(get_heartbeat_seconds(10), 60)
+# Default heartbeat cadence for the stream endpoints (well inside the Databricks
+# Apps proxy's idle window). An explicit ?heartbeat= query param always wins.
+_DEFAULT_HEARTBEAT = DEFAULT_HEARTBEAT_SECONDS
+_DEFAULT_GEN_HEARTBEAT = 10
 
 
 def _parse_last_event_id(request: Request) -> Optional[int]:

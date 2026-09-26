@@ -174,7 +174,7 @@ def _environment_overrides(environment: "str | None", environ=os.environ):
     ``KASAL_DEPLOYMENT_MODE=local`` (never treated as hosted) and turns the
     development identity on (``LOCAL_DEV_AUTH=true``, unless you set it
     yourself), so a request without an identity header runs as
-    ``LOCAL_DEV_USER_EMAIL``. It used to set ``DATABRICKS_APP_NAME``, which
+    ``dev@localhost``. It used to set ``DATABRICKS_APP_NAME``, which
     does the opposite: the backend reads that as "inside Databricks Apps" and
     refuses ``LOCAL_DEV_AUTH``, so every API call was a 401. Inside real Apps
     (``DATABRICKS_APP_NAME`` set by the platform) the backend still refuses the

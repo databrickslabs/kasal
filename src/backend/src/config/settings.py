@@ -1,22 +1,72 @@
 import logging
 import os
-from typing import Any, List, Optional, Union
+from typing import Any, ClassVar, List, Optional, Tuple, Type
 
-from pydantic import AnyHttpUrl, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator, model_validator
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 from src.core.paths import BACKEND_ROOT
 
+#: The ONLY fields the environment (or a local .env file) may set. Every one is
+#: set by the Databricks Apps launcher (``entrypoint.py``), by Kasal itself for a
+#: child process, or by local development (``run.sh`` / ``./run.sh postgres``).
+#: Every other field is a constant: a setting nobody sets in Databricks Apps is
+#: a setting that is never set — it belongs in Configuration or in the code.
+ENV_FIELDS = frozenset(
+    {
+        "DATABASE_TYPE",
+        "DATABASE_URI",
+        "SYNC_DATABASE_URI",
+        "SQLITE_DB_PATH",
+        "POSTGRES_SERVER",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_DB",
+        "POSTGRES_PORT",
+        # Development switches; forced off inside Databricks Apps (see below).
+        "DEBUG_MODE",
+        "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS",
+    }
+)
+
+
+class _OnlyEnvFields:
+    """Mixin for a settings source: ignore every field not in ENV_FIELDS."""
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> Tuple[Any, str, bool]:
+        if field_name not in ENV_FIELDS:
+            return None, field_name, False
+        value: Tuple[Any, str, bool] = super().get_field_value(  # type: ignore[misc]
+            field, field_name
+        )
+        return value
+
+
+class _EnvSource(_OnlyEnvFields, EnvSettingsSource):
+    pass
+
+
+class _DotEnvSource(_OnlyEnvFields, DotEnvSettingsSource):
+    pass
+
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Modern Backend"
-    PROJECT_DESCRIPTION: str = "A modern backend API for the Kasal application"
-    VERSION: str = "0.1.0"
-    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: ClassVar[str] = "Modern Backend"
+    PROJECT_DESCRIPTION: ClassVar[str] = (
+        "A modern backend API for the Kasal application"
+    )
+    VERSION: ClassVar[str] = "0.1.0"
+    API_V1_STR: ClassVar[str] = "/api/v1"
 
-    # BACKEND_CORS_ORIGINS is a comma-separated list of origins
-    # e.g: "http://localhost,http://localhost:8080"
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # The localhost dev-server origins are the default OUTSIDE Databricks Apps
     # only (see _apply_databricks_apps_policy): there the SPA is served from the
     # app's own origin, and a credentialed CORS allowance for localhost is
@@ -29,14 +79,6 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
-
-    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
-        raise ValueError(v)
 
     # Database settings
     #
@@ -71,7 +113,6 @@ class Settings(BaseSettings):
     SQLITE_DB_PATH: Optional[str] = os.getenv(
         "SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db")
     )
-    DB_FILE_PATH: Optional[str] = os.getenv("DB_FILE_PATH", "sqlite.db")
 
     DATABASE_URI: Optional[str] = None
     SYNC_DATABASE_URI: Optional[str] = None
@@ -109,45 +150,29 @@ class Settings(BaseSettings):
     # API Documentation
     DOCS_ENABLED: bool = True
 
-    # Logging
-    # Support both old LOG_LEVEL and new KASAL_LOG_LEVEL environment variables
-    LOG_LEVEL: str = os.getenv("KASAL_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
+    # Logging (KASAL_LOG_LEVEL is set by app.yaml and run.sh).
+    LOG_LEVEL: str = os.getenv("KASAL_LOG_LEVEL", "INFO")
 
-    # Server settings
-    SERVER_HOST: str = "0.0.0.0"
-    SERVER_PORT: int = 8000
+    # Server settings (``python -m src.main`` only; run.sh and Apps run uvicorn).
+    SERVER_HOST: ClassVar[str] = "0.0.0.0"
+    SERVER_PORT: ClassVar[int] = 8000
     DEBUG_MODE: bool = False
 
     # Local development fallback user: the identity a request WITHOUT an
     # identity header runs as, when LOCAL_DEV_AUTH=true (run.sh sets it; see
-    # main._local_dev_auth_enabled). Empty means "dev@localhost". Ignored in
-    # Databricks Apps and with ENVIRONMENT=production, where the platform proxy
-    # provides X-Forwarded-Email.
-    LOCAL_DEV_USER_EMAIL: str = os.getenv("LOCAL_DEV_USER_EMAIL", "")
+    # main._local_dev_auth_enabled). Ignored in Databricks Apps and with
+    # ENVIRONMENT=production, where the platform proxy provides
+    # X-Forwarded-Email. The dev frontend always sends its own header
+    # (VITE_DEV_USER_EMAIL), which wins over this.
+    LOCAL_DEV_USER_EMAIL: ClassVar[str] = "dev@localhost"
 
-    # Add the following setting to control database seeding
-    AUTO_SEED_DATABASE: bool = True
+    # Seed the database at startup (the seeders are idempotent).
+    AUTO_SEED_DATABASE: ClassVar[bool] = True
 
     # Deliver trigger webhooks to loopback/private addresses (skips the SSRF
     # check). A local-dev convenience for a localhost receiver; refused inside
     # Databricks Apps.
     KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS: bool = False
-
-    # Response caching for the legacy LiteLLM completion_with_usage path.
-    # Native chat/crew/flow calls use the transport layer. Disk caching is
-    # disabled because its default serializer reads pickle from writable files.
-    LITELLM_CACHE_ENABLED: bool = (
-        os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
-    )
-    # Supported backends: "local" (in-memory, default) and "redis" (shared).
-    LITELLM_CACHE_TYPE: str = os.getenv("LITELLM_CACHE_TYPE", "local")
-    LITELLM_CACHE_TTL: int = int(os.getenv("LITELLM_CACHE_TTL", "3600"))
-    # Redis connection (only used when LITELLM_CACHE_TYPE == "redis").
-    LITELLM_CACHE_REDIS_HOST: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_HOST")
-    LITELLM_CACHE_REDIS_PORT: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PORT")
-    LITELLM_CACHE_REDIS_PASSWORD: Optional[str] = os.getenv(
-        "LITELLM_CACHE_REDIS_PASSWORD"
-    )
 
     @model_validator(mode="after")
     def _apply_databricks_apps_policy(self) -> "Settings":
@@ -195,6 +220,22 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: Type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> Tuple[PydanticBaseSettingsSource, ...]:
+        """Constructor arguments, then ENV_FIELDS from the environment / .env."""
+        return (
+            init_settings,
+            _EnvSource(settings_cls),
+            _DotEnvSource(settings_cls),
+        )
 
 
 settings = Settings()

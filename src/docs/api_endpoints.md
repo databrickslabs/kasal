@@ -97,8 +97,7 @@ be resolved` for any other refusal. The reason is logged server-side.
 Only public routes such as the health checks skip this dependency.
 
 **Local development.** With `LOCAL_DEV_AUTH=true` (which `run.sh` sets), a
-request that carries no identity header runs as `LOCAL_DEV_USER_EMAIL` (default
-`dev@localhost`). The flag is ignored inside Databricks Apps and when
+request that carries no identity header runs as `dev@localhost`. The flag is ignored inside Databricks Apps and when
 `ENVIRONMENT=production`. If you start `uvicorn` yourself without it, every API
 call returns `401` unless you send an identity header:
 
@@ -518,10 +517,9 @@ Per identity (group, falling back to client IP), applied only to the `/api/`
 surface. SSE streams and health checks are exempt so a long-lived stream cannot
 exhaust a window.
 
-| Setting | Default |
-| --- | --- |
-| `RATE_LIMIT_DEFAULT` | `600/minute` |
-| `RATE_LIMIT_STORAGE_URI` | in-memory |
+The limit is `600/minute`, counted in memory (a Databricks App runs one
+instance). It is a constant in `src/backend/src/core/rate_limit.py`, not an
+environment variable.
 
 Exceeding it returns `429`. If the `limits` package is not installed the
 middleware is a no-op — there is no limiting at all, rather than a stricter

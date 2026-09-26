@@ -176,7 +176,7 @@ class TestConfigureSubprocessLogging:
         mock_module_logger.handlers = []
         mock_get_logger.return_value = mock_module_logger
 
-        with patch.dict(os.environ, {"KASAL_DEBUG_TRACES": "true"}):
+        with patch.dict(os.environ, {"KASAL_LOG_CREW": "DEBUG"}):
             with patch("logging.FileHandler") as mock_fh:
                 mock_fh.return_value = MagicMock()
                 configure_subprocess_logging("exec-debug-traces", "crew")
@@ -197,7 +197,6 @@ class TestConfigureSubprocessLogging:
 
         with patch.dict(os.environ, {"KASAL_LOG_LEVEL": "INFO"}, clear=False):
             os.environ.pop("KASAL_LOG_CREW", None)
-            os.environ.pop("KASAL_DEBUG_TRACES", None)
             os.environ.pop("KASAL_DEBUG_ALL", None)
             with patch("logging.FileHandler") as mock_fh:
                 mock_fh.return_value = MagicMock()

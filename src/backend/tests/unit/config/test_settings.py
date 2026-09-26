@@ -7,13 +7,23 @@ Tests the configuration settings and validators.
 import os
 from unittest.mock import patch
 
-import pytest
-
 from src.config.settings import Settings
 
 
 class TestSettings:
     """Test cases for Settings configuration."""
+
+    def test_only_the_allow_listed_fields_read_the_environment(self, monkeypatch):
+        """A setting Databricks Apps never sets is a constant, not an env var."""
+        monkeypatch.setenv("PROJECT_NAME", "from-env")
+        monkeypatch.setenv("CORS_ORIGINS", '["https://evil.example.com"]')
+        monkeypatch.setenv("DOCS_ENABLED", "false")
+        monkeypatch.setenv("POSTGRES_DB", "from_env_db")
+        fresh = Settings()
+        assert fresh.PROJECT_NAME == "Modern Backend"
+        assert "https://evil.example.com" not in fresh.CORS_ORIGINS
+        assert fresh.DOCS_ENABLED is True
+        assert fresh.POSTGRES_DB == "from_env_db"
 
     def test_default_settings(self):
         """Test default settings initialization."""
@@ -36,35 +46,11 @@ class TestSettings:
         ]
         assert settings.DATABASE_TYPE == os.getenv("DATABASE_TYPE", "sqlite")
         assert settings.DOCS_ENABLED is True
-        assert (
-            settings.LOG_LEVEL == "DEBUG"
-        )  # Check the actual default from environment
+        assert settings.LOG_LEVEL == os.getenv("KASAL_LOG_LEVEL", "INFO")
         assert settings.SERVER_HOST == "0.0.0.0"
         assert settings.SERVER_PORT == 8000
         assert settings.DEBUG_MODE is True  # conftest sets DEBUG_MODE=true in env
         assert settings.AUTO_SEED_DATABASE is True
-
-    def test_cors_origins_from_string(self):
-        """Test CORS origins parsing from comma-separated string."""
-        settings = Settings(
-            BACKEND_CORS_ORIGINS="http://localhost,http://localhost:3000"
-        )
-
-        assert len(settings.BACKEND_CORS_ORIGINS) == 2
-        assert "http://localhost" in str(settings.BACKEND_CORS_ORIGINS[0])
-        assert "http://localhost:3000" in str(settings.BACKEND_CORS_ORIGINS[1])
-
-    def test_cors_origins_from_list(self):
-        """Test CORS origins when provided as list."""
-        origins = ["http://localhost", "http://localhost:3000"]
-        settings = Settings(BACKEND_CORS_ORIGINS=origins)
-
-        assert len(settings.BACKEND_CORS_ORIGINS) == 2
-
-    def test_cors_origins_invalid_format(self):
-        """Test CORS origins with invalid format."""
-        with pytest.raises(ValueError):
-            Settings(BACKEND_CORS_ORIGINS=123)  # Invalid type
 
     def test_database_uri_postgres_default(self):
         """Test database URI assembly for PostgreSQL."""
@@ -175,17 +161,6 @@ class TestSettings:
 
         # Should still construct valid URI with empty DB
         assert "postgresql+asyncpg://user" ":pass@server:5432/" in settings.DATABASE_URI
-
-    def test_cors_origins_whitespace_handling(self):
-        """Test CORS origins with whitespace handling."""
-        settings = Settings(
-            BACKEND_CORS_ORIGINS="http://localhost ,  http://localhost:3000  "
-        )
-
-        # Should strip whitespace
-        assert len(settings.BACKEND_CORS_ORIGINS) == 2
-        # Check that URLs are properly parsed despite whitespace
-        assert any("localhost" in str(url) for url in settings.BACKEND_CORS_ORIGINS)
 
     def test_env_file_loading(self):
         """Test that settings can load from .env file."""

@@ -8,8 +8,6 @@ instance behavior that may not be covered in the main settings tests.
 import os
 from unittest.mock import patch
 
-import pytest
-
 from src.config.settings import Settings, settings
 
 
@@ -24,46 +22,12 @@ class TestSettingsEdgeCases:
 
     def test_global_settings_immutability_simulation(self):
         """Test that creating new Settings instances doesn't affect the global one."""
-        original_project_name = settings.PROJECT_NAME
+        original_db = settings.POSTGRES_DB
 
-        # Create a new instance with different values
-        new_settings = Settings(PROJECT_NAME="Different Backend")
+        new_settings = Settings(POSTGRES_DB="different_db")
 
-        # Global settings should remain unchanged
-        assert settings.PROJECT_NAME == original_project_name
-        assert new_settings.PROJECT_NAME == "Different Backend"
-
-    def test_cors_origins_validator_edge_cases(self):
-        """Test CORS origins validator with various edge cases."""
-
-        # Test with single URL
-        settings_single = Settings(BACKEND_CORS_ORIGINS="http://localhost:3000")
-        assert len(settings_single.BACKEND_CORS_ORIGINS) == 1
-
-        # Test with valid URLs separated by commas
-        settings_mixed = Settings(
-            BACKEND_CORS_ORIGINS="http://localhost:3000,http://example.com"
-        )
-        assert len(settings_mixed.BACKEND_CORS_ORIGINS) == 2
-
-        # Test with string format that bypasses the comma splitting
-        settings_bracket = Settings(BACKEND_CORS_ORIGINS=["http://localhost:3000"])
-        assert len(settings_bracket.BACKEND_CORS_ORIGINS) == 1
-
-    def test_cors_origins_validator_invalid_types(self):
-        """Test CORS origins validator with invalid input types."""
-
-        # Test with integer (should raise ValueError)
-        with pytest.raises(ValueError):
-            Settings(BACKEND_CORS_ORIGINS=123)
-
-        # Test with dict (should raise ValueError)
-        with pytest.raises(ValueError):
-            Settings(BACKEND_CORS_ORIGINS={"invalid": "dict"})
-
-        # Test with None (should raise ValueError)
-        with pytest.raises(ValueError):
-            Settings(BACKEND_CORS_ORIGINS=None)
+        assert settings.POSTGRES_DB == original_db
+        assert new_settings.POSTGRES_DB == "different_db"
 
     def test_database_uri_validator_edge_cases(self):
         """Test database URI validators with edge cases."""
@@ -136,7 +100,6 @@ class TestSettingsEdgeCases:
         env_vars = {
             "DATABASE_TYPE": "sqlite",
             "SQLITE_DB_PATH": "/custom/path/test.db",
-            "LOG_LEVEL": "ERROR",
         }
 
         with patch.dict(os.environ, env_vars):
@@ -146,7 +109,6 @@ class TestSettingsEdgeCases:
 
             assert env_settings.DATABASE_TYPE == "sqlite"
             assert env_settings.SQLITE_DB_PATH == "/custom/path/test.db"
-            assert env_settings.LOG_LEVEL == "ERROR"
 
     def test_model_config_attributes(self):
         """Test model configuration attributes are properly set."""
@@ -181,7 +143,6 @@ class TestSettingsEdgeCases:
 
         # List fields
         assert isinstance(test_settings.CORS_ORIGINS, list)
-        assert isinstance(test_settings.BACKEND_CORS_ORIGINS, list)
 
         # Verify critical default values
         assert test_settings.API_V1_STR == "/api/v1"
@@ -220,20 +181,6 @@ class TestSettingsEdgeCases:
 
         # Should contain class name
         assert "Settings" in settings_repr
-
-    def test_cors_origins_whitespace_edge_cases(self):
-        """Test CORS origins handling with various whitespace scenarios."""
-
-        # Test with whitespace in URLs that are trimmed properly
-        settings_with_spaces = Settings(
-            BACKEND_CORS_ORIGINS="http://localhost:3000 , http://example.com"
-        )
-        assert len(settings_with_spaces.BACKEND_CORS_ORIGINS) == 2
-
-        # Verify the URLs are properly trimmed
-        urls = [str(url) for url in settings_with_spaces.BACKEND_CORS_ORIGINS]
-        assert any("localhost" in url for url in urls)
-        assert any("example.com" in url for url in urls)
 
     @patch.dict(os.environ, {}, clear=True)
     def test_settings_with_no_environment_variables(self):
@@ -274,7 +221,6 @@ class TestSettingsEdgeCases:
             # Absolute, anchored on the backend root — never CWD-relative, which
             # is what scattered empty app.db files across the repo.
             assert not clean_settings.SQLITE_DB_PATH.startswith("./")
-            assert clean_settings.DB_FILE_PATH == "sqlite.db"  # Default fallback
         finally:
             # Rebuild the module under the real environment, then hand back the
             # exact singleton object everyone else is holding.

@@ -32,7 +32,7 @@ one resolver. Inside Databricks Apps (`DATABRICKS_APP_NAME` set) only
 not use -> 403, a resolver failure -> 503.
 
 - `LOCAL_DEV_AUTH=true` (run.sh sets it) makes a request with NO identity
-  header run as `LOCAL_DEV_USER_EMAIL` (default `dev@localhost`). It is refused
+  header run as `dev@localhost`. It is refused
   inside Databricks Apps and with `ENVIRONMENT=production`.
 - Starting `uvicorn src.main:app` yourself? Export `LOCAL_DEV_AUTH=true`, or
   every API call is a 401.

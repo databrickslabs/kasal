@@ -29,7 +29,6 @@ Example:
 """
 
 import logging
-import os
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -52,6 +51,7 @@ _group_context: ContextVar[Optional["GroupContext"]] = ContextVar(
     "group_context", default=None
 )
 
+
 # --- Group-membership resolution cache ---------------------------------------
 # Resolving a user's group memberships costs several DB round-trips
 # (users + group_users + groups) plus a commit, and it runs on EVERY
@@ -62,7 +62,7 @@ _group_context: ContextVar[Optional["GroupContext"]] = ContextVar(
 # email for a short TTL so repeat polls do zero DB work. Membership mutations
 # call clear_membership_cache() to drop stale entries immediately, and the TTL
 # bounds staleness for anything that mutates outside this process.
-_MEMBERSHIP_CACHE_TTL = float(os.getenv("GROUP_MEMBERSHIP_CACHE_TTL", "30"))
+_MEMBERSHIP_CACHE_TTL = 30.0
 # email -> (expires_at_monotonic, (user, groups_with_roles))
 _membership_cache: Dict[str, tuple] = {}
 

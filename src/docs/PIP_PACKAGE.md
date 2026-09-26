@@ -11,7 +11,7 @@ kasal                    # UI + API on http://127.0.0.1:8000
 
 Every API call needs an identity, and the `kasal` command does not set one.
 Without a proxy in front, export `LOCAL_DEV_AUTH=true` first so requests run as
-`LOCAL_DEV_USER_EMAIL` (default `dev@localhost`); otherwise every API call
+`dev@localhost`; otherwise every API call
 returns 401. Only do that while the server is bound to loopback: with
 `--host 0.0.0.0`, anyone who can reach the port acts as that user.
 

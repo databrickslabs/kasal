@@ -59,15 +59,14 @@ ${BLUE}Identity (local development):${NC}
 
     LOCAL_DEV_AUTH          run.sh sets this to true (default here). A request
                             with no identity header then runs as
-                            LOCAL_DEV_USER_EMAIL. Ignored, and cannot be turned
+                            dev@localhost. Ignored, and cannot be turned
                             on, inside Databricks Apps (DATABRICKS_APP_NAME) or
                             with ENVIRONMENT=production. Starting uvicorn
                             yourself? Export LOCAL_DEV_AUTH=true, or every API
                             call returns 401. Set LOCAL_DEV_AUTH=false here to
                             test the unauthenticated behaviour.
-    LOCAL_DEV_USER_EMAIL    The development user's email (default dev@localhost).
-                            The dev frontend sends VITE_DEV_USER_EMAIL instead,
-                            and a header always wins over this fallback.
+                            The dev frontend sends its own identity header
+                            (VITE_DEV_USER_EMAIL), which always wins.
 
 ${BLUE}Logging Control Environment Variables:${NC}
 
@@ -115,9 +114,6 @@ ${BLUE}Examples:${NC}
 
     # Another port (start the frontend with the same KASAL_PORT)
     KASAL_PORT=8001 ./run.sh
-
-    # Act as a specific development user
-    LOCAL_DEV_USER_EMAIL=alice@example.com ./run.sh
 
     # Verbose mode with PostgreSQL (app debug, no SQL)
     ./run.sh -v postgres

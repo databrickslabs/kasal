@@ -12,12 +12,13 @@ _APP = {
     "DATABRICKS_WORKSPACE_ID": "123",
     "DATABRICKS_HOST": "https://example.com",
 }
-_FLAGS = ("DEBUG_MODE", "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", "DOCS_ENABLED")
+#: Development switches the environment may set (and Apps refuses).
+_FLAGS = ("DEBUG_MODE", "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS")
 
 
 @pytest.fixture
 def local(monkeypatch):
-    for key in (*_APP, "ENVIRONMENT", "CORS_ORIGINS", *_FLAGS):
+    for key in (*_APP, "ENVIRONMENT", "CORS_ORIGINS", "DOCS_ENABLED", *_FLAGS):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("KASAL_DEPLOYMENT_MODE", "local")
     return monkeypatch
@@ -61,9 +62,14 @@ def test_inside_apps_localhost_cors_default_is_dropped(apps):
     assert Settings().CORS_ORIGINS == []
 
 
-def test_inside_apps_explicit_cors_origins_are_honoured(apps):
+def test_the_environment_cannot_open_cors_or_docs(apps):
+    """Neither is an environment variable any more: inside Apps the SPA is
+    same-origin and the OpenAPI schema is off, and nothing can turn them on."""
     apps.setenv("CORS_ORIGINS", '["https://portal.example.com"]')
-    assert Settings().CORS_ORIGINS == ["https://portal.example.com"]
+    apps.setenv("DOCS_ENABLED", "true")
+    s = Settings()
+    assert s.CORS_ORIGINS == []
+    assert s.DOCS_ENABLED is False
 
 
 def test_app_name_alone_is_enough_to_refuse(local):
