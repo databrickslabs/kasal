@@ -17,7 +17,7 @@ The local dev setup (`run.sh` plus the Vite dev server) catches most bugs. The r
 
 ## Before you begin
 
-- A backend virtualenv: `cd src/backend && uv sync`.
+- A backend virtualenv: `cd src/backend && uv sync --frozen`.
 - A built frontend, if you want the static UI: `python src/build.py`.
 - An identity for API calls. Outside Databricks Apps, a request with no identity header gets **401**. Either export `LOCAL_DEV_AUTH=true` (requests without an identity header then run as `LOCAL_DEV_USER_EMAIL`, default `dev@localhost`), or send `X-Forwarded-Email` yourself. `run.sh` sets `LOCAL_DEV_AUTH` for you; the recipes below do not use `run.sh`, so they set it explicitly.
 

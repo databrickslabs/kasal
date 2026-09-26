@@ -34,11 +34,13 @@ Install the backend dependencies and start the server from `src/backend`:
 
 ```bash
 cd src/backend
-uv sync            # creates src/backend/.venv from uv.lock
+uv sync --frozen   # creates src/backend/.venv from exactly what uv.lock pins
 ./run.sh           # SQLite; ./run.sh postgres for PostgreSQL
 ```
 
-To change a dependency, edit `src/backend/pyproject.toml`, run `uv lock`, then `uv sync`. Never edit `uv.lock` by hand.
+Always pass `--frozen`. A plain `uv sync` re-resolves against whatever package index your machine is configured for and can rewrite `uv.lock` with that index's URLs; `--frozen` installs the committed lock as it is. `run.sh` and CI both use `uv sync --frozen`.
+
+To change a dependency, edit `src/backend/pyproject.toml`, run `uv lock`, check that the `uv.lock` diff only points at public registries, then run `uv sync --frozen`. Never edit `uv.lock` by hand.
 
 `run.sh` does the following, in order:
 
@@ -64,6 +66,23 @@ KASAL_PORT=8001 npm start
 ```
 
 Interactive API docs are served at `/api-docs` on the backend. For every environment variable, see the [configuration reference](./CONFIGURATION.md).
+
+## Compare the launchers
+
+There are three ways to start Kasal, and they don't share defaults. Use `run.sh` for development.
+
+| | `src/backend/run.sh` | `src/entrypoint.py` | `kasal` (pip package, `packaging/kasal/cli.py`) |
+|---|---|---|---|
+| Intended use | Local development | Production / Databricks Apps entry point (`src/app.yaml` runs it) | Trying Kasal from an installed wheel |
+| Bind host | `KASAL_BIND_HOST`, default `127.0.0.1`; warns on any other host | `KASAL_BIND_HOST` if set; otherwise `0.0.0.0` inside Databricks Apps and `127.0.0.1` elsewhere | `--host`, default `127.0.0.1` |
+| Port | `KASAL_PORT`, default `8000` | `--port`, default `8000` | `--port`, default `8000` |
+| `LOCAL_DEV_AUTH` | Set to `true` unless you set it | Set to `true` by `--environment dev` unless you set it; otherwise not set, and refused inside Apps | Not set; export it yourself, or API calls return 401 (see the [pip package guide](./PIP_PACKAGE.md)) |
+| Default database | SQLite, `src/backend/app.db` (`./run.sh postgres` for PostgreSQL) | SQLite, `src/kasal.db`; inside Apps, the attached Lakebase resource | SQLite, `~/.kasal/kasal.db`; any `DATABASE_TYPE` or `SQLITE_DB_PATH` you export wins |
+| Frontend | None; run the Vite dev server on port 3000 | Serves the built `src/frontend_static` | Serves the UI bundled in the wheel |
+| Dependencies | Runs `uv sync --frozen` first | Uses the current interpreter | Installed with the wheel |
+| Reload on code change | Yes (`--reload --reload-dir src`) | With `--reload` | No |
+
+`src/entrypoint.py` flags: `--db-type sqlite|postgres` and `--db-url` (a `postgresql://` URL is rewritten to `postgresql+asyncpg://`, and `DATABASE_TYPE` is exported so the crew and flow subprocesses agree), `--port`, `--reload`, `--debug` and `--environment dev|prod` (`dev` behaves like `run.sh`: `KASAL_DEPLOYMENT_MODE=local` and `LOCAL_DEV_AUTH=true`). For day-to-day development, `run.sh` is still the simplest option.
 
 ## Authentication in local development
 
@@ -95,16 +114,39 @@ The backend, `alembic` and `python run_seeders.py` all read `src/backend/src/con
 | Entry point | Default database | SQLite file |
 |---|---|---|
 | `./run.sh`, `uvicorn`, `alembic`, `python run_seeders.py` | SQLite (`DATABASE_TYPE` defaults to `sqlite`) | `src/backend/app.db` |
-| `python src/entrypoint.py` | SQLite (`--db-type sqlite`) | `src/kasal.db` |
+| `python src/entrypoint.py` | SQLite | `src/kasal.db` |
 | `kasal` (pip package) | SQLite | `~/.kasal/kasal.db` |
 
-To apply migrations and seed the default database:
+For the other ways the launchers differ, see [Compare the launchers](#compare-the-launchers).
+
+### Create and seed a database
+
+On a new database, start the app once. `./run.sh` (or any other launcher; see [compare the launchers](#compare-the-launchers)) runs `init_db()` at startup, which builds the whole schema, and then seeds it in the background while `AUTO_SEED_DATABASE` is on. Nothing else is needed.
+
+To build and seed a database without starting the server, for example a scratch file for a test, run `init_db()` and then the seeders:
 
 ```bash
 cd src/backend
-uv run alembic upgrade head
-uv run python run_seeders.py
+export DATABASE_TYPE=sqlite SQLITE_DB_PATH=/tmp/kasal-scratch.db
+uv run --frozen python -c "import asyncio; from src.db.session import init_db; asyncio.run(init_db())"
+uv run --frozen python run_seeders.py
 ```
+
+The order matters. `run_seeders.py` does not create tables: on an empty database every seeder fails with `no such table`, yet the script still prints "All seeders completed successfully!" and exits 0. Check that `init_db()` ran first.
+
+### Status of Alembic
+
+Don't use `alembic upgrade head` to create a database. The migration history has several roots and no baseline revision, so it cannot build a schema from nothing: on an empty SQLite file it stops at `no such table: agents`, and on a database that `init_db()` built it fails too, because it replays every migration from the start. CI runs that step as report-only for the same reason (see [continuous integration](./continuous-integration.md)).
+
+What Alembic is for today is recording schema changes. To create a migration, bring a database to the current schema with `init_db()`, mark it as current, then autogenerate:
+
+```bash
+cd src/backend
+uv run --frozen alembic stamp head    # once per database that init_db() built
+uv run --frozen alembic revision --autogenerate -m "description"
+```
+
+Review the generated file before you commit it. On SQLite, autogenerate also reports type changes (for example `NUMERIC` to `UUID`) that are only differences between the SQLite and PostgreSQL column types; delete those operations.
 
 To use PostgreSQL, start the server with `./run.sh postgres` and set `DATABASE_TYPE=postgres` (plus the `POSTGRES_*` variables) on every other command you run. To use another SQLite file, set `SQLITE_DB_PATH` the same way.
 

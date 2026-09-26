@@ -194,7 +194,7 @@ Rules worth knowing before changing anything here:
   something, remove it from that binding's set — do not special-case the call
   site. The API and the UI read the same declaration.
 
-Open items are tracked in [the dual-harness backlog](./dual-harness-backlog.md).
+Open items are tracked in an internal engineering backlog.
 
 ---
 

@@ -20,8 +20,8 @@ cd kasal
 
 # Backend setup (required) — Python deps are managed with uv (no requirements.txt)
 cd src/backend
-uv sync            # install dependencies (creates .venv)
-./run.sh sqlite    # SQLite for development (run.sh runs `uv sync` for you)
+uv sync --frozen   # install exactly what uv.lock pins (creates .venv)
+./run.sh sqlite    # SQLite; builds and seeds the database on first start
 
 # Frontend setup (optional - only if working on UI)
 cd ../frontend
@@ -89,7 +89,7 @@ Backend typing debt and dependency exposure are documented in [Validation and se
 
 **Backend Development:**
 ```bash
-# Start development server (run.sh runs `uv sync` for you)
+# Start development server (run.sh runs `uv sync --frozen` for you)
 cd src/backend
 ./run.sh sqlite  # or ./run.sh postgres for PostgreSQL
 
@@ -102,12 +102,16 @@ uv run lint-imports
 
 **Database Changes:**
 ```bash
-# Create migration for model changes. Alembic reads Settings, which defaults to
-# the same SQLite file run.sh uses (src/backend/app.db):
+# Create a migration for model changes. Alembic reads Settings, which defaults
+# to the same SQLite file run.sh uses (src/backend/app.db). Start run.sh once so
+# init_db() has built that file, then:
 cd src/backend
-uv run alembic revision --autogenerate -m "description"
-uv run alembic upgrade head
+uv run --frozen alembic stamp head     # once per database that init_db() built
+uv run --frozen alembic revision --autogenerate -m "description"
+# Review the file: on SQLite, drop the spurious type changes autogenerate reports
 ```
+
+Don't run `alembic upgrade head` to create or seed a database: there is no baseline revision, so it fails on an empty database and on one `init_db()` built. A new database gets its schema and seed data from starting the app (see [create and seed a database](src/docs/DEVELOPER_GUIDE.md#create-and-seed-a-database)).
 
 Alembic does not run at startup: the app builds its schema with `init_db()`. A column added to an existing table also needs a step in `src/backend/src/db/self_heal/columns.py` (a new table: `tables.py`), or existing installs never get it.
 
@@ -237,7 +241,7 @@ There is no end-to-end suite (no Cypress or Playwright script).
 ## Common Gotchas & Important Notes
 
 ### Critical Requirements
-- **Dependencies via uv**: run `uv sync` in `src/backend` (uv manages the `.venv`); there is no `requirements.txt`. Prefix tools with `uv run`
+- **Dependencies via uv**: run `uv sync --frozen` in `src/backend` (uv manages the `.venv`; a plain `uv sync` can rewrite `uv.lock`); there is no `requirements.txt`. Prefix tools with `uv run`
 - **Database migrations**: Required for any model changes
 - **Type safety**: Use TypeScript/Python type hints extensively
 - **Async operations**: All database calls must be async

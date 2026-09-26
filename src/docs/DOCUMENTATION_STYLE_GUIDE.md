@@ -101,6 +101,7 @@ Don't use callouts for prerequisites, steps, or cross-references — those belon
 - **Each subfolder gets a `README.md`** that states the section's scope, links to every page in the folder, and links back up to the parent hub. GitHub renders it when browsing the directory; the in-app nav uses it as the default page. `powerbi/README.md` is the model.
 - **`src/docs/README.md` is the top-level hub** — mostly navigation: a short intro, then grouped links to section pages. Keep its links as relative `.md` paths and keep them in sync when you add or move a page.
 - **Images** live in `images/` (already present); reference them with relative paths.
+- **Internal pages don't ship.** Proposals, backlogs, reviews and evaluations can live in `src/docs/`, but mark them with a status callout right under the H1 (`> [!NOTE]` then `> **Status: internal / proposal.** …`). The build leaves any page with that banner out of the app bundle and the pip wheel, along with `archive/`, `reviews/` and the files listed in `src/scripts/build-tasks.cjs`. Don't link to an internal page from a shipped one (the build fails if you do), and don't add one to the hub.
 
 ---
 

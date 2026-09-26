@@ -16,8 +16,7 @@ How a flow carries state across nodes and across turns: channels with merge poli
 
 > [!NOTE]
 > This describes work that is implemented and unit-tested but has not yet been
-> exercised against a live instance. For the design rationale and the comparison
-> with LangGraph and CrewAI, see the [conversational flow state proposal](./conversational-flow-state-proposal.md).
+> exercised against a live instance.
 
 ## The problem this solves
 
@@ -324,7 +323,6 @@ one row per completed method, plus a `turn_end` row per turn.
 
 ## Related
 
-- [Conversational flow state proposal](./conversational-flow-state-proposal.md): the design rationale, and how LangGraph and CrewAI solve the same problem
 - [Checkpointing and resume](./CHECKPOINTING.md): the checkpoint record, identity hashing, and what a resume restores
 - [Flow routing](./flow-routing.md): how routers and conditions read state
 - [Memory](./MEMORY.md): the cross-thread store this deliberately keeps separate from a thread

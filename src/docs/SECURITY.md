@@ -89,7 +89,7 @@ Kasal is multi-tenant and group-aware. Resources and permissions are scoped to t
 | Selected workspace (`group_id` header) | Scope | Role |
 | --- | --- | --- |
 | A teamspace the user belongs to | That teamspace only | The user's role in it |
-| The user's personal workspace | The personal workspace only | No teamspace role. The effective role is admin for a system admin or personal-workspace manager, otherwise editor (`core/permissions.get_effective_role`) |
+| The user's personal workspace | The personal workspace only | No teamspace role. The effective role is admin for a system admin or personal-workspace manager, otherwise editor (`get_effective_role` in `core/permissions.py`) |
 | None (identity discovery, MCP or A2A callers without `X-Group-Id`) | Every teamspace the user belongs to, plus the personal workspace | The least privileged role across that scope; none if any membership has an unknown role |
 
 The cross-teamspace run list, `GET /executions/history/all-groups`, builds its own scope from the user's memberships and does not depend on the selected workspace.
