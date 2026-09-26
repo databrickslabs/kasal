@@ -102,12 +102,16 @@ uv run lint-imports
 
 **Database Changes:**
 ```bash
-# Create migration for model changes. Alembic reads Settings, which defaults to
-# the same SQLite file run.sh uses (src/backend/app.db):
+# Create a migration for model changes. Alembic reads Settings, which defaults
+# to the same SQLite file run.sh uses (src/backend/app.db). Start run.sh once so
+# init_db() has built that file, then:
 cd src/backend
-uv run alembic revision --autogenerate -m "description"
-uv run alembic upgrade head
+uv run --frozen alembic stamp head     # once per database that init_db() built
+uv run --frozen alembic revision --autogenerate -m "description"
+# Review the file: on SQLite, drop the spurious type changes autogenerate reports
 ```
+
+Don't run `alembic upgrade head` to create or seed a database: there is no baseline revision, so it fails on an empty database and on one `init_db()` built. A new database gets its schema and seed data from starting the app (see [create and seed a database](src/docs/DEVELOPER_GUIDE.md#create-and-seed-a-database)).
 
 Alembic does not run at startup: the app builds its schema with `init_db()`. A column added to an existing table also needs a step in `src/backend/src/db/self_heal/columns.py` (a new table: `tables.py`), or existing installs never get it.
 

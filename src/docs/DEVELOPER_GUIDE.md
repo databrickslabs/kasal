@@ -98,13 +98,34 @@ The backend, `alembic` and `python run_seeders.py` all read `src/backend/src/con
 | `python src/entrypoint.py` | SQLite (`--db-type sqlite`) | `src/kasal.db` |
 | `kasal` (pip package) | SQLite | `~/.kasal/kasal.db` |
 
-To apply migrations and seed the default database:
+### Create and seed a database
+
+On a new database, start the app once. `./run.sh` (or any launcher below) runs `init_db()` at startup, which builds the whole schema, and then seeds it in the background while `AUTO_SEED_DATABASE` is on. Nothing else is needed.
+
+To build and seed a database without starting the server, for example a scratch file for a test, run `init_db()` and then the seeders:
 
 ```bash
 cd src/backend
-uv run alembic upgrade head
-uv run python run_seeders.py
+export DATABASE_TYPE=sqlite SQLITE_DB_PATH=/tmp/kasal-scratch.db
+uv run --frozen python -c "import asyncio; from src.db.session import init_db; asyncio.run(init_db())"
+uv run --frozen python run_seeders.py
 ```
+
+The order matters. `run_seeders.py` does not create tables: on an empty database every seeder fails with `no such table`, yet the script still prints "All seeders completed successfully!" and exits 0. Check that `init_db()` ran first.
+
+### Status of Alembic
+
+Don't use `alembic upgrade head` to create a database. The migration history has several roots and no baseline revision, so it cannot build a schema from nothing: on an empty SQLite file it stops at `no such table: agents`, and on a database that `init_db()` built it fails too, because it replays every migration from the start. CI runs that step as report-only for the same reason (see [continuous integration](./continuous-integration.md)).
+
+What Alembic is for today is recording schema changes. To create a migration, bring a database to the current schema with `init_db()`, mark it as current, then autogenerate:
+
+```bash
+cd src/backend
+uv run --frozen alembic stamp head    # once per database that init_db() built
+uv run --frozen alembic revision --autogenerate -m "description"
+```
+
+Review the generated file before you commit it. On SQLite, autogenerate also reports type changes (for example `NUMERIC` to `UUID`) that are only differences between the SQLite and PostgreSQL column types; delete those operations.
 
 To use PostgreSQL, start the server with `./run.sh postgres` and set `DATABASE_TYPE=postgres` (plus the `POSTGRES_*` variables) on every other command you run. To use another SQLite file, set `SQLITE_DB_PATH` the same way.
 
