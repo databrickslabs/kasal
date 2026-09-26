@@ -1299,11 +1299,6 @@
     },
     {
       "file": "src/db/database_router.py",
-      "message": "Argument 1 to \"get_lakebase_session\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/db/database_router.py",
       "message": "Incompatible return value type (got \"Any | bool | None\", expected \"bool\")  [return-value]",
       "count": 1
     },
@@ -3219,11 +3214,6 @@
     },
     {
       "file": "src/services/agent_builder/crew_preparation.py",
-      "message": "Argument \"group_id\" to \"get_provider_api_key\" of \"ApiKeysService\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/crew_preparation.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
     },
@@ -4949,11 +4939,6 @@
     },
     {
       "file": "src/services/databricks/secrets/service.py",
-      "message": "Argument \"group_id\" to \"get_api_key_value\" of \"ApiKeysService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/secrets/service.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
     },
@@ -4970,7 +4955,7 @@
     {
       "file": "src/services/databricks/secrets/service.py",
       "message": "Property \"databricks_service\" defined in \"DatabricksSecretsService\" is read-only  [misc]",
-      "count": 6
+      "count": 5
     },
     {
       "file": "src/services/databricks/secrets/service.py",
@@ -6646,11 +6631,6 @@
       "file": "src/services/flow_builder/flow_runner_service.py",
       "message": "Argument \"flow_id\" to \"create_execution\" of \"FlowExecutionService\" has incompatible type \"UUID | None\"; expected \"UUID | str\"  [arg-type]",
       "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/flow_runner_service.py",
-      "message": "Argument \"group_id\" to \"get_provider_api_key\" of \"ApiKeysService\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/services/flow_builder/flow_runner_service.py",
@@ -8444,11 +8424,6 @@
     },
     {
       "file": "src/services/mlflow/evaluation_runner.py",
-      "message": "Argument 1 to \"get_experiment_by_name\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/mlflow/evaluation_runner.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 3
     },
@@ -8714,22 +8689,7 @@
     },
     {
       "file": "src/services/powerbi/service.py",
-      "message": "Argument \"password\" to \"UsernamePasswordCredential\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/service.py",
       "message": "Argument \"semantic_model_id\" to \"_execute_query\" of \"PowerBIService\" has incompatible type \"str | Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/service.py",
-      "message": "Argument \"username\" to \"UsernamePasswordCredential\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/service.py",
-      "message": "Argument 1 to \"len\" has incompatible type \"str | None\"; expected \"Sized\"  [arg-type]",
       "count": 1
     },
     {
@@ -9604,13 +9564,8 @@
     },
     {
       "file": "src/services/settings/api_keys.py",
-      "message": "Argument 1 to \"ApiKeysService\" has incompatible type \"Session\"; expected \"AsyncSession\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/api_keys.py",
       "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 4
+      "count": 3
     },
     {
       "file": "src/services/settings/api_keys.py",
@@ -9629,18 +9584,13 @@
     },
     {
       "file": "src/services/settings/api_keys.py",
-      "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
+      "message": "Incompatible default for argument \"db\" (default has type \"None\", argument has type \"AsyncSession\")  [assignment]",
       "count": 1
     },
     {
       "file": "src/services/settings/api_keys.py",
-      "message": "Incompatible default for argument \"db\" (default has type \"None\", argument has type \"AsyncSession\")  [assignment]",
-      "count": 5
-    },
-    {
-      "file": "src/services/settings/api_keys.py",
       "message": "Incompatible default for argument \"group_id\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 6
+      "count": 1
     },
     {
       "file": "src/services/settings/api_keys.py",
@@ -11400,7 +11350,7 @@
     {
       "file": "src/services/tools/tool_factory.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 7
+      "count": 6
     },
     {
       "file": "src/services/tools/tool_factory.py",
@@ -11970,7 +11920,7 @@
     {
       "file": "src/utils/databricks_auth.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 5
+      "count": 4
     },
     {
       "file": "src/utils/databricks_auth.py",
@@ -11991,11 +11941,6 @@
       "file": "src/utils/databricks_auth.py",
       "message": "Incompatible default for argument \"user_token\" (default has type \"None\", argument has type \"str\")  [assignment]",
       "count": 3
-    },
-    {
-      "file": "src/utils/databricks_auth.py",
-      "message": "Returning Any from function declared to return \"bool\"  [no-any-return]",
-      "count": 2
     },
     {
       "file": "src/utils/databricks_auth.py",

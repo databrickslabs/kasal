@@ -202,6 +202,62 @@ def setup_test_env(monkeypatch):
     monkeypatch.setenv("DEBUG_MODE", "true")
 
 
+_ISOLATED_ENV_PREFIXES = ("DATABRICKS_", "MLFLOW_")
+
+
+@pytest.fixture(autouse=True)
+def isolate_databricks_and_mlflow_env():
+    """Restore every DATABRICKS_* / MLFLOW_* variable after each test.
+
+    Several code paths (MLflow setup, URL normalisation, the subprocess helpers)
+    write a workspace host or token into os.environ, and some tests drive them
+    without monkeypatch. A host left behind makes a later test's real MLflow /
+    databricks-sdk call retry against it for minutes instead of failing at once,
+    which under xdist hung whole workers. Every test starts from the same env.
+    """
+    before = {
+        k: v for k, v in os.environ.items() if k.startswith(_ISOLATED_ENV_PREFIXES)
+    }
+    yield
+    for key in [k for k in os.environ if k.startswith(_ISOLATED_ENV_PREFIXES)]:
+        if key not in before:
+            del os.environ[key]
+    for key, value in before.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def no_leaked_databricks_auth_window(request):
+    """Fail a test that leaves a Databricks auth window (sp_auth._pinned) open.
+
+    A window holds a process-wide lock and a token in os.environ until it closes.
+    Left open, every later MLflow call for a different credential in the same
+    worker waits on the lock, and the waiting threads keep the worker from
+    exiting. Reset the state here so the rest of the suite is unaffected.
+    """
+    yield
+    sp_auth = sys.modules.get("src.services.mlflow.sp_auth")
+    if sp_auth is None or not sp_auth._PIN_DEPTH:
+        return
+    with sp_auth._PIN_COND:
+        for key, value in sp_auth._PIN_ORIGINAL.items():
+            if value is not None:
+                os.environ[key] = value
+            else:
+                os.environ.pop(key, None)
+        sp_auth._PIN_ORIGINAL.clear()
+        sp_auth._PIN_DEPTH = 0
+        sp_auth._PIN_ACTIVE = None
+        sp_auth._PIN_THREAD.depth = 0
+        sp_auth._PIN_COND.notify_all()
+    pytest.fail(
+        f"{request.node.nodeid} left a Databricks auth window open "
+        "(sp_auth._pinned); close it, e.g. via _restore_environment_vars",
+        pytrace=False,
+    )
+
+
 # Cleanup fixtures
 @pytest.fixture(autouse=True)
 def cleanup_after_test():

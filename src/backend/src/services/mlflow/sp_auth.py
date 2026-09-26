@@ -116,6 +116,10 @@ _PIN_ACTIVE: Optional[Tuple[Optional[str], Optional[str]]] = None
 #: SWAP_KEYS as they were before the FIRST active window; restored by the last.
 _PIN_ORIGINAL: Dict[str, Optional[str]] = {}
 _PIN_THREAD = threading.local()
+#: Longest a window waits for another credential's window to close. A window
+#: that is never closed (a bug) must fail the next caller loudly rather than
+#: block every later MLflow call — and the process's exit — forever.
+_PIN_WAIT_SECONDS = 60.0
 
 #: Window key for the app service principal. SP bearers are minted per call, so
 #: two SP windows carry different token strings for the SAME identity — keying
@@ -148,8 +152,14 @@ def _pinned(
     key = (host, identity or token)
     with _PIN_COND:
         nested = getattr(_PIN_THREAD, "depth", 0) > 0
-        while _PIN_DEPTH > 0 and not nested and _PIN_ACTIVE != key:
-            _PIN_COND.wait()
+        if not _PIN_COND.wait_for(
+            lambda: not (_PIN_DEPTH > 0 and not nested and _PIN_ACTIVE != key),
+            timeout=_PIN_WAIT_SECONDS,
+        ):
+            raise TimeoutError(
+                "Timed out waiting for another Databricks auth window to close; "
+                "an auth window was left open"
+            )
         if _PIN_DEPTH == 0:
             _PIN_ORIGINAL.clear()
             _PIN_ORIGINAL.update({k: os.environ.get(k) for k in SWAP_KEYS})

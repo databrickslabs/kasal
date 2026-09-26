@@ -682,7 +682,11 @@ class TestCreateRun:
             result = runner.create_run(auth_ctx)
 
             assert result["run_id"] == "run-abc"
-            assert result["experiment_name"] == "/Shared/kasal-crew-execution-traces"
+            # No experiment configured: the private per-environment fallback, never /Shared.
+            assert (
+                result["experiment_name"]
+                == "/Users/tests@example.com/kasal-crew-traces"
+            )
             assert "experiment_id" in result
 
     def test_create_run_sets_and_restores_env_vars(self):

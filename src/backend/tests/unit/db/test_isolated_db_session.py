@@ -140,6 +140,15 @@ async def test_get_isolated_db_session_uses_private_nullpool_engine_for_sqlite(
     monkeypatch.setattr(
         sess_mod.async_session_factory, "_is_lakebase", False, raising=False
     )
+    # ...and that the DB config does not say so either: is_lakebase_enabled()
+    # reads the shared test database, which an earlier test in the same xdist
+    # worker may have left with a Lakebase config row.
+    from src.db import database_router
+
+    async def _lakebase_disabled():
+        return False
+
+    monkeypatch.setattr(database_router, "is_lakebase_enabled", _lakebase_disabled)
 
     try:
         async with sess_mod.get_isolated_db_session() as session:
