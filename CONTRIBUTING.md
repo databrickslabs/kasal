@@ -211,9 +211,12 @@ uv run python run_tests.py --coverage --html-coverage
 ### Frontend Testing
 ```bash
 cd src/frontend
-npm test        # Jest + React Testing Library
-npm run test:e2e # Cypress for end-to-end testing
+npm test                  # Vitest + React Testing Library, watch mode
+npm run test:run          # Vitest, single run (what CI runs)
+npx vitest run --coverage # with a coverage report in coverage/
 ```
+
+There is no end-to-end suite (no Cypress or Playwright script).
 
 ## Common Gotchas & Important Notes
 

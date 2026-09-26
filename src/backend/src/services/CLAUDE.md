@@ -54,9 +54,11 @@ one was itself called `services/` — which, once the package moved under
 and `flow_builder/`, over shared machinery in `execution/`. See
 `execution/CLAUDE.md`.
 
-The rule that keeps a capability a capability: it may import `kasal_engine` (the
-vendored LIBRARY — `BaseTool`, `event_bus`, `MemoryRecord`), but it must
-not import a PATH package. A guardrail that imports `flow_builder` has stopped
+The rule that keeps a capability a capability: it may import the shared library
+pieces (`BaseTool` in `services/tools/base.py`, `event_bus` in
+`core/events/bus.py`, `MemoryRecord` in `services/memory/engine/types.py`; the
+old vendored `kasal_engine` package is gone), but it must not import a PATH
+package. A guardrail that imports `flow_builder` has stopped
 being usable from a chat turn, which is the whole reason these moved.
 
 ## Layering, and how it is enforced

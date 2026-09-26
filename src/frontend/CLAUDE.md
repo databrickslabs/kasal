@@ -18,7 +18,7 @@ Frontend-specific instructions for Claude Code when working in the frontend dire
 - React 18 with TypeScript, bundled with **Vite** (not Create React App)
 - Material-UI (MUI) for components
 - ReactFlow for workflow visualization
-- **Zustand** for state management (primary; some legacy Redux Toolkit still present)
+- **Zustand** for state management (the only store library; there is no Redux)
 - Axios for HTTP requests, wrapped by `apiClient`
 - **Vitest** + React Testing Library for tests (no Cypress in this repo)
 
@@ -103,7 +103,7 @@ array in `src/features/help/documentation/Documentation.tsx`.
 
 ## Environment
 
-- Node.js 18+ recommended
+- Node.js 22 (the version CI uses)
 - React 18 with TypeScript, Vite dev server (HMR)
 - Development server auto-refreshes on file changes
 - Environment variables use Vite's `VITE_` prefix (e.g. `VITE_API_URL`); `.env` is not committed

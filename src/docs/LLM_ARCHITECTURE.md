@@ -17,23 +17,21 @@ Kasal splits LLM work into four layers. Each one knows only about the layer bene
 | Layer | Location | Knows about |
 |-------|----------|-------------|
 | Facade | `src/backend/src/services/llm/manager.py` | The kasal API other code calls. Stable by contract — `LLMManager.completion` alone has 38+ call sites. |
-| Configuration | `src/backend/src/core/llm/` | The model catalog, tenants, credentials, endpoint URLs, telemetry, embeddings. |
-| Endpoint policy |  `src/backend/src/services/llm/handlers/` | How one serving endpoint misbehaves: retries, fallback, message sanitization, alternate APIs. |
-| Transport | `src/backend/kasal_engine/llm/` | The OpenAI-compatible wire protocol. No database, no tenants, no catalog. |
+| Configuration | `src/backend/src/services/llm/` | The model catalog, tenants, credentials, endpoint URLs, per-endpoint parameter rules, embeddings. A service: it reads the database. |
+| Endpoint policy | `src/backend/src/services/llm/handlers/` | How one serving endpoint misbehaves: retries, fallback, message sanitization, alternate APIs. |
+| Transport | `src/backend/src/core/llm/transport/` | The OpenAI-compatible wire protocol. No database, no tenants, no catalog. |
 
-Only two directories hold LLM code: `src/core/llm/` for everything kasal-specific (handlers included, as a subpackage), and `kasal_engine/llm/` for the transport.
+Beside them, `src/backend/src/core/llm/` holds what hangs off an LLM call without touching the database: usage telemetry, context-limit phrasings, JSON extraction and the subprocess token.
 
-### Why the engine is a separate tree
+### Why the transport sits in `core/`
 
-`kasal_engine` is the vendored package that replaced crewAI. It sits next to `src/` — `src/deploy.py` copies it as a sibling — because **the dependency runs one way**: the engine imports nothing from `src`. No FastAPI, no SQLAlchemy, no tenant context.
+The transport used to live in a separate `kasal_engine/` tree next to `src/`. That tree no longer exists: the agent engine is first-party code under `src/backend/src/`, and the transport is `src/core/llm/transport/`.
 
-That rule is worth keeping because it is *checkable*: `grep -r "from src\." kasal_engine/` returns nothing, so a violation is visible the moment it appears. Fold the transport into `src/core/llm/` and the rule becomes a convention no one can grep for — and the first `src.services` import sliding into the transport layer goes unnoticed. Silent drift of exactly that kind is what produced the duplication described below.
-
-Note also that `kasal_engine/llm` is not a standalone library: it is one subpackage of the engine, and `kasal_engine/memory/memory.py` refers to `BaseLLM`. Moving only `llm/` would make the engine import from `src` — the inversion.
+What the separate tree bought is kept by the layering instead: **the dependency runs one way**. The transport imports nothing from `services`, `repositories` or `db` — no SQLAlchemy, no tenant context. That is checkable, not a convention: the import-linter contract "`core/` never imports services" (`[tool.importlinter]` in `src/backend/pyproject.toml`, run by `run_tests.py` and in CI) fails the build the moment a `src.services` import slides into the transport. Silent drift of exactly that kind is what produced the duplication described below.
 
 ## What each layer owns
 
-### Transport: `kasal_engine/llm/`
+### Transport: `src/core/llm/transport/`
 
 The engine is where a request becomes HTTP. It is model-agnostic and tenant-agnostic by design.
 
@@ -50,17 +48,18 @@ The engine is where a request becomes HTTP. It is model-agnostic and tenant-agno
 
 Behavior that belongs here is anything true of *every* model on an OpenAI-compatible endpoint: the tool-call loop, budget enforcement, usage counting, event emission.
 
-### Configuration: `src/core/llm/`
+### Configuration: `src/services/llm/`
 
 This layer answers questions the engine deliberately cannot: *which* model, on *whose* credentials, at *which* URL.
 
 | Module | Responsibility |
 |--------|----------------|
+| `params.py` | What gets sent with a request, decided in one place: the per-model `ModelConfig.params` declaration turned into request parameters. |
 | `embeddings.py` | Embeddings — a different protocol entirely: direct HTTP to Databricks, Ollama, Google or OpenAI, with batching, auth resolution and a per-provider circuit breaker. Never touches the engine's LLM. |
-| `usage_telemetry.py` | Forwards per-call token usage to Databricks logfood, by subscribing to the engine's `LLMCallCompletedEvent`. |
-| `context_limits.py` | The single list of error phrasings that mean "context window overflow", extending the engine's own list. |
+| `src/core/llm/usage_telemetry.py` | Forwards per-call token usage to Databricks logfood, by subscribing to the engine's `LLMCallCompletedEvent`. |
+| `src/core/llm/context_limits.py` | The single list of error phrasings that mean "context window overflow", extending the engine's own list. |
 
-### Endpoint policy: `src/core/llm/handlers/`
+### Endpoint policy: `src/services/llm/handlers/`
 
 Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 
@@ -96,7 +95,7 @@ Five entry points, and they are the whole public surface:
 | `completion()` | A standalone call returning text — intent detection, generation services, guardrails. |
 | `completion_with_usage()` | A call needing Anthropic prompt caching and the `usage` block back. The only direct litellm caller left in kasal. |
 | `configure_kasal_llm()` / `get_llm()` | A configured `LLM` for crew, flow and chat execution. |
-| `get_embedding()` / `get_embeddings()` | Embedding vectors; thin delegates to `src/core/llm/embeddings.py`. |
+| `get_embedding()` / `get_embeddings()` | Embedding vectors; thin delegates to `src/services/llm/embeddings.py`. |
 
 ## The path of one call
 
@@ -139,9 +138,9 @@ Two consequences worth internalizing:
 
 Where new behavior belongs follows from what it needs to know:
 
-- **True for every OpenAI-compatible model?** The engine, in `completion.py` or `base.py`. Budget enforcement, retries of protocol-level errors, response parsing.
-- **Needs the catalog, a tenant, credentials or a URL?** `src/core/llm/`.
-- **True of one serving endpoint?** A handler subclass in `src/core/llm/handlers/`, named for the endpoint rather than the model.
+- **True for every OpenAI-compatible model?** The transport, in `src/core/llm/transport/` (`completion.py` or `base.py`). Budget enforcement, retries of protocol-level errors, response parsing.
+- **Needs the catalog, a tenant, credentials or a URL?** `src/services/llm/`.
+- **True of one serving endpoint?** A handler subclass in `src/services/llm/handlers/`, named for the endpoint rather than the model.
 - **A new entry point for application code?** `LLMManager`, delegating downward.
 
 Two checks before adding a workaround:

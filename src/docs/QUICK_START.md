@@ -24,7 +24,7 @@ python src/deploy.py
 
 ## Run locally
 
-For testing and development you can run Kasal on your own machine. You need Python 3.9+ and Node.js. The backend uses `uv` for dependencies and auto-reloads on changes; the frontend uses hot module replacement.
+For testing and development you can run Kasal on your own machine. You need Python 3.11 (the backend pins `>=3.11,<3.12`) and Node.js 22. The backend uses `uv` for dependencies and auto-reloads on changes; the frontend uses hot module replacement.
 
 ```bash
 git clone https://github.com/databrickslabs/kasal
