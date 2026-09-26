@@ -17,7 +17,7 @@ Compliance mapping: [security compliance mapping](./README_SECURITY_COMPLIANCE.m
 
 ## Before you begin
 
-- Clone the Kasal repository and install backend dependencies with `cd src/backend && uv sync`.
+- Clone the Kasal repository and install backend dependencies with `cd src/backend && uv sync --frozen`.
 - Activate the Python virtual environment used by the backend.
 - Have the backend running (`cd src/backend && ./run.sh`) and the frontend running (`cd src/frontend && npm start`) for the manual checks.
 - Open browser DevTools (Network tab) for the rendering and header checks.
@@ -31,7 +31,7 @@ Compliance mapping: [security compliance mapping](./README_SECURITY_COMPLIANCE.m
 ```bash
 # Dependencies are managed by uv; `uv run` uses src/backend/.venv
 cd src/backend
-uv sync
+uv sync --frozen
 
 # Run all unit tests
 uv run python run_tests.py --type unit

@@ -20,8 +20,8 @@ cd kasal
 
 # Backend setup (required) — Python deps are managed with uv (no requirements.txt)
 cd src/backend
-uv sync            # install dependencies (creates .venv)
-./run.sh sqlite    # SQLite for development (run.sh runs `uv sync` for you)
+uv sync --frozen   # install exactly what uv.lock pins (creates .venv)
+./run.sh sqlite    # SQLite; builds and seeds the database on first start
 
 # Frontend setup (optional - only if working on UI)
 cd ../frontend
@@ -89,7 +89,7 @@ Backend typing debt and dependency exposure are documented in [Validation and se
 
 **Backend Development:**
 ```bash
-# Start development server (run.sh runs `uv sync` for you)
+# Start development server (run.sh runs `uv sync --frozen` for you)
 cd src/backend
 ./run.sh sqlite  # or ./run.sh postgres for PostgreSQL
 
@@ -241,7 +241,7 @@ There is no end-to-end suite (no Cypress or Playwright script).
 ## Common Gotchas & Important Notes
 
 ### Critical Requirements
-- **Dependencies via uv**: run `uv sync` in `src/backend` (uv manages the `.venv`); there is no `requirements.txt`. Prefix tools with `uv run`
+- **Dependencies via uv**: run `uv sync --frozen` in `src/backend` (uv manages the `.venv`; a plain `uv sync` can rewrite `uv.lock`); there is no `requirements.txt`. Prefix tools with `uv run`
 - **Database migrations**: Required for any model changes
 - **Type safety**: Use TypeScript/Python type hints extensively
 - **Async operations**: All database calls must be async

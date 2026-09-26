@@ -33,7 +33,7 @@ The jobs are:
 | Job | What it runs | Gates |
 |---|---|---|
 | `backend-tests` | `uv sync --frozen`, then `run_tests.py --parallel 2 --skip-lint --coverage` on Python 3.11. Uploads `coverage.xml` | Tests gate. Coverage is report-only: no `fail_under` is set yet |
-| `backend-lint` | `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync` installs them | Yes |
+| `backend-lint` | `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync --frozen` installs them | Yes |
 | `migrations` | On a `pgvector/pgvector:pg16` service: exactly one Alembic head; `init_db()` builds the app schema on an empty PostgreSQL; `alembic upgrade head` from empty | The first two gate. The upgrade step is report-only (`continue-on-error`) |
 | `frontend` | Node 22: `npm ci`, `npm run test:run` (Vitest), `npm run lint` (ESLint), `npm run build` (`tsc -b` and `vite build`) | Yes. ESLint warnings do not fail the job; errors do |
 | `frontend-coverage` | `vitest run --coverage` with `VITEST_COVERAGE_REPORT_ONLY=1`, which drops the per-path thresholds in `vitest.config.ts`. Uploads `coverage/` | No: the job is `continue-on-error` |

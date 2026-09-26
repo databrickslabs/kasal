@@ -34,11 +34,13 @@ Install the backend dependencies and start the server from `src/backend`:
 
 ```bash
 cd src/backend
-uv sync            # creates src/backend/.venv from uv.lock
+uv sync --frozen   # creates src/backend/.venv from exactly what uv.lock pins
 ./run.sh           # SQLite; ./run.sh postgres for PostgreSQL
 ```
 
-To change a dependency, edit `src/backend/pyproject.toml`, run `uv lock`, then `uv sync`. Never edit `uv.lock` by hand.
+Always pass `--frozen`. A plain `uv sync` re-resolves against whatever package index your machine is configured for and can rewrite `uv.lock` with that index's URLs; `--frozen` installs the committed lock as it is. `run.sh` and CI both use `uv sync --frozen`.
+
+To change a dependency, edit `src/backend/pyproject.toml`, run `uv lock`, check that the `uv.lock` diff only points at public registries, then run `uv sync --frozen`. Never edit `uv.lock` by hand.
 
 `run.sh` does the following, in order:
 
@@ -65,6 +67,23 @@ KASAL_PORT=8001 npm start
 
 Interactive API docs are served at `/api-docs` on the backend. For every environment variable, see the [configuration reference](./CONFIGURATION.md).
 
+## Compare the launchers
+
+There are three ways to start Kasal, and they don't share defaults. Use `run.sh` for development.
+
+| | `src/backend/run.sh` | `src/entrypoint.py` | `kasal` (pip package, `packaging/kasal/cli.py`) |
+|---|---|---|---|
+| Intended use | Local development | Production / Databricks Apps entry point (`src/app.yaml` runs it) | Trying Kasal from an installed wheel |
+| Bind host | `KASAL_BIND_HOST`, default `127.0.0.1`; warns on any other host | `0.0.0.0`, fixed | `--host`, default `127.0.0.1` |
+| Port | `KASAL_PORT`, default `8000` | `--port`, default `8000` | `--port`, default `8000` |
+| `LOCAL_DEV_AUTH` | Set to `true` unless you set it | Not set; export it yourself outside Apps, or API calls return 401 | Not set; export it yourself, or API calls return 401 (see the [pip package guide](./PIP_PACKAGE.md)) |
+| Default database | SQLite, `src/backend/app.db` (`./run.sh postgres` for PostgreSQL) | SQLite, `src/kasal.db`; inside Apps, the attached Lakebase resource | SQLite, `~/.kasal/kasal.db`; any `DATABASE_TYPE` or `SQLITE_DB_PATH` you export wins |
+| Frontend | None; run the Vite dev server on port 3000 | Serves the built `src/frontend_static` | Serves the UI bundled in the wheel |
+| Dependencies | Runs `uv sync --frozen` first | Uses the current interpreter | Installed with the wheel |
+| Reload on code change | Yes (`--reload --reload-dir src`) | No | No |
+
+The command-line flags of `src/entrypoint.py` are being reworked, so this guide doesn't document them. For local work outside `run.sh`, start `uvicorn` directly as shown in the next section.
+
 ## Authentication in local development
 
 Every API call needs an identity. Inside Databricks Apps it comes from the platform proxy, through the `X-Forwarded-Email`, `X-Forwarded-User` and `X-Forwarded-Access-Token` headers. A request with no identity gets **401**; the backend no longer assumes a default user.
@@ -74,7 +93,7 @@ Locally there is no proxy, so Kasal offers an opt-in development identity:
 - `LOCAL_DEV_AUTH=true` makes `LocalDevAuthMiddleware` (`src/backend/src/main.py`) add `X-Forwarded-Email: <LOCAL_DEV_USER_EMAIL>` to any request that has no identity header.
 - `LOCAL_DEV_USER_EMAIL` sets that user. The default is `dev@localhost`.
 - `run.sh` sets `LOCAL_DEV_AUTH=true` for you. If you start `uvicorn` or `src/entrypoint.py` yourself, export it first, or every API call returns 401.
-- It is refused in production: when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`, the flag is ignored and an error is logged. `python src/entrypoint.py --environment dev` sets `DATABRICKS_APP_NAME`, so it switches the development identity off too.
+- It is refused in production: when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`, the flag is ignored and an error is logged. Some `src/entrypoint.py` options set `DATABRICKS_APP_NAME` to mimic Apps, which switches the development identity off too.
 
 `LOCAL_DEV_AUTH` is read with `os.getenv`, so putting it in a `.env` file has no effect. Export it in your shell.
 
@@ -95,12 +114,14 @@ The backend, `alembic` and `python run_seeders.py` all read `src/backend/src/con
 | Entry point | Default database | SQLite file |
 |---|---|---|
 | `./run.sh`, `uvicorn`, `alembic`, `python run_seeders.py` | SQLite (`DATABASE_TYPE` defaults to `sqlite`) | `src/backend/app.db` |
-| `python src/entrypoint.py` | SQLite (`--db-type sqlite`) | `src/kasal.db` |
+| `python src/entrypoint.py` | SQLite | `src/kasal.db` |
 | `kasal` (pip package) | SQLite | `~/.kasal/kasal.db` |
+
+For the other ways the launchers differ, see [Compare the launchers](#compare-the-launchers).
 
 ### Create and seed a database
 
-On a new database, start the app once. `./run.sh` (or any launcher below) runs `init_db()` at startup, which builds the whole schema, and then seeds it in the background while `AUTO_SEED_DATABASE` is on. Nothing else is needed.
+On a new database, start the app once. `./run.sh` (or any other launcher; see [compare the launchers](#compare-the-launchers)) runs `init_db()` at startup, which builds the whole schema, and then seeds it in the background while `AUTO_SEED_DATABASE` is on. Nothing else is needed.
 
 To build and seed a database without starting the server, for example a scratch file for a test, run `init_db()` and then the seeders:
 
