@@ -21,7 +21,10 @@ lost scheduled work that someone has to re-run by hand. A queued run instead:
 - is visible: its row goes to ``PENDING`` with a message naming the limit
   and its queue position, and back to ``RUNNING`` when it is admitted;
 - is stoppable: a stop request removes it from the queue
-  (:meth:`RunAdmission.cancel_waiting`), and it never spawns;
+  (:meth:`RunAdmission.cancel_waiting`), and it never spawns. The same call
+  covers a run that was admitted but has not started its process yet: the
+  executor claims the start (:meth:`RunAdmission.claim_start`) right before
+  ``process.start()``, and a stop that came first makes that claim fail;
 - does not use up its timeout: the executors start the run clock after
   admission.
 
@@ -33,6 +36,19 @@ value is clamped to the pool size (``MAX_CONCURRENT_RUNS_CEILING``), because a
 limit above it would bring back the silent in-pool wait this gate removes. With no
 row, the default is the pool size: nothing that ran before is queued now,
 except what used to stall in the pool.
+
+The gate re-reads the row at most every ``_LIMIT_CACHE_SECONDS``. A change made
+through ``EngineConfigService`` in this process takes effect at once
+(:meth:`RunAdmission.apply_limit` / :meth:`RunAdmission.invalidate_limit`), and
+a raised limit admits queued runs immediately rather than when a slot frees.
+
+## One slot per execution id
+
+A second ``acquire`` for an id that already holds or awaits a slot is REJECTED
+with :class:`DuplicateRunError`. Making it idempotent would let two processes
+run under one slot (the first release frees it while the second still runs),
+and overwriting the entry, as the gate used to, did the same while also
+leaving the first run unstoppable once the executor's handle was replaced.
 
 The gate lives in the parent process and is per server process, like the pool
 it protects.
@@ -46,7 +62,16 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable, Deque, Dict, Optional
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Deque,
+    Dict,
+    Optional,
+    Set,
+)
 
 from src.services.execution.blocking_pools import (
     EVENT_RELAY_MAX_WORKERS,
@@ -71,7 +96,12 @@ QueuedCallback = Callable[[int, int], Awaitable[None]]
 
 
 class RunCancelledWhileQueued(Exception):
-    """A stop request reached a run before it was admitted."""
+    """A stop request reached a run before its process started: while it was
+    queued, or after admission but before ``process.start()``."""
+
+
+class DuplicateRunError(RuntimeError):
+    """An execution id asked for a slot it already holds or is waiting for."""
 
 
 def clamp_limit(value: Optional[int]) -> int:
@@ -90,6 +120,21 @@ def clamp_limit(value: Optional[int]) -> int:
     return max(1, value)
 
 
+def configured_limit_of(row: Any) -> Optional[int]:
+    """The limit an engine-config row sets, or None (no row, disabled, junk)."""
+    if row is None or getattr(row, "enabled", True) is False:
+        return None
+    try:
+        return int(str(row.config_value).strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "[run_admission] ignoring non-integer %s=%r",
+            CONFIG_KEY,
+            row.config_value,
+        )
+        return None
+
+
 async def read_configured_limit() -> Optional[int]:
     """The operator's limit from the engine-config table, or None if unset.
 
@@ -103,17 +148,7 @@ async def read_configured_limit() -> Optional[int]:
         row = await EngineConfigService(session).find_by_engine_and_key(
             CONFIG_ENGINE_NAME, CONFIG_KEY
         )
-    if row is None or getattr(row, "enabled", True) is False:
-        return None
-    try:
-        return int(str(row.config_value).strip())
-    except (TypeError, ValueError):
-        logger.warning(
-            "[run_admission] ignoring non-integer %s=%r",
-            CONFIG_KEY,
-            row.config_value,
-        )
-        return None
+    return configured_limit_of(row)
 
 
 @dataclass
@@ -140,6 +175,10 @@ class RunAdmission:
         self._limit: int = DEFAULT_MAX_CONCURRENT_RUNS
         self._limit_read_at: Optional[float] = None
         self._limit_known = False  # a read has succeeded at least once
+        # Admitted runs whose executor has claimed the start (see claim_start),
+        # and admitted runs a stop reached before that claim.
+        self._started: Set[str] = set()
+        self._stop_requested: Set[str] = set()
 
     # -- observation -------------------------------------------------------
 
@@ -160,6 +199,7 @@ class RunAdmission:
             "limit": self._limit,
             "active": dict(self._active),
             "queued": [w.execution_id for w in self._waiters],
+            "starting": sorted(set(self._active) - self._started),
         }
 
     # -- the limit ---------------------------------------------------------
@@ -182,13 +222,30 @@ class RunAdmission:
                 e,
                 clamp_limit(configured),
             )
-        self._limit = clamp_limit(configured)
-        self._limit_read_at = now
+        self._set_limit(clamp_limit(configured), now)
         return self._limit
 
     def invalidate_limit(self) -> None:
         """Force the next admission to re-read the configured limit."""
         self._limit_read_at = None
+
+    def apply_limit(self, configured: Optional[int]) -> int:
+        """Use a limit the caller just wrote (None: the row is gone/disabled).
+
+        Takes effect now: a raised limit admits queued runs straight away. A
+        lowered one never stops a running run; it only holds new ones back.
+        """
+        self._limit_known = True
+        self._set_limit(clamp_limit(configured), time.monotonic())
+        logger.info("[run_admission] limit set to %s", self._limit)
+        return self._limit
+
+    def _set_limit(self, limit: int, read_at: float) -> None:
+        raised = limit > self._limit
+        self._limit = limit
+        self._limit_read_at = read_at
+        if raised:
+            self._admit_waiters()
 
     # -- admission ---------------------------------------------------------
 
@@ -223,8 +280,15 @@ class RunAdmission:
         """Take a slot, waiting in FIFO order if none is free.
 
         Returns True when the run had to queue.
+
+        Raises:
+            DuplicateRunError: ``execution_id`` already holds or awaits a slot.
         """
+        self._reject_duplicate(execution_id)
         limit = await self.current_limit()
+        # current_limit() may have awaited a DB read: check again, so two
+        # acquires for one id that raced through that read cannot both pass.
+        self._reject_duplicate(execution_id)
         if not self._waiters and len(self._active) < limit:
             self._active[execution_id] = kind
             return False
@@ -264,12 +328,50 @@ class RunAdmission:
         )
         return True
 
+    def _reject_duplicate(self, execution_id: str) -> None:
+        if execution_id in self._active or self.is_queued(execution_id):
+            logger.error(
+                "[run_admission] refused a second run slot for execution %s: "
+                "it already holds or awaits one",
+                execution_id,
+            )
+            raise DuplicateRunError(
+                f"Execution {execution_id} already holds or awaits a run slot"
+            )
+
     def release(self, execution_id: str) -> None:
+        self._started.discard(execution_id)
+        self._stop_requested.discard(execution_id)
         if self._active.pop(execution_id, None) is not None:
             self._admit_waiters()
 
+    def claim_start(self, execution_id: str) -> None:
+        """Called by an executor immediately before ``process.start()``.
+
+        With no ``await`` between this and the start, a stop either lands
+        before it (and is honoured here) or finds the started process.
+
+        Raises:
+            RunCancelledWhileQueued: a stop reached the run after it was
+                admitted and before this claim.
+        """
+        if execution_id in self._stop_requested:
+            self._stop_requested.discard(execution_id)
+            logger.info(
+                "[run_admission] run %s was stopped before its process started",
+                execution_id,
+            )
+            raise RunCancelledWhileQueued(execution_id)
+        self._started.add(execution_id)
+
     def cancel_waiting(self, execution_id: str) -> bool:
-        """Remove a queued run so it never spawns. True if it was queued."""
+        """Stop a run that has not started its process, so it never spawns.
+
+        A queued run leaves the queue. An admitted run whose executor has not
+        claimed the start yet is marked, and :meth:`claim_start` refuses it.
+        True in either case; False when the run is unknown or already started
+        (the caller then stops the process itself).
+        """
         for waiter in list(self._waiters):
             if waiter.execution_id == execution_id:
                 self._discard(waiter)
@@ -277,6 +379,14 @@ class RunAdmission:
                     waiter.future.set_result(False)
                 logger.info("[run_admission] removed queued run %s", execution_id)
                 return True
+        if execution_id in self._active and execution_id not in self._started:
+            self._stop_requested.add(execution_id)
+            logger.info(
+                "[run_admission] stop requested for admitted run %s before its "
+                "process started",
+                execution_id,
+            )
+            return True
         return False
 
     def _discard(self, waiter: _Waiter) -> None:
@@ -330,11 +440,11 @@ def queue_status_callbacks(execution_id: str) -> Dict[str, Any]:
 
 
 def stopped_while_queued(execution_id: str) -> Dict[str, Any]:
-    """The executors' result for a run stopped before it was admitted."""
+    """The executors' result for a run stopped before its process started."""
     return {
         "status": "STOPPED",
         "execution_id": execution_id,
-        "message": "Execution was stopped while queued for a run slot",
+        "message": "Execution was stopped before it started (queued or starting)",
     }
 
 

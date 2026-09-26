@@ -75,7 +75,12 @@ The four parent-side subprocess modules, shared by both subprocess paths:
   default and ceiling are the pool size, 16; re-read at most every 30 s). Over
   the limit a run QUEUES, it is not rejected: status `PENDING` with a
   "Queued: …" message, FIFO admission, back to `RUNNING` when admitted.
-  `cancel_waiting()` is how a stop removes a queued run so it never spawns.
+  `cancel_waiting()` is how a stop removes a queued run so it never spawns;
+  it also marks an admitted run that has not started, and the executor's
+  `claim_start()` (called right before `process.start()`, no `await` between)
+  refuses it. An engine-config write applies the new limit at once
+  (`apply_limit`), and a raised limit admits queued runs immediately. A second
+  `acquire` for an id that holds or awaits a slot raises `DuplicateRunError`.
 - `run_wait.py`: `collect_result()` drains the result queue WHILE the child
   runs (a result bigger than the pipe buffer deadlocks a join-then-read), holds
   one `RUN_WAIT_EXECUTOR` thread per run, and polls the exit on the loop.

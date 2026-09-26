@@ -33,6 +33,8 @@ def isolated_run_gate(monkeypatch):
     monkeypatch.setattr(gate, "_limit", module.DEFAULT_MAX_CONCURRENT_RUNS)
     monkeypatch.setattr(gate, "_limit_read_at", None)
     monkeypatch.setattr(gate, "_limit_known", False)
+    monkeypatch.setattr(gate, "_started", set())
+    monkeypatch.setattr(gate, "_stop_requested", set())
     yield gate
 
 

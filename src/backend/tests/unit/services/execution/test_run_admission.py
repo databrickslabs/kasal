@@ -12,6 +12,7 @@ from src.services.execution.run_admission import (
     CONFIG_KEY,
     DEFAULT_MAX_CONCURRENT_RUNS,
     MAX_CONCURRENT_RUNS_CEILING,
+    DuplicateRunError,
     RunAdmission,
     RunCancelledWhileQueued,
     clamp_limit,
@@ -287,3 +288,196 @@ class TestStopWhileQueued:
         with pytest.raises(asyncio.CancelledError):
             await waiter
         assert gate.active_count == 0
+
+
+class TestLimitChanges:
+    @pytest.mark.asyncio
+    async def test_raising_the_limit_admits_queued_runs_at_once(self):
+        gate = _gate(1)
+        await gate.acquire("a", "crew")
+        b = asyncio.create_task(gate.acquire("b", "crew"))
+        c = asyncio.create_task(gate.acquire("c", "crew"))
+        await _until(lambda: gate.queued_count == 2)
+
+        assert gate.apply_limit(3) == 3
+        # No release: the new slots are handed out by the limit change itself.
+        assert await b is True and await c is True
+        assert gate.active_count == 3 and gate.queued_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_re_read_that_raises_the_limit_admits_the_queue_first(self):
+        provider = AsyncMock(return_value=1)
+        gate = RunAdmission(limit_provider=provider)
+        await gate.acquire("a", "crew")
+        b = asyncio.create_task(gate.acquire("b", "crew"))
+        await _until(lambda: gate.is_queued("b"))
+
+        provider.return_value = 3
+        gate.invalidate_limit()
+        # "c" triggers the re-read; FIFO: "b" is admitted before "c" is.
+        assert await gate.acquire("c", "crew") is False
+        assert await b is True
+        assert gate.active_count == 3
+
+    @pytest.mark.asyncio
+    async def test_lowering_the_limit_stops_nothing_that_runs(self):
+        gate = _gate(3)
+        for run in ("a", "b", "c"):
+            await gate.acquire(run, "crew")
+        gate.apply_limit(1)
+        assert gate.active_count == 3
+        waiter = asyncio.create_task(gate.acquire("d", "crew"))
+        await _until(lambda: gate.is_queued("d"))
+        gate.release("a")
+        gate.release("b")
+        assert gate.is_queued("d")  # still 1 running against a limit of 1
+        gate.release("c")
+        assert await waiter is True
+
+    def test_applied_limit_is_cached_like_a_read(self):
+        gate = _gate(5)
+        gate.apply_limit(None)
+        assert gate.snapshot()["limit"] == DEFAULT_MAX_CONCURRENT_RUNS
+        assert gate._limit_read_at is not None
+
+
+class TestEngineConfigWritesReachTheGate:
+    """Changing ``max_concurrent_runs`` through the engine-config service is
+    applied to this process's gate immediately."""
+
+    def _row(self, value, key=CONFIG_KEY, enabled=True):
+        return MagicMock(
+            engine_name=CONFIG_ENGINE_NAME,
+            config_key=key,
+            config_value=value,
+            enabled=enabled,
+        )
+
+    def _service(self, repository):
+        from src.services.settings.engine import EngineConfigService
+
+        service = EngineConfigService(session=MagicMock())
+        service.repository = repository
+        return service
+
+    @pytest.mark.asyncio
+    async def test_updating_the_value_applies_it(self):
+        repository = MagicMock()
+        repository.update_config_value = AsyncMock(return_value=True)
+        repository.find_by_engine_and_key = AsyncMock(return_value=self._row("8"))
+        with patch.object(module, "run_admission") as gate:
+            await self._service(repository).update_config_value(
+                CONFIG_ENGINE_NAME, CONFIG_KEY, "8"
+            )
+        gate.apply_limit.assert_called_once_with(8)
+
+    @pytest.mark.asyncio
+    async def test_creating_the_row_applies_it(self):
+        repository = MagicMock()
+        repository.find_by_engine_and_key = AsyncMock(return_value=None)
+        repository.create = AsyncMock(return_value=self._row("4"))
+        data = MagicMock(engine_name=CONFIG_ENGINE_NAME, config_key=CONFIG_KEY)
+        data.model_dump.return_value = {}
+        with patch.object(module, "run_admission") as gate:
+            await self._service(repository).create_engine_config(data)
+        gate.apply_limit.assert_called_once_with(4)
+
+    @pytest.mark.asyncio
+    async def test_disabling_the_row_restores_the_default(self):
+        repository = MagicMock()
+        repository.toggle_enabled = AsyncMock(return_value=True)
+        repository.find_by_engine_name = AsyncMock(
+            return_value=self._row("2", enabled=False)
+        )
+        with patch.object(module, "run_admission") as gate:
+            await self._service(repository).toggle_engine_enabled(
+                CONFIG_ENGINE_NAME, False
+            )
+        gate.apply_limit.assert_called_once_with(None)
+
+    @pytest.mark.asyncio
+    async def test_deleting_a_kasal_row_invalidates_the_cache(self):
+        repository = MagicMock()
+        repository.find_by_engine_name = AsyncMock(return_value=MagicMock(id=1))
+        repository.delete = AsyncMock()
+        with patch.object(module, "run_admission") as gate:
+            await self._service(repository).delete_engine_config(CONFIG_ENGINE_NAME)
+        gate.invalidate_limit.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_other_keys_leave_the_gate_alone(self):
+        repository = MagicMock()
+        repository.update_config_value = AsyncMock(return_value=True)
+        repository.find_by_engine_and_key = AsyncMock(
+            return_value=self._row("true", key="flow_enabled")
+        )
+        with patch.object(module, "run_admission") as gate:
+            await self._service(repository).update_config_value(
+                CONFIG_ENGINE_NAME, "flow_enabled", "true"
+            )
+        gate.apply_limit.assert_not_called()
+        gate.invalidate_limit.assert_not_called()
+
+
+class TestDuplicateExecutionId:
+    """A second slot for one id is refused: overwriting the entry let two
+    processes share a slot and left the first one unstoppable."""
+
+    @pytest.mark.asyncio
+    async def test_an_active_id_is_rejected_and_keeps_its_slot(self):
+        gate = _gate(2)
+        await gate.acquire("a", "crew")
+        with pytest.raises(DuplicateRunError):
+            await gate.acquire("a", "flow")
+        assert gate.snapshot()["active"] == {"a": "crew"}
+        gate.release("a")
+        assert gate.active_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_queued_id_is_rejected(self):
+        gate = _gate(1)
+        await gate.acquire("a", "crew")
+        waiter = asyncio.create_task(gate.acquire("b", "crew"))
+        await _until(lambda: gate.is_queued("b"))
+        with pytest.raises(DuplicateRunError):
+            await gate.acquire("b", "crew")
+        assert gate.queued_count == 1
+        gate.release("a")
+        assert await waiter is True
+
+    @pytest.mark.asyncio
+    async def test_the_id_can_run_again_after_release(self):
+        gate = _gate(1)
+        async with gate.slot("a", "crew"):
+            pass
+        async with gate.slot("a", "crew"):
+            assert gate.active_count == 1
+
+
+class TestStopBetweenAdmissionAndStart:
+    @pytest.mark.asyncio
+    async def test_a_stop_before_the_start_claim_is_honoured(self):
+        gate = _gate(1)
+        with pytest.raises(RunCancelledWhileQueued):
+            async with gate.slot("a", "crew"):
+                assert gate.cancel_waiting("a") is True
+                gate.claim_start("a")
+        assert gate.active_count == 0
+        assert gate.snapshot()["starting"] == []
+
+    @pytest.mark.asyncio
+    async def test_after_the_claim_the_caller_stops_the_process_itself(self):
+        gate = _gate(1)
+        async with gate.slot("a", "crew"):
+            gate.claim_start("a")
+            assert gate.cancel_waiting("a") is False
+
+    @pytest.mark.asyncio
+    async def test_a_stop_request_does_not_outlive_its_run(self):
+        gate = _gate(1)
+        with pytest.raises(RunCancelledWhileQueued):
+            async with gate.slot("a", "crew"):
+                gate.cancel_waiting("a")
+                raise RunCancelledWhileQueued("a")  # the body gave up otherwise
+        async with gate.slot("a", "crew"):
+            gate.claim_start("a")  # a fresh run under the same id starts

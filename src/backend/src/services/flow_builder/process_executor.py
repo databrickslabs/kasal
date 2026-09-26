@@ -1540,7 +1540,7 @@ class ProcessFlowExecutor:
                 daemon=False,  # Don't make daemon so it can spawn its own child processes (crews)
             )
 
-            # Store the process
+            run_admission.claim_start(execution_id)  # a stop since admission wins
             self._running_processes[execution_id] = process
 
             # Start the process. The run clock starts here, not before the
