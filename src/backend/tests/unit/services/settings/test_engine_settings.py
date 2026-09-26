@@ -159,3 +159,70 @@ class TestSaveSettings:
         service.repository.create.assert_awaited_once()
         assert engine_settings.value("jev_api_base") == "https://example.com"
         assert resolve_budget_profile("deep").max_iter == 12
+
+
+class TestScalarSettings:
+    """Server-wide memory/knowledge knobs (were KASAL_MEMORY_SWEEP*, KNOWLEDGE_*)."""
+
+    def test_defaults_without_rows(self):
+        engine_settings.forget()
+        assert engine_settings.setting(engine_settings.MEMORY_SWEEP_ENABLED) is True
+        assert engine_settings.setting(engine_settings.KNOWLEDGE_TTL_DAYS) == 7
+
+    def test_typed_and_bounded(self):
+        engine_settings.replace(
+            [
+                _row("memory_sweep_enabled", "false"),
+                _row("knowledge_min_score", "0.5"),
+                _row("memory_sweep_batch", "1000"),  # above its maximum
+            ]
+        )
+        assert engine_settings.setting("memory_sweep_enabled") is False
+        assert engine_settings.setting("knowledge_min_score") == 0.5
+        assert engine_settings.setting("memory_sweep_batch") == 5
+
+    def test_consumers_read_the_snapshot(self):
+        from src.services.knowledge.search_guard import (
+            KnowledgeSearchBudget,
+            configured_min_score,
+        )
+        from src.services.memory.maintenance.sweep import sweep_enabled
+
+        engine_settings.replace(
+            [
+                _row("memory_sweep_enabled", "false"),
+                _row("knowledge_min_score", "0.6"),
+                _row("knowledge_max_searches", "2"),
+            ]
+        )
+        assert sweep_enabled() is False
+        assert configured_min_score() == 0.6
+        assert KnowledgeSearchBudget().max_searches == 2
+
+    @pytest.mark.asyncio
+    async def test_view_round_trips_advanced(self):
+        service = _service()
+        view = await engine_settings_view.update_view(
+            service,
+            {"advanced": {"knowledge_ttl_days": 30, "memory_sweep_enabled": None}},
+        )
+        service.save_settings.assert_awaited_once_with(
+            {"knowledge_ttl_days": "30", "memory_sweep_enabled": ""}
+        )
+        assert view["advanced"]["knowledge_ttl_days"] == 30
+        assert view["advanced"]["memory_sweep_enabled"] is True
+        assert view["advanced_specs"]["knowledge_ttl_days"]["maximum"] == 3650
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sent, message",
+        [
+            ({"nope": 1}, "Unknown engine setting"),
+            ({"knowledge_ttl_days": -1}, "whole number from 0 to 3650"),
+            ({"knowledge_min_score": 2.0}, "number from 0 to 1"),
+            ({"memory_sweep_enabled": 1}, "wrong type"),
+        ],
+    )
+    async def test_advanced_rejects_invalid(self, sent, message):
+        with pytest.raises(BadRequestError, match=message):
+            await engine_settings_view.update_view(_service(), {"advanced": sent})

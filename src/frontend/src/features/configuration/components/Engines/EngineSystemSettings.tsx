@@ -15,6 +15,7 @@ import { ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
 import { EngineConfigService } from '../../../../api/config/EngineConfigService';
 import type { EngineSettings, EngineSettingsPatch } from '../../../../types/config/engines';
 import AdvancedNumberField from '../AdvancedNumberField';
+import EngineAdvancedSettings from './EngineAdvancedSettings';
 
 const MODE_LABELS: Record<string, string> = { deep: 'Deep research' };
 
@@ -27,7 +28,8 @@ const BUDGET_FIELDS: Record<string, { label: string; helper: string; max: number
 
 /**
  * System-wide engine settings: the Jev API URL and, under Advanced, the agent
- * time limit and run budgets. These replaced the JEV_API_BASE,
+ * time limit, run budgets and server-wide memory/knowledge settings. These
+ * replaced the JEV_API_BASE,
  * KASAL_AGENT_MAX_EXECUTION_TIME and KASAL_BUDGET_<MODE>_<FIELD> environment
  * variables, which a Databricks App never sets. Hidden unless the API lets the
  * viewer read them (system administrators).
@@ -154,6 +156,7 @@ const EngineSystemSettings: React.FC = () => {
               })}
             </Box>
           ))}
+          <EngineAdvancedSettings settings={settings} saving={saving} onPatch={(body) => void patch(body)} />
         </AccordionDetails>
       </Accordion>
     </Paper>

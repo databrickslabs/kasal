@@ -49,6 +49,7 @@ import {
 } from '../../../types/config/memoryBackend';
 import { MemoryBackendService } from '../../../api/memory/MemoryBackendService';
 import { MemoryRecordsBrowser } from './MemoryRecordsBrowser';
+import LakebaseRoleField from './LakebaseRoleField';
 
 export const MemoryConfiguration: React.FC = () => {
   const [mode, setMode] = useState<'disabled' | 'lakebase'>('disabled');
@@ -978,6 +979,10 @@ export const MemoryConfiguration: React.FC = () => {
                 }));
               }}
               helperText="Must match your embedding model (1024 for databricks-gte-large-en)"
+            />
+            <LakebaseRoleField
+              value={lakebaseConfig.db_role}
+              onChange={(db_role) => setLakebaseConfig(prev => ({ ...prev, db_role }))}
             />
           </Box>
 

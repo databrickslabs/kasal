@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -155,6 +155,18 @@ class EngineSettings(BaseModel):
     #: Effective run budgets per answer mode, and the built-in defaults.
     budgets: Dict[str, Dict[str, int]]
     budget_defaults: Dict[str, Dict[str, int]]
+    #: Server-wide scalar settings (memory sweep, knowledge limits): the
+    #: effective value per key, and each key's default and bounds.
+    advanced: Dict[str, Union[bool, int, float]] = Field(default_factory=dict)
+    advanced_specs: Dict[str, "EngineSettingSpec"] = Field(default_factory=dict)
+
+
+class EngineSettingSpec(BaseModel):
+    """Default and bounds of one scalar engine setting (drives the form)."""
+
+    default: Union[bool, int, float]
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
 
 
 class EngineSettingsUpdate(BaseModel):
@@ -164,3 +176,8 @@ class EngineSettingsUpdate(BaseModel):
     agent_max_execution_time: Optional[int] = Field(default=None, ge=0, le=86400)
     #: {mode: {field: value}}; a null value resets that field to its default.
     budgets: Optional[Dict[str, Dict[str, Optional[int]]]] = None
+    #: {key: value}; a null value resets that setting to its default.
+    advanced: Optional[Dict[str, Optional[Union[bool, int, float]]]] = None
+
+
+EngineSettings.model_rebuild()

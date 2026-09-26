@@ -31,6 +31,7 @@ import {
   useMemoryTuningConfig,
   useMemoryBackendStore,
 } from '../../../store/memoryBackend';
+import MemoryHygieneFields from './MemoryHygieneFields';
 
 interface SliderSpec {
   key: keyof MemoryTuningConfig;
@@ -199,7 +200,8 @@ export const MemoryTuningPanel: React.FC = () => {
           <Typography variant="subtitle1">Memory Tuning</Typography>
           <Typography variant="caption" color="text.secondary">
             Advanced — composite-score weights and floor, recall depth (query
-            distillation, exploration rounds), save-time consolidation, memory LLM.
+            distillation, exploration rounds), save-time consolidation, memory LLM,
+            write screening and retention.
           </Typography>
         </Box>
       </AccordionSummary>
@@ -338,6 +340,7 @@ export const MemoryTuningPanel: React.FC = () => {
             </TextField>
           </Grid>
         </Grid>
+        <MemoryHygieneFields tuning={tuning} update={updateCognitiveConfig} />
       </AccordionDetails>
     </Accordion>
   );

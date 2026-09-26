@@ -21,7 +21,6 @@ test double, the real stores live in ``services.memory.storage``.
 import concurrent.futures
 import contextvars
 import logging
-import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -29,7 +28,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from src.core.events.bus import event_bus
 from src.core.events.types import (
@@ -44,6 +43,7 @@ from src.core.events.types import (
 from .analyze import MemoryAnalysis, extract_json_object
 from .consolidation import consolidate_on_save
 from .recall_planner import deep_recall
+from .tuning import MemoryHygiene
 from .types import KIND_EPISODIC, MemoryRecord, ScopeInfo
 
 logger = logging.getLogger(__name__)
@@ -257,17 +257,11 @@ RECALL_MIN_SCORE_BY_EMBEDDER: dict[str, float] = {"ollama": 0.62}
 def default_recall_min_score(embedder_provider: str | None = None) -> float:
     """Blended-score floor for a recall that passes no threshold.
 
-    Precedence: KASAL_MEMORY_RECALL_MIN_SCORE (deployment override) → the floor
-    for ``embedder_provider`` → the calibrated default. A teamspace's explicit
+    The floor for ``embedder_provider``, else the calibrated default. A
+    teamspace's explicit
     Memory Tuning value is applied by the caller (``Memory.recall_min_score``)
     and never reaches here.
     """
-    raw = os.getenv("KASAL_MEMORY_RECALL_MIN_SCORE")
-    if raw is not None:
-        try:
-            return max(0.0, float(raw))
-        except ValueError:
-            pass
     if embedder_provider:
         return RECALL_MIN_SCORE_BY_EMBEDDER.get(
             embedder_provider.lower(), DEFAULT_RECALL_MIN_SCORE
@@ -279,7 +273,7 @@ def _default_recall_min_score() -> float:
     return default_recall_min_score()
 
 
-class Memory(BaseModel):
+class Memory(MemoryHygiene):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     llm: Any = Field(
@@ -643,7 +637,7 @@ class Memory(BaseModel):
         # near. Without a floor, a query about a topic the store has never seen
         # returns the k least-unrelated records, and callers inject them as
         # context. Knowledge search stops the same failure with the same rule
-        # (services/knowledge/search_guard.py: KNOWLEDGE_MIN_SCORE) — this is
+        # (services/knowledge/search_guard.py: configured_min_score) — this is
         # that stopping rule for memory (measured live: "genie ontology" over
         # a news-only store recalled 18 news records at blended scores
         # 0.56-0.74, and the model wove "Lebanon news" into the diagram).

@@ -11,6 +11,15 @@ export interface EngineSettings {
   /** Effective budgets for the modes a run applies, and the built-in ones. */
   budgets: BudgetTable;
   budget_defaults: BudgetTable;
+  /** Server-wide scalar settings (memory sweep, knowledge limits). */
+  advanced: Record<string, boolean | number>;
+  advanced_specs: Record<string, EngineSettingSpec>;
+}
+
+export interface EngineSettingSpec {
+  default: boolean | number;
+  minimum: number | null;
+  maximum: number | null;
 }
 
 /** Partial update: an omitted field is left alone, null resets it. */
@@ -18,4 +27,5 @@ export interface EngineSettingsPatch {
   jev_api_base?: string | null;
   agent_max_execution_time?: number | null;
   budgets?: Record<string, Record<string, number | null>>;
+  advanced?: Record<string, boolean | number | null>;
 }

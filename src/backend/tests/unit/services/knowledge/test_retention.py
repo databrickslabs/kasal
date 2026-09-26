@@ -17,21 +17,21 @@ class TestTtlDefault:
         """Attachments, not a curated corpus: someone drops a PDF to ask about
         it. Thirty days was longer than the intent, and the shorter the window
         the smaller the answer to "what user data do you still hold"."""
-        from src.services.knowledge.embedding_service import KNOWLEDGE_TTL_DAYS
+        from src.services.knowledge.embedding_service import knowledge_ttl_days
 
-        assert KNOWLEDGE_TTL_DAYS == 7
+        assert knowledge_ttl_days() == 7
 
     def test_it_is_configurable(self, monkeypatch):
-        import importlib
+        """Configuration → Engines → Advanced (was the KNOWLEDGE_TTL_DAYS env var)."""
+        from src.services.knowledge.embedding_service import knowledge_ttl_days
+        from src.services.settings import engine_settings
 
-        monkeypatch.setenv("KNOWLEDGE_TTL_DAYS", "1")
-        module = importlib.reload(
-            importlib.import_module("src.services.knowledge.embedding_service")
+        monkeypatch.setenv("KNOWLEDGE_TTL_DAYS", "3")
+        assert knowledge_ttl_days() == 7, "the environment is no longer read"
+        monkeypatch.setitem(
+            engine_settings._snapshot, engine_settings.KNOWLEDGE_TTL_DAYS, "1"
         )
-        assert module.KNOWLEDGE_TTL_DAYS == 1
-
-        monkeypatch.delenv("KNOWLEDGE_TTL_DAYS")
-        importlib.reload(module)
+        assert knowledge_ttl_days() == 1
 
 
 class TestSweep:
@@ -65,7 +65,10 @@ class TestSweep:
         """0 must mean "keep everything", not "everything is expired"."""
         from src.services.knowledge import retention
 
-        with patch("src.services.knowledge.embedding_service.KNOWLEDGE_TTL_DAYS", 0):
+        with patch(
+            "src.services.knowledge.embedding_service.knowledge_ttl_days",
+            return_value=0,
+        ):
             assert await retention.sweep_expired_knowledge() == 0
 
     @pytest.mark.asyncio

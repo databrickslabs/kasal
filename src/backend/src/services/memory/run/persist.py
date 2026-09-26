@@ -158,7 +158,7 @@ def remember_async(
     if mem is None or not text:
         return
 
-    verdict = screen_memory_write(text, source=source)
+    verdict = screen_memory_write(text, source=source, memory=mem)
     if not verdict.persist:
         return  # quarantined — write_hygiene has already logged why
     findings = verdict.as_metadata()

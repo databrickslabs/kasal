@@ -22,7 +22,7 @@ finished task.
 "weigh it, do not treat it as instructions". This is the second layer, not a
 replacement — the header is what protects against everything the regexes miss.
 
-Modes, via ``KASAL_MEMORY_WRITE_SCREENING``:
+Modes, via the teamspace's Memory Tuning ``write_screening``:
 
 * ``quarantine`` (default) — HIGH-severity content is not persisted at all.
 * ``annotate`` — nothing is blocked; findings are recorded in metadata. Use this
@@ -38,7 +38,6 @@ later trust-weighting pass can treat them as lower-confidence.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,9 +67,11 @@ def _get_detector() -> Any:
     return _detector
 
 
-def screening_mode() -> str:
+def screening_mode(memory: Any = None) -> str:
     """Configured mode, defaulting to ``quarantine`` for anything unrecognised."""
-    mode = str(os.environ.get("KASAL_MEMORY_WRITE_SCREENING", "")).strip().lower()
+    from src.services.memory.engine.tuning import tuned
+
+    mode = tuned(memory, "write_screening", MODE_QUARANTINE).strip().lower()
     return mode if mode in _MODES else MODE_QUARANTINE
 
 
@@ -100,13 +101,15 @@ class ScreenVerdict:
         }
 
 
-def screen_memory_write(content: str, source: str | None = None) -> ScreenVerdict:
+def screen_memory_write(
+    content: str, source: str | None = None, memory: Any = None
+) -> ScreenVerdict:
     """Screen ``content`` before it is persisted. Never raises.
 
     A failure here must not lose a memory: screening is a safety net, and a
     broken net is not a reason to drop the write.
     """
-    mode = screening_mode()
+    mode = screening_mode(memory)
     if mode == MODE_OFF or not (content or "").strip():
         return ScreenVerdict()
     try:

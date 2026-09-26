@@ -6,7 +6,7 @@ an episodic record from a run six months ago is still there competing for the
 recall candidate pool. Retention-forever is a recognised failure mode, not a
 neutral default.
 
-**Opt-in, and deliberately so.** ``KASAL_MEMORY_FORGETTING`` defaults to off.
+**Opt-in, and deliberately so.** Memory Tuning ``forgetting_enabled`` defaults to off.
 This pass deletes rows from a tenant's memory; that is not a decision to make on
 someone's behalf via a default, and the value of turning it on scales with store
 size, which is exactly what an operator can see and this code cannot.
@@ -36,11 +36,11 @@ facts/decisions ~0.8) is the honest proxy for "not worth keeping".
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any
 
 from src.services.memory.engine import KIND_EPISODIC
+from src.services.memory.engine.tuning import tuned
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +55,8 @@ _DEFAULT_EPISODIC_TTL_DAYS = 180.0
 _DEFAULT_IMPORTANCE_FLOOR = 0.4
 
 
-def forgetting_enabled() -> bool:
-    return os.environ.get("KASAL_MEMORY_FORGETTING", "false").lower() == "true"
-
-
-def _float_env(name: str, default: float) -> float:
-    try:
-        return float(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
+def forgetting_enabled(memory: Any = None) -> bool:
+    return tuned(memory, "forgetting_enabled", False)
 
 
 def _age_days(record: Any) -> float | None:
@@ -112,22 +105,17 @@ def _should_forget(
 def forget_expired_memories(memory: Any, scope: str | None = None) -> dict[str, int]:
     """Delete records past their retention rule. ``{"scanned", "forgotten"}``.
 
-    Off unless ``KASAL_MEMORY_FORGETTING=true``. Best-effort throughout: a
+    Off unless the teamspace's Memory Tuning turns ``forgetting_enabled`` on. Best-effort throughout: a
     failure logs and aborts the pass rather than raising into a run.
     """
     stats = {"scanned": 0, "forgotten": 0}
-    if memory in (None, True, False) or not forgetting_enabled():
+    if memory in (None, True, False) or not forgetting_enabled(memory):
         return stats
 
-    superseded_retention_days = _float_env(
-        "KASAL_MEMORY_SUPERSEDED_RETENTION_DAYS", _DEFAULT_SUPERSEDED_RETENTION_DAYS
-    )
-    episodic_ttl_days = _float_env(
-        "KASAL_MEMORY_EPISODIC_TTL_DAYS", _DEFAULT_EPISODIC_TTL_DAYS
-    )
-    importance_floor = _float_env(
-        "KASAL_MEMORY_IMPORTANCE_FLOOR", _DEFAULT_IMPORTANCE_FLOOR
-    )
+    window = retention_settings(memory)
+    superseded_retention_days = window["superseded_retention_days"]
+    episodic_ttl_days = window["episodic_ttl_days"]
+    importance_floor = window["importance_floor"]
 
     try:
         records = memory.list_records(scope=scope, limit=_SCAN_LIMIT)
@@ -167,16 +155,15 @@ def forget_expired_memories(memory: Any, scope: str | None = None) -> dict[str, 
 
 # Kept for callers that want the window without running the pass (metrics, a
 # future scheduled sweep that reports what it WOULD remove).
-def retention_settings() -> dict[str, float]:
+def retention_settings(memory: Any = None) -> dict[str, float]:
     return {
-        "superseded_retention_days": _float_env(
-            "KASAL_MEMORY_SUPERSEDED_RETENTION_DAYS",
-            _DEFAULT_SUPERSEDED_RETENTION_DAYS,
+        "superseded_retention_days": tuned(
+            memory, "superseded_retention_days", _DEFAULT_SUPERSEDED_RETENTION_DAYS
         ),
-        "episodic_ttl_days": _float_env(
-            "KASAL_MEMORY_EPISODIC_TTL_DAYS", _DEFAULT_EPISODIC_TTL_DAYS
+        "episodic_ttl_days": tuned(
+            memory, "episodic_ttl_days", _DEFAULT_EPISODIC_TTL_DAYS
         ),
-        "importance_floor": _float_env(
-            "KASAL_MEMORY_IMPORTANCE_FLOOR", _DEFAULT_IMPORTANCE_FLOOR
+        "importance_floor": tuned(
+            memory, "importance_floor", _DEFAULT_IMPORTANCE_FLOOR
         ),
     }

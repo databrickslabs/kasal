@@ -12,9 +12,11 @@ import pytest
 
 from src.schemas.memory_backend import MemoryBackendType
 from src.services.knowledge.embedding_session import (
+    _assume_knowledge_role,
     emit_knowledge_span,
     ensure_lakebase_doc_table,
     knowledge_embedding_session,
+    resolve_knowledge_role,
     resolve_lakebase_instance,
 )
 
@@ -290,3 +292,60 @@ class TestKnowledgeRoutingObservability:
             emit_knowledge_span(
                 "knowledge_search", {"group_id": "g1", "lakebase": True}
             )
+
+
+def _role_cfg(db_role):
+    return SimpleNamespace(
+        backend_type=MemoryBackendType.LAKEBASE,
+        lakebase_config=SimpleNamespace(instance_name="my-lb", db_role=db_role),
+    )
+
+
+class TestKnowledgeRole:
+    """The role comes from the Lakebase settings (was LAKEBASE_KNOWLEDGE_ROLE)."""
+
+    @pytest.mark.asyncio
+    async def test_unset_uses_databricks_superuser(self, monkeypatch):
+        monkeypatch.setenv("LAKEBASE_KNOWLEDGE_ROLE", "from_env")
+        with _patch_config(_role_cfg(None)):
+            assert await resolve_knowledge_role(MagicMock(), "g1") == (
+                "databricks_superuser"
+            )
+
+    @pytest.mark.asyncio
+    async def test_configured_role_and_empty_disables(self):
+        with _patch_config(_role_cfg("kasal_owner")):
+            assert await resolve_knowledge_role(MagicMock(), "g1") == "kasal_owner"
+        with _patch_config(_role_cfg("")):
+            assert await resolve_knowledge_role(MagicMock(), "g1") is None
+
+    @pytest.mark.asyncio
+    async def test_unreadable_config_uses_the_default(self):
+        svc = MagicMock()
+        svc.get_active_config = AsyncMock(side_effect=RuntimeError("db down"))
+        with patch(
+            "src.services.memory.config.config_service.MemoryConfigService",
+            return_value=svc,
+        ):
+            assert await resolve_knowledge_role(MagicMock(), "g1") == (
+                "databricks_superuser"
+            )
+
+    @pytest.mark.asyncio
+    async def test_set_role_only_for_a_safe_identifier(self):
+        session = MagicMock()
+        session.execute = AsyncMock()
+        await _assume_knowledge_role(session, None)
+        await _assume_knowledge_role(session, 'x"; DROP TABLE y; --')
+        session.execute.assert_not_awaited()
+
+        await _assume_knowledge_role(session, "kasal_owner")
+        statements = [str(c.args[0]) for c in session.execute.await_args_list]
+        assert 'SET ROLE "kasal_owner"' in statements
+
+    def test_schema_rejects_an_unsafe_role(self):
+        from src.schemas.memory_backend import LakebaseMemoryConfig
+
+        assert LakebaseMemoryConfig(db_role="").db_role == ""
+        with pytest.raises(ValueError):
+            LakebaseMemoryConfig(db_role="bad role")

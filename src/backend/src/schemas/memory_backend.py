@@ -9,7 +9,7 @@ schemas no longer split memory into short-term / long-term / entity tiers.
 import re as _re
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -84,9 +84,7 @@ class MemoryTuningConfig(BaseModel):
         description=(
             "Blended-score floor below which a recall returns nothing. Left "
             "unset, the floor follows the embedder in use: 0.75 with the "
-            "Databricks embedder, 0.62 with the local Ollama fallback "
-            "(KASAL_MEMORY_RECALL_MIN_SCORE overrides that default per "
-            "deployment)."
+            "Databricks embedder, 0.62 with the local Ollama fallback."
         ),
     )
 
@@ -143,6 +141,56 @@ class MemoryTuningConfig(BaseModel):
             "Character count below which deep recall skips LLM query analysis "
             "(default 200). Set 0 to always run LLM analysis."
         ),
+    )
+
+    # Hygiene and retention (were KASAL_MEMORY_* environment variables).
+    recall_max_drop: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Recall drops candidates scoring more than this below the best one "
+            "(default 0.12). Keeps 'least unrelated filler' out of the context."
+        ),
+    )
+    write_screening: Optional[Literal["quarantine", "annotate", "off"]] = Field(
+        None,
+        description=(
+            "Prompt-injection screening before a memory is saved: quarantine "
+            "(default) drops high-severity content, annotate only records it, "
+            "off screens nothing."
+        ),
+    )
+    forgetting_enabled: Optional[bool] = Field(
+        None,
+        description=(
+            "Delete memories past their retention rule (default off: it is the "
+            "only pass that removes something a user might still want)."
+        ),
+    )
+    superseded_retention_days: Optional[float] = Field(
+        None,
+        ge=1,
+        description="Days a replaced fact is kept as history (default 90).",
+    )
+    episodic_ttl_days: Optional[float] = Field(
+        None,
+        ge=1,
+        description="Days an unimportant run/chat memory is kept (default 180).",
+    )
+    importance_floor: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Memories at or above this importance are never forgotten (default 0.4).",
+    )
+    supersession_enabled: Optional[bool] = Field(
+        None,
+        description="Retire facts a newer one contradicts (default on).",
+    )
+    llm_consolidation_enabled: Optional[bool] = Field(
+        None,
+        description="Merge clusters of near-duplicate memories between runs (default on).",
     )
 
     # LLM override for memory analysis.
@@ -267,6 +315,25 @@ class LakebaseMemoryConfig(BaseModel):
         False,
         description="Whether the memory table has been initialized on the Lakebase instance",
     )
+
+    #: Role knowledge sessions assume (SET ROLE); it replaced the
+    #: LAKEBASE_KNOWLEDGE_ROLE env var. None = databricks_superuser, "" = none.
+    db_role: Optional[str] = Field(
+        default=None,
+        description=(
+            "Role assumed for knowledge search on this instance "
+            "(default databricks_superuser; empty string assumes none)."
+        ),
+    )
+
+    @field_validator("db_role")
+    @classmethod
+    def _validate_db_role(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return v
+        if not _SAFE_TABLE_NAME.match(v):
+            raise ValueError(f"Invalid db_role identifier: {v!r}")
+        return v
 
     model_config = {
         "json_schema_extra": {

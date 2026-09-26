@@ -192,10 +192,11 @@ class TestRecallRelevanceCliff:
         )
         assert "no similarity stamp" in block
 
-    def test_cliff_width_is_env_tunable(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MAX_DROP", "0.5")
+    def test_cliff_width_is_teamspace_tunable(self):
         records = [self._rec("top match", 0.90), self._rec("filler A", 0.60)]
-        block = build_memory_preamble(_memory_with(records), "the query")
+        memory = _memory_with(records)
+        memory.recall_max_drop = 0.5  # Memory Tuning recall_max_drop
+        block = build_memory_preamble(memory, "the query")
         assert "filler A" in block  # 0.6 >= 0.9 - 0.5
 
 
@@ -295,14 +296,10 @@ class TestRecallDefaultFloor:
         storage.search.return_value = []
         return Memory(storage=storage), storage
 
-    def test_default_floor_is_calibrated_and_env_tunable(self, monkeypatch):
+    def test_default_floor_is_calibrated(self):
         memory, storage = self._memory()
         memory.recall("q")
         assert storage.search.call_args.kwargs["score_threshold"] == 0.75
-
-        monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.6")
-        memory.recall("q")
-        assert storage.search.call_args.kwargs["score_threshold"] == 0.6
 
     def test_explicit_zero_disables_the_floor(self):
         memory, storage = self._memory()

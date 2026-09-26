@@ -9,15 +9,18 @@ export interface AdvancedNumberFieldProps {
   max: number;
   saving: boolean;
   onSave: (value: number | null) => void;
+  /** Accept decimals (default: whole numbers only). */
+  decimal?: boolean;
 }
 
-/** A bounded whole number with Save and "Reset to default" (sends null). */
-function AdvancedNumberField({ label, helper, value, min, max, saving, onSave }: AdvancedNumberFieldProps) {
+/** A bounded number with Save and "Reset to default" (sends null). */
+function AdvancedNumberField({ label, helper, value, min, max, saving, onSave, decimal = false }: AdvancedNumberFieldProps) {
   const [draft, setDraft] = useState(value === undefined ? '' : String(value));
   useEffect(() => setDraft(value === undefined ? '' : String(value)), [value]);
 
   const parsed = Number(draft);
-  const valid = draft.trim() !== '' && Number.isInteger(parsed) && parsed >= min && parsed <= max;
+  const valid =
+    draft.trim() !== '' && (decimal ? Number.isFinite(parsed) : Number.isInteger(parsed)) && parsed >= min && parsed <= max;
   const changed = valid && parsed !== value;
 
   return (
@@ -29,8 +32,8 @@ function AdvancedNumberField({ label, helper, value, min, max, saving, onSave }:
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         error={draft.trim() !== '' && !valid}
-        helperText={draft.trim() !== '' && !valid ? `Whole number from ${min} to ${max}.` : helper}
-        inputProps={{ min, max, 'aria-label': label }}
+        helperText={draft.trim() !== '' && !valid ? `${decimal ? 'Number' : 'Whole number'} from ${min} to ${max}.` : helper}
+        inputProps={{ min, max, step: decimal ? 'any' : 1, 'aria-label': label }}
         sx={{ width: 260 }}
       />
       <Button size="small" variant="outlined" disabled={!changed || saving} onClick={() => onSave(parsed)} sx={{ mt: 0.5 }}>

@@ -101,8 +101,6 @@ The database variables are:
 | `KASAL_REQUIRE_LAKEBASE_RESOURCE` | Unset (`src/app.yaml`: `true`) | When `true` inside Databricks Apps, startup fails unless the `lakebase` resource is attached | `src/backend/src/db/session.py` |
 | `KASAL_LAKEBASE_RESOURCE` | Empty | Lakebase endpoint name, injected from the app resource by `src/app.yaml` | `src/backend/src/core/databricks_app.py` |
 | `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPORT` | Unset; `PGPORT` `5432` | Injected by Databricks Apps for an attached Lakebase resource. All of host, database and user are required once any is set | `src/backend/src/core/databricks_app.py` |
-| `LAKEBASE_INSTANCE_NAME` | `kasal-lakebase` | Lakebase instance used when Lakebase is configured through the UI rather than as an app resource | `src/backend/src/db/lakebase_session.py`, `src/backend/src/db/database_router.py` |
-| `LAKEBASE_KNOWLEDGE_ROLE` | `databricks_superuser` | Role used for the knowledge-embedding session on Lakebase | `src/backend/src/services/knowledge/embedding_session.py` |
 
 For more information, see the [Lakebase deployment guide](./lakebase-deployment.md).
 
@@ -214,6 +212,8 @@ A system administrator sets these under **Configuration → Engines → System s
 | Jev API URL | Unset | Base URL of the Jev decisions API; it must use `https://`. Unset means Jev is not configured: decisions stay off for every workspace, the runtime reads no credentials, and an admin cannot enable Jev (the save is refused with `400`). When set, each workspace still opts in and stores its key as `JEV_API_KEY` under **Configuration → API Keys** | `JEV_API_BASE` |
 | Advanced → Agent time limit | `900` | Wall-clock seconds for one agent call when the agent sets none; `0` turns it off. An explicit `max_execution_time` on the agent wins | `KASAL_AGENT_MAX_EXECUTION_TIME` |
 | Advanced → Run budget (Deep research) | Built-in profile | Tool rounds and seconds per agent call, seconds per run, and guardrail retries for deep-mode runs. Each field must be at least 1, and **Reset to default** restores the built-in value. Only modes a run applies are shown; today that is deep | `KASAL_BUDGET_<MODE>_<FIELD>` |
+| Advanced → Memory maintenance | Sweep on, every `6` h, `5` workspaces per tick; `900` s between passes on one scope | The background memory sweep across all workspaces, and the throttle on the pass after a run | `KASAL_MEMORY_SWEEP`, `KASAL_MEMORY_SWEEP_INTERVAL_HOURS`, `KASAL_MEMORY_SWEEP_BATCH`, `KASAL_MEMORY_MAINTENANCE_INTERVAL` |
+| Advanced → Knowledge search | Relevance `0.35`, `8` searches per agent turn (`0` = unlimited), uploads kept `7` days (`0` = forever) | Filters and limits knowledge search, and how long uploaded documents live | `KNOWLEDGE_MIN_SCORE`, `KNOWLEDGE_MAX_SEARCHES`, `KNOWLEDGE_TTL_DAYS` |
 
 The settings are `engine_config` rows for engine `kasal`, read and written through `GET` and `PATCH /api/v1/engine-config/settings`. Synchronous readers use an in-process snapshot (`src/backend/src/services/settings/engine_settings.py`): the server loads it at startup, each crew or flow subprocess loads it when it starts, and a save updates it at once.
 
@@ -221,22 +221,11 @@ Two former variables are now constants in `src/backend/src/services/llm/manager.
 
 ## Memory, knowledge and recipes
 
-Memory maintenance runs in the background; these control it and the knowledge store:
+Memory hygiene and retention are per-teamspace settings under **Configuration → Memory → Memory Tuning**; the memory sweep, its throttle and the knowledge limits are server-wide settings under **Configuration → Engines → System settings → Advanced**. [MEMORY.md](./MEMORY.md#settings) lists them with the variables they replaced. What remains here is host and transport configuration:
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `KASAL_MEMORY_DIR` | `~/.kasal/memory` | Root of the local memory stores, one per workspace | `src/backend/src/utils/memory_paths.py` |
-| `KASAL_MEMORY_MAINTENANCE_INTERVAL` | `900` | Seconds between maintenance passes | `src/backend/src/services/memory/maintenance/passes.py` |
-| `KASAL_MEMORY_LLM_CONSOLIDATION` | `true` | LLM consolidation of near-duplicate memories | `src/backend/src/services/memory/maintenance/passes.py` |
-| `KASAL_MEMORY_SUPERSESSION` | `true` | Marks memories superseded by newer facts | `src/backend/src/services/memory/maintenance/supersession.py` |
-| `KASAL_MEMORY_SWEEP` | `true` | Periodic sweep pass | `src/backend/src/services/memory/maintenance/sweep.py` |
-| `KASAL_MEMORY_SWEEP_INTERVAL_HOURS`, `KASAL_MEMORY_SWEEP_BATCH` | `6`, `5` | Sweep cadence and batch size | `src/backend/src/services/memory/maintenance/sweep.py` |
-| `KASAL_MEMORY_FORGETTING` | `false` | Deletes old low-value memories | `src/backend/src/services/memory/maintenance/forgetting.py` |
-| `KASAL_MEMORY_SUPERSEDED_RETENTION_DAYS`, `KASAL_MEMORY_EPISODIC_TTL_DAYS`, `KASAL_MEMORY_IMPORTANCE_FLOOR` | `90`, `180`, `0.4` | Forgetting thresholds | `src/backend/src/services/memory/maintenance/forgetting.py` |
-| `KASAL_MEMORY_WRITE_SCREENING` | `quarantine` | Prompt-injection screening of memory writes: `quarantine` drops high-severity content, `annotate` only records findings, `off` disables it | `src/backend/src/services/memory/run/write_hygiene.py` |
-| `KASAL_MEMORY_RECALL_MIN_SCORE` | Per-embedder calibrated floor | Deployment-wide minimum recall score; a workspace's own tuning value wins | `src/backend/src/services/memory/engine/memory.py` |
-| `KASAL_MEMORY_RECALL_MAX_DROP` | `0.12` | Drops recall candidates scoring this far below the best one | `src/backend/src/services/memory/run/recall.py` |
-| `KNOWLEDGE_TTL_DAYS` | `7` | Lifetime of uploaded knowledge embeddings | `src/backend/src/services/knowledge/embedding_service.py` |
 | `EMBEDDING_BATCH_SIZE` | `32` | Texts per embedding request | `src/backend/src/services/llm/embeddings.py` |
 | `EMBEDDING_TIMEOUT_SECONDS`, `EMBEDDING_HTTP_TIMEOUT_SECONDS` | `60`, `30` or `60` depending on the path | Embedding timeouts | `src/backend/src/services/llm/embeddings.py` |
 | `WORKFLOW_RECIPE_MIN_SIMILARITY` | `0.75` | Similarity needed to offer a past crew as a recipe | `src/backend/src/services/recipes/recipes.py` |

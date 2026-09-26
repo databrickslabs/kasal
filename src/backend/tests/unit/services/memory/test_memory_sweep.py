@@ -147,7 +147,11 @@ class TestSweepTick:
 
     @pytest.mark.asyncio
     async def test_disabled_sweep_does_nothing(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMORY_SWEEP", "false")
+        from src.services.settings import engine_settings
+
+        monkeypatch.setitem(
+            engine_settings._snapshot, engine_settings.MEMORY_SWEEP_ENABLED, "false"
+        )
         assert sweep_enabled() is False
         assert await sweep_memory_maintenance() == {
             "scopes": 0,
@@ -156,8 +160,7 @@ class TestSweepTick:
         }
 
     @pytest.mark.asyncio
-    async def test_enabled_by_default(self, monkeypatch):
-        monkeypatch.delenv("KASAL_MEMORY_SWEEP", raising=False)
+    async def test_enabled_by_default(self):
         assert sweep_enabled() is True
 
     @pytest.mark.asyncio
