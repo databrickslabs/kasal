@@ -73,7 +73,7 @@ class KasalProduct:
     SKILL = "skill"
 
 
-def get_user_agent(product: str = None) -> str:
+def get_user_agent(product: Optional[str] = None) -> str:
     """
     Generate User-Agent string for Databricks REST API calls.
 
@@ -94,7 +94,7 @@ def get_user_agent(product: str = None) -> str:
     return f"{KASAL_BASE}/{VERSION}"
 
 
-def get_user_agent_header(product: str = None) -> dict:
+def get_user_agent_header(product: Optional[str] = None) -> dict:
     """
     Get User-Agent as a header dictionary for REST API calls.
 
@@ -236,7 +236,8 @@ def _extract_token(token_value: str) -> str:
             import json
 
             token_data = json.loads(token_value)
-            return token_data.get("access_token", token_value)
+            token: str = token_data.get("access_token", token_value)
+            return token
         except (json.JSONDecodeError, TypeError):
             pass
 

@@ -193,7 +193,7 @@ class HITLApproval(Base):
         primaryjoin="HITLApproval.execution_id == ExecutionHistory.job_id",
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(HITLApproval, self).__init__(**kwargs)
 
         # Set defaults
@@ -232,12 +232,16 @@ class HITLApproval(Base):
     @property
     def timeout_action(self) -> str:
         """Get the configured timeout action."""
-        return self.gate_config.get("timeout_action", HITLTimeoutAction.AUTO_REJECT)
+        action: str = self.gate_config.get(
+            "timeout_action", HITLTimeoutAction.AUTO_REJECT
+        )
+        return action
 
     @property
     def message(self) -> str:
         """Get the display message for approvers."""
-        return self.gate_config.get("message", "Approval required to proceed")
+        message: str = self.gate_config.get("message", "Approval required to proceed")
+        return message
 
     @property
     def allowed_approvers(self) -> list:
@@ -309,7 +313,7 @@ class HITLWebhook(Base):
         nullable=True,
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(HITLWebhook, self).__init__(**kwargs)
         if self.events is None:
             self.events = ["gate_reached"]

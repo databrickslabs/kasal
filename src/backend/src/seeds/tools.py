@@ -4,6 +4,7 @@ Seed the tools table with default tool data.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
@@ -229,7 +230,7 @@ tools_data = [
 ]
 
 
-def get_tool_configs():
+def get_tool_configs() -> Dict[str, Dict[str, Any]]:
     """Return the default configurations for each tool."""
     return {
         "6": {
@@ -647,14 +648,14 @@ def get_tool_configs():
     }
 
 
-async def seed_async():
+async def seed_async() -> None:
     """Seed tools into the database using async session."""
     logger.info("Seeding tools table (async)...")
 
     # Get existing tool IDs to avoid duplicates
     async with async_session_factory() as session:
-        result = await session.execute(select(Tool.id))
-        existing_ids = set(result.scalars().all())
+        id_result = await session.execute(select(Tool.id))
+        existing_ids = set(id_result.scalars().all())
 
     tools_added = 0
     tools_updated = 0
@@ -744,7 +745,7 @@ async def seed_async():
     )
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding tools."""
     logger.info("Tools seed function called")
     try:

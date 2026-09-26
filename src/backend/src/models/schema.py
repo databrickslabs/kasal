@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict
 
 from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,7 +43,7 @@ class Schema(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """
         Initialize a Schema object with enhanced JSON handling.
 
@@ -86,7 +86,7 @@ class Schema(Base):
             self.tools = []
         # example_data can be None, so we don't set a default
 
-    def as_dict(self):
+    def as_dict(self) -> Dict[str, Any]:
         """
         Convert the schema object to a dictionary with proper JSON handling.
 

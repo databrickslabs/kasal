@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,17 +17,17 @@ class Vector(UserDefinedType):
     #: on the similarity queries, which run per prompt.
     cache_ok = True
 
-    def __init__(self, dim=1024):
+    def __init__(self, dim: int = 1024) -> None:
         self.dim = dim
 
-    def get_col_spec(self, **kw):
+    def get_col_spec(self, **kw: Any) -> str:
         # Use vector type for PostgreSQL, TEXT for SQLite
         if hasattr(self, "dialect") and "sqlite" in str(self.dialect).lower():
             return "TEXT"
         return f"vector({self.dim})"
 
-    def bind_processor(self, dialect):
-        def process(value):
+    def bind_processor(self, dialect: Any) -> Callable[[Any], Any]:
+        def process(value: Any) -> Any:
             if value is None:
                 return None
 
@@ -46,8 +46,8 @@ class Vector(UserDefinedType):
 
         return process
 
-    def result_processor(self, dialect, coltype):
-        def process(value):
+    def result_processor(self, dialect: Any, coltype: Any) -> Callable[[Any], Any]:
+        def process(value: Any) -> Any:
             if value is None:
                 return None
 
@@ -86,7 +86,7 @@ class Vector(UserDefinedType):
         (``_find_similar_sqlite``) and never reaches these.
         """
 
-        def _distance(self, other, operator: str):
+        def _distance(self, other: Any, operator: str) -> Any:
             from sqlalchemy import Float, cast, literal
 
             # Two things are load-bearing here:
@@ -101,13 +101,13 @@ class Vector(UserDefinedType):
             vector_param = cast(literal(other, self.expr.type), self.expr.type)
             return self.op(operator, return_type=Float)(vector_param)
 
-        def cosine_distance(self, other):
+        def cosine_distance(self, other: Any) -> Any:
             return self._distance(other, "<=>")
 
-        def l2_distance(self, other):
+        def l2_distance(self, other: Any) -> Any:
             return self._distance(other, "<->")
 
-        def max_inner_product(self, other):
+        def max_inner_product(self, other: Any) -> Any:
             return self._distance(other, "<#>")
 
 
@@ -140,7 +140,7 @@ class DocumentationEmbedding(Base):
         nullable=True,
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"DocumentationEmbedding(id={self.id}, source={self.source}, title={self.title})"
 
 
@@ -183,5 +183,5 @@ class KnowledgeEmbedding(Base):
         nullable=True,
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"KnowledgeEmbedding(id={self.id}, group_id={self.group_id}, file_path={self.file_path})"

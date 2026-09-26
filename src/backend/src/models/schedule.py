@@ -85,7 +85,7 @@ class Schedule(Base):
         Index("ix_schedule_flow_id", "flow_id"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(Schedule, self).__init__(**kwargs)
         if self.inputs is None:
             self.inputs = {}

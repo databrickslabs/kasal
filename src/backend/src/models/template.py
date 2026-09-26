@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -42,7 +42,7 @@ class PromptTemplate(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )  # Use timezone-naive UTC time
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(PromptTemplate, self).__init__(**kwargs)
         if self.is_active is None:
             self.is_active = True

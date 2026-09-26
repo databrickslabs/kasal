@@ -44,7 +44,7 @@ class Flow(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(Flow, self).__init__(**kwargs)
         if self.id is None:
             self.id = uuid.uuid4()

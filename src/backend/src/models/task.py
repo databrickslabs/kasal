@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -72,7 +72,7 @@ class Task(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         # Store the explicitly provided kwargs before calling super
         explicit_kwargs = set(kwargs.keys())
 

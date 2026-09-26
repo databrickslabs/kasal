@@ -9,7 +9,7 @@ from src.db.base import Base
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -126,7 +126,7 @@ class Agent(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(Agent, self).__init__(**kwargs)
         if self.tools is None:
             self.tools = []

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -110,7 +110,6 @@ class GroupUser(Base):
     """
 
     __tablename__ = "group_users"
-    __table_args__ = {"extend_existing": True}
 
     id: Mapped[str] = mapped_column(
         String(100), primary_key=True, default=generate_uuid
@@ -159,7 +158,7 @@ class GroupUser(Base):
     # Unique constraint: one user can only have one membership per group
     __table_args__ = ({"mysql_engine": "InnoDB", "extend_existing": True},)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<GroupUser(group_id='{self.group_id}', user_id='{self.user_id}', role='{self.role}')>"
 
 

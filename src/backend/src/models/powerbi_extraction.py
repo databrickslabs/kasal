@@ -100,7 +100,7 @@ class PowerBIExtraction(Base):
         Index("ix_powerbi_extraction_workspace_dataset", "workspace_id", "dataset_id"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<PowerBIExtraction(id={self.id}, "
             f"workspace={self.workspace_id}, dataset={self.dataset_id}, "

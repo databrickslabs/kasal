@@ -38,7 +38,7 @@ class Tool(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(Tool, self).__init__(**kwargs)
         if self.config is None:
             self.config = {}

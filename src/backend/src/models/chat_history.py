@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -59,7 +59,7 @@ class ChatHistory(Base):
         Index("idx_chat_history_group_timestamp", "group_id", "timestamp"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize ChatHistory with default values."""
         super(ChatHistory, self).__init__(**kwargs)
         if self.id is None:

@@ -14,6 +14,7 @@ task as needed; this seed set targets decision/outcome workloads.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict, List
 
 from sqlalchemy import select
 
@@ -37,7 +38,7 @@ OBSOLETE_SCHEMA_NAMES = [
 ]
 
 # Whole-crew workload outcomes with routing-friendly fields.
-SAMPLE_SCHEMAS = [
+SAMPLE_SCHEMAS: List[Dict[str, Any]] = [
     # ── Action / automation outcomes ────────────────────────────────────────────
     {
         "name": "OperationResult",
@@ -287,7 +288,7 @@ SAMPLE_SCHEMAS = [
 ]
 
 
-async def seed_async():
+async def seed_async() -> None:
     """Seed schemas into the database (upsert by name) and prune obsolete ones."""
     logger.info("Seeding schemas...")
 
@@ -345,7 +346,7 @@ async def seed_async():
     )
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding schemas."""
     try:
         await seed_async()

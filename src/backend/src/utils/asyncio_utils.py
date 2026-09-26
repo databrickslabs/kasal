@@ -213,7 +213,7 @@ def create_and_run_loop(coroutine: Any) -> Any:
             logger.error(f"Error cleaning up event loop: {str(e)}")
 
 
-def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:
+def run_in_thread_with_loop(func: Callable, *args: Any, **kwargs: Any) -> Any:
     """Run a function in a thread with a properly managed event loop."""
     # Track whether we created a new event loop
     created_loop = False

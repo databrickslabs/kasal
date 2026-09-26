@@ -60,7 +60,7 @@ class EventSubscription(Base):
         Index("ix_eventsubscription_group_id", "group_id"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if self.enabled is None:
             self.enabled = True
@@ -98,7 +98,7 @@ class EmitRule(Base):
         Index("ix_emitrule_group_id", "group_id"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if self.enabled is None:
             self.enabled = True

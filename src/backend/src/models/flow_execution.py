@@ -44,7 +44,7 @@ class FlowExecution(Base):
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(FlowExecution, self).__init__(**kwargs)
         if self.config is None:
             self.config = {}

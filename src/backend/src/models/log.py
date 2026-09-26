@@ -41,7 +41,7 @@ class LLMLog(Base):
         String(255), nullable=True
     )  # Creator email for audit
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(LLMLog, self).__init__(**kwargs)
         if self.created_at is None:
             self.created_at = datetime.utcnow()

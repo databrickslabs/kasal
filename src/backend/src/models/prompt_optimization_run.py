@@ -24,7 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 

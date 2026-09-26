@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.db.base import Base
 
 
-def generate_billing_id():
+def generate_billing_id() -> str:
     """Generate a unique billing record ID."""
     return str(uuid4())
 

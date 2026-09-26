@@ -8,7 +8,7 @@ carries per-type enable flags — memory is either on (``is_active=True``) or of
 
 import enum
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, String
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -76,7 +76,7 @@ class MemoryBackend(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary."""
         return {
             "id": self.id,
@@ -94,7 +94,7 @@ class MemoryBackend(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
-    def to_config_dict(self):
+    def to_config_dict(self) -> Dict[str, Any]:
         """Convert to runtime configuration for the memory factory."""
         config = {
             "backend_type": self.backend_type.value if self.backend_type else "default",

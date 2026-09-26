@@ -5,7 +5,7 @@ This module defines models for storing execution log data.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -45,7 +45,7 @@ class ExecutionLog(Base):
         Index("idx_execution_logs_group_exec_id", "group_id", "execution_id"),
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(ExecutionLog, self).__init__(**kwargs)
         if self.timestamp is None:
             self.timestamp = datetime.utcnow()

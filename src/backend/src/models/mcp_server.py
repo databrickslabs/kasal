@@ -56,7 +56,7 @@ class MCPServer(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(MCPServer, self).__init__(**kwargs)
         if self.additional_config is None:
             self.additional_config = {}

@@ -4,6 +4,7 @@ Seed the prompt_templates table with default template definitions.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict, List
 
 from sqlalchemy import select
 
@@ -508,7 +509,7 @@ shapes that fit it.
 never replace one with a data URL or a path.
 """
 
-DEFAULT_TEMPLATES = [
+DEFAULT_TEMPLATES: List[Dict[str, Any]] = [
     {
         "name": "generate_agent",
         "description": "Template for generating an AI agent based on user description",
@@ -596,14 +597,16 @@ DEFAULT_TEMPLATES = [
 ]
 
 
-async def seed_async():
+async def seed_async() -> None:
     """Seed prompt templates into the database using async session."""
     logger.info("Seeding prompt_templates table (async)...")
 
     # Get existing template names to avoid duplicates (outside the loop to reduce DB queries)
     async with async_session_factory() as session:
-        result = await session.execute(select(PromptTemplate.name))
-        existing_names = {row[0] for row in result.scalars().all()}
+        name_result = await session.execute(select(PromptTemplate.name))
+        # scalars() already yields the name strings; indexing row[0] took each
+        # name's FIRST CHARACTER, so no real name ever matched.
+        existing_names = set(name_result.scalars().all())
 
     # Insert new templates
     templates_added = 0
@@ -696,7 +699,7 @@ async def seed_async():
     )
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding prompt templates."""
     logger.info("Starting prompt templates seeding process...")
     try:

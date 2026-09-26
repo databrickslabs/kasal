@@ -6,7 +6,7 @@ These serve as templates that users can import and customize.
 """
 
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -511,7 +511,7 @@ MQUERY_DYNAMIC_CREW = {
 # ============================================================================
 # This crew has all parameters configured directly in the UI.
 
-MQUERY_STATIC_CREW_AGENT = {
+MQUERY_STATIC_CREW_AGENT: Dict[str, Any] = {
     "id": "example-mquery-static-agent-001",
     "name": "M-Query Converter",
     "role": "M-Query Extraction and Conversion Specialist",
@@ -673,7 +673,7 @@ MQUERY_STATIC_CREW = {
 # All Example Crews
 # ============================================================================
 
-EXAMPLE_CREWS = [
+EXAMPLE_CREWS: List[Dict[str, Dict[str, Any]]] = [
     # Measure Conversion Pipeline Crews
     {
         "crew": DYNAMIC_CREW,

@@ -26,5 +26,5 @@ class LakebaseConfig(Base):
         DateTime(timezone=True), onupdate=func.now()
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<DatabaseConfig(key='{self.key}')>"

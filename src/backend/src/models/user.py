@@ -12,7 +12,7 @@ from src.db.base import Base
 from src.models.enums import UserRole, UserStatus
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 

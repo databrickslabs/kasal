@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.db.base import Base
 
 
-def generate_job_id():
+def generate_job_id() -> str:
     """
     Generate a unique job ID.
 
@@ -245,7 +245,7 @@ class ExecutionHistory(Base):
         primaryjoin="ExecutionHistory.job_id == HITLApproval.execution_id",
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(ExecutionHistory, self).__init__(**kwargs)
         if self.job_id is None:
             self.job_id = generate_job_id()
@@ -312,7 +312,7 @@ class TaskStatus(Base):
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="task_statuses")
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(TaskStatus, self).__init__(**kwargs)
         if self.started_at is None:
             self.started_at = datetime.utcnow()
@@ -370,7 +370,7 @@ class ErrorTrace(Base):
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="error_traces")
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(ErrorTrace, self).__init__(**kwargs)
         if self.error_metadata is None:
             self.error_metadata = {}

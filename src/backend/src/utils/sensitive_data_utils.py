@@ -170,7 +170,7 @@ def encrypt_sensitive_fields(
     if not data or not isinstance(data, dict):
         return data
 
-    result = {}
+    result: Dict[str, Any] = {}
 
     for key, value in data.items():
         if isinstance(value, dict) and recursive:
@@ -209,7 +209,7 @@ def decrypt_sensitive_fields(
     if not data or not isinstance(data, dict):
         return data
 
-    result = {}
+    result: Dict[str, Any] = {}
 
     for key, value in data.items():
         if isinstance(value, dict) and recursive:
@@ -254,7 +254,7 @@ def mask_sensitive_fields(
     if not data or not isinstance(data, dict):
         return data
 
-    result = {}
+    result: Dict[str, Any] = {}
 
     for key, value in data.items():
         if isinstance(value, dict) and recursive:

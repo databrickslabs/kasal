@@ -112,7 +112,7 @@ class ConversionHistory(Base):
         Index("ix_conversion_history_formats", "source_format", "target_format"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<ConversionHistory(id={self.id}, "
             f"{self.source_format}->{self.target_format}, "
@@ -202,7 +202,7 @@ class ConversionJob(Base):
         Index("ix_conversion_jobs_status", "status"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<ConversionJob(id={self.id}, "
             f"name={self.name}, "
@@ -280,7 +280,7 @@ class SavedConverterConfiguration(Base):
         Index("ix_saved_configs_public", "is_public", "is_template"),
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<SavedConverterConfiguration(id={self.id}, "
             f"name={self.name}, "
