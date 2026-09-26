@@ -1,6 +1,8 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import (
     ForbiddenError,
     KasalError,
@@ -32,7 +34,7 @@ def _is_personal_workspace(group_context: Optional[GroupContext]) -> bool:
 
     if not group_context:
         return False
-    primary = getattr(group_context, "primary_group_id", None)
+    primary: Optional[str] = getattr(group_context, "primary_group_id", None)
     email = getattr(group_context, "group_email", None)
     if not primary or not email:
         return False
@@ -64,7 +66,7 @@ class ToolService:
     Uses dependency injection for better testability and modularity.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """
         Initialize service with session.
         Uses dependency injection pattern for clean architecture.
@@ -181,12 +183,12 @@ class ToolService:
         # mutation clears the cache.
         from src.core.cache import tool_list_cache
 
-        cache_group = (
-            group_context.primary_group_id
-            if group_context and getattr(group_context, "primary_group_id", None)
-            else "__none__"
+        cache_group: str = (
+            getattr(group_context, "primary_group_id", None) if group_context else None
+        ) or "__none__"
+        cached: Optional[ToolListResponse] = await tool_list_cache.get(
+            cache_group, "enabled_tools"
         )
-        cached = await tool_list_cache.get(cache_group, "enabled_tools")
         if cached is not None:
             return cached.model_copy(deep=True)
 
@@ -247,7 +249,8 @@ class ToolService:
         mapping service filters on ``group_id`` to separate global tools from a
         workspace's own. It used to build ``ToolRepository`` for that.
         """
-        return await self.repository.list()
+        records: List[Any] = await self.repository.list()
+        return records
 
     async def get_tool_record(self, tool_id: int) -> Optional[Any]:
         """One tool ROW (ORM) by id, or None. See :meth:`list_tool_records`."""
@@ -584,6 +587,8 @@ class ToolService:
                 raise ForbiddenError(detail="Group context required to toggle tools")
 
             primary_group_id = group_context.primary_group_id
+            if primary_group_id is None:  # cannot happen: group_ids is non-empty
+                raise ForbiddenError(detail="Group context required to toggle tools")
 
             # If it's a default tool (group_id = null), create a group-specific copy
             if tool.group_id is None:
@@ -613,6 +618,8 @@ class ToolService:
                     toggled_tool = await self.repository.create(tool_data)
                     await self._invalidate_enabled_tools_cache()
 
+                if toggled_tool is None:  # the copy vanished between read and toggle
+                    raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
                 status_text = "enabled" if toggled_tool.enabled else "disabled"
                 return ToggleResponse(
                     message=f"Tool {status_text} successfully for your group",
@@ -633,6 +640,8 @@ class ToolService:
             toggled_tool = await self.repository.toggle_enabled(tool_id)
             await self._invalidate_enabled_tools_cache()
 
+            if toggled_tool is None:  # deleted between the lookup and the toggle
+                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
             status_text = "enabled" if toggled_tool.enabled else "disabled"
             return ToggleResponse(
                 message=f"Tool {status_text} successfully", enabled=toggled_tool.enabled

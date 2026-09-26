@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
-from typing import Any, TypedDict
+from typing import IO, Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -85,34 +85,39 @@ def _assert_public_target(url: str) -> str:
             or address.is_reserved
         ):
             raise ValueError(f"Refusing to fetch private/internal address for {host!r}")
-    return infos[0][4][0]
+    return str(infos[0][4][0])
 
 
 class _PinnedHTTPConnection(http.client.HTTPConnection):
     """Connects to the address that was validated, not to a fresh lookup."""
 
-    def __init__(self, *args, pinned: str, **kwargs):
+    def __init__(self, *args: Any, pinned: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._pinned = pinned
 
-    def connect(self):
+    def connect(self) -> None:
         self.sock = socket.create_connection(
-            (self._pinned, self.port), self.timeout, self.source_address
+            (self._pinned, self.port),
+            self.timeout,
+            self.source_address,  # type: ignore[attr-defined]  # set by HTTPConnection.__init__, missing from typeshed
         )
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """As above; TLS still verifies the certificate against the HOST NAME."""
 
-    def __init__(self, *args, pinned: str, **kwargs):
+    def __init__(self, *args: Any, pinned: str, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._pinned = pinned
 
-    def connect(self):
+    def connect(self) -> None:
         sock = socket.create_connection(
-            (self._pinned, self.port), self.timeout, self.source_address
+            (self._pinned, self.port),
+            self.timeout,
+            self.source_address,  # type: ignore[attr-defined]  # set by HTTPConnection.__init__, missing from typeshed
         )
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        ctx = self._context  # type: ignore[attr-defined]  # private HTTPSConnection attr
+        self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
 
 
 class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
@@ -120,22 +125,29 @@ class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
     hop, which the redirect handler re-issues through here — is validated and
     then connected to exactly the address that passed."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         urllib.request.HTTPHandler.__init__(self)
         urllib.request.HTTPSHandler.__init__(self, context=ssl.create_default_context())
 
-    def http_open(self, req):
-        pinned = _assert_public_target(req.full_url)
-        return self.do_open(_PinnedHTTPConnection, req, pinned=pinned)
-
-    def https_open(self, req):
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
         pinned = _assert_public_target(req.full_url)
         return self.do_open(
-            _PinnedHTTPSConnection, req, pinned=pinned, context=self._context
+            _PinnedHTTPConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
+            req,
+            pinned=pinned,
+        )
+
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        pinned = _assert_public_target(req.full_url)
+        return self.do_open(
+            _PinnedHTTPSConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
+            req,
+            pinned=pinned,
+            context=self._context,  # type: ignore[attr-defined]  # private HTTPSHandler attr
         )
 
 
-def _origin(url: str) -> tuple:
+def _origin(url: str) -> tuple[str, str]:
     parts = urllib.parse.urlsplit(url)
     return (parts.scheme, parts.netloc)
 
@@ -146,7 +158,15 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
 
     max_redirections = _MAX_REDIRECTS
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         target = urllib.parse.urljoin(req.full_url, newurl)
         try:
             _assert_public_target(target)
@@ -161,7 +181,7 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
         return new
 
 
-def _open(request: urllib.request.Request, timeout: int):
+def _open(request: urllib.request.Request, timeout: int) -> http.client.HTTPResponse:
     """Open through the pinned, redirect-checking opener. The one seam tests stub.
 
     Built by hand rather than with ``build_opener``: the default set includes
@@ -175,7 +195,8 @@ def _open(request: urllib.request.Request, timeout: int):
         urllib.request.HTTPErrorProcessor(),
     ):
         opener.add_handler(handler)
-    return opener.open(request, timeout=timeout)
+    response: http.client.HTTPResponse = opener.open(request, timeout=timeout)
+    return response
 
 
 def _safe_fetch(

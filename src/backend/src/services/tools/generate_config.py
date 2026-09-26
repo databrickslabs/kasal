@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import json
+from typing import Any
 
 if __package__:
     from src.services.powerbi import pipeline_config as _config
@@ -35,18 +36,20 @@ else:
 
     _path = Path(__file__).resolve().parents[1] / "powerbi" / "pipeline_config.py"
     _spec = importlib.util.spec_from_file_location("kasal_pipeline_config_cli", _path)
+    if _spec is None or _spec.loader is None:
+        raise ImportError(f"Cannot load pipeline_config from {_path}")
     _config = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_config)
 
 __all__ = _config.__all__
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     """Keep legacy helper imports working while new callers use powerbi."""
     return getattr(_config, name)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Generate pipeline_config.json from Power BI APIs. "

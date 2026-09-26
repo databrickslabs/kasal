@@ -13,7 +13,7 @@ Date: 2025
 """
 
 import logging
-from typing import Any, Dict, List, Type
+from typing import Any, Coroutine, Dict, List, Type
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -309,7 +309,7 @@ class PowerBIRelationshipsTool(BaseTool):
             ]
             selection_fields = ["auth_method"]  # User selection - must be deterministic
 
-            merged_kwargs = {}
+            merged_kwargs: Dict[str, Any] = {}
             for key in set(
                 list(self._default_config.keys()) + list(filtered_kwargs.keys())
             ):
@@ -406,7 +406,7 @@ class PowerBIRelationshipsTool(BaseTool):
             logger.error(f"PowerBIRelationshipsTool error: {str(e)}", exc_info=True)
             return f"Error: {str(e)}"
 
-    def _run_sync(self, coro):
+    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
 
@@ -711,7 +711,7 @@ class PowerBIRelationshipsTool(BaseTool):
         output.append(f"- **Inactive**: {inactive_count}")
 
         # Cardinality breakdown with conversion notes
-        cardinality_counts = {}
+        cardinality_counts: Dict[str, int] = {}
         for rel in relationships:
             from_card = "*" if rel["from_cardinality"] == "Many" else "1"
             to_card = "*" if rel["to_cardinality"] == "Many" else "1"

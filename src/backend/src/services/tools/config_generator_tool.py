@@ -80,7 +80,7 @@ class ConfigGeneratorTool(BaseTool):
         self._default_config = default_config
 
     def _run(self, **kwargs: Any) -> str:
-        def _get(key):
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val
@@ -132,7 +132,7 @@ class ConfigGeneratorTool(BaseTool):
                         f"[ConfigGenerator] Using group_id={group_id} for cache lookup"
                     )
 
-                    async def _load_cache():
+                    async def _load_cache() -> Optional[dict[str, Any]]:
                         async with ToolSessionProvider.cache_service() as svc:
                             return await svc.get_cached_metadata(
                                 group_id=group_id,
@@ -228,8 +228,8 @@ class ConfigGeneratorTool(BaseTool):
                     logger.warning(f"Failed to parse scan data: {e}")
 
             # === Propose config keys ===
-            config = {}
-            confidence = {}
+            config: dict[str, Any] = {}
+            confidence: dict[str, str] = {}
 
             # 1. join_key_map
             join_key_map = {}
@@ -267,7 +267,7 @@ class ConfigGeneratorTool(BaseTool):
             confidence["enrichment_joins"] = "high"
 
             # 3. column_overrides
-            column_overrides = {}
+            column_overrides: dict[str, dict[str, str]] = {}
             for m in measures:
                 dax = m.get("dax_expression", "")
                 if not dax or dax == "Not available":
@@ -276,8 +276,8 @@ class ConfigGeneratorTool(BaseTool):
                 if not table or table not in mquery_tables:
                     continue
                 # Extract Table[Col] references
-                for ref_match in re.finditer(r"(\w+)\[(\w+)\]", dax):
-                    dax_col = ref_match.group(2)
+                for col_ref in re.finditer(r"(\w+)\[(\w+)\]", dax):
+                    dax_col = col_ref.group(2)
                     snake = to_snake_case(dax_col)
                     # Check if this column exists in MQuery
                     tinfo = mquery_tables[table]
@@ -310,7 +310,7 @@ class ConfigGeneratorTool(BaseTool):
             confidence["mapping_only_tables"] = "high"
 
             # 5. switch_decompositions (skeleton)
-            switch_decomps = {}
+            switch_decomps: dict[str, list] = {}
             for m in measures:
                 dax = m.get("dax_expression", "")
                 if "SELECTEDVALUE" in dax.upper() and "SWITCH" in dax.upper():
@@ -356,7 +356,7 @@ class ConfigGeneratorTool(BaseTool):
             confidence["parameter_defaults"] = "high" if param_defaults else "low"
 
             # 7. measure_resolutions (from first-pass pipeline)
-            measure_resolutions = {}
+            measure_resolutions: dict[str, str] = {}
             pipeline = None
             try:
                 pipeline = MetricViewPipeline(
@@ -388,7 +388,7 @@ class ConfigGeneratorTool(BaseTool):
             confidence["measure_resolutions"] = "medium"
 
             # 8. filter_sets
-            filter_sets = {}
+            filter_sets: dict[str, list] = {}
             for table_decomps in switch_decomps.values():
                 for d in table_decomps:
                     comment = d.get("comment", "")
@@ -409,7 +409,7 @@ class ConfigGeneratorTool(BaseTool):
                 from collections import Counter
 
                 if pipeline is not None:
-                    categories = Counter()
+                    categories: Counter[str] = Counter()
                     for spec in pipeline.all_specs.values():
                         for m in spec.untranslatable:
                             reason = m.skip_reason.split("(")[0].strip()

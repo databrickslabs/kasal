@@ -17,11 +17,14 @@ import json
 import logging
 import re
 import urllib.parse
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +99,9 @@ class DatabricksDashboardCreatorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
         """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
         ``host_override`` (the ``databricks_host`` input) may only re-spell the
@@ -144,7 +149,10 @@ class DatabricksDashboardCreatorTool(BaseTool):
         from src.services.tools.async_bridge import run_sync_with_context
         from src.utils.asyncio_utils import create_and_run_loop
 
-        return run_sync_with_context(lambda: create_and_run_loop(_query()), timeout=15)
+        found: str = run_sync_with_context(
+            lambda: create_and_run_loop(_query()), timeout=15
+        )
+        return found
 
     def _parse_visual_mappings(self, raw: Any) -> tuple[list, str, str, str]:
         """Parse visual_mappings_json — may be a string with the full tool 94 output.
@@ -246,7 +254,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
                 if measures
                 else (fields[-1]["name"] if fields else "value")
             )
-            spec = {
+            spec: dict[str, Any] = {
                 "version": version,
                 "widgetType": widget_type,
                 "encodings": {
@@ -353,7 +361,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
             pages_map.setdefault(page, []).append(m)
 
         # Build datasets: one per unique UCMV view
-        datasets = []
+        datasets: list[dict[str, Any]] = []
         view_to_dataset: dict[str, str] = {}
         view_to_sql: dict[str, Optional[str]] = {}
         for m in visual_mappings:
@@ -532,7 +540,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _run(self, **kwargs: Any) -> str:
-        def _get(key):
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val

@@ -6,12 +6,16 @@ import logging
 import os
 import sys
 import traceback
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import aiohttp
 
 from src.services.tools.mcp_follow import follow_spec_from_config, follow_tool_call
 from src.utils.databricks_auth import get_databricks_auth_headers
+
+if TYPE_CHECKING:
+    from src.services.tools.base import BaseTool
+    from src.services.tools.mcp_adapter import MCPAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +43,7 @@ def format_mcp_exception(exc: BaseException) -> str:
         msgs.append(f"{type(e).__name__}: {text}" if text else type(e).__name__)
 
     _walk(exc)
-    seen = set()
-    unique = [m for m in msgs if not (m in seen or seen.add(m))]
+    unique = list(dict.fromkeys(msgs))  # order-preserving de-duplication
     return "; ".join(unique) or f"{type(exc).__name__}: {exc}"
 
 
@@ -56,7 +59,7 @@ def _format_resource_link(uri: str, name: Optional[str], mime: Optional[str]) ->
     return f"![{label}]({uri})" if _is_image_mime(mime) else f"[{label}]({uri})"
 
 
-def _format_content_block(block) -> Optional[str]:
+def _format_content_block(block: Any) -> Optional[str]:
     """Render a single MCP content block as agent-friendly text.
 
     Duck-typed (the exact classes vary by MCP SDK version):
@@ -100,7 +103,7 @@ def _format_content_block(block) -> Optional[str]:
     return None
 
 
-def _format_mcp_tool_result(result) -> str:
+def _format_mcp_tool_result(result: Any) -> str:
     """Normalize an MCP CallToolResult into agent-friendly text.
 
     Prefers structured JSON output, surfaces tool errors (``isError``), preserves
@@ -140,13 +143,13 @@ def _format_mcp_tool_result(result) -> str:
 
 
 # Dictionary to track all active MCP adapters
-_active_mcp_adapters = {}
+_active_mcp_adapters: Dict[str, Any] = {}
 
 # Connection pool for MCP adapters to reuse connections
-_mcp_connection_pool = {}
+_mcp_connection_pool: Dict[str, "MCPAdapter"] = {}
 
 
-def _adapter_is_healthy(adapter) -> bool:
+def _adapter_is_healthy(adapter: Any) -> bool:
     """Whether a pooled adapter can be reused for tool discovery.
 
     ``MCPAdapter.initialize()`` sets ``_initialized = True`` even when
@@ -163,7 +166,9 @@ def _adapter_is_healthy(adapter) -> bool:
     )
 
 
-async def get_or_create_mcp_adapter(server_params, adapter_id=None):
+async def get_or_create_mcp_adapter(
+    server_params: Dict[str, Any], adapter_id: Optional[str] = None
+) -> "MCPAdapter":
     """
     Get an existing MCP adapter from the connection pool or create a new one.
     This improves performance by reusing existing connections when possible.
@@ -247,7 +252,7 @@ async def get_or_create_mcp_adapter(server_params, adapter_id=None):
     return adapter
 
 
-def register_mcp_adapter(adapter_id, adapter):
+def register_mcp_adapter(adapter_id: str, adapter: Any) -> None:
     """
     Register an MCP adapter for tracking
 
@@ -260,7 +265,7 @@ def register_mcp_adapter(adapter_id, adapter):
     logger.info(f"Registered MCP adapter with ID {adapter_id}")
 
 
-async def stop_all_adapters():
+async def stop_all_adapters() -> None:
     """
     Stop all active MCP adapters that have been registered (async version)
 
@@ -286,11 +291,11 @@ async def stop_all_adapters():
     adapter_ids = list(_active_mcp_adapters.keys())
 
     for adapter_id in adapter_ids:
-        adapter = _active_mcp_adapters.get(adapter_id)
-        if adapter:
+        tracked = _active_mcp_adapters.get(adapter_id)
+        if tracked:
             try:
                 logger.info(f"Stopping MCP adapter: {adapter_id}")
-                await stop_mcp_adapter(adapter)
+                await stop_mcp_adapter(tracked)
                 # Remove from tracked adapters
                 del _active_mcp_adapters[adapter_id]
             except Exception as e:
@@ -306,7 +311,7 @@ async def stop_all_adapters():
     logger.info("All MCP adapters stopped")
 
 
-async def get_databricks_workspace_host():
+async def get_databricks_workspace_host() -> Tuple[Optional[str], Optional[str]]:
     """
     Get the Databricks workspace host from the configuration.
 
@@ -336,7 +341,12 @@ async def get_databricks_workspace_host():
         return None, str(e)
 
 
-async def call_databricks_api(endpoint, method="GET", data=None, params=None):
+async def call_databricks_api(
+    endpoint: str,
+    method: str = "GET",
+    data: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+) -> Any:
     """
     Call the Databricks API directly as a fallback when MCP fails (async version)
 
@@ -396,7 +406,7 @@ async def call_databricks_api(endpoint, method="GET", data=None, params=None):
         return {"error": f"API error: {str(e)}"}
 
 
-def create_kasal_tool_from_mcp(mcp_tool_dict):
+def create_kasal_tool_from_mcp(mcp_tool_dict: Dict[str, Any]) -> "BaseTool":
     """
     Create a CrewAI tool from an MCP tool dictionary.
 
@@ -470,20 +480,20 @@ def create_kasal_tool_from_mcp(mcp_tool_dict):
         name: str = mcp_tool_wrapper.name
         description: str = mcp_tool_wrapper.description
         args_schema: Type[BaseModel] = DynamicToolInput
-        _mcp_tool_wrapper: MCPTool = None
+        _mcp_tool_wrapper: MCPTool  # set in __init__ (pydantic private attr)
 
-        def __init__(self):
-            super().__init__()
+        def __init__(self) -> None:
+            super().__init__()  # type: ignore[call-arg]  # pydantic plugin: defaults live on the subclass
             self._mcp_tool_wrapper = mcp_tool_wrapper
 
-        def _run(self, **kwargs) -> str:
+        def _run(self, **kwargs: Any) -> str:
             """Execute the MCP tool."""
             try:
                 # Remove dummy field if it exists
                 kwargs.pop("dummy", None)
 
                 # Helper function to run async code in a fresh event loop
-                def run_async_in_new_loop(params):
+                def run_async_in_new_loop(params: Dict[str, Any]) -> Any:
                     """Run the async function in a completely isolated event loop."""
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
@@ -549,7 +559,7 @@ def create_kasal_tool_from_mcp(mcp_tool_dict):
     return MCPCrewAITool()
 
 
-def wrap_mcp_tool(tool):
+def wrap_mcp_tool(tool: Any) -> Any:
     """
     Wrap an MCP tool to handle event loop issues by using process isolation
 
@@ -569,7 +579,7 @@ def wrap_mcp_tool(tool):
     if tool_name in ["get_space", "start_conversation", "create_message"]:
         logger.debug(f"Using Databricks Genie specific wrapper for {tool_name}")
 
-        def wrapped_run(*args, **kwargs):
+        def wrapped_run(*args: Any, **kwargs: Any) -> Any:
             try:
                 # First try executing directly
                 logger.debug(f"Attempting direct execution of {tool_name}")
@@ -667,7 +677,7 @@ def wrap_mcp_tool(tool):
     # For other tools, use the standard approach
     logger.debug(f"Using standard wrapper for {tool_name}")
 
-    def wrapped_run(*args, **kwargs):
+    def wrapped_run_default(*args: Any, **kwargs: Any) -> Any:
         try:
             # First try executing directly - this might work for some cases
             logger.debug(f"Attempting direct execution of {tool_name}")
@@ -714,13 +724,13 @@ def wrap_mcp_tool(tool):
             return f"Error executing tool: {str(e)}"
 
     # Replace the original _run method with our wrapped version
-    tool._run = wrapped_run
+    tool._run = wrapped_run_default
     logger.info(f"Successfully wrapped MCP tool: {tool_name}")
 
     return tool
 
 
-async def run_in_separate_process(tool_name, kwargs):
+async def run_in_separate_process(tool_name: str, kwargs: Dict[str, Any]) -> Any:
     """
     Run an MCP tool in a separate process to avoid event loop issues (async version)
 
@@ -818,7 +828,7 @@ asyncio.run(run_tool())
                 pass
 
 
-async def stop_mcp_adapter(adapter):
+async def stop_mcp_adapter(adapter: Any) -> None:
     """
     Safely stop an MCP adapter (async version)
 

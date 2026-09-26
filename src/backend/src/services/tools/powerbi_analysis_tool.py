@@ -16,7 +16,7 @@ import json
 import logging
 import re
 from datetime import date
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Coroutine, Dict, List, Optional, Type, TypeVar
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -33,21 +33,19 @@ from src.services.tools.powerbi_analysis_utils import (
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 # Ensure logger level is set to DEBUG to capture all DAX Generation logs
 logger.setLevel(logging.DEBUG)
 
 
-def _run_async_in_sync_context(coro):
-    """Run ``coro`` from this tool's synchronous code.
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
 
-    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
-    copies the caller's ContextVars (group, OBO token, execution id) into the
-    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
-    coroutine's own exceptions through. The copy that lived here caught
-    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
-    the coroutine was mistaken for "no running loop" and the spent coroutine
-    was run a second time, and it waited forever.
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
     from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
@@ -298,7 +296,7 @@ class PowerBIAnalysisTool(
             # - For user_question: prefer kwargs (the actual question from the agent)
             # - For auth/connection params: prefer default config (pre-configured values)
             # - For options: prefer kwargs if provided, else default config
-            merged_config = {}
+            merged_config: Dict[str, Any] = {}
 
             # Connection and auth parameters - default config takes precedence
             config_params = [
@@ -599,7 +597,7 @@ class PowerBIAnalysisTool(
         report_id = config.get("report_id")
 
         # Initialize model_context (will be populated from cache or fresh fetch)
-        model_context = {
+        model_context: Dict[str, Any] = {
             "measures": [],
             "relationships": [],
             "tables": [],
@@ -758,7 +756,7 @@ class PowerBIAnalysisTool(
 
         # Step 3: Generate DAX using LLM with retry mechanism
         max_retries = config.get("max_dax_retries", 5)
-        dax_attempts = []
+        dax_attempts: List[Dict[str, Any]] = []
 
         if results["model_context"]["measures"] or results["model_context"]["tables"]:
             for attempt in range(max_retries):

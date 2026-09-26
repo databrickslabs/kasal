@@ -11,11 +11,14 @@ Output JSON feeds directly into the Databricks Dashboard Creator (tool 95).
 import json
 import logging
 import re
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +133,9 @@ class PBIVisualUCMVMapperTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
         """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
         ``host_override`` (the ``databricks_host`` input) may only re-spell the
@@ -278,7 +283,7 @@ class PBIVisualUCMVMapperTool(BaseTool):
         from src.services.tools.async_bridge import run_async_with_context
         from src.utils.telemetry import KasalProduct, get_user_agent_header
 
-        async def _run():
+        async def _run() -> str:
             return await LLMManager.completion(
                 messages=[
                     {
@@ -480,7 +485,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
     # ──────────────────────────────────────────────────────────────────────────
 
     def _run(self, **kwargs: Any) -> str:
-        def _get(key):
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val

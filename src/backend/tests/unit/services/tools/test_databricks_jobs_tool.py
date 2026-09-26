@@ -466,6 +466,22 @@ class TestDatabricksJobsTool(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer test-api-key")
         self.assertEqual(headers["Content-Type"], "application/json")
 
+    @patch(
+        "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+        new_callable=AsyncMock,
+    )
+    def test_get_auth_headers_without_group_never_looks_up_keys(self, mock_get_api_key):
+        """No group_id: refused before any (unscoped) API-key lookup."""
+        tool = DatabricksJobsTool()
+        tool._token = None
+        tool._group_id = None
+        loop = asyncio.new_event_loop()
+        with self.assertRaises(Exception) as cm:
+            loop.run_until_complete(tool._get_auth_headers())
+        loop.close()
+        self.assertIn("group_id is required", str(cm.exception))
+        mock_get_api_key.assert_not_called()
+
     @patch("src.services.tools.databricks_jobs_tool.aiohttp.ClientSession")
     @patch(
         "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
@@ -475,6 +491,7 @@ class TestDatabricksJobsTool(unittest.TestCase):
         """Test _get_auth_headers with no token raises error"""
         tool = DatabricksJobsTool()
         tool._token = None
+        tool._group_id = "group-1"  # a lookup needs a group; None is refused earlier
 
         # Mock the API Keys Service to return None (no API key found)
         mock_get_api_key.return_value = None

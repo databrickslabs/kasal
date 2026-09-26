@@ -38,7 +38,7 @@ from pydantic_core import CoreSchema, core_schema
 
 SerializableCallable = Callable[..., Any]
 
-_TOOL_TYPE_REGISTRY: dict[str, type] = {}
+_TOOL_TYPE_REGISTRY: dict[str, type["BaseTool"]] = {}
 
 # Sentinel set after BaseTool is defined so __get_pydantic_core_schema__ can
 # distinguish the base class from subclasses.
@@ -157,7 +157,8 @@ class ToolUsageLimitExceededError(Exception):
 def _format_tool_output_for_agent(tool: Any, raw_result: Any) -> str:
     original_tool = getattr(tool, "_original_tool", None)
     if original_tool is not None:
-        return original_tool.format_output_for_agent(raw_result)
+        formatted: str = original_tool.format_output_for_agent(raw_result)
+        return formatted
 
     result_schema = getattr(tool, "result_schema", None)
     if not (isinstance(result_schema, type) and issubclass(result_schema, BaseModel)):

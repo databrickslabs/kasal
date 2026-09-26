@@ -14,7 +14,7 @@ never be able to reach another tenant's content.
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,7 @@ from .async_bridge import run_async_with_context
 from .base import BaseTool
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 def _group_ids(explicit: Optional[List[str]] = None) -> List[str]:
@@ -42,7 +43,7 @@ def _group_ids(explicit: Optional[List[str]] = None) -> List[str]:
     return list(explicit or [])
 
 
-async def _with_session(coro_factory):
+async def _with_session(coro_factory: Callable[[Any], Awaitable[_T]]) -> _T:
     from src.db.session import get_isolated_db_session
 
     async with get_isolated_db_session() as session:

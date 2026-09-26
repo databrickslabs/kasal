@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Optional, Type, Union
+from typing import Any, ClassVar, Coroutine, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import urlencode
 
 import aiohttp
@@ -17,6 +17,7 @@ from src.services.tools.databricks_tool_utils import assert_tool_host
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 # Global execution tracking dictionaries (outside of class to avoid Pydantic field interpretation)
@@ -47,16 +48,30 @@ VALID_ACTIONS = [
 DISABLED_ACTIONS = ("create", "submit")
 
 
-def _run_async_in_sync_context(coro):
-    """Run ``coro`` from this tool's synchronous code.
+async def _lookup_databricks_token(group_id: Optional[str]) -> Optional[str]:
+    """The workspace's Databricks key from ApiKeysService, under any of its names.
 
-    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
-    copies the caller's ContextVars (group, OBO token, execution id) into the
-    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
-    coroutine's own exceptions through. The copy that lived here caught
-    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
-    the coroutine was mistaken for "no running loop" and the spent coroutine
-    was run a second time, and it waited forever.
+    SECURITY: scoped to ``group_id``; None raises the same ValueError that
+    ``get_provider_api_key`` raises for it (multi-tenant isolation).
+    """
+    from src.services.settings.api_keys import ApiKeysService
+
+    if group_id is None:
+        raise ValueError("SECURITY: group_id is required for API keys")
+    for provider in ("databricks", "DATABRICKS_API_KEY", "DATABRICKS_TOKEN"):
+        token = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+        if token:
+            return token
+    return None
+
+
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
+
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
     from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
@@ -180,7 +195,7 @@ class DatabricksJobsTool(BaseTool):
         return hashlib.sha256(json_str.encode()).hexdigest()[:16]
 
     @classmethod
-    def clear_execution_tracking(cls):
+    def clear_execution_tracking(cls) -> None:
         """Clear all execution tracking (mainly for testing)."""
         global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
         _GLOBAL_RUN_EXECUTIONS.clear()
@@ -211,10 +226,10 @@ class DatabricksJobsTool(BaseTool):
     max_usage_count: Optional[int] = None  # Set to None to bypass CrewAI's limit check
     current_usage_count: int = 0
 
-    _host: str = PrivateAttr(default=None)
-    _token: str = PrivateAttr(default=None)
+    _host: Optional[str] = PrivateAttr(default=None)
+    _token: Optional[str] = PrivateAttr(default=None)
     _host_checked: bool = PrivateAttr(default=False)
-    _action_limits: Dict[str, Optional[int]] = PrivateAttr(default=None)
+    _action_limits: Dict[str, Optional[int]] = PrivateAttr(default_factory=dict)
     _action_usage_counts: Dict[str, int] = PrivateAttr(default_factory=dict)
     _group_id: Optional[str] = PrivateAttr(
         default=None
@@ -338,25 +353,9 @@ class DatabricksJobsTool(BaseTool):
                         "Attempting to get Databricks API key from API Keys Service..."
                     )
                     try:
-                        from src.services.settings.api_keys import ApiKeysService
-
-                        async def get_databricks_token():
-                            # SECURITY: Try both possible key names with group_id for multi-tenant isolation
-                            token = (
-                                await ApiKeysService.get_provider_api_key(
-                                    "databricks", group_id=self._group_id
-                                )
-                                or await ApiKeysService.get_provider_api_key(
-                                    "DATABRICKS_API_KEY", group_id=self._group_id
-                                )
-                                or await ApiKeysService.get_provider_api_key(
-                                    "DATABRICKS_TOKEN", group_id=self._group_id
-                                )
-                            )
-                            return token
-
-                        # Use _run_async_in_sync_context which safely handles both async and sync contexts
-                        self._token = _run_async_in_sync_context(get_databricks_token())
+                        self._token = _run_async_in_sync_context(
+                            _lookup_databricks_token(self._group_id)
+                        )
                         if self._token:
                             logger.info(
                                 "✅ Successfully retrieved Databricks API key from API Keys Service"
@@ -376,26 +375,8 @@ class DatabricksJobsTool(BaseTool):
                 if not self._token:
                     logger.info("Trying API Keys Service without enhanced auth...")
                     try:
-                        from src.services.settings.api_keys import ApiKeysService
-
-                        async def get_databricks_token_fallback():
-                            # SECURITY: Try with group_id for multi-tenant isolation
-                            token = (
-                                await ApiKeysService.get_provider_api_key(
-                                    "databricks", group_id=self._group_id
-                                )
-                                or await ApiKeysService.get_provider_api_key(
-                                    "DATABRICKS_API_KEY", group_id=self._group_id
-                                )
-                                or await ApiKeysService.get_provider_api_key(
-                                    "DATABRICKS_TOKEN", group_id=self._group_id
-                                )
-                            )
-                            return token
-
-                        # Use _run_async_in_sync_context which safely handles both async and sync contexts
                         self._token = _run_async_in_sync_context(
-                            get_databricks_token_fallback()
+                            _lookup_databricks_token(self._group_id)
                         )
                         if self._token:
                             logger.info(
@@ -500,20 +481,8 @@ class DatabricksJobsTool(BaseTool):
                 "🚨 No authentication token available, attempting runtime API key retrieval"
             )
             try:
-                from src.services.settings.api_keys import ApiKeysService
-
                 # SECURITY: Runtime retrieval with group_id for multi-tenant isolation
-                runtime_token = (
-                    await ApiKeysService.get_provider_api_key(
-                        "databricks", group_id=self._group_id
-                    )
-                    or await ApiKeysService.get_provider_api_key(
-                        "DATABRICKS_API_KEY", group_id=self._group_id
-                    )
-                    or await ApiKeysService.get_provider_api_key(
-                        "DATABRICKS_TOKEN", group_id=self._group_id
-                    )
-                )
+                runtime_token = await _lookup_databricks_token(self._group_id)
 
                 if runtime_token:
                     logger.info(
@@ -624,7 +593,7 @@ class DatabricksJobsTool(BaseTool):
 
                     if response.status == 200:
                         try:
-                            json_response = await response.json()
+                            json_response: Dict[str, Any] = await response.json()
                             logger.info(
                                 f"✅ Successfully parsed JSON response ({len(response_text)} chars)"
                             )
@@ -711,14 +680,14 @@ class DatabricksJobsTool(BaseTool):
 
             # Get and validate parameters
             action = kwargs.get("action", "").lower()
-            job_id = kwargs.get("job_id")
-            run_id = kwargs.get("run_id")
-            job_config = kwargs.get("job_config")
+            job_id: Any = kwargs.get("job_id")  # schema below validates per action
+            run_id: Any = kwargs.get("run_id")
+            job_config: Any = kwargs.get("job_config")
             limit = kwargs.get("limit", 20)
             name_filter = kwargs.get("name_filter")
             job_params = kwargs.get("job_params")
             run_name = kwargs.get("run_name")
-            tasks = kwargs.get("tasks")
+            tasks: Any = kwargs.get("tasks")
 
             # SECURITY (prompt-injection -> code execution): 'create' and 'submit'
             # accept arbitrary job_config / task definitions, i.e. arbitrary code
@@ -1000,7 +969,7 @@ class DatabricksJobsTool(BaseTool):
 
             # Paginate through results
             while remaining > 0:
-                params = {
+                params: Dict[str, Any] = {
                     "limit": min(remaining, 25),
                     "expand_tasks": True,
                 }
@@ -1089,7 +1058,7 @@ class DatabricksJobsTool(BaseTool):
             remaining = limit
 
             while remaining > 0:
-                params = {
+                params: Dict[str, Any] = {
                     "limit": min(remaining, 25),
                     "expand_tasks": True,
                 }
@@ -1171,7 +1140,7 @@ class DatabricksJobsTool(BaseTool):
                 "GET", "/api/2.2/jobs/get", params={"job_id": job_id}
             )
 
-            job_id = response.get("job_id")
+            resp_job_id = response.get("job_id")
             settings = response.get("settings", {})
             name = settings.get("name", "Unnamed Job")
             creator = response.get("creator_user_name", "Unknown")
@@ -1192,7 +1161,7 @@ class DatabricksJobsTool(BaseTool):
             output = "Job Details:\n"
             output += "=" * 80 + "\n"
             output += f"🔧 {name}\n"
-            output += f"   Job ID: {job_id}\n"
+            output += f"   Job ID: {resp_job_id}\n"
             output += f"   Creator: {creator}\n"
             output += f"   Created: {created_str}\n\n"
 
@@ -1259,7 +1228,7 @@ class DatabricksJobsTool(BaseTool):
                 runs_response = await self._make_api_call(
                     "GET",
                     "/api/2.2/jobs/runs/list",
-                    params={"job_id": job_id, "limit": 5},
+                    params={"job_id": resp_job_id, "limit": 5},
                 )
                 runs = runs_response.get("runs", [])
 
@@ -1299,7 +1268,7 @@ class DatabricksJobsTool(BaseTool):
                     output += "Recent Runs: No runs found\n"
             except Exception as runs_err:
                 logger.warning(
-                    f"[get_job] Failed to fetch recent runs for job {job_id}: {runs_err}"
+                    f"[get_job] Failed to fetch recent runs for job {resp_job_id}: {runs_err}"
                 )
                 output += "Recent Runs: Unable to fetch\n"
 
@@ -1520,7 +1489,7 @@ class DatabricksJobsTool(BaseTool):
 
         try:
             # Prepare the request payload
-            payload = {"job_id": job_id}
+            payload: Dict[str, Any] = {"job_id": job_id}
 
             # Add job parameters if provided
             if job_params:
