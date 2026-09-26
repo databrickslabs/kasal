@@ -1020,9 +1020,13 @@ UCMV_REEVAL_CREW = {
     "task_ids": [UCMV_REEVAL_TASK_ID],
     "nodes": [
         _agent_node(UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_AGENT, 68, 68),
-        _task_node(UCMV_REEVAL_TASK_ID, UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK, 368, 68),
+        _task_node(
+            UCMV_REEVAL_TASK_ID, UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK, 368, 68
+        ),
     ],
-    "edges": [_agent_to_task_edge("ucmv-reeval", UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK_ID)],
+    "edges": [
+        _agent_to_task_edge("ucmv-reeval", UCMV_REEVAL_AGENT_ID, UCMV_REEVAL_TASK_ID)
+    ],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

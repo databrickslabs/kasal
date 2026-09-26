@@ -1308,9 +1308,9 @@ class TestGetAuthContext:
                 result = (
                     await get_auth_context()
                 )  # no group_id param → searches all groups
-            assert result is not None, (
-                "PAT under a non-primary group should still resolve"
-            )
+            assert (
+                result is not None
+            ), "PAT under a non-primary group should still resolve"
             assert result.auth_method == "pat" and result.token == "pat_from_g3"
         finally:
             invalidate_pat_cache()

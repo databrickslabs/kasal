@@ -45,11 +45,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-from src.core.logger import LoggerManager
 from src.core.llm.transport.response_parsing import (
     merge_tool_call_metadata,
     tool_call_metadata,
 )
+from src.core.logger import LoggerManager
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
 
 logger = LoggerManager.get_instance().crew

@@ -93,15 +93,22 @@ def test_an_oversized_slide_is_rejected_by_the_schema(monkeypatch):
 
 def test_start_slide_edit_returns_run_id_and_forwards_capabilities(monkeypatch):
     from unittest.mock import AsyncMock
+
     from src.services.decks import agent_refine
 
     start = AsyncMock(return_value={"job_id": "agent-run"})
     monkeypatch.setattr(agent_refine, "start_slide_refinement", start)
     client = _client(monkeypatch, AsyncMock())
-    response = client.post("/decks/slides/refine/start", json={
-        "mode": "refine", "instruction": "Search online", "slide": "current",
-        "mcp_servers": ["browser"], "agentbricks_endpoints": ["researcher"],
-    })
+    response = client.post(
+        "/decks/slides/refine/start",
+        json={
+            "mode": "refine",
+            "instruction": "Search online",
+            "slide": "current",
+            "mcp_servers": ["browser"],
+            "agentbricks_endpoints": ["researcher"],
+        },
+    )
     assert response.status_code == 200
     assert response.json() == {"job_id": "agent-run"}
     body, session, context = start.call_args.args

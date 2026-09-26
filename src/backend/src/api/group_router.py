@@ -32,8 +32,8 @@ from src.schemas.group import (
     GroupUserUpdateRequest,
     GroupWithRoleResponse,
 )
-from src.services.groups.groups import GroupService
 from src.services.groups.duplication import GroupDuplicationService
+from src.services.groups.groups import GroupService
 from src.services.groups.users import UserService
 
 logger = LoggerManager.get_instance().api

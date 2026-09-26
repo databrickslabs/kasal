@@ -878,12 +878,14 @@ class ExecutionHistoryService:
         runs = await self.history_repo.find_recent_results_containing(key, limit=limit)
         out: list[dict] = []
         for run in runs:
-            out.append({
-                "job_id": getattr(run, "job_id", None),
-                "run_name": getattr(run, "run_name", None),
-                "created_at": getattr(run, "created_at", None),
-                "result": getattr(run, "result", None),
-            })
+            out.append(
+                {
+                    "job_id": getattr(run, "job_id", None),
+                    "run_name": getattr(run, "run_name", None),
+                    "created_at": getattr(run, "created_at", None),
+                    "result": getattr(run, "result", None),
+                }
+            )
         return out
 
     async def update_result(

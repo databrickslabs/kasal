@@ -6,7 +6,11 @@ from fastapi import APIRouter
 
 from src.core.exceptions import BadRequestError
 from src.dependencies.providers import GroupContextDep, SessionDep
-from src.schemas.deck import SlideRefineRequest, SlideRefineResponse, SlideRefineRunResponse
+from src.schemas.deck import (
+    SlideRefineRequest,
+    SlideRefineResponse,
+    SlideRefineRunResponse,
+)
 from src.services.decks.slide_refine import SlideRefineService
 
 router = APIRouter(

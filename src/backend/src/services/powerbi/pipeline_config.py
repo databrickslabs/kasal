@@ -248,8 +248,10 @@ def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
     expressions: dict[str, str] = {}
     for part in tmdl_parts or []:
         path = part.get("path", "")
-        if not (path == "definition/expressions.tmdl"
-                or path.startswith("definition/expressions/")):
+        if not (
+            path == "definition/expressions.tmdl"
+            or path.startswith("definition/expressions/")
+        ):
             continue
         try:
             content = base64.b64decode(part.get("payload", "")).decode("utf-8")
@@ -265,7 +267,9 @@ def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
             expr = m.group(3).strip()
             clean = []
             for line in expr.split("\n"):
-                if line.strip().startswith(("lineageTag:", "annotation", "queryGroup:")):
+                if line.strip().startswith(
+                    ("lineageTag:", "annotation", "queryGroup:")
+                ):
                     break
                 clean.append(line)
             expressions[name] = "\n".join(clean).strip()

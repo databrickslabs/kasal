@@ -1035,12 +1035,16 @@ def emit_yaml(
                 # Never an emitted measure; the reviewer completes + verifies it.
                 try:
                     from .recovery_recommender import draft_source_view
+
                     _draft = draft_source_view(
-                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key)
+                        dax, measure_name=m.measure_name, fact_table=spec.fact_table_key
+                    )
                 except Exception:
                     _draft = None
                 if _draft:
-                    lines.append("  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):")
+                    lines.append(
+                        "  #       SOURCE-VIEW DRAFT (build this, then a UCMV on it):"
+                    )
                     for _dl in _draft.split("\n"):
                         lines.append(f"  #         {_dl}")
 

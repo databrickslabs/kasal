@@ -10,11 +10,11 @@ from src.services.tools.metric_view_utils.data_classes import (
     TranslationResult,
 )
 from src.services.tools.metric_view_utils.physical_name_resolver import (
-    physical_table,
-    is_generated,
-    column_map,
-    resolve_physical_names,
     _norm,
+    column_map,
+    is_generated,
+    physical_table,
+    resolve_physical_names,
 )
 
 # ── M expressions (trimmed to the shape the resolver reads) ──

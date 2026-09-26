@@ -1052,7 +1052,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         return out
 
     @staticmethod
-    def _build_ucmv_mquery(admin_tables: dict, expressions: dict | None = None) -> list[dict]:
+    def _build_ucmv_mquery(
+        admin_tables: dict, expressions: dict | None = None
+    ) -> list[dict]:
         """Convert admin_tables into the UCMV `mquery_json` shape.
 
         Both `parse_admin_tables` and `parse_tmdl_to_admin_tables` populate
@@ -1304,7 +1306,9 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _enrich_source_tables_from_mquery(
-        config: dict, admin_tables: dict, expressions: dict | None = None,
+        config: dict,
+        admin_tables: dict,
+        expressions: dict | None = None,
     ) -> list[dict]:
         """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
         Power Query M source (deterministic — no warehouse, no LLM).
@@ -1334,9 +1338,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 continue  # human/derived value — never overwrite
             tinfo = admin_tables.get(dim) or {}
             mquery = tinfo.get("mquery_expression") or tinfo.get("mquery") or ""
-            resolved = (
-                extract_source_table(mquery, expressions) if mquery else None
-            )
+            resolved = extract_source_table(mquery, expressions) if mquery else None
             if resolved:
                 entry["source_table"] = resolved
                 log.append(

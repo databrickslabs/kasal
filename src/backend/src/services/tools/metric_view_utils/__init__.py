@@ -6,6 +6,11 @@ converting Power BI measures into Databricks UC Metric View YAML + deploy SQL.
 """
 
 from .artifact_cascade import cross_table_artifact_cascade
+from .capability_version import (
+    capability_fingerprint,
+    capability_summary,
+    has_capability_changed,
+)
 from .constants import (
     RE_AGG_COL,
     RE_CALC_COL,
@@ -25,9 +30,15 @@ from .data_classes import (
 )
 from .dax_llm_fallback import translate_batch_with_llm, translate_with_llm
 from .dax_translator import DaxTranslator
+from .function_ref_retriever import detect_functions, render_function_refs
+from .generated_table_emitter import emit_view_sql
 from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
 from .metadata_generator import MetadataGenerator
+from .mquery_let_evaluator import (
+    extract_parameter_defaults,
+    resolve_via_let_evaluation,
+)
 from .mquery_parser import MQueryParser
 from .pbi_parameter_resolver import PbiParameterResolver
 from .pipeline import MetricViewPipeline
@@ -39,17 +50,6 @@ from .sql_post_processor import SqlPostProcessor
 from .table_processor import process_table
 from .utils import load_mapping, spark_sql_compat, to_snake_case, yaml_scalar
 from .yaml_emitter import emit_yaml
-from .capability_version import (
-    capability_fingerprint,
-    capability_summary,
-    has_capability_changed,
-)
-from .function_ref_retriever import detect_functions, render_function_refs
-from .generated_table_emitter import emit_view_sql
-from .mquery_let_evaluator import (
-    extract_parameter_defaults,
-    resolve_via_let_evaluation,
-)
 
 __all__ = [
     "TranslationResult",

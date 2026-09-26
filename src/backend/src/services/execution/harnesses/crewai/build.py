@@ -6,10 +6,8 @@ from typing import Any, Dict
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
-from src.services.execution.harnesses.crewai.kwargs import (
-    _KNOWN_DROPS as _KNOWN_DROPS,
-    translate as translate,
-)
+from src.services.execution.harnesses.crewai.kwargs import _KNOWN_DROPS as _KNOWN_DROPS
+from src.services.execution.harnesses.crewai.kwargs import translate as translate
 
 logger = LoggerManager.get_instance().crew
 

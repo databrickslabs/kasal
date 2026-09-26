@@ -14,7 +14,6 @@ from src.services.execution.runtime import Agent, Task, TaskOutput
 from src.services.tools.base import BaseTool
 from tests.unit.helpers.harness_double import patch_build
 
-
 pytestmark = pytest.mark.usefixtures("kasal_harness")
 
 

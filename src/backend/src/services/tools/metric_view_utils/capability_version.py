@@ -20,6 +20,7 @@ fingerprint replaces it.
 Fail-open by design: any error yields the ``_UNKNOWN`` sentinel, which callers treat
 as "changed" (re-evaluate) rather than crashing a scheduled sweep.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -108,7 +109,9 @@ def capability_fingerprint() -> str:
 
         return digest.hexdigest()[:16]
     except Exception as exc:  # fail-open
-        logger.warning("[capability] fingerprint failed (%s) — treating as unknown", exc)
+        logger.warning(
+            "[capability] fingerprint failed (%s) — treating as unknown", exc
+        )
         return _UNKNOWN
 
 

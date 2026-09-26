@@ -308,9 +308,9 @@ class TestSetupStorageDirectory:
                 # Capture INSIDE the patch.dict block — it reverts os.environ
                 # (including CREWAI_STORAGE_DIR) when the context exits.
                 value = os.environ.get("CREWAI_STORAGE_DIR")
-                assert value is not None, (
-                    "setup_storage_directory did not set CREWAI_STORAGE_DIR"
-                )
+                assert (
+                    value is not None
+                ), "setup_storage_directory did not set CREWAI_STORAGE_DIR"
                 return value
 
     def test_sets_default_storage_dir(self):

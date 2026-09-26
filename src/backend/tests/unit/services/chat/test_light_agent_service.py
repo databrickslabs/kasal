@@ -834,6 +834,6 @@ class TestRunTraceWriterRelease:
         # The LAST finally in the method is the run's outermost teardown; the
         # trace writer must be closed there, not only on the success/except paths.
         tail = source[source.rindex("finally:") :]
-        assert "_trace_writer.close()" in tail, (
-            "run_light_agent_execution must release the trace writer in its finally"
-        )
+        assert (
+            "_trace_writer.close()" in tail
+        ), "run_light_agent_execution must release the trace writer in its finally"

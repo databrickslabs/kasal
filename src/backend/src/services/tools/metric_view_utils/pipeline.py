@@ -85,8 +85,11 @@ class MetricViewPipeline:
         self._mquery_expressions: dict[str, str] = dict(mquery_expressions or {})
         if not self._mquery_expressions and self.scan_data:
             for _k, _si in self.scan_data.items():
-                _m = (_si.get("raw_m_expression") or _si.get("m_expression")
-                      if isinstance(_si, dict) else getattr(_si, "raw_m_expression", None))
+                _m = (
+                    _si.get("raw_m_expression") or _si.get("m_expression")
+                    if isinstance(_si, dict)
+                    else getattr(_si, "raw_m_expression", None)
+                )
                 if _m:
                     self._mquery_expressions[_k] = _m
         # Fallback: config-gen ships the raw M per table in the config (no scan_data
@@ -362,25 +365,32 @@ class MetricViewPipeline:
         # (KASAL_FIXES Gaps 1-3). Fail-open — unresolved identifiers are left as-is.
         if self._mquery_expressions:
             from .physical_name_resolver import resolve_physical_names
+
             _res = resolve_physical_names(
-                self.all_specs, self.mquery_tables, self._mquery_expressions)
+                self.all_specs, self.mquery_tables, self._mquery_expressions
+            )
             if _res.get("generated_tables"):
                 self._limitations["generated_tables"] = _res["generated_tables"]
                 # Gap 3 materialization: emit CREATE VIEW SQL for generated calendars
                 # (List.Dates etc.) so the reviewer can create the missing source.
                 from .generated_table_emitter import emit_view_sql
+
                 _gen_sql = {}
                 for _t in _res["generated_tables"]:
                     _sql = emit_view_sql(
                         self._mquery_expressions.get(_t, ""),
-                        f"{{catalog}}.{{schema}}.{to_snake_case(_t)}")
+                        f"{{catalog}}.{{schema}}.{to_snake_case(_t)}",
+                    )
                     if _sql:
                         _gen_sql[_t] = _sql
                 if _gen_sql:
                     self._limitations["generated_view_sql"] = _gen_sql
                     logger.info(
                         "[MetricViewPipeline] emitted CREATE VIEW SQL for %d generated "
-                        "table(s): %s", len(_gen_sql), ", ".join(sorted(_gen_sql)))
+                        "table(s): %s",
+                        len(_gen_sql),
+                        ", ".join(sorted(_gen_sql)),
+                    )
 
         # Phase 2c: Rebuild YAML comment blocks to reflect updated skip_reasons
         for spec in self.all_specs.values():
@@ -841,6 +851,7 @@ class MetricViewPipeline:
         """Return pipeline results as a serializable dict."""
         from .recovery_recommender import draft_source_view as _draft_source_view
         from .recovery_recommender import recommend as _recovery_recipe
+
         # Tables reachable only via a skipped many:many/bidirectional relationship
         # — used to recommend an EXISTS-precompute recovery (Gap 4) instead of a
         # generic decline.
@@ -899,17 +910,23 @@ class MetricViewPipeline:
                         # shape matches; else the class-based default.
                         "proposal": build_proposal(
                             m.dax_class,
-                            getattr(m, "explanation", None) or _recovery_recipe(
-                                m.dax_expression, fact_table=spec.fact_table_key,
+                            getattr(m, "explanation", None)
+                            or _recovery_recipe(
+                                m.dax_expression,
+                                fact_table=spec.fact_table_key,
                                 m2n_tables=_m2n_tables,
-                                join_tables={j.get("name") for j in (spec.joins or [])}),
-                            m.skip_reason),
+                                join_tables={j.get("name") for j in (spec.joins or [])},
+                            ),
+                            m.skip_reason,
+                        ),
                         # Best-effort, UNVERIFIED source-view SQL scaffold for cross-fact /
                         # multi-stage measures — a proposal starting point, never an emitted
                         # measure. Clearly labeled DRAFT; complete + verify against PBI.
                         "source_view_sql_draft": _draft_source_view(
-                            m.dax_expression, measure_name=m.measure_name,
-                            fact_table=spec.fact_table_key),
+                            m.dax_expression,
+                            measure_name=m.measure_name,
+                            fact_table=spec.fact_table_key,
+                        ),
                     }
                     for m in spec.untranslatable
                 ],

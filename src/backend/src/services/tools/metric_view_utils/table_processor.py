@@ -684,7 +684,7 @@ def process_table(
             if _nm and _nm not in _seen_alias:
                 _seen_alias.add(_nm)
                 _join_aliases.append(_nm)
-        for alias in (getattr(table_info, "dim_source_tables", None) or {}):
+        for alias in getattr(table_info, "dim_source_tables", None) or {}:
             if alias not in _seen_alias:
                 _seen_alias.add(alias)
                 _join_aliases.append(alias)

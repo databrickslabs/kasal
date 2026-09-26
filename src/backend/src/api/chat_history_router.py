@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.schemas.builder_session import BuilderCanvasRequest, BuilderCanvasResponse
 from src.schemas.chat_history import (
     ChatHistoryListResponse,
     ChatHistoryResponse,
@@ -18,9 +19,8 @@ from src.schemas.chat_history import (
     SetRunningJobRequest,
     UpdateMessageRequest,
 )
-from src.services.chat.history import ChatHistoryService
-from src.schemas.builder_session import BuilderCanvasRequest, BuilderCanvasResponse
 from src.services.chat.builder_sessions import BuilderSessionService
+from src.services.chat.history import ChatHistoryService
 
 router = APIRouter(
     prefix="/chat-history",

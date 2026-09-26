@@ -13,7 +13,6 @@ import pytest
 from src.services.agent_builder.task_adapter import create_task
 from src.services.execution.runtime import Agent
 
-
 pytestmark = pytest.mark.usefixtures("kasal_harness")
 
 

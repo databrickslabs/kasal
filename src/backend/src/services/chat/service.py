@@ -1270,7 +1270,8 @@ class LightAgentService:
                         "Check its execution trace for details."
                     )
                 result_payload = {
-                    "section": section, "model": getattr(config, "model", None)
+                    "section": section,
+                    "model": getattr(config, "model", None),
                 }
             try:
                 # Diagram/slides/presentation are rendered from the agent's own

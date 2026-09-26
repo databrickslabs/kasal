@@ -31,7 +31,6 @@ from src.models.template import PromptTemplate
 from src.models.tool import Tool
 from src.models.ui_config import UIConfig
 
-
 CONFIGURATION_MODELS = (
     ApiKey,
     DatabricksConfig,

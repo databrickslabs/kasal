@@ -132,11 +132,14 @@ def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
     """
     logger.info(
         "[physical_name_resolver] invoked: %d spec(s), %d M expression(s)",
-        len(specs or {}), len(mquery_expressions or {}))
+        len(specs or {}),
+        len(mquery_expressions or {}),
+    )
     if not mquery_expressions:
         logger.info(
             "[physical_name_resolver] skipped: no Power Query M available "
-            "(pass scan_data_json / mquery_expressions) — identifiers left as model names")
+            "(pass scan_data_json / mquery_expressions) — identifiers left as model names"
+        )
         return {"generated_tables": [], "tables_resolved": 0, "columns_rewritten": 0}
 
     # Per friendly table: physical name, column map, generated flag — indexed by
@@ -236,5 +239,7 @@ def resolve_physical_names(specs, mquery_tables, mquery_expressions) -> dict:
         logger.info(
             "[physical_name_resolver] no-op: %d M expression(s) but nothing matched "
             "%d spec(s) (check that fact/dim keys align with the M table names)",
-            len(mquery_expressions), len(specs or {}))
+            len(mquery_expressions),
+            len(specs or {}),
+        )
     return report

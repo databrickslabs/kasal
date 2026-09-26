@@ -1,4 +1,5 @@
 """Unit tests for the DAX function-reference retriever."""
+
 from src.services.tools.metric_view_utils import function_ref_retriever as R
 
 
@@ -29,7 +30,7 @@ class TestRender:
         assert block == ""
 
     def test_injects_tail_trap_with_curated_form(self):
-        block = R.render_function_refs(["FIND(\"@\", Cust[email])"])
+        block = R.render_function_refs(['FIND("@", Cust[email])'])
         assert "FIND" in block
         assert "INSTR(source.hay, 'needle')" in block
         assert "ARG ORDER SWAPS" in block
@@ -52,7 +53,9 @@ class TestRender:
         assert R.render_function_refs(["SUM(t[x])"]) == ""
 
     def test_respects_max_render_cap(self):
-        block = R.render_function_refs(["GEOMEAN(a) MEDIAN(b) STDEV.S(c)"], max_render=1)
+        block = R.render_function_refs(
+            ["GEOMEAN(a) MEDIAN(b) STDEV.S(c)"], max_render=1
+        )
         assert block.count("### ") == 1
 
 

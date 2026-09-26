@@ -260,7 +260,8 @@ class DAXExpressionParser:
                             "DAX variable substitution for '%s' exceeded %d chars "
                             "(likely exponential VAR-chain expansion); aborting to "
                             "avoid a parser hang.",
-                            var["variable_name"], _MAX_EXPANDED_EXPR_CHARS,
+                            var["variable_name"],
+                            _MAX_EXPANDED_EXPR_CHARS,
                         )
                         raise RuntimeError(
                             "DAX variable substitution exceeded maximum expression "

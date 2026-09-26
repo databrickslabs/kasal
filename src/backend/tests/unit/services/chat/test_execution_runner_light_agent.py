@@ -1909,23 +1909,46 @@ async def test_kickoff_no_session_tag_without_session_id():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer,valid", [
-    ('<section class="slide">Revised</section>', True),
-    ('Research unavailable', False),
-    ('<section class="slide">One</section><section class="slide">Two</section>', False),
-])
+@pytest.mark.parametrize(
+    "answer,valid",
+    [
+        ('<section class="slide">Revised</section>', True),
+        ("Research unavailable", False),
+        (
+            '<section class="slide">One</section><section class="slide">Two</section>',
+            False,
+        ),
+    ],
+)
 @pytest.mark.parametrize("needs_finalization", [False, True])
-async def test_slide_contract_uses_agent_and_only_persists_one_slide(answer, valid, needs_finalization):
+async def test_slide_contract_uses_agent_and_only_persists_one_slide(
+    answer, valid, needs_finalization
+):
     config = make_config(
-        agents_yaml={"editor": {"role": "Slide editor", "goal": "Edit", "backstory": "One slide", "tools": [], "memory": False}},
-        tasks_yaml={"edit": {"description": "Search online then improve the slide", "expected_output": "One slide"}},
+        agents_yaml={
+            "editor": {
+                "role": "Slide editor",
+                "goal": "Edit",
+                "backstory": "One slide",
+                "tools": [],
+                "memory": False,
+            }
+        },
+        tasks_yaml={
+            "edit": {
+                "description": "Search online then improve the slide",
+                "expected_output": "One slide",
+            }
+        },
     )
     config.output_contract = "slide"
     agent = AsyncMock()
     agent.kickoff_async.return_value = SimpleNamespace(raw=answer)
     if needs_finalization:
         agent.kickoff_async.side_effect = [
-            SimpleNamespace(raw="Now I'll create the improved slide with research-backed content:"),
+            SimpleNamespace(
+                raw="Now I'll create the improved slide with research-backed content:"
+            ),
             SimpleNamespace(raw=answer),
         ]
     update = AsyncMock(return_value=True)
@@ -1933,17 +1956,37 @@ async def test_slide_contract_uses_agent_and_only_persists_one_slide(answer, val
         patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch("src.services.settings.api_keys.ApiKeysService"),
-        patch("src.services.tools.tool_factory.ToolFactory.create", new_callable=AsyncMock, return_value=MagicMock()),
-        patch("src.services.execution.kernel.agent_tools.build_agent_with_tools", new_callable=AsyncMock, return_value=agent),
-        patch("src.services.execution.status.ExecutionStatusService.update_status", update),
-        patch("src.services.chat.diagram_directive.apply_diagram_directive") as deck_directive,
-        patch("src.services.a2ui.runner.compose_surface", new_callable=AsyncMock) as compose,
+        patch(
+            "src.services.tools.tool_factory.ToolFactory.create",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=agent,
+        ),
+        patch(
+            "src.services.execution.status.ExecutionStatusService.update_status", update
+        ),
+        patch(
+            "src.services.chat.diagram_directive.apply_diagram_directive"
+        ) as deck_directive,
+        patch(
+            "src.services.a2ui.runner.compose_surface", new_callable=AsyncMock
+        ) as compose,
     ):
-        result = await run_light_agent(f"slide-{uuid.uuid4()}", config, group_context=make_group_context())
-    assert agent.kickoff_async.await_count == (1 if valid and not needs_finalization else 2)
+        result = await run_light_agent(
+            f"slide-{uuid.uuid4()}", config, group_context=make_group_context()
+        )
+    assert agent.kickoff_async.await_count == (
+        1 if valid and not needs_finalization else 2
+    )
     deck_directive.assert_not_called()
     compose.assert_not_awaited()
     assert result["status"] == ("COMPLETED" if valid else "FAILED")
     if valid:
-        completed = [c for c in update.call_args_list if c.kwargs.get("status") == "COMPLETED"]
+        completed = [
+            c for c in update.call_args_list if c.kwargs.get("status") == "COMPLETED"
+        ]
         assert completed[-1].kwargs["result"] == {"section": answer, "model": "gpt-4"}

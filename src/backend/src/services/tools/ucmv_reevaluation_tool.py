@@ -24,6 +24,7 @@ Cost controls (a scheduled sweep must not quietly burn tokens):
 
 Docs: src/docs/powerbi/ucmv-reevaluation-recoverable-measures.md
 """
+
 import json
 import logging
 from typing import Any, Optional, Type
@@ -47,7 +48,9 @@ class UCMVReevaluationSchema(BaseModel):
         ),
     )
     group_id: Optional[str] = Field(
-        None, description="Group/tenant id to scope stored extractions (multi-tenant isolation).")
+        None,
+        description="Group/tenant id to scope stored extractions (multi-tenant isolation).",
+    )
     include_impossible: Optional[bool] = Field(
         False,
         description=(
@@ -63,9 +66,12 @@ class UCMVReevaluationSchema(BaseModel):
         ),
     )
     max_measures_per_dataset: Optional[int] = Field(
-        200, description="Cap retried measures per dataset (applied after impact ordering).")
+        200,
+        description="Cap retried measures per dataset (applied after impact ordering).",
+    )
     max_datasets: Optional[int] = Field(
-        50, description="Cap how many datasets a single sweep scans.")
+        50, description="Cap how many datasets a single sweep scans."
+    )
     force: Optional[bool] = Field(
         False,
         description=(
@@ -96,8 +102,13 @@ class UCMVReevaluationTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         config_keys = (
-            'dataset_ids', 'group_id', 'include_impossible', 'use_llm',
-            'max_measures_per_dataset', 'max_datasets', 'force',
+            "dataset_ids",
+            "group_id",
+            "include_impossible",
+            "use_llm",
+            "max_measures_per_dataset",
+            "max_datasets",
+            "force",
         )
         default_config: dict = {}
         for key in config_keys:
@@ -117,14 +128,14 @@ class UCMVReevaluationTool(BaseTool):
         if isinstance(raw, list):
             return [str(x).strip() for x in raw if str(x).strip()]
         text = str(raw).strip()
-        if text.startswith('['):
+        if text.startswith("["):
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, list):
                     return [str(x).strip() for x in parsed if str(x).strip()]
             except json.JSONDecodeError:
                 pass
-        return [p.strip() for p in text.split(',') if p.strip()]
+        return [p.strip() for p in text.split(",") if p.strip()]
 
     @staticmethod
     def _harvest_untranslatable(obj: Any, out: list) -> None:
@@ -136,14 +147,16 @@ class UCMVReevaluationTool(BaseTool):
         actually finds the measures.
         """
         if isinstance(obj, dict):
-            val = obj.get('untranslatable_items')
+            val = obj.get("untranslatable_items")
             if isinstance(val, list):
                 out.extend(i for i in val if isinstance(i, dict))
             for v in obj.values():
                 if isinstance(v, str):
-                    if 'untranslatable_items' in v:
+                    if "untranslatable_items" in v:
                         try:
-                            UCMVReevaluationTool._harvest_untranslatable(json.loads(v), out)
+                            UCMVReevaluationTool._harvest_untranslatable(
+                                json.loads(v), out
+                            )
                         except (json.JSONDecodeError, ValueError):
                             pass
                 else:
@@ -152,8 +165,9 @@ class UCMVReevaluationTool(BaseTool):
             for v in obj:
                 UCMVReevaluationTool._harvest_untranslatable(v, out)
 
-    async def _load_executions(self, dataset_ids: list[str], group_id: Optional[str],
-                               max_datasets: int) -> list[dict]:
+    async def _load_executions(
+        self, dataset_ids: list[str], group_id: Optional[str], max_datasets: int
+    ) -> list[dict]:
         """Latest UCMV EXECUTION results carrying non-transpiled measures.
 
         The execution result blob is the authoritative record: it is the full tool
@@ -194,15 +208,17 @@ class UCMVReevaluationTool(BaseTool):
             fp = self._find_fingerprint(parsed)
             cfg = self._find_config(parsed)
             job_id = run.get("job_id")
-            out.append({
-                'source': 'execution',
-                'key': str(job_id),
-                'label': run.get("run_name") or str(job_id),
-                'created_at': str(run.get("created_at") or ''),
-                'items': items,
-                'fingerprint': fp,
-                'config': cfg or {},
-            })
+            out.append(
+                {
+                    "source": "execution",
+                    "key": str(job_id),
+                    "label": run.get("run_name") or str(job_id),
+                    "created_at": str(run.get("created_at") or ""),
+                    "items": items,
+                    "fingerprint": fp,
+                    "config": cfg or {},
+                }
+            )
             if len(out) >= max_datasets:
                 break
         return out
@@ -211,7 +227,7 @@ class UCMVReevaluationTool(BaseTool):
     def _find_fingerprint(obj: Any) -> Optional[str]:
         """Pull a recorded capability_fingerprint out of a nested blob, if present."""
         if isinstance(obj, dict):
-            fp = obj.get('capability_fingerprint')
+            fp = obj.get("capability_fingerprint")
             if isinstance(fp, str) and fp:
                 return fp
             for v in obj.values():
@@ -229,7 +245,7 @@ class UCMVReevaluationTool(BaseTool):
     def _find_config(obj: Any) -> dict:
         """Best-effort pipeline config (translator context) from a nested blob."""
         if isinstance(obj, dict):
-            for key in ('proposed_config', 'config', 'configuration'):
+            for key in ("proposed_config", "config", "configuration"):
                 v = obj.get(key)
                 if isinstance(v, dict) and v:
                     return v
@@ -249,32 +265,39 @@ class UCMVReevaluationTool(BaseTool):
     # ------------------------------------------------------------------
     def _run(self, **kwargs: Any) -> str:
         from src.services.tools.metric_view_utils.capability_version import (
-            capability_summary, has_capability_changed,
+            capability_summary,
+            has_capability_changed,
         )
         from src.services.tools.metric_view_utils.reevaluate import (
             reevaluate_measures,
         )
 
         def _get(key: str, default: Any = None) -> Any:
-            if key in kwargs and kwargs[key] not in (None, ''):
+            if key in kwargs and kwargs[key] not in (None, ""):
                 return kwargs[key]
-            if key in self._default_config and self._default_config[key] not in (None, ''):
+            if key in self._default_config and self._default_config[key] not in (
+                None,
+                "",
+            ):
                 return self._default_config[key]
             return default
 
-        dataset_ids = self._parse_dataset_ids(_get('dataset_ids'))
-        group_id = _get('group_id')
-        include_impossible = bool(_get('include_impossible', False))
-        use_llm = bool(_get('use_llm', False))
-        max_per_ds = int(_get('max_measures_per_dataset', 200) or 200)
-        max_datasets = int(_get('max_datasets', 50) or 50)
-        force = bool(_get('force', False))
+        dataset_ids = self._parse_dataset_ids(_get("dataset_ids"))
+        group_id = _get("group_id")
+        include_impossible = bool(_get("include_impossible", False))
+        use_llm = bool(_get("use_llm", False))
+        max_per_ds = int(_get("max_measures_per_dataset", 200) or 200)
+        max_datasets = int(_get("max_datasets", 50) or 50)
+        force = bool(_get("force", False))
 
         capability = capability_summary()
         logger.info(
             "[UCMVReeval] capability=%s patterns=%s datasets=%s group=%s use_llm=%s",
-            capability.get('fingerprint'), capability.get('pattern_count'),
-            dataset_ids or 'ALL', group_id, use_llm,
+            capability.get("fingerprint"),
+            capability.get("pattern_count"),
+            dataset_ids or "ALL",
+            group_id,
+            use_llm,
         )
 
         # PRIMARY source: execution results (the full tool output the UI renders —
@@ -283,15 +306,20 @@ class UCMVReevaluationTool(BaseTool):
         # capability fingerprint, and the pipeline config the retry needs).
         executions: list[dict] = []
         try:
-            executions = run_async(self._load_executions(dataset_ids, group_id, max_datasets))
+            executions = run_async(
+                self._load_executions(dataset_ids, group_id, max_datasets)
+            )
         except Exception as exc:
             logger.error("[UCMVReeval] could not load stored runs: %s", exc)
-            return json.dumps({
-                'error': f'could not load stored runs: {exc}',
-                'capability': capability,
-                'datasets': [],
-                'summary': {'datasets_scanned': 0, 'measures_recovered': 0},
-            }, indent=2)
+            return json.dumps(
+                {
+                    "error": f"could not load stored runs: {exc}",
+                    "capability": capability,
+                    "datasets": [],
+                    "summary": {"datasets_scanned": 0, "measures_recovered": 0},
+                },
+                indent=2,
+            )
 
         datasets_report: list[dict] = []
         total_recovered = 0
@@ -299,77 +327,85 @@ class UCMVReevaluationTool(BaseTool):
 
         # ── Execution-sourced runs (the rich path) ──────────────────────────────
         for ex in executions:
-            items = ex['items']
-            fingerprint_changed = has_capability_changed(ex.get('fingerprint')) or force
+            items = ex["items"]
+            fingerprint_changed = has_capability_changed(ex.get("fingerprint")) or force
             base = {
-                'dataset_id': ex['label'],
-                'workspace_id': None,
-                'converted_at': ex['created_at'],
-                'conversion_id': ex['key'],
-                'source': 'execution',
+                "dataset_id": ex["label"],
+                "workspace_id": None,
+                "converted_at": ex["created_at"],
+                "conversion_id": ex["key"],
+                "source": "execution",
             }
             if not fingerprint_changed:
-                datasets_report.append({
-                    **base, 'fingerprint_changed': False,
-                    'note': 'transpiler unchanged since this run — nothing to gain',
-                    'newly_translatable': [],
-                    'still_failing_count': len(items), 'skipped_count': 0,
-                })
+                datasets_report.append(
+                    {
+                        **base,
+                        "fingerprint_changed": False,
+                        "note": "transpiler unchanged since this run — nothing to gain",
+                        "newly_translatable": [],
+                        "still_failing_count": len(items),
+                        "skipped_count": 0,
+                    }
+                )
                 continue
 
             result = reevaluate_measures(
-                items, ex.get('config') or {},
+                items,
+                ex.get("config") or {},
                 review=None,
                 include_impossible=include_impossible,
                 use_llm=use_llm,
                 limit=max_per_ds,
             )
-            counts = result.get('counts', {})
-            total_recovered += counts.get('recovered', 0)
-            total_retried += counts.get('retried', 0)
+            counts = result.get("counts", {})
+            total_recovered += counts.get("recovered", 0)
+            total_retried += counts.get("retried", 0)
             entry = {
-                **base, 'fingerprint_changed': True,
-                'newly_translatable': result.get('newly_translatable', []),
-                'still_failing_count': counts.get('still_failing', 0),
-                'skipped_count': counts.get('skipped', 0),
-                'counts': counts,
+                **base,
+                "fingerprint_changed": True,
+                "newly_translatable": result.get("newly_translatable", []),
+                "still_failing_count": counts.get("still_failing", 0),
+                "skipped_count": counts.get("skipped", 0),
+                "counts": counts,
             }
             # Be explicit about WHY we retried, so "fingerprint_changed: true" is not
             # read as "the transpiler improved" when it really means "unknown".
-            if not ex.get('fingerprint'):
-                entry['fingerprint_note'] = (
-                    'run pre-dates capability-fingerprint recording — retried because a '
-                    'gain cannot be ruled out, not because the transpiler is known to '
-                    'have changed'
+            if not ex.get("fingerprint"):
+                entry["fingerprint_note"] = (
+                    "run pre-dates capability-fingerprint recording — retried because a "
+                    "gain cannot be ruled out, not because the transpiler is known to "
+                    "have changed"
                 )
-            if not counts.get('recovered') and not use_llm:
-                entry['note'] = (
-                    'deterministic fast-path only (use_llm=false). Measures previously '
-                    'routed to the LLM cannot be recovered without use_llm=true.'
+            if not counts.get("recovered") and not use_llm:
+                entry["note"] = (
+                    "deterministic fast-path only (use_llm=false). Measures previously "
+                    "routed to the LLM cannot be recovered without use_llm=true."
                 )
             datasets_report.append(entry)
 
-
         output = {
-            'capability': capability,
-            'settings': {
-                'include_impossible': include_impossible,
-                'use_llm': use_llm,
-                'max_measures_per_dataset': max_per_ds,
-                'max_datasets': max_datasets,
-                'force': force,
+            "capability": capability,
+            "settings": {
+                "include_impossible": include_impossible,
+                "use_llm": use_llm,
+                "max_measures_per_dataset": max_per_ds,
+                "max_datasets": max_datasets,
+                "force": force,
             },
-            'datasets': datasets_report,
-            'summary': {
-                'datasets_scanned': len(datasets_report),
-                'measures_retried': total_retried,
-                'measures_recovered': total_recovered,
-                'datasets_with_recoveries': sum(
-                    1 for d in datasets_report if d.get('newly_translatable')),
+            "datasets": datasets_report,
+            "summary": {
+                "datasets_scanned": len(datasets_report),
+                "measures_retried": total_retried,
+                "measures_recovered": total_recovered,
+                "datasets_with_recoveries": sum(
+                    1 for d in datasets_report if d.get("newly_translatable")
+                ),
             },
         }
         logger.info(
             "[UCMVReeval] done: %s dataset(s), %s retried, %s recoverable",
-            len(datasets_report), total_retried, total_recovered,
+            len(datasets_report),
+            total_retried,
+            total_recovered,
         )
         return json.dumps(output, indent=2, default=str)
