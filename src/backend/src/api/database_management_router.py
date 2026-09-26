@@ -379,9 +379,8 @@ async def debug_permissions(
                         "auth_method": auth_method,
                         "has_service_principal": bool(client_id and client_secret),
                         "has_user_token": bool(user_token),
-                        "token_preview": (
-                            auth_token[:20] + "..." if auth_token else None
-                        ),
+                        # Whether a token was sent, never any part of it (N4).
+                        "has_auth_token": bool(auth_token),
                         "current_user": user_email,
                         "note": "Check if service principal credentials are working",
                     }

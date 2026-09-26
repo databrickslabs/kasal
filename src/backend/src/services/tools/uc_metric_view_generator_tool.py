@@ -394,7 +394,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             if not valid:
                 return json.dumps({"error": f"PBI input validation failed: {err_msg}"})
             logger.info(
-                f"[UCMV] API extraction mode: workspace={workspace_id}, dataset={dataset_id}, token={self._mask_secret(_get('access_token'))}"
+                f"[UCMV] API extraction mode: workspace={workspace_id}, dataset={dataset_id}, token_provided={bool(_get('access_token'))}"
             )
             try:
                 extracted = self._extract_from_pbi_api(

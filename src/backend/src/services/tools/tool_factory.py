@@ -2110,12 +2110,6 @@ class ToolFactory:
                         "[TOOL_FACTORY] Proceeding with tool creation despite validation error"
                     )
 
-                # CRITICAL DEBUG: Print to stdout
-                print("[TOOL_FACTORY] ========================================")
-                print("[TOOL_FACTORY] Creating DatabricksKnowledgeSearchTool")
-                print(f"[TOOL_FACTORY]   - tool_config received: {tool_config}")
-                print(f"[TOOL_FACTORY]   - tool_config type: {type(tool_config)}")
-
                 tool_args = {
                     "group_id": self.config.get("group_id", "default"),
                     # DO NOT PASS execution_id - we want to search all documents!
@@ -2128,18 +2122,12 @@ class ToolFactory:
                 }
                 # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
                 if tool_config and isinstance(tool_config, dict):
-                    print("[TOOL_FACTORY]   - Merging tool_config into tool_args")
                     tool_args.update(tool_config)
-                else:
-                    print(
-                        "[TOOL_FACTORY]   - tool_config is empty or not a dict, NOT merging"
-                    )
-
-                print(f"[TOOL_FACTORY] Final tool_args: {tool_args}")
-                print(f"[TOOL_FACTORY]   - group_id: {tool_args.get('group_id')}")
-                print(f"[TOOL_FACTORY]   - file_paths: {tool_args.get('file_paths')}")
-                print(f"[TOOL_FACTORY]   - agent_id: {tool_args.get('agent_id')}")
-                print("[TOOL_FACTORY] ========================================")
+                # Keys only: tool_args carries the user's token (audit H6/N4).
+                logger.debug(
+                    "[TOOL_FACTORY] DatabricksKnowledgeSearchTool args: %s",
+                    sorted(tool_args),
+                )
 
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool

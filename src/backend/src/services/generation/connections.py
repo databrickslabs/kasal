@@ -356,17 +356,22 @@ class ConnectionService:
         Returns:
             Dictionary with test results for each provider
         """
-        results = {}
+        # Configured / not configured only. No part of a key is returned: this
+        # is readable by any authenticated user, and the provider's rejection
+        # text can itself echo a masked key, so the message is fixed.
+        results: Dict[str, Any] = {}
 
-        # Test OpenAI API key
         openai_key = os.environ.get("OPENAI_API_KEY")
         if openai_key:
-            valid, message = await self.validate_api_key(openai_key)
+            valid, _detail = await self.validate_api_key(openai_key)
             results["openai"] = {
                 "has_key": True,
                 "valid": valid,
-                "message": message,
-                "key_prefix": openai_key[:4] + "..." if openai_key else "None",
+                "message": (
+                    "API key is configured and valid"
+                    if valid
+                    else "API key is configured but was not accepted"
+                ),
             }
         else:
             results["openai"] = {
@@ -375,19 +380,12 @@ class ConnectionService:
                 "message": "No API key found in environment variables",
             }
 
-        # Test Anthropic API key (simple presence check)
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-        results["anthropic"] = {
-            "has_key": bool(anthropic_key),
-            "key_prefix": anthropic_key[:4] + "..." if anthropic_key else "None",
-        }
-
-        # Test DeepSeek API key (simple presence check)
-        deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
-        results["deepseek"] = {
-            "has_key": bool(deepseek_key),
-            "key_prefix": deepseek_key[:4] + "..." if deepseek_key else "None",
-        }
+        # Anthropic and DeepSeek: presence only.
+        for provider, env_var in (
+            ("anthropic", "ANTHROPIC_API_KEY"),
+            ("deepseek", "DEEPSEEK_API_KEY"),
+        ):
+            results[provider] = {"has_key": bool(os.environ.get(env_var))}
 
         # Include Python version info
         import sys
