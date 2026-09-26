@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import text
 
 from src.core.databricks_app import DatabricksAppInstallation
@@ -70,8 +71,8 @@ def _legacy_fernet_key(client: Any) -> str:
         return ""
 
 
-def _validate_material(raw: str) -> dict:
-    material = json.loads(raw)
+def _validate_material(raw: str) -> dict[str, Any]:
+    material: dict[str, Any] = json.loads(raw)
     if material.get("version") != 1:
         raise ValueError("Unsupported app encryption material version")
     Fernet(material["fernet"].encode())
@@ -79,6 +80,11 @@ def _validate_material(raw: str) -> dict:
         material["private_key"].encode(), password=None
     )
     public = serialization.load_pem_public_key(material["public_key"].encode())
+    # EncryptionUtils only ever generates RSA pairs; anything else is invalid.
+    if not isinstance(private, rsa.RSAPrivateKey) or not isinstance(
+        public, rsa.RSAPublicKey
+    ):
+        raise ValueError("App encryption key pair must be RSA")
     if private.public_key().public_numbers() != public.public_numbers():
         raise ValueError("App encryption key pair does not match")
     return material
