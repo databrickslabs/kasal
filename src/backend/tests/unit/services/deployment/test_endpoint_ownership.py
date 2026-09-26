@@ -11,8 +11,18 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import requests
+from databricks.sdk.errors import (
+    InternalError,
+    NotFound,
+    PermissionDenied,
+    ResourceDoesNotExist,
+    TemporarilyUnavailable,
+    TooManyRequests,
+    Unauthenticated,
+)
 
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import KasalError, NotFoundError
 from src.services.catalog.crews import CrewService
 from src.services.deployment import endpoint_ownership
 from src.services.deployment.endpoint_ownership import (
@@ -82,14 +92,40 @@ async def test_endpoint_without_provenance_is_refused():
             await svc.assert_endpoint_belongs_to_crew(str(CREW_ID), "ep", GC)
 
 
+@pytest.mark.parametrize(
+    "error, status",
+    [
+        (NotFound("Endpoint ep does not exist"), 404),
+        (ResourceDoesNotExist("Endpoint ep does not exist"), 404),
+        (Unauthenticated("token expired for sp@example.com"), 401),
+        (PermissionDenied("sp@example.com cannot view ep"), 403),
+        (TemporarilyUnavailable("try later"), 503),
+        (TooManyRequests("slow down"), 503),
+        (requests.exceptions.ConnectionError("https://example.com refused"), 503),
+        (requests.exceptions.ReadTimeout("read timed out"), 503),
+        (InternalError("upstream 500 at https://example.com"), 502),
+        (RuntimeError("unexpected"), 502),
+    ],
+)
 @pytest.mark.asyncio
-async def test_unreadable_endpoint_is_refused():
+async def test_a_failed_read_maps_to_the_right_status(error, status, caplog):
+    """Only a real "does not exist" is 404: an expired credential or an outage
+    must not tell the caller the deployment is gone."""
     svc = _service(_crew())
-    with patch.object(
-        endpoint_ownership, "_read_endpoint", side_effect=RuntimeError("404")
-    ):
-        with pytest.raises(NotFoundError):
-            await svc.assert_endpoint_belongs_to_crew(str(CREW_ID), "ep", GC)
+    with patch.object(endpoint_ownership, "_read_endpoint", side_effect=error):
+        with caplog.at_level("INFO", logger=endpoint_ownership.__name__):
+            with pytest.raises(KasalError) as raised:
+                await svc.assert_endpoint_belongs_to_crew(str(CREW_ID), "ep", GC)
+
+    assert raised.value.status_code == status
+    assert raised.value.__cause__ is error
+    # The SDK's text (hosts, principals) is logged, never returned.
+    assert "example.com" not in raised.value.detail
+    assert "ep" in caplog.text
+    if status == 404:
+        assert isinstance(raised.value, NotFoundError)
+    else:
+        assert any(r.levelname == "ERROR" for r in caplog.records)
 
 
 @pytest.mark.asyncio
