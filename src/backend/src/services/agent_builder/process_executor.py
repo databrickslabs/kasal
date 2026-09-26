@@ -2088,7 +2088,7 @@ class ProcessCrewExecutor:
                 ),
             )
 
-            # Store the process for tracking and termination
+            run_admission.claim_start(execution_id)  # a stop since admission wins
             self._running_processes[execution_id] = process
 
             # Start the process. The run clock starts here, not before the

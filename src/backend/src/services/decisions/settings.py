@@ -6,7 +6,7 @@ from typing import cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import BadRequestError, ConflictError
+from src.core.exceptions import BadRequestError, ConflictError, KasalError
 from src.repositories.decision_config_repository import DecisionConfigRepository
 from src.schemas.decision_config import DecisionConfigResponse, DecisionConfigUpdate
 from src.services.decisions import provider
@@ -16,6 +16,22 @@ from src.utils.encryption_utils import EncryptionUtils
 logger = logging.getLogger(__name__)
 
 JEV_KEY_NAME = "JEV_API_KEY"
+
+
+class DecisionCredentialUnreadable(KasalError):
+    """The workspace opted in and has a JEV_API_KEY, but it cannot be decrypted.
+
+    Distinct from "no key": that is a configuration the admin chose, this is a
+    fault (a rotated encryption key, a corrupted row) someone has to fix, so
+    it must not look the same. Callers that fall back (``decisions.runtime``)
+    still fall back; they now know why.
+    """
+
+    status_code = 500
+    detail = (
+        f"The stored {JEV_KEY_NAME} could not be decrypted; "
+        "re-enter it in Configuration > API Keys"
+    )
 
 
 class DecisionSettingsService:
@@ -61,6 +77,10 @@ class DecisionSettingsService:
     async def credential(self) -> str | None:
         """The decrypted key when this workspace opted in, read on OUR session.
 
+        None when the workspace has not opted in or has no key. A key that
+        exists but will not decrypt raises ``DecisionCredentialUnreadable``
+        after an error-level log, rather than reading as "no key".
+
         Not ``ApiKeysService.get_provider_api_key``: that classmethod opens a
         second session of its own, i.e. two sessions per decision on a path
         that runs from memory and kernel hot spots. ``find_by_name`` on the
@@ -76,7 +96,11 @@ class DecisionSettingsService:
             return EncryptionUtils.decrypt_value(cast(str, key.encrypted_value))
         except Exception as exc:
             # Never log the value or the ciphertext.
-            logger.warning(
-                "Could not decrypt %s (%s)", JEV_KEY_NAME, type(exc).__name__
+            logger.error(
+                "Could not decrypt %s for workspace %s (%s); decisions are off "
+                "for it until the key is re-entered",
+                JEV_KEY_NAME,
+                self.group_id,
+                type(exc).__name__,
             )
-            return None
+            raise DecisionCredentialUnreadable() from None

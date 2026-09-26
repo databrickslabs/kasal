@@ -47,7 +47,6 @@ if [ ! -d src/frontend_static ] || [ -z "$(ls -A src/frontend_static 2>/dev/null
 fi
 
 # No platform proxy locally, so opt in to the development identity.
-# Do NOT pass --environment dev: it sets DATABRICKS_APP_NAME, which turns this off.
 export LOCAL_DEV_AUTH=true
 
 cd src
@@ -61,7 +60,7 @@ bash /tmp/run-prod-mode.sh "$PWD"
 ```
 
 > [!WARNING]
-> `entrypoint.py` always binds to `0.0.0.0`. With `LOCAL_DEV_AUTH` on, anyone who can reach port 8000 acts as the development user. Run it only on a machine or network you trust, or send an identity header and leave `LOCAL_DEV_AUTH` unset.
+> Outside Databricks Apps `entrypoint.py` binds to `127.0.0.1` unless `KASAL_BIND_HOST` says otherwise. If you set `KASAL_BIND_HOST=0.0.0.0` with `LOCAL_DEV_AUTH` on, anyone who can reach port 8000 acts as the development user. Do that only on a machine or network you trust, or send an identity header and leave `LOCAL_DEV_AUTH` unset.
 
 To run `uvicorn` directly instead, bind to loopback and set the identity:
 
@@ -119,6 +118,7 @@ services:
       - <path-to-kasal-checkout>/src:/app/python/source_code
     environment:
       - LOCAL_DEV_AUTH=true            # no platform proxy in the container
+      - KASAL_BIND_HOST=0.0.0.0        # reachable through the published port
       - UV_PROJECT_ENVIRONMENT=/opt/venv   # keep the Linux venv out of your checkout
       - DATABRICKS_HOST=${DATABRICKS_HOST}
       - DATABRICKS_TOKEN=${DATABRICKS_TOKEN}

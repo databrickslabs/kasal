@@ -17,18 +17,29 @@ that proves the endpoint is this tenant's deployment of this crew.
 Anything that cannot be proven — the endpoint is missing, serves a foreign
 model, or the provenance cannot be read — is refused as "not found", so the
 check fails closed and does not reveal which endpoints exist.
+
+A failure to READ the endpoint at all is not "not found", though: an expired
+app credential or a Databricks outage must not tell the caller the deployment
+is gone. ``_raise_for_read_failure`` maps the SDK error to 401/403 (the app's
+credential was refused), 503 (throttled or temporarily unavailable) or 502 (any
+other upstream failure), with a generic message; the detail is logged here.
 """
 
 import asyncio
 import json
 import logging
 import tempfile
-from typing import Any, Set, Tuple
+from typing import Any, NoReturn, Set, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import (
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from src.services.catalog.crews import CrewService
 from src.utils.user_context import GroupContext
 
@@ -99,6 +110,68 @@ def _served_crew_ids(endpoint: Any, endpoint_name: str) -> Set[str]:
     return crew_ids
 
 
+def _raise_for_read_failure(
+    exc: Exception, endpoint_name: str, not_found: Exception
+) -> NoReturn:
+    """Turn a failed ``serving_endpoints.get`` into the right HTTP error.
+
+    Only a real "does not exist" answer becomes 404. The message never carries
+    the SDK's text (it can name hosts and principals); the log line does.
+    """
+    import requests  # type: ignore[import-untyped]
+    from databricks.sdk.errors import (
+        DeadlineExceeded,
+        NotFound,
+        PermissionDenied,
+        TemporarilyUnavailable,
+        TooManyRequests,
+        Unauthenticated,
+    )
+
+    if isinstance(exc, NotFound):
+        logger.info("Serving endpoint %s does not exist", endpoint_name)
+        raise not_found from exc
+    if isinstance(exc, Unauthenticated):
+        logger.error(
+            "Databricks rejected the credential reading serving endpoint %s: %s",
+            endpoint_name,
+            exc,
+        )
+        raise UnauthorizedError(
+            detail="Databricks rejected the credential used to read the deployment"
+        ) from exc
+    if isinstance(exc, PermissionDenied):
+        logger.error(
+            "Not permitted to read serving endpoint %s: %s", endpoint_name, exc
+        )
+        raise ForbiddenError(
+            detail="Not permitted to read the deployment in Databricks"
+        ) from exc
+    logger.error(
+        "Could not read serving endpoint %s (%s): %s",
+        endpoint_name,
+        type(exc).__name__,
+        exc,
+    )
+    unavailable = (
+        TemporarilyUnavailable,
+        TooManyRequests,
+        DeadlineExceeded,
+        ConnectionError,
+        TimeoutError,
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+    )
+    if isinstance(exc, unavailable):
+        raise KasalError(
+            detail="Databricks is temporarily unavailable; try again shortly",
+            status_code=503,
+        ) from exc
+    raise KasalError(
+        detail="Could not read the deployment from Databricks", status_code=502
+    ) from exc
+
+
 class ServingEndpointOwnershipService:
     """Checks a serving endpoint is the caller's group's deployment of a crew."""
 
@@ -126,8 +199,7 @@ class ServingEndpointOwnershipService:
         try:
             endpoint, served = await asyncio.to_thread(_read_endpoint, endpoint_name)
         except Exception as exc:
-            logger.warning("Could not read serving endpoint %s: %s", endpoint_name, exc)
-            raise not_found
+            _raise_for_read_failure(exc, endpoint_name, not_found)
         if str(crew.id) not in served:
             logger.warning(
                 "Refused to act on endpoint %s: it does not serve crew %s",

@@ -6,7 +6,10 @@ import pytest
 from src.config.settings import settings
 from src.core.exceptions import BadRequestError, ForbiddenError
 from src.schemas.decision_config import DecisionConfigUpdate
-from src.services.decisions.settings import DecisionSettingsService
+from src.services.decisions.settings import (
+    DecisionCredentialUnreadable,
+    DecisionSettingsService,
+)
 
 
 @pytest.fixture
@@ -81,11 +84,17 @@ async def test_runtime_reads_key_on_its_own_session_only_when_enabled(service):
 
 
 @pytest.mark.asyncio
-async def test_credential_is_none_without_key_or_when_decrypt_fails(service, caplog):
+async def test_credential_is_none_without_a_key(service):
     service.repository.get.return_value = SimpleNamespace(enabled=True)
     service.api_keys.find_by_name.return_value = None
     assert await service.credential() is None
+    service.api_keys.find_by_name.return_value = SimpleNamespace(encrypted_value="")
+    assert await service.credential() is None
 
+
+@pytest.mark.asyncio
+async def test_an_undecryptable_key_is_an_error_not_a_missing_key(service, caplog):
+    service.repository.get.return_value = SimpleNamespace(enabled=True)
     service.api_keys.find_by_name.return_value = SimpleNamespace(
         encrypted_value="ciphertext"
     )
@@ -93,8 +102,32 @@ async def test_credential_is_none_without_key_or_when_decrypt_fails(service, cap
         "src.services.decisions.settings.EncryptionUtils.decrypt_value",
         side_effect=ValueError("ciphertext"),
     ):
-        assert await service.credential() is None
+        with caplog.at_level("ERROR", logger="src.services.decisions.settings"):
+            with pytest.raises(DecisionCredentialUnreadable) as raised:
+                await service.credential()
+
+    assert raised.value.status_code == 500
+    # The cause is not chained: its message could carry the ciphertext.
+    assert raised.value.__cause__ is None
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert errors and "JEV_API_KEY" in errors[0].getMessage()
+    assert "workspace-a" in errors[0].getMessage()
     assert "ciphertext" not in caplog.text
+    assert "ciphertext" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_an_undecryptable_key_is_not_read_when_not_opted_in(service):
+    service.repository.get.return_value = SimpleNamespace(enabled=False)
+    service.api_keys.find_by_name.return_value = SimpleNamespace(
+        encrypted_value="ciphertext"
+    )
+    with patch(
+        "src.services.decisions.settings.EncryptionUtils.decrypt_value",
+        side_effect=ValueError("bad"),
+    ) as decrypt:
+        assert await service.credential() is None
+    decrypt.assert_not_called()
 
 
 @pytest.mark.asyncio

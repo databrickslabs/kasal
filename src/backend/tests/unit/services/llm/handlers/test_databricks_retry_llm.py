@@ -119,27 +119,18 @@ class TestSanitizeMessagesForDatabricks:
         assert result is original
         assert original[0]["content"] == "Calling tools."
 
-    def test_strips_cache_breakpoint_field(self):
-        """CrewAI stamps a top-level cache_breakpoint flag for prompt caching, but
-        non-Claude Databricks endpoints (llama/qwen/gemma/gpt-oss/gemini) 400 on
-        the unknown field — it must be stripped from the sent messages."""
+    def test_leaves_the_cache_breakpoint_hint_to_the_transport(self):
+        """The transport owns CrewAI's hint (core/llm/transport/prompt_cache.py):
+        it translates it for Claude and strips it for everything else. Removing
+        it here, before the transport sees it, cost Claude a cache breakpoint."""
+        original = {"role": "user", "content": "hi", "cache_breakpoint": True}
         msgs = [
             {"role": "system", "content": "sys", "cache_breakpoint": True},
-            {"role": "user", "content": "hi", "cache_breakpoint": True},
+            original,
         ]
         DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
-        assert all("cache_breakpoint" not in m for m in msgs)
-        assert msgs[0] == {"role": "system", "content": "sys"}
-        assert msgs[1] == {"role": "user", "content": "hi"}
-
-    def test_cache_breakpoint_strip_does_not_mutate_caller_dict(self):
-        """The flag is removed from a COPY, so CrewAI's reusable message buffer
-        keeps its markers for providers that actually cache."""
-        original = {"role": "user", "content": "hi", "cache_breakpoint": True}
-        msgs = [original]
-        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
-        assert "cache_breakpoint" not in msgs[0]  # stripped in the sent list
-        assert original.get("cache_breakpoint") is True  # caller's dict untouched
+        assert msgs[0]["cache_breakpoint"] is True
+        assert msgs[1] is original and original["cache_breakpoint"] is True
 
     def test_handles_non_dict_items(self):
         msgs = ["plain string", {"role": "user", "content": "Hello"}]
@@ -156,6 +147,76 @@ class TestSanitizeMessagesForDatabricks:
         assert len(msgs) == 2
         assert msgs[0]["content"] is None
         assert msgs[1]["content"] is None
+
+
+def _conversation_with_a_tool_round():
+    """CrewAI's shape after one tool round: hints on the system and the task
+    prompt, and a tail that is NOT the task prompt (so the transport's rolling
+    tail marker cannot stand in for the task-prompt breakpoint)."""
+    return [
+        {
+            "role": "system",
+            "content": "You are a researcher.",
+            "cache_breakpoint": True,
+        },
+        {"role": "user", "content": "The task prompt.", "cache_breakpoint": True},
+        {
+            "role": "assistant",
+            "content": "Looking it up.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "search", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "result"},
+    ]
+
+
+def _sent_messages(model):
+    """Run DatabricksRetryLLM.call() down to the wire; return the messages sent."""
+    from types import SimpleNamespace
+    from unittest.mock import PropertyMock
+
+    from src.core.llm.transport import OpenAICompletion
+
+    llm = DatabricksRetryLLM(model=model)
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="done", tool_calls=None),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+    create = Mock(return_value=response)
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    with patch.object(
+        OpenAICompletion, "client", new_callable=PropertyMock, return_value=client
+    ):
+        assert llm.call(_conversation_with_a_tool_round()) == "done"
+    return create.call_args.kwargs["messages"]
+
+
+class TestCacheHintReachesTheTransport:
+    def test_databricks_claude_keeps_the_task_prompt_breakpoint(self):
+        sent = _sent_messages("databricks/databricks-claude-sonnet-4-5")
+        task = sent[1]
+        assert task["role"] == "user"
+        assert task["content"][-1]["cache_control"] == {"type": "ephemeral"}
+        assert task["content"][-1]["text"] == "The task prompt."
+        assert all("cache_breakpoint" not in m for m in sent)
+
+    def test_non_claude_endpoint_gets_no_hint_and_no_marker(self):
+        sent = _sent_messages("databricks/databricks-llama-4-maverick")
+        assert all("cache_breakpoint" not in m for m in sent)
+        assert "cache_control" not in repr(sent)
+        assert sent[1] == {"role": "user", "content": "The task prompt."}
 
 
 class TestEngineToolCallsWithContent:

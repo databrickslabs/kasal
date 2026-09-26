@@ -2057,63 +2057,6 @@ class ExecutionService:
             "restored_tasks": restored_units,
         }
 
-    async def _check_for_running_jobs(self, group_context: GroupContext = None) -> None:
-        """
-        Check for running jobs to enforce single job execution constraint.
-
-        Args:
-            group_context: Group context for filtering (ensures users can only see their own group's jobs)
-
-        Raises:
-            ValueError: If there are any running jobs
-        """
-        try:
-            # Get active statuses that should block new executions
-            active_statuses = [
-                ExecutionStatus.PENDING.value,
-                ExecutionStatus.PREPARING.value,
-                ExecutionStatus.RUNNING.value,
-            ]
-
-            # Use ExecutionRepository to check for active executions
-            from src.db.session import routed_scoped_session
-            from src.repositories.execution_repository import ExecutionRepository
-
-            async with routed_scoped_session() as db:
-                repo = ExecutionRepository(db)
-
-                # Get executions with group filtering
-                group_ids = group_context.group_ids if group_context else None
-                active_executions, _ = await repo.get_execution_history(
-                    limit=1,  # We only need to know if any exist
-                    offset=0,
-                    group_ids=group_ids,
-                    status_filter=active_statuses,  # Filter for active statuses
-                )
-
-                if active_executions:
-                    active_execution = active_executions[0]
-                    error_msg = (
-                        f"Cannot start new job. Another job is currently running: "
-                        f"'{active_execution.run_name}' (Status: {active_execution.status}). "
-                        f"Please wait for it to complete. "
-                        f"Note: In future releases, we plan to add support for concurrent job execution."
-                    )
-                    crew_logger.warning(
-                        f"[ExecutionService._check_for_running_jobs] {error_msg}"
-                    )
-                    raise ValueError(error_msg)
-
-        except ValueError:
-            # Re-raise ValueError (our constraint violation)
-            raise
-        except Exception as e:
-            # Log other errors but don't block execution creation
-            crew_logger.error(
-                f"[ExecutionService._check_for_running_jobs] Error checking for running jobs: {str(e)}"
-            )
-            # We don't raise here to avoid blocking execution if the check fails for technical reasons
-
     async def generate_execution_name(
         self, request: ExecutionNameGenerationRequest
     ) -> Dict[str, str]:

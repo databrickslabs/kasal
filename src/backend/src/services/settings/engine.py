@@ -27,6 +27,32 @@ class EngineConfigService:
         """
         self.repository = EngineConfigRepository(session)
 
+    @staticmethod
+    def _run_limit_changed(row: Any = None, engine_name: Optional[str] = None) -> None:
+        """Tell this process's run gate that ``max_concurrent_runs`` changed.
+
+        The gate caches the limit for 30 s, so without this an operator who
+        raised it watched queued runs wait for the cache or for a slot to free.
+        A written row is applied directly (it may not be committed yet, so a
+        re-read could see the old value); a delete only invalidates. Other
+        server processes pick the change up on their next re-read.
+        """
+        from src.services.execution.run_admission import (
+            CONFIG_ENGINE_NAME,
+            CONFIG_KEY,
+            configured_limit_of,
+            run_admission,
+        )
+
+        if row is not None:
+            if (
+                getattr(row, "engine_name", None) == CONFIG_ENGINE_NAME
+                and getattr(row, "config_key", None) == CONFIG_KEY
+            ):
+                run_admission.apply_limit(configured_limit_of(row))
+        elif engine_name == CONFIG_ENGINE_NAME:
+            run_admission.invalidate_limit()
+
     async def find_all(self) -> List[EngineConfig]:
         """
         Get all engine configurations from the repository.
@@ -115,7 +141,9 @@ class EngineConfigService:
             config_dict = dict(config_data)
 
         # Create new engine config
-        return await self.repository.create(config_dict)
+        created = await self.repository.create(config_dict)
+        self._run_limit_changed(created)
+        return created
 
     async def update_engine_config(self, engine_name: str, config_data):
         """
@@ -142,7 +170,9 @@ class EngineConfigService:
             config_dict = dict(config_data)
 
         # Update engine config
-        return await self.repository.update(existing_config.id, config_dict)
+        updated = await self.repository.update(existing_config.id, config_dict)
+        self._run_limit_changed(updated)
+        return updated
 
     async def toggle_engine_enabled(
         self, engine_name: str, enabled: bool
@@ -165,7 +195,9 @@ class EngineConfigService:
                 return None
 
             # Get the updated engine config
-            return await self.repository.find_by_engine_name(engine_name)
+            toggled = await self.repository.find_by_engine_name(engine_name)
+            self._run_limit_changed(toggled)
+            return toggled
         except Exception as e:
             # Log the error at service level but don't expose internal details
             logger.error(
@@ -198,7 +230,9 @@ class EngineConfigService:
                 return None
 
             # Get the updated engine config
-            return await self.repository.find_by_engine_and_key(engine_name, config_key)
+            row = await self.repository.find_by_engine_and_key(engine_name, config_key)
+            self._run_limit_changed(row)
+            return row
         except Exception as e:
             # Log the error at service level but don't expose internal details
             logger.error(
@@ -342,6 +376,7 @@ class EngineConfigService:
         # Delete the engine config
         try:
             await self.repository.delete(config.id)
+            self._run_limit_changed(engine_name=engine_name)
             logger.info(f"Successfully deleted engine config with name {engine_name}")
             return True
         except Exception as e:

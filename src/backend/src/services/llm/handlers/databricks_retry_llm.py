@@ -696,16 +696,11 @@ class DatabricksRetryLLM(LLM):
         if not messages or not isinstance(messages, list):
             return messages
 
-        # CrewAI stamps a top-level ``cache_breakpoint`` flag on messages for
-        # prompt caching, but Databricks serving endpoints reject it as an
-        # unknown field: only Claude's native caching understands it and litellm
-        # does NOT translate it for the ``databricks/`` provider, so non-Claude
-        # endpoints (llama, qwen, gemma, gpt-oss, gemini) 400 with
-        # 'Bad request: json: unknown field "cache_breakpoint"'. Strip it from a
-        # copy of each message (don't mutate CrewAI's originals) before sending.
-        for idx, m in enumerate(messages):
-            if isinstance(m, dict) and "cache_breakpoint" in m:
-                messages[idx] = {k: v for k, v in m.items() if k != "cache_breakpoint"}
+        # CrewAI's top-level ``cache_breakpoint`` hint is NOT stripped here. The
+        # transport owns it (core/llm/transport/prompt_cache.py): for
+        # Databricks-hosted Claude it becomes a cache_control marker on the task
+        # prompt, for every other endpoint it is removed before the request.
+        # Stripping it here, first, cost Claude that breakpoint.
 
         i = 0
         while i < len(messages):
