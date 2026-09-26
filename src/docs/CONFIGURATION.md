@@ -144,6 +144,16 @@ These control encryption, rate limiting and a few request-path caches:
 
 These tune the agent runtime and the LLM layer. Defaults are chosen for a single app instance.
 
+### Concurrent run limit
+
+Crew and flow runs share one concurrent-run limit per server process. It is not an environment variable: it is the engine-config row `engine_name="kasal"`, `config_key="max_concurrent_runs"`, which a system admin creates or changes through the `/engine-config` API. With no row, or a disabled or non-integer value, the limit is 16. A value above 16 is capped at 16, the size of the run-wait and event-relay thread pools (`src/backend/src/services/execution/blocking_pools.py`), because every live run holds a thread in each; a value below 1 counts as 1. The value is re-read at most every 30 seconds.
+
+A run started over the limit is not rejected. It is queued with status `PENDING` and a `Queued: …` message naming the limit and its position, admitted first in, first out as slots free, and set to `RUNNING` when it starts. Stopping a queued run removes it from the queue. A run's timeout starts when its process starts, so time spent queued does not count against it. The gate lives in `src/backend/src/services/execution/run_admission.py`. For the API calls, see [run concurrency limit](./api_endpoints.md#run-concurrency-limit).
+
+### Execution and LLM variables
+
+The execution and LLM variables are:
+
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `KASAL_LLM_MAX_CONCURRENCY` | `64` | Size of the dedicated thread pool for blocking LLM calls | `src/backend/src/services/llm/manager.py` |

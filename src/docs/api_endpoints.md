@@ -229,6 +229,15 @@ the model, and `result_preview`, the first 280 characters of the serialized
 result. Read `GET /executions/{execution_id}` for the full result, or pass
 `?include_payload=true` to get full rows in bulk.
 
+**Over the concurrent-run limit, a run queues.** Crew and flow runs share one
+limit per server process (see [run concurrency limit](#run-concurrency-limit)).
+A run started while every slot is in use is still accepted: its status is
+`PENDING` with a message such as `Queued: all 16 run slots are in use (position
+2). The run starts when a slot frees.` Queued runs start first in, first out,
+and switch to `RUNNING` when admitted. `POST /executions/{execution_id}/stop`
+on a queued run removes it from the queue, so it never starts. A run's timeout
+counts from when its process starts, not from when it was queued.
+
 There is **no `/executions/{id}/logs`**. Per-step detail is in the traces
 (below); process logs are streamed over SSE.
 
@@ -410,7 +419,34 @@ A run's harness is decided once, at creation, and recorded on its row; changing
 this setting never re-points a run already under way.
 
 The same router also carries the rest of `engine-config` (16 routes) —
-`flow_enabled`, OpenTelemetry switches and similar.
+`flow_enabled`, OpenTelemetry switches and similar. Creating or changing a row
+requires a system admin (`403` otherwise).
+
+### Run concurrency limit
+
+Crew and flow runs share one concurrent-run limit per server process, read from
+the engine-config row `engine_name="kasal"`, `config_key="max_concurrent_runs"`.
+With no row, or a disabled or non-integer one, the limit is 16. A value above 16
+is capped at 16, the size of the thread pools each live run holds a thread in,
+and a value below 1 counts as 1. The value is re-read at most every 30 seconds,
+so a change applies to runs admitted after that.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/engine-config` | Create the row: `engine_name`, `engine_type`, `config_key`, `config_value` (a string), optional `enabled` and `description` |
+| `GET` | `/engine-config/engine/kasal/config/max_concurrent_runs` | Read it (`404` when unset) |
+| `PATCH` | `/engine-config/engine/kasal/config/max_concurrent_runs/value` | Change the value: `{"config_value": "8"}` |
+
+To set the limit to 8 the first time:
+
+```bash
+curl -X POST https://<your-app>.databricksapps.com/api/v1/engine-config \
+  -H "Content-Type: application/json" \
+  -H "X-Forwarded-Email: admin@example.com" \
+  -d '{"engine_name": "kasal", "engine_type": "system", "config_key": "max_concurrent_runs", "config_value": "8"}'
+```
+
+For what a queued run looks like, see [Executions](#executions).
 
 ---
 
