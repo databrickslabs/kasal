@@ -30,6 +30,9 @@ def persistence(tmp_path, monkeypatch):
     db_file = tmp_path / "fp.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}", poolclass=NullPool)
     factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    # The real factory reports whether Lakebase is swapped in; with SQLite as the
+    # default database, get_isolated_db_session now reads it.
+    factory.is_lakebase = False  # type: ignore[attr-defined]
     monkeypatch.setattr(session_mod, "async_session_factory", factory, raising=False)
 
     p = KasalFlowPersistence()
