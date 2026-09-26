@@ -33,28 +33,29 @@ dependencies = [
     # HTTP clients
     "httpx>=0.26.0",
     "aiohttp>=3.9.0",
-    "httpx-sse==0.4.0",
     "urllib3>=1.26.6",
     # Auth
     # NOTE: python-jose + passlib removed — they were unused (0 imports) and
-    # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt is
-    # used directly; auth is via the Databricks OAuth proxy (no homegrown JWT).
-    "bcrypt==4.0.1",
+    # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt (once
+    # pinned ==4.0.1 for passlib) went with them; auth is via the Databricks
+    # OAuth proxy (no homegrown JWT).
     "cryptography",
     "python-multipart>=0.0.9",
     # Document parsing
     "pdfminer.six", # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
     # Databricks
-    "databricks",
     "databricks-sdk>=0.102.0",
     "databricks-vectorsearch",
+    # No first-party import, but a real runtime dependency: MLflow's built-in
+    # GenAI scorers (RelevanceToQuery, Safety, Correctness, Groundedness, ...
+    # used by services/mlflow/evaluation_runner.py) delegate to
+    # `databricks.agents.evals.judges` when the judge model is the Databricks
+    # default, as do mlflow.genai.datasets and labeling. Do not prune.
     "databricks-agents>=1.4.0",
     # Azure
     "azure-identity>=1.15.0",
     # AI/ML
     "litellm[caching]==1.84.0", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.84.0 clears PYSEC-2026-388/390/2597-2600/3476-3479 + GHSA-69x8-hrgq-fjj8
-    "langchain",
-    "langchain-text-splitters", # langchain 1.x moved text splitters out of core
     "mcp>=1.28.1,<1.29.0", # Kasal's own MCP integration. The floor is set by
     # crewai, which requires ~=1.28.1; this was <1.27.0 and `uv` refused the
     # resolution outright. Kasal's own use is narrow — the sse / streamable-http
@@ -63,8 +64,8 @@ dependencies = [
     # `mcpadapt` is NOT here: it was only ever present because crewai-tools[mcp]
     # imported mcpadapt.core, and crewai-tools is deliberately not a dependency
     # (see below).
-    #
-    # The SECOND agent runtime. Kasal's own runtime lives in
+
+    # CrewAI — the SECOND agent runtime. Kasal's own runtime lives in
     # services/execution/runtime/; which of the two executes a run is an
     # operator setting (Configuration -> Engines), resolved once per execution
     # and stamped on the row so a run — and its resume — sticks to one engine.
@@ -73,10 +74,11 @@ dependencies = [
     # adapts them onto whichever engine is active; crewai-tools would add
     # pymupdf, pytube and youtube-transcript-api for nothing.
     #
-    # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84,
-    # which this project pins at 1.74.9 above. The CrewAI engine runs on Kasal's
-    # own transport instead (a BaseLLM subclass), so the extra is unnecessary
-    # AND the conflict never arises — and Databricks auth, retry/fallback, the
+    # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84;
+    # litellm is pinned independently above (==1.84.0, for completion_with_usage
+    # only). The CrewAI engine runs on Kasal's own transport instead (a BaseLLM
+    # subclass), so the extra is unnecessary and the two pins never have to move
+    # together — and Databricks auth, retry/fallback, the
     # context-window clamp and every LLM event stay identical across engines.
     "crewai==1.15.20",
     # Observability
@@ -88,23 +90,18 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0,<2.0.0",
     # Utils
     "openpyxl>=3.1.0", # PowerBI MQuery conversion report parsing (was transitive via crewai)
-    "tenacity>=8.2.3",
     "croniter",
     "psutil",
-    "rich>=14.2.0",
-    "redis>=5.0.0",
+    "redis>=5.0.0", # no direct import: backs LITELLM_CACHE_TYPE=redis (litellm) and redis:// rate-limit storage (limits)
     "aiofiles>=23.0.0",
     "rapidfuzz>=3.0.0", # Power BI metadata fuzzy matching (optional; falls back to difflib)
     # Protobuf (version pinned for compatibility)
     "protobuf>=5.29.0,<6.0.0",
     "grpcio-status>=1.62.0,<1.71.0",
     # Tools
-    "google-api-python-client",
-    "pysendpulse",
-    "nixtla",
-    "selenium",
-    "python-pptx",
-    "wheel",
+    # google-api-python-client, pysendpulse, nixtla, selenium, python-pptx and
+    # wheel were removed: 0 imports (they backed crewai-tools-era tools that no
+    # longer exist; PPTX export is client-side via pptxgenjs).
     "ollama>=0.6.2",
     "gepa>=0.1.4",
 ]
