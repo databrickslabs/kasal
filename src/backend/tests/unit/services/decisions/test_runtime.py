@@ -53,6 +53,20 @@ async def test_disabled_workspace_never_calls_provider_or_traces(gateway):
 
 
 @pytest.mark.asyncio
+async def test_an_undecryptable_key_falls_back_and_says_why(gateway, caplog):
+    """The run still falls back, but the log names the fault instead of
+    looking like a workspace that simply has no key."""
+    from src.services.decisions.settings import DecisionCredentialUnreadable
+
+    credential, provider, trace = gateway
+    credential.side_effect = DecisionCredentialUnreadable()
+    assert await runtime.decide("test", {}, QUESTIONS, group_id="one") is None
+    provider.assert_not_awaited()
+    trace.assert_not_called()
+    assert "DecisionCredentialUnreadable" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_unconfigured_endpoint_is_off_without_reading_credentials(
     gateway, monkeypatch
 ):
