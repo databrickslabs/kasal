@@ -23,6 +23,7 @@ from src.core.llm.robust_json import robust_json_parser
 from src.services.catalog.templates import TemplateService
 from src.services.llm.manager import LLMManager
 from src.services.skills import draft_run, parser
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 from src.utils.user_context import GroupContext
 
@@ -158,7 +159,8 @@ async def _ask(
     began = time.monotonic()
     content, served = await LLMManager.completion(
         messages=messages,
-        model=model,
+        # No model picked: the engine default, as the other generators do.
+        model=model or DEFAULT_ENGINE_MODEL,
         temperature=0.4,
         max_tokens=4000,
         extra_headers=get_user_agent_header(KasalProduct.SKILL),
