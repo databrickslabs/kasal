@@ -38,26 +38,6 @@
       "count": 5
     },
     {
-      "file": "src/api/agentbricks_router.py",
-      "message": "Missing named argument \"creator_filter\" for \"AgentBricksEndpointsRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/agentbricks_router.py",
-      "message": "Missing named argument \"endpoint_ids\" for \"AgentBricksEndpointsRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/agentbricks_router.py",
-      "message": "Missing named argument \"host\" for \"AgentBricksAuthConfig\"  [call-arg]",
-      "count": 5
-    },
-    {
-      "file": "src/api/agentbricks_router.py",
-      "message": "Missing named argument \"pat_token\" for \"AgentBricksAuthConfig\"  [call-arg]",
-      "count": 5
-    },
-    {
       "file": "src/api/agents_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 7
@@ -93,26 +73,6 @@
       "count": 3
     },
     {
-      "file": "src/api/chat_history_router.py",
-      "message": "Argument \"sessions\" to \"ChatSessionListResponse\" has incompatible type \"list[dict[Any, Any]]\"; expected \"list[ChatSessionInfo]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/chat_history_router.py",
-      "message": "Missing named argument \"data\" for \"SessionPreviewResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/chat_history_router.py",
-      "message": "Missing named argument \"title\" for \"SessionPreviewResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/chat_history_router.py",
-      "message": "Missing named argument \"type\" for \"SessionPreviewResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/api/connections_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
@@ -134,48 +94,8 @@
     },
     {
       "file": "src/api/crews_export_router.py",
-      "message": "Argument \"instances\" to \"LakebaseInstancesResponse\" has incompatible type \"list[dict[str, Any]]\"; expected \"list[LakebaseInstance]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 6
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"databricks_catalog\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"databricks_schema\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"databricks_warehouse_id\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"experiment_id\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"include_memory_config\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"lakebase_instance\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/crews_export_router.py",
-      "message": "Missing named argument \"mlflow_experiment_name\" for \"ExportOptions\"  [call-arg]",
-      "count": 1
     },
     {
       "file": "src/api/crews_router.py",
@@ -241,11 +161,6 @@
       "file": "src/api/documentation_embeddings_router.py",
       "message": "Incompatible default for argument \"group_context\" (default has type \"None\", argument has type \"GroupContext\")  [assignment]",
       "count": 5
-    },
-    {
-      "file": "src/api/engine_config_router.py",
-      "message": "Argument \"configs\" to \"EngineConfigListResponse\" has incompatible type \"list[EngineConfig]\"; expected \"list[EngineConfigResponse]\"  [arg-type]",
-      "count": 3
     },
     {
       "file": "src/api/engine_config_router.py",
@@ -394,31 +309,6 @@
     },
     {
       "file": "src/api/flows_router.py",
-      "message": "Argument \"crew_id\" to \"FlowResponse\" has incompatible type \"Column[UUID]\"; expected \"UUID | None\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/api/flows_router.py",
-      "message": "Argument \"flow_config\" to \"FlowResponse\" has incompatible type \"Column[Any] | dict[Never, Never]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/api/flows_router.py",
-      "message": "Argument \"flow_uuid\" to \"CheckpointInfo\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/flows_router.py",
-      "message": "Argument \"id\" to \"FlowResponse\" has incompatible type \"Column[Any]\"; expected \"UUID | str\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/api/flows_router.py",
-      "message": "Argument \"name\" to \"FlowResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/api/flows_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 14
     },
@@ -433,93 +323,8 @@
       "count": 5
     },
     {
-      "file": "src/api/genie_router.py",
-      "message": "Missing named argument \"enabled_only\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/genie_router.py",
-      "message": "Missing named argument \"host\" for \"GenieAuthConfig\"  [call-arg]",
-      "count": 5
-    },
-    {
-      "file": "src/api/genie_router.py",
-      "message": "Missing named argument \"pat_token\" for \"GenieAuthConfig\"  [call-arg]",
-      "count": 5
-    },
-    {
-      "file": "src/api/genie_router.py",
-      "message": "Missing named argument \"search_query\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/genie_router.py",
-      "message": "Missing named argument \"space_ids\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/api/group_router.py",
       "message": "Argument \"assigned_by_email\" to \"assign_user_to_group\" of \"GroupService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupResponse\" has incompatible type \"**dict[str, object]\"; expected \"GroupStatus\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupResponse\" has incompatible type \"**dict[str, object]\"; expected \"bool\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupResponse\" has incompatible type \"**dict[str, object]\"; expected \"datetime\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupResponse\" has incompatible type \"**dict[str, object]\"; expected \"int\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupResponse\" has incompatible type \"**dict[str, object]\"; expected \"str | None\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupResponse\" has incompatible type \"**dict[str, object]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupUserResponse\" has incompatible type \"**dict[str, object]\"; expected \"GroupUserRole\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupUserResponse\" has incompatible type \"**dict[str, object]\"; expected \"GroupUserStatus\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupUserResponse\" has incompatible type \"**dict[str, object]\"; expected \"bool | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupUserResponse\" has incompatible type \"**dict[str, object]\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupUserResponse\" has incompatible type \"**dict[str, object]\"; expected \"datetime\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"GroupUserResponse\" has incompatible type \"**dict[str, object]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -541,56 +346,6 @@
       "file": "src/api/healthcheck_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"approval_comment\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"created_at\" to \"HITLApprovalResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"crew_sequence\" to \"HITLApprovalResponse\" has incompatible type \"Column[int]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"execution_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"expires_at\" to \"HITLApprovalResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"flow_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"flow_state_snapshot\" to \"HITLApprovalResponse\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"gate_config\" to \"HITLApprovalResponse\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"gate_node_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"group_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/api/hitl_router.py",
@@ -635,36 +390,6 @@
     {
       "file": "src/api/hitl_router.py",
       "message": "Argument \"group_id\" to \"update_webhook\" of \"HITLWebhookService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"id\" to \"HITLApprovalResponse\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"previous_crew_name\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"previous_crew_output\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"rejection_reason\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"responded_at\" to \"HITLApprovalResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument \"responded_by\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
       "count": 1
     },
     {
@@ -728,26 +453,6 @@
       "count": 1
     },
     {
-      "file": "src/api/mcp_router.py",
-      "message": "Missing named argument \"enabled_only\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/mcp_router.py",
-      "message": "Missing named argument \"host\" for \"GenieAuthConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/mcp_router.py",
-      "message": "Missing named argument \"pat_token\" for \"GenieAuthConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/mcp_router.py",
-      "message": "Missing named argument \"space_ids\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/api/mcp_server_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 3
@@ -808,43 +513,8 @@
       "count": 1
     },
     {
-      "file": "src/api/memory_backend/configs_router.py",
-      "message": "Missing named argument \"custom_config\" for \"MemoryBackendCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/configs_router.py",
-      "message": "Missing named argument \"databricks_config\" for \"MemoryBackendCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/configs_router.py",
-      "message": "Missing named argument \"description\" for \"MemoryBackendCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/configs_router.py",
-      "message": "Missing named argument \"lakebase_config\" for \"MemoryBackendCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/api/memory_backend/lakebase_router.py",
       "message": "Argument 1 to \"replace_memory_backend\" of \"MemoryBackendService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/lakebase_router.py",
-      "message": "Missing named argument \"custom_config\" for \"MemoryBackendCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/lakebase_router.py",
-      "message": "Missing named argument \"databricks_config\" for \"MemoryBackendCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/lakebase_router.py",
-      "message": "Missing named argument \"description\" for \"MemoryBackendCreate\"  [call-arg]",
       "count": 1
     },
     {
@@ -884,38 +554,8 @@
     },
     {
       "file": "src/api/models_router.py",
-      "message": "Argument \"models\" to \"ModelListResponse\" has incompatible type \"list[ModelConfig]\"; expected \"list[ModelConfigResponse]\"  [arg-type]",
-      "count": 5
-    },
-    {
-      "file": "src/api/models_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 11
-    },
-    {
-      "file": "src/api/powerbi_router.py",
-      "message": "Argument \"client_id\" to \"PowerBIConfigResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/powerbi_router.py",
-      "message": "Argument \"enabled\" to \"PowerBIConfigResponse\" has incompatible type \"Column[bool]\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/powerbi_router.py",
-      "message": "Argument \"semantic_model_id\" to \"PowerBIConfigResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/powerbi_router.py",
-      "message": "Argument \"tenant_id\" to \"PowerBIConfigResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/powerbi_router.py",
-      "message": "Argument \"workspace_id\" to \"PowerBIConfigResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/api/powerbi_router.py",
@@ -956,11 +596,6 @@
       "file": "src/api/skills_router.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/api/skills_router.py",
-      "message": "List comprehension has incompatible type List[dict[str, Any]]; expected List[SkillFileResponse]  [misc]",
-      "count": 1
     },
     {
       "file": "src/api/sse_router.py",
@@ -1265,7 +900,7 @@
     {
       "file": "src/core/rate_limit.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/core/rate_limit.py",
@@ -1834,11 +1469,6 @@
     },
     {
       "file": "src/repositories/agentbricks_repository.py",
-      "message": "Argument \"state\" to \"AgentBricksEndpoint\" has incompatible type \"str | Any\"; expected \"AgentBricksEndpointState | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
     },
@@ -1871,46 +1501,6 @@
       "file": "src/repositories/agentbricks_repository.py",
       "message": "Item \"None\" of \"AsyncClient | None\" has no attribute \"post\"  [union-attr]",
       "count": 1
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"error\" for \"AgentBricksQueryResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"filtered\" for \"AgentBricksEndpointsResponse\"  [call-arg]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"result\" for \"AgentBricksExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"stream\" for \"AgentBricksQueryRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"total_count\" for \"AgentBricksEndpointsResponse\"  [call-arg]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"trace\" for \"AgentBricksExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"trace\" for \"AgentBricksQueryResponse\"  [call-arg]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/agentbricks_repository.py",
-      "message": "Missing named argument \"usage\" for \"AgentBricksQueryResponse\"  [call-arg]",
-      "count": 3
     },
     {
       "file": "src/repositories/api_key_repository.py",
@@ -2464,106 +2054,6 @@
     },
     {
       "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"columns\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"created_at\" for \"GenieSpace\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"data\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"error\" for \"GenieExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"error\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"execution_time\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"filtered\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"has_more\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"next_page_token\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"page_size\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"query_id\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"query_result\" for \"GenieExecutionResponse\"  [call-arg]",
-      "count": 5
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"response\" for \"GenieSendMessageResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"result\" for \"GenieExecutionResponse\"  [call-arg]",
-      "count": 5
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"result\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"row_count\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"sql\" for \"GenieQueryResult\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"title\" for \"GenieStartConversationRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"total_fetched\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
-      "message": "Missing named argument \"updated_at\" for \"GenieSpace\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/genie_repository.py",
       "message": "Returning Any from function declared to return \"list[GenieSpace]\"  [no-any-return]",
       "count": 2
     },
@@ -2893,16 +2383,6 @@
       "count": 3
     },
     {
-      "file": "src/schemas/crew_export.py",
-      "message": "Argument \"default_factory\" to \"Field\" has incompatible type \"type[AppDeploymentConfig]\"; expected \"Callable[[], Never] | Callable[[dict[str, Any]], Never]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/schemas/crew_export.py",
-      "message": "Argument \"default_factory\" to \"Field\" has incompatible type \"type[ExportOptions]\"; expected \"Callable[[], Never] | Callable[[dict[str, Any]], Never]\"  [arg-type]",
-      "count": 2
-    },
-    {
       "file": "src/schemas/crew_feedback.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
@@ -2985,11 +2465,6 @@
     {
       "file": "src/schemas/task.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/schemas/task_generation.py",
-      "message": "Argument \"default_factory\" to \"Field\" has incompatible type \"type[AdvancedConfig]\"; expected \"Callable[[], Never] | Callable[[dict[str, Any]], Never]\"  [arg-type]",
       "count": 1
     },
     {
@@ -3130,11 +2605,6 @@
     {
       "file": "src/services/a2a/a2a_server/push.py",
       "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/a2a/a2a_server/render.py",
-      "message": "Argument \"state\" to \"TaskStatus\" has incompatible type \"str\"; expected \"Literal['TASK_STATE_SUBMITTED', 'TASK_STATE_WORKING', 'TASK_STATE_INPUT_REQUIRED', 'TASK_STATE_AUTH_REQUIRED', 'TASK_STATE_COMPLETED', 'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_REJECTED']\"  [arg-type]",
       "count": 2
     },
     {
@@ -3419,21 +2889,6 @@
     },
     {
       "file": "src/services/catalog/templates.py",
-      "message": "Argument 1 to \"PromptTemplateCreate\" has incompatible type \"**dict[str, object]\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Argument 1 to \"PromptTemplateCreate\" has incompatible type \"**dict[str, object]\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Argument 1 to \"PromptTemplateCreate\" has incompatible type \"**dict[str, object]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/catalog/templates.py",
       "message": "Argument 1 to \"delete\" of \"TemplateRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
       "count": 1
     },
@@ -3624,16 +3079,6 @@
     },
     {
       "file": "src/services/chat/dispatcher.py",
-      "message": "Missing named argument \"agent\" for \"TaskGenerationRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/chat/dispatcher.py",
-      "message": "Missing named argument \"markdown\" for \"TaskGenerationRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/chat/dispatcher.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 1
     },
@@ -3641,26 +3086,6 @@
       "file": "src/services/chat/dispatcher.py",
       "message": "Unpacking a string is disallowed  [misc]",
       "count": 2
-    },
-    {
-      "file": "src/services/chat/history.py",
-      "message": "Argument 1 to \"ChatHistoryResponse\" has incompatible type \"**dict[str, datetime | str | dict[Any, Any] | None]\"; expected \"datetime\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/chat/history.py",
-      "message": "Argument 1 to \"ChatHistoryResponse\" has incompatible type \"**dict[str, datetime | str | dict[Any, Any] | None]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/chat/history.py",
-      "message": "Argument 1 to \"ChatHistoryResponse\" has incompatible type \"**dict[str, datetime | str | dict[Any, Any] | None]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/chat/history.py",
-      "message": "Argument 1 to \"ChatHistoryResponse\" has incompatible type \"**dict[str, datetime | str | dict[Any, Any] | None]\"; expected \"str\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/chat/history.py",
@@ -3834,16 +3259,6 @@
     },
     {
       "file": "src/services/converters/common/transformers/structures.py",
-      "message": "Unexpected keyword argument \"filters\" for \"KPI\"; did you mean \"filter\"?  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/converters/common/transformers/structures.py",
-      "message": "Unexpected keyword argument \"filters\" for \"Structure\"; did you mean \"filter\"?  [call-arg]",
-      "count": 3
-    },
-    {
-      "file": "src/services/converters/common/transformers/structures.py",
       "message": "Unsupported operand types for + (\"list[str | dict[str, Any]]\" and \"list[str]\")  [operator]",
       "count": 1
     },
@@ -3910,11 +3325,6 @@
     {
       "file": "src/services/converters/common/transformers/yaml.py",
       "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/common/transformers/yaml.py",
-      "message": "Unexpected keyword argument \"filters\" for \"KPI\"; did you mean \"filter\"?  [call-arg]",
       "count": 1
     },
     {
@@ -3993,11 +3403,6 @@
       "count": 1
     },
     {
-      "file": "src/services/converters/formats/mquery/connector.py",
-      "message": "Unexpected keyword argument \"filters\" for \"KPI\"; did you mean \"filter\"?  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/converters/formats/mquery/llm_converter.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 1
@@ -4060,11 +3465,6 @@
     {
       "file": "src/services/converters/formats/powerbi/connector.py",
       "message": "Signature of \"extract_measures\" incompatible with supertype \"src.services.converters.base.connectors.BaseInboundConnector\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/powerbi/connector.py",
-      "message": "Unexpected keyword argument \"filters\" for \"KPI\"; did you mean \"filter\"?  [call-arg]",
       "count": 1
     },
     {
@@ -4264,16 +3664,6 @@
     },
     {
       "file": "src/services/converters/formats/sql/helpers/sql_structures.py",
-      "message": "Argument \"display_sign\" to \"SQLMeasure\" has incompatible type \"int | None\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/sql/helpers/sql_structures.py",
-      "message": "Argument \"display_sign\" to \"SQLStructure\" has incompatible type \"int | None\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/sql/helpers/sql_structures.py",
       "message": "Argument 1 to \"_convert_filters_to_sql\" of \"SQLStructureExpander\" has incompatible type \"list[str | dict[str, Any]]\"; expected \"list[str]\"  [arg-type]",
       "count": 2
     },
@@ -4345,11 +3735,6 @@
     {
       "file": "src/services/converters/formats/sql/helpers/sql_structures.py",
       "message": "Need type annotation for \"table_measures\" (hint: \"table_measures: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/sql/helpers/sql_structures.py",
-      "message": "Unexpected keyword argument \"filters\" for \"KPI\"; did you mean \"filter\"?  [call-arg]",
       "count": 1
     },
     {
@@ -4543,61 +3928,6 @@
       "count": 1
     },
     {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"creator_filter\" for \"AgentBricksEndpointsRequest\"  [call-arg]",
-      "count": 4
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"endpoint_ids\" for \"AgentBricksEndpointsRequest\"  [call-arg]",
-      "count": 4
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"filtered\" for \"AgentBricksEndpointsResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"ready_only\" for \"AgentBricksEndpointsRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"result\" for \"AgentBricksExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"search_query\" for \"AgentBricksEndpointsRequest\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"stream\" for \"AgentBricksQueryRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"total_count\" for \"AgentBricksEndpointsResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"trace\" for \"AgentBricksExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"trace\" for \"AgentBricksQueryResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/agentbricks/service.py",
-      "message": "Missing named argument \"usage\" for \"AgentBricksQueryResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/databricks/analytics/export.py",
       "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
       "count": 1
@@ -4616,106 +3946,6 @@
       "file": "src/services/databricks/analytics/export.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument \"status\" to \"GenieExecutionResponse\" has incompatible type \"str\"; expected \"GenieQueryStatus\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument 2 to \"GenieSpacesRequest\" has incompatible type \"**dict[str, int]\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument 2 to \"GenieSpacesRequest\" has incompatible type \"**dict[str, int]\"; expected \"list[str] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument 2 to \"GenieSpacesRequest\" has incompatible type \"**dict[str, int]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument 3 to \"GenieSpacesRequest\" has incompatible type \"**dict[str, str]\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument 3 to \"GenieSpacesRequest\" has incompatible type \"**dict[str, str]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Argument 3 to \"GenieSpacesRequest\" has incompatible type \"**dict[str, str]\"; expected \"list[str] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"enabled_only\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"filtered\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"has_more\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"max_retries\" for \"GenieExecutionRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"next_page_token\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"page_size\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"page_size\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"page_token\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"query_result\" for \"GenieExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"result\" for \"GenieExecutionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"search_query\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"space_ids\" for \"GenieSpacesRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/genie/service.py",
-      "message": "Missing named argument \"total_fetched\" for \"GenieSpacesResponse\"  [call-arg]",
-      "count": 2
     },
     {
       "file": "src/services/databricks/lakebase/connection.py",
@@ -4979,96 +4209,6 @@
     },
     {
       "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"ai_gateway_enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"catalog\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool]\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"evaluation_enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"evaluation_judge_model\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str] | None\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"knowledge_chunk_overlap\" to \"DatabricksConfigResponse\" has incompatible type \"Column[int] | int\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"knowledge_chunk_size\" to \"DatabricksConfigResponse\" has incompatible type \"Column[int] | int\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"knowledge_volume_enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"knowledge_volume_path\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str] | None\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"mlflow_enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"mlflow_experiment_name\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str] | str\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"schema\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"volume_create_date_dirs\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"volume_enabled\" to \"DatabricksConfigResponse\" has incompatible type \"Column[bool] | bool\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"volume_file_format\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str] | str\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"volume_path\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str] | None\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"warehouse_id\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
-      "message": "Argument \"workspace_url\" to \"DatabricksConfigResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/databricks/workspace/service.py",
       "message": "Argument 1 to \"_apply_ai_gateway_env\" of \"DatabricksService\" has incompatible type \"int | Any | str | None\"; expected \"bool\"  [arg-type]",
       "count": 1
     },
@@ -5085,7 +4225,7 @@
     {
       "file": "src/services/databricks/workspace/service.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/services/decks/slide_refine.py",
@@ -5106,21 +4246,6 @@
       "file": "src/services/deployment/crew.py",
       "message": "\"Column[Any]\" has no attribute \"__iter__\"; maybe \"__str__\"? (not iterable)  [attr-defined]",
       "count": 2
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Argument \"agents\" to \"Crew\" has incompatible type \"list[Agent]\"; expected \"list[BaseAgent]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Argument \"crew_name\" to \"DeploymentResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Argument \"deployment_target\" to \"DeploymentResponse\" has incompatible type \"str\"; expected \"DeploymentTarget\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/deployment/crew.py",
@@ -5241,91 +4366,6 @@
       "file": "src/services/execution/checkpointing/resume_config.py",
       "message": "Argument 1 to \"int\" has incompatible type \"str | None\"; expected \"str | Buffer | SupportsInt | SupportsIndex | SupportsTrunc\"  [arg-type]",
       "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"chat_mode_type\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"crew_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"edges\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"flow_config\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"flow_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"harness\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"llm_provider\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"memory_workspace_scope\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"nodes\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"reasoning\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"resume_checkpoint\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"resume_from_crew_sequence\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"resume_from_execution_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"resume_from_flow_uuid\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"schema_detection_enabled\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"session_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/checkpointing/resume_config.py",
-      "message": "Missing named argument \"user_message\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
     },
     {
       "file": "src/services/execution/checkpointing/service.py",
@@ -5634,26 +4674,6 @@
     },
     {
       "file": "src/services/execution/history.py",
-      "message": "Missing named argument \"deleted_job_id\" for \"DeleteResponse\"  [call-arg]",
-      "count": 4
-    },
-    {
-      "file": "src/services/execution/history.py",
-      "message": "Missing named argument \"deleted_outputs\" for \"DeleteResponse\"  [call-arg]",
-      "count": 4
-    },
-    {
-      "file": "src/services/execution/history.py",
-      "message": "Missing named argument \"deleted_run_id\" for \"DeleteResponse\"  [call-arg]",
-      "count": 4
-    },
-    {
-      "file": "src/services/execution/history.py",
-      "message": "Missing named argument \"deleted_runs\" for \"DeleteResponse\"  [call-arg]",
-      "count": 4
-    },
-    {
-      "file": "src/services/execution/history.py",
       "message": "Returning Any from function declared to return \"bool\"  [no-any-return]",
       "count": 4
     },
@@ -5876,11 +4896,6 @@
       "file": "src/services/execution/logs/queue.py",
       "message": "Incompatible return value type (got \"None\", expected \"Queue[Any]\")  [return-value]",
       "count": 1
-    },
-    {
-      "file": "src/services/execution/logs/writer.py",
-      "message": "Argument \"content\" to \"ExecutionLogResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/services/execution/logs/writer.py",
@@ -6328,21 +5343,6 @@
       "count": 1
     },
     {
-      "file": "src/services/external/authoring.py",
-      "message": "Argument \"data\" to \"Node\" has incompatible type \"dict[str, Any | str | list[Any] | None]\"; expected \"NodeData\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/authoring.py",
-      "message": "Argument \"position\" to \"Node\" has incompatible type \"dict[str, float]\"; expected \"Position\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/authoring.py",
-      "message": "Missing named argument \"api_key\" for \"CrewGenerationRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/external/identity.py",
       "message": "Argument \"access_token\" to \"from_email\" of \"GroupContext\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 1
@@ -6366,96 +5366,6 @@
       "file": "src/services/external/invocation.py",
       "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"UUID\")  [assignment]",
       "count": 1
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"chat_mode_type\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"crew_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"edges\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"flow_config\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"flow_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"harness\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"llm_provider\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"memory_workspace_scope\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"model\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"nodes\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"reasoning\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"resume_checkpoint\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"resume_from_crew_sequence\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"resume_from_execution_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"resume_from_flow_uuid\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"schema_detection_enabled\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"session_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/external/invocation.py",
-      "message": "Missing named argument \"user_message\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
     },
     {
       "file": "src/services/external/invocation.py",
@@ -6665,16 +5575,6 @@
     {
       "file": "src/services/flow_builder/flow_service.py",
       "message": "Incompatible return value type (got \"Flow | None\", expected \"Flow\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/generation.py",
-      "message": "Argument \"edges\" to \"FlowGenerationResponse\" has incompatible type \"list[dict[str, Collection[str]]]\"; expected \"list[Edge]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/generation.py",
-      "message": "Argument \"nodes\" to \"FlowGenerationResponse\" has incompatible type \"list[dict[str, Collection[str]]]\"; expected \"list[Node]\"  [arg-type]",
       "count": 1
     },
     {
@@ -7063,11 +5963,6 @@
       "count": 1
     },
     {
-      "file": "src/services/generation/connections.py",
-      "message": "Unexpected keyword argument \"explanation\" for \"ConnectionResponse\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/generation/crew/answer_mode.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
@@ -7154,16 +6049,6 @@
     },
     {
       "file": "src/services/generation/crew/conversation.py",
-      "message": "Missing named argument \"api_key\" for \"CrewGenerationRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/generation/crew/conversation.py",
-      "message": "Missing named argument \"tools\" for \"CrewGenerationRequest\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/generation/crew/conversation.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 1
     },
@@ -7235,11 +6120,6 @@
     {
       "file": "src/services/generation/crew/progressive.py",
       "message": "Incompatible types in assignment (expression has type \"nullcontext[None]\", variable has type \"_GeneratorContextManager[Any, None, None]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/generation/crew/progressive.py",
-      "message": "Missing named argument \"markdown\" for \"TaskGenerationRequest\"  [call-arg]",
       "count": 2
     },
     {
@@ -7604,27 +6484,7 @@
     },
     {
       "file": "src/services/hitl/service.py",
-      "message": "Argument \"approval_comment\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
       "message": "Argument \"approval_id\" to \"update_status\" of \"HITLApprovalRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"created_at\" to \"HITLApprovalResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"crew_sequence\" to \"HITLApprovalResponse\" has incompatible type \"Column[int]\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"execution_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
       "count": 2
     },
     {
@@ -7634,62 +6494,7 @@
     },
     {
       "file": "src/services/hitl/service.py",
-      "message": "Argument \"expires_at\" to \"HITLApprovalResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"flow_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"flow_state_snapshot\" to \"HITLApprovalResponse\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"gate_config\" to \"HITLApprovalResponse\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"gate_node_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
       "message": "Argument \"group_email\" to \"GroupContext\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"group_id\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"id\" to \"HITLApprovalResponse\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"previous_crew_name\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"rejection_reason\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"responded_at\" to \"HITLApprovalResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"responded_by\" to \"HITLApprovalResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
       "count": 2
     },
     {
@@ -7724,43 +6529,8 @@
     },
     {
       "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"approval_id\" to \"HITLWebhookPayload\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
       "message": "Argument \"approval_id\" to \"mark_webhook_sent\" of \"HITLApprovalRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
       "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"created_at\" to \"HITLWebhookResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"enabled\" to \"HITLWebhookResponse\" has incompatible type \"Column[bool]\"; expected \"bool\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"execution_id\" to \"HITLWebhookPayload\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"expires_at\" to \"HITLWebhookPayload\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"flow_id\" to \"HITLWebhookPayload\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"flow_id\" to \"HITLWebhookResponse\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 3
     },
     {
       "file": "src/services/hitl/webhook.py",
@@ -7769,58 +6539,8 @@
     },
     {
       "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"gate_node_id\" to \"HITLWebhookPayload\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"group_id\" to \"HITLWebhookResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
       "message": "Argument \"group_id\" to \"get_for_event\" of \"HITLWebhookRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
       "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"headers\" to \"HITLWebhookResponse\" has incompatible type \"Column[Any]\"; expected \"dict[str, str] | None\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"id\" to \"HITLWebhookResponse\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"name\" to \"HITLWebhookResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"previous_crew_name\" to \"HITLWebhookPayload\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"previous_crew_output_preview\" to \"HITLWebhookPayload\" has incompatible type \"ColumnElement[Any] | None\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"responded_by\" to \"HITLWebhookPayload\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"updated_at\" to \"HITLWebhookResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"url\" to \"HITLWebhookResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 3
     },
     {
       "file": "src/services/hitl/webhook.py",
@@ -7980,61 +6700,6 @@
     {
       "file": "src/services/llm/manager.py",
       "message": "Argument \"type\" to \"enable_cache\" has incompatible type \"str\"; expected \"LiteLLMCacheType | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"Literal['completions', 'responses']\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"Literal['openai']\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"bool | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"float | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"int | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"list[str] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -8146,16 +6811,6 @@
       "file": "src/services/memory/config/backend_service.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 5
-    },
-    {
-      "file": "src/services/memory/config/config_service.py",
-      "message": "Argument \"backend_type\" to \"MemoryBackendConfig\" has incompatible type \"Column[Any]\"; expected \"MemoryBackendType\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/memory/config/config_service.py",
-      "message": "Argument \"custom_config\" to \"MemoryBackendConfig\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/services/memory/config/lakebase_service.py",
@@ -8290,11 +6945,6 @@
     {
       "file": "src/services/memory/storage/lakebase.py",
       "message": "Returning Any from function declared to return \"list[tuple[MemoryRecord, float]]\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/memory/storage/local.py",
-      "message": "Argument \"kind\" to \"MemoryRecord\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -8478,68 +7128,13 @@
       "count": 1
     },
     {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"execution_id\" for \"ConversionHistoryFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"is_public\" for \"SavedConfigurationFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"is_template\" for \"SavedConfigurationFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"search\" for \"SavedConfigurationFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"source_format\" for \"ConversionHistoryFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"source_format\" for \"SavedConfigurationFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"status\" for \"ConversionHistoryFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"target_format\" for \"ConversionHistoryFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
-      "message": "Missing named argument \"target_format\" for \"SavedConfigurationFilter\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/powerbi/extractions.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 1
     },
     {
       "file": "src/services/powerbi/kpi_conversion.py",
-      "message": "Argument \"source_format\" to \"ConversionResponse\" has incompatible type \"src.services.converters.base.converter.ConversionFormat\"; expected \"src.schemas.kpi_conversion.ConversionFormat\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/kpi_conversion.py",
       "message": "Argument \"source_format\" to \"convert\" of \"KPIConversionService\" has incompatible type \"src.schemas.kpi_conversion.ConversionFormat\"; expected \"src.services.converters.base.converter.ConversionFormat\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/kpi_conversion.py",
-      "message": "Argument \"target_format\" to \"ConversionResponse\" has incompatible type \"src.services.converters.base.converter.ConversionFormat\"; expected \"src.schemas.kpi_conversion.ConversionFormat\"  [arg-type]",
       "count": 1
     },
     {
@@ -8611,11 +7206,6 @@
       "file": "src/services/powerbi/service.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/services/powerbi/service.py",
-      "message": "Missing named argument \"error\" for \"DAXQueryResponse\"  [call-arg]",
-      "count": 1
     },
     {
       "file": "src/services/powerbi/service.py",
@@ -8783,91 +7373,6 @@
       "count": 1
     },
     {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"chat_mode_type\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"crew_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"edges\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"flow_config\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"flow_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"harness\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"llm_provider\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"memory_workspace_scope\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"nodes\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"reasoning\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"resume_checkpoint\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"resume_from_crew_sequence\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"resume_from_execution_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"resume_from_flow_uuid\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"schema_detection_enabled\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"session_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/reflection.py",
-      "message": "Missing named argument \"user_message\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
       "file": "src/services/prompt_optimization/judge_registry.py",
       "message": "Argument 1 to \"int\" has incompatible type \"Any | None\"; expected \"str | Buffer | SupportsInt | SupportsIndex | SupportsTrunc\"  [arg-type]",
       "count": 1
@@ -8940,21 +7445,6 @@
     {
       "file": "src/services/prompt_optimization/runs.py",
       "message": "Argument 3 to \"update_with_group_check\" of \"TemplateService\" has incompatible type \"GroupContext | None\"; expected \"GroupContext\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/prompt_optimization/runs.py",
-      "message": "Missing named argument \"description\" for \"PromptTemplateUpdate\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/prompt_optimization/runs.py",
-      "message": "Missing named argument \"is_active\" for \"PromptTemplateUpdate\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/prompt_optimization/runs.py",
-      "message": "Missing named argument \"name\" for \"PromptTemplateUpdate\"  [call-arg]",
       "count": 2
     },
     {
@@ -9169,31 +7659,6 @@
     },
     {
       "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"agents_yaml\" to \"CrewConfig\" has incompatible type \"Column[Any] | dict[Never, Never]\"; expected \"dict[str, dict[str, Any]]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"created_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime] | Any\"; expected \"datetime\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"created_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"enabled\" to \"SchedulerJobResponse\" has incompatible type \"Column[bool] | Any\"; expected \"bool\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"enabled\" to \"SchedulerJobResponse\" has incompatible type \"Column[bool]\"; expected \"bool\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
       "message": "Argument \"group_email\" to \"GroupContext\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
       "count": 1
     },
@@ -9206,81 +7671,6 @@
       "file": "src/services/scheduling/scheduler.py",
       "message": "Argument \"group_id\" to \"create_run_record\" of \"ExecutionService\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
       "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"id\" to \"SchedulerJobResponse\" has incompatible type \"Column[Any] | Any\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"id\" to \"SchedulerJobResponse\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"inputs\" to \"CrewConfig\" has incompatible type \"Column[Any] | dict[Never, Never]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"last_run_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime] | Any\"; expected \"datetime | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"last_run_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"model\" to \"CrewConfig\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"name\" to \"SchedulerJobResponse\" has incompatible type \"Column[str] | Any\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"name\" to \"SchedulerJobResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"next_run_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime] | Any\"; expected \"datetime | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"next_run_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"schedule\" to \"SchedulerJobResponse\" has incompatible type \"Column[str] | Any\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"schedule\" to \"SchedulerJobResponse\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 4
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"tasks_yaml\" to \"CrewConfig\" has incompatible type \"Column[Any] | dict[Never, Never]\"; expected \"dict[str, dict[str, Any]]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"updated_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime] | Any\"; expected \"datetime\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"updated_at\" to \"SchedulerJobResponse\" has incompatible type \"Column[datetime]\"; expected \"datetime\"  [arg-type]",
-      "count": 4
     },
     {
       "file": "src/services/scheduling/scheduler.py",
@@ -9381,81 +7771,6 @@
       "file": "src/services/scheduling/scheduler.py",
       "message": "Item \"None\" of \"Schedule | None\" has no attribute \"updated_at\"  [union-attr]",
       "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"chat_mode_type\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"crew_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"edges\" for \"ScheduleCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"flow_config\" for \"ScheduleCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"flow_id\" for \"ScheduleCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"harness\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"llm_provider\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"memory_workspace_scope\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"nodes\" for \"ScheduleCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"resume_checkpoint\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"resume_from_crew_sequence\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"resume_from_execution_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"resume_from_flow_uuid\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"session_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Missing named argument \"user_message\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
     },
     {
       "file": "src/services/security/scanner_pipeline.py",
@@ -9690,16 +8005,6 @@
     {
       "file": "src/services/skills/service.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/skills/uc_sync.py",
-      "message": "Argument \"files\" to \"SkillCreate\" has incompatible type \"list[dict[str, Any]] | None\"; expected \"list[SkillFileInput] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/skills/uc_sync.py",
-      "message": "Argument \"files\" to \"SkillUpdate\" has incompatible type \"list[dict[str, Any]]\"; expected \"list[SkillFileInput] | None\"  [arg-type]",
       "count": 1
     },
     {
@@ -10719,31 +9024,6 @@
     },
     {
       "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"converter_version\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"error_message\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"execution_time_ms\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"extra_metadata\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"warnings\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 2
     },
@@ -10830,31 +9110,6 @@
     {
       "file": "src/services/tools/pipeline_config_generator_tool.py",
       "message": "Item \"tuple[str, ...]\" of \"str | tuple[str, str]\" has no attribute \"strip\"  [union-attr]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pipeline_config_generator_tool.py",
-      "message": "Missing named argument \"converter_version\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pipeline_config_generator_tool.py",
-      "message": "Missing named argument \"error_message\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pipeline_config_generator_tool.py",
-      "message": "Missing named argument \"execution_time_ms\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pipeline_config_generator_tool.py",
-      "message": "Missing named argument \"extra_metadata\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pipeline_config_generator_tool.py",
-      "message": "Missing named argument \"warnings\" for \"ConversionHistoryCreate\"  [call-arg]",
       "count": 1
     },
     {
@@ -11146,21 +9401,6 @@
       "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
       "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"None\")  [assignment]",
       "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Missing named argument \"converter_version\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Missing named argument \"measure_count\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Missing named argument \"warnings\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
     },
     {
       "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
@@ -11514,31 +9754,6 @@
     },
     {
       "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Missing named argument \"converter_version\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Missing named argument \"error_message\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Missing named argument \"execution_time_ms\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Missing named argument \"extra_metadata\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Missing named argument \"warnings\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
       "message": "Need type annotation for \"extract\" (hint: \"extract: list[<type>] = ...\")  [var-annotated]",
       "count": 1
     },
@@ -11659,11 +9874,6 @@
     },
     {
       "file": "src/services/trace/service.py",
-      "message": "Missing named argument \"deleted_trace_id\" for \"DeleteTraceResponse\"  [call-arg]",
-      "count": 12
-    },
-    {
-      "file": "src/services/trace/service.py",
       "message": "Returning Any from function declared to return \"list[Any]\"  [no-any-return]",
       "count": 2
     },
@@ -11690,91 +9900,6 @@
     {
       "file": "src/services/triggers/queue_consumer_service.py",
       "message": "Incompatible return value type (got \"Column[str]\", expected \"str\")  [return-value]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"chat_mode_type\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"crew_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"edges\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"flow_config\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"flow_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"llm_provider\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"memory_workspace_scope\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"model\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"nodes\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"reasoning\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"resume_checkpoint\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"resume_from_crew_sequence\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"resume_from_execution_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"resume_from_flow_uuid\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"schema_detection_enabled\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"session_id\" for \"CrewConfig\"  [call-arg]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Missing named argument \"user_message\" for \"CrewConfig\"  [call-arg]",
       "count": 2
     },
     {
