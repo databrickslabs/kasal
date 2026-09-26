@@ -33,6 +33,7 @@ import litellm
 from litellm import CustomLogger
 
 from src.core.llm.transport import LLM
+from src.core.llm.transport.completion import NO_API_KEY
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
 
@@ -464,6 +465,21 @@ def _is_http_400(exc: Exception) -> bool:
     return False
 
 
+async def _self_hosted_api_key(provider: str, group_id: Optional[str]) -> str:
+    """The workspace's key for a self-hosted endpoint, or a harmless placeholder.
+
+    ``provider`` names the API key (``vllm`` -> VLLM_API_KEY, ``kat`` ->
+    KAT_API_KEY in Configuration -> API Keys). Self-hosted vLLM / KAT servers
+    usually run without auth, so no key is not an error. The key is never read
+    from os.environ (shared by every workspace).
+    """
+    if group_id:
+        key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+        if key:
+            return key
+    return NO_API_KEY
+
+
 class LLMManager:
     """The public facade for LLM work in kasal.
 
@@ -712,6 +728,9 @@ class LLMManager:
             val = getattr(llm, attr, None)
             if val:
                 call_kwargs[attr] = val
+        # litellm falls back to the provider's *_API_KEY in os.environ when no
+        # key is passed; that env is shared by every workspace, so never let it.
+        call_kwargs.setdefault("api_key", NO_API_KEY)
         # Merge telemetry headers with any caller-supplied ones.
         headers = dict(getattr(llm, "extra_headers", None) or {})
         if extra_headers:
@@ -1083,7 +1102,7 @@ class LLMManager:
         elif provider == ModelProvider.VLLM:
             # Self-hosted vLLM server — OpenAI-compatible endpoint
             api_base = os.getenv("VLLM_BASE_URL", "http://localhost:8081/v1")
-            api_key = os.getenv("VLLM_API_KEY", "vllm")
+            api_key = await _self_hosted_api_key("vllm", group_id)
             # No prefix, exactly like the OpenAI branch above. This used to build
             # "openai/<model>" so litellm would route it, and the register_model
             # call that went with it is already gone (the transport asks its own
@@ -1100,7 +1119,7 @@ class LLMManager:
         elif provider == ModelProvider.CUSTOM:
             # Custom self-hosted OpenAI-compatible endpoint.
             api_base = os.getenv("KAT_BASE_URL", "http://127.0.0.1:8082/v1")
-            api_key = os.getenv("KAT_API_KEY", "local-no-auth")
+            api_key = await _self_hosted_api_key("kat", group_id)
             prefixed_model = model_name_value
         elif provider == ModelProvider.KIMI:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no

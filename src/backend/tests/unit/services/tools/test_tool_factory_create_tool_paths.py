@@ -276,7 +276,7 @@ class TestCreateTool:
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        with patch.dict(os.environ, {"SERPER_API_KEY": "test-serper-key"}):
+        with patch.object(f, "_get_api_key", return_value="test-serper-key"):
             f.create_tool("SerperDevTool")
 
         call_kwargs = mock_cls.call_args[1]
@@ -293,7 +293,7 @@ class TestCreateTool:
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        with patch.dict(os.environ, {"SERPER_API_KEY": "key"}):
+        with patch.object(f, "_get_api_key", return_value="key"):
             f.create_tool("SerperDevTool")
 
         call_kwargs = mock_cls.call_args[1]
@@ -306,24 +306,28 @@ class TestCreateTool:
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        with patch.dict(os.environ, {"SERPER_API_KEY": "key"}):
+        with patch.object(f, "_get_api_key", return_value="key"):
             f.create_tool("SerperDevTool")
 
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("search_type") == "search"
 
-    def test_perplexity_tool_uses_env_key(self):
+    def test_perplexity_tool_uses_the_workspace_key_not_the_env(self):
         f = _make_factory()
         info = _make_tool_info("PerplexityTool", 3, config={})
         f._available_tools["PerplexityTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["PerplexityTool"] = mock_cls
 
-        with patch.dict(os.environ, {"PERPLEXITY_API_KEY": "env-perplexity-key"}):
+        with (
+            patch.dict(os.environ, {"PERPLEXITY_API_KEY": "env-perplexity-key"}),
+            patch.object(f, "_get_api_key", return_value="ws-key") as get_key,
+        ):
             f.create_tool("PerplexityTool")
 
+        get_key.assert_called_once_with("PERPLEXITY_API_KEY")
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("api_key") == "env-perplexity-key"
+        assert call_kwargs.get("api_key") == "ws-key"
 
     def test_perplexity_tool_key_from_config(self):
         f = _make_factory()

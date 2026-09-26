@@ -61,9 +61,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -129,9 +127,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -179,9 +175,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -231,9 +225,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -285,9 +277,7 @@ class TestRunFlowExecutionAdditional:
             ) as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -352,9 +342,7 @@ class TestRunDynamicFlowOuter:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session",
                 new=_smart_ctx,
@@ -394,9 +382,7 @@ class TestRunDynamicFlowOuter:
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ApiKeysService"
-            ) as MockApiSvc,
+            patch("src.services.settings.api_keys.ApiKeysService") as MockApiSvc,
             patch(
                 "src.services.flow_builder.flow_runner_service._smart_db_session"
             ) as mock_smart,

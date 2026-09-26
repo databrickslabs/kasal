@@ -97,6 +97,13 @@ def build_litellm_embedder(provider_config: dict) -> Any:
         if value and dst_key not in call_kwargs:
             call_kwargs[dst_key] = value
 
+    # litellm reads the provider's *_API_KEY from os.environ when none is
+    # passed. That environment is shared by every workspace, so an absent key
+    # is sent as an explicit placeholder rather than resolved from there.
+    from src.core.llm.transport.completion import NO_API_KEY
+
+    call_kwargs.setdefault("api_key", NO_API_KEY)
+
     def _embed(texts: list[str]) -> list[list[float]]:
         import litellm
 

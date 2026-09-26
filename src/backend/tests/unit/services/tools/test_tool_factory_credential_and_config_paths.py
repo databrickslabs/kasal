@@ -565,40 +565,20 @@ class TestGetApiKeySync:
 class TestInitializeWithApiKeysService:
 
     @pytest.mark.asyncio
-    async def test_initialize_preloads_api_keys(self):
-        """initialize() pre-loads API keys when api_keys_service is set."""
+    async def test_initialize_reads_no_keys_and_writes_none_to_env(self):
+        """initialize() no longer pre-loads keys into os.environ (shared by all
+        workspaces); each tool receives its workspace key at construction."""
         mock_svc = MagicMock()
+        mock_svc.find_by_name = AsyncMock()
         f = _make_factory(api_keys_service=mock_svc)
+        before = dict(os.environ)
 
-        with (
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-            patch(
-                "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-        ):
+        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock):
             await f.initialize()
 
         assert f._initialized is True
-
-    @pytest.mark.asyncio
-    async def test_initialize_key_preload_exception_does_not_fail(self):
-        """Exception during key preloading is logged but initialization completes."""
-        mock_svc = MagicMock()
-        f = _make_factory(api_keys_service=mock_svc)
-
-        with (
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-            patch(
-                "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
-                new_callable=AsyncMock,
-                side_effect=Exception("key error"),
-            ),
-        ):
-            await f.initialize()
-
-        assert f._initialized is True
+        mock_svc.find_by_name.assert_not_awaited()
+        assert dict(os.environ) == before
 
 
 # ─── _update_tool_config_async ───────────────────────────────────────────────
@@ -1129,21 +1109,19 @@ class TestUpdateToolConfigAsyncNonDictConfig:
         assert update_data.config == {"new": "val"}
 
 
-# ─── _sync_load_available_tools with api_keys preloading ────────────────────
+# ─── _sync_load_available_tools no longer preloads api keys ─────────────────
 
 
 class TestSyncLoadWithApiKeysPreloading:
 
-    def test_sync_load_preloads_env_keys_when_found(self):
-        """_sync_load_available_tools pre-loads API keys into env when found."""
+    def test_sync_load_never_writes_keys_into_the_environment(self):
+        """Keys are passed to each tool explicitly; the shared env is untouched."""
         mock_svc = MagicMock()
         f = _make_factory(api_keys_service=mock_svc)
+        names = ("SERPER_API_KEY", "PERPLEXITY_API_KEY", "OPENAI_API_KEY")
+        clean = {k: v for k, v in os.environ.items() if k not in names}
 
-        # Isolate environment changes so that API keys set inside
-        # _sync_load_available_tools (e.g. DATABRICKS_API_KEY) do not leak
-        # into subsequent tests and pollute the auth chain.
-        with patch.dict(os.environ, {}, clear=False):
-            # No running loop, uses new loop
+        with patch.dict(os.environ, clean, clear=True):
             with (
                 patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
                 patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
@@ -1152,12 +1130,11 @@ class TestSyncLoadWithApiKeysPreloading:
                     "_get_api_key_async",
                     new_callable=AsyncMock,
                     return_value="found-key",
-                ),
+                ) as get_key,
             ):
                 f._sync_load_available_tools()
-
-        # Should have pre-loaded SERPER_API_KEY into environment
-        # (or at least attempted to)
+            assert not any(n in os.environ for n in names)
+        get_key.assert_not_awaited()
 
     def test_sync_load_handles_key_loading_exception(self):
         """_sync_load_available_tools handles exception during key loading."""

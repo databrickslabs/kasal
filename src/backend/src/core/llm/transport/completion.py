@@ -8,7 +8,6 @@ ImportError is raised on first use if it is missing.
 """
 
 import logging
-import os
 import re
 from collections.abc import Callable, Generator
 from contextlib import closing
@@ -94,6 +93,11 @@ logger = logging.getLogger(__name__)
 # Databricks-served gpt-5* endpoints accept `reasoning_effort` alongside tools,
 # and blanket-dropping it there would silently disable reasoning that works.
 # An optional provider prefix ("openai/gpt-5.6-terra") is tolerated.
+#: Sent when no API key was resolved (keyless local vLLM/KAT, or a workspace
+#: with none configured). Explicit so the OpenAI SDK never falls back to
+#: OPENAI_API_KEY in the shared process environment.
+NO_API_KEY = "no-key-configured"
+
 _TOOLS_REJECT_REASONING_EFFORT_RE = re.compile(r"(?:^|/)gpt-5\.6")
 
 # Anthropic models that accept `thinking: {"type": "enabled", "budget_tokens": N}`
@@ -269,7 +273,13 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                     "package: pip install openai"
                 ) from e
             self._client = OpenAI(
-                api_key=self.api_key or os.environ.get("OPENAI_API_KEY"),
+                # Never an env fallback: the caller (LLMManager) resolves the
+                # workspace's key; os.environ is shared by every workspace. The
+                # OpenAI SDK reads OPENAI_API_KEY itself when api_key is None, so
+                # an absent key is sent as an explicit placeholder instead — an
+                # endpoint that needs one answers 401 rather than accepting
+                # whatever key another tenant left in the environment.
+                api_key=self.api_key or NO_API_KEY,
                 base_url=self.base_url or self.api_base,
                 timeout=self.timeout,
                 max_retries=self.max_retries,

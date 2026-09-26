@@ -958,12 +958,18 @@ class TestTestApiKeys:
         svc.validate_api_key = AsyncMock(return_value=(True, "valid"))
 
         env = {
-            "OPENAI_API_KEY": "sk-1234567890",
-            "ANTHROPIC_API_KEY": "ant-abc",
-            "DEEPSEEK_API_KEY": "ds-xyz",
+            "openai": "sk-1234567890",
+            "anthropic": "ant-abc",
+            "deepseek": "ds-xyz",
         }
-        with patch.dict(os.environ, env, clear=False):
-            results = await svc.test_api_keys()
+        with patch(
+            "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=lambda provider, group_id: env.get(provider),
+        ) as lookup:
+            results = await svc.test_api_keys(group_id="grp-1")
+        # The CALLING workspace's keys, from ApiKeysService.
+        assert {c.kwargs["group_id"] for c in lookup.await_args_list} == {"grp-1"}
 
         # Configured / not configured only: no part of any key is returned.
         assert results["openai"]["has_key"] is True
@@ -1002,15 +1008,14 @@ class TestTestApiKeys:
         svc = ConnectionService()
         svc.validate_api_key = AsyncMock(return_value=(False, "invalid key"))
 
-        env = {"OPENAI_API_KEY": "sk-bad"}
-        env_clean = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")
-        }
-        env_clean.update(env)
-        with patch.dict(os.environ, env_clean, clear=True):
-            results = await svc.test_api_keys()
+        with patch(
+            "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=lambda provider, group_id: (
+                "sk-bad" if provider == "openai" else None
+            ),
+        ):
+            results = await svc.test_api_keys(group_id="grp-1")
 
         assert results["openai"]["has_key"] is True
         assert results["openai"]["valid"] is False
@@ -1018,6 +1023,23 @@ class TestTestApiKeys:
         assert results["openai"]["message"] == (
             "API key is configured but was not accepted"
         )
+
+    @pytest.mark.asyncio
+    async def test_a_key_in_the_environment_is_not_reported(self):
+        """The env is shared by every workspace: it never counts as configured."""
+        svc = ConnectionService()
+        env = {"OPENAI_API_KEY": "sk-env", "ANTHROPIC_API_KEY": "ant-env"}
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            results = await svc.test_api_keys(group_id="grp-1")
+        assert results["openai"]["has_key"] is False
+        assert results["anthropic"]["has_key"] is False
 
     @pytest.mark.asyncio
     async def test_python_info_populated(self):

@@ -408,9 +408,7 @@ class TestRunDynamicFlow:
                     )
                     mock_backend.return_value = mock_flow
 
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.ApiKeysService"
-                    ):
+                    with patch("src.services.settings.api_keys.ApiKeysService"):
                         with patch("os.makedirs"):
                             service = FlowRunnerService(mock_session)
 
@@ -458,9 +456,7 @@ class TestRunDynamicFlow:
                     )
                     mock_backend.return_value = mock_flow
 
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.ApiKeysService"
-                    ):
+                    with patch("src.services.settings.api_keys.ApiKeysService"):
                         with patch("os.makedirs"):
                             service = FlowRunnerService(mock_session)
 
@@ -509,9 +505,7 @@ class TestRunDynamicFlow:
                     )
                     mock_backend.return_value = mock_flow
 
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.ApiKeysService"
-                    ):
+                    with patch("src.services.settings.api_keys.ApiKeysService"):
                         with patch("os.makedirs"):
                             with patch(
                                 "src.services.execution.history.ExecutionHistoryService"
@@ -530,143 +524,6 @@ class TestRunDynamicFlow:
 
                                 assert result["success"] is True
                                 assert result.get("flow_uuid") == "flow-uuid-123"
-
-
-class TestGetRequiredProviders:
-    """Tests for _get_required_providers method."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create mock async session."""
-        return MagicMock(spec=AsyncSession)
-
-    @pytest.fixture
-    def service(self, mock_session):
-        """Create FlowRunnerService instance."""
-        with patch(
-            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
-        ):
-            with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                return FlowRunnerService(mock_session)
-
-    @pytest.mark.asyncio
-    async def test_get_required_providers_from_model(self, service, mock_session):
-        """Test extracting providers from model config."""
-        config = {"model": "gpt-4"}
-
-        with patch("src.services.settings.models.ModelConfigService") as mock_model_svc:
-            mock_model_svc_instance = MagicMock()
-            mock_model_svc_instance.get_model_config = AsyncMock(
-                return_value={"provider": "openai"}
-            )
-            mock_model_svc.return_value = mock_model_svc_instance
-
-            providers = await service._get_required_providers(mock_session, config)
-
-            assert "OPENAI" in providers
-
-    @pytest.mark.asyncio
-    async def test_get_required_providers_from_crew_config(self, service, mock_session):
-        """Test extracting providers from crew config."""
-        config = {
-            "model": "gpt-4",
-            "crew": {"reasoning_llm": "claude-3", "manager_llm": "gpt-4"},
-        }
-
-        with patch("src.services.settings.models.ModelConfigService") as mock_model_svc:
-            mock_model_svc_instance = MagicMock()
-
-            async def get_config(model_name):
-                if "gpt" in model_name:
-                    return {"provider": "openai"}
-                elif "claude" in model_name:
-                    return {"provider": "anthropic"}
-                return None
-
-            mock_model_svc_instance.get_model_config = AsyncMock(side_effect=get_config)
-            mock_model_svc.return_value = mock_model_svc_instance
-
-            providers = await service._get_required_providers(mock_session, config)
-
-            assert "OPENAI" in providers
-            assert "ANTHROPIC" in providers
-
-    @pytest.mark.asyncio
-    async def test_get_required_providers_empty_config(self, service, mock_session):
-        """Test with empty config returns empty list."""
-        config = {}
-
-        providers = await service._get_required_providers(mock_session, config)
-
-        assert providers == []
-
-    @pytest.mark.asyncio
-    async def test_get_required_providers_error_handling(self, service, mock_session):
-        """Test that errors are handled gracefully."""
-        config = {"model": "unknown-model"}
-
-        with patch("src.services.settings.models.ModelConfigService") as mock_model_svc:
-            mock_model_svc_instance = MagicMock()
-            mock_model_svc_instance.get_model_config = AsyncMock(
-                side_effect=Exception("Not found")
-            )
-            mock_model_svc.return_value = mock_model_svc_instance
-
-            providers = await service._get_required_providers(mock_session, config)
-
-            # Should return empty list, not raise exception
-            assert providers == []
-
-    @pytest.mark.asyncio
-    async def test_get_required_providers_from_top_level_config(
-        self, service, mock_session
-    ):
-        """Test extracting providers from top-level config fields."""
-        config = {"manager_llm": "gpt-4", "reasoning_llm": "claude-3"}
-
-        with patch("src.services.settings.models.ModelConfigService") as mock_model_svc:
-            mock_model_svc_instance = MagicMock()
-
-            async def get_config(model_name):
-                if "gpt" in model_name:
-                    return {"provider": "openai"}
-                elif "claude" in model_name:
-                    return {"provider": "anthropic"}
-                return None
-
-            mock_model_svc_instance.get_model_config = AsyncMock(side_effect=get_config)
-            mock_model_svc.return_value = mock_model_svc_instance
-
-            providers = await service._get_required_providers(mock_session, config)
-
-            assert len(providers) == 2
-
-    @pytest.mark.asyncio
-    async def test_legacy_planning_llm_contributes_no_provider(
-        self, service, mock_session
-    ):
-        """Regression: ``planning_llm`` was dropped from provider collection.
-
-        The CrewAI-style planner is gone, so a legacy saved flow that still carries
-        ``planning_llm`` (at either nesting level) must not cause its provider's
-        credentials to be treated as required for the run.
-        """
-        config = {
-            "planning_llm": "gpt-4",
-            "crew": {"planning_llm": "gpt-4"},
-        }
-
-        with patch("src.services.settings.models.ModelConfigService") as mock_model_svc:
-            mock_model_svc_instance = MagicMock()
-            mock_model_svc_instance.get_model_config = AsyncMock(
-                return_value={"provider": "openai"}
-            )
-            mock_model_svc.return_value = mock_model_svc_instance
-
-            providers = await service._get_required_providers(mock_session, config)
-
-            assert providers == []
-            mock_model_svc_instance.get_model_config.assert_not_called()
 
 
 class TestRunFlowExecution:
@@ -715,9 +572,7 @@ class TestRunFlowExecution:
                     )
                     mock_backend.return_value = mock_flow
 
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.ApiKeysService"
-                    ):
+                    with patch("src.services.settings.api_keys.ApiKeysService"):
                         with patch("os.makedirs"):
                             service = FlowRunnerService(mock_session)
 
@@ -795,9 +650,7 @@ class TestRunFlowExecution:
                     )
                     mock_backend.return_value = mock_flow
 
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.ApiKeysService"
-                    ):
+                    with patch("src.services.settings.api_keys.ApiKeysService"):
                         with patch("os.makedirs"):
                             service = FlowRunnerService(mock_session)
 
@@ -1122,7 +975,6 @@ class TestFlowRunnerServiceMethodSignatures:
             "get_flow_executions_by_flow",
             "_run_dynamic_flow",
             "_run_flow_execution",
-            "_get_required_providers",
         ]
 
         for method_name in required_methods:

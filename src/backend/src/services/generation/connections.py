@@ -8,7 +8,7 @@ and determining optimal connections and dependencies.
 import logging
 import os
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.schemas.connection import ConnectionRequest, ConnectionResponse
@@ -349,9 +349,12 @@ class ConnectionService:
         except Exception as e:
             return False, f"API key validation error: {str(e)}"
 
-    async def test_api_keys(self) -> Dict[str, Any]:
+    async def test_api_keys(self, group_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Test API keys and configurations.
+        Test the calling workspace's API keys.
+
+        Keys are read from ``group_id``'s ApiKeysService, never the process
+        environment (shared by every workspace this server serves).
 
         Returns:
             Dictionary with test results for each provider
@@ -361,7 +364,16 @@ class ConnectionService:
         # text can itself echo a masked key, so the message is fixed.
         results: Dict[str, Any] = {}
 
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        async def _key(provider: str) -> Optional[str]:
+            if not group_id:
+                return None
+            from src.services.settings.api_keys import ApiKeysService
+
+            return await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
+
+        openai_key = await _key("openai")
         if openai_key:
             valid, _detail = await self.validate_api_key(openai_key)
             results["openai"] = {
@@ -377,15 +389,12 @@ class ConnectionService:
             results["openai"] = {
                 "has_key": False,
                 "valid": False,
-                "message": "No API key found in environment variables",
+                "message": "No API key configured for this workspace",
             }
 
         # Anthropic and DeepSeek: presence only.
-        for provider, env_var in (
-            ("anthropic", "ANTHROPIC_API_KEY"),
-            ("deepseek", "DEEPSEEK_API_KEY"),
-        ):
-            results[provider] = {"has_key": bool(os.environ.get(env_var))}
+        for provider in ("anthropic", "deepseek"):
+            results[provider] = {"has_key": bool(await _key(provider))}
 
         # Include Python version info
         import sys

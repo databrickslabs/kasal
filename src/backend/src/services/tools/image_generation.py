@@ -15,9 +15,10 @@ changed:
   ``url`` only, so it would have returned "Failed to generate image" against any
   current model.
 
-The API key is read from the environment because that is how every tool in this
-package gets one: ``ToolFactory.initialize`` pre-loads it from ApiKeysService
-(group-scoped, encrypted at rest) into ``os.environ`` before any tool runs.
+The API key is passed in explicitly (``api_key``): Kasal's ToolFactory reads it
+from the workspace's ApiKeysService, an exported app from its own environment.
+It is never read from ``os.environ`` here, because Kasal serves many workspaces
+from one process and the environment is shared by all of them.
 """
 
 import json
@@ -62,6 +63,7 @@ class ImageGenerationTool(BaseTool):
     size: Literal["auto", "1024x1024", "1536x1024", "1024x1536"] | None = "1024x1024"
     quality: Literal["auto", "low", "medium", "high"] | None = "auto"
     n: int = 1
+    api_key: str | None = Field(default=None, repr=False, exclude=True)
 
     env_vars: list[EnvVar] = Field(
         default_factory=lambda: [
@@ -78,7 +80,7 @@ class ImageGenerationTool(BaseTool):
         if not image_description:
             return "Image description is required."
 
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = self.api_key
         if not api_key:
             return (
                 "No API key configured for image generation. Add OPENAI_API_KEY "

@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ConfigDict, model_validator
 
-from .completion import OpenAICompletion
+from .completion import NO_API_KEY, OpenAICompletion
 
 _KNOWN_PREFIXES = (
     "openai",
@@ -35,8 +35,10 @@ class LLM(OpenAICompletion):
         if self._client is None:
             from .anthropic_client import AnthropicClient
 
+            # Explicit placeholder: the Anthropic SDK would otherwise read
+            # ANTHROPIC_API_KEY from the environment every workspace shares.
             self._client = AnthropicClient(
-                api_key=self.api_key,
+                api_key=self.api_key or NO_API_KEY,
                 base_url=self.base_url or self.api_base,
                 timeout=self.timeout,
                 max_retries=self.max_retries,

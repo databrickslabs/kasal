@@ -5,7 +5,6 @@ This module handles the preparation and configuration of CrewAI agents and tasks
 """
 
 import asyncio
-import os
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
@@ -1057,8 +1056,7 @@ class CrewPreparation:
                     )
             logger.info("=" * 80)
 
-            # 13. Handle OpenAI API key
-            await self._handle_openai_api_key()
+            # 13. No provider key goes into os.environ (LLMManager passes each).
 
             # 14. Create crew instance with error handling
             # NOTE: knowledge_sources no longer used - we use DatabricksKnowledgeSearchTool instead
@@ -1160,27 +1158,6 @@ class CrewPreparation:
         except Exception as e:
             handle_crew_error(e, "Error creating crew")
             return False
-
-    async def _handle_openai_api_key(self) -> None:
-        """Handle OpenAI API key configuration"""
-        try:
-            from src.services.settings.api_keys import ApiKeysService
-
-            # SECURITY: Get group_id from config for multi-tenant isolation
-            group_id = self.config.get("group_id")
-            openai_key = await ApiKeysService.get_provider_api_key(
-                "openai", group_id=group_id
-            )
-            if openai_key:
-                os.environ["OPENAI_API_KEY"] = openai_key
-                logger.info("OpenAI API key is configured, keeping it for CrewAI")
-            else:
-                os.environ["OPENAI_API_KEY"] = "sk-dummy-validation-key"
-                logger.info(
-                    "No OpenAI API key configured, set dummy key for CrewAI validation"
-                )
-        except Exception as e:
-            logger.warning(f"Error handling OpenAI API key: {e}")
 
     async def execute(self) -> Dict[str, Any]:
         """
