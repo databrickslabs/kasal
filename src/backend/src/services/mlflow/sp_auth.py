@@ -24,6 +24,12 @@ grant. The fix: present the SP's own bearer token as the method to use (set
 ``DATABRICKS_TOKEN`` and pin ``DATABRICKS_AUTH_TYPE=pat``) for the duration of
 the call, restoring the original env afterwards.
 
+This module is the ONLY place a token is written into ``os.environ``
+(``tests/unit/architecture/test_no_secrets_in_environ.py`` holds that line),
+because MLflow reads its credentials from nowhere else. Windows for different
+credentials are mutually exclusive (see ``_pinned``), so a token written for one
+request is never visible to a concurrent MLflow call made for another.
+
 The OAuth variables are deliberately LEFT IN PLACE. The SDK raises "more than
 one authorization method" only when no auth type is chosen
 (``Config._validate``); an explicit ``DATABRICKS_AUTH_TYPE`` is enough. An
@@ -42,7 +48,7 @@ import logging
 import os
 import threading
 from contextlib import contextmanager
-from typing import Dict, Iterator, Optional
+from typing import Dict, Iterator, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -101,35 +107,61 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
         return None
 
 
-_PIN_LOCK = threading.RLock()
+#: Guards every field below. A Condition, because a window whose credential
+#: differs from the active one WAITS for it to close rather than overwrite it.
+_PIN_COND = threading.Condition(threading.RLock())
 _PIN_DEPTH = 0
+#: The credential the open windows share (``None`` while none is open).
+_PIN_ACTIVE: Optional[Tuple[Optional[str], Optional[str]]] = None
 #: SWAP_KEYS as they were before the FIRST active window; restored by the last.
 _PIN_ORIGINAL: Dict[str, Optional[str]] = {}
+_PIN_THREAD = threading.local()
+
+#: Window key for the app service principal. SP bearers are minted per call, so
+#: two SP windows carry different token strings for the SAME identity — keying
+#: them by identity lets them overlap instead of queueing behind each other.
+_APP_SP = "app-service-principal"
 
 
 @contextmanager
 def _pinned(
-    *, host: Optional[str] = None, token: Optional[str] = None
+    *,
+    host: Optional[str] = None,
+    token: Optional[str] = None,
+    identity: Optional[str] = None,
 ) -> Iterator[None]:
-    """Pin token auth for the duration of a window, reference-counted.
+    """Pin token auth for the duration of a window.
 
-    Windows run on worker threads and overlap (a judge listing, a GEPA
-    prompt registration and a tracing setup can all be active at once). Each
-    used to save and restore the env independently, so the last one out
-    restored the FIRST one's intermediate state — which is how a stale
-    ``DATABRICKS_AUTH_TYPE=pat`` outlived every window (issue #8). Now the
-    first window snapshots :data:`SWAP_KEYS`, later ones only apply their
-    values, and the snapshot is restored when the last window exits.
+    MLflow (and the bare ``WorkspaceClient()`` it builds) reads Databricks auth
+    ONLY from the process environment — there is no per-call credential. The
+    environment is shared by every workspace and user this server serves, so a
+    window is the only place a token may be written there, and windows for
+    DIFFERENT credentials are mutually exclusive: the second waits for the first
+    to close. Two concurrent requests therefore can never see each other's token.
+    Windows for the same credential overlap (reference counted), and a window
+    nested in one this thread already holds proceeds and restores on exit.
+
+    Blocking — callers run in worker threads (``asyncio.to_thread``), never on
+    the event loop.
     """
-    global _PIN_DEPTH
-    with _PIN_LOCK:
+    global _PIN_DEPTH, _PIN_ACTIVE
+    key = (host, identity or token)
+    with _PIN_COND:
+        nested = getattr(_PIN_THREAD, "depth", 0) > 0
+        while _PIN_DEPTH > 0 and not nested and _PIN_ACTIVE != key:
+            _PIN_COND.wait()
         if _PIN_DEPTH == 0:
             _PIN_ORIGINAL.clear()
             _PIN_ORIGINAL.update({k: os.environ.get(k) for k in SWAP_KEYS})
+            _PIN_ACTIVE = key
+        outer = {k: os.environ.get(k) for k in SWAP_KEYS} if nested else None
         _PIN_DEPTH += 1
+        _PIN_THREAD.depth = getattr(_PIN_THREAD, "depth", 0) + 1
         if host is not None:
             os.environ["DATABRICKS_HOST"] = host
         if token is not None:
+            # The one sanctioned write of a token into os.environ: MLflow can
+            # only read it from there, and the exclusion above scopes it.
             os.environ["DATABRICKS_TOKEN"] = token
         # The SDK then uses DATABRICKS_TOKEN, skips its "more than one
         # authorization method" validation, and a bare WorkspaceClient() built
@@ -139,40 +171,40 @@ def _pinned(
     try:
         yield
     finally:
-        with _PIN_LOCK:
+        with _PIN_COND:
             _PIN_DEPTH -= 1
+            _PIN_THREAD.depth -= 1
+            restore = _PIN_ORIGINAL if _PIN_DEPTH == 0 else outer
+            for k, value in (restore or {}).items():
+                if value is not None:
+                    os.environ[k] = value
+                elif k in os.environ:
+                    del os.environ[k]
             if _PIN_DEPTH == 0:
-                for key, value in _PIN_ORIGINAL.items():
-                    if value is not None:
-                        os.environ[key] = value
-                    elif key in os.environ:
-                        del os.environ[key]
                 _PIN_ORIGINAL.clear()
+                _PIN_ACTIVE = None
+                _PIN_COND.notify_all()
 
 
 @contextmanager
 def pat_auth_env() -> Iterator[bool]:
-    """Pin ``DATABRICKS_AUTH_TYPE=pat`` for the duration, WITHOUT touching the
-    OAuth SP creds.
+    """Pin token auth as the app service principal for the duration.
 
     Use around calls that internally build a bare ``WorkspaceClient()`` AND also
-    run other Databricks work that may still need the SP creds — the GEPA
-    ``optimize_prompts`` call is exactly this: MLflow's per-eval ``get_trace``
-    resolves a SQL warehouse via a bare client (which dies under the app-injected
-    ``oauth-m2m`` when no m2m creds resolve), while ``predict_fn`` executes the
-    crew whose LLM auth may fall back to SPN. Pinning ``auth_type=pat``
-    disambiguates for the bare client (it uses ``DATABRICKS_TOKEN``) — the same
-    disambiguation the explicit ``WorkspaceClient(..., auth_type="pat")`` in
-    ``databricks_auth`` uses.
+    run other Databricks work — the GEPA ``optimize_prompts`` call is exactly
+    this: MLflow's per-eval ``get_trace`` resolves a SQL warehouse via a bare
+    client. Pinning ``auth_type=pat`` with the SP's own bearer disambiguates for
+    the bare client, the same disambiguation the explicit
+    ``WorkspaceClient(..., auth_type="pat")`` in ``databricks_auth`` uses.
 
-    Yields ``True`` when a token is present to pin against, ``False`` (no-op)
-    otherwise.
+    This used to pin whatever ``DATABRICKS_TOKEN`` was already in the process
+    environment. Nothing puts one there any more (a token in the shared env
+    belongs to no workspace in particular), so the bearer is derived from the
+    platform SP credentials instead (or, in local dev only, a PAT the developer
+    exported). Yields ``False`` (no-op) where there is neither.
     """
-    if not os.environ.get("DATABRICKS_TOKEN"):
-        yield False
-        return
-    with _pinned():
-        yield True
+    with sp_single_auth() as active:
+        yield active
 
 
 @contextmanager
@@ -216,17 +248,18 @@ def sp_single_auth() -> Iterator[bool]:
             "MLflow call: authenticating as the app service principal via its "
             "bearer token (auth type pinned to 'pat'; OAuth creds left in place)."
         )
-        with single_auth_env(token=bearer):
+        with _pinned(token=bearer, identity=_APP_SP):
             yield True
         return
 
-    # No SP bearer, but if a PAT is already in the env, still pin token auth so a
-    # bare WorkspaceClient() built inside the window (MLflow get_trace warehouse
-    # resolution during optimize_prompts) uses it instead of the app-injected
-    # oauth-m2m it can no longer satisfy. Only a true PAT-less/token-less env is a
-    # genuine no-op.
-    if os.environ.get("DATABRICKS_TOKEN"):
-        with single_auth_env():  # keeps existing token, pins AUTH_TYPE=pat
+    # No SP bearer. In LOCAL DEV a PAT the developer exported is still pinned as
+    # the single method (nothing is written; the window only fixes the auth
+    # type), so a bare WorkspaceClient() built inside uses it. Inside Apps there
+    # is no such fallback: Kasal never puts a token in the shared environment.
+    from src.utils.databricks_auth import local_dev_pat
+
+    if local_dev_pat():
+        with _pinned(identity="local-dev-pat"):
             yield True
         return
 

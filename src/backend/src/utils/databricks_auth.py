@@ -62,7 +62,6 @@ Key features:
 
 **LEGACY FUNCTIONS (Being Deprecated)**:
 - `get_databricks_auth_headers()`: Get auth headers for API calls (use get_auth_context().get_headers() instead)
-- `setup_environment_variables()`: **DEPRECATED** - causes race conditions, use get_auth_context() instead
 - `get_mcp_auth_headers()`: Get auth headers for MCP server calls (use get_auth_context().get_mcp_headers() instead)
 
 **UTILITY FUNCTIONS**:
@@ -147,21 +146,9 @@ auth = await get_auth_context(user_token=user_token)
 headers = auth.get_headers()
 ```
 
-#### OLD: setup_environment_variables() → NEW: get_auth_context()
-```python
-# OLD (causes race conditions - DO NOT USE)
-setup_environment_variables(user_token=user_token)
-response = litellm.completion(model="databricks/model", messages=[...])
-
-# NEW (thread-safe, no race conditions)
-auth = await get_auth_context(user_token=user_token)
-params = auth.get_litellm_params()
-response = litellm.completion(
-    model="databricks/model",
-    messages=[...],
-    **params
-)
-```
+`setup_environment_variables()` has been DELETED: it wrote a token into the
+process environment, which every workspace shares. Use get_auth_context() and
+pass `auth.get_litellm_params()` / `auth.get_headers()` explicitly.
 
 ## Token Management
 
@@ -975,97 +962,26 @@ async def validate_databricks_connection() -> Tuple[bool, Optional[str]]:
         return False, str(e)
 
 
-def setup_environment_variables(user_token: Optional[str] = None) -> bool:
+def local_dev_pat() -> Optional[str]:
+    """A PAT from ``DATABRICKS_TOKEN`` / ``DATABRICKS_API_KEY`` — local dev only.
+
+    A developer running Kasal outside Databricks Apps may export a PAT in their
+    shell; that is single-user, so honouring it is safe. Inside Apps this always
+    returns None: the environment there is shared by every workspace, and a PAT
+    comes only from the workspace's own API keys.
     """
-    DEPRECATED: Set up Databricks environment variables for compatibility with other libraries.
+    from src.core.databricks_app import is_databricks_app
 
-    **WARNING**: This function causes race conditions in multi-threaded environments.
-    Process-wide environment variables (os.environ) are NOT thread-safe.
-
-    **Use get_auth_context() instead**:
-    - For liteLLM: Use auth.get_litellm_params() and pass api_key/api_base directly
-    - For WorkspaceClient: Use auth.get_workspace_client()
-    - For REST APIs: Use auth.get_headers()
-
-    **MLflow**: Configure ONCE at application startup with service-level credentials,
-    not per-request with user tokens.
-
-    Args:
-        user_token: Optional user access token for OBO authentication
-
-    Returns:
-        bool: True if successful, False otherwise
-
-    Migration Example:
-        # OLD (race condition):
-        setup_environment_variables(user_token=user_token)
-        response = litellm.completion(model="databricks/model", messages=[...])
-
-        # NEW (thread-safe):
-        auth = await get_auth_context(user_token=user_token)
-        params = auth.get_litellm_params()
-        response = litellm.completion(model="databricks/model", messages=[...], **params)
-    """
-    import warnings
-
-    warnings.warn(
-        "setup_environment_variables() is deprecated and causes race conditions. "
-        "Use get_auth_context() instead. "
-        "See module docstring for migration examples.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    try:
-        import asyncio
-
-        async def _setup():
-            if not await _databricks_auth._load_config():
-                return False
-
-            # Set environment variables for host first
-            if _databricks_auth._workspace_host:
-                os.environ["DATABRICKS_HOST"] = _databricks_auth._workspace_host
-                # Also set API_BASE for LiteLLM compatibility - must include /serving-endpoints
-                os.environ["DATABRICKS_API_BASE"] = (
-                    f"{_databricks_auth._workspace_host}/serving-endpoints"
-                )
-
-            # Prefer OBO user token if provided
-            if user_token:
-                try:
-                    _databricks_auth.set_user_access_token(user_token)
-                except Exception:
-                    # Best-effort; still export token to env for SDKs
-                    pass
-                os.environ["DATABRICKS_TOKEN"] = user_token
-                os.environ["DATABRICKS_API_KEY"] = user_token
-            elif _databricks_auth._api_token:
-                # Fall back to service PAT
-                os.environ["DATABRICKS_TOKEN"] = _databricks_auth._api_token
-                os.environ["DATABRICKS_API_KEY"] = _databricks_auth._api_token
-
-            return True
-
-        # Check if we're already in an event loop
-        try:
-            asyncio.get_running_loop()
-            # We're in an event loop — offload with ContextVars copied so the
-            # OBO user token from UserContext survives the thread hop
-            import concurrent.futures
-            import contextvars
-
-            ctx = contextvars.copy_context()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(ctx.run, asyncio.run, _setup())
-                return future.result()
-        except RuntimeError:
-            # No event loop running, safe to use asyncio.run
-            return asyncio.run(_setup())
-
-    except Exception as e:
-        logger.error(f"Error setting up environment variables: {e}")
-        return False
+    if is_databricks_app():
+        return None
+    for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
+        env_val = os.environ.get(env_key)
+        if env_val:
+            logger.info(
+                f"[AUTH] Priority 2b: PAT from environment ({env_key}), local dev"
+            )
+            return env_val
+    return None
 
 
 def extract_user_token_from_request(request) -> Optional[str]:
@@ -1330,22 +1246,13 @@ async def get_auth_context(
             except Exception as e:
                 logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
 
-        # Priority 2b: Check environment variable as PAT fallback
-        # In subprocess contexts, MLflow setup converts SPN creds into a
-        # DATABRICKS_TOKEN env var.  This is a valid PAT-equivalent token.
+        # Priority 2b (LOCAL DEV ONLY): a PAT exported in the developer's shell.
+        # Never inside Databricks Apps: there the process environment is shared
+        # by every workspace this server serves, so a token found in it belongs
+        # to nobody in particular (reading it once let workspace B act with
+        # workspace A's PAT). Kasal itself never writes one there.
         if not pat_token:
-            for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                env_val = os.environ.get(env_key)
-                if env_val:
-                    pat_token = env_val
-                    logger.info(
-                        f"[AUTH] Priority 2b: ✓ PAT loaded from environment variable ({env_key})"
-                    )
-                    break
-            if not pat_token:
-                logger.debug(
-                    "[AUTH] Priority 2b: No PAT found in environment variables"
-                )
+            pat_token = local_dev_pat()
 
         if pat_token:
             return AuthContext(

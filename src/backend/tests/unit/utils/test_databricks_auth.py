@@ -20,7 +20,6 @@ from src.utils.databricks_auth import (
     get_workspace_client,
     get_workspace_client_with_fallback,
     is_scope_error,
-    setup_environment_variables,
     validate_databricks_connection,
 )
 
@@ -867,133 +866,6 @@ class TestGetDatabricksAuthHeadersSync:
             headers, err = get_databricks_auth_headers_sync()
         assert headers is None
         assert "async boom" in err
-
-
-# ── setup_environment_variables ────────────────────────
-
-
-class TestSetupEnvironmentVariables:
-    def test_config_load_fails(self):
-        import warnings
-
-        with patch.object(
-            _databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False
-        ):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                assert setup_environment_variables(user_token="tok") is False
-
-    def test_set_access_token_fails(self):
-        import warnings
-
-        orig_host = _databricks_auth._workspace_host
-        orig_token = _databricks_auth._api_token
-        try:
-            _databricks_auth._workspace_host = "https://h.com"
-            with (
-                patch.object(
-                    _databricks_auth,
-                    "_load_config",
-                    new_callable=AsyncMock,
-                    return_value=True,
-                ),
-                patch.object(
-                    _databricks_auth,
-                    "set_user_access_token",
-                    side_effect=Exception("oops"),
-                ),
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", DeprecationWarning)
-                    result = setup_environment_variables(user_token="tok")
-            assert result is True
-            assert os.environ.get("DATABRICKS_TOKEN") == "tok"
-        finally:
-            _databricks_auth._workspace_host = orig_host
-            _databricks_auth._api_token = orig_token
-            for v in [
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_API_KEY",
-                "DATABRICKS_HOST",
-                "DATABRICKS_API_BASE",
-            ]:
-                os.environ.pop(v, None)
-
-    def test_without_token_uses_api_token(self):
-        import warnings
-
-        orig_token = _databricks_auth._api_token
-        orig_host = _databricks_auth._workspace_host
-        try:
-            _databricks_auth._api_token = "pat_value"
-            _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(
-                _databricks_auth,
-                "_load_config",
-                new_callable=AsyncMock,
-                return_value=True,
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", DeprecationWarning)
-                    assert setup_environment_variables(None) is True
-            assert os.environ.get("DATABRICKS_TOKEN") == "pat_value"
-        finally:
-            _databricks_auth._api_token = orig_token
-            _databricks_auth._workspace_host = orig_host
-            for v in [
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_API_KEY",
-                "DATABRICKS_HOST",
-                "DATABRICKS_API_BASE",
-            ]:
-                os.environ.pop(v, None)
-
-    def test_from_async_context(self):
-        import warnings
-
-        orig_host = _databricks_auth._workspace_host
-
-        async def _inner():
-            _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(
-                _databricks_auth,
-                "_load_config",
-                new_callable=AsyncMock,
-                return_value=True,
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", DeprecationWarning)
-                    return setup_environment_variables(user_token="tok2")
-
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(_inner())
-            assert isinstance(result, bool)
-        finally:
-            loop.close()
-            _databricks_auth._workspace_host = orig_host
-            for v in [
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_API_KEY",
-                "DATABRICKS_HOST",
-                "DATABRICKS_API_BASE",
-            ]:
-                os.environ.pop(v, None)
-
-    def test_outer_exception(self):
-        """Lines 868-870."""
-        import warnings
-
-        with (
-            patch("asyncio.get_running_loop", side_effect=RuntimeError),
-            patch("asyncio.run", side_effect=Exception("run fail")),
-        ):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                assert setup_environment_variables(user_token="tok") is False
-
-
-# ── extract_user_token_from_request ────────────────────
 
 
 class TestExtractUserToken:
@@ -2583,3 +2455,60 @@ class TestPatLookupCache:
         m._PAT_TOKEN_CACHE["g2"] = ("t2", _time.time() + 60)
         m.invalidate_pat_cache()
         assert m._PAT_TOKEN_CACHE == {}
+
+
+class TestLocalDevPat:
+    """A PAT in the environment is a local-dev convenience, never used in Apps.
+
+    Inside Databricks Apps the process environment is shared by every workspace
+    the server serves, so a token found there belongs to nobody in particular.
+    """
+
+    def test_env_pat_is_used_outside_apps(self, monkeypatch):
+        from src.utils.databricks_auth import local_dev_pat
+
+        monkeypatch.setenv("DATABRICKS_TOKEN", "dev-pat")
+        with patch("src.core.databricks_app.is_databricks_app", return_value=False):
+            assert local_dev_pat() == "dev-pat"
+
+    def test_env_pat_is_ignored_inside_apps(self, monkeypatch):
+        from src.utils.databricks_auth import local_dev_pat
+
+        monkeypatch.setenv("DATABRICKS_TOKEN", "leaked-pat")
+        monkeypatch.setenv("DATABRICKS_API_KEY", "leaked-key")
+        with patch("src.core.databricks_app.is_databricks_app", return_value=True):
+            assert local_dev_pat() is None
+
+    @pytest.mark.asyncio
+    async def test_get_auth_context_never_returns_an_env_pat_inside_apps(
+        self, monkeypatch
+    ):
+        saved = (
+            _databricks_auth._workspace_host,
+            _databricks_auth._client_id,
+            _databricks_auth._client_secret,
+        )
+        _databricks_auth._workspace_host = "https://example.com"
+        _databricks_auth._client_id = None
+        _databricks_auth._client_secret = None
+        monkeypatch.setenv("DATABRICKS_TOKEN", "leaked-pat")
+        try:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.core.databricks_app.is_databricks_app", return_value=True),
+                patch("src.utils.user_context.UserContext") as mock_uc,
+            ):
+                mock_uc.get_group_context.return_value = None
+                result = await get_auth_context()
+            assert result is None or result.token != "leaked-pat"
+        finally:
+            (
+                _databricks_auth._workspace_host,
+                _databricks_auth._client_id,
+                _databricks_auth._client_secret,
+            ) = saved

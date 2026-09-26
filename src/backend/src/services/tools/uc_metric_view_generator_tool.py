@@ -9,6 +9,7 @@ from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.tools.async_bridge import workspace_llm_credentials
 from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -428,13 +429,14 @@ class UCMetricViewGeneratorTool(BaseTool):
         llm_config = None
         use_llm = _get("use_llm_fallback") or False
         if use_llm:
+            llm_url, llm_token = workspace_llm_credentials(
+                _get("llm_workspace_url"), _get("llm_token")
+            )
             llm_config = {
                 "use_llm_fallback": True,
                 "llm_model": _get("llm_model") or "databricks-claude-sonnet-4-5",
-                "llm_workspace_url": _get("llm_workspace_url")
-                or os.environ.get("DATABRICKS_HOST", ""),
-                "llm_token": _get("llm_token")
-                or os.environ.get("DATABRICKS_TOKEN", ""),
+                "llm_workspace_url": llm_url,
+                "llm_token": llm_token,
                 # LLM-first translation (skill-corpus driven) is the default; the
                 # regex patterns become a trivial fast-path. 'regex_first' restores
                 # the prior regex-primary behaviour.
@@ -590,10 +592,8 @@ class UCMetricViewGeneratorTool(BaseTool):
                     if isinstance(measures_raw, str)
                     else measures_raw
                 )
-                import tempfile  # NOTE: os is already imported at module level; importing it
+                import tempfile  # (never `import os` here: it would shadow the global)
 
-                # here too would make `os` a function-local for all of _run() and break the
-                # earlier os.environ.get(...) calls with UnboundLocalError.
                 for table_key, yml in yaml_output.items():
                     with tempfile.NamedTemporaryFile(
                         mode="w", suffix=".yml", delete=False

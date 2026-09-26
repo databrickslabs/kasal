@@ -135,7 +135,6 @@ class TriggerQueueConsumerService:
                 group_ids=[group_id] if group_id else [],
                 group_email=None,
             )
-            await self._load_databricks_auth()
 
             from src.services.execution.service import ExecutionService
 
@@ -486,26 +485,3 @@ class TriggerQueueConsumerService:
             return config, (config.execution_type or "crew")
 
         raise ValueError(f"unknown target kind: {kind!r}")
-
-    async def _load_databricks_auth(self) -> None:
-        """Best-effort: put Databricks host/token in env for the launched run.
-
-        Mirrors the scheduler (``run_schedule_job``) so a queue-triggered run
-        authenticates the same way a scheduled one does. Best-effort by design —
-        the subprocess re-resolves auth; failures here must not abort dispatch.
-        """
-        import os
-
-        try:
-            from src.utils.databricks_auth import get_auth_context
-
-            auth = await get_auth_context()
-        except Exception:  # noqa: BLE001
-            return
-        if not auth:
-            return
-        if getattr(auth, "workspace_url", None):
-            os.environ["DATABRICKS_HOST"] = auth.workspace_url
-        if getattr(auth, "token", None):
-            os.environ["DATABRICKS_TOKEN"] = auth.token
-            os.environ["DATABRICKS_API_KEY"] = auth.token

@@ -427,12 +427,6 @@ async def configure_mlflow_in_subprocess(
             except Exception as ctx_err:
                 alog.warning(f"[SUBPROCESS] Could not set UserContext: {ctx_err}")
 
-        # The platform also injects DATABRICKS_TOKEN (a PAT) which
-        # conflicts with SPN in the SDK ("more than one authorization
-        # method").  We strip PAT vars before the SDK call and restore
-        # them after; a bearer token is extracted up-front so the MLflow
-        # exporter uses simple HOST + TOKEN auth.
-
         auth_method: Optional[str] = None
 
         # Extract credential via SDK
@@ -475,9 +469,9 @@ async def configure_mlflow_in_subprocess(
                 workspace_url = host.rstrip("/")
                 if not workspace_url.startswith("http"):
                     workspace_url = f"https://{workspace_url}"
+                # CLIENT_ID / CLIENT_SECRET are already in the env (the platform
+                # injected them; that is where they were read from above).
                 os.environ["DATABRICKS_HOST"] = workspace_url
-                os.environ["DATABRICKS_CLIENT_ID"] = client_id
-                os.environ["DATABRICKS_CLIENT_SECRET"] = client_secret
                 os.environ["DATABRICKS_AUTH_TYPE"] = "oauth-m2m"
                 # Remove static token vars so oauth-m2m is the SINGLE auth method
                 # (the SDK errors with "more than one authorization method

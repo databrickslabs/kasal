@@ -648,33 +648,9 @@ class SchedulerService:
                     created_at=execution_time_naive,
                 )
 
-                # Ensure Databricks auth is available via unified auth for scheduled jobs
-                import os
-
-                try:
-                    from src.utils.databricks_auth import get_auth_context
-
-                    auth = await get_auth_context()
-                    if auth:
-                        if auth.workspace_url:
-                            os.environ["DATABRICKS_HOST"] = auth.workspace_url
-                            logger_manager.scheduler.info(
-                                f"Loaded DATABRICKS_HOST from unified {auth.auth_method} auth for scheduled job"
-                            )
-                        if auth.token:
-                            os.environ["DATABRICKS_TOKEN"] = auth.token
-                            os.environ["DATABRICKS_API_KEY"] = auth.token
-                            logger_manager.scheduler.info(
-                                f"Loaded DATABRICKS_TOKEN from unified {auth.auth_method} auth for scheduled job"
-                            )
-                    else:
-                        logger_manager.scheduler.warning(
-                            "No unified auth available for scheduled job"
-                        )
-                except Exception as e:
-                    logger_manager.scheduler.warning(
-                        f"Could not load Databricks auth from unified auth: {e}"
-                    )
+                # No Databricks credentials are exported into os.environ here:
+                # the process env is shared by every workspace, and the run
+                # resolves its own auth (get_auth_context) for its group.
 
                 # Create group context from schedule information
                 from src.utils.user_context import GroupContext
