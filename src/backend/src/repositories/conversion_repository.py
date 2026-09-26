@@ -32,19 +32,37 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         """
         super().__init__(ConversionHistory, session)
 
-    async def find_by_execution_id(self, execution_id: str) -> List[ConversionHistory]:
+    async def get_for_groups(
+        self, history_id: int, group_ids: List[str]
+    ) -> Optional[ConversionHistory]:
+        """Get a history entry by ID only if it belongs to one of ``group_ids``."""
+        if not group_ids:
+            return None
+        query = select(self.model).where(
+            self.model.id == history_id, self.model.group_id.in_(group_ids)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def find_by_execution_id(
+        self, execution_id: str, group_id: Optional[str] = None
+    ) -> List[ConversionHistory]:
         """
         Find all conversion history entries for a specific execution.
 
         Args:
             execution_id: Execution ID to filter by
+            group_id: Optional group ID to filter by
 
         Returns:
             List of conversion history entries
         """
+        conditions = [self.model.execution_id == execution_id]
+        if group_id:
+            conditions.append(self.model.group_id == group_id)
         query = (
             select(self.model)
-            .where(self.model.execution_id == execution_id)
+            .where(and_(*conditions))
             .order_by(desc(self.model.created_at))
         )
         result = await self.session.execute(query)
@@ -253,6 +271,18 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         """
         super().__init__(ConversionJob, session)
 
+    async def get_for_groups(
+        self, job_id: str, group_ids: List[str]
+    ) -> Optional[ConversionJob]:
+        """Get a job by ID only if it belongs to one of ``group_ids``."""
+        if not group_ids:
+            return None
+        query = select(self.model).where(
+            self.model.id == job_id, self.model.group_id.in_(group_ids)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
     async def find_by_status(
         self, status: str, group_id: Optional[str] = None, limit: int = 50
     ) -> List[ConversionJob]:
@@ -411,6 +441,20 @@ class SavedConverterConfigurationRepository(
             session: SQLAlchemy async session
         """
         super().__init__(SavedConverterConfiguration, session)
+
+    async def get_visible_to_groups(
+        self, config_id: int, group_ids: List[str]
+    ) -> Optional[SavedConverterConfiguration]:
+        """Get a configuration by ID if it is a system template or in ``group_ids``.
+
+        Ownership and ``is_public`` within the group are the service's rule.
+        """
+        conditions = [self.model.is_template == True]  # noqa: E712
+        if group_ids:
+            conditions.append(self.model.group_id.in_(group_ids))
+        query = select(self.model).where(self.model.id == config_id, or_(*conditions))
+        result = await self.session.execute(query)
+        return result.scalars().first()
 
     async def find_by_user(
         self, created_by_email: str, group_id: Optional[str] = None
