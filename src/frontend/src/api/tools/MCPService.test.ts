@@ -75,31 +75,36 @@ describe('getDatabricksCatalog', () => {
       ],
     };
     client.get.mockResolvedValue({ data: catalog });
-    expect(await service.getDatabricksCatalog()).toEqual(catalog);
+    expect(await service.getDatabricksCatalog()).toEqual({ ...catalog, legacy_external_count: 0 });
     expect(client.get).toHaveBeenCalledWith('/mcp/databricks/available');
   });
 
-  it('migrates legacy registrations with an explicit POST, never from the GET', async () => {
+  it('reports pending legacy registrations but never migrates on load', async () => {
     client.get.mockResolvedValue({ data: { legacy_external_count: 2 } });
-    client.post.mockResolvedValueOnce({ data: { migrated: 2 } });
     expect(await service.getDatabricksCatalog()).toEqual({
       workspace_url: '',
       external: [],
       managed: [],
+      legacy_external_count: 2,
     });
-    expect(client.post).toHaveBeenCalledWith('/mcp/databricks/migrate-external-urls');
+    // Loading the catalog is a read: the migration is an explicit admin action.
+    expect(client.post).not.toHaveBeenCalled();
   });
 
-  it('does not POST when nothing is pending, and survives a failed migration', async () => {
-    client.get.mockResolvedValue({ data: { legacy_external_count: 0 } });
-    await service.getDatabricksCatalog();
-    expect(client.post).not.toHaveBeenCalledWith('/mcp/databricks/migrate-external-urls');
+  it('migrates legacy registrations only when asked, and reports failures', async () => {
+    client.post.mockResolvedValueOnce({ data: { migrated: 2 } });
+    expect(await service.migrateLegacyExternalUrls()).toBe(2);
+    expect(client.post).toHaveBeenCalledWith('/mcp/databricks/migrate-external-urls');
 
-    client.get.mockResolvedValue({ data: { legacy_external_count: 1 } });
-    client.post.mockRejectedValueOnce(new Error('boom'));
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await expect(service.getDatabricksCatalog()).resolves.toBeTruthy();
-    warn.mockRestore();
+    client.post.mockResolvedValueOnce({ data: {} });
+    expect(await service.migrateLegacyExternalUrls()).toBe(0);
+
+    client.post.mockRejectedValueOnce({ response: { data: { detail: 'Only admins' } } });
+    await expect(service.migrateLegacyExternalUrls()).rejects.toThrow('Only admins');
+    client.post.mockRejectedValueOnce(new Error('network'));
+    await expect(service.migrateLegacyExternalUrls()).rejects.toThrow(
+      'Error migrating legacy MCP registrations',
+    );
   });
 
   it('fills defaults when the response is partial', async () => {
@@ -108,6 +113,7 @@ describe('getDatabricksCatalog', () => {
       workspace_url: '',
       external: [],
       managed: [],
+      legacy_external_count: 0,
     });
   });
 });

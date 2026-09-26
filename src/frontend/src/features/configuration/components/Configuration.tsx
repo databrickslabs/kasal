@@ -12,6 +12,7 @@ import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 import { getSettingsSections, SettingsGroup, SettingsScope, SettingsSection, SettingsSectionId } from './settingsSections';
 import GeneralSettings from './GeneralSettings';
 import SettingsContent from './SettingsContent';
+import { ErrorBoundary } from '../../../shared/errors/ErrorBoundary';
 import { readSettingsNavigation, clearSettingsNavigation, switchSettingsTeamspace } from '../lib/settingsNavigation';
 
 const ModelConfiguration = lazy(() => import('./Models'));
@@ -181,9 +182,11 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
           <Typography component="h2" sx={{ fontSize: 26, fontWeight: 650, letterSpacing: '-0.025em' }}>{label(active)}</Typography>
           <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 0.75, mb: 4 }}>{active.description}</Typography>
           <SettingsContent>
-            <Suspense fallback={<Box role="status" sx={{ py: 5, display: 'flex', alignItems: 'center', gap: 1.5 }}><CircularProgress size={18} color="inherit" /><Typography variant="body2">Loading {label(active).toLocaleLowerCase()}…</Typography></Box>}>
-              <SectionContent key={`${groupId}:${activeScope}:${active.id}`} id={active.id} scope={activeScope} onNavigate={setSelected} />
-            </Suspense>
+            <ErrorBoundary resetKeys={[groupId, activeScope, active.id]}>
+              <Suspense fallback={<Box role="status" sx={{ py: 5, display: 'flex', alignItems: 'center', gap: 1.5 }}><CircularProgress size={18} color="inherit" /><Typography variant="body2">Loading {label(active).toLocaleLowerCase()}…</Typography></Box>}>
+                <SectionContent key={`${groupId}:${activeScope}:${active.id}`} id={active.id} scope={activeScope} onNavigate={setSelected} />
+              </Suspense>
+            </ErrorBoundary>
           </SettingsContent>
         </Box>
       </Box>

@@ -8,13 +8,13 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { Run } from '../../../api/execution/ExecutionHistoryService';
-// @react-pdf/renderer is large; load it only when a PDF is requested.
-const generateRunPDF = async (run: Run) => (await import('../../../utils/pdfGenerator')).generateRunPDF(run);
 import { useTranslation } from 'react-i18next';
 import ReplayIcon from '@mui/icons-material/Replay';
 import ExecutionStopButton from './ExecutionStopButton';
 import CheckpointDialog from './CheckpointDialog';
 import { useUserPreferencesStore } from '../../../store/userPreferencesStore';
+// Loads @react-pdf/renderer on demand and toasts on failure.
+import { downloadRunPDF } from './downloadRunPDF';
 
 /**
  * Runs that ended badly — always worth offering a resume, since a checkpoint is
@@ -113,7 +113,7 @@ const RunActions: React.FC<RunActionsProps> = ({
           <MenuItem disabled={isActive} onClick={() => act(() => onShowLogs(run.job_id))}><ListItemIcon><TerminalIcon fontSize="small" /></ListItemIcon><ListItemText>View logs</ListItemText></MenuItem>
           <MenuItem onClick={() => act(() => onShowDetails?.())}><ListItemIcon><Info size={18} /></ListItemIcon><ListItemText>Run details</ListItemText></MenuItem>
           <MenuItem onClick={() => act(() => onSchedule(run))}><ListItemIcon><ScheduleIcon fontSize="small" /></ListItemIcon><ListItemText>Schedule execution</ListItemText></MenuItem>
-          <MenuItem disabled={isActive} onClick={() => act(() => { void generateRunPDF(run); })}><ListItemIcon><PictureAsPdfIcon fontSize="small" /></ListItemIcon><ListItemText>Download PDF</ListItemText></MenuItem>
+          <MenuItem disabled={isActive} onClick={() => act(() => { void downloadRunPDF(run); })}><ListItemIcon><PictureAsPdfIcon fontSize="small" /></ListItemIcon><ListItemText>Download PDF</ListItemText></MenuItem>
           {isResumable && <MenuItem onClick={() => act(() => setCheckpointOpen(true))}><ListItemIcon><ReplayIcon fontSize="small" /></ListItemIcon><ListItemText>Checkpoint and resume</ListItemText></MenuItem>}
           <MenuItem onClick={() => act(() => onDelete(run))} sx={{ color: 'error.main', mt: 0.5 }}><ListItemIcon sx={{ color: 'inherit' }}><DeleteIcon fontSize="small" /></ListItemIcon><ListItemText>Delete run</ListItemText></MenuItem>
         </Menu>
@@ -183,7 +183,7 @@ const RunActions: React.FC<RunActionsProps> = ({
       <Tooltip title={t('runHistory.actions.downloadPdf')}>
         <IconButton
           size="small"
-          onClick={() => generateRunPDF(run)}
+          onClick={() => { void downloadRunPDF(run); }}
           color="default"
         >
           <PictureAsPdfIcon fontSize="small" />

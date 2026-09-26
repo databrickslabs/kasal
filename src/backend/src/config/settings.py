@@ -34,9 +34,14 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # Database settings
-    DATABASE_TYPE: str = os.getenv(
-        "DATABASE_TYPE", "postgres"
-    )  # 'postgres' or 'sqlite'
+    #
+    # 'sqlite' or 'postgres'. The default is SQLite, the same as ``run.sh`` and
+    # the Databricks Apps entrypoint. It used to be "postgres" here while run.sh
+    # defaulted to SQLite, so the documented companion commands that do not go
+    # through run.sh (``alembic upgrade head``, ``python run_seeders.py``) hit
+    # postgres@localhost while the server used app.db. Every entry point must
+    # agree; opt in to PostgreSQL with DATABASE_TYPE=postgres.
+    DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "sqlite")
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
@@ -72,13 +77,13 @@ class Settings(BaseSettings):
             return v
 
         # Check database type to determine URI format
-        db_type = info.data.get("DATABASE_TYPE", "postgres")
+        db_type = info.data.get("DATABASE_TYPE", "sqlite")
 
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
             return f"sqlite+aiosqlite:///{sqlite_path}"
         else:
-            # Default to PostgreSQL - return string instead of PostgresDsn to avoid validation issues
+            # PostgreSQL - return string instead of PostgresDsn to avoid validation issues
             return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
 
     @field_validator("SYNC_DATABASE_URI", mode="before")
@@ -87,7 +92,7 @@ class Settings(BaseSettings):
             return v
 
         # Check database type to determine URI format
-        db_type = info.data.get("DATABASE_TYPE", "postgres")
+        db_type = info.data.get("DATABASE_TYPE", "sqlite")
 
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
@@ -108,10 +113,18 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8000
     DEBUG_MODE: bool = False
 
-    # Local development fallback user.
-    # Set this in your .env file when running outside Databricks Apps.
-    # Leave empty (the default) in production — the platform provides X-Forwarded-Email.
+    # Local development fallback user: the identity a request WITHOUT an
+    # identity header runs as, when LOCAL_DEV_AUTH=true (run.sh sets it; see
+    # main._local_dev_auth_enabled). Empty means "dev@localhost". Ignored in
+    # Databricks Apps and with ENVIRONMENT=production, where the platform proxy
+    # provides X-Forwarded-Email.
     LOCAL_DEV_USER_EMAIL: str = os.getenv("LOCAL_DEV_USER_EMAIL", "")
+
+    # Base URL of the Jev decisions API (services/decisions/provider.py), e.g.
+    # "https://jev.example.com". Deployment-owned: never taken from a prompt or
+    # a tool result. Empty (the default) means the provider is not configured,
+    # so decisions stay off for every workspace and admins cannot enable them.
+    JEV_API_BASE: str = os.getenv("JEV_API_BASE", "")
 
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True

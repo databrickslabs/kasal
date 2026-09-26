@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useState } from 'react';
+import { ErrorBoundary } from '../../../shared/errors/ErrorBoundary';
 
 /**
  * Run-detail dialogs, loaded on demand.
@@ -11,6 +12,18 @@ export const LazyShowResult = lazy(() => import('./ShowResult'));
 export const LazyShowTraceTimeline = lazy(() => import('./ShowTraceTimeline'));
 export const LazyShowLogs = lazy(() => import('./ShowLogs'));
 export const LazyRecipeEffectivenessDialog = lazy(() => import('./RecipeEffectivenessDialog'));
+
+/**
+ * A lazy dialog behind an error boundary. If its chunk fails to load (usually
+ * a redeploy since the page was opened), the user gets a dialog offering a
+ * reload instead of a blank screen: without a boundary the rejection
+ * unmounts the whole app.
+ */
+export const LazyDialogBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <ErrorBoundary variant="dialog">
+    <Suspense fallback={null}>{children}</Suspense>
+  </ErrorBoundary>
+);
 
 interface MountWhenOpenedProps {
   open: boolean;
@@ -26,5 +39,5 @@ export const MountWhenOpened: React.FC<MountWhenOpenedProps> = ({ open, children
   const [opened, setOpened] = useState(open);
   if (open && !opened) setOpened(true);
   if (!opened && !open) return null;
-  return <Suspense fallback={null}>{children}</Suspense>;
+  return <LazyDialogBoundary>{children}</LazyDialogBoundary>;
 };

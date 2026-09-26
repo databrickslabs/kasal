@@ -17,6 +17,7 @@ const mockService = {
   setGlobalAvailability: vi.fn(),
   setWorkspaceEnabled: vi.fn(),
   ensureDatabricksServer: vi.fn(),
+  migrateLegacyExternalUrls: vi.fn(),
 };
 
 vi.mock('../../../../api/tools/MCPService', () => ({
@@ -90,6 +91,21 @@ const renderCatalog = async (
 };
 
 describe('DatabricksMcpCatalog', () => {
+  it('offers the legacy-URL migration as an explicit action, never on load', async () => {
+    mockService.getDatabricksCatalog.mockResolvedValue({ ...CATALOG, legacy_external_count: 2 });
+    mockService.migrateLegacyExternalUrls.mockResolvedValue(2);
+    const { onChanged } = await renderCatalog('workspace');
+
+    expect(screen.getByText(/still use the legacy external-MCP proxy URL/)).toBeInTheDocument();
+    expect(mockService.migrateLegacyExternalUrls).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Migrate' }));
+    });
+    expect(mockService.migrateLegacyExternalUrls).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
   it('lists external + managed entries with toggles reflecting the registered state', async () => {
     await renderCatalog('global');
 

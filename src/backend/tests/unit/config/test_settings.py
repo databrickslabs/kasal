@@ -34,7 +34,7 @@ class TestSettings:
             "http://localhost:5173",
             "http://127.0.0.1:5173",
         ]
-        assert settings.DATABASE_TYPE == os.getenv("DATABASE_TYPE", "postgres")
+        assert settings.DATABASE_TYPE == os.getenv("DATABASE_TYPE", "sqlite")
         assert settings.DOCS_ENABLED is True
         assert (
             settings.LOG_LEVEL == "DEBUG"

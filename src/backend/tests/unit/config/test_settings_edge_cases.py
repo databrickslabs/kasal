@@ -245,8 +245,8 @@ class TestSettingsEdgeCases:
         cleared environment, and this test used to assert whatever env happened
         to exist when the first test module imported settings. That made it fail
         or pass depending on collection order: several memory test modules set
-        DATABASE_TYPE=sqlite at module scope, so running them first turned the
-        "postgres default" assertion red.
+        DATABASE_TYPE=sqlite at module scope, so running them first could mask
+        the default this asserts.
         """
         import importlib
 
@@ -266,7 +266,11 @@ class TestSettingsEdgeCases:
             clean_settings = reloaded.Settings()
 
             # Should use all defaults
-            assert clean_settings.DATABASE_TYPE == "postgres"  # Default fallback
+            # SQLite, the same default as run.sh and the Apps entrypoint, so
+            # alembic and run_seeders.py open the database the server uses.
+            assert clean_settings.DATABASE_TYPE == "sqlite"  # Default fallback
+            assert clean_settings.DATABASE_URI.startswith("sqlite+aiosqlite:///")
+            assert clean_settings.DATABASE_URI.endswith("app.db")
             # Absolute, anchored on the backend root — never CWD-relative, which
             # is what scattered empty app.db files across the repo.
             assert not clean_settings.SQLITE_DB_PATH.startswith("./")

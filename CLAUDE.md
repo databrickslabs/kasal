@@ -16,13 +16,16 @@ you are editing wins on specifics:
   - `src/backend/src/repositories/CLAUDE.md` — data access
   - `src/backend/src/services/execution/CLAUDE.md` — the three execution paths
     (Chat / Agent Builder / Flow Builder) and the machinery they share
-  - `src/backend/src/services/` — capabilities usable without a crew run:
-    `tools/`, `memory/`, `guardrails/`, `security/`, `knowledge/`, `export/`,
-    `trace/`
   - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system
     (renderer + composer + catalog + UIConfigurator + exported-app vendoring).
     **Read before adding/editing an A2UI component** — the touchpoints span
     frontend, backend and the export template.
+
+  The capability packages under `src/backend/src/services/` (`tools/`, `memory/`,
+  `guardrails/`, `security/`, `knowledge/`, `export/`, `trace/`) have NO CLAUDE.md
+  of their own; `services/CLAUDE.md` ("Two shapes live here") covers them, and
+  `src/backend/CLAUDE.md` has the memory package map. To check this list:
+  `git ls-files | grep 'CLAUDE.md$'`.
 
 ## Important Project Rules
 

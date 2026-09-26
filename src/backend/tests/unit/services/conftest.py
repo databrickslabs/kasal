@@ -11,6 +11,7 @@ def jev_disabled_by_default():
     # Gateway tests override this boundary to exercise enabled and failed calls;
     # settings tests exercise the real service and API-key delegation separately.
     with patch(
-        "src.db.decision_context.decision_credential", new=AsyncMock(return_value=None)
+        "src.services.decisions.credentials.decision_credential",
+        new=AsyncMock(return_value=None),
     ):
         yield

@@ -24,6 +24,7 @@ import {
   databricksMcpServerName,
 } from '../../../../api/tools/MCPService';
 import type { MCPServerConfig } from '../../../../types/config/mcp';
+import LegacyMcpUrlNotice from './LegacyMcpUrlNotice';
 
 /**
  * Admin curation surface for the workspace's Databricks MCP servers.
@@ -406,6 +407,12 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
           {actionError}
         </Alert>
+      )}
+      {catalog && (
+        <LegacyMcpUrlNotice
+          count={catalog.legacy_external_count ?? 0}
+          onMigrated={() => onChanged()}
+        />
       )}
 
       {catalog === null ? (

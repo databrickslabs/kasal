@@ -11,8 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import Request
 
-from src.core.exceptions import KasalError, UnauthorizedError
-from src.dependencies.providers import get_group_context
+from src.core.exceptions import ForbiddenError, KasalError, UnauthorizedError
+from src.dependencies.providers import (
+    GROUP_ACCESS_DENIED_DETAIL,
+    WORKSPACE_ACCESS_DENIED_DETAIL,
+    get_group_context,
+)
 from src.utils.user_context import GroupContext
 
 
@@ -66,10 +70,13 @@ class TestGetGroupContextExceptionHandling:
         assert exc_info.value.status_code == 503
 
     @pytest.mark.asyncio
-    async def test_value_error_raises_http_403(self):
-        """ValueError from GroupContext.from_email still raises HTTPException(403)."""
-        from fastapi import HTTPException
+    async def test_value_error_raises_403_with_generic_detail(self, caplog):
+        """A resolver refusal is a 403 whose detail does not echo the ValueError.
 
+        The resolver message names the requested group id; it goes to the log.
+        The client gets a fixed message that still contains "access to group",
+        which the frontend API client matches to drop a stale workspace.
+        """
         request = _make_request()
 
         with patch.object(
@@ -77,10 +84,42 @@ class TestGetGroupContextExceptionHandling:
             "from_email",
             new_callable=AsyncMock,
             side_effect=ValueError(
-                "Access denied: User does not have access to group X"
+                "Access denied: User does not have access to group secret-group-42"
             ),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with caplog.at_level("WARNING", logger="src.core.dependencies"):
+                with pytest.raises(ForbiddenError) as exc_info:
+                    await get_group_context(
+                        request=request,
+                        x_forwarded_email=None,
+                        x_forwarded_access_token=None,
+                        x_auth_request_email="user@example.com",
+                        x_auth_request_user=None,
+                        x_auth_request_access_token=None,
+                        x_group_id="secret-group-42",
+                        x_group_domain=None,
+                    )
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == GROUP_ACCESS_DENIED_DETAIL
+        assert "secret-group-42" not in exc_info.value.detail
+        assert "access to group" in exc_info.value.detail.lower()
+        assert "secret-group-42" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_other_value_error_raises_403_with_workspace_detail(self):
+        """Refusals that are not about the selected group get the other fixed text."""
+        request = _make_request()
+
+        with patch.object(
+            GroupContext,
+            "from_email",
+            new_callable=AsyncMock,
+            side_effect=ValueError(
+                "Access denied: personal workspace has not been allocated"
+            ),
+        ):
+            with pytest.raises(ForbiddenError) as exc_info:
                 await get_group_context(
                     request=request,
                     x_forwarded_email=None,
@@ -92,7 +131,9 @@ class TestGetGroupContextExceptionHandling:
                     x_group_domain=None,
                 )
 
-            assert exc_info.value.status_code == 403
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == WORKSPACE_ACCESS_DENIED_DETAIL
+        assert "access to group" not in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_no_email_raises_401(self):

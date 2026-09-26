@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useEffect, forwardRef, useRef } from 'react';
+import React, { useState, useEffect, forwardRef, useRef } from 'react';
 import {
   Box,
   Card,
@@ -25,7 +25,7 @@ import { Run } from '../../../api/execution/ExecutionHistoryService';
 import { ScheduleService } from '../../../api/execution/ScheduleService';
 import { ResultValue } from '../../../types/execution/result';
 import {
-  LazyShowResult, LazyShowTraceTimeline, LazyShowLogs, LazyRecipeEffectivenessDialog, MountWhenOpened,
+  LazyShowResult, LazyShowTraceTimeline, LazyShowLogs, LazyRecipeEffectivenessDialog, MountWhenOpened, LazyDialogBoundary,
 } from './lazyRunDialogs';
 import { executionLogService } from '../../../api/execution/ExecutionLogs';
 import type { LogMessage, LogEntry } from '../../../api/execution/ExecutionLogs';
@@ -560,7 +560,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
           </Box>}
 
           {selectedRunId && (
-            <Suspense fallback={null}>
+            <LazyDialogBoundary>
               <LazyShowTraceTimeline
                 open={showTraceOpen}
                 onClose={handleCloseTrace}
@@ -569,12 +569,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
                 onViewResult={handleShowResult}
                 onShowLogs={handleShowLogs}
               />
-            </Suspense>
+            </LazyDialogBoundary>
           )}
 
 
           {showLogsDialog && selectedJobId && (
-            <Suspense fallback={null}>
+            <LazyDialogBoundary>
               <LazyShowLogs
                 open={showLogsDialog}
                 onClose={handleCloseLogs}
@@ -583,7 +583,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
                 isConnecting={isConnecting}
                 connectionError={connectionError}
               />
-            </Suspense>
+            </LazyDialogBoundary>
           )}
 
           <RunDialogs
