@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +63,11 @@ class UserService:
     async def get_user(self, user_id: str) -> Optional[User]:
         """Get a user by ID"""
         return await self.user_repo.get(user_id)
+
+    async def get_system_admin_emails(self) -> Set[str]:
+        """Lower-cased emails of every system administrator (read-only)."""
+        emails = await self.user_repo.find_system_admin_emails()
+        return {email.strip().lower() for email in emails}
 
     async def get_users(
         self,

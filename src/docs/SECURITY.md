@@ -96,6 +96,15 @@ The cross-teamspace run list, `GET /executions/history/all-groups`, builds its o
 
 **Background lookups follow the run's teamspace.** Tool-side "latest output" fallbacks (the UCMV, Power BI mapper, Genie config, dashboard and re-evaluation tools) read only rows from the run's own teamspace, taken from the run's `GroupContext` and never from tool input. With no teamspace they find nothing.
 
+**Power BI converter templates.** A saved converter configuration marked as a template (`is_template=true`) is visible to every teamspace, so only a system administrator can create, update or delete one. Templates a workspace user created before that rule are still visible everywhere. To review them, run this read-only listing from `src/backend` with the app's environment:
+
+```bash
+.venv/bin/python -m scripts.maintenance.list_unreviewed_powerbi_templates        # table
+.venv/bin/python -m scripts.maintenance.list_unreviewed_powerbi_templates --json # JSON
+```
+
+It lists each template whose `created_by_email` is not a current system administrator (compared case-insensitively), with its id, name, teamspace, formats, use count and creation time, and changes nothing. For each row, check the configuration for teamspace-specific or sensitive content. Then a system administrator either deletes it, or keeps it as a deliberate shared template, or asks its creator to save a private copy first. The same listing is available in code as `ConverterService.list_templates_created_by_non_admins()`, which refuses a caller who is not a system administrator.
+
 ## Secrets and encryption at rest
 
 Sensitive values — provider API keys, MCP server credentials, Databricks personal access tokens, and encrypted tool configurations — are stored encrypted in the application database (SQLite in local development, Databricks Lakebase in production). Only ciphertext is persisted; plaintext secrets are never written to the database, to `.env` files, or to logs.
