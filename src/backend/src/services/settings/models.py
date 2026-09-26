@@ -589,8 +589,8 @@ class ModelConfigService:
         there. Returns None when nothing is usable (the caller then keeps the
         original Databricks config).
 
-        KASAL_FALLBACK_MODEL pins a specific model key and wins over the ranking
-        when that model is enabled.
+        The fallback model a system admin pins (Configuration → Models → Advanced;
+        it replaced KASAL_FALLBACK_MODEL) wins over the ranking when enabled.
         """
         try:
             models = await self.find_enabled_models()
@@ -600,17 +600,19 @@ class ModelConfigService:
 
         candidates = [m for m in models if (m.provider or "").lower() != "databricks"]
 
-        pinned_key = os.getenv("KASAL_FALLBACK_MODEL")
+        from src.services.settings import engine_settings
+
+        pinned_key = engine_settings.setting("fallback_model")
         if pinned_key:
             for m in candidates:
                 if m.key == pinned_key:
                     logger.info(
-                        "Using KASAL_FALLBACK_MODEL pin '%s' for Databricks substitution",
+                        "Using fallback model pin '%s' for Databricks substitution",
                         pinned_key,
                     )
                     return self._as_config(m)
             logger.warning(
-                "KASAL_FALLBACK_MODEL='%s' is not an enabled model — ignoring the pin",
+                "Fallback model '%s' is not an enabled model — ignoring the pin",
                 pinned_key,
             )
 

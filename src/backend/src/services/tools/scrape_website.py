@@ -1,11 +1,12 @@
 """ScrapeWebsiteTool — fetch a URL and return its text."""
 
 import logging
-import os
 import re
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from src.services.settings.engine_settings import setting as engine_setting
 
 from .base import BaseTool
 from .web_fetch import _safe_fetch, _TextExtractor
@@ -20,23 +21,14 @@ logger = logging.getLogger(__name__)
 #: failing the task with a token error rather than a truncated read.
 #:
 #: 30k characters is roughly 7-8k tokens: enough for a long article, small next to
-#: any current context window. Override per tool instance, or globally with
-#: SCRAPE_WEBSITE_MAX_CHARS.
+#: any current context window. Override per tool instance, or for every tool in
+#: Tools → Advanced (was SCRAPE_WEBSITE_MAX_CHARS).
 _DEFAULT_MAX_CHARS = 30_000
 
 #: Ceiling on the bytes downloaded, independent of the character cap: HTML markup
 #: dwarfs the text it carries, so the fetch is bounded separately to avoid pulling
 #: megabytes into memory just to extract a few thousand characters.
 _DEFAULT_MAX_FETCH_BYTES = 2_000_000
-
-
-def _env_int(name: str, default: int) -> int:
-    """A positive int from the environment, or ``default`` if unset/garbage."""
-    try:
-        value = int(os.getenv(name, ""))
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
 
 
 class FixedScrapeWebsiteToolSchema(BaseModel):
@@ -57,13 +49,11 @@ class ScrapeWebsiteTool(BaseTool):
     cookies: dict[str, str] | None = None
     #: Cap on the returned text. See _DEFAULT_MAX_CHARS for why this exists.
     max_chars: int = Field(
-        default_factory=lambda: _env_int("SCRAPE_WEBSITE_MAX_CHARS", _DEFAULT_MAX_CHARS)
+        default_factory=lambda: int(engine_setting("scrape_max_chars"))
     )
     #: Cap on the bytes fetched, before any text extraction.
     max_fetch_bytes: int = Field(
-        default_factory=lambda: _env_int(
-            "SCRAPE_WEBSITE_MAX_FETCH_BYTES", _DEFAULT_MAX_FETCH_BYTES
-        )
+        default_factory=lambda: int(engine_setting("scrape_max_fetch_bytes"))
     )
     headers: dict[str, str] | None = Field(
         default_factory=lambda: {
@@ -90,7 +80,10 @@ class ScrapeWebsiteTool(BaseTool):
             )
             self.args_schema = FixedScrapeWebsiteToolSchema
             if cookies is not None:
-                self.cookies = {cookies["name"]: os.getenv(cookies["value"]) or ""}
+                # The value is the cookie itself. It used to NAME an environment
+                # variable to read, which let a tool config send any server
+                # secret (e.g. DATABRICKS_CLIENT_SECRET) to a site it chose.
+                self.cookies = {cookies["name"]: str(cookies.get("value") or "")}
 
     def _run(self, **kwargs: Any) -> Any:
         website_url: str | None = kwargs.get("website_url", self.website_url)

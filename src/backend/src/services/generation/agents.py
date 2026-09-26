@@ -134,7 +134,7 @@ class AgentGenerationService:
 
         Args:
             prompt_text: Natural language description of the agent
-            model: Model to use for generation, defaults to AGENT_MODEL or the engine default
+            model: Model to use for generation, defaults to the engine default model
             tools: List of tools available to the agent (ignored — use available_tools)
             group_context: Optional group context for multi-group isolation
             available_tools: Optional list of dicts with 'name' and 'description' for tool selection

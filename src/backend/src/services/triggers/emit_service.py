@@ -15,7 +15,6 @@ domain's repositories.
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Dict, Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +26,7 @@ from src.repositories.event_subscription_repository import (
     EventSubscriptionRepository,
 )
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
+from src.services.settings.engine_settings import setting as engine_setting
 from src.services.triggers.event_types import EventType, canonical_event_name
 
 logger = LoggerManager.get_instance().system
@@ -38,10 +38,7 @@ logger = LoggerManager.get_instance().system
 #: ``failed`` event): without it, one self-subscription generates runs — and LLM
 #: spend — forever.
 def _max_hops() -> int:
-    try:
-        return max(1, int(os.getenv("KASAL_EVENT_TRIGGERS_MAX_HOPS", "5")))
-    except (TypeError, ValueError):
-        return 5
+    return int(engine_setting("event_triggers_max_hops"))
 
 
 def _shape_to_schema(schema_def: Any, result: Any) -> Optional[Dict[str, Any]]:
@@ -190,13 +187,13 @@ class EmitService:
 
         ``correlation_id`` threads the ORIGIN of a chain (defaults to this run's
         job id when it starts one); ``hops`` is this run's depth in that chain —
-        at ``KASAL_EVENT_TRIGGERS_MAX_HOPS`` the chain stops here.
+        at the configured chain-depth cap the chain stops here.
         """
         if hops >= _max_hops():
             logger.warning(
                 "[Emit] run %s at hop %d reached the chain-depth cap (%d) — "
-                "emitting nothing. A legitimate deeper pipeline can raise "
-                "KASAL_EVENT_TRIGGERS_MAX_HOPS; a cycle should be re-wired.",
+                "emitting nothing. A legitimate deeper pipeline can raise the "
+                "cap (Event triggers → Advanced); a cycle should be re-wired.",
                 job_id,
                 hops,
                 _max_hops(),

@@ -14,11 +14,11 @@ surface dict, or ``None`` when A2UI is disabled or there is no text to render.
 
 import asyncio
 import logging
-import os
 import threading
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from src.services.a2ui import settings as a2ui_settings
 from src.services.a2ui.compose import (
     ComposeStream,
     compose_a2ui,
@@ -37,6 +37,7 @@ from src.services.a2ui.stream import (
     surface_to_messages,
 )
 from src.services.a2ui.structured_text import render_research_envelope
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,15 @@ def _catalog() -> Dict[str, Any]:
 
 
 def a2ui_enabled() -> bool:
-    """Master switch (env-gated, default on)."""
-    return os.getenv("A2UI_ENABLED", "true").lower() in ("1", "true", "yes")
+    """System kill switch (Configuration → Output design, system; default on).
+    Off means off in every workspace, whatever the workspace switch says."""
+    return bool(engine_setting("a2ui_enabled"))
+
+
+async def compose_timeout(group_id: Optional[str] = None) -> float:
+    """Seconds the chat path waits for a surface: the workspace's Output design
+    override, else the system default."""
+    return float((await a2ui_settings.for_group(group_id))["a2ui_compose_timeout"])
 
 
 #: Outcomes that mean composition never ran: there was no answer to render, the
@@ -185,16 +193,6 @@ def _time_now() -> float:
     return time.monotonic()
 
 
-def _retries() -> int:
-    """Composer attempts before falling back to markdown — env-tunable so weaker
-    local models (e.g. a self-hosted Qwen) can be given more attempts without a
-    code change."""
-    try:
-        return max(1, int(os.getenv("A2UI_COMPOSE_RETRIES", "2")))
-    except (TypeError, ValueError):
-        return 2
-
-
 # Catalog/directive resolution is shared (stdlib-only) with the exported app so
 # both resolve a workspace's UIConfig IDENTICALLY — see src.services.a2ui.compose.
 # These thin adapters turn Kasal's pydantic UIConfigResponse into the plain dict
@@ -237,31 +235,34 @@ def _resolve_guidance(cfg: Any, query: str) -> str:
 
 async def _resolve_config(
     group_id: Optional[str], query: str
-) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-    """Resolve (enabled, catalog, guidance) for this workspace.
+) -> Tuple[bool, Optional[Dict[str, Any]], str, Dict[str, Any]]:
+    """Resolve (enabled, catalog, guidance, settings) for this workspace.
 
-    The UIConfigurator is the source of truth; the env flag + bundled catalog are
-    only the fallback when there's no group or the lookup fails (UI formatting
-    must never break a run)."""
+    The UIConfigurator is the source of truth; the system defaults + bundled
+    catalog are the fallback when there's no group or the lookup fails (UI
+    formatting must never break a run). ``settings`` are the runtime knobs —
+    compose attempts, streaming — with the workspace's overrides applied."""
     enabled = a2ui_enabled()
     catalog = _catalog()
     guidance = ""
+    settings = a2ui_settings.effective()
     if not group_id:
-        return enabled, catalog, guidance
+        return enabled, catalog, guidance, settings
     try:
         from src.db.session import routed_scoped_session
         from src.services.settings.ui import UIConfigService
 
         async with routed_scoped_session() as session:
             cfg = await UIConfigService(session, group_id=group_id).get_config()
-        enabled = bool(cfg.enabled)
+        enabled = enabled and bool(cfg.enabled)
         catalog = _resolve_catalog(cfg, catalog)
         guidance = _resolve_guidance(cfg, query)
+        settings = a2ui_settings.effective(getattr(cfg, "settings_json", None))
     except Exception as exc:  # noqa: BLE001 — fall back to env + bundled catalog
         logger.warning(
             f"[a2ui] workspace UI config lookup failed ({exc}); using defaults"
         )
-    return enabled, catalog, guidance
+    return enabled, catalog, guidance, settings
 
 
 # Surface kinds a plain-prose answer degrades into (as opposed to explicitly
@@ -311,15 +312,11 @@ class _ComposeStreamBridge(ComposeStream):
     before. Nothing in this class may raise into the composer.
     """
 
-    #: Delta delivery cadence; parsing consumes each character once.
-    @staticmethod
-    def _interval() -> float:
-        try:
-            return max(0.0, float(os.getenv("A2UI_STREAM_INTERVAL_MS", "120")) / 1000.0)
-        except Exception:  # noqa: BLE001
-            return 0.12
-
-    def __init__(self, surface_id, on_delta, loop, llm) -> None:
+    def __init__(self, surface_id, on_delta, loop, llm, settings=None) -> None:
+        #: Delta delivery cadence (the effective a2ui_stream_interval_ms);
+        #: parsing consumes each character once.
+        interval_ms = (settings or {}).get("a2ui_stream_interval_ms", 120)
+        self._interval_s = max(0, int(interval_ms)) / 1000.0
         self._surface_id = surface_id
         self._on_delta = on_delta
         self._loop = loop
@@ -357,7 +354,7 @@ class _ComposeStreamBridge(ComposeStream):
                 self.chunks += 1
                 self._characters += len(chunk)
                 now = time.monotonic()
-                if now - self._last_feed < self._interval():
+                if now - self._last_feed < self._interval_s:
                     return
                 self._last_feed = now
                 buf = "".join(self._buf)
@@ -527,7 +524,7 @@ async def compose_surface(
 
     # The UIConfigurator (per workspace) is the source of truth: whether A2UI is on,
     # which component catalog the composer may use, and the per-deliverable settings.
-    enabled, catalog, guidance = await _resolve_config(group_id, query)
+    enabled, catalog, guidance, settings = await _resolve_config(group_id, query)
     if not enabled or not catalog:
         await _retract_shell()
         _skip(
@@ -592,18 +589,13 @@ async def compose_surface(
     # the engine emit LLMStreamChunkEvent per delta; the bridge parses those into
     # A2UI messages and ships them. Everything here is best-effort — if any of it
     # fails we fall straight back to composing silently and delivering once.
-    # Kill-switch: A2UI_STREAMING=false.
+    # Kill switch: Output design → Advanced → Stream surfaces.
     bridge: Optional[_ComposeStreamBridge] = None
     _chunk_handler = None
-    if (
-        on_delta is not None
-        and _loop is not None
-        and os.getenv("A2UI_STREAMING", "true").strip().lower()
-        not in ("0", "false", "no")
-    ):
+    if on_delta is not None and _loop is not None and settings["a2ui_streaming"]:
         try:
             llm.stream = True
-            bridge = _ComposeStreamBridge(SURFACE_ID, on_delta, _loop, llm)
+            bridge = _ComposeStreamBridge(SURFACE_ID, on_delta, _loop, llm, settings)
             # The shell is already on screen, so the bridge must count it as
             # sent — otherwise `retract()` would decide there was nothing to
             # take back and leave the empty frame there.
@@ -715,7 +707,7 @@ async def compose_surface(
             llm_call=_llm_call,
             catalog=catalog,
             enabled=True,
-            retries=_retries(),
+            retries=int(settings["a2ui_compose_retries"]),
             guidance=guidance,
             stream=bridge,
         )

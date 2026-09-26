@@ -87,13 +87,26 @@ os.environ["LOG_DIR"] = log_path
 os.makedirs(log_path, exist_ok=True)
 
 
+def _trigger_interval() -> int:
+    """Seconds between trigger-queue ticks (Event triggers → Advanced)."""
+    from src.services.settings.engine_settings import setting
+
+    return int(setting("event_triggers_interval"))
+
+
+def _trigger_batch() -> int:
+    from src.services.settings.engine_settings import setting
+
+    return int(setting("event_triggers_batch"))
+
+
 async def _on_database_ready(system_logger: logging.Logger) -> None:
     """Startup steps that need the database. Neither may stop the app starting."""
     # Configuration → Engines settings for synchronous readers (Jev URL, run
     # budgets, agent time limit). Never raises: defaults apply on failure.
-    from src.services.settings import engine_settings
+    from src.services.settings import engine_settings_loader
 
-    await engine_settings.load()
+    await engine_settings_loader.load()
 
     system_logger.info("Cleaning up stale jobs from previous run...")
     try:
@@ -518,8 +531,6 @@ async def lifespan(app: FastAPI):
             from src.services.triggers import TriggerQueueConsumerService
 
             _trigger_consumer = TriggerQueueConsumerService()
-            _tq_interval = int(os.environ.get("KASAL_EVENT_TRIGGERS_INTERVAL", "5"))
-            _tq_batch = int(os.environ.get("KASAL_EVENT_TRIGGERS_BATCH", "5"))
 
             async def _event_triggers_enabled() -> bool:
                 """Read the admin toggle; default OFF, never raise."""
@@ -535,12 +546,12 @@ async def lifespan(app: FastAPI):
                     return False
 
             async def _trigger_queue_loop():
-                await asyncio.sleep(_tq_interval)  # let the app finish booting
+                await asyncio.sleep(_trigger_interval())  # let the app finish booting
                 ticks = 0
                 while True:
                     try:
                         if await _event_triggers_enabled():
-                            await _trigger_consumer.claim_and_dispatch(_tq_batch)
+                            await _trigger_consumer.claim_and_dispatch(_trigger_batch())
                             ticks += 1
                             if ticks >= 12:  # housekeeping: crashed rows + retention
                                 await _trigger_consumer.reclaim()
@@ -548,7 +559,7 @@ async def lifespan(app: FastAPI):
                                 ticks = 0
                     except Exception as _tq_err:  # noqa: BLE001
                         system_logger.error(f"[TriggerQueue] loop error: {_tq_err}")
-                    await asyncio.sleep(_tq_interval)
+                    await asyncio.sleep(_trigger_interval())
 
             # Keep a strong reference on app.state: the event loop holds only
             # weak refs to tasks, so a bare create_task here can be garbage-
@@ -559,8 +570,8 @@ async def lifespan(app: FastAPI):
             system_logger.info(
                 "Event-trigger consumer loop started (gated on Configuration "
                 "setting; interval=%ss, batch=%s)",
-                _tq_interval,
-                _tq_batch,
+                _trigger_interval(),
+                _trigger_batch(),
             )
         except Exception as e:
             system_logger.error(f"Failed to start event-trigger consumer: {e}")

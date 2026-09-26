@@ -58,10 +58,30 @@ class TestEnvironmentSetup:
         assert os.environ.get("CREWAI_DISABLE_TELEMETRY") == "true"
 
     def test_mlflow_tracking_uri_set(self):
-        """Test that MLFLOW_TRACKING_URI is set to databricks."""
-        import src.main  # noqa: F401
+        """Importing src.main sets MLFLOW_TRACKING_URI to databricks.
 
-        assert os.environ.get("MLFLOW_TRACKING_URI") == "databricks"
+        Checked in a fresh interpreter: it is an import-time side effect, and
+        the conftest env isolation removes MLFLOW_* after whichever test first
+        imported the module, so the cached import cannot show it here.
+        """
+        import subprocess
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if k != "MLFLOW_TRACKING_URI"}
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os, src.main; print(os.environ['MLFLOW_TRACKING_URI'])",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+        assert probe.stdout.strip().splitlines()[-1] == "databricks", probe.stderr[
+            -500:
+        ]
 
     def test_log_dir_is_set(self):
         """Test that LOG_DIR environment variable is set."""

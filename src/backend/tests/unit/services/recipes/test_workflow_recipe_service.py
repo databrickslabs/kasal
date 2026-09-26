@@ -542,7 +542,7 @@ class TestExemplars:
         assert text == ""
 
     @pytest.mark.asyncio
-    async def test_kill_switch_disables_injection(self, monkeypatch):
+    async def test_kill_switch_disables_injection(self, engine_setting, monkeypatch):
         from src.services.recipes import recipes as module
 
         async def fake_find(self, prompt, group_ids, limit=8):
@@ -551,7 +551,7 @@ class TestExemplars:
         monkeypatch.setattr(
             module.WorkflowRecipeService, "find_similar_for_prompt", fake_find
         )
-        monkeypatch.setattr(module, "EXEMPLARS_ENABLED", False)
+        engine_setting("workflow_recipe_exemplars", False)
         text = await module.WorkflowRecipeService(session=None).exemplars_for_prompt(
             "load companies", ["g1"]
         )

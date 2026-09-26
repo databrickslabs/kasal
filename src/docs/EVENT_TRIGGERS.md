@@ -20,13 +20,13 @@ the toggle takes effect within one poll interval — no restart. Emit-on-complet
 is gated on the same setting: while it is off, finished runs emit nothing and no
 pending rows pile up.
 
-Environment variables tune the mechanics only:
+A system administrator tunes the mechanics under **Configuration → Event triggers → Advanced (all workspaces)** (they replaced the `KASAL_EVENT_TRIGGERS_INTERVAL`, `_BATCH` and `_MAX_HOPS` environment variables):
 
-| Env var | Default | Meaning |
+| Setting | Default | Meaning |
 |---|---|---|
-| `KASAL_EVENT_TRIGGERS_INTERVAL` | `5` | seconds between claim polls |
-| `KASAL_EVENT_TRIGGERS_BATCH` | `5` | rows claimed per poll |
-| `KASAL_EVENT_TRIGGERS_MAX_HOPS` | `5` | chain-depth cap (see Chains below) |
+| Check the queue every (seconds) | `5` | seconds between claim polls |
+| Events per check | `5` | rows claimed per poll |
+| Chain depth limit | `5` | chain-depth cap (see Chains below) |
 
 Claims use `FOR UPDATE SKIP LOCKED` on Postgres/Lakebase, so running the loop on
 multiple app replicas is safe (no double-claim). On SQLite (local dev) the lock
@@ -159,7 +159,7 @@ no terminating condition, so one event means one run, always.
 
 For **indirect** cycles the guard is the hop cap: every emitted row carries
 `event.hops` = parent depth + 1, and the emit hook refuses to emit at
-`KASAL_EVENT_TRIGGERS_MAX_HOPS` (default 5). That catches A → B → A, or a
+the chain depth limit (default 5). That catches A → B → A, or a
 handler subscribed to another producer's `failed` event feeding back — chains
 that would otherwise generate runs (and LLM spend) forever. A legitimately
 deeper pipeline can raise the env var; a cycle should be re-wired.

@@ -119,10 +119,12 @@ class TestTheAnswerOnScreenIsKeptWhole:
         assert "Assistant: " + report in out
 
     @pytest.mark.asyncio
-    async def test_the_pinned_answer_has_its_own_ceiling(self, monkeypatch):
+    async def test_the_pinned_answer_has_its_own_ceiling(
+        self, engine_setting, monkeypatch
+    ):
         """Whole, not unbounded: past the last-answer cap it is cut there —
         not at the 240 stub and not by the shared budget."""
-        monkeypatch.setenv("CHAT_HISTORY_LAST_ANSWER_CHAR_CAP", "1000")
+        engine_setting("chat_history_last_answer_char_cap", 1000)
         out = await _preamble(
             [
                 _msg("user", "make a deck"),
@@ -134,10 +136,12 @@ class TestTheAnswerOnScreenIsKeptWhole:
         assert "Y" * 1001 not in out
 
     @pytest.mark.asyncio
-    async def test_the_budget_never_evicts_the_pinned_answer(self, monkeypatch):
+    async def test_the_budget_never_evicts_the_pinned_answer(
+        self, engine_setting, monkeypatch
+    ):
         """A tiny budget drops older assistant turns and then the oldest user
         turns — never the answer on screen."""
-        monkeypatch.setenv("CHAT_HISTORY_MAX_CHARS", "200")
+        engine_setting("chat_history_max_chars", 200)
         latest = "L" * 3000
         messages = [_msg("user", "my name is ada")]
         for i in range(6):

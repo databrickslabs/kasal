@@ -10,7 +10,11 @@ from src.services.execution.config.budget_profile import (
     default_profiles,
     resolve_budget_profile,
 )
-from src.services.settings import engine_settings, engine_settings_view
+from src.services.settings import (
+    engine_settings,
+    engine_settings_loader,
+    engine_settings_view,
+)
 from src.services.settings.engine import EngineConfigService
 
 
@@ -62,7 +66,7 @@ class TestSnapshot:
         with patch(
             "src.db.session.routed_scoped_session", side_effect=RuntimeError("down")
         ):
-            await engine_settings.load()
+            await engine_settings_loader.load()
 
 
 class TestBudgetOverride:

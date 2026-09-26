@@ -12,6 +12,7 @@ The environment variables that Kasal's backend, launch scripts and frontend read
 - [Execution and LLM tuning](#execution-and-llm-tuning)
 - [Chat, A2UI and generation](#chat-a2ui-and-generation)
 - [Configuration → Engines system settings](#configuration--engines-system-settings)
+- [Settings that moved from environment variables to the UI](#settings-that-moved-from-environment-variables-to-the-ui)
 - [Memory, knowledge and recipes](#memory-knowledge-and-recipes)
 - [Event triggers](#event-triggers)
 - [Logging](#logging)
@@ -154,12 +155,10 @@ The execution and LLM variables are:
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `KASAL_FALLBACK_MODEL` | Unset | Model key to substitute for a Databricks model when no Databricks workspace is available. Ignored unless that model is enabled | `src/backend/src/services/settings/models.py` |
 | `KASAL_RESPONSES_MAX_OUTPUT_TOKENS` | `16000` (falls back to `KASAL_CODEX_MAX_OUTPUT_TOKENS`) | Output-token cap for the Databricks Responses API adapter | `src/backend/src/services/llm/handlers/databricks_responses_llm.py` |
 | `KASAL_REASONING_EFFORT_DISABLED` | Empty | `1`/`true`/`yes` never sends a reasoning-effort parameter | `src/backend/src/utils/model_config.py` |
 | `KASAL_REASONING_EFFORT_MODELS` | Empty | Comma-separated extra model-name substrings that accept reasoning effort | `src/backend/src/utils/model_config.py` |
 | `KASAL_HARNESS` | Unset (`crewai`) | Harness a spawned run uses when neither the request nor the config chooses one. Normally set by Kasal for the child process | `src/backend/src/services/execution/harnesses/selection.py` |
-| `CREW_TOKEN_STREAMING` | `true` | Streams LLM tokens from crew subprocesses to the UI. `false`/`0`/`no` turns it off | `src/backend/src/services/execution/kernel/agent_builder.py` |
 | `KASAL_ENGINE_STORAGE_DIR` | `~/.local/share/kasal_engine` | Engine-local storage such as flow checkpoints. `CREWAI_STORAGE_DIR` wins when set | `src/backend/src/utils/storage_paths.py` |
 | `LITELLM_CACHE_ENABLED` | `true` | Response cache for the legacy LiteLLM completion path | `src/backend/src/config/settings.py` |
 | `LITELLM_CACHE_TYPE` | `local` | `local` (in-memory) or `redis` | `src/backend/src/config/settings.py` |
@@ -179,29 +178,7 @@ Provider API keys such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SERPER_API_KEY
 
 ## Chat, A2UI and generation
 
-These tune the chat surface, generative UI and the crew/task generators:
-
-| Variable | Default | What it does | Read in |
-|---|---|---|---|
-| `A2UI_ENABLED` | `true` | Composes generative UI for chat answers | `src/backend/src/services/a2ui/runner.py` |
-| `A2UI_STREAMING` | `true` | Streams A2UI surfaces as they are composed | `src/backend/src/services/a2ui/runner.py` |
-| `A2UI_STREAM_INTERVAL_MS` | `120` | Minimum interval between streamed A2UI updates | `src/backend/src/services/a2ui/runner.py` |
-| `A2UI_COMPOSE_RETRIES` | `2` | Retries when a composed surface fails validation | `src/backend/src/services/a2ui/runner.py` |
-| `A2UI_COMPOSE_TIMEOUT` | `240` | Seconds to wait for composition | `src/backend/src/services/chat/service.py` |
-| `A2UI_EARLY` | `true` | Starts composing before the answer finishes | `src/backend/src/services/a2ui/early.py` |
-| `CHAT_COMPACTION` | `true` | Summarizes older chat history when it grows past the trigger | `src/backend/src/services/chat/context_compaction.py` |
-| `CHAT_COMPACTION_TRIGGER_CHARS` | `8000` | History size that triggers compaction | `src/backend/src/services/chat/context_compaction.py` |
-| `CHAT_COMPACTION_KEEP_ROWS` | `24` | Recent rows kept verbatim | `src/backend/src/services/chat/context_compaction.py` |
-| `CHAT_COMPACTION_MODEL` | Unset (chat model) | Model used for compaction | `src/backend/src/services/chat/context_compaction.py` |
-| `CHAT_SUMMARY_MAX_CHARS` | `2000` | Maximum size of the compacted summary | `src/backend/src/services/chat/context_compaction.py` |
-| `CHAT_HISTORY_RECENT_LIMIT` | `120` | Rows loaded for compaction | `src/backend/src/services/chat/context_compaction.py` |
-| `CHAT_HISTORY_MAX_CHARS` | `6000` | Budget for the conversation preamble | `src/backend/src/services/chat/conversation_preamble.py` |
-| `CHAT_HISTORY_MAX_ASSISTANT_TURNS` | `8` | Assistant turns kept in the preamble | `src/backend/src/services/chat/conversation_preamble.py` |
-| `CHAT_HISTORY_USER_CHAR_CAP`, `CHAT_HISTORY_ASSISTANT_CHAR_CAP`, `CHAT_HISTORY_LAST_ANSWER_CHAR_CAP` | `500`, `240`, `12000` | Per-message truncation in the preamble | `src/backend/src/services/chat/conversation_preamble.py` |
-| `CHAT_MEMORY_SETTLE_SECONDS` | `20` | Wait for memory writes to settle before history reads | `src/backend/src/services/chat/history.py` |
-| `DEFAULT_LLM_MODEL` | `databricks-gemini-3-8-flash` | Fallback model when no UI selection and no `KASAL_DEFAULT_MODEL` apply | `src/backend/src/utils/model_config.py` |
-| `AGENT_MODEL`, `CREW_MODEL`, `CONNECTION_MODEL`, `DEFAULT_TASK_MODEL`, `TASK_MODEL`, `DEFAULT_IMPROVE_MODEL`, `PROMPT_IMPROVE_MODEL` | `DEFAULT_LLM_MODEL` | Fallbacks for the generators when the request names no model. Prefer choosing the model in the UI | `src/backend/src/services/generation/` |
-| `DAX_LLM_BATCH_SIZE` | `12` | Measures per LLM call in the DAX fallback translator | `src/backend/src/services/tools/metric_view_utils/dax_llm_fallback.py` |
+The chat, generative UI (A2UI) and generator settings are no longer environment variables; see [Settings that moved from environment variables to the UI](#settings-that-moved-from-environment-variables-to-the-ui). A run with no model named uses the model chosen in the UI, else the installed default model (Configuration → Models); `DEFAULT_LLM_MODEL` and the per-generator `AGENT_MODEL`/`CREW_MODEL`/`TASK_MODEL`/`CONNECTION_MODEL`/`PROMPT_IMPROVE_MODEL` are no longer read.
 
 ## Configuration → Engines system settings
 
@@ -219,6 +196,23 @@ The settings are `engine_config` rows for engine `kasal`, read and written throu
 
 Two former variables are now constants in `src/backend/src/services/llm/manager.py`: the blocking-LLM thread pool (`LLM_MAX_CONCURRENCY = 64`, formerly `KASAL_LLM_MAX_CONCURRENCY`; the pool is sized at import, so a runtime setting could not apply) and the default extended-thinking budget (`10240` tokens, formerly `KASAL_THINKING_BUDGET_TOKENS`).
 
+
+## Settings that moved from environment variables to the UI
+
+A Databricks App sets only the variables its deployment injects, so every tunable below used to be fixed at its default in production. Each now lives in the Configuration section it belongs to. Server-wide ones sit in an **Advanced (all workspaces)** panel that only system administrators see; they are `engine_config` rows (engine `kasal`) read through `src/backend/src/services/settings/engine_settings.py`, loaded at startup and in each crew or flow subprocess, and applied to runs started after a save.
+
+| Where | Settings | Replaced |
+|---|---|---|
+| System administration → **Output design** | Rich answers on/off (a kill switch for every workspace), early layout, streaming, stream interval, compose attempts, compose timeout | `A2UI_ENABLED`, `A2UI_EARLY`, `A2UI_STREAMING`, `A2UI_STREAM_INTERVAL_MS`, `A2UI_COMPOSE_RETRIES`, `A2UI_COMPOSE_TIMEOUT` |
+| Teamspace → **Output design** → Advanced: rich answer behaviour | This teamspace's overrides of the five A2UI defaults above (not the on/off switch; the teamspace has its own). Stored in `ui_config.settings_json` | — |
+| Engines → System settings → Advanced → **Chat** | Answer streaming (chat and crew), conversation summarising and its sizes, history limits and caps, memory settle time | `CHAT_TOKEN_STREAMING`, `CREW_TOKEN_STREAMING`, `CHAT_COMPACTION`, `CHAT_COMPACTION_KEEP_ROWS`, `CHAT_COMPACTION_TRIGGER_CHARS`, `CHAT_SUMMARY_MAX_CHARS`, `CHAT_HISTORY_*`, `CHAT_MEMORY_SETTLE_SECONDS` |
+| **Tools** → Advanced (all workspaces) | Website text and bytes limits, DAX measures per LLM call, embedding batch size and timeouts | `SCRAPE_WEBSITE_MAX_CHARS`, `SCRAPE_WEBSITE_MAX_FETCH_BYTES`, `DAX_LLM_BATCH_SIZE`, `EMBEDDING_BATCH_SIZE`, `EMBEDDING_TIMEOUT_SECONDS`, `EMBEDDING_HTTP_TIMEOUT_SECONDS` |
+| **Event triggers** → Advanced (all workspaces) | Queue check interval, events per check, chain depth limit | `KASAL_EVENT_TRIGGERS_INTERVAL`, `KASAL_EVENT_TRIGGERS_BATCH`, `KASAL_EVENT_TRIGGERS_MAX_HOPS` |
+| **Prompts** → Advanced (all workspaces) | Workflow recipes: use curated past crews, minimum similarity, holdout fraction, runs mined per pass | `WORKFLOW_RECIPE_EXEMPLARS`, `WORKFLOW_RECIPE_MIN_SIMILARITY`, `WORKFLOW_RECIPE_HOLDOUT`, `WORKFLOW_RECIPE_MINE_BATCH` |
+| System administration → **Models** → Advanced | Fallback model key used instead of a Databricks model when no workspace is available | `KASAL_FALLBACK_MODEL` |
+
+The architecture test `src/backend/tests/unit/architecture/test_env_reads_stay_in_config.py` keeps it this way: outside `config/settings.py`, `config/logging.py` and `core/databricks_app.py`, a file may not gain an environment read, and none of the variables above may be read again.
+
 ## Memory, knowledge and recipes
 
 Memory hygiene and retention are per-teamspace settings under **Configuration → Memory → Memory Tuning**; the memory sweep, its throttle and the knowledge limits are server-wide settings under **Configuration → Engines → System settings → Advanced**. [MEMORY.md](./MEMORY.md#settings) lists them with the variables they replaced. What remains here is host and transport configuration:
@@ -226,23 +220,12 @@ Memory hygiene and retention are per-teamspace settings under **Configuration �
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `KASAL_MEMORY_DIR` | `~/.kasal/memory` | Root of the local memory stores, one per workspace | `src/backend/src/utils/memory_paths.py` |
-| `EMBEDDING_BATCH_SIZE` | `32` | Texts per embedding request | `src/backend/src/services/llm/embeddings.py` |
-| `EMBEDDING_TIMEOUT_SECONDS`, `EMBEDDING_HTTP_TIMEOUT_SECONDS` | `60`, `30` or `60` depending on the path | Embedding timeouts | `src/backend/src/services/llm/embeddings.py` |
-| `WORKFLOW_RECIPE_MIN_SIMILARITY` | `0.75` | Similarity needed to offer a past crew as a recipe | `src/backend/src/services/recipes/recipes.py` |
-| `WORKFLOW_RECIPE_MINE_BATCH` | `100` | Runs mined per batch | `src/backend/src/services/recipes/recipes.py` |
-| `WORKFLOW_RECIPE_HOLDOUT` | `0.0` | Fraction of generations held out from recipes, for measurement | `src/backend/src/services/recipes/recipes.py` |
 
 For more information, see the [memory guide](./MEMORY.md).
 
 ## Event triggers
 
-The trigger queue consumer starts with the server:
-
-| Variable | Default | What it does | Read in |
-|---|---|---|---|
-| `KASAL_EVENT_TRIGGERS_INTERVAL` | `5` | Seconds between queue polls | `src/backend/src/main.py` |
-| `KASAL_EVENT_TRIGGERS_BATCH` | `5` | Events handled per poll | `src/backend/src/main.py` |
-| `KASAL_EVENT_TRIGGERS_MAX_HOPS` | `5` | Maximum chain depth before a triggered run stops emitting | `src/backend/src/services/triggers/emit_service.py` |
+The trigger queue consumer starts with the server. Its interval, batch size and chain-depth limit are under **Configuration → Event triggers → Advanced (all workspaces)**; see [Settings that moved from environment variables to the UI](#settings-that-moved-from-environment-variables-to-the-ui). `KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS` is listed under [Security and API limits](#security-and-api-limits).
 
 ## Logging
 

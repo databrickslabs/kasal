@@ -8,6 +8,7 @@ import { useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useThemeStore } from '../../../store/theme';
 import { useEventTriggersStore } from '../../../store/eventTriggers';
+import SystemSettingsPanel from './SystemSettings/SystemSettingsPanel';
 import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 import { getSettingsSections, SettingsGroup, SettingsScope, SettingsSection, SettingsSectionId } from './settingsSections';
 import GeneralSettings from './GeneralSettings';
@@ -41,17 +42,17 @@ const groups: { id: SettingsGroup; label: string }[] = [
 function SectionContent({ id, scope, onNavigate }: { id: SettingsSectionId; scope: SettingsScope; onNavigate: (id: SettingsSectionId) => void }) {
   const mode = scope === 'system' ? 'system' : 'workspace';
   switch (id) {
-    case 'event-triggers': return <TriggersPanel embedded />;
+    case 'event-triggers': return <><TriggersPanel embedded /><SystemSettingsPanel group="triggers" /></>;
     case 'general': return <GeneralSettings />;
     case 'overview': return <WorkspaceOverview embedded onConfigureSection={section => { if (section === 'mcp') onNavigate('mcp'); }} />;
-    case 'models': return <ModelConfiguration mode={mode} />;
-    case 'tools': return <ToolsConfiguration mode={mode} />;
+    case 'models': return <><ModelConfiguration mode={mode} />{mode === 'system' && <SystemSettingsPanel group="models" />}</>;
+    case 'tools': return <><ToolsConfiguration mode={mode} /><SystemSettingsPanel group="tools" /></>;
     case 'mcp': return <MCPConfiguration mode={mode} />;
     case 'remote-agents': return <RemoteAgents mode={mode} />;
     case 'skills': return <SkillsConfiguration />;
-    case 'prompts': return <Prompts />;
+    case 'prompts': return <><Prompts /><SystemSettingsPanel group="recipes" /></>;
     case 'memory': return <MemoryConfiguration />;
-    case 'ui': return <UIConfigurator />;
+    case 'ui': return mode === 'system' ? <SystemSettingsPanel group="a2ui" standalone /> : <UIConfigurator />;
     case 'databricks': return <DatabricksConfiguration />;
     case 'mlflow': return <MLflowConfiguration />;
     case 'api-keys': return <APIKeys />;

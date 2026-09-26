@@ -11,7 +11,6 @@ Five knowledge/RAG services use them, all through ``LLMManager.get_embedding`` /
 """
 
 import logging
-import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +18,7 @@ from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
 from src.services.llm.endpoints import require_ollama_base_url
 from src.services.settings.api_keys import ApiKeysService
+from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ async def get_embeddings(
         ]
 
     if batch_size is None:
-        batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
+        batch_size = int(engine_setting("embedding_batch_size"))
 
     try:
         from src.utils.databricks_app_auth import get_model_auth_context
@@ -107,7 +107,7 @@ async def get_embeddings(
         import aiohttp
 
         timeout = aiohttp.ClientTimeout(
-            total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "60"))
+            total=float(engine_setting("embedding_timeout_seconds"))
         )
         results: List[Optional[List[float]]] = []
         from src.utils.aiohttp_session import shared_client_session
@@ -307,7 +307,7 @@ async def get_embedding(
                     payload["model"] = body_model
 
                 timeout = aiohttp.ClientTimeout(
-                    total=float(os.getenv("EMBEDDING_HTTP_TIMEOUT_SECONDS", "30"))
+                    total=float(engine_setting("embedding_request_timeout_seconds"))
                 )
                 from src.utils.aiohttp_session import shared_client_session
 
@@ -433,7 +433,7 @@ async def get_embedding(
             raw_model = embedding_model.removeprefix("ollama/")
 
             timeout_val = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
+                total=float(engine_setting("embedding_timeout_seconds"))
             )
             from src.utils.aiohttp_session import shared_client_session
 
@@ -489,7 +489,7 @@ async def get_embedding(
             }
 
             timeout_val = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
+                total=float(engine_setting("embedding_timeout_seconds"))
             )
             from src.utils.aiohttp_session import shared_client_session
 
@@ -542,7 +542,7 @@ async def get_embedding(
             payload = {"model": embedding_model, "input": text}
 
             timeout_val = aiohttp.ClientTimeout(
-                total=float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60"))
+                total=float(engine_setting("embedding_timeout_seconds"))
             )
             from src.utils.aiohttp_session import shared_client_session
 

@@ -39,8 +39,10 @@ class UIConfigService:
         catalog_type='minimal') when it has never been configured."""
         config = await self.repository.get_for_group(self.group_id)
         if config is None:
-            return UIConfigResponse(group_id=self.group_id)
-        return UIConfigResponse.model_validate(config)
+            response = UIConfigResponse(group_id=self.group_id)
+        else:
+            response = UIConfigResponse.model_validate(config)
+        return _with_system_defaults(response)
 
     async def update_config(
         self, config_in: UIConfigUpdate, created_by_email: Optional[str] = None
@@ -61,6 +63,10 @@ class UIConfigService:
         existing.catalog_type = config_in.catalog_type
         existing.catalog_json = config_in.catalog_json
         existing.style_json = config_in.style_json
+        # Both were accepted and then silently dropped: the "Select" catalog's
+        # switched-off components never saved.
+        for field in ("disabled_components", "settings_json"):
+            setattr(existing, field, getattr(config_in, field))
 
         await self.session.commit()
         await self.repository.reload(existing)
@@ -70,4 +76,12 @@ class UIConfigService:
             existing.enabled,
             existing.catalog_type,
         )
-        return UIConfigResponse.model_validate(existing)
+        return _with_system_defaults(UIConfigResponse.model_validate(existing))
+
+
+def _with_system_defaults(response: UIConfigResponse) -> UIConfigResponse:
+    """Attach the system A2UI defaults the workspace's overrides replace."""
+    from src.services.a2ui.settings import system_defaults
+
+    response.system_defaults = system_defaults()
+    return response

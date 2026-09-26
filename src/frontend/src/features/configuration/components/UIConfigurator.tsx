@@ -36,6 +36,8 @@ import {
   optionVal,
   buildDirective,
 } from './uiConfigShared';
+import A2UIRuntimeOverrides, { type A2UIOverrides } from './A2UIRuntimeOverrides';
+import { parseOverrides } from './a2uiOverrides';
 
 // Every component the shared A2UI renderer can draw — the universe the toggles
 // tick off from. MUST match the renderer's registry (src/shared/a2ui/registry.tsx)
@@ -127,6 +129,8 @@ const UIConfigurator: React.FC = () => {
   // Per-deliverable type-specific settings (keyed by type, then option key).
   const [options, setOptions] = useState<Record<string, Record<string, OptionValue>>>({});
   const [activeType, setActiveType] = useState<DeliverableKey>('default');
+  const [runtime, setRuntime] = useState<A2UIOverrides>({});
+  const [runtimeDefaults, setRuntimeDefaults] = useState<Record<string, boolean | number>>({});
 
   useEffect(() => {
     let active = true;
@@ -136,6 +140,8 @@ const UIConfigurator: React.FC = () => {
       .then((cfg: UIConfig) => {
         if (!active) return;
         setEnabled(cfg.enabled);
+        setRuntimeDefaults(cfg.system_defaults ?? {});
+        setRuntime(parseOverrides(cfg.settings_json));
         // Legacy rows may carry the old "basic" value — treat it as "full".
         try {
           const off = cfg.disabled_components ? JSON.parse(cfg.disabled_components) : [];
@@ -202,6 +208,7 @@ const UIConfigurator: React.FC = () => {
       catalog_json: null,
       disabled_components: disabledComps.length ? JSON.stringify(disabledComps) : null,
       style_json,
+      settings_json: Object.keys(runtime).length ? JSON.stringify(runtime) : null,
     };
     try {
       await UIConfigService.updateConfig(payload);
@@ -211,7 +218,7 @@ const UIConfigurator: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [enabled, disabledComps, themes, options]);
+  }, [enabled, disabledComps, themes, options, runtime]);
 
   // The palette currently being edited, and whether the active type is themed.
   const activeTheme: Theme = themes[activeType] || themes.default;
@@ -556,6 +563,8 @@ const UIConfigurator: React.FC = () => {
           )}
         </Box>
       )}
+
+      <A2UIRuntimeOverrides overrides={runtime} defaults={runtimeDefaults} onChange={setRuntime} />
 
       <Box sx={{ mt: 3 }}>
         <Button variant="contained" onClick={handleSave} disabled={saving}>

@@ -13,6 +13,10 @@ export interface UIConfig {
   // JSON array of component names switched off; only for catalog_type 'select'.
   disabled_components?: string | null;
   style_json?: string | null;
+  /** This workspace's overrides of the system A2UI defaults (JSON object). */
+  settings_json?: string | null;
+  /** Read-only: the system values those overrides replace. */
+  system_defaults?: Record<string, boolean | number> | null;
   id?: number | null;
   group_id?: string | null;
   created_by_email?: string | null;
@@ -22,7 +26,7 @@ export interface UIConfig {
 
 export type UIConfigUpdate = Pick<
   UIConfig,
-  'enabled' | 'catalog_type' | 'catalog_json' | 'disabled_components' | 'style_json'
+  'enabled' | 'catalog_type' | 'catalog_json' | 'disabled_components' | 'style_json' | 'settings_json'
 >;
 
 /** Notified with the freshest config whenever it changes (i.e. a save), so open

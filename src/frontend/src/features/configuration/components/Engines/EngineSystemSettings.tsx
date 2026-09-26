@@ -15,7 +15,7 @@ import { ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
 import { EngineConfigService } from '../../../../api/config/EngineConfigService';
 import type { EngineSettings, EngineSettingsPatch } from '../../../../types/config/engines';
 import AdvancedNumberField from '../AdvancedNumberField';
-import EngineAdvancedSettings from './EngineAdvancedSettings';
+import SystemSettingsFields from '../SystemSettings/SystemSettingsFields';
 
 const MODE_LABELS: Record<string, string> = { deep: 'Deep research' };
 
@@ -156,7 +156,12 @@ const EngineSystemSettings: React.FC = () => {
               })}
             </Box>
           ))}
-          <EngineAdvancedSettings settings={settings} saving={saving} onPatch={(body) => void patch(body)} />
+          <SystemSettingsFields
+            groups={['memory', 'knowledge', 'chat']}
+            settings={settings}
+            saving={saving}
+            onPatch={(body) => void patch(body)}
+          />
         </AccordionDetails>
       </Accordion>
     </Paper>

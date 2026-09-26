@@ -48,11 +48,7 @@ Aim for enough coverage that a meaningful share of new prompts find a curated ma
 
 ## 2. Turn on the holdout
 
-Set the holdout fraction on the backend and restart it:
-
-```bash
-export WORKFLOW_RECIPE_HOLDOUT=0.2   # withhold exemplars from 20% of eligible generations
-```
+Set **Holdout fraction** to `0.2` under **Configuration → Prompts → Advanced (all workspaces)** (system administrators; it replaced the `WORKFLOW_RECIPE_HOLDOUT` environment variable). It applies to the next generation; no restart is needed.
 
 Every generation that finds a curated, above-threshold match now has a 20% chance of being denied it and recorded as a **control**. Both arms are repeat work; they differ only in treatment.
 
@@ -106,12 +102,14 @@ The top-line figures answer a different question — not "does it help?" but "co
 
 ## Configuration reference
 
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `WORKFLOW_RECIPE_HOLDOUT` | `0.0` | Fraction of eligible generations denied exemplars, as the control arm. `0.0` disables the control (and with it, any causal reading). |
-| `WORKFLOW_RECIPE_EXEMPLARS` | `true` | Kill-switch for injection entirely. Set `false` when diagnosing a generation regression. |
-| `WORKFLOW_RECIPE_MIN_SIMILARITY` | `0.75` | Cosine floor for a recipe to be offered. **Model-dependent** — see below. |
-| `WORKFLOW_RECIPE_MINE_BATCH` | `100` | Executions examined per mining pass. |
+Under **Configuration → Prompts → Advanced (all workspaces)**:
+
+| Setting | Default | Effect | Replaced |
+|---------|---------|--------|----------|
+| Holdout fraction | `0.0` | Fraction of eligible generations denied exemplars, as the control arm. `0.0` disables the control (and with it, any causal reading). | `WORKFLOW_RECIPE_HOLDOUT` |
+| Use curated past crews as examples | on | Kill switch for injection entirely. Turn it off when diagnosing a generation regression. | `WORKFLOW_RECIPE_EXEMPLARS` |
+| Minimum similarity | `0.75` | Cosine floor for a recipe to be offered. **Model-dependent** — see below. | `WORKFLOW_RECIPE_MIN_SIMILARITY` |
+| Runs mined per pass | `100` | Executions examined per mining pass. | `WORKFLOW_RECIPE_MINE_BATCH` |
 
 The similarity default was measured on a dev corpus (51 recipes, local `nomic-embed-text`): genuinely matching prompts scored 0.818 / 0.826 / 0.831, while an unrelated prompt ("build me a snake game in python") topped out at 0.456. `0.75` sits in that gap with margin on the noise side, because the costs are asymmetric — missing a reusable crew just means generating it as before, whereas offering the wrong crew wastes attention and erodes trust in every later suggestion.
 

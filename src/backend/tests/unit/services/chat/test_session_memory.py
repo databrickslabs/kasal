@@ -30,8 +30,8 @@ from src.services.chat.history import ChatHistoryService, _is_activity_card
 
 
 @pytest.fixture(autouse=True)
-def _settle_immediately(monkeypatch):
-    monkeypatch.setattr(history_module, "EXCHANGE_SETTLE_SECONDS", 0)
+def _settle_immediately(engine_setting, monkeypatch):
+    engine_setting("chat_memory_settle_seconds", 0)
     history_module._settling.clear()
     yield
     history_module._settling.clear()
