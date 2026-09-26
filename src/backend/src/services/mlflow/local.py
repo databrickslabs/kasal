@@ -157,7 +157,7 @@ def experiment_id(uri: str, name: str, timeout: float = REACHABILITY_TIMEOUT) ->
     query = urllib.parse.urlencode({"experiment_name": name})
     url = f"{uri.rstrip('/')}/api/2.0/mlflow/experiments/get-by-name?{query}"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+        with urllib.request.urlopen(url, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return str(payload.get("experiment", {}).get("experiment_id", "") or "")
     except urllib.error.HTTPError as exc:

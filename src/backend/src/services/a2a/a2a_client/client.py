@@ -149,7 +149,7 @@ async def _request(
             response = await client.request(
                 method, url, headers=_headers(api_key, token), json=json_body
             )
-    except Exception as exc:  # noqa: BLE001 — httpx raises a family, all the same here
+    except Exception as exc:  # httpx raises a family, all the same here
         raise RemoteAgentError(f"Could not reach {url}: {exc}") from exc
 
     if not response.is_success:
@@ -159,7 +159,7 @@ async def _request(
 
     try:
         payload = response.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise RemoteAgentError(f"{url} did not answer JSON") from exc
 
     if not isinstance(payload, dict):

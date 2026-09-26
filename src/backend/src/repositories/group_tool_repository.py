@@ -40,7 +40,7 @@ class GroupToolRepository:
         result = await self.session.execute(
             select(GroupTool).where(
                 (GroupTool.group_id == group_id) & (GroupTool.enabled == True)
-            )  # noqa: E712
+            )
         )
         return list(result.scalars().all())
 

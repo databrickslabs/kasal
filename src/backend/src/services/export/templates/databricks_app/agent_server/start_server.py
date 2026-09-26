@@ -24,7 +24,7 @@ import agent_server.agent  # noqa: E402
 # which never double-encodes. The agent's /invocations endpoint is unaffected.
 agent_server = AgentServer("ResponsesAgent")
 # Define the app as a module level variable to enable multiple workers
-app = agent_server.app  # noqa: F841
+app = agent_server.app
 
 
 @app.get("/me")

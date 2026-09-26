@@ -299,7 +299,7 @@ class Crew(BaseModel):
         for provider in self.context_providers:
             try:
                 extra = provider(task=task, agent=task.agent, context=base)
-            except Exception:  # noqa: BLE001 — providers must never break a run
+            except Exception:  # providers must never break a run
                 logger.exception("context provider %r failed; skipping", provider)
                 continue
             if extra:
@@ -319,7 +319,7 @@ class Crew(BaseModel):
         for sink in self.output_sinks:
             try:
                 sink(task=task, output=output)
-            except Exception:  # noqa: BLE001 — sinks must never break a run
+            except Exception:  # sinks must never break a run
                 logger.exception("output sink %r failed; skipping", sink)
 
     def _load_checkpoint(self, from_checkpoint: Any) -> dict[int, TaskOutput] | None:

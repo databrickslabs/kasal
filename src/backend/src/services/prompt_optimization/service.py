@@ -45,7 +45,7 @@ from src.repositories.prompt_optimization_run_repository import (
 )
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.services.catalog.templates import TemplateService
-from src.services.prompt_optimization import (  # noqa: E402,F401
+from src.services.prompt_optimization import (
     CrewRunnerMixin,
     JudgeAlignmentMixin,
     JudgeOperationsMixin,
@@ -53,13 +53,13 @@ from src.services.prompt_optimization import (  # noqa: E402,F401
     TemplateRunnerMixin,
     run_state,
 )
-from src.services.prompt_optimization.config import (  # noqa: E402,F401
+from src.services.prompt_optimization.config import (  # noqa: F401
     DEFAULT_TARGET_MODEL,
     MIN_EXAMPLES,
     TEMPLATE_TASKS,
     _pin_local_experiment,
 )
-from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
+from src.services.prompt_optimization.gepa.crew_doc import (
     _CREW_DOC_FIELD_LABELS,
     _distill_requirements,
     _extract_user_from_log,
@@ -67,7 +67,7 @@ from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _parse_requirement_lines,
     _serialize_crew_doc,
 )
-from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (
     _CATEGORICAL_GRADES,
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
@@ -81,7 +81,7 @@ from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _parse_grade_from_text,
     _to_float,
 )
-from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
+from src.services.prompt_optimization.gepa.judge_model import (
     _crew_target_model,
     _resolve_judge_model,
     _stored_judge_model_to_key,
@@ -92,7 +92,7 @@ from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
 # ``prompt_optimization_service.X`` regardless of which file X now lives in.
 # These are IMPORTS, not copies: ``_RUNS`` and ``_GEPA_REFLECTION_STATE`` are
 # shared mutable state and must remain one object across every importer.
-from src.services.prompt_optimization.gepa.reflection import (  # noqa: E402,F401
+from src.services.prompt_optimization.gepa.reflection import (  # noqa: F401
     _GEPA_REFLECTION_STATE,
     _JUDGE_SYSTEM,
     DEFAULT_JUDGE_SAMPLES,
@@ -103,7 +103,7 @@ from src.services.prompt_optimization.gepa.reflection import (  # noqa: E402,F40
     _sync_llm_completion,
     _sync_run_crew,
 )
-from src.services.prompt_optimization.run_state import (  # noqa: E402,F401
+from src.services.prompt_optimization.run_state import (  # noqa: F401
     _LIVE_COUNTERS,
     _MAX_KEPT_RUNS,
     _PUBLIC_FIELDS,

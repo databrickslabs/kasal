@@ -825,9 +825,7 @@ class WorkflowRecipeService:
                     fields["run_count"] = 1
                     await self.repository.create(fields)
                 created += 1
-            except (
-                Exception
-            ) as distil_err:  # noqa: BLE001 — one bad run must not stop the sweep
+            except Exception as distil_err:  # one bad run must not stop the sweep
                 logger.warning(
                     f"[WorkflowRecipes] Skipped {execution.job_id}: {distil_err}"
                 )

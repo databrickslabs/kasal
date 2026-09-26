@@ -437,7 +437,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
         back to a caller that owns its own loop (the CrewAI executor); that path
         returns after the first response, unchanged.
         """
-        from openai.types.responses import Response  # noqa: F401 (parity import)
+        from openai.types.responses import Response  # (parity import)
 
         # Round cap + wall-clock deadline for the tool loop. getattr-guarded so
         # the isolated unit test's minimal fake base (no _execution_budget) still

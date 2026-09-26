@@ -7,7 +7,7 @@ including the private helpers (`_setup_sync`) tests import.
 Prefer importing from ``src.services.mlflow.mlflow_parent_setup`` in new code.
 """
 
-from src.services.mlflow.mlflow_parent_setup import *  # noqa: F401,F403
+from src.services.mlflow.mlflow_parent_setup import *  # noqa: F403
 from src.services.mlflow.mlflow_parent_setup import (  # noqa: F401
     _group_cache_key,
     _setup_sync,

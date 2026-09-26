@@ -33,13 +33,13 @@ def _short(text: object, limit: int = 60) -> str:
 
 
 class _ProgressListener(BaseEventListener):
-    def setup_listeners(self, bus):  # noqa: ANN001 — bus is event_bus
+    def setup_listeners(self, bus):  # bus is event_bus
         @bus.on(CrewKickoffStartedEvent)
-        def _on_crew(source, event):  # noqa: ANN001, ARG001
+        def _on_crew(source, event):
             progress.report("Starting…")
 
         @bus.on(TaskStartedEvent)
-        def _on_task(source, event):  # noqa: ANN001, ARG001
+        def _on_task(source, event):
             name = (event.task_name or "").strip() or " ".join(
                 str(
                     getattr(getattr(event, "task", None), "description", "") or ""
@@ -55,19 +55,19 @@ class _ProgressListener(BaseEventListener):
             progress.report(f"Working on: {_short(name)}")
 
         @bus.on(AgentExecutionStartedEvent)
-        def _on_agent(source, event):  # noqa: ANN001, ARG001
+        def _on_agent(source, event):
             role = _short(getattr(event, "agent_role", "") or "", 40)
             if role:
                 progress.report(f"{role} is thinking…")
 
         @bus.on(LiteAgentExecutionStartedEvent)
-        def _on_lite(source, event):  # noqa: ANN001, ARG001
+        def _on_lite(source, event):
             # The conversation layer's gather/classify steps use standalone
             # agents (LiteAgent) — surface a generic "thinking" hint for them.
             progress.report("Thinking…")
 
         @bus.on(ToolUsageStartedEvent)
-        def _on_tool(source, event):  # noqa: ANN001, ARG001
+        def _on_tool(source, event):
             progress.report(
                 f"Using tool: {_short(getattr(event, 'tool_name', '') or 'tool', 40)}"
             )

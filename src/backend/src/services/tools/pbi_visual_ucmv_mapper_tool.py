@@ -479,7 +479,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
     # Main _run
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _run(self, **kwargs: Any) -> str:  # noqa: C901
+    def _run(self, **kwargs: Any) -> str:
         def _get(key):
             val = kwargs.get(key)
             if val is not None:

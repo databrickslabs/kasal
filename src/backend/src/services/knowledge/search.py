@@ -122,7 +122,7 @@ class KnowledgeSearch:
                 f"[knowledge] search timed out after {SEARCH_TIMEOUT_SECONDS}s: {query!r}"
             )
             return f"The knowledge search timed out after {SEARCH_TIMEOUT_SECONDS} seconds."
-        except Exception as search_err:  # noqa: BLE001
+        except Exception as search_err:
             logger.error(f"[knowledge] search failed: {search_err}", exc_info=True)
             return f"Error searching knowledge base: {search_err}"
 

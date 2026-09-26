@@ -158,9 +158,7 @@ class ExecutionStatusService:
                             canonical = normalize_ui_document(stored_result)
                             if canonical is not None:
                                 stored_result = canonical
-                        except (
-                            Exception
-                        ) as norm_err:  # noqa: BLE001 — never affect persistence
+                        except Exception as norm_err:  # never affect persistence
                             logger.warning(
                                 f"[ExecutionStatusService] UI-document normalization "
                                 f"skipped for job_id {job_id}: {norm_err}"

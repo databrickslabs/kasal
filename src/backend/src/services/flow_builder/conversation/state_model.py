@@ -139,13 +139,13 @@ class DictLikeState(BaseModel):
     def __contains__(self, key: object) -> bool:
         return isinstance(key, str) and hasattr(self, key)
 
-    def keys(self):  # noqa: D102 — dict surface
+    def keys(self):  # dict surface
         return self.model_dump().keys()
 
-    def items(self):  # noqa: D102 — dict surface
+    def items(self):  # dict surface
         return self.model_dump().items()
 
-    def values(self):  # noqa: D102 — dict surface
+    def values(self):  # dict surface
         return self.model_dump().values()
 
     def update(self, other: Dict[str, Any]) -> None:

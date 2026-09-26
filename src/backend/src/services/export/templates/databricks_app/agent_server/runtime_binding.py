@@ -38,7 +38,7 @@ if RUNTIME == "crewai":
     )
     from crewai import Agent as _CrewAgent
     from crewai import Crew as _CrewCrew
-    from crewai import Process  # noqa: F401 — re-exported
+    from crewai import Process  # re-exported
     from crewai import Task as _CrewTask
 
     def _wrap_llm(llm: Any) -> Any:
@@ -104,7 +104,7 @@ if RUNTIME == "crewai":
             self.llm = llm
 
 else:
-    from agent_server.kasal_runtime.services.execution.runtime import (  # noqa: F401
+    from agent_server.kasal_runtime.services.execution.runtime import (
         Agent,
         Crew,
         LLMGuardrail,

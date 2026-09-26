@@ -69,7 +69,7 @@ def create_databricks_experiment(
                         else {}
                     ),
                 )
-            except Exception as exc:  # noqa: BLE001 — fall back to plain experiment
+            except Exception as exc:  # fall back to plain experiment
                 if is_databricks_app():
                     raise
                 logger.warning(

@@ -1579,7 +1579,7 @@ class ToolFactory:
                     # If not in environment, try to get from DatabricksService
                     if not databricks_host:
                         try:
-                            from src.services.databricks.workspace.config_provider import (  # noqa: E501
+                            from src.services.databricks.workspace.config_provider import (
                                 DatabricksConfigProvider,
                             )
 

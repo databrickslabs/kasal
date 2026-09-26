@@ -161,7 +161,7 @@ class EmbedderConfigBuilder:
             class EmbeddingFunction:
                 """Callable that turns documents into embeddings."""
 
-                def __call__(self, input: Documents) -> Embeddings:  # noqa: A002
+                def __call__(self, input: Documents) -> Embeddings:
                     raise NotImplementedError
 
             databricks_key = None

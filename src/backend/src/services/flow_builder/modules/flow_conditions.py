@@ -567,13 +567,13 @@ class ConditionState:
     def __len__(self) -> int:
         return len(self._snap())
 
-    def keys(self):  # noqa: D102 - dict surface
+    def keys(self):  # dict surface
         return self._snap().keys()
 
-    def values(self):  # noqa: D102 - dict surface
+    def values(self):  # dict surface
         return self._snap().values()
 
-    def items(self):  # noqa: D102 - dict surface
+    def items(self):  # dict surface
         return self._snap().items()
 
     def __repr__(self) -> str:

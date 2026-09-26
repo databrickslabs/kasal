@@ -303,7 +303,7 @@ class MLflowService:
                 getattr(db_config, "db_schema", None),
                 getattr(db_config, "warehouse_id", None),
             )
-        except Exception as cfg_err:  # noqa: BLE001 — plain experiment is the fallback
+        except Exception as cfg_err:  # plain experiment is the fallback
             if is_databricks_app():
                 raise
             logger.debug(

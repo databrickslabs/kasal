@@ -460,9 +460,7 @@ def _enter_request_session(session: AsyncSession):
     owner_token = None
     try:
         owner_token = _request_session_owner.set(asyncio.current_task())
-    except (
-        Exception
-    ):  # noqa: BLE001 — no running loop is not fatal; reuse just won't match
+    except Exception:  # no running loop is not fatal; reuse just won't match
         pass
     return session_token, owner_token
 

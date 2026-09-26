@@ -629,7 +629,7 @@ async def compose_surface(
         began = _t.monotonic()
         try:
             out = llm.call(messages)
-        except Exception as call_exc:  # noqa: BLE001
+        except Exception as call_exc:
             # Streaming the compose must never cost the whole surface. If the
             # streamed call fails, degrade to a NON-streamed compose so the deck is
             # still produced (it just arrives at once). Without this, a streaming

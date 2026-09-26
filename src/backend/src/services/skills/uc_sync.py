@@ -117,9 +117,7 @@ class SkillUcSyncService:
                 try:
                     await self._push_one(client, headers, host, skill, catalog, schema)
                     results.append({"name": skill.name, "status": "ok"})
-                except (
-                    Exception
-                ) as exc:  # noqa: BLE001 - one failure can't stop the batch
+                except Exception as exc:  # one failure can't stop the batch
                     results.append(
                         {
                             "name": skill.name,
@@ -270,9 +268,7 @@ class SkillUcSyncService:
                 try:
                     await self._import_one(client, headers, host, catalog, schema, sid)
                     results.append({"name": sid, "status": "ok"})
-                except (
-                    Exception
-                ) as exc:  # noqa: BLE001 - one failure can't stop the batch
+                except Exception as exc:  # one failure can't stop the batch
                     results.append(
                         {
                             "name": sid,

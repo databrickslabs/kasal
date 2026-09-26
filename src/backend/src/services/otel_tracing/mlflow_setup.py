@@ -11,7 +11,7 @@ some call sites and tests import.
 Prefer importing from ``src.services.mlflow.mlflow_setup`` in new code.
 """
 
-from src.services.mlflow.mlflow_setup import *  # noqa: F401,F403
+from src.services.mlflow.mlflow_setup import *  # noqa: F403
 from src.services.mlflow.mlflow_setup import (  # noqa: F401
     KASAL_TRACE_TABLE_PREFIX,
     KASAL_UC_EXPERIMENT_SUFFIX,

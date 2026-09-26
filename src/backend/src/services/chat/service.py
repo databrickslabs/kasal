@@ -1398,7 +1398,7 @@ class LightAgentService:
                 "status_persisted": outcome.persisted,
             }
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error(
                 f"[light_agent] Error in light agent execution {execution_id}: {e}",
                 exc_info=True,

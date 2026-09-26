@@ -198,7 +198,7 @@ async def ask(
             group_context=group_context,
             session=session,
         )
-    except Exception as exc:  # noqa: BLE001 — an external caller gets an answer
+    except Exception as exc:  # an external caller gets an answer
         # The caller is another agent, not a browser: an unhandled exception
         # crossing the protocol boundary becomes an opaque transport error with
         # no run id to follow up on. Report the failure as a result instead.

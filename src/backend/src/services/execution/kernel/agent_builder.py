@@ -119,9 +119,7 @@ def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> 
         return
     try:
         _apply_reasoning_effort_unsafe(llm, spec, label)
-    except (
-        Exception
-    ) as e:  # noqa: BLE001 — a reasoning preference must never fail a run
+    except Exception as e:  # a reasoning preference must never fail a run
         logger.debug(f"Could not apply reasoning effort for agent {label}: {e}")
 
 

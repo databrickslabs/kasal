@@ -8,10 +8,10 @@ import logging
 import os
 from typing import Any, Dict
 
-from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
+from src.services.prompt_optimization.gepa.crew_doc import (
     _extract_user_from_log,
 )
-from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (
     _job_name_score,
 )
 
