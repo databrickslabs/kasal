@@ -126,7 +126,9 @@ class ExemplarDecision:
 
     @property
     def best_similarity(self) -> Optional[float]:
-        scores = [c.get("similarity") for c in self.candidates if c.get("similarity")]
+        scores: List[float] = [
+            c["similarity"] for c in self.candidates if c.get("similarity")
+        ]
         return max(scores) if scores else None
 
 
@@ -927,16 +929,16 @@ class WorkflowRecipeService:
 
         linked = 0
         for trial in trials:
-            execution = next(
+            first_run = next(
                 (by_agent_id[a] for a in (trial.agent_ids or []) if a in by_agent_id),
                 None,
             )
-            if execution is None:
+            if first_run is None:
                 continue
-            shape = await self._trace_shape(execution.job_id)
-            trial.linked_job_id = execution.job_id
+            shape = await self._trace_shape(first_run.job_id)
+            trial.linked_job_id = first_run.job_id
             trial.linked_at = datetime.utcnow()
-            trial.outcome_status = execution.status
+            trial.outcome_status = first_run.status
             trial.outcome_duration_ms = shape.get("duration_ms")
             trial.outcome_error_spans = shape.get("error_span_count")
             trial.outcome_tool_calls = shape.get("tool_call_count")

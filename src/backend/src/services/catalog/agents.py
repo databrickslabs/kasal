@@ -124,7 +124,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
         return self._decrypt_agent_tool_configs(agent)
 
     async def get_with_group_check(
-        self, id: str, group_context: GroupContext
+        self, id: str, group_context: Optional[GroupContext]
     ) -> Optional[Agent]:
         """
         Get an agent by ID with group verification and decrypted tool_configs.
@@ -287,7 +287,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
         self,
         id: str,
         fields: Dict[str, str],
-        group_context: GroupContext,
+        group_context: Optional[GroupContext],
     ) -> bool:
         """Rewrite an agent's prompt TEXT, verifying it belongs to the caller's group.
 
@@ -357,7 +357,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
         return self._decrypt_agent_tool_configs(agent)
 
     @staticmethod
-    async def _delete_agents_and_tasks(session, agent_ids: List[str]) -> None:
+    async def _delete_agents_and_tasks(
+        session: AsyncSession, agent_ids: List[str]
+    ) -> None:
         """
         Delete the given agents and the tasks assigned to them, on ``session``.
 

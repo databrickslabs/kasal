@@ -101,7 +101,7 @@ class KasalSSESpanProcessor(SpanProcessor):
                 # No running loop — run synchronously in a thread
                 import concurrent.futures
 
-                def _broadcast():
+                def _broadcast() -> None:
                     asyncio.run(sse_manager.broadcast_to_job(self._job_id, event))
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:

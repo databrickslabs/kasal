@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +128,7 @@ class CrewService:
                 raise
         return data
 
-    async def get(self, id: UUID) -> Optional[Crew]:
+    async def get(self, id: Union[UUID, str]) -> Optional[Crew]:
         """
         Get a crew by ID with decrypted tool_configs.
 
@@ -435,7 +435,7 @@ class CrewService:
         return await self.repository.find_by_ids(crew_ids)
 
     async def get_by_group(
-        self, id: UUID, group_context: GroupContext
+        self, id: UUID, group_context: Optional[GroupContext]
     ) -> Optional[Crew]:
         """
         Get a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).

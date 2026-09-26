@@ -226,7 +226,7 @@ class TemplateService:
         return await self.repository.find_by_name(name)
 
     async def find_by_name_with_group_check(
-        self, name: str, group_context: GroupContext
+        self, name: str, group_context: Optional[GroupContext]
     ) -> Optional[PromptTemplate]:
         """
         Find a template by name with group semantics:
@@ -359,7 +359,10 @@ class TemplateService:
         return result
 
     async def update_with_group_check(
-        self, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext
+        self,
+        id: int,
+        template_data: PromptTemplateUpdate,
+        group_context: Optional[GroupContext],
     ) -> Optional[PromptTemplate]:
         """
         Update semantics aligned with flat list and same-name overrides:

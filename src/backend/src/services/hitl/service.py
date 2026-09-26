@@ -8,7 +8,7 @@ handling timeouts, and triggering flow resume.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -370,14 +370,18 @@ class HITLService:
             logger.error(f"Database error rejecting HITL: {str(e)}")
             raise HITLServiceError(f"Failed to reject: {str(e)}")
 
-    async def get_approval(self, approval_id: str) -> Optional[HITLApproval]:
+    async def get_approval(
+        self, approval_id: Union[int, str]
+    ) -> Optional[HITLApproval]:
         """One approval row by id.
 
         Callers in other domains — the runtime's tool-approval gate and the
         human-review guardrail — used to build ``HITLApprovalRepository``
         themselves to poll a decision. Approvals are this service's domain.
+        They hold the id as a string; the column is an integer, and asyncpg
+        rejects a str bound to an integer parameter, so it is coerced here.
         """
-        return await self.approval_repo.get_by_id(approval_id)
+        return await self.approval_repo.get_by_id(int(approval_id))
 
     async def get_approvals_for_execution(
         self, execution_id: str, group_id: Optional[str] = None
@@ -695,7 +699,7 @@ class HITLService:
 
             # Trigger the flow execution asynchronously in a background task
             # This ensures we don't block the approval response
-            async def _trigger_resume():
+            async def _trigger_resume() -> None:
                 try:
                     crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(
@@ -798,7 +802,7 @@ class HITLService:
             )
 
             # Trigger the flow execution asynchronously in a background task
-            async def _trigger_retry():
+            async def _trigger_retry() -> None:
                 try:
                     crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(

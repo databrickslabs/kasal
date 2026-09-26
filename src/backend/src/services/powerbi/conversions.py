@@ -8,6 +8,8 @@ import logging
 import uuid
 from typing import Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import (
     BadRequestError,
     ForbiddenError,
@@ -55,7 +57,9 @@ class ConverterService:
     Integrates with existing KPI conversion infrastructure.
     """
 
-    def __init__(self, session, group_context: Optional[GroupContext] = None):
+    def __init__(
+        self, session: AsyncSession, group_context: Optional[GroupContext] = None
+    ) -> None:
         """
         Initialize service with session and group context.
 

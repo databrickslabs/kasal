@@ -169,7 +169,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
 
     def _extract_value(
         self, output: Union[str, Any, Dict[str, Any]]
-    ) -> Optional[Union[int, float, str]]:
+    ) -> Any:  # whatever the output holds under the field; validate() coerces it
         """
         Extract the value to check from various output types.
 
@@ -350,7 +350,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
 
     def _get_value_from_dict(
         self, data: Dict[str, Any]
-    ) -> Optional[Union[int, float, str]]:
+    ) -> Any:  # the raw JSON value found for the field, or None
         """Extract the value from a dictionary using the field name."""
         logger.info(f"Extracting value from dict with keys: {list(data.keys())}")
 

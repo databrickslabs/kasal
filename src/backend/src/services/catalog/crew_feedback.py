@@ -8,6 +8,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.crew_feedback import CrewFeedback
 from src.repositories.crew_feedback_repository import CrewFeedbackRepository
 from src.utils.user_context import GroupContext
 
@@ -15,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class CrewFeedbackService:
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repository = CrewFeedbackRepository(session)
 
@@ -25,7 +28,7 @@ class CrewFeedbackService:
         rating: str,
         comment: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> CrewFeedback:
         """Record a vote. Thumbs-down must carry a comment (enforced at the
         schema layer; double-checked here so the rule holds for all callers)."""
         if rating not in ("up", "down"):

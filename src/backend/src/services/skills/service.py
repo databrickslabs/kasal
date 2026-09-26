@@ -100,7 +100,7 @@ class SkillService:
         if skill.group_id is None:
             skill = await self._own_copy_of(skill, group_context)
 
-        merged = {
+        merged: Dict[str, Any] = {
             "name": data.name if data.name is not None else skill.name,
             "description": (
                 data.description if data.description is not None else skill.description
@@ -331,7 +331,9 @@ class SkillService:
             return SkillValidationResult(valid=False, errors=exc.errors)
         return SkillValidationResult(valid=True, warnings=parsed.warnings)
 
-    def _validate(self, name, description, body, data) -> parser.ParsedSkill:
+    def _validate(
+        self, name: str, description: str, body: str, data: Any
+    ) -> parser.ParsedSkill:
         return parser.validate_row(
             name, description, body, data.license, data.compatibility, data.metadata
         )

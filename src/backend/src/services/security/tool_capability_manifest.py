@@ -19,7 +19,7 @@ Usage:
 import logging
 from dataclasses import dataclass, field
 from enum import Flag, auto
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List
 
 logger = logging.getLogger(__name__)
 
@@ -341,8 +341,8 @@ def apply_spotlighting_wrappers(crew: Any) -> int:
             if caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT:
                 original_run = tool._run
 
-                def make_wrapper(fn):
-                    def _wrapped(*args, **kwargs):
+                def make_wrapper(fn: Callable[..., Any]) -> Callable[..., str]:
+                    def _wrapped(*args: Any, **kwargs: Any) -> str:
                         result = fn(*args, **kwargs)
                         return f"<<\n{result}\n>>"
 
