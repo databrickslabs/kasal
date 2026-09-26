@@ -361,7 +361,9 @@ class ErrorTrace(Base):
     error_type: Mapped[str] = mapped_column(String, nullable=False)
     error_message: Mapped[str] = mapped_column(String, nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc), nullable=True
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=True,
     )
     error_metadata: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
 
