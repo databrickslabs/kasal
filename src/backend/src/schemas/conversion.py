@@ -248,7 +248,11 @@ class SavedConfigurationBase(BaseModel):
     configuration: Dict[str, Any] = Field(..., description="Converter configuration")
     is_public: bool = Field(default=False, description="Whether shared with group")
     is_template: bool = Field(
-        default=False, description="Whether it's a system template"
+        default=False,
+        description=(
+            "Whether it's a system template, visible to every workspace. Only a "
+            "system administrator may create or edit one."
+        ),
     )
     tags: Optional[List[str]] = Field(None, description="Tags for categorization")
 

@@ -14,6 +14,7 @@ from src.core.exceptions import (
     NotFoundError,
     UnauthorizedError,
 )
+from src.core.permissions import is_system_admin
 from src.repositories.conversion_repository import (
     ConversionHistoryRepository,
     ConversionJobRepository,
@@ -114,7 +115,17 @@ class ConverterService:
             raise ForbiddenError(
                 detail=f"Not authorized to {action} this configuration"
             )
+        if config.is_template:
+            self._require_system_admin_for_template(action)
         return config
+
+    def _require_system_admin_for_template(self, action: str) -> None:
+        """A template is visible to EVERY tenant (audit N2): system admins only."""
+        context = self.group_context
+        if context is None or is_system_admin(context) is not True:
+            raise ForbiddenError(
+                detail=f"Only system administrators can {action} a template configuration"
+            )
 
     # ===== CONVERSION HISTORY METHODS =====
 
@@ -430,6 +441,9 @@ class ConverterService:
                 headers={},
                 detail="Authentication required to save configurations",
             )
+
+        if config_data.is_template:
+            self._require_system_admin_for_template("create")
 
         # Add group context
         config_dict = config_data.model_dump()
