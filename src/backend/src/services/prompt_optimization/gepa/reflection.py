@@ -12,7 +12,7 @@ import asyncio
 import logging
 import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.utils.user_context import GroupContext
 
@@ -55,13 +55,13 @@ def _install_gepa_reflection_bridge() -> None:
         return
     original = gepa.optimize
 
-    def bridged(*args, **kwargs):
+    def bridged(*args: Any, **kwargs: Any) -> Any:
         override = getattr(_GEPA_REFLECTION_STATE, "reflection_fn", None)
         if override is not None:
             kwargs["reflection_lm"] = override
         return original(*args, **kwargs)
 
-    bridged._kasal_reflection_bridge = True
+    setattr(bridged, "_kasal_reflection_bridge", True)
     gepa.optimize = bridged
 
 
@@ -70,7 +70,7 @@ def _make_reflection_fn(
     model: str,
     group_context: Optional[GroupContext],
     user_token: Optional[str],
-):
+) -> Callable[[Any], str]:
     """Build GEPA's reflection callable, backed by LLMManager.
 
     `model` is a plain Kasal model key — LLMManager resolves provider,

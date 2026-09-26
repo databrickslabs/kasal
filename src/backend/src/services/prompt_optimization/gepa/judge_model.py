@@ -42,7 +42,8 @@ def _crew_target_model(agents: Any) -> Optional[str]:
     declared = [a.llm for a in (agents or []) if getattr(a, "llm", None)]
     if not declared:
         return None
-    return Counter(declared).most_common(1)[0][0]
+    model: str = Counter(declared).most_common(1)[0][0]
+    return model
 
 
 def _resolve_judge_model(

@@ -175,7 +175,7 @@ def _intent_format_score(outputs: Any) -> float:
     if parsed.get("intent") in VALID_INTENTS:
         score += 0.6
     try:
-        confidence = float(parsed.get("confidence"))
+        confidence = float(parsed.get("confidence", ""))
         if 0.0 <= confidence <= 1.0:
             score += 0.2
     except (TypeError, ValueError):

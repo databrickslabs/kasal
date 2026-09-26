@@ -18,6 +18,7 @@ from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
+from src.services.prompt_optimization.host import PromptOptimizationHost
 from src.services.prompt_optimization.judge_registry import (
     JudgeRegistry,
     uc_schema_of,
@@ -52,7 +53,7 @@ def _judge_link(backend: Any, registry_uri: str) -> Any:
     return lambda prompt_name: tab
 
 
-class JudgeOperationsMixin:
+class JudgeOperationsMixin(PromptOptimizationHost):
     async def list_crew_evals(
         self, crew_id: str, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
@@ -83,7 +84,7 @@ class JudgeOperationsMixin:
                             break
                     except Exception:
                         pass
-                    assessments = []
+                    assessments: List[Any] = []
                     try:
                         assessments = trace.search_assessments() or []
                     except Exception:
@@ -156,7 +157,7 @@ class JudgeOperationsMixin:
                     mlflow.log_expectation(
                         trace_id=trace_id,
                         name="human_expectation",
-                        value=expectation.strip(),
+                        value=(expectation or "").strip(),
                     )
                 return True
 

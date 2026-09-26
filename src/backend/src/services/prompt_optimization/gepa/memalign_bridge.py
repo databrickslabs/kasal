@@ -91,7 +91,7 @@ def _sync_embed(
             f"Embedding failed with the crew's embedder ({provider}). Check the "
             "embedder configured on the crew's agents, then align again."
         )
-    return [list(v) for v in vectors]
+    return [list(v) for v in vectors if v is not None]
 
 
 def _make_lm(
@@ -109,7 +109,9 @@ def _make_lm(
     class LLMManagerLM(dspy.BaseLM):
         forward_contract = "legacy"
 
-        def forward(self, prompt=None, messages=None, **kwargs):
+        def forward(
+            self, prompt: Any = None, messages: Any = None, **kwargs: Any
+        ) -> Any:
             # response_format and friends are dropped: the distillation prompt
             # spells out the JSON it wants, and mlflow already retries without
             # structured output for models that reject it.

@@ -148,7 +148,7 @@ class TemplateRunnerMixin:
         prompt_uri = prompt_version.uri
         logger.info(f"Prompt optimization stage=optimize prompt_uri={prompt_uri}")
 
-        def predict_fn(**inputs) -> str:
+        def predict_fn(**inputs: Any) -> str:
             # Loading via the registry URI is what lets the optimizer inject
             # candidate templates without knowing our LLM stack.
             candidate = client.load_prompt(prompt_uri)
@@ -167,15 +167,15 @@ class TemplateRunnerMixin:
         task_cfg = TEMPLATE_TASKS[template_name]
 
         @scorer
-        def output_format(outputs) -> float:
+        def output_format(outputs: Any) -> float:
             if template_name == "detect_intent":
                 return _intent_format_score(outputs)
             if task_cfg.get("format_fn"):
-                return task_cfg["format_fn"](outputs)
+                return float(task_cfg["format_fn"](outputs))
             return _json_keys_score(outputs, task_cfg["required_keys"])
 
         @scorer
-        def output_correct(inputs, outputs) -> float:
+        def output_correct(inputs: Any, outputs: Any) -> float:
             if template_name == "detect_intent":
                 try:
                     parsed = robust_json_parser(str(outputs))
