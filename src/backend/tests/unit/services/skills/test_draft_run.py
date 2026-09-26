@@ -1,5 +1,4 @@
-"""A skill draft as a run: the run record, the per-call trace rows, and the
-terminal status — all best-effort, none able to fail the draft."""
+"""A skill draft as a run: the run record and the terminal status — all best-effort, none able to fail the draft."""
 
 import asyncio
 
@@ -75,43 +74,10 @@ def test_open_run_failure_leaves_the_draft_without_a_run(monkeypatch):
     )
 
 
-def test_record_call_writes_a_request_row_and_a_response_row(monkeypatch):
-    written = []
-
-    async def write_rows(job_id, rows, **kwargs):
-        written.append((job_id, rows, kwargs))
-
-    monkeypatch.setattr(generation_run, "write_rows", write_rows)
-    asyncio.run(
-        draft_run.record_call(
-            "job-1",
-            attempt=2,
-            model="m",
-            prompt="[user]\nhi",
-            response='{"name": "x"}',
-            duration_ms=12.345,
-            group_context=_Group(),
-        )
-    )
-    job_id, rows, kwargs = written[0]
-    assert job_id == "job-1" and kwargs["fallback_source"] == "Skills"
-    assert [r[0] for r in rows] == ["llm_call", "llm_response"]
-    assert rows[0][2] == "[user]\nhi" and rows[0][3]["attempt"] == 2
-    assert rows[1][2] == '{"name": "x"}' and rows[1][3]["duration_ms"] == 12.35
-
-    written.clear()
-    asyncio.run(
-        draft_run.record_call(
-            None,
-            attempt=1,
-            model=None,
-            prompt="p",
-            response="r",
-            duration_ms=1,
-            group_context=None,
-        )
-    )
-    assert written == []  # no run, nothing to attribute the rows to
+def test_no_rows_are_hand_written_the_bridge_owns_the_trace():
+    # The draft's LLM calls reach the trace through the event bus and the
+    # scoped OTelEventBridge; a second writer here would double every row.
+    assert not hasattr(draft_run, "record_call")
 
 
 def test_close_run_marks_completed_with_the_draft_or_failed_with_the_reason(
@@ -142,5 +108,7 @@ def test_close_run_marks_completed_with_the_draft_or_failed_with_the_reason(
     asyncio.run(draft_run.close_run(None, error="ignored"))
     assert calls[0][:3] == ("job-1", "COMPLETED", "Skill drafted")
     assert calls[0][3]["name"] == "n" and "body" not in calls[0][3]
+    # The whole draft rides along for a caller polling the run for its answer.
+    assert calls[0][3][draft_run.RESULT_KEY]["body"] == "big"
     assert calls[1] == ("job-2", "FAILED", "boom", None)
     assert len(calls) == 2
