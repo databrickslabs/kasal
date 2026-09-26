@@ -871,10 +871,15 @@ async def seed_async():
                         )
                         # Sampling parameters and endpoint refusals. Seeded like
                         # every other field, so a corrected value ships with a
-                        # release rather than needing a hand-edited row — and a
-                        # model that declares neither keeps sending exactly what
-                        # it sent before these columns existed.
-                        existing_model.params = model_data.get("params")
+                        # release rather than needing a hand-edited row — but
+                        # the endpoint an admin saved (api_base, tool options)
+                        # is theirs: replacing params wholesale erased it on
+                        # every restart.
+                        from src.services.llm.endpoints import merge_seed_params
+
+                        existing_model.params = merge_seed_params(
+                            model_data.get("params"), existing_model.params
+                        )
                         existing_model.unsupported_params = model_data.get(
                             "unsupported_params"
                         )
