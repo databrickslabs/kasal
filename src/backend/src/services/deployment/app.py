@@ -551,7 +551,7 @@ class CrewAppDeploymentService:
                 create_lakebase,
                 warehouse_id,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception(f"Deployment {deployment_id} failed")
             self._set(
                 deployment_id,
@@ -697,7 +697,7 @@ class CrewAppDeploymentService:
                     ):
                         raise RuntimeError("App deployment did not succeed")
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if (
                     "active deployment in progress" in str(exc)
                     and time.time() < deadline
@@ -711,7 +711,7 @@ class CrewAppDeploymentService:
         self._set(deployment_id, step="STARTING", message="Starting app")
         try:
             client.apps.start(app_name)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if "compute is in ACTIVE state" not in str(exc):
                 raise
 

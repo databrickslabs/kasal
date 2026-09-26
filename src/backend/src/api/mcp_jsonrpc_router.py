@@ -190,7 +190,7 @@ async def _handle(
             return _error(request_id, _INVALID_REQUEST, exc.detail)
         except TypeError as exc:
             return _error(request_id, _INVALID_PARAMS, str(exc))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("[mcp] tool %s failed", name)
             return _error(request_id, _INTERNAL_ERROR, str(exc))
 

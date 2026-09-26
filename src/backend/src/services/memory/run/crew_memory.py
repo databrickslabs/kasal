@@ -756,9 +756,7 @@ class CrewMemoryService:
                 group_id,
             )
             return llm
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 — degrade to the crew LLM, never break the run
+        except Exception as exc:  # degrade to the crew LLM, never break the run
             logger.warning(
                 "Could not build memory analysis LLM '%s' (%s); "
                 "falling back to the crew's LLM instance",

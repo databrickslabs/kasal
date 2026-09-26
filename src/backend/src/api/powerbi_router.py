@@ -143,10 +143,10 @@ async def set_powerbi_config(
             },
         }
     except Exception as e:
-        logger.error(f"Error setting Power BI configuration: {str(e)}", exc_info=True)
+        logger.exception("Error setting Power BI configuration")
         raise HTTPException(
-            status_code=500, detail=f"Error setting Power BI configuration: {str(e)}"
-        )
+            status_code=500, detail="Error setting Power BI configuration"
+        ) from e
 
 
 @router.get("/config", response_model=PowerBIConfigResponse)
@@ -186,10 +186,10 @@ async def get_powerbi_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting Power BI configuration: {str(e)}", exc_info=True)
+        logger.exception("Error getting Power BI configuration")
         raise HTTPException(
-            status_code=500, detail=f"Error getting Power BI configuration: {str(e)}"
-        )
+            status_code=500, detail="Error getting Power BI configuration"
+        ) from e
 
 
 @router.post("/query", response_model=DAXQueryResponse)
@@ -215,10 +215,8 @@ async def execute_dax_query(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error executing DAX query: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Error executing DAX query: {str(e)}"
-        )
+        logger.exception("Error executing DAX query")
+        raise HTTPException(status_code=500, detail="Error executing DAX query") from e
 
 
 @router.get("/status", response_model=Dict)
@@ -258,10 +256,10 @@ async def check_powerbi_status(
             ),
         }
     except Exception as e:
-        logger.error(f"Error checking Power BI status: {str(e)}", exc_info=True)
+        logger.exception("Error checking Power BI status")
         raise HTTPException(
-            status_code=500, detail=f"Error checking Power BI status: {str(e)}"
-        )
+            status_code=500, detail="Error checking Power BI status"
+        ) from e
 
 
 # ===== Context Configuration Endpoints =====

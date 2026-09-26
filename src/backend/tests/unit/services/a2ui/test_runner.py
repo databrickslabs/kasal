@@ -307,7 +307,7 @@ class TestStructuredResultReachesTheComposer:
         class CrewOutput:
             raw = "# The answer"
 
-            def model_dump_json(self):  # noqa: D102 — must NOT be reached
+            def model_dump_json(self):  # must NOT be reached
                 return '{"unexpected": true}'
 
         assert _result_text(CrewOutput()) == "# The answer"

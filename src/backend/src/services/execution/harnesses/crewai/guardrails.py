@@ -28,7 +28,7 @@ would let an automated consumer treat a degraded answer as a clean one.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Tuple  # noqa: F401 — Tuple documents the contract
+from typing import Any, Callable, Tuple  # Tuple documents the contract
 
 from src.core.logger import LoggerManager
 

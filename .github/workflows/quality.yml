@@ -67,6 +67,11 @@ jobs:
       - run: uv sync --frozen
       - name: black, isort, ruff, mypy baseline, import-linter
         run: uv run python run_tests.py --lint-only
+      # The architecture tests are also the ruff/size/detail ratchets; run them
+      # here too so a ratchet failure shows up next to the lint result, without
+      # waiting for the full test job.
+      - name: Architecture and ratchet tests
+        run: uv run pytest -q tests/unit/architecture
 
   migrations:
     name: Migrations and schema on PostgreSQL
@@ -176,7 +181,11 @@ jobs:
           cache-dependency-path: src/frontend/package-lock.json
       - run: npm ci
       - run: npm run test:run
-      - run: npm run lint
+      # Warning RATCHET: the count ESLint reported when this landed. Lower the
+      # number whenever warnings are fixed; never raise it. Passed here rather
+      # than in package.json so local `npm run lint` output is unchanged.
+      - name: Lint (warnings may not grow)
+        run: npm run lint -- --max-warnings 968
       - run: npm run build
 
   # Coverage is a separate, non-blocking job: the test gate above stays exactly

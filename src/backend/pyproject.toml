@@ -216,6 +216,19 @@ select = ["E", "F"]
 # something everyone passes with --no-verify.
 ignore = ["E501"]
 
+# RUF100: a `noqa` that suppresses nothing is a lie about the code next to it, and
+# it hides the day the suppressed rule would fire for real. The 110 dead ones that
+# had piled up were removed mechanically (ruff's fix for RUF100 touches noqa
+# comments and nothing else).
+extend-select = ["RUF100"]
+
+# Rules ENFORCED as a per-file COUNT ratchet by
+# tests/unit/architecture/test_ruff_ratchet.py (baseline: ruff_ratchet_baseline.json
+# next to it), not selected here, because thousands of pre-existing hits would turn
+# this gate red. Listing them as `external` keeps RUF100 from deleting the `noqa`
+# comments that suppress them — those comments ARE honoured by the ratchet.
+external = ["BLE001", "S110", "TRY400", "G004", "B904"]
+
 [tool.ruff.lint.per-file-ignores]
 # SQLAlchemy filters are built with `==`, not truthiness: `where(Model.flag == True)`
 # compiles to SQL, while ruff's suggested `where(Model.flag)` evaluates the COLUMN
@@ -348,4 +361,97 @@ ignore_imports = [
     "src.utils.databricks_auth -> src.services.databricks.workspace.service",
     "src.utils.databricks_auth -> src.services.settings.api_keys",
     "src.utils.prompt_utils -> src.services.catalog.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Routers never import repositories or db"
+type = "forbidden"
+source_modules = ["src.api"]
+forbidden_modules = ["src.repositories", "src.db"]
+# Direct imports only: every router reaches the db transitively through
+# src.dependencies / services, which is how it is supposed to work.
+allow_indirect_imports = true
+# SHRINK-ONLY BASELINE. A router takes a session from src.dependencies and calls
+# a service; it never builds a repository or reaches into src.db itself. Each
+# line below predates this contract and is a known leak. import-linter errors on
+# an ignore that no longer matches, so fixing a router forces deleting its line
+# here. Never ADD to this list: move the work into a service instead.
+ignore_imports = [
+    # --- router -> repository (5 import lines, 4 edges): the service should own these ---
+    "src.api.logs_router -> src.repositories.log_repository",
+    "src.api.mcp_router -> src.repositories.databricks_config_repository",
+    "src.api.mcp_router -> src.repositories.mcp_repository",
+    "src.api.sse_router -> src.repositories.execution_history_repository",
+    # --- router -> db (10 import lines, 7 edges) ---
+    # Background worker owning a fresh routed session (sanctioned helper, but it
+    # belongs in the service that runs the job).
+    "src.api.builder_generation_router -> src.db.session",
+    # Legacy get_db dependency: switch to the SessionDep in src.dependencies.
+    "src.api.converter_router -> src.db.session",
+    # _local_session_factory / dispose_engines: belongs in a LakebaseService.
+    "src.api.database_management_router -> src.db.session",
+    # get_lakebase_session + raw f-string SQL: belongs in services/memory/storage.
+    "src.api.memory_backend.record_browsers -> src.db.lakebase_session",
+    # PERMANENT: /health/db reports on THIS process's raw factory and Lakebase
+    # state; routing it through a service would make the check pass by
+    # construction (see the comment in healthcheck_router.db_health).
+    "src.api.healthcheck_router -> src.db.database_router",
+    "src.api.healthcheck_router -> src.db.lakebase_state",
+    "src.api.healthcheck_router -> src.db.session",
+]
+
+[[tool.importlinter.contracts]]
+name = "db never imports services"
+type = "forbidden"
+source_modules = ["src.db"]
+forbidden_modules = ["src.services"]
+# Direct imports are zero. Transitively src.db reaches services only through the
+# five accepted lazy utils -> services edges documented on the "Core and utils
+# never import services" contract above; those are that contract's business.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Execution shared machinery never imports a path package"
+type = "forbidden"
+# The kernel and the machinery the three paths share (see
+# src/services/execution/CLAUDE.md) must not depend on any one path.
+source_modules = [
+    "src.services.execution.kernel",
+    "src.services.execution.config",
+    "src.services.execution.checkpointing",
+]
+forbidden_modules = [
+    "src.services.agent_builder",
+    "src.services.flow_builder",
+    "src.services.chat",
+]
+allow_indirect_imports = true
+# SHRINK-ONLY BASELINE: the four existing edges (audit #16). Each should move the
+# helper it needs down into the kernel. Never add to this list.
+ignore_imports = [
+    "src.services.execution.config.manager_config_builder -> src.services.agent_builder.agent_adapter",
+    "src.services.execution.kernel.output_contract -> src.services.agent_builder.schema_converter",
+    "src.services.execution.kernel.task_builder -> src.services.agent_builder.task_adapter",
+    "src.services.execution.checkpointing.resume_config -> src.services.flow_builder.flow_service",
+]
+
+[[tool.importlinter.contracts]]
+name = "Vendored runtime modules never import backend-only decisions"
+type = "forbidden"
+# These modules ship inside the exported Databricks App (see
+# services/export/runtime_vendor.py); src.services.decisions does not, so an
+# import of it raises ImportError in the exported app.
+source_modules = [
+    "src.services.tools.serper_search",
+    "src.services.tools.web_fetch",
+    "src.services.tools.scrape_website",
+    "src.services.tools.image_generation",
+    "src.services.execution.runtime",
+]
+forbidden_modules = ["src.services.decisions"]
+allow_indirect_imports = true
+# SHRINK-ONLY: the known shipped bug (audit V1). Fix by injecting the ranker from
+# tool_factory, then delete this line.
+ignore_imports = [
+    "src.services.tools.serper_search -> src.services.decisions.policies",
 ]

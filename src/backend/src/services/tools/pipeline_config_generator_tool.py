@@ -683,9 +683,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                         ),
                         timeout=300,
                     )
-                except (
-                    Exception
-                ) as e:  # noqa: BLE001 — enrichment must never abort config-gen
+                except Exception as e:  # enrichment must never abort config-gen
                     logger.warning(
                         f"[PipelineConfigGen] Warehouse filter_sets enrichment failed: {e}"
                     )

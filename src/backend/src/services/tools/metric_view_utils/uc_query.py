@@ -155,9 +155,7 @@ async def run_query(
         workspace_url, wid, headers = _resolved
     except UCQueryError as e:
         return {"success": False, "error": str(e)}
-    except (
-        Exception
-    ) as e:  # noqa: BLE001 — surface as a skip reason, don't crash config-gen
+    except Exception as e:  # surface as a skip reason, don't crash config-gen
         return {"success": False, "error": f"warehouse resolve failed: {e}"}
 
     url = f"{workspace_url}/api/2.0/sql/statements"

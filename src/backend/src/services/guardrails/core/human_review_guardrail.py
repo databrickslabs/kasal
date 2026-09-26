@@ -114,7 +114,7 @@ class HumanReviewGuardrail:
 
         try:
             approval_id = run_async_with_context(self._create(raw), timeout=30)
-        except Exception as create_err:  # noqa: BLE001
+        except Exception as create_err:
             # Fail closed: a review-required task must not silently advance.
             logger.error(f"[task_review] could not create approval: {create_err}")
             raise RuntimeError(

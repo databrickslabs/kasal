@@ -65,7 +65,7 @@ def captured_events():
     events = []
 
     @event_bus.on(ContextCompactionEvent)
-    def _capture(source, event):  # noqa: ARG001
+    def _capture(source, event):
         events.append(event)
 
     return events

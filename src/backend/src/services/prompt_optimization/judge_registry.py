@@ -211,7 +211,7 @@ class JudgeRegistry:
         """
         try:
             result = self._client.search_prompt_versions(name, max_results=PAGE_SIZE)
-        except Exception as exc:  # noqa: BLE001 — UC raises for an unknown prompt
+        except Exception as exc:  # UC raises for an unknown prompt
             text = str(exc).lower()
             if "not exist" in text or "not found" in text:
                 return None
@@ -300,7 +300,7 @@ class JudgeRegistry:
                 for number in range(1, latest + 1):
                     try:
                         self._client.delete_prompt_version(name, str(number))
-                    except Exception as exc:  # noqa: BLE001 — gaps are fine
+                    except Exception as exc:  # gaps are fine
                         if (
                             "not exist" in str(exc).lower()
                             or "not found" in str(exc).lower()

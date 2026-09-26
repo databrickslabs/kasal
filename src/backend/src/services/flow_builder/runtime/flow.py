@@ -529,7 +529,7 @@ class Flow(Generic[T]):
         state_data = dict(self._state) if isinstance(self._state, dict) else self._state
         try:
             self._persistence.save_state(flow_uuid, method_name, state_data)
-        except Exception as exc:  # noqa: BLE001 — reported, never fatal
+        except Exception as exc:  # reported, never fatal
             logger.exception("flow persistence save_state failed for %s", method_name)
             self._emit_checkpoint_saved(method_name, flow_uuid, error=str(exc))
             return

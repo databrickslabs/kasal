@@ -164,7 +164,7 @@ class KasalFlowPersistence(FlowPersistence):
         for _ in range(attempts):
             try:
                 return _run_async(coro_factory)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 message = str(exc).lower()
                 last_error = exc
                 if "no such table" in message and not _table_ensured:

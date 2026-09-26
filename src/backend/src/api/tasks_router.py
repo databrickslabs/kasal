@@ -68,8 +68,8 @@ async def create_task(
     try:
         return await service.create_with_group(task_in, group_context)
     except Exception as e:
-        logger.error(f"Error creating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error creating task")
+        raise HTTPException(status_code=500, detail="Error creating task") from e
 
 
 @router.get("", response_model=List[TaskSchema])
@@ -90,8 +90,8 @@ async def list_tasks(
     try:
         return await service.find_by_group(group_context)
     except Exception as e:
-        logger.error(f"Error listing tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error listing tasks")
+        raise HTTPException(status_code=500, detail="Error listing tasks") from e
 
 
 @router.get("/{task_id}", response_model=TaskSchema)
@@ -134,8 +134,8 @@ async def get_task(
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"Error getting task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error getting task")
+        raise HTTPException(status_code=500, detail="Error getting task") from e
 
 
 @router.put("/{task_id}/full", response_model=TaskSchema)
@@ -182,8 +182,8 @@ async def update_task_full(
         # Re-raise HTTP exceptions (like 404) without modification
         raise
     except Exception as e:
-        logger.error(f"Error updating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error updating task")
+        raise HTTPException(status_code=500, detail="Error updating task") from e
 
 
 @router.put("/{task_id}", response_model=TaskSchema)
@@ -228,8 +228,8 @@ async def update_task(
         # Re-raise HTTP exceptions (like 404) without modification
         raise
     except Exception as e:
-        logger.error(f"Error updating task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error updating task")
+        raise HTTPException(status_code=500, detail="Error updating task") from e
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -268,8 +268,8 @@ async def delete_task(
         # Re-raise HTTP exceptions (like 404) without modification
         raise
     except Exception as e:
-        logger.error(f"Error deleting task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error deleting task")
+        raise HTTPException(status_code=500, detail="Error deleting task") from e
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
@@ -295,5 +295,5 @@ async def delete_all_tasks(
     try:
         await service.delete_all_for_group(group_context)
     except Exception as e:
-        logger.error(f"Error deleting all tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error deleting all tasks")
+        raise HTTPException(status_code=500, detail="Error deleting all tasks") from e

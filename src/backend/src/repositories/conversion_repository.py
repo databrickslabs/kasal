@@ -449,7 +449,7 @@ class SavedConverterConfigurationRepository(
 
         Ownership and ``is_public`` within the group are the service's rule.
         """
-        conditions = [self.model.is_template == True]  # noqa: E712
+        conditions = [self.model.is_template == True]
         if group_ids:
             conditions.append(self.model.group_id.in_(group_ids))
         query = select(self.model).where(self.model.id == config_id, or_(*conditions))

@@ -14,12 +14,12 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from src.services.prompt_optimization.gepa import reflection
-from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
+from src.services.prompt_optimization.gepa.crew_doc import (
     _distill_requirements,
     _parse_crew_doc,
     _parse_requirement_lines,
 )
-from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (
     _grade_judge_verdict,
     _median_sample,
     _parse_grade_from_text,
@@ -29,7 +29,7 @@ from src.services.prompt_optimization.gepa.judge_memory import (
     JudgeMemory,
     majority_embedder,
 )
-from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
+from src.services.prompt_optimization.gepa.judge_model import (
     _stored_judge_model_to_key,
 )
 from src.services.prompt_optimization.gepa.reflection import (

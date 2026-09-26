@@ -358,7 +358,7 @@ def get_text(
         if max_age is not None and (time.time() - ts) > max_age:
             return None
         return value
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"[state_store] get({key}) failed: {exc}")
         if strict:
             raise StorageUnavailable(str(exc)) from exc
@@ -375,7 +375,7 @@ def claim_text(cid: Optional[str], key: str, value: str) -> bool:
     try:
         with _lock:
             return _get_backend().set_if_absent(str(cid), key, value, time.time())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"[state_store] claim({key}) failed: {exc}")
         raise StorageUnavailable(str(exc)) from exc
 

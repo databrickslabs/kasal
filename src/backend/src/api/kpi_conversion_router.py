@@ -39,10 +39,10 @@ async def get_available_formats(
         formats = await service.get_available_formats()
         return formats
     except Exception as e:
-        logger.error(f"Error fetching available formats: {e}")
+        logger.exception("Error fetching available formats")
         raise HTTPException(
-            status_code=500, detail=f"Failed to fetch available formats: {str(e)}"
-        )
+            status_code=500, detail="Failed to fetch available formats"
+        ) from e
 
 
 @router.post("/convert", response_model=ConversionResponse)
@@ -75,8 +75,8 @@ async def convert_measure(
         logger.error(f"Validation error during conversion: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error during measure conversion: {e}")
-        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+        logger.exception("Error during measure conversion")
+        raise HTTPException(status_code=500, detail="Conversion failed") from e
 
 
 @router.post("/validate", response_model=ValidationResponse)
@@ -103,8 +103,8 @@ async def validate_measure(
         )
         return result
     except Exception as e:
-        logger.error(f"Error during validation: {e}")
-        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+        logger.exception("Error during validation")
+        raise HTTPException(status_code=500, detail="Validation failed") from e
 
 
 @router.post("/batch-convert", response_model=List[ConversionResponse])
@@ -132,7 +132,5 @@ async def batch_convert_measures(
         logger.error(f"Validation error during batch conversion: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error during batch conversion: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Batch conversion failed: {str(e)}"
-        )
+        logger.exception("Error during batch conversion")
+        raise HTTPException(status_code=500, detail="Batch conversion failed") from e

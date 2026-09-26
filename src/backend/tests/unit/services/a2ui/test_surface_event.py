@@ -24,7 +24,7 @@ def captured_events():
     with event_bus.scoped_handlers():
 
         @event_bus.on(A2UISurfaceEvent)
-        def _capture(source, event):  # noqa: ANN001
+        def _capture(source, event):
             events.append(event)
 
         yield events

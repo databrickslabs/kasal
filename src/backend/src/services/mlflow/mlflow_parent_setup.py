@@ -32,7 +32,7 @@ from src.core.databricks_app import is_databricks_app
 logger = logging.getLogger(__name__)
 
 try:  # mirror dispatcher's guarded import
-    import mlflow as _mlflow  # noqa: F401
+    import mlflow as _mlflow
 
     _HAS_MLFLOW = True
 except Exception:  # pragma: no cover - mlflow always present in prod

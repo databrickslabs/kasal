@@ -187,7 +187,7 @@ class TestTheWholePassSurvivesTheFirstStepFailing:
         conn = _conn()
         attempted: list[str] = []
 
-        async def always_boom(c):  # noqa: ARG001
+        async def always_boom(c):
             raise RuntimeError("nope")
 
         import src.db.self_heal.runner as runner_module

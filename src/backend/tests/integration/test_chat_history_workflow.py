@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 # Import the chat models so their tables are registered on Base.metadata before
 # we create_all() the test schema below.
-import src.models.chat_history  # noqa: F401
+import src.models.chat_history
 import src.models.chat_session  # noqa: F401
 from src.main import LocalDevAuthMiddleware, app
 

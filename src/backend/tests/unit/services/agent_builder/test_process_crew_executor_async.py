@@ -658,7 +658,7 @@ class TestProcessLogQueue:
 
         async def _broken_session():
             raise RuntimeError("db down")
-            yield  # noqa
+            yield
 
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
             with patch("os.path.exists", return_value=True):

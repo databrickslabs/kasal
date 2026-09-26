@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from src.core.llm.robust_json import robust_json_parser
 from src.services.prompt_optimization.config import TEMPLATE_TASKS
 from src.services.prompt_optimization.gepa import reflection
-from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (
     VALID_INTENTS,
     _intent_format_score,
     _json_keys_score,

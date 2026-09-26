@@ -811,7 +811,7 @@ class DatabricksRetryLLM(LLM):
             )
             try:
                 return fallback_llm.call(**call_kwargs)
-            except Exception as fb_exc:  # noqa: BLE001
+            except Exception as fb_exc:
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise  # a non-swappable error from the fallback → surface it
@@ -859,7 +859,7 @@ class DatabricksRetryLLM(LLM):
             )
             try:
                 return await fallback_llm.acall(**call_kwargs)
-            except Exception as fb_exc:  # noqa: BLE001
+            except Exception as fb_exc:
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise

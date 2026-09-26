@@ -58,7 +58,7 @@ os.environ["DATABRICKS_CONFIG_FILE"] = os.devnull
 # evicts modules from sys.modules, and later imports get FRESH classes —
 # silently disconnecting the gpt-oss monkey patches the suite asserts on.
 try:
-    import numpy  # noqa: F401
+    import numpy
     import numpy.exceptions  # noqa: F401
 except Exception:
     pass

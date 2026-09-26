@@ -8,7 +8,7 @@ import path (``prompt_optimization.gepa.sp_auth``) keeps working.
 Prefer importing from ``src.services.mlflow.sp_auth`` in new code.
 """
 
-from src.services.mlflow.sp_auth import SWAP_KEYS as _SWAP_KEYS  # noqa: F401
+from src.services.mlflow.sp_auth import SWAP_KEYS as _SWAP_KEYS
 from src.services.mlflow.sp_auth import derive_sp_bearer as _derive_sp_bearer
 from src.services.mlflow.sp_auth import (
     single_auth_env,

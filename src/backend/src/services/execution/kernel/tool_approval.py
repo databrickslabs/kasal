@@ -200,7 +200,7 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             approval_id = run_async_with_context(
                 _create_approval(execution_id, group_id, gate_config), timeout=30
             )
-        except Exception as create_err:  # noqa: BLE001
+        except Exception as create_err:
             # Fail CLOSED: an approval-required tool must not run when the
             # approval record can't be created.
             logger.error(f"[tool_approval] could not create approval: {create_err}")

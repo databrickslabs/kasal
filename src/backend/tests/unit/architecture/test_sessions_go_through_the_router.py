@@ -66,6 +66,12 @@ ACQUIRING_NAMES = {
     # guardrails call it, so that prose was writing a cheque this test did not
     # honour. Now it is a RECORDED exception (below) instead of an invisible one.
     "sync_session_factory",
+    # Added with a baseline (BASELINE below). ``_local_session_factory`` is the
+    # SQLite factory behind the router, and ``get_lakebase_session`` opens a
+    # session straight to a Lakebase instance: both pick a database, and both
+    # were outside this set while the router kept growing call sites.
+    "_local_session_factory",
+    "get_lakebase_session",
 }
 
 #: Paths allowed to acquire, each with the reason. Prefix match on the
@@ -136,6 +142,27 @@ ALLOWED = {
     # writer.py routes through get_smart_db_session.
 }
 
+#: SHRINK-ONLY BASELINE: modules that called ``_local_session_factory`` or
+#: ``get_lakebase_session`` when those names joined ACQUIRING_NAMES. Unlike
+#: ALLOWED these are NOT sanctioned; they are recorded so the rule could land
+#: without a refactor. Never add a path here. When a module stops calling the
+#: names, ``test_the_baseline_only_shrinks`` fails until its entry is deleted.
+BASELINE = {
+    # Router opens sessions itself: belongs in a LakebaseService method.
+    "api/database_management_router.py": {"_local_session_factory"},
+    # Router opens a Lakebase session and runs f-string SQL: belongs in
+    # services/memory/storage behind a repository.
+    "api/memory_backend/record_browsers.py": {"get_lakebase_session"},
+    # Memory/knowledge/generation code that talks to a user-chosen Lakebase
+    # instance (not the app database) directly. Candidates for one sanctioned
+    # helper, at which point they move to ALLOWED with a reason.
+    "services/memory/config/lakebase_service.py": {"get_lakebase_session"},
+    "services/memory/storage/lakebase.py": {"get_lakebase_session"},
+    "services/knowledge/embedding_session.py": {"get_lakebase_session"},
+    "services/generation/crew/progressive.py": {"get_lakebase_session"},
+    "services/generation/crew/recipes.py": {"get_lakebase_session"},
+}
+
 #: Layers that must NEVER acquire, whatever the reason. A repository has no
 #: legitimate case — it receives a session in its constructor, full stop.
 NEVER_ACQUIRE_PREFIXES = ("repositories/",)
@@ -201,7 +228,7 @@ class TestNoUnapprovedSessionAcquisition:
                 tree = ast.parse(path.read_text())
             except SyntaxError:  # pragma: no cover
                 continue
-            called = _acquiring_calls(tree)
+            called = _acquiring_calls(tree) - BASELINE.get(relative, set())
             if called:
                 offenders[relative] = called
 
@@ -353,6 +380,17 @@ class TestTheSafeWrapperIsGone:
 
 class TestTheListItselfStaysHonest:
     """An allowlist rots two ways: stale entries, and entries that stop routing."""
+
+    @pytest.mark.parametrize("relative_path", sorted(BASELINE))
+    def test_the_baseline_only_shrinks(self, relative_path):
+        """A baselined module that no longer calls a name must lose its entry."""
+        path = BACKEND_SRC / relative_path
+        assert path.exists(), f"{relative_path} is gone — delete its BASELINE entry."
+        stale = BASELINE[relative_path] - _acquiring_calls(ast.parse(path.read_text()))
+        assert not stale, (
+            f"{relative_path} no longer calls {sorted(stale)}. Remove it from "
+            "BASELINE so the ratchet keeps the ground you gained."
+        )
 
     @pytest.mark.parametrize("relative_path", sorted(ALLOWED))
     def test_the_entry_still_exists(self, relative_path):
