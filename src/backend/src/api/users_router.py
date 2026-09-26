@@ -1,4 +1,4 @@
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -40,7 +40,7 @@ async def read_users_me(
     current_user: AuthenticatedUserDep,
     service: Annotated[UserService, Depends(get_user_service)],
     group_context: GroupContextDep,
-):
+) -> Any:  # ORM User, serialized through response_model
     """Get current user's information"""
     import logging
 
@@ -48,7 +48,7 @@ async def read_users_me(
     logger.info(
         f"[ENDPOINT DEBUG] /users/me called for user: {current_user.email}, is_system_admin: {current_user.is_system_admin}, is_personal_workspace_manager: {current_user.is_personal_workspace_manager}"
     )
-    await service.record_login(current_user.id)
+    await service.record_login(str(current_user.id))
     return await service.get_user_complete(current_user.id)
 
 
@@ -58,7 +58,7 @@ async def update_users_me(
     current_user: AuthenticatedUserDep,
     service: Annotated[UserService, Depends(get_user_service)],
     group_context: GroupContextDep,
-):
+) -> Any:  # ORM User, serialized through response_model
     """Update current user's information"""
     return await service.update_user(current_user.id, user_update)
 
@@ -85,7 +85,7 @@ async def read_users(
     role: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
-):
+) -> Any:  # ORM Users, serialized through response_model
     """Get list of users (system admin only)"""
     filters = {}
 
@@ -105,7 +105,7 @@ async def provision_user(
     payload: UserProvisionRequest,
     service: Annotated[UserService, Depends(get_user_service)],
     admin_user: SystemAdminUserDep,
-):
+) -> Any:  # ORM User, serialized through response_model
     """Add a person before their first sign-in; existing identities are reused."""
     return await service.provision_user(str(payload.email))
 
@@ -114,7 +114,7 @@ async def provision_user(
 async def search_user_directory(
     admin_user: SystemAdminUserDep,
     search: str = Query(..., min_length=2, max_length=200),
-):
+) -> List[DirectoryPerson]:
     """Search the Databricks workspace directory without creating Kasal users."""
     from src.services.groups.directory import search_directory
     from src.utils.user_context import UserContext
@@ -146,7 +146,7 @@ async def update_user(
     service: Annotated[UserService, Depends(get_user_service)],
     admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
-):
+) -> Any:  # ORM User, serialized through response_model
     """Update a user's username or status (system admin only). Email is
     immutable through the API — it is the identity authentication resolves."""
     # Use injected service
@@ -166,7 +166,7 @@ async def update_user_permissions(
     service: Annotated[UserService, Depends(get_user_service)],
     admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
-):
+) -> Any:  # ORM User, serialized through response_model
     """Update user permissions (system admin only)"""
     # Check if the current user is a system admin
     if (
@@ -191,7 +191,7 @@ async def delete_user(
     service: Annotated[UserService, Depends(get_user_service)],
     admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Delete a user (system admin only)"""
     # Use injected service
     success = await service.delete_user(user_id)

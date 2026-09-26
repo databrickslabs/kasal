@@ -121,7 +121,7 @@ class ProgressiveGenerationMixin:
                     )
                     return
 
-                model = request.model or os.getenv("CREW_MODEL", DEFAULT_ENGINE_MODEL)
+                model = request.model or os.getenv("CREW_MODEL") or DEFAULT_ENGINE_MODEL
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
                 # Caps are UPPER BOUNDS, not predictions: the PLAN LLM decides the

@@ -20,6 +20,8 @@ from the schema-scoped UC listing.
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.repositories.mcp_repository import MCPServerRepository
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,7 @@ def plan_legacy_url_migration(
 class MCPLegacyUrlService:
     """Counts and applies the legacy-proxy → AI Gateway URL migration."""
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.server_repository = MCPServerRepository(session)
 
     async def _plan(

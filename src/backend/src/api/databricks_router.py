@@ -1,4 +1,4 @@
-from typing import Annotated, Dict, List
+from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, Query
 
@@ -70,7 +70,7 @@ async def set_databricks_config(
     request: DatabricksConfigCreate,
     group_context: GroupContextDep,
     service: DatabricksServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Set Databricks configuration.
     Only workspace admins can set Databricks configuration for their workspace.
@@ -99,7 +99,7 @@ async def set_ai_gateway_status(
     payload: AIGatewayStatusUpdate,
     group_context: GroupContextDep,
     service: DatabricksServiceDep,
-):
+) -> Dict[str, Any]:
     """Persist just the AI Gateway routing flag on the active Databricks config.
 
     Immediate toggle that doesn't require re-POSTing the full config payload
@@ -121,7 +121,7 @@ async def set_ai_gateway_status(
 async def get_databricks_config(
     group_context: GroupContextDep,
     service: DatabricksServiceDep,
-):
+) -> DatabricksConfigResponse:
     """
     Get current Databricks configuration.
     Only workspace admins can view Databricks configuration.
@@ -169,7 +169,7 @@ async def get_databricks_config(
 async def check_personal_token_required(
     group_context: GroupContextDep,
     service: DatabricksServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Check if personal access token is required for Databricks.
     Only workspace admins can check personal token requirements.
@@ -194,7 +194,7 @@ async def check_personal_token_required(
 async def check_databricks_connection(
     group_context: GroupContextDep,
     service: DatabricksServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Check connection to Databricks.
     Only workspace admins can check Databricks connection status.
@@ -218,7 +218,7 @@ async def check_databricks_connection(
 @router.get("/environment", response_model=Dict)
 async def get_databricks_environment(
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Get information about the Databricks environment.
     Only workspace admins can view Databricks environment information.
@@ -262,7 +262,7 @@ _HOST_OVERRIDE_DESC = (
 )
 
 
-def _check_host_override_role(group_context: GroupContextDep, host: str | None):
+def _check_host_override_role(group_context: GroupContextDep, host: str | None) -> None:
     """A host override is a tool-configuration action: Admin and Editor only.
 
     The service additionally refuses any host other than the configured
@@ -279,7 +279,7 @@ async def list_warehouses(
     service: DatabricksServiceDep,
     group_context: GroupContextDep,
     host: str = Query(default=None, description=_HOST_OVERRIDE_DESC),
-):
+) -> List[Dict[str, Any]]:
     """List SQL warehouses in the workspace (optional ``host`` = configured workspace only)."""
     _check_host_override_role(group_context, host)
     return await service.list_warehouses(host=host)
@@ -290,7 +290,7 @@ async def list_catalogs(
     service: DatabricksServiceDep,
     group_context: GroupContextDep,
     host: str = Query(default=None, description=_HOST_OVERRIDE_DESC),
-):
+) -> List[str]:
     """List Unity Catalog catalogs (optional ``host`` = configured workspace only)."""
     _check_host_override_role(group_context, host)
     return await service.list_catalogs(host=host)
@@ -302,7 +302,7 @@ async def list_schemas(
     group_context: GroupContextDep,
     catalog: str = Query(..., description="Catalog name to list schemas for"),
     host: str = Query(default=None, description=_HOST_OVERRIDE_DESC),
-):
+) -> List[str]:
     """List Unity Catalog schemas for a catalog (optional ``host`` = configured workspace only)."""
     _check_host_override_role(group_context, host)
     return await service.list_schemas(catalog=catalog, host=host)

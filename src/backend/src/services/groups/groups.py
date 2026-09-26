@@ -217,7 +217,10 @@ class GroupService:
         return await self.get_user_groups(user.id)
 
     async def create_group(
-        self, name: str, description: str = None, created_by_email: str = None
+        self,
+        name: str,
+        description: Optional[str] = None,
+        created_by_email: Optional[str] = None,
     ) -> Group:
         """
         Create a new group manually.

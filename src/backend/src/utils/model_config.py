@@ -32,7 +32,9 @@ logger = logging.getLogger(__name__)
 # reasoning and tool use with much higher throughput than frontier-only models.
 # It is a global endpoint, so deployments using this default must enable
 # cross-geography routing in the Databricks workspace.
-DEFAULT_ENGINE_MODEL = DatabricksAppInstallation.from_env().default_model or os.getenv(
+DEFAULT_ENGINE_MODEL: (
+    str
+) = DatabricksAppInstallation.from_env().default_model or os.getenv(
     "DEFAULT_LLM_MODEL", "databricks-gemini-3-8-flash"
 )
 

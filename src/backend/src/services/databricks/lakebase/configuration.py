@@ -4,11 +4,12 @@ import logging
 from typing import Any, Dict
 
 from src.core.databricks_app import LakebaseAppResource
+from src.repositories.database_config_repository import DatabaseConfigRepository
 
 logger = logging.getLogger(__name__)
 
 
-async def get_config(repository) -> Dict[str, Any]:
+async def get_config(repository: DatabaseConfigRepository) -> Dict[str, Any]:
     """
     Get current Lakebase configuration.
 

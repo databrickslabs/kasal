@@ -34,6 +34,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Mapping, Optional
 
+from starlette.types import ASGIApp, Receive, Scope, Send
+
 logger = logging.getLogger(__name__)
 
 # Header names, as sent. Starlette header lookups are case-insensitive.
@@ -182,11 +184,11 @@ class UntrustedIdentityHeadersMiddleware:
     BaseHTTPMiddleware) so SSE responses are not buffered.
     """
 
-    def __init__(self, app, enabled: Optional[bool] = None):
+    def __init__(self, app: ASGIApp, enabled: Optional[bool] = None) -> None:
         self.app = app
         self.enabled = running_in_databricks_apps() if enabled is None else enabled
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.enabled and scope.get("type") in ("http", "websocket"):
             headers = scope.get("headers") or []
             kept = [

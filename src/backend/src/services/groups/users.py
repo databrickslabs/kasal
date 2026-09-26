@@ -82,7 +82,7 @@ class UserService:
 
     async def record_login(self, user_id: str) -> None:
         """Record profile initialization, without writes on frequent refreshes."""
-        user = await self.user_repo.get(user_id)
+        user = await self.get_user(user_id)
         if user is None:
             return
         now = datetime.now(timezone.utc)

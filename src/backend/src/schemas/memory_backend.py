@@ -246,11 +246,13 @@ class LakebaseMemoryConfig(BaseModel):
         None,
         description="Lakebase instance name (uses configured default if not set)",
     )
-    embedding_dimension: int = Field(1024, description="Dimension of embedding vectors")
+    embedding_dimension: int = Field(
+        default=1024, description="Dimension of embedding vectors"
+    )
 
     # Memory table — one table stores every MemoryRecord.
     memory_table: str = Field(
-        "crew_memory",
+        default="crew_memory",
         description="Table for CrewAI memory records.",
     )
 
@@ -350,7 +352,7 @@ class MemoryBackendConfig(BaseModel):
     )
 
     databricks_config: Optional[DatabricksMemoryConfig] = Field(
-        None,
+        default=None,
         description="Configuration for Databricks backend (required if backend_type='databricks')",
     )
     lakebase_config: Optional[LakebaseMemoryConfig] = Field(
@@ -359,12 +361,12 @@ class MemoryBackendConfig(BaseModel):
     )
 
     cognitive_config: Optional[MemoryTuningConfig] = Field(
-        None,
+        default=None,
         description="Optional tuning parameters for the memory.",
     )
 
     custom_config: Optional[Dict[str, Any]] = Field(
-        None, description="Additional backend-specific configuration"
+        default=None, description="Additional backend-specific configuration"
     )
 
     model_config = {

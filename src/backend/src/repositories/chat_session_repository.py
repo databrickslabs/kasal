@@ -6,9 +6,9 @@ here. Group scoping is enforced on every read/write that takes group_ids.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chat_session import ChatSession
@@ -81,7 +81,14 @@ class ChatSessionRepository:
         )
         await self.session.execute(stmt)
 
-    async def save_canvas(self, session_id, group_id, user_id, revision, **values):
+    async def save_canvas(
+        self,
+        session_id: str,
+        group_id: str,
+        user_id: str,
+        revision: int,
+        **values: Any,
+    ) -> bool:
         """Compare-and-swap prevents another browser's canvas being overwritten."""
         result = await self.session.execute(
             update(ChatSession)
@@ -96,7 +103,8 @@ class ChatSessionRepository:
             )
         )
         await self.session.flush()
-        return bool(result.rowcount)
+        # UPDATE returns a CursorResult; Session.execute is typed as Result.
+        return bool(cast(CursorResult[Any], result).rowcount)
 
     async def set_running_job(
         self, session_id: str, group_ids: List[str], job_id: Optional[str]

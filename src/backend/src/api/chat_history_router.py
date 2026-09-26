@@ -1,4 +1,4 @@
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
 from fastapi import APIRouter, Depends, Path, Query, status
 
@@ -53,7 +53,7 @@ ChatHistoryServiceDep = Annotated[ChatHistoryService, Depends(get_chat_history_s
 @router.get("/sessions/{session_id}/canvas", response_model=BuilderCanvasResponse)
 async def get_builder_canvas(
     session_id: str, session: SessionDep, group_context: GroupContextDep
-):
+) -> BuilderCanvasResponse:
     return await BuilderSessionService(session).get(session_id, group_context)
 
 
@@ -63,7 +63,7 @@ async def save_builder_canvas(
     request: BuilderCanvasRequest,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> BuilderCanvasResponse:
     return await BuilderSessionService(session).save(session_id, request, group_context)
 
 
@@ -74,7 +74,7 @@ async def save_chat_message(
     message_request: SaveMessageRequest,
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> ChatHistoryResponse:
     """
     Save a chat message with group isolation.
 
@@ -112,7 +112,7 @@ async def get_chat_session_messages(
     group_context: GroupContextDep,
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(50, ge=1, le=100, description="Messages per page"),
-):
+) -> ChatHistoryListResponse:
     """
     Get chat messages for a specific session with group filtering.
 
@@ -156,7 +156,7 @@ async def get_user_chat_sessions(
     group_context: GroupContextDep,
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(20, ge=1, le=50, description="Sessions per page"),
-):
+) -> List[ChatHistoryResponse]:
     """
     Get recent chat sessions for the current user with group filtering.
 
@@ -187,7 +187,7 @@ async def get_group_chat_sessions(
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(20, ge=1, le=50, description="Sessions per page"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
-):
+) -> ChatSessionListResponse:
     """
     Get chat sessions for the group with optional user filtering.
 
@@ -221,7 +221,7 @@ async def delete_chat_session(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete a complete chat session with group filtering.
 
@@ -245,7 +245,7 @@ async def delete_chat_session(
 async def create_new_chat_session(
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> dict[str, Any]:
     """
     Generate a new chat session ID.
 
@@ -280,7 +280,7 @@ async def create_named_session(
     request: ChatSessionCreateRequest,
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> NamedChatSessionResponse:
     """Create a named chat session for the current user and workspace."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -301,7 +301,7 @@ async def list_named_sessions(
     group_context: GroupContextDep,
     page: int = Query(0, ge=0, description="Page number (0-based)"),
     per_page: int = Query(50, ge=1, le=100, description="Sessions per page"),
-):
+) -> List[NamedChatSessionResponse]:
     """List the current user's named sessions in this workspace (most recent first)."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -319,7 +319,7 @@ async def rename_named_session(
     request: ChatSessionRenameRequest,
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> NamedChatSessionResponse:
     """Rename a named chat session (group-checked)."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -344,7 +344,7 @@ async def get_session_preview(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> SessionPreviewResponse:
     """Return the session's rendered preview, or all-null when it has none."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -360,7 +360,7 @@ async def save_session_preview(
     request: SavePreviewRequest,
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Save (replace) the session's rendered preview (group-checked)."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -380,7 +380,7 @@ async def delete_session_preview(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Clear the session's rendered preview (group-checked)."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -393,7 +393,7 @@ async def get_session_running_job(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> RunningJobResponse:
     """Return the session's in-flight crew job id (for refresh reconnect), or null."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -409,7 +409,7 @@ async def set_session_running_job(
     request: SetRunningJobRequest,
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Record the in-flight crew job for a session (group-checked)."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -427,7 +427,7 @@ async def clear_session_running_job(
     session_id: Annotated[str, Path(..., description="Chat session identifier")],
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Clear the session's in-flight crew job marker (run finished/stopped)."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
@@ -441,7 +441,7 @@ async def update_chat_message(
     request: UpdateMessageRequest,
     service: ChatHistoryServiceDep,
     group_context: GroupContextDep,
-):
+) -> ChatHistoryResponse:
     """Update a message in place (streaming append / result attach), group-checked."""
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")

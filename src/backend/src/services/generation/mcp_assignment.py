@@ -2,11 +2,13 @@
 
 import asyncio
 import json
+from typing import Any, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
 from src.core.llm.robust_json import robust_json_parser
 from src.services.llm.manager import LLMManager
+from src.utils.user_context import GroupContext
 
 
 class TaskMcpAssignment(BaseModel):
@@ -20,7 +22,9 @@ class McpAssignments(BaseModel):
     assignments: list[TaskMcpAssignment]
 
 
-async def describe_selected_mcps(names, group_context) -> list[dict]:
+async def describe_selected_mcps(
+    names: Optional[Sequence[str]], group_context: Optional[GroupContext]
+) -> list[dict]:
     """Discover metadata only, using the same scope and authentication as execution."""
     if not names:
         return []
@@ -46,15 +50,17 @@ async def describe_selected_mcps(names, group_context) -> list[dict]:
                 "A selected MCP server is unavailable. Reopen the tool picker."
             )
         configs = [server.model_dump() for server in servers]
+    # group_id above already required a context; bind its token for the workers.
+    user_token = group_context.access_token if group_context else None
 
-    async def describe(server):
+    async def describe(server: dict[str, Any]) -> dict[str, Any]:
         try:
             tools = await asyncio.wait_for(
                 MCPIntegration._create_tools_for_server(
                     server,
                     f"planning_{group_id}",
                     None,
-                    user_token=group_context.access_token,
+                    user_token=user_token,
                     group_id=group_id,
                 ),
                 timeout=30,
@@ -93,7 +99,7 @@ async def assign_mcps_to_tasks(
         return {}
     from src.services.decisions.policies import assign
 
-    assigned = await assign(tasks, capabilities)
+    assigned: Optional[dict[str, list[str]]] = await assign(tasks, capabilities)
     if assigned is not None:
         return assigned
     allowed = {item["name"] for item in capabilities}
@@ -152,7 +158,9 @@ def task_mcp_configs(servers: list[str]) -> dict:
     return {"MCP_SERVERS": {"servers": servers}} if servers else {}
 
 
-async def describe_selected_tools(ids, group_context) -> list[dict]:
+async def describe_selected_tools(
+    ids: Optional[Sequence[str]], group_context: GroupContext
+) -> list[dict]:
     if not ids:
         return []
     from src.db.session import routed_scoped_session

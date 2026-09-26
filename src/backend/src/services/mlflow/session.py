@@ -1,17 +1,22 @@
 """Conversation identity shared by native and event-exported MLflow traces."""
 
 import logging
+from typing import Any, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def session_id_from(config, inputs=None):
+def session_id_from(
+    config: Mapping[str, Any], inputs: Optional[Mapping[str, Any]] = None
+) -> Optional[str]:
     value = config.get("session_id") or (inputs or {}).get("session_id")
     value = value or (config.get("inputs") or {}).get("session_id")
     return value if isinstance(value, str) and value.strip() else None
 
 
-def tag_session(span, session_id, user=None):
+def tag_session(
+    span: Any, session_id: Optional[str], user: Optional[str] = None
+) -> None:
     """Update trace metadata while the trace is live, before either exporter flushes.
 
     The client API used by the event exporter does not activate its root span.

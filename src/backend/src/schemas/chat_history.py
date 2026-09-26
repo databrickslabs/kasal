@@ -232,7 +232,7 @@ class NamedChatSessionResponse(BaseModel):
 
     @field_validator("mode", mode="before")
     @classmethod
-    def default_session_mode(cls, value):
+    def default_session_mode(cls, value: Any) -> Any:
         return value or "chat"
 
     user_id: str = Field(..., description="Owner user id")

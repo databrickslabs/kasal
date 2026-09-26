@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
@@ -20,6 +21,9 @@ from sqlalchemy import text
 from src.core.databricks_app import DatabricksAppInstallation
 from src.utils.databricks_app_auth import get_app_client
 from src.utils.encryption_utils import EncryptionUtils
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
 _SECRET_KEY = "encryption-material-v1"
 
@@ -35,12 +39,12 @@ def _scope_name() -> str:
     return f"kasal-app-{digest}"
 
 
-def _read_secret(client, scope: str, key: str) -> str:
+def _read_secret(client: Any, scope: str, key: str) -> str:
     result = client.secrets.get_secret(scope=scope, key=key)
     return base64.b64decode(result.value, validate=True).decode()
 
 
-def _legacy_fernet_key(client) -> str:
+def _legacy_fernet_key(client: Any) -> str:
     """Retain explicit or previously assigned keys during upgrade."""
     from databricks.sdk.errors import PermissionDenied, ResourceDoesNotExist
 
@@ -164,7 +168,7 @@ def _ensure_material(scope: str) -> None:
     EncryptionUtils._cached_key = material["fernet"].encode()
 
 
-async def initialize_app_keys(connection) -> None:
+async def initialize_app_keys(connection: "AsyncConnection") -> None:
     """Called during native Lakebase startup, before seeding or user requests."""
     scope = _scope_name()
     lock_id = int.from_bytes(

@@ -142,7 +142,7 @@ class MemoryBackendService:
     # ===== Configuration Management (delegated to MemoryConfigService) =====
 
     async def get_active_config(
-        self, group_id: str = None
+        self, group_id: Optional[str] = None
     ) -> Optional[MemoryBackendConfig]:
         """Get the active memory backend configuration."""
         return await self._config_service.get_active_config(group_id)

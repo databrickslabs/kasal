@@ -94,13 +94,14 @@ class KnowledgeSearch:
             )
         from src.services.decisions.policies import rank
 
-        return await rank(
+        ranked: List[Dict[str, Any]] = await rank(
             "knowledge_ranking",
             query,
             results or [],
             [r.get("content", "") for r in results or []],
             group_id=self.group_id,
         )
+        return ranked
 
     async def search(
         self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None

@@ -426,18 +426,18 @@ class CrewStreamingRequest(BaseModel):
     # --- ChatMode auto-execute. AgentBuilder/crew canvas leaves these at the
     # defaults, so it stays generate-only (renders the plan as nodes, no run). ---
     auto_execute: bool = Field(
-        False,
+        default=False,
         description="When true, run the generated crew on the backend immediately after generation (ChatMode). AgentBuilder keeps this false and only renders the plan.",
     )
     session_id: Optional[str] = Field(
-        None,
+        default=None,
         description="Chat session id — memory partition + run ownership for the auto-executed run",
     )
     user_message_id: Optional[str] = Field(
-        None, description="Saved user message that starts this chat turn"
+        default=None, description="Saved user message that starts this chat turn"
     )
     memory_workspace_scope: Optional[bool] = Field(
-        True,
+        default=True,
         description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only",
     )
     disable_memory: bool = Field(
@@ -445,7 +445,7 @@ class CrewStreamingRequest(BaseModel):
         description="'No memory' mode — build agents without memory for the auto-executed run",
     )
     answer_from_conversation: bool = Field(
-        False,
+        default=False,
         description=(
             "Set by the dispatcher, not the client: this turn restates or reshapes "
             "the answer already on screen. The run is grounded on the transcript "

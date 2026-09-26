@@ -4,29 +4,33 @@ import asyncio
 import json
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.repositories.chat_history_repository import ChatHistoryRepository
 from src.repositories.chat_session_repository import ChatSessionRepository
-from src.schemas.builder_session import BuilderCanvasResponse
+from src.schemas.builder_session import BuilderCanvasRequest, BuilderCanvasResponse
 from src.utils.encryption_utils import EncryptionUtils
+from src.utils.user_context import GroupContext
 
 
 class BuilderSessionService:
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.repo = ChatSessionRepository(session)
         self.history = ChatHistoryRepository(session)
 
     @staticmethod
-    def _identity(context):
+    def _identity(context: GroupContext) -> tuple[str, str]:
         if not context.primary_group_id or not context.group_email:
             raise ForbiddenError("A teamspace and user are required")
         if not check_role_in_context(context, ["admin", "editor"]):
             raise ForbiddenError("Only editors and admins can access builder canvases")
         return context.primary_group_id, context.group_email
 
-    async def get(self, session_id, context):
+    async def get(
+        self, session_id: str, context: GroupContext
+    ) -> BuilderCanvasResponse:
         group_id, user_id = self._identity(context)
         row = await self.repo.get_by_id_and_group(session_id, [group_id])
         if not row or row.user_id != user_id:
@@ -35,12 +39,14 @@ class BuilderSessionService:
         if row.canvas_state:
             # Encrypt the complete snapshot, including any tool credentials.
             raw = await asyncio.to_thread(
-                EncryptionUtils.decrypt_value, row.canvas_state
+                EncryptionUtils.decrypt_value, str(row.canvas_state)
             )
             state = json.loads(raw)
-        return BuilderCanvasResponse(state=state, revision=row.canvas_revision)
+        return BuilderCanvasResponse(state=state, revision=int(row.canvas_revision))
 
-    async def save(self, session_id, request, context):
+    async def save(
+        self, session_id: str, request: BuilderCanvasRequest, context: GroupContext
+    ) -> BuilderCanvasResponse:
         group_id, user_id = self._identity(context)
         row = await self.repo.get_by_id_and_group(session_id, [group_id])
         if row and row.user_id != user_id:
