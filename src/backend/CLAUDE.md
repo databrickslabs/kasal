@@ -6,7 +6,8 @@ Backend-specific instructions for Claude Code when working in the backend direct
 
 ### Development
 - **Dependencies are managed with `uv`** (not Poetry). Install/sync: `uv sync` (or `uv sync --frozen`). The venv lives at `src/backend/.venv`.
-- **Start server**: `./run.sh` (defaults to SQLite) or `./run.sh postgres` for PostgreSQL. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`, bound to `127.0.0.1` (set `KASAL_BIND_HOST=0.0.0.0` to expose it; see `./run.sh -h`).
+- **Start server**: `./run.sh` (defaults to SQLite) or `./run.sh postgres` for PostgreSQL. `run.sh` runs `uv sync --frozen` then `.venv/bin/uvicorn src.main:app --reload`, bound to `127.0.0.1` (set `KASAL_BIND_HOST=0.0.0.0` to expose it; see `./run.sh -h`). It also sets `LOCAL_DEV_AUTH=true`; see "Local identity" below.
+- **Port**: `KASAL_PORT` (default 8000). Start the dev frontend with the same `KASAL_PORT` (it also reads `VITE_KASAL_PORT`) so its API client and proxy follow.
 - **Run tests**: `python run_tests.py` (all tests + linting; **parallel by default**)
 - **Lint only / tests only**: `python run_tests.py --lint-only` or `--skip-lint`
   (CI runs them as separate parallel jobs; lint no longer waits for green tests)
@@ -21,7 +22,30 @@ Backend-specific instructions for Claude Code when working in the backend direct
   that called the real `time.sleep` in a retry path cost ~91s of the old
   runtime; patch `time.sleep` in tests that exercise retry/backoff.
 
+### Local identity (why a direct `uvicorn` run gets 401)
+A proxy in front of Kasal authenticates the user and forwards the identity as
+headers; Kasal itself never logs anyone in. `utils/request_identity.py` is the
+one resolver. Inside Databricks Apps (`DATABRICKS_APP_NAME` set) only
+`X-Forwarded-*` is trusted and `X-Auth-Request-*` is stripped; elsewhere
+`X-Auth-Request-*` (oauth2-proxy) wins over `X-Forwarded-*`.
+`get_group_context` then fails closed: no identity -> 401, a workspace you may
+not use -> 403, a resolver failure -> 503.
+
+- `LOCAL_DEV_AUTH=true` (run.sh sets it) makes a request with NO identity
+  header run as `LOCAL_DEV_USER_EMAIL` (default `dev@localhost`). It is refused
+  inside Databricks Apps and with `ENVIRONMENT=production`.
+- Starting `uvicorn src.main:app` yourself? Export `LOCAL_DEV_AUTH=true`, or
+  every API call is a 401.
+- The dev frontend always sends `X-Forwarded-Email` (`VITE_DEV_USER_EMAIL`,
+  default `dev@localhost`); a header always wins over the fallback.
+
 ### Database
+One local default: **SQLite at `src/backend/app.db`** (absolute, from
+`core/paths.BACKEND_ROOT`, so the CWD does not matter). `run.sh`, alembic and
+`run_seeders.py` all read `config/settings.py`, so they open the same file.
+(`src/entrypoint.py`, the Databricks Apps entry point, sets its own path.)
+Set `DATABASE_TYPE=postgres` (plus `POSTGRES_*`) for PostgreSQL, or
+`SQLITE_DB_PATH` for another SQLite file, on every command you run.
 - **Migrations**: `alembic upgrade head`
 - **Create migration**: `alembic revision --autogenerate -m "description"`
 - **Seed database**: `python run_seeders.py`

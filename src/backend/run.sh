@@ -21,7 +21,9 @@ ${BLUE}Usage:${NC}
 
 ${BLUE}Database Types:${NC}
     sqlite      Use SQLite database (default)
-                - Uses local file (./app.db)
+                - Uses src/backend/app.db, wherever you run this script
+                  from (set SQLITE_DB_PATH to use another file)
+                - The same default as alembic and run_seeders.py
                 - No external database server required
                 - Good for development and testing
 
@@ -43,10 +45,29 @@ ${BLUE}Server Environment Variables:${NC}
                             only). Set to 0.0.0.0 to expose the server on every
                             interface: with LOCAL_DEV_AUTH on, anyone who can
                             reach the port acts as the development user.
-    KASAL_PORT              Port to listen on (default 8000)
+    KASAL_PORT              Port to listen on (default 8000). The dev frontend
+                            reads the same variable (or VITE_KASAL_PORT), so
+                            start it with the same value: KASAL_PORT=8001 npm start
     KASAL_KILL_PORT_OWNER   If the port is held by a process that is not a
                             Kasal server from this checkout, run.sh refuses to
                             start. Set to true to terminate that process instead.
+
+${BLUE}Identity (local development):${NC}
+    Kasal never logs anyone in itself: a proxy in front of it (Databricks Apps,
+    or oauth2-proxy) forwards the signed-in user as a header. A request with no
+    identity header is refused with 401.
+
+    LOCAL_DEV_AUTH          run.sh sets this to true (default here). A request
+                            with no identity header then runs as
+                            LOCAL_DEV_USER_EMAIL. Ignored, and cannot be turned
+                            on, inside Databricks Apps (DATABRICKS_APP_NAME) or
+                            with ENVIRONMENT=production. Starting uvicorn
+                            yourself? Export LOCAL_DEV_AUTH=true, or every API
+                            call returns 401. Set LOCAL_DEV_AUTH=false here to
+                            test the unauthenticated behaviour.
+    LOCAL_DEV_USER_EMAIL    The development user's email (default dev@localhost).
+                            The dev frontend sends VITE_DEV_USER_EMAIL instead,
+                            and a header always wins over this fallback.
 
 ${BLUE}Logging Control Environment Variables:${NC}
 
@@ -91,6 +112,12 @@ ${BLUE}Examples:${NC}
 
     # Expose the server on the network (explicit opt-in)
     KASAL_BIND_HOST=0.0.0.0 ./run.sh
+
+    # Another port (start the frontend with the same KASAL_PORT)
+    KASAL_PORT=8001 ./run.sh
+
+    # Act as a specific development user
+    LOCAL_DEV_USER_EMAIL=alice@example.com ./run.sh
 
     # Verbose mode with PostgreSQL (app debug, no SQL)
     ./run.sh -v postgres
@@ -166,6 +193,11 @@ print_config() {
     echo ""
 }
 
+# Run from the backend directory whatever the caller's CWD: the .venv, logs/
+# and the uvicorn app path below are all relative to it.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR" || exit 1
+
 # Parse command line arguments
 DB_TYPE=""
 SHOW_CONFIG=true
@@ -232,18 +264,21 @@ fi
 # Trap Ctrl+C and kill all child processes
 trap 'echo "Shutting down..."; kill $(jobs -p); exit' INT TERM
 
-# Set database configuration
+# Set database configuration.
+# SQLITE_DB_PATH is NOT exported: settings.py defaults it to the absolute
+# src/backend/app.db, the same file alembic and run_seeders.py open. Exporting
+# a CWD-relative ./app.db (as this script used to) created a stray empty
+# database whenever run.sh was started from another directory, and silently
+# overrode a SQLITE_DB_PATH the caller had set.
 if [ "$DB_TYPE" = "sqlite" ]; then
     echo -e "${GREEN}Starting application with SQLite database${NC}"
     export DATABASE_TYPE=sqlite
-    export SQLITE_DB_PATH=./app.db
 elif [ "$DB_TYPE" = "postgres" ]; then
     echo -e "${GREEN}Starting application with PostgreSQL database${NC}"
     export DATABASE_TYPE=postgres
 else
     echo -e "${YELLOW}Invalid database type. Using SQLite as default.${NC}"
     export DATABASE_TYPE=sqlite
-    export SQLITE_DB_PATH=./app.db
 fi
 
 # Set default log level if not specified
@@ -285,7 +320,6 @@ fi
 # ("cannot schedule new futures after shutdown", event pairing warnings).
 # Scoped by process working directory so we never touch other projects.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STALE_PATTERNS=(
     "uvicorn src.main:app"
     "multiprocessing.spawn import spawn_main"

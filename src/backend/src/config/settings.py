@@ -34,9 +34,14 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # Database settings
-    DATABASE_TYPE: str = os.getenv(
-        "DATABASE_TYPE", "postgres"
-    )  # 'postgres' or 'sqlite'
+    #
+    # 'sqlite' or 'postgres'. The default is SQLite, the same as ``run.sh`` and
+    # the Databricks Apps entrypoint. It used to be "postgres" here while run.sh
+    # defaulted to SQLite, so the documented companion commands that do not go
+    # through run.sh (``alembic upgrade head``, ``python run_seeders.py``) hit
+    # postgres@localhost while the server used app.db. Every entry point must
+    # agree; opt in to PostgreSQL with DATABASE_TYPE=postgres.
+    DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "sqlite")
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
@@ -72,13 +77,13 @@ class Settings(BaseSettings):
             return v
 
         # Check database type to determine URI format
-        db_type = info.data.get("DATABASE_TYPE", "postgres")
+        db_type = info.data.get("DATABASE_TYPE", "sqlite")
 
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
             return f"sqlite+aiosqlite:///{sqlite_path}"
         else:
-            # Default to PostgreSQL - return string instead of PostgresDsn to avoid validation issues
+            # PostgreSQL - return string instead of PostgresDsn to avoid validation issues
             return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
 
     @field_validator("SYNC_DATABASE_URI", mode="before")
@@ -87,7 +92,7 @@ class Settings(BaseSettings):
             return v
 
         # Check database type to determine URI format
-        db_type = info.data.get("DATABASE_TYPE", "postgres")
+        db_type = info.data.get("DATABASE_TYPE", "sqlite")
 
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
