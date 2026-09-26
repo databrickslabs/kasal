@@ -1,9 +1,11 @@
 """Proving a Model Serving endpoint belongs to a crew before acting on it.
 
-``DELETE /crews/{crew_id}/deployment/{endpoint_name}`` deletes with the app's
-own Databricks credential, so without a check any workspace admin could delete
-ANY serving endpoint in the workspace by name — including ones Kasal never
-created or that another tenant's crew serves.
+``DELETE /crews/{crew_id}/deployment/{endpoint_name}`` and
+``GET /crews/{crew_id}/deployment/status`` act with the app's own Databricks
+credential, so without a check any workspace admin could delete, and any editor
+could read (state, creator email, timestamps), ANY serving endpoint in the
+workspace by name — including ones Kasal never created or that another tenant's
+crew serves.
 
 Kasal keeps no deployment table, so ownership is read from the endpoint itself:
 every crew deployment (``CrewDeploymentService``) registers an MLflow model whose
@@ -21,13 +23,14 @@ import asyncio
 import json
 import logging
 import tempfile
-from typing import List, Set
+from typing import Any, Set, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import NotFoundError
-from src.repositories.crew_repository import CrewRepository
+from src.services.catalog.crews import CrewService
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +45,22 @@ def _registry_uri_for(model_name: str) -> str:
     return "databricks-uc" if model_name.count(".") == 2 else "databricks"
 
 
-def _served_crew_ids(endpoint_name: str) -> Set[str]:
-    """Blocking: the crew ids whose deployed models ``endpoint_name`` serves."""
+def _read_endpoint(endpoint_name: str) -> Tuple[Any, Set[str]]:
+    """Blocking: the endpoint, and the crew ids whose deployed models it serves."""
     from databricks.sdk import WorkspaceClient
+    from databricks.sdk.useragent import with_product
+
+    from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+
+    with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
+    endpoint = WorkspaceClient().serving_endpoints.get(endpoint_name)
+    return endpoint, _served_crew_ids(endpoint, endpoint_name)
+
+
+def _served_crew_ids(endpoint: Any, endpoint_name: str) -> Set[str]:
+    """Blocking: the crew ids whose deployed models ``endpoint`` serves."""
     from mlflow.tracking import MlflowClient
 
-    endpoint = WorkspaceClient().serving_endpoints.get(endpoint_name)
     config = getattr(endpoint, "config", None)
     entities = list(getattr(config, "served_entities", None) or [])
     entities += list(getattr(config, "served_models", None) or [])
@@ -90,12 +103,15 @@ class ServingEndpointOwnershipService:
     """Checks a serving endpoint is the caller's group's deployment of a crew."""
 
     def __init__(self, session: AsyncSession):
-        self.crew_repository = CrewRepository(session)
+        # The crew is read through its owning service (audit N5), which scopes
+        # it to the caller's current workspace.
+        self.crew_service = CrewService(session)
 
     async def assert_endpoint_belongs_to_crew(
-        self, crew_id: str, endpoint_name: str, group_ids: List[str]
-    ) -> None:
-        """Raise ``NotFoundError`` unless the endpoint serves this group's crew."""
+        self, crew_id: str, endpoint_name: str, group_context: GroupContext
+    ) -> Any:
+        """Return the endpoint, or raise ``NotFoundError`` unless it serves this
+        group's crew."""
         not_found = NotFoundError(
             detail=f"No deployment {endpoint_name} found for crew {crew_id}"
         )
@@ -103,12 +119,12 @@ class ServingEndpointOwnershipService:
             crew_uuid = UUID(str(crew_id))
         except ValueError:
             raise not_found
-        crew = await self.crew_repository.get_by_group(crew_uuid, group_ids or [])
+        crew = await self.crew_service.get_by_group(crew_uuid, group_context)
         if not crew:
             raise not_found
 
         try:
-            served = await asyncio.to_thread(_served_crew_ids, endpoint_name)
+            endpoint, served = await asyncio.to_thread(_read_endpoint, endpoint_name)
         except Exception as exc:
             logger.warning("Could not read serving endpoint %s: %s", endpoint_name, exc)
             raise not_found
@@ -119,3 +135,4 @@ class ServingEndpointOwnershipService:
                 crew_id,
             )
             raise not_found
+        return endpoint

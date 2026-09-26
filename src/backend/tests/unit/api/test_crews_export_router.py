@@ -552,7 +552,7 @@ class TestDeployCrew:
 
 
 class TestGetDeploymentStatus:
-    """Tests for get_deployment_status endpoint."""
+    """Tests for get_deployment_status endpoint (a thin call into the service)."""
 
     @pytest.fixture
     def valid_group_context(self):
@@ -563,40 +563,48 @@ class TestGetDeploymentStatus:
 
     @pytest.mark.asyncio
     async def test_get_deployment_status_success(self, valid_group_context):
-        """Test successful status retrieval."""
-        crew_id = "test-crew-123"
-        endpoint_name = "test-endpoint"
-
-        mock_endpoint = MagicMock()
-        mock_endpoint.state = MagicMock()
-        mock_endpoint.state.ready = MagicMock(value="READY")
-        mock_endpoint.state.config_update = None
-        mock_endpoint.pending_config = None
-        mock_endpoint.creator = "test-user"
-        mock_endpoint.creation_timestamp = 1234567890
-        mock_endpoint.last_updated_timestamp = 1234567890
-        mock_endpoint.config = MagicMock()
-
+        """The router delegates to the service, which checks ownership."""
+        service = MagicMock()
+        service.get_endpoint_status = AsyncMock(
+            return_value={"endpoint_name": "test-endpoint", "state": "READY"}
+        )
         with patch(
             "src.api.crews_export_router.check_role_in_context", return_value=True
         ):
-            with patch("databricks.sdk.WorkspaceClient") as mock_ws:
-                mock_ws_instance = MagicMock()
-                mock_ws.return_value = mock_ws_instance
-                mock_ws_instance.serving_endpoints.get.return_value = mock_endpoint
+            result = await get_deployment_status(
+                crew_id="test-crew-123",
+                group_context=valid_group_context,
+                service=service,
+                endpoint_name="test-endpoint",
+            )
 
-                result = await get_deployment_status(
-                    crew_id=crew_id,
-                    group_context=valid_group_context,
-                    endpoint_name=endpoint_name,
-                )
-
-        assert result["endpoint_name"] == endpoint_name
         assert result["state"] == "READY"
+        service.get_endpoint_status.assert_awaited_once_with(
+            "test-crew-123", "test-endpoint", valid_group_context
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_deployment_status_not_owned_is_not_found(
+        self, valid_group_context
+    ):
+        service = MagicMock()
+        service.get_endpoint_status = AsyncMock(side_effect=NotFoundError("nope"))
+        with patch(
+            "src.api.crews_export_router.check_role_in_context", return_value=True
+        ):
+            with pytest.raises(NotFoundError):
+                await get_deployment_status(
+                    crew_id="crew-1",
+                    group_context=valid_group_context,
+                    service=service,
+                    endpoint_name="someone-elses-endpoint",
+                )
 
     @pytest.mark.asyncio
     async def test_get_deployment_status_forbidden(self, valid_group_context):
         """Test status check is forbidden for non-editors."""
+        service = MagicMock()
+        service.get_endpoint_status = AsyncMock()
         with patch(
             "src.api.crews_export_router.check_role_in_context", return_value=False
         ):
@@ -604,8 +612,10 @@ class TestGetDeploymentStatus:
                 await get_deployment_status(
                     crew_id="crew-1",
                     group_context=valid_group_context,
+                    service=service,
                     endpoint_name="ep-1",
                 )
+        service.get_endpoint_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_deployment_status_invalid_context(self):
@@ -620,41 +630,13 @@ class TestGetDeploymentStatus:
                 await get_deployment_status(
                     crew_id="crew-1",
                     group_context=invalid_context,
+                    service=MagicMock(),
                     endpoint_name="ep-1",
                 )
-
-    @pytest.mark.asyncio
-    async def test_get_deployment_status_null_state(self, valid_group_context):
-        """Test status with null state returns UNKNOWN."""
-        mock_endpoint = MagicMock()
-        mock_endpoint.state = None
-        mock_endpoint.pending_config = None
-        mock_endpoint.creator = "user"
-        mock_endpoint.creation_timestamp = 0
-        mock_endpoint.last_updated_timestamp = 0
-        mock_endpoint.config = None
-
-        with patch(
-            "src.api.crews_export_router.check_role_in_context", return_value=True
-        ):
-            with patch("databricks.sdk.WorkspaceClient") as mock_ws:
-                mock_ws_instance = MagicMock()
-                mock_ws.return_value = mock_ws_instance
-                mock_ws_instance.serving_endpoints.get.return_value = mock_endpoint
-
-                result = await get_deployment_status(
-                    crew_id="crew-1",
-                    group_context=valid_group_context,
-                    endpoint_name="ep-1",
-                )
-
-        assert result["state"] == "UNKNOWN"
-        assert result["ready_replicas"] == 0
-        assert result["target_replicas"] == 0
 
 
 class TestDeleteDeployment:
-    """Tests for delete_deployment endpoint."""
+    """Tests for delete_deployment endpoint (a thin call into the service)."""
 
     @pytest.fixture
     def valid_group_context(self):
@@ -665,62 +647,49 @@ class TestDeleteDeployment:
 
     @pytest.mark.asyncio
     async def test_delete_deployment_success(self, valid_group_context):
-        """Test successful deployment deletion."""
-        crew_id = "test-crew-123"
-        endpoint_name = "test-endpoint"
-
-        with (
-            patch(
-                "src.api.crews_export_router.check_role_in_context", return_value=True
-            ),
-            patch(
-                "src.services.deployment.endpoint_ownership."
-                "ServingEndpointOwnershipService.assert_endpoint_belongs_to_crew",
-                new_callable=AsyncMock,
-            ) as mock_check,
+        """The router delegates to the service, which checks ownership."""
+        service = MagicMock()
+        service.delete_endpoint = AsyncMock(
+            return_value={
+                "message": "Endpoint test-endpoint has been deleted successfully",
+                "endpoint_name": "test-endpoint",
+            }
+        )
+        with patch(
+            "src.api.crews_export_router.check_role_in_context", return_value=True
         ):
-            # Patch the import inside the function
-            with patch("databricks.sdk.WorkspaceClient") as mock_ws:
-                mock_ws_instance = MagicMock()
-                mock_ws.return_value = mock_ws_instance
-
-                result = await delete_deployment(
-                    crew_id=crew_id,
-                    endpoint_name=endpoint_name,
-                    group_context=valid_group_context,
-                    session=MagicMock(),
-                )
-
-                # Assert inside the context manager where mock is active
-                mock_ws_instance.serving_endpoints.delete.assert_called_once_with(
-                    endpoint_name
-                )
-            mock_check.assert_awaited_once_with(
-                crew_id, endpoint_name, valid_group_context.group_ids
+            result = await delete_deployment(
+                crew_id="test-crew-123",
+                endpoint_name="test-endpoint",
+                group_context=valid_group_context,
+                service=service,
             )
 
-        assert result["endpoint_name"] == endpoint_name
+        service.delete_endpoint.assert_awaited_once_with(
+            "test-crew-123", "test-endpoint", valid_group_context
+        )
+        assert result["endpoint_name"] == "test-endpoint"
         assert "deleted successfully" in result["message"]
 
     @pytest.mark.asyncio
     async def test_delete_deployment_admin_only(self, valid_group_context):
         """Test that only admins can delete deployments."""
-        crew_id = "test-crew-123"
-        endpoint_name = "test-endpoint"
-
+        service = MagicMock()
+        service.delete_endpoint = AsyncMock()
         with patch(
             "src.api.crews_export_router.check_role_in_context", return_value=False
         ):
             with pytest.raises(ForbiddenError) as exc_info:
                 await delete_deployment(
-                    crew_id=crew_id,
-                    endpoint_name=endpoint_name,
+                    crew_id="test-crew-123",
+                    endpoint_name="test-endpoint",
                     group_context=valid_group_context,
-                    session=MagicMock(),
+                    service=service,
                 )
 
         assert exc_info.value.status_code == 403
         assert "admins" in exc_info.value.detail
+        service.delete_endpoint.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_deployment_invalid_context(self):
@@ -736,29 +705,5 @@ class TestDeleteDeployment:
                     crew_id="crew-1",
                     endpoint_name="ep-1",
                     group_context=invalid_context,
-                    session=MagicMock(),
+                    service=MagicMock(),
                 )
-
-    @pytest.mark.asyncio
-    async def test_delete_refuses_endpoint_not_owned_by_crew(self, valid_group_context):
-        """An endpoint that is not this group's crew deployment is never deleted."""
-        with (
-            patch(
-                "src.api.crews_export_router.check_role_in_context", return_value=True
-            ),
-            patch(
-                "src.services.deployment.endpoint_ownership."
-                "ServingEndpointOwnershipService.assert_endpoint_belongs_to_crew",
-                new_callable=AsyncMock,
-                side_effect=NotFoundError("No deployment"),
-            ),
-            patch("databricks.sdk.WorkspaceClient") as mock_ws,
-        ):
-            with pytest.raises(NotFoundError):
-                await delete_deployment(
-                    crew_id="crew-1",
-                    endpoint_name="someone-elses-endpoint",
-                    group_context=valid_group_context,
-                    session=MagicMock(),
-                )
-            mock_ws.return_value.serving_endpoints.delete.assert_not_called()

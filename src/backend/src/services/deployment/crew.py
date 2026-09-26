@@ -24,6 +24,13 @@ from src.schemas.crew_export import (
     DeploymentStatus,
     ModelServingConfig,
 )
+from src.services.deployment.endpoint_ownership import (
+    ServingEndpointOwnershipService,
+)
+from src.services.deployment.endpoints import (
+    delete_endpoint_blocking,
+    endpoint_status,
+)
 from src.utils.user_context import GroupContext
 
 if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
@@ -47,6 +54,7 @@ class CrewDeploymentService:
         self.agent_repository = AgentRepository(session)
         self.task_repository = TaskRepository(session)
         self.tool_repository = ToolRepository(session)
+        self.endpoint_ownership = ServingEndpointOwnershipService(session)
 
     async def deploy_to_model_serving(
         self,
@@ -425,6 +433,29 @@ class CrewDeploymentService:
             "tools": tool_names,
             "async_execution": task.async_execution,
             "context": task.context or [],
+        }
+
+    async def get_endpoint_status(
+        self, crew_id: str, endpoint_name: str, group_context: GroupContext
+    ) -> Dict[str, Any]:
+        """Status of this group's deployment of the crew (else ``NotFoundError``)."""
+        endpoint = await self.endpoint_ownership.assert_endpoint_belongs_to_crew(
+            crew_id, endpoint_name, group_context
+        )
+        return endpoint_status(endpoint_name, endpoint)
+
+    async def delete_endpoint(
+        self, crew_id: str, endpoint_name: str, group_context: GroupContext
+    ) -> Dict[str, str]:
+        """Delete this group's deployment of the crew (else ``NotFoundError``)."""
+        await self.endpoint_ownership.assert_endpoint_belongs_to_crew(
+            crew_id, endpoint_name, group_context
+        )
+        await asyncio.to_thread(delete_endpoint_blocking, endpoint_name)
+        logger.info(f"Deleted endpoint {endpoint_name} for crew {crew_id}")
+        return {
+            "message": f"Endpoint {endpoint_name} has been deleted successfully",
+            "endpoint_name": endpoint_name,
         }
 
     def _generate_usage_example(self, endpoint_url: str, endpoint_name: str) -> str:

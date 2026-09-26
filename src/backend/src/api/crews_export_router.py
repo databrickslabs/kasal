@@ -2,7 +2,6 @@
 API router for crew export and deployment operations.
 """
 
-import asyncio
 import io
 import logging
 import zipfile
@@ -411,11 +410,13 @@ async def deploy_crew(
 async def get_deployment_status(
     crew_id: str,
     group_context: GroupContextDep,
+    service: DeploymentServiceDep,
     endpoint_name: str = Query(..., description="Model serving endpoint name"),
 ) -> Dict[str, Any]:
     """
     Get status of a deployed endpoint.
-    Only Editors and Admins can check deployment status.
+    Only Editors and Admins can check deployment status, and only of an endpoint
+    that serves this crew, which must belong to the caller's group.
 
     **Returns:**
     - Endpoint state (READY, NOT_READY, etc.)
@@ -432,6 +433,7 @@ async def get_deployment_status(
     Args:
         crew_id: ID of the crew
         group_context: Group context from headers
+        service: Deployment service injected by dependency
         endpoint_name: Name of the serving endpoint
 
     Returns:
@@ -445,40 +447,9 @@ async def get_deployment_status(
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
 
-    from databricks.sdk import WorkspaceClient
-    from databricks.sdk.useragent import with_product
-
-    from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
-
-    with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
-    # The SDK is synchronous (client auth resolution included): keep it off the loop.
-    endpoint = await asyncio.to_thread(
-        lambda: WorkspaceClient().serving_endpoints.get(endpoint_name)
-    )
-
-    return {
-        "endpoint_name": endpoint_name,
-        "state": (
-            endpoint.state.ready.value
-            if endpoint.state and endpoint.state.ready
-            else "UNKNOWN"
-        ),
-        "config_update": (
-            endpoint.state.config_update.value
-            if endpoint.state and endpoint.state.config_update
-            else None
-        ),
-        "pending_config": endpoint.pending_config is not None,
-        "ready_replicas": (
-            getattr(endpoint.state, "ready_replicas", 0) if endpoint.state else 0
-        ),
-        "target_replicas": (
-            getattr(endpoint.config, "target_replicas", 0) if endpoint.config else 0
-        ),
-        "creator": endpoint.creator,
-        "creation_timestamp": endpoint.creation_timestamp,
-        "last_updated_timestamp": endpoint.last_updated_timestamp,
-    }
+    # Read with the app's credential: only this group's deployment of this
+    # crew is shown (raises NotFoundError otherwise).
+    return await service.get_endpoint_status(crew_id, endpoint_name, group_context)
 
 
 @router.delete("/{crew_id}/deployment/{endpoint_name}")
@@ -486,7 +457,7 @@ async def delete_deployment(
     crew_id: str,
     endpoint_name: str,
     group_context: GroupContextDep,
-    session: SessionDep,
+    service: DeploymentServiceDep,
 ) -> Dict[str, str]:
     """
     Delete a Model Serving endpoint.
@@ -499,6 +470,7 @@ async def delete_deployment(
         crew_id: ID of the crew
         endpoint_name: Name of the serving endpoint to delete
         group_context: Group context from headers
+        service: Deployment service injected by dependency
 
     Returns:
         Confirmation message
@@ -513,28 +485,4 @@ async def delete_deployment(
 
     # The delete runs with the app's credential: refuse any endpoint that is
     # not this group's deployment of this crew (raises NotFoundError).
-    from src.services.deployment.endpoint_ownership import (
-        ServingEndpointOwnershipService,
-    )
-
-    await ServingEndpointOwnershipService(session).assert_endpoint_belongs_to_crew(
-        crew_id, endpoint_name, group_context.group_ids
-    )
-
-    from databricks.sdk import WorkspaceClient
-    from databricks.sdk.useragent import with_product
-
-    from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
-
-    with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
-    # The SDK is synchronous (client auth resolution included): keep it off the loop.
-    await asyncio.to_thread(
-        lambda: WorkspaceClient().serving_endpoints.delete(endpoint_name)
-    )
-
-    logger.info(f"Deleted endpoint {endpoint_name} for crew {crew_id}")
-
-    return {
-        "message": f"Endpoint {endpoint_name} has been deleted successfully",
-        "endpoint_name": endpoint_name,
-    }
+    return await service.delete_endpoint(crew_id, endpoint_name, group_context)

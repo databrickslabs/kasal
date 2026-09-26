@@ -72,11 +72,15 @@ async def _auth_headers(host_override: Optional[str] = None) -> tuple[str, dict]
     auth = await get_auth_context(user_token=user_token)
     if auth is None:
         raise UCQueryError("authentication failed (no AuthContext)")
-    if host_override:
-        url = host_override.strip().rstrip("/")
-        if not url.startswith("https://"):
-            url = f"https://{url}"
-        auth.workspace_url = url
+    # The override (tool input, or a warehouse endpoint URL) may only name the
+    # credential's own workspace (audit N1/F3a).
+    from src.core.exceptions import ForbiddenError
+    from src.services.tools.databricks_tool_utils import apply_host_override
+
+    try:
+        apply_host_override(auth, host_override)
+    except ForbiddenError as e:
+        raise UCQueryError(f"untrusted host: {e.detail}") from e
     workspace_url = (auth.workspace_url or "").rstrip("/")
     if not workspace_url:
         raise UCQueryError("workspace_url not configured")

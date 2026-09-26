@@ -720,15 +720,7 @@ class ToolFactory:
                             api_key.encrypted_value
                         )
 
-                        # Log first and last 4 characters of the key for debugging
-                        key_preview = (
-                            f"{decrypted_value[:4]}...{decrypted_value[-4:]}"
-                            if len(decrypted_value) > 8
-                            else "***"
-                        )
-                        logger.info(
-                            f"Using {key_name} from service directly: {key_preview}"
-                        )
+                        logger.info(f"Using {key_name} from service directly")
                         return decrypted_value
                     else:
                         logger.warning(f"{key_name} not found via service")
@@ -785,15 +777,7 @@ class ToolFactory:
             decrypted_value = await execute_db_operation_smart(_get_key_on_own_session)
 
             if decrypted_value:
-                # Log first and last 4 characters of the key for debugging
-                key_preview = (
-                    f"{decrypted_value[:4]}...{decrypted_value[-4:]}"
-                    if len(decrypted_value) > 8
-                    else "***"
-                )
-                logger.info(
-                    f"Using {key_name} from isolated database operation: {key_preview}"
-                )
+                logger.info(f"Using {key_name} from isolated database operation")
                 return decrypted_value
             else:
                 logger.warning(f"{key_name} not found via isolated database operation")
@@ -1476,9 +1460,7 @@ class ToolFactory:
 
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(
-                                f"Extracted user token from context for DatabricksJobsTool: {user_token[:10]}..."
-                            )
+                            logger.info("Extracted user token for DatabricksJobsTool")
                         else:
                             logger.warning(
                                 "No user token found in context for DatabricksJobsTool"
@@ -1706,9 +1688,7 @@ class ToolFactory:
 
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(
-                                f"Extracted user token from context for GenieTool OBO authentication: {user_token[:10]}..."
-                            )
+                            logger.info("Extracted user token for GenieTool OBO")
                         else:
                             logger.warning(
                                 "No user token found in context for GenieTool"
@@ -1717,9 +1697,7 @@ class ToolFactory:
                             group_context = UserContext.get_group_context()
                             if group_context and group_context.access_token:
                                 user_token = group_context.access_token
-                                logger.info(
-                                    f"Found user token in group context: {user_token[:10]}..."
-                                )
+                                logger.info("Found user token in group context")
                             else:
                                 logger.warning("No user token in group context either")
                     except Exception as e:
@@ -1894,7 +1872,7 @@ class ToolFactory:
                 # Create the GenieTool instance
                 try:
                     logger.info(
-                        f"Creating GenieTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}"
+                        f"Creating GenieTool with config, OBO: {bool(user_token)}, group_id: {group_id}"
                     )
                     logger.info(
                         f"GenieTool config being passed: {mask_sensitive_fields(genie_tool_config)}"
@@ -2006,9 +1984,7 @@ class ToolFactory:
 
                         user_token = UserContext.get_user_token()
                         if user_token:
-                            logger.info(
-                                f"Extracted user token from context for AgentBricksTool OBO authentication: {user_token[:10]}..."
-                            )
+                            logger.info("Extracted user token for AgentBricksTool OBO")
                         else:
                             logger.warning(
                                 "No user token found in context for AgentBricksTool"
@@ -2017,9 +1993,7 @@ class ToolFactory:
                             group_context = UserContext.get_group_context()
                             if group_context and group_context.access_token:
                                 user_token = group_context.access_token
-                                logger.info(
-                                    f"Found user token in group context: {user_token[:10]}..."
-                                )
+                                logger.info("Found user token in group context")
                             else:
                                 logger.warning("No user token in group context either")
                     except Exception as e:
@@ -2072,7 +2046,7 @@ class ToolFactory:
                 # Create the AgentBricksTool instance
                 try:
                     logger.info(
-                        f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, token preview: {user_token[:10] + '...' if user_token else 'None'}, group_id: {group_id}"
+                        f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, group_id: {group_id}"
                     )
                     logger.info(
                         f"AgentBricksTool config being passed: {mask_sensitive_fields(agentbricks_tool_config)}"

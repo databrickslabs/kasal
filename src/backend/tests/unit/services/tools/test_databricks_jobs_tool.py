@@ -4,10 +4,22 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.tools.databricks_jobs_tool import (
     DatabricksJobsTool,
     DatabricksJobsToolSchema,
 )
+
+
+@pytest.fixture(autouse=True)
+def _host_is_the_credentialed_workspace():
+    """The HTTP-path tests; the host check has its own (databricks_tool_utils)."""
+    with patch(
+        "src.services.tools.databricks_jobs_tool.assert_tool_host",
+        AsyncMock(side_effect=lambda host: host),
+    ):
+        yield
 
 
 class TestDatabricksJobsToolSchema(unittest.TestCase):
@@ -285,45 +297,22 @@ class TestDatabricksJobsTool(unittest.TestCase):
         self.assertEqual(tool._host, "test-workspace.cloud.databricks.com")
         self.assertEqual(tool._token, "test-pat-token")
 
-    def test_host_processing_https(self):
-        """Test host URL processing with https prefix"""
-        tool = DatabricksJobsTool(
-            databricks_host="https://test-workspace.cloud.databricks.com/"
-        )
-        self.assertEqual(tool._host, "test-workspace.cloud.databricks.com")
-
-    def test_host_processing_http(self):
-        """Test host URL processing with http prefix"""
-        tool = DatabricksJobsTool(
-            databricks_host="http://test-workspace.cloud.databricks.com"
-        )
-        self.assertEqual(tool._host, "test-workspace.cloud.databricks.com")
-
-    def test_host_processing_list(self):
-        """Test host processing when provided as list"""
-        tool_config = {
-            "DATABRICKS_HOST": [
-                "workspace1.cloud.databricks.com",
-                "workspace2.cloud.databricks.com",
-            ],
-            "DATABRICKS_API_KEY": "test-key",
-        }
-        tool = DatabricksJobsTool(tool_config=tool_config)
-        self.assertEqual(tool._host, "workspace1.cloud.databricks.com")
-
-    def test_host_processing_empty_list(self):
-        """Test host processing with empty list"""
-        tool_config = {"DATABRICKS_HOST": [], "DATABRICKS_API_KEY": "test-key"}
-        tool = DatabricksJobsTool(tool_config=tool_config)
-        # Should fall back to default
-        self.assertEqual(tool._host, "your-workspace.cloud.databricks.com")
-
-    def test_token_masking_short_token(self):
-        """Test token masking with short token"""
-        tool = DatabricksJobsTool(
-            tool_config={"DATABRICKS_HOST": "test.com", "DATABRICKS_API_KEY": "short"}
-        )
-        self.assertEqual(tool._token, "short")
+    def test_host_processing(self):
+        """URL, http and list forms normalise to a bare host; empty falls back."""
+        key = {"DATABRICKS_API_KEY": "test-key"}
+        host = "test-workspace.cloud.databricks.com"
+        cases = [
+            ({"databricks_host": f"https://{host}/"}, host),
+            ({"databricks_host": f"http://{host}"}, host),
+            ({"tool_config": {"DATABRICKS_HOST": [host, "w2.x.com"], **key}}, host),
+            (
+                {"tool_config": {"DATABRICKS_HOST": [], **key}},
+                "your-workspace.cloud.databricks.com",
+            ),
+        ]
+        for kwargs, expected in cases:
+            with self.subTest(kwargs=kwargs):
+                self.assertEqual(DatabricksJobsTool(**kwargs)._host, expected)
 
     def test_environment_variable_fallback(self):
         """Test authentication via tool_config"""

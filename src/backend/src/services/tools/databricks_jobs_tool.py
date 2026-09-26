@@ -12,7 +12,9 @@ from urllib.parse import urlencode
 import aiohttp
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
+from src.services.databricks.workspace.host_guard import normalize_workspace_host
 from src.services.tools.base import BaseTool
+from src.services.tools.databricks_tool_utils import assert_tool_host
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
@@ -233,6 +235,7 @@ class DatabricksJobsTool(BaseTool):
 
     _host: str = PrivateAttr(default=None)
     _token: str = PrivateAttr(default=None)
+    _host_checked: bool = PrivateAttr(default=False)
     _action_limits: Dict[str, Optional[int]] = PrivateAttr(default=None)
     _action_usage_counts: Dict[str, int] = PrivateAttr(default_factory=dict)
     _group_id: Optional[str] = PrivateAttr(
@@ -319,32 +322,11 @@ class DatabricksJobsTool(BaseTool):
             databricks_host = initial_databricks_host
             logger.info(f"Using databricks_host from parameter: {databricks_host}")
 
-        # Process host if found in any format
+        # Process host if found in any format (a list, a URL or a bare host)
+        if isinstance(databricks_host, list):
+            databricks_host = databricks_host[0] if databricks_host else None
         if databricks_host:
-            # Handle if databricks_host is a list
-            if isinstance(databricks_host, list) and databricks_host:
-                databricks_host = databricks_host[0]
-                logger.info(
-                    f"Converting databricks_host from list to string: {databricks_host}"
-                )
-            # Strip https:// and trailing slash if present
-            if isinstance(databricks_host, str):
-                original_host = databricks_host
-                if databricks_host.startswith("https://"):
-                    databricks_host = databricks_host[8:]
-                    logger.info(
-                        f"Stripped https:// prefix from host: {original_host} -> {databricks_host}"
-                    )
-                if databricks_host.startswith("http://"):
-                    databricks_host = databricks_host[7:]
-                    logger.info(
-                        f"Stripped http:// prefix from host: {original_host} -> {databricks_host}"
-                    )
-                if databricks_host.endswith("/"):
-                    databricks_host = databricks_host[:-1]
-                    logger.info("Stripped trailing slash from host")
-
-            self._host = databricks_host
+            self._host = normalize_workspace_host(databricks_host)
             logger.info(f"Final host after processing: {self._host}")
 
         # Try to get authentication if token not already set
@@ -473,15 +455,7 @@ class DatabricksJobsTool(BaseTool):
         logger.info("Single Execution Control: Enabled (per-action limits)")
         logger.info(f"Action Limits: {self._action_limits}")
 
-        # Log token (masked)
-        if self._token:
-            masked_token = (
-                f"{self._token[:4]}...{self._token[-4:]}"
-                if len(self._token) > 8
-                else "***"
-            )
-            logger.info(f"PAT Token (masked): {masked_token}")
-        else:
+        if not self._token:
             logger.warning(
                 "No token provided - will attempt to use enhanced authentication"
             )
@@ -589,13 +563,7 @@ class DatabricksJobsTool(BaseTool):
                 "🚨 AUTHENTICATION FAILURE: No authentication token available"
             )
 
-        # Log the authentication method being used (with masked token)
-        masked_token = (
-            f"{auth_token[:4]}...{auth_token[-4:]}" if len(auth_token) > 8 else "***"
-        )
-        logger.info(
-            f"✅ Using authentication method: {auth_method} (token: {masked_token})"
-        )
+        logger.info(f"✅ Using authentication method: {auth_method}")
 
         return {
             "Authorization": f"Bearer {auth_token}",
@@ -649,22 +617,16 @@ class DatabricksJobsTool(BaseTool):
                 separator = "&" if "?" in url else "?"
                 url = f"{url}{separator}{query_string}"
 
-        # Get authentication headers
+        # The token is the group's PAT or the auth context's credential: only the
+        # workspace it belongs to may receive it, never a configured host (M4).
+        if not self._host_checked:
+            self._host = await assert_tool_host(self._host)
+            self._host_checked = True
         headers = await self._get_auth_headers()
 
         logger.info(f"🌐 Making {method} request to: {url}")
         if json_body:
             logger.debug(f"📤 Request payload: {json.dumps(json_body, indent=2)}")
-
-        # Log authentication method being used
-        auth_header = headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token_preview = (
-                auth_header[7:11] + "..." + auth_header[-4:]
-                if len(auth_header) > 15
-                else "***"
-            )
-            logger.debug(f"🔐 Using auth token: {token_preview}")
 
         async with aiohttp.ClientSession() as session:
             try:

@@ -1,6 +1,5 @@
 """Genie Space Generator Tool for CrewAI — deploy Genie Spaces from UC Metric Views."""
 
-import asyncio
 import json
 import logging
 import urllib.parse
@@ -119,41 +118,15 @@ class GenieSpaceGeneratorTool(BaseTool):
         self._default_config = default_config
 
     def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain an AuthContext synchronously. Override in tests for easy mocking.
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        Runs the async get_auth_context() in a dedicated thread so this method is
-        safe to call from within a running asyncio event loop (which CrewAI always
-        provides). Using asyncio.new_event_loop().run_until_complete() in the *same*
-        thread raises "Cannot run the event loop while another loop is running".
-
-        Args:
-            host_override: If provided, patches the returned AuthContext's workspace_url
-                           so the tool targets a specific workspace rather than the one
-                           resolved from Kasal Settings / env vars.
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
         """
-        import concurrent.futures
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        from src.utils.databricks_auth import get_auth_context
-
-        def _run_in_thread():
-            """Run the coroutine in a fresh thread that owns its own event loop."""
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        return resolve_tool_auth(host_override)
 
     def _run(self, **kwargs: Any) -> str:  # noqa: C901
         def _get(key):

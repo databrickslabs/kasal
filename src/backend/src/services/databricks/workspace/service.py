@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
-from src.core.exceptions import KasalError
+from src.core.exceptions import ForbiddenError, KasalError
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import (
     DatabricksConfigCreate,
@@ -13,7 +13,7 @@ from src.schemas.databricks_config import (
 )
 from src.services.databricks.workspace.host_guard import (
     assert_host_is_configured_workspace,
-    normalize_workspace_host,
+    validate_stored_workspace_url,
 )
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 
@@ -113,10 +113,14 @@ class DatabricksService:
         Returns:
             Configuration response with success message
         """
+        # The listing calls send the caller's credential to this URL: only the
+        # workspace the credentials belong to may be stored (audit N1). Raised
+        # before the try below so the 403 is not rewrapped as a 500.
+        workspace_url = await validate_stored_workspace_url(config_in.workspace_url)
         try:
             # Create configuration data dictionary
             config_data = {
-                "workspace_url": config_in.workspace_url,
+                "workspace_url": workspace_url,
                 "warehouse_id": config_in.warehouse_id,
                 "catalog": config_in.catalog,
                 "schema": config_in.db_schema,
@@ -577,8 +581,17 @@ class DatabricksService:
         """
         return await self._resolve_workspace_url_and_headers(host)
 
-    async def _resolve_workspace_url_and_headers(self, host: str | None = None):
-        """Helper: returns (auth_headers, workspace_url) applying optional host override."""
+    async def _resolve_workspace_url_and_headers(
+        self, host: str | None = None
+    ) -> Tuple[Dict[str, str], str]:
+        """Helper: returns (auth_headers, workspace_url) applying optional host override.
+
+        The headers carry the OBO token, the group's PAT or the app's SPN token,
+        each valid only on the auth context's workspace. So whatever host the
+        request would go to — the caller's ``host``, the team's stored
+        ``workspace_url`` or the installation host — must be that workspace, or
+        nothing is sent (audit C2 / N1).
+        """
         from src.utils.databricks_auth import get_auth_context
 
         # Pass the user token so OBO is attempted first (get_auth_context skips OBO
@@ -589,29 +602,24 @@ class DatabricksService:
         if not auth:
             raise KasalError(detail="No authentication credentials available")
 
-        headers = auth.get_headers()
-
-        config = await self.repository.get_active_config(group_id=self.group_id)
-        workspace_url = config.workspace_url if config and config.workspace_url else ""
-        if not workspace_url:
-            workspace_url = os.getenv("DATABRICKS_HOST", "")
-        if host:
-            # The credential above is attached to this request: never send it to
-            # a caller-chosen host. Only the configured workspace is accepted.
-            assert_host_is_configured_workspace(
-                host, (workspace_url, auth.workspace_url)
-            )
-            workspace_url = f"https://{normalize_workspace_host(host)}"
-
-        if not workspace_url:
+        target = host or await self._stored_workspace_url() or auth.workspace_url
+        if not target:
             raise KasalError(
                 detail="workspace_url not configured and DATABRICKS_HOST not set"
             )
-        if not workspace_url.startswith("https://"):
-            workspace_url = f"https://{workspace_url}"
-        workspace_url = workspace_url.rstrip("/")
+        subject = "Workspace host override" if host else "Configured workspace URL"
+        target_host = assert_host_is_configured_workspace(
+            target, (auth.workspace_url,), subject=subject
+        )
+        return auth.get_headers(), f"https://{target_host}"
 
-        return headers, workspace_url
+    async def _stored_workspace_url(self) -> str:
+        """The team's workspace URL; the installation's inside Databricks Apps."""
+        installation = DatabricksAppInstallation.from_env()
+        if installation.hosted:
+            return str(installation.host)
+        config = await self.repository.get_active_config(group_id=self.group_id)
+        return str(config.workspace_url or "") if config else ""
 
     async def list_warehouses(self, host: str | None = None) -> list:
         """List SQL warehouses accessible in the workspace."""
@@ -756,9 +764,9 @@ class DatabricksService:
         # All required fields are present, now test actual connection
         try:
             # Prepare the workspace URL - fall back to environment variable if not in config
-            import os
-
-            workspace_url = config.workspace_url or os.getenv("DATABRICKS_HOST", "")
+            workspace_url = str(config.workspace_url or "") or os.getenv(
+                "DATABRICKS_HOST", ""
+            )
 
             if not workspace_url:
                 return {
@@ -813,6 +821,17 @@ class DatabricksService:
                     "message": "No authentication credentials available (PAT or OAuth)",
                     "connected": False,
                 }
+
+            # The credential is only valid on (and only ever sent to) the auth
+            # context's workspace (audit N1).
+            try:
+                assert_host_is_configured_workspace(
+                    workspace_url,
+                    (auth.workspace_url,),
+                    subject="Configured workspace URL",
+                )
+            except ForbiddenError as e:
+                return {"status": "error", "message": e.detail, "connected": False}
 
             # Make the actual API call to test connection
             async with httpx.AsyncClient(timeout=10.0) as client:

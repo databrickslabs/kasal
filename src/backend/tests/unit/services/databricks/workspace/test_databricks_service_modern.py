@@ -151,6 +151,15 @@ class TestInit:
 class TestSetDatabricksConfig:
     """Tests for set_databricks_config method."""
 
+    @pytest.fixture(autouse=True)
+    def _credentialed_host(self):
+        # The stored URL is validated against the credentialed workspace (N1).
+        with patch(
+            "src.services.databricks.workspace.host_guard.credentialed_workspace_host",
+            AsyncMock(return_value="https://example.com"),
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_set_config_success_enabled(self):
         """Lines 54-109: Successful config creation with enabled=True."""
@@ -731,6 +740,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test"
                 }
@@ -764,6 +774,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test"
                 }
@@ -815,6 +826,7 @@ class TestCheckDatabricksConnection:
             "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
         ) as mock_auth:
             mock_auth_ctx = MagicMock()
+            mock_auth_ctx.workspace_url = "https://example.com"
             mock_auth_ctx.get_headers.return_value = {}
             mock_auth.return_value = mock_auth_ctx
 
@@ -846,6 +858,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -879,6 +892,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -912,6 +926,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -946,6 +961,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -977,6 +993,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -1008,6 +1025,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -1039,6 +1057,7 @@ class TestCheckDatabricksConnection:
                 "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
             ) as mock_auth:
                 mock_auth_ctx = MagicMock()
+                mock_auth_ctx.workspace_url = "https://example.com"
                 mock_auth_ctx.get_headers.return_value = {
                     "Authorization": "Bearer test-token"
                 }
@@ -1082,6 +1101,7 @@ class TestCheckDatabricksConnection:
                     "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
                 ) as mock_auth:
                     mock_auth_ctx = MagicMock()
+                    mock_auth_ctx.workspace_url = "https://env-host.example.com"
                     mock_auth_ctx.get_headers.return_value = {
                         "Authorization": "Bearer test"
                     }
@@ -1243,6 +1263,7 @@ class TestObOTokenThreading:
         async def fake_gac(user_token=None, **kw):
             captured["user_token"] = user_token
             m = MagicMock()
+            m.workspace_url = "https://x.cloud.databricks.com"
             m.get_headers = MagicMock(return_value={"Authorization": "Bearer x"})
             return m
 
@@ -1262,6 +1283,7 @@ class TestObOTokenThreading:
         async def fake_gac(user_token=None, **kw):
             captured["user_token"] = user_token
             m = MagicMock()
+            m.workspace_url = "https://x.cloud.databricks.com"
             m.get_headers = MagicMock(return_value={"Authorization": "Bearer x"})
             return m
 
