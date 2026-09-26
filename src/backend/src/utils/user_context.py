@@ -32,7 +32,7 @@ import logging
 import os
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from fastapi import Request
@@ -124,14 +124,18 @@ class GroupContext:
     group_email: Optional[str] = None  # e.g., "alice@acme-corp.com"
     email_domain: Optional[str] = None  # e.g., "acme-corp.com"
     user_id: Optional[str] = None  # User ID if available
-    access_token: Optional[str] = None  # Databricks access token
+    # The user's Databricks bearer token. Excluded from repr so that logging a
+    # GroupContext (f"{group_context}") can never write the token to a log sink.
+    access_token: Optional[str] = field(default=None, repr=False)
     user_role: Optional[str] = (
         None  # User's role in primary group (admin/editor/operator)
     )
     highest_role: Optional[str] = (
         None  # User's highest role across ALL groups (for authorization)
     )
-    current_user: Optional[Any] = None  # User model instance with permission fields
+    # User model instance with permission fields; kept out of repr for the same
+    # reason (it is an ORM row, and its repr is not ours to control).
+    current_user: Optional[Any] = field(default=None, repr=False)
 
     @property
     def primary_group_id(self) -> Optional[str]:

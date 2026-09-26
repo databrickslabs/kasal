@@ -84,7 +84,7 @@ class KasalFlowService:
         logger.info(f"  flow_id: {flow_id}")
         logger.info(f"  job_id: {job_id}")
         logger.info(f"  run_name: {run_name}")
-        logger.info(f"  group_context: {group_context}")
+        logger.info(f"  group_id: {getattr(group_context, 'primary_group_id', None)}")
         logger.info(f"  user_token: {'<present>' if user_token else '<not provided>'}")
         logger.info(f"  resume_from_flow_uuid: {resume_from_flow_uuid}")
         logger.info(f"  resume_from_execution_id: {resume_from_execution_id}")
