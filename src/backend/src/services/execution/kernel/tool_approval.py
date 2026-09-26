@@ -210,6 +210,10 @@ def make_tool_approval_hook(
                 f"'{tool_name}' requires approval but the approval request "
                 f"could not be created ({create_err})."
             ) from create_err
+        if approval_id is None:  # fail closed: no row, so nobody could approve it
+            raise ToolExecutionBlockedError(
+                f"'{tool_name}' requires approval but no approval request was created."
+            )
 
         logger.info(
             f"[tool_approval] execution {execution_id}: '{tool_name}' waiting "
