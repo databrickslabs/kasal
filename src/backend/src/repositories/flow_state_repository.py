@@ -1,10 +1,12 @@
-from typing import List, Optional
+from typing import Any, List, Optional, Tuple, TypeVar
 
-from sqlalchemy import desc, select
+from sqlalchemy import Select, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.models.flow_state import FlowState
+
+_RowT = TypeVar("_RowT", bound=Tuple[Any, ...])
 
 
 class FlowStateRepository(BaseRepository[FlowState]):
@@ -23,7 +25,7 @@ class FlowStateRepository(BaseRepository[FlowState]):
     def __init__(self, session: AsyncSession):
         super().__init__(FlowState, session)
 
-    def _scope(self, query, group_id: Optional[str]):
+    def _scope(self, query: Select[_RowT], group_id: Optional[str]) -> Select[_RowT]:
         """Narrow a query to exactly one tenant. Never widen it.
 
         A flow's checkpoints hold everything the run saw — crew outputs, the

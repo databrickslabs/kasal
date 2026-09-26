@@ -6,9 +6,10 @@ tool bindings, so leaking one across workspaces would leak how another tenant
 builds their crews.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.workflow_recipe import WorkflowRecipe
@@ -29,7 +30,7 @@ class WorkflowRecipeRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def reload(self, recipe) -> None:
+    async def reload(self, recipe: WorkflowRecipe) -> None:
         """Re-read a row after commit so server-side defaults are populated."""
         await self.session.refresh(recipe)
 
@@ -115,7 +116,7 @@ class WorkflowRecipeRepository:
             return await self._find_similar_sqlite(query_embedding, group_ids, limit)
         return await self._find_similar_postgres(query_embedding, group_ids, limit)
 
-    def _base_query(self, group_ids: List[str]):
+    def _base_query(self, group_ids: List[str]) -> Select[Tuple[WorkflowRecipe]]:
         """Retrievable recipes for these workspaces.
 
         Suppressed curations are filtered HERE rather than at each caller, so no
@@ -167,7 +168,7 @@ class WorkflowRecipeRepository:
             stmt = stmt.where(WorkflowRecipe.group_id.in_(group_ids))
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def _find_similar_sqlite(
         self, query_embedding: List[float], group_ids: List[str], limit: int

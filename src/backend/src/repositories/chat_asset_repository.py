@@ -1,8 +1,9 @@
 """Data access for chat assets (uploaded images)."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
@@ -57,4 +58,4 @@ class ChatAssetRepository:
                 return False
             stmt = stmt.where(ChatAsset.group_id.in_(group_ids))
         result = await self.session.execute(stmt)
-        return bool(result.rowcount)
+        return bool(cast("CursorResult[Any]", result).rowcount)

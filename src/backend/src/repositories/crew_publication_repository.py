@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -108,7 +109,7 @@ class PublicationRepository(BaseRepository[Publication]):
             self.model.group_id.in_(group_ids),
         )
         result = await self.session.execute(query)
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def delete_publications(
         self,
@@ -140,7 +141,7 @@ class PublicationRepository(BaseRepository[Publication]):
             conditions.append(self.model.group_id.in_(group_ids))
 
         result = await self.session.execute(delete(self.model).where(*conditions))
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
 
 #: Named CrewPublicationRepository while only crews were publishable.

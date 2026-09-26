@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union, cast
 
 from sqlalchemy import desc, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -43,7 +44,10 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         model: Type[DocumentationEmbedding] = DocumentationEmbedding,
     ):
         """Initialize repository with database session and target model."""
-        super().__init__(model, db)
+        # Dual-mode: the async-only methods below go through ``self.session``;
+        # a sync ``Session`` (guardrail callers) only reaches the
+        # ``isinstance(self.db, AsyncSession)``-guarded ones, via ``self.db``.
+        super().__init__(model, cast(AsyncSession, db))
         self.db = db
         self._model = model
 
@@ -69,7 +73,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             **self._owner_kwargs(doc_embedding),
         )
         self.db.add(db_embedding)
-        await self.db.flush()  # Flush to get the ID but don't commit
+        await self.session.flush()  # Flush to get the ID but don't commit
         return db_embedding
 
     async def bulk_create(
@@ -125,7 +129,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             result = await self.db.execute(
                 select(self._model).offset(skip).limit(limit)
             )
-            return result.scalars().all()
+            return list(result.scalars().all())
         else:
             return self.db.query(self._model).offset(skip).limit(limit).all()
 
@@ -137,14 +141,14 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         if db_embedding:
             for key, value in update_data.items():
                 setattr(db_embedding, key, value)
-            await self.db.flush()
+            await self.session.flush()
         return db_embedding
 
     async def delete(self, embedding_id: int) -> bool:
         """Delete a documentation embedding by ID."""
         db_embedding = await self.get_by_id(embedding_id)
         if db_embedding:
-            await self.db.delete(db_embedding)
+            await self.session.delete(db_embedding)
             # Don't commit here — the caller owns the transaction
             return True
         return False
@@ -182,7 +186,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             )
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(sa_delete(self._model).where(*conditions))
-            return result.rowcount or 0
+            return cast("CursorResult[Any]", result).rowcount or 0
         else:
             deleted = (
                 self.db.query(self._model)
@@ -217,7 +221,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                     self._model.created_by == created_by,
                 )
             )
-        result = await self.db.execute(
+        result = await self.session.execute(
             select(self._model.doc_metadata).where(*conditions).limit(1)
         )
         metadata = result.scalars().first()
@@ -253,7 +257,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                     self._model.created_by == created_by,
                 )
             )
-        result = await self.db.execute(sa_delete(self._model).where(*conditions))
+        result = await self.session.execute(sa_delete(self._model).where(*conditions))
         return int(getattr(result, "rowcount", 0) or 0)
 
     async def delete_expired(self, group_id: str, cutoff: datetime) -> int:
@@ -268,7 +272,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         """
         from sqlalchemy import delete as sa_delete
 
-        result = await self.db.execute(
+        result = await self.session.execute(
             sa_delete(self._model).where(
                 self._model.group_id == group_id,
                 self._model.created_at < cutoff,
@@ -290,7 +294,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         """
         from sqlalchemy import delete as sa_delete
 
-        result = await self.db.execute(
+        result = await self.session.execute(
             sa_delete(self._model).where(self._model.created_at < cutoff)
         )
         return int(getattr(result, "rowcount", 0) or 0)
@@ -308,7 +312,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
 
         if not rows:
             return
-        await self.db.execute(sa_insert(self._model).values(rows))
+        await self.session.execute(sa_insert(self._model).values(rows))
 
     async def insert_raw(self, row: Dict[str, Any]) -> DocumentationEmbedding:
         """Insert one plain-dict embedding row and return the new instance.
@@ -377,7 +381,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                 .offset(skip)
                 .limit(limit)
             )
-            return result.scalars().all()
+            return list(result.scalars().all())
         else:
             return (
                 self.db.query(self._model)
@@ -398,7 +402,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                 .offset(skip)
                 .limit(limit)
             )
-            return result.scalars().all()
+            return list(result.scalars().all())
         else:
             return (
                 self.db.query(self._model)
@@ -414,7 +418,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             result = await self.db.execute(
                 select(self._model).order_by(desc(self._model.created_at)).limit(limit)
             )
-            return result.scalars().all()
+            return list(result.scalars().all())
         else:
             return (
                 self.db.query(self._model)
@@ -430,7 +434,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                 dialect_name = self.db.bind.dialect.name.lower()
                 return dialect_name
             elif hasattr(self.db, "get_bind"):
-                bind = await self.db.get_bind()
+                bind = self.db.get_bind()  # sync on both session kinds
                 if bind:
                     dialect_name = bind.dialect.name.lower()
                     return dialect_name
@@ -473,7 +477,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             query = query.where(self._model.group_id == group_id)
             if file_paths:
                 query = query.where(self._model.file_path.in_(file_paths))
-        result = await self.db.execute(query)
+        result = await self.session.execute(query)
         rows = result.scalars().all()
 
         q = [float(x) for x in query_embedding]
@@ -574,7 +578,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             "distance"
         )
         query = query.add_columns(distance).order_by(distance).limit(limit)
-        result = await self.db.execute(query)
+        result = await self.session.execute(query)
         rows = []
         for row, dist in result.all():
             # pgvector's <=> is cosine DISTANCE; similarity is its complement.

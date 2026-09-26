@@ -25,7 +25,7 @@ class ToolRepository(BaseRepository[Tool]):
     async def find_by_ids(self, tool_ids: List[int]) -> List[Tool]:
         """Resolve an execution's already-selected catalogue IDs in batches."""
         ids = list(dict.fromkeys(tool_ids))
-        tools = []
+        tools: List[Tool] = []
         for start in range(0, len(ids), 500):
             result = await self.session.execute(
                 select(self.model).where(self.model.id.in_(ids[start : start + 500]))

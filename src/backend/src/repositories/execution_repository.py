@@ -6,9 +6,9 @@ This module provides database operations for execution models.
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from sqlalchemy import func, update
+from sqlalchemy import ColumnElement, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -39,7 +39,7 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
     ) -> Any:
         """The WHERE clause shared by the full and summary history lists."""
         # Build base filter with group filtering
-        base_filter = True
+        base_filter: Union[bool, ColumnElement[bool]] = True
         if system_level:
             # SYSTEM LEVEL: Allow access to all executions for cleanup/admin operations
             logging.getLogger(__name__).info(
@@ -93,9 +93,9 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         self,
         limit: int = 50,
         offset: int = 0,
-        group_ids: List[str] = None,
-        status_filter: List[str] = None,
-        user_email: str = None,
+        group_ids: Optional[List[str]] = None,
+        status_filter: Optional[List[str]] = None,
+        user_email: Optional[str] = None,
         system_level: bool = False,
         include_count: bool = False,
     ) -> Tuple[List[ExecutionHistory], int]:
@@ -137,7 +137,7 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
             .limit(limit)
         )
         result = await self.session.execute(stmt)
-        executions = result.scalars().all()
+        executions = list(result.scalars().all())
 
         return executions, total_count
 
@@ -166,7 +166,7 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         return list(result.all())
 
     async def get_execution_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
+        self, job_id: str, group_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by job_id with group filtering.
@@ -327,7 +327,7 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
             )
 
             result = await self.session.execute(stmt)
-            updated_execution = result.scalars().first()
+            updated_execution: Optional[ExecutionHistory] = result.scalars().first()
 
             if not updated_execution:
                 logger.warning(

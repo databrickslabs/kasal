@@ -68,11 +68,11 @@ class GenieRepository:
             auth_config: Optional authentication configuration
         """
         self.auth_config = auth_config if auth_config is not None else None
-        self._host = None
-        self._client: Optional[httpx.AsyncClient] = None
+        self._host: Optional[str] = None
+        self._client: httpx.AsyncClient
         self._setup_client()
 
-    def _setup_client(self):
+    def _setup_client(self) -> None:
         """Setup async HTTP client with retry logic."""
         transport = httpx.AsyncHTTPTransport(retries=3)
         self._client = httpx.AsyncClient(transport=transport, timeout=30.0)
@@ -328,7 +328,7 @@ class GenieRepository:
         )
 
     async def _fetch_spaces_page(
-        self, headers: dict, page_size: int, token: Optional[str]
+        self, headers: Optional[Dict[str, str]], page_size: int, token: Optional[str]
     ) -> Tuple[List[GenieSpace], Optional[str]]:
         """Fetch ONE page of spaces -> (spaces, next_page_token).
 
@@ -380,7 +380,7 @@ class GenieRepository:
             return spaces, next_token
 
     async def _fetch_all_spaces_uncached(
-        self, headers: dict
+        self, headers: Optional[Dict[str, str]]
     ) -> Tuple[List[GenieSpace], bool]:
         """Walk every page of spaces sequentially -> (spaces, complete). On an
         unrecoverable error mid-walk, returns what was fetched with complete=False
@@ -402,7 +402,9 @@ class GenieRepository:
             if not token:
                 return all_spaces, True
 
-    async def _get_all_spaces_cached(self, headers: dict) -> List[GenieSpace]:
+    async def _get_all_spaces_cached(
+        self, headers: Optional[Dict[str, str]]
+    ) -> List[GenieSpace]:
         """Full spaces list for this host, fetched once and cached. A per-host lock
         serializes the one-time full walk so concurrent searches don't each scan
         (which caused 429). A complete list caches for the full TTL; a partial one
@@ -412,7 +414,8 @@ class GenieRepository:
         if cached and (time.time() - cached["ts"]) < cached.get(
             "ttl", _SPACES_CACHE_TTL
         ):
-            return cached["spaces"]
+            cached_spaces: List[GenieSpace] = cached["spaces"]
+            return cached_spaces
         lock = _SPACES_LOCKS.setdefault(host, asyncio.Lock())
         async with lock:
             # Re-check inside the lock: another search may have just populated it.
@@ -420,7 +423,8 @@ class GenieRepository:
             if cached and (time.time() - cached["ts"]) < cached.get(
                 "ttl", _SPACES_CACHE_TTL
             ):
-                return cached["spaces"]
+                locked_spaces: List[GenieSpace] = cached["spaces"]
+                return locked_spaces
             spaces, complete = await self._fetch_all_spaces_uncached(headers)
             ttl = _SPACES_CACHE_TTL if complete else _SPACES_PARTIAL_TTL
             _SPACES_CACHE[host] = {"spaces": spaces, "ts": time.time(), "ttl": ttl}
@@ -556,7 +560,7 @@ class GenieRepository:
                 f"/api/2.0/genie/spaces/{request.space_id}/conversations/{conversation_id}/messages"
             )
 
-            payload = {"content": request.message}
+            payload: Dict[str, Any] = {"content": request.message}
             if request.attachments:
                 payload["attachments"] = request.attachments
 
@@ -817,12 +821,12 @@ class GenieRepository:
             else "No response content found"
         )
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         """Close the async HTTP client."""
         if self._client:
             await self._client.aclose()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup client on deletion."""
         client = getattr(self, "_client", None)
         if client and not client.is_closed:

@@ -4,9 +4,10 @@ Repository for the data_processing table.
 This module provides database access functions for the data_processing table.
 """
 
-from typing import Optional
+from typing import Any, Optional, cast
 
 from sqlalchemy import func, select, text, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -98,7 +99,7 @@ class DataProcessingRepository(BaseRepository):
         )
 
         result = await self.session.execute(stmt)
-        return result.rowcount > 0
+        return cast("CursorResult[Any]", result).rowcount > 0
 
     def update_processed_status_sync(self, che_number: str, processed: bool) -> bool:
         """
@@ -121,7 +122,7 @@ class DataProcessingRepository(BaseRepository):
         )
 
         result = self.sync_session.execute(stmt)
-        return result.rowcount > 0
+        return cast("CursorResult[Any]", result).rowcount > 0
 
     async def count_unprocessed_records(self) -> int:
         """

@@ -5,9 +5,10 @@ This module provides database operations for execution logs.
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional, Union, cast
 
 from sqlalchemy import delete, desc, func
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -34,9 +35,9 @@ class ExecutionLogsRepository:
         self,
         execution_id: str,
         content: str,
-        timestamp=None,
-        group_id: str = None,
-        group_email: str = None,
+        timestamp: Union[datetime, str, None] = None,
+        group_id: Optional[str] = None,
+        group_email: Optional[str] = None,
         *,
         flush: bool = True,
     ) -> ExecutionLog:
@@ -97,7 +98,7 @@ class ExecutionLogsRepository:
         limit: int = 1000,
         offset: int = 0,
         newest_first: bool = False,
-        group_ids: list = None,
+        group_ids: Optional[list] = None,
     ) -> List[ExecutionLog]:
         """
         Retrieve logs for a specific execution using injected session.
@@ -124,9 +125,11 @@ class ExecutionLogsRepository:
         query = query.offset(offset).limit(limit)
 
         result = await self.session.execute(query)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
-    def _normalize_timestamp(self, timestamp):
+    def _normalize_timestamp(
+        self, timestamp: Union[datetime, str, None]
+    ) -> Optional[datetime]:
         """
         Convert timestamp to timezone-naive UTC datetime.
 
@@ -175,7 +178,7 @@ class ExecutionLogsRepository:
         return result.scalars().first()
 
     async def delete_by_execution_id(
-        self, execution_id: str, group_ids: list = None
+        self, execution_id: str, group_ids: Optional[list] = None
     ) -> int:
         """
         Delete all logs for a specific execution using injected session.
@@ -193,7 +196,7 @@ class ExecutionLogsRepository:
         result = await self.session.execute(stmt)
         # Don't commit here - let the service/router manage transactions
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def delete_all(self) -> int:
         """
@@ -206,7 +209,7 @@ class ExecutionLogsRepository:
         result = await self.session.execute(stmt)
         # Don't commit here - let the service/router manage transactions
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def delete_older_than(self, cutoff: datetime) -> int:
         """
@@ -221,10 +224,10 @@ class ExecutionLogsRepository:
         stmt = delete(ExecutionLog).where(ExecutionLog.timestamp < cutoff)
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def count_by_execution_id(
-        self, execution_id: str, group_ids: list = None
+        self, execution_id: str, group_ids: Optional[list] = None
     ) -> int:
         """
         Count logs for a specific execution using injected session.

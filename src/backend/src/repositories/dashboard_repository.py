@@ -90,6 +90,19 @@ class DashboardRepository:
             return {}
         return {k: v for k, v in headers.items() if k.lower() == "authorization"}
 
+    async def _get_base_url(self) -> str:
+        if not self._host:
+            self._host = await self._resolve_host()
+        if not self._host:
+            raise RuntimeError(
+                "No Databricks workspace URL configured. "
+                "Set DATABRICKS_HOST or configure a Databricks profile."
+            )
+        host = self._host
+        if not host.startswith("https://"):
+            host = f"https://{host}"
+        return f"{host}/api/2.0/lakeview"
+
     async def _get_headers(self) -> Dict[str, str]:
         if self._auth_headers is None:
             self._auth_headers = await self._resolve_auth_headers()
@@ -114,7 +127,8 @@ class DashboardRepository:
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
-        return resp.json()
+        dashboard: Dict[str, Any] = resp.json()
+        return dashboard
 
     async def list_dashboards(self, page_size: int = 50) -> List[Dict[str, Any]]:
         """
@@ -134,7 +148,8 @@ class DashboardRepository:
             return []
         resp.raise_for_status()
         data = resp.json()
-        return data.get("dashboards", [])
+        dashboards: List[Dict[str, Any]] = data.get("dashboards", [])
+        return dashboards
 
     async def close(self) -> None:
         await self._client.aclose()

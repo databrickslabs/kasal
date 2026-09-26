@@ -140,7 +140,7 @@ class ChatSessionRepository:
         session_id: str,
         group_ids: List[str],
         summary: str,
-        upto,
+        upto: Optional[datetime],
     ) -> Optional[ChatSession]:
         """Save the running context summary and its fold-marker timestamp."""
         record = await self.get_by_id_and_group(session_id, group_ids)
@@ -162,4 +162,4 @@ class ChatSessionRepository:
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return (result.rowcount or 0) > 0
+        return (cast("CursorResult[Any]", result).rowcount or 0) > 0

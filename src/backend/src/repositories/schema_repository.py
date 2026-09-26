@@ -53,8 +53,10 @@ class SchemaRepository(BaseRepository[Schema, int]):
         if hasattr(self.session, "execute"):
             # Using a synchronous session
             query = select(self.model).where(self.model.name == name)
-            result = self.session.execute(query)
-            return result.scalars().first()
+            sync_session: Any = self.session  # a sync Session at runtime
+            result = sync_session.execute(query)
+            found: Optional[Schema] = result.scalars().first()
+            return found
         else:
             # Log a warning if we're using an async session with sync method
             import logging
@@ -65,8 +67,10 @@ class SchemaRepository(BaseRepository[Schema, int]):
             # Create a sync version of the query
             query = select(self.model).where(self.model.name == name)
             # Execute synchronously (will only work if session supports sync execution)
-            result = self.session.execute(query)
-            return result.scalars().first()
+            fallback_session: Any = self.session
+            fallback_result = fallback_session.execute(query)
+            fallback: Optional[Schema] = fallback_result.scalars().first()
+            return fallback
 
     async def find_by_type(self, schema_type: str) -> List[Schema]:
         """

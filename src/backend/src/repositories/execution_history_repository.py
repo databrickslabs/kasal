@@ -6,11 +6,13 @@ This module provides database operations for execution history models.
 
 import json
 import logging
+import typing
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import Text, cast, delete, distinct, func, update
+from sqlalchemy.engine import CursorResult, Result, Row
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -23,6 +25,12 @@ from src.models.flow_state import FlowState
 # Removed async_session_factory import - using injected session only
 
 logger = logging.getLogger(__name__)
+
+
+def _rowcount(result: Result[Any]) -> int:
+    """Rows a DML statement touched; ``execute()`` is typed as the base Result."""
+    return typing.cast("CursorResult[Any]", result).rowcount
+
 
 # Distinguishes "leave this column alone" from "set it to NULL" on partial
 # updates, where None is itself a meaningful value rather than an absent
@@ -300,7 +308,7 @@ class ExecutionHistoryRepository:
         return list(result.scalars().all())
 
     async def get_execution_by_id(
-        self, execution_id: int, group_ids: List[str] = None
+        self, execution_id: int, group_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by ID with group filtering.
@@ -327,7 +335,7 @@ class ExecutionHistoryRepository:
         return result.scalars().first()
 
     async def get_execution_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
+        self, job_id: str, group_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by job_id with group filtering.
@@ -353,9 +361,11 @@ class ExecutionHistoryRepository:
         result = await session.execute(stmt)
         return result.scalars().first()
 
-    async def get_execution_statuses_by_job_ids(self, job_ids: List[str]):
+    async def get_execution_statuses_by_job_ids(
+        self, job_ids: List[str]
+    ) -> List[Row[Any]]:
         """Scalar status snapshots for the internal poller; bounded IN clauses."""
-        rows = []
+        rows: List[Row[Any]] = []
         for start in range(0, len(job_ids), 500):
             result = await self.session.execute(
                 select(
@@ -368,8 +378,8 @@ class ExecutionHistoryRepository:
         return rows
 
     async def get_execution_summary_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
-    ):
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Row[Any]]:
         """Slim scalar-only lookup for hot polling paths.
 
         The full-row variant drags the result/inputs/partial_results/checkpoint
@@ -419,7 +429,7 @@ class ExecutionHistoryRepository:
         return await self._get_execution_by_id_internal(self.session, execution_id)
 
     async def check_execution_exists(
-        self, execution_id: int, group_ids: List[str] = None
+        self, execution_id: int, group_ids: Optional[List[str]] = None
     ) -> bool:
         """
         Check if an execution exists, scoped to the given groups.
@@ -482,7 +492,7 @@ class ExecutionHistoryRepository:
                 FlowState.flow_uuid.notin_(still_referenced),
             )
         )
-        count = result.rowcount or 0
+        count = _rowcount(result) or 0
         if count:
             logger.info(f"Deleted {count} orphaned flow_states row(s)")
         return count
@@ -537,14 +547,14 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id == job_id)
             task_status_result = await session.execute(task_status_stmt)
-            result["task_status_count"] = task_status_result.rowcount
+            result["task_status_count"] = _rowcount(task_status_result)
 
             # Delete associated error traces
             error_trace_stmt = delete(ErrorTrace).where(
                 ErrorTrace.run_id == execution_id
             )
             error_trace_result = await session.execute(error_trace_stmt)
-            result["error_trace_count"] = error_trace_result.rowcount
+            result["error_trace_count"] = _rowcount(error_trace_result)
 
             # Delete the run
             run_stmt = delete(ExecutionHistory).where(
@@ -552,7 +562,7 @@ class ExecutionHistoryRepository:
             )
             delete_result = await session.execute(run_stmt)
             logger.debug(
-                f"[DELETE] Deleted execution record, affected rows: {delete_result.rowcount}"
+                f"[DELETE] Deleted execution record, affected rows: {_rowcount(delete_result)}"
             )
 
             # After the run is gone, so "still referenced" is accurate.
@@ -629,14 +639,14 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id == job_id)
             task_status_result = await session.execute(task_status_stmt)
-            result["task_status_count"] = task_status_result.rowcount
+            result["task_status_count"] = _rowcount(task_status_result)
 
             # Delete associated error traces
             error_trace_stmt = delete(ErrorTrace).where(
                 ErrorTrace.run_id == execution_id
             )
             error_trace_result = await session.execute(error_trace_stmt)
-            result["error_trace_count"] = error_trace_result.rowcount
+            result["error_trace_count"] = _rowcount(error_trace_result)
 
             # Delete the run
             run_stmt = delete(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
@@ -722,7 +732,7 @@ class ExecutionHistoryRepository:
             return False
 
     async def delete_all_executions(
-        self, group_ids: List[str] = None
+        self, group_ids: Optional[List[str]] = None
     ) -> Dict[str, int]:
         """
         Delete all executions and associated data for specified groups.
@@ -743,7 +753,10 @@ class ExecutionHistoryRepository:
         )
 
     async def _delete_all_executions_with_session(
-        self, session: AsyncSession, group_ids: List[str] = None, commit: bool = False
+        self,
+        session: AsyncSession,
+        group_ids: Optional[List[str]] = None,
+        commit: bool = False,
     ) -> Dict[str, int]:
         """Internal method to handle deletion of all executions with a given session."""
         try:
@@ -777,14 +790,14 @@ class ExecutionHistoryRepository:
                     TaskStatus.job_id.in_(job_ids)
                 )
                 task_status_result = await session.execute(task_status_stmt)
-                result["task_status_count"] = task_status_result.rowcount
+                result["task_status_count"] = _rowcount(task_status_result)
 
                 # Delete error traces for these execution_ids
                 error_trace_stmt = delete(ErrorTrace).where(
                     ErrorTrace.run_id.in_(execution_ids)
                 )
                 error_trace_result = await session.execute(error_trace_stmt)
-                result["error_trace_count"] = error_trace_result.rowcount
+                result["error_trace_count"] = _rowcount(error_trace_result)
 
                 # Delete execution traces (FK to executionhistory.id and .job_id)
                 await session.execute(
@@ -821,12 +834,12 @@ class ExecutionHistoryRepository:
                 # Delete all task statuses
                 task_status_stmt = delete(TaskStatus)
                 task_status_result = await session.execute(task_status_stmt)
-                result["task_status_count"] = task_status_result.rowcount
+                result["task_status_count"] = _rowcount(task_status_result)
 
                 # Delete all error traces
                 error_trace_stmt = delete(ErrorTrace)
                 error_trace_result = await session.execute(error_trace_stmt)
-                result["error_trace_count"] = error_trace_result.rowcount
+                result["error_trace_count"] = _rowcount(error_trace_result)
 
                 # Delete all execution traces (FK to executionhistory.id and .job_id)
                 await session.execute(delete(ExecutionTrace))
@@ -844,7 +857,7 @@ class ExecutionHistoryRepository:
 
                 # Every execution is gone, so every flow state is orphaned.
                 flow_state_result = await session.execute(delete(FlowState))
-                result["flow_state_count"] = flow_state_result.rowcount or 0
+                result["flow_state_count"] = _rowcount(flow_state_result) or 0
 
             # Flush to ensure operations are sent to database
             await session.flush()
@@ -866,7 +879,7 @@ class ExecutionHistoryRepository:
 
     async def get_checkpoints_for_flow(
         self,
-        flow_id,
+        flow_id: Union[str, UUID],
         group_id: Optional[str] = None,
         status_filter: Optional[str] = "active",
     ) -> List[ExecutionHistory]:
@@ -1201,7 +1214,7 @@ class ExecutionHistoryRepository:
             return False
 
     async def update_execution_result(
-        self, job_id: str, result_data: dict, group_ids: list[str] = None
+        self, job_id: str, result_data: dict, group_ids: Optional[list[str]] = None
     ) -> bool:
         """
         Update the result field for an execution identified by job_id.
@@ -1437,21 +1450,21 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
             task_status_result = await self.session.execute(task_status_stmt)
-            task_status_count = task_status_result.rowcount
+            task_status_count = _rowcount(task_status_result)
 
             # Delete associated error traces
             error_trace_stmt = delete(ErrorTrace).where(
                 ErrorTrace.run_id.in_(execution_ids)
             )
             error_trace_result = await self.session.execute(error_trace_stmt)
-            error_trace_count = error_trace_result.rowcount
+            error_trace_count = _rowcount(error_trace_result)
 
             # Delete the execution history records
             run_stmt = delete(ExecutionHistory).where(
                 ExecutionHistory.created_at < cutoff
             )
             run_result = await self.session.execute(run_stmt)
-            run_count = run_result.rowcount
+            run_count = _rowcount(run_result)
 
             # Flow method state for the purged runs. flow_states has no FK to
             # executionhistory, so housekeeping never reached it and the table
