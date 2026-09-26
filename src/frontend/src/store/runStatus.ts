@@ -323,12 +323,16 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
                 // Mark as processed before dispatching
                 currentProcessedCompletions.add(completionKey);
 
-                window.dispatchEvent(new CustomEvent('jobCompleted', {
-                  detail: {
-                    jobId: run.job_id,
-                    result: run.result
-                  }
-                }));
+                // List rows carry no result, and a listener (chat) finalizes
+                // its answer from this one: fetch the run's full result first.
+                void runService.withPayload(run).then((full) => {
+                  window.dispatchEvent(new CustomEvent('jobCompleted', {
+                    detail: {
+                      jobId: run.job_id,
+                      result: full.result
+                    }
+                  }));
+                });
               } else if (run.status.toLowerCase() === 'failed') {
                 // Mark as processed before dispatching
                 currentProcessedCompletions.add(completionKey);

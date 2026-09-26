@@ -15,6 +15,7 @@ vi.mock('../api/execution/ExecutionHistoryService', () => ({
   runService: {
     getRuns: vi.fn(),
     invalidateRunsCache: vi.fn(),
+    withPayload: vi.fn(),
   },
 }));
 
@@ -591,6 +592,28 @@ describe('runStatus store', () => {
       // Completed job should not be in activeRuns
       expect(state.activeRuns['job-a']).toBeUndefined();
 
+      getItemSpy.mockRestore();
+    });
+
+    it('dispatches jobCompleted with the full result, not the list summary', async () => {
+      const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('group-1');
+      const base = {
+        id: 'job-c', job_id: 'job-c', created_at: '2024-06-01T10:00:00Z', updated_at: '2024-06-01T10:05:00Z',
+        run_name: 'Run C', agents_yaml: '', tasks_yaml: '', group_id: 'group-1',
+      };
+      useRunStatusStore.setState({ runHistory: [{ ...base, status: 'running' }] });
+      // The list row has no result; the detail does.
+      mockGetRuns.mockResolvedValue({ runs: [{ ...base, status: 'completed' }], total: 1, limit: 50, offset: 0 });
+      (runService.withPayload as ReturnType<typeof vi.fn>).mockImplementation(
+        async (run: object) => ({ ...run, result: { content: 'the answer' } }),
+      );
+      const completed = new Promise<CustomEvent>(resolve =>
+        window.addEventListener('jobCompleted', e => resolve(e as CustomEvent), { once: true }));
+
+      await useRunStatusStore.getState().fetchInitialRunHistory();
+
+      const event = await completed;
+      expect(event.detail).toEqual({ jobId: 'job-c', result: { content: 'the answer' } });
       getItemSpy.mockRestore();
     });
 

@@ -7,9 +7,11 @@ import PreviewIcon from '@mui/icons-material/Preview';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { Run } from '../../../api/execution/ExecutionHistoryService';
-// @react-pdf/renderer is large; load it only when a PDF is requested.
-const generateRunPDF = async (run: Run) => (await import('../../../utils/pdfGenerator')).generateRunPDF(run);
+import { Run, runService } from '../../../api/execution/ExecutionHistoryService';
+// @react-pdf/renderer is large; load it only when a PDF is requested. The row
+// is a list summary, so fetch the full result the PDF renders.
+const generateRunPDF = async (run: Run) =>
+  (await import('../../../utils/pdfGenerator')).generateRunPDF(await runService.withPayload(run));
 import { useTranslation } from 'react-i18next';
 import ReplayIcon from '@mui/icons-material/Replay';
 import ExecutionStopButton from './ExecutionStopButton';

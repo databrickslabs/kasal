@@ -21,7 +21,7 @@ import RunActivityRow from './RunActivityRow';
 import RunActivityOverview, { matchesRunFilter, type RunFilter } from './RunActivityOverview';
 import ExecutionHistorySkeleton from './ExecutionHistorySkeleton';
 import { refreshRecipeIndexIfStale } from './recipeIndexCache';
-import { Run } from '../../../api/execution/ExecutionHistoryService';
+import { Run, runService } from '../../../api/execution/ExecutionHistoryService';
 import { ScheduleService } from '../../../api/execution/ScheduleService';
 import { ResultValue } from '../../../types/execution/result';
 import {
@@ -339,9 +339,13 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
       return;
     }
 
+    // History rows are list summaries; the crew/flow configuration and the run
+    // inputs being scheduled live on the detail endpoint.
+    const scheduleRun = await runService.withPayload(selectedRunForSchedule);
+
     // Determine execution type from the run
-    const executionType = selectedRunForSchedule.execution_type ||
-                         selectedRunForSchedule.inputs?.execution_type ||
+    const executionType = scheduleRun.execution_type ||
+                         scheduleRun.inputs?.execution_type ||
                          'crew';
 
     // Check if this is a flow execution
@@ -349,17 +353,17 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
 
     if (isFlowExecution) {
       // Handle flow execution scheduling
-      const flow_id = selectedRunForSchedule.flow_id || selectedRunForSchedule.inputs?.flow_id;
-      const nodes = selectedRunForSchedule.inputs?.nodes;
-      const edges = selectedRunForSchedule.inputs?.edges;
-      const flow_config = selectedRunForSchedule.inputs?.flow_config;
+      const flow_id = scheduleRun.flow_id || scheduleRun.inputs?.flow_id;
+      const nodes = scheduleRun.inputs?.nodes;
+      const edges = scheduleRun.inputs?.edges;
+      const flow_config = scheduleRun.inputs?.flow_config;
 
       // Validate flow configuration
       if (!flow_id && !(nodes && edges && nodes.length > 0 && edges.length >= 0)) {
         console.error('CRITICAL: Flow execution missing configuration', {
-          executionId: selectedRunForSchedule.id,
-          jobId: selectedRunForSchedule.job_id,
-          runName: selectedRunForSchedule.run_name,
+          executionId: scheduleRun.id,
+          jobId: scheduleRun.job_id,
+          runName: scheduleRun.run_name,
           hasFlowId: !!flow_id,
           hasNodes: !!nodes,
           hasEdges: !!edges,
@@ -382,9 +386,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
           nodes: nodes,
           edges: edges,
           flow_config: flow_config || {},
-          inputs: selectedRunForSchedule.inputs?.inputs || {},
+          inputs: scheduleRun.inputs?.inputs || {},
           is_active: true,
-          model: selectedRunForSchedule.inputs?.model,
+          model: scheduleRun.inputs?.model,
         };
 
         await ScheduleService.createSchedule(scheduleData);
@@ -403,28 +407,28 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
       let tasks_yaml = null;
 
       // First try to get from the inputs object (this is where the complete config is stored)
-      if (selectedRunForSchedule.inputs?.agents_yaml) {
-        agents_yaml = selectedRunForSchedule.inputs.agents_yaml;
+      if (scheduleRun.inputs?.agents_yaml) {
+        agents_yaml = scheduleRun.inputs.agents_yaml;
       }
-      if (selectedRunForSchedule.inputs?.tasks_yaml) {
-        tasks_yaml = selectedRunForSchedule.inputs.tasks_yaml;
+      if (scheduleRun.inputs?.tasks_yaml) {
+        tasks_yaml = scheduleRun.inputs.tasks_yaml;
       }
 
       // Fallback to direct properties (now properly populated from backend)
-      if (!agents_yaml && selectedRunForSchedule.agents_yaml) {
+      if (!agents_yaml && scheduleRun.agents_yaml) {
         try {
-          agents_yaml = typeof selectedRunForSchedule.agents_yaml === 'string'
-            ? JSON.parse(selectedRunForSchedule.agents_yaml)
-            : selectedRunForSchedule.agents_yaml;
+          agents_yaml = typeof scheduleRun.agents_yaml === 'string'
+            ? JSON.parse(scheduleRun.agents_yaml)
+            : scheduleRun.agents_yaml;
         } catch (e) {
           console.warn('Failed to parse agents_yaml string:', e);
         }
       }
-      if (!tasks_yaml && selectedRunForSchedule.tasks_yaml) {
+      if (!tasks_yaml && scheduleRun.tasks_yaml) {
         try {
-          tasks_yaml = typeof selectedRunForSchedule.tasks_yaml === 'string'
-            ? JSON.parse(selectedRunForSchedule.tasks_yaml)
-            : selectedRunForSchedule.tasks_yaml;
+          tasks_yaml = typeof scheduleRun.tasks_yaml === 'string'
+            ? JSON.parse(scheduleRun.tasks_yaml)
+            : scheduleRun.tasks_yaml;
         } catch (e) {
           console.warn('Failed to parse tasks_yaml string:', e);
         }
@@ -433,10 +437,10 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
       // Validate crew configuration
       if (!agents_yaml || !tasks_yaml || Object.keys(agents_yaml).length === 0 || Object.keys(tasks_yaml).length === 0) {
         console.error('CRITICAL: Crew execution missing configuration', {
-          executionId: selectedRunForSchedule.id,
-          jobId: selectedRunForSchedule.job_id,
-          runName: selectedRunForSchedule.run_name,
-          hasInputs: !!selectedRunForSchedule.inputs,
+          executionId: scheduleRun.id,
+          jobId: scheduleRun.job_id,
+          runName: scheduleRun.run_name,
+          hasInputs: !!scheduleRun.inputs,
           hasAgentsYaml: !!agents_yaml,
           hasTasksYaml: !!tasks_yaml,
           agentsYamlKeys: agents_yaml ? Object.keys(agents_yaml) : [],
@@ -456,9 +460,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
           execution_type: 'crew',
           agents_yaml: agents_yaml,
           tasks_yaml: tasks_yaml,
-          inputs: selectedRunForSchedule.inputs?.inputs || {},
+          inputs: scheduleRun.inputs?.inputs || {},
           is_active: true,
-          model: selectedRunForSchedule.inputs?.model,
+          model: scheduleRun.inputs?.model,
         };
 
         await ScheduleService.createSchedule(scheduleData);
