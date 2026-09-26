@@ -18,7 +18,6 @@ The security preamble is injected by the CALLER
 returns, so each path keeps its own ``[SECURITY]`` log line while the injection
 itself stays shared (Phase 1).
 """
-import os  # noqa: E402 - import follows module initialization
 import re  # noqa: E402 - import follows module initialization
 from typing import (  # noqa: E402 - import follows module initialization
     Any,
@@ -32,6 +31,9 @@ from src.core.llm.output_cap import (  # noqa: E402 - import follows module init
 )
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
+)
+from src.core.process_role import (  # noqa: E402 - import follows module initialization
+    in_run_subprocess,
 )
 from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
     active_harness,
@@ -361,7 +363,7 @@ async def build_agent_llm(
     # Chat Completions and Responses API adapters honor this flag. Kill-switch:
     # Configuration → Engines → Advanced → Chat.
     if (
-        os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true"
+        in_run_subprocess()
         and engine_settings.setting("crew_token_streaming")
         and llm is not None
         and not isinstance(llm, str)

@@ -12,8 +12,9 @@ the gate itself (`GET /hitl/pending` still returns it).
 """
 
 import logging
-import os
 from typing import Any, Dict
+
+from src.core.process_role import in_run_subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ async def notify_input_needed_sse(execution_id: str, payload: Dict[str, Any]) ->
 
 def notify_input_needed(execution_id: str, payload: Dict[str, Any]) -> None:
     """Notify the UI that input is needed — path-appropriate transport."""
-    if os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true":
+    if in_run_subprocess():
         # Subprocess: the parent's relay turns this frame into the same SSE
         # event. The DB row stays the source of truth (pipe drops on full).
         try:

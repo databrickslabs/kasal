@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.process_role import in_run_subprocess
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
@@ -217,9 +218,8 @@ class ExecutionStatusService:
                     )
 
                     # Announce the new status for real-time updates.
-                    import os
 
-                    is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
+                    is_subprocess = in_run_subprocess()
                     try:
                         from datetime import datetime as dt
 

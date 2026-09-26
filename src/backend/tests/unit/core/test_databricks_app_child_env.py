@@ -62,7 +62,6 @@ class TestChildEnvAllowed:
             "SQLITE_DB_PATH",
             "POSTGRES_PASSWORD",  # the operator's own DB, not a workspace key
             "ENCRYPTION_KEY",  # children decrypt the workspace's stored keys
-            "CREW_SUBPROCESS_MODE",
         ):
             assert child_env_allowed(name, hosted=True), name
 

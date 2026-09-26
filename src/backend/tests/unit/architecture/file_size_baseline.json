@@ -18,7 +18,7 @@
   "src/backend/src/services/a2ui/runner.py": 970,
   "src/backend/src/services/a2ui/stream.py": 811,
   "src/backend/src/services/agent_builder/crew_preparation.py": 1319,
-  "src/backend/src/services/agent_builder/process_executor.py": 2392,
+  "src/backend/src/services/agent_builder/process_executor.py": 2387,
   "src/backend/src/services/chat/dispatcher.py": 2058,
   "src/backend/src/services/chat/service.py": 1918,
   "src/backend/src/services/converters/formats/powerbi/dax_parser.py": 900,

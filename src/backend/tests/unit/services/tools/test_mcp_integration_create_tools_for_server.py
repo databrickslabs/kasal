@@ -2,7 +2,7 @@
 Extended tests for mcp_integration.py to push coverage to 90%+.
 
 Covers missing lines:
-- FLOW_SUBPROCESS_MODE logger selection (line 27)
+- flow-subprocess logger selection
 - resolve_effective_mcp_servers - explicit servers deduplication, group_id preference
 - create_mcp_tools_for_agent - servers found, tool creation, loop error handling
 - create_mcp_tools_for_task - servers found, tool creation, loop error handling
@@ -546,7 +546,7 @@ class TestFlowSubprocessModeLogger:
     """Test that flow logger is selected in subprocess mode."""
 
     def test_flow_logger_selected_when_env_set(self):
-        """Module should use flow logger when FLOW_SUBPROCESS_MODE=true."""
+        """Module should use the flow logger inside a flow subprocess."""
         # We test indirectly by checking that the module loaded correctly.
         # The logger selection happens at module import time.
         import src.services.tools.mcp_integration as mcp_mod
@@ -554,7 +554,7 @@ class TestFlowSubprocessModeLogger:
         assert mcp_mod.logger is not None
 
     def test_crew_logger_selected_by_default(self):
-        """By default (no FLOW_SUBPROCESS_MODE), crew logger should be used."""
+        """Outside a flow subprocess, the crew logger should be used."""
         import src.services.tools.mcp_integration as mcp_mod
 
         # Logger should be set (either crew or flow depending on env)

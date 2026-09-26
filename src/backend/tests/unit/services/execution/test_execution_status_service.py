@@ -690,7 +690,7 @@ class TestUiDocumentNormalizationOnWrite:
                 "src.services.execution.status.ExecutionRepository",
                 return_value=repo,
             ),
-            patch.dict("os.environ", {"CREW_SUBPROCESS_MODE": "true"}),
+            patch("src.core.process_role._ROLE", "crew"),
             norm,
         ):
             ok = await ExecutionStatusService.update_status(

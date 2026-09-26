@@ -40,9 +40,10 @@ def prepare_child_environment(execution_id: str, process_type: str = "crew") -> 
 
         restrict_environment_to_child_allow_list()
 
-    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    from src.core.process_role import mark_run_subprocess
+
+    mark_run_subprocess(process_type)
     if process_type == "flow":
-        os.environ["FLOW_SUBPROCESS_MODE"] = "true"
         os.environ["CREWAI_DEBUG_TRACING"] = "true"
     os.environ["KASAL_EXECUTION_ID"] = execution_id
     if "DATABASE_TYPE" not in os.environ:
