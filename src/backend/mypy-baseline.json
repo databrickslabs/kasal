@@ -4374,6 +4374,11 @@
     },
     {
       "file": "src/services/converters/formats/uc_metrics/authentication.py",
+      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
+      "count": 1
+    },
+    {
+      "file": "src/services/converters/formats/uc_metrics/authentication.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 1
     },
@@ -4390,6 +4395,16 @@
     {
       "file": "src/services/converters/formats/uc_metrics/connector.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
+      "count": 1
+    },
+    {
+      "file": "src/services/converters/formats/uc_metrics/connector.py",
+      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
+      "count": 1
+    },
+    {
+      "file": "src/services/converters/formats/uc_metrics/connector.py",
+      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -4595,6 +4610,11 @@
     {
       "file": "src/services/databricks/analytics/export.py",
       "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
+      "count": 1
+    },
+    {
+      "file": "src/services/databricks/analytics/export.py",
+      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -5145,6 +5165,11 @@
     {
       "file": "src/services/deployment/crew.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"Agent\")  [assignment]",
+      "count": 1
+    },
+    {
+      "file": "src/services/deployment/crew.py",
+      "message": "Library stubs not installed for \"pandas\"  [import-untyped]",
       "count": 1
     },
     {
@@ -6275,6 +6300,11 @@
     {
       "file": "src/services/export/databricks_app_exporter.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
+      "count": 1
+    },
+    {
+      "file": "src/services/export/databricks_app_exporter.py",
+      "message": "Library stubs not installed for \"aiofiles\"  [import-untyped]",
       "count": 1
     },
     {
@@ -7878,6 +7908,11 @@
       "count": 1
     },
     {
+      "file": "src/services/knowledge/databricks_service.py",
+      "message": "Library stubs not installed for \"openpyxl\"  [import-untyped]",
+      "count": 1
+    },
+    {
       "file": "src/services/knowledge/embedding_queue.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 8
@@ -8434,6 +8469,11 @@
     },
     {
       "file": "src/services/mlflow/evaluation_runner.py",
+      "message": "Library stubs not installed for \"pandas\"  [import-untyped]",
+      "count": 1
+    },
+    {
+      "file": "src/services/mlflow/evaluation_runner.py",
       "message": "Module has no attribute \"from_pandas\"  [attr-defined]",
       "count": 1
     },
@@ -8820,6 +8860,11 @@
     {
       "file": "src/services/prompt_optimization/gepa/memalign_bridge.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
+      "count": 1
+    },
+    {
+      "file": "src/services/prompt_optimization/gepa/memalign_bridge.py",
+      "message": "Skipping analyzing \"dspy\": module is installed, but missing library stubs or py.typed marker  [import-untyped]",
       "count": 1
     },
     {
@@ -12116,6 +12161,11 @@
       "file": "src/utils/telemetry.py",
       "message": "Incompatible default for argument \"product\" (default has type \"None\", argument has type \"str\")  [assignment]",
       "count": 2
+    },
+    {
+      "file": "src/utils/telemetry.py",
+      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
+      "count": 1
     },
     {
       "file": "src/utils/telemetry.py",
