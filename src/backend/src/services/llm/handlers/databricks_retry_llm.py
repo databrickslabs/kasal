@@ -932,7 +932,8 @@ class DatabricksRetryLLM(LLM):
         available_functions: Optional[Dict[str, Callable[..., Any]]] = None,
         from_task: Any = None,
         from_agent: Any = None,
-        **kwargs: Any,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
+        response_model: Any = None,
+        **kwargs: Any,
     ) -> Any:
         """
         Override the call method to add retry logic for empty responses.
@@ -946,9 +947,8 @@ class DatabricksRetryLLM(LLM):
 
         Retry attempts are emitted as OTel spans so they appear in the trace
         timeline.  Each span covers the backoff wait period.
-
-        Note: kwargs accepts additional parameters like response_model (CrewAI 1.9.x structured outputs)
         """
+        kwargs["response_model"] = response_model  # forwarded with the rest
         crew_log = self._get_crew_logger()
 
         # Already fell back to a working model on a previous turn — keep using it.
@@ -1168,7 +1168,8 @@ class DatabricksRetryLLM(LLM):
         available_functions: Optional[Dict[str, Callable[..., Any]]] = None,
         from_task: Any = None,
         from_agent: Any = None,
-        **kwargs: Any,  # e.g. response_model (CrewAI structured outputs)
+        response_model: Any = None,
+        **kwargs: Any,
     ) -> Any:
         """Async counterpart of call() with model fallback.
 
@@ -1179,6 +1180,7 @@ class DatabricksRetryLLM(LLM):
         it applies the same message sanitization and, on a model-swappable
         error, delegates to another enabled model.
         """
+        kwargs["response_model"] = response_model  # forwarded with the rest
         crew_log = self._get_crew_logger()
 
         if self._active_fallback is not None:

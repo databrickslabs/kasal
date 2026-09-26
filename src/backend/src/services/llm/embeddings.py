@@ -286,11 +286,9 @@ async def get_embedding(
             if not embedding_model.startswith("databricks/"):
                 embedding_model = f"databricks/{embedding_model}"
 
-            # Use direct HTTP request to avoid config file issues
             import aiohttp
 
             try:
-                # Construct the direct API endpoint using centralized utility.
                 # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
                 # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
                 workspace_url = DatabricksURLUtils.extract_workspace_from_endpoint(
