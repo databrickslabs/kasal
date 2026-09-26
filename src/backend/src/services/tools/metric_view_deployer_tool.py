@@ -1,6 +1,5 @@
 """Metric View Deployer Tool for CrewAI — deploy YAML to Databricks via SQL Statement API."""
 
-import asyncio
 import json
 import logging
 import re as _re
@@ -83,29 +82,15 @@ class MetricViewDeployerTool(BaseTool):
         self._default_config = default_config
 
     def _authenticate(self, host_override: Optional[str] = None):
-        """Obtain AuthContext synchronously (OBO → PAT → SPN)."""
-        import concurrent.futures
+        """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
-        from src.utils.databricks_auth import get_auth_context
+        ``host_override`` (the ``databricks_host`` input) may only re-spell the
+        credential's own workspace; any other host is refused (audit N1/F3a).
+        Kept as a method so tests can patch it.
+        """
+        from src.services.tools.databricks_tool_utils import resolve_tool_auth
 
-        def _run_in_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(get_auth_context())
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            auth = executor.submit(_run_in_thread).result(timeout=30)
-
-        if auth is not None and host_override:
-            url = host_override.strip().rstrip("/")
-            if not url.startswith("https://"):
-                url = f"https://{url}"
-            auth.workspace_url = url
-        return auth
+        return resolve_tool_auth(host_override)
 
     @staticmethod
     def _yaml_to_ddl(yaml_content: str, view_name: str) -> str:

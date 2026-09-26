@@ -4,10 +4,23 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.tools.databricks_jobs_tool import (
     DatabricksJobsTool,
     DatabricksJobsToolSchema,
 )
+
+
+@pytest.fixture(autouse=True)
+def _host_is_the_credentialed_workspace():
+    """These tests exercise the HTTP path; the host check has its own tests."""
+
+    async def _same(host):
+        return host
+
+    with patch("src.services.tools.databricks_jobs_tool.assert_tool_host", _same):
+        yield
 
 
 class TestDatabricksJobsToolSchema(unittest.TestCase):
