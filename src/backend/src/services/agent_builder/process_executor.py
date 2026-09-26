@@ -219,6 +219,7 @@ def run_crew_in_process(
     # This must be done early before any other imports that might configure logging
     from src.services.execution.subprocess_bootstrap import (
         configure_subprocess_logging,
+        open_child_database,
         restore_stdout_stderr,
         suppress_stdout_stderr,
     )
@@ -464,9 +465,7 @@ def run_crew_in_process(
             # Activate Lakebase on async_session_factory so ALL callers
             # (tools, memory, etc.) automatically use Lakebase.
             try:
-                from src.db.database_router import activate_lakebase_in_subprocess
-
-                lb_ok = await activate_lakebase_in_subprocess()
+                lb_ok = await open_child_database()  # Lakebase + engine settings
                 if lb_ok:
                     subprocess_logger.info(
                         "[SUBPROCESS] Lakebase activated on async_session_factory"

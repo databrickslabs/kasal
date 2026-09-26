@@ -1,4 +1,5 @@
 import { apiClient } from '../../shared/api/client';
+import type { EngineSettings, EngineSettingsPatch } from '../../types/config/engines';
 
 export interface EngineConfig {
   id: number;
@@ -203,6 +204,17 @@ export class EngineConfigService {
       `${this.baseUrl}/engine/${engineName}/config/${configKey}/value`,
       { config_value: configValue }
     );
+    return response.data;
+  }
+
+  /** Configuration → Engines system settings (system administrators only). */
+  static async getSettings(): Promise<EngineSettings> {
+    const response = await apiClient.get<EngineSettings>(`${this.baseUrl}/settings`);
+    return response.data;
+  }
+
+  static async updateSettings(patch: EngineSettingsPatch): Promise<EngineSettings> {
+    const response = await apiClient.patch<EngineSettings>(`${this.baseUrl}/settings`, patch);
     return response.data;
   }
 }

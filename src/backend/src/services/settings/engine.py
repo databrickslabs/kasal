@@ -28,7 +28,11 @@ class EngineConfigService:
         self.repository = EngineConfigRepository(session)
 
     @staticmethod
-    def _run_limit_changed(row: Any = None, engine_name: Optional[str] = None) -> None:
+    def _run_limit_changed(
+        row: Any = None,
+        engine_name: Optional[str] = None,
+        deleted_key: Optional[str] = None,
+    ) -> None:
         """Tell this process's run gate that ``max_concurrent_runs`` changed.
 
         The gate caches the limit for 30 s, so without this an operator who
@@ -43,6 +47,14 @@ class EngineConfigService:
             configured_limit_of,
             run_admission,
         )
+        from src.services.settings import engine_settings
+
+        # Keep the Configuration → Engines snapshot current too, so a changed
+        # setting applies to the next run without a restart.
+        if row is not None:
+            engine_settings.apply_row(row)
+        elif engine_name == engine_settings.ENGINE_NAME and deleted_key:
+            engine_settings.forget(deleted_key)
 
         if row is not None:
             if (
@@ -241,6 +253,41 @@ class EngineConfigService:
             # Re-raise for controller layer to handle
             raise
 
+    async def get_settings(self) -> Dict[str, str]:
+        """The Configuration → Engines settings that are set (engine ``kasal``)."""
+        from src.services.settings import engine_settings
+
+        rows = await self.find_by_engine_type(engine_settings.ENGINE_TYPE)
+        return {
+            str(r.config_key): str(r.config_value or "")
+            for r in rows
+            if r.engine_name == engine_settings.ENGINE_NAME and r.enabled
+        }
+
+    async def save_settings(self, values: Dict[str, str]) -> Dict[str, str]:
+        """Upsert Configuration → Engines settings; an empty value resets one."""
+        from src.schemas.engine_config import EngineConfigCreate
+        from src.services.settings import engine_settings
+
+        for key, value in values.items():
+            existing = await self.find_by_engine_and_key(
+                engine_settings.ENGINE_NAME, key
+            )
+            if existing is not None:
+                await self.update_config_value(engine_settings.ENGINE_NAME, key, value)
+            else:
+                await self.create_engine_config(
+                    EngineConfigCreate(
+                        engine_name=engine_settings.ENGINE_NAME,
+                        engine_type=engine_settings.ENGINE_TYPE,
+                        config_key=key,
+                        config_value=value,
+                        enabled=True,
+                        description="Configuration → Engines setting",
+                    )
+                )
+        return await self.get_settings()
+
     async def get_kasal_flow_enabled(self) -> bool:
         """
         Get the CrewAI flow enabled status.
@@ -376,7 +423,10 @@ class EngineConfigService:
         # Delete the engine config
         try:
             await self.repository.delete(config.id)
-            self._run_limit_changed(engine_name=engine_name)
+            self._run_limit_changed(
+                engine_name=engine_name,
+                deleted_key=getattr(config, "config_key", None),
+            )
             logger.info(f"Successfully deleted engine config with name {engine_name}")
             return True
         except Exception as e:

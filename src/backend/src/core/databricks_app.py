@@ -292,7 +292,6 @@ CHILD_ENV_NAMES = frozenset(
         "GROUP_MEMBERSHIP_CACHE_TTL",
         "SSE_HEARTBEAT_SECONDS",
         "INSTRUCTOR_MODEL_NAME",
-        "JEV_API_BASE",
         "DAX_LLM_BATCH_SIZE",
         # Model-name overrides (not credentials). Provider endpoint URLs are no
         # longer env: they live on each model in Configuration → Models.

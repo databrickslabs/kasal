@@ -48,6 +48,9 @@ from src.services.execution.kernel.agent_security import (  # noqa: E402 - impor
 from src.services.execution.kernel.agent_skills import (  # noqa: E402 - import follows module initialization
     inject_skills,
 )
+from src.services.settings import (  # noqa: E402 - import follows module initialization
+    engine_settings,
+)
 
 logger = LoggerManager.get_instance().crew
 
@@ -95,9 +98,10 @@ DEFAULT_REASONING_EFFORT = "low"
 #:
 #: Generous on purpose: a legitimate research turn with slow tools must not be
 #: cut off. An explicit ``max_execution_time`` on the agent always wins.
-DEFAULT_AGENT_MAX_EXECUTION_TIME = int(
-    os.getenv("KASAL_AGENT_MAX_EXECUTION_TIME", "900") or 0
-)
+#: The value comes from Configuration → Engines (``engine_settings``; it replaced
+#: the KASAL_AGENT_MAX_EXECUTION_TIME env var) and is read per build, so a
+#: change applies to the next run. This name is the built-in default.
+DEFAULT_AGENT_MAX_EXECUTION_TIME = engine_settings.DEFAULT_AGENT_MAX_EXECUTION_TIME
 
 
 def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> None:
@@ -443,12 +447,11 @@ def build_agent_kwargs(
     # DEFAULT_AGENT_MAX_EXECUTION_TIME. Only when the spec did not set one.
     if (
         "max_execution_time" not in agent_kwargs
-        and DEFAULT_AGENT_MAX_EXECUTION_TIME > 0
+        and (default_time := engine_settings.agent_max_execution_time()) > 0
     ):
-        agent_kwargs["max_execution_time"] = DEFAULT_AGENT_MAX_EXECUTION_TIME
+        agent_kwargs["max_execution_time"] = default_time
         logger.info(
-            f"Applying default max_execution_time="
-            f"{DEFAULT_AGENT_MAX_EXECUTION_TIME}s for agent {label}"
+            f"Applying default max_execution_time=" f"{default_time}s for agent {label}"
         )
 
     # Log settings that came from a DEFAULT rather than the spec. The loop above

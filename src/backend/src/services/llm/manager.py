@@ -38,6 +38,10 @@ from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
 from src.services.llm.endpoints import require_api_base
 
+#: Concurrent blocking LLM calls per server process (was the
+#: KASAL_LLM_MAX_CONCURRENCY env var). A pool sized at import, so a constant.
+LLM_MAX_CONCURRENCY = 64
+
 # Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
 # loop's DEFAULT ThreadPoolExecutor (max ~min(32, cpu+4) workers) with every
 # other to_thread user in the process, and Databricks LLM calls run with ~300s
@@ -45,7 +49,7 @@ from src.services.llm.endpoints import require_api_base
 # concurrent chat users (plus every other to_thread caller) behind it. A
 # dedicated, larger pool caps LLM concurrency without starving anyone else.
 _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=int(os.getenv("KASAL_LLM_MAX_CONCURRENCY", "64")),
+    max_workers=LLM_MAX_CONCURRENCY,
     thread_name_prefix="llm-call",
 )
 
@@ -104,6 +108,7 @@ log_file_path = os.path.join(log_dir, "llm.log")
 
 # Configure standard Python logger to also write to the llm.log file
 logger = logging.getLogger(__name__)
+
 
 #: Thinking budget when a model enables extended thinking without one
 #: (was the KASAL_THINKING_BUDGET_TOKENS env var).

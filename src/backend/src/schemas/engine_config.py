@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -142,3 +142,25 @@ class HarnessUpdate(BaseModel):
     """Change the harness runs default to."""
 
     harness: str = Field(..., description="'kasal' or 'crewai'")
+
+
+class EngineSettings(BaseModel):
+    """Configuration → Engines system settings, with defaults filled in."""
+
+    #: The Jev decisions API URL; None when not set (Jev then stays off).
+    jev_api_base: Optional[str] = None
+    #: Wall-clock seconds for one agent call when the agent sets none (0 = off).
+    agent_max_execution_time: int
+    agent_max_execution_time_default: int
+    #: Effective run budgets per answer mode, and the built-in defaults.
+    budgets: Dict[str, Dict[str, int]]
+    budget_defaults: Dict[str, Dict[str, int]]
+
+
+class EngineSettingsUpdate(BaseModel):
+    """Partial update. An omitted field is left alone; null (or "") resets it."""
+
+    jev_api_base: Optional[str] = None
+    agent_max_execution_time: Optional[int] = Field(default=None, ge=0, le=86400)
+    #: {mode: {field: value}}; a null value resets that field to its default.
+    budgets: Optional[Dict[str, Dict[str, Optional[int]]]] = None

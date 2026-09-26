@@ -13,12 +13,15 @@ from src.schemas.engine_config import (
     EngineConfigToggleUpdate,
     EngineConfigUpdate,
     EngineConfigValueUpdate,
+    EngineSettings,
+    EngineSettingsUpdate,
     EventTriggersConfigUpdate,
     HarnessResponse,
     HarnessUpdate,
     KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
+from src.services.settings import engine_settings_view
 from src.services.settings.engine import EngineConfigService
 
 router = APIRouter(
@@ -613,3 +616,30 @@ async def set_harness(
     logger.info(f"API call: PUT /engine-config/harness - harness={config_data.harness}")
     await service.set_harness(config_data.harness)
     return await service.get_harnesses()
+
+
+@router.get("/settings", response_model=EngineSettings)
+async def get_engine_settings(
+    service: EngineConfigServiceDep, group_context: GroupContextDep
+) -> EngineSettings:
+    """Configuration → Engines system settings (system administrators only)."""
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can access engine configuration"
+        )
+    return EngineSettings(**await engine_settings_view.get_view(service))
+
+
+@router.patch("/settings", response_model=EngineSettings)
+async def update_engine_settings(
+    payload: EngineSettingsUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineSettings:
+    """Partial update; null (or "") resets a field to its default."""
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can change engine configuration"
+        )
+    sent = payload.model_dump(exclude_unset=True)
+    return EngineSettings(**await engine_settings_view.update_view(service, sent))
