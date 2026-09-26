@@ -1,5 +1,7 @@
 """Slide edits use Chat's light-agent executor and capability configuration."""
 
+from typing import Any
+
 from src.schemas.crew import CrewStreamingRequest
 from src.schemas.deck import SlideRefineRequest
 from src.schemas.execution import CrewConfig
@@ -7,17 +9,18 @@ from src.services.decks.slide_refine import _system_prompt, _user_message
 from src.services.execution.service import ExecutionService
 from src.services.generation.crews import CrewGenerationService
 from src.services.tools.tool_service import ToolService
+from src.utils.user_context import GroupContext
 
 
-async def start_slide_refinement(body: SlideRefineRequest, session, group_context):
+async def start_slide_refinement(
+    body: SlideRefineRequest, session: Any, group_context: GroupContext
+) -> dict[str, Any]:
     if body.mode == "refine" and not (body.slide or "").strip():
         raise ValueError("a refine needs the slide to revise")
 
     # Match Chat's workspace tool boundary. Never trust client tool IDs/names
     # to enable tools that the current workspace has disabled.
-    enabled = await ToolService(session).get_enabled_tools_for_group(
-        group_context.primary_group_id
-    )
+    enabled = await ToolService(session).get_enabled_tools_for_group(group_context)
     selected = set(body.tools) if body.tools is not None else None
     tools = [
         tool.title
