@@ -294,12 +294,8 @@ CHILD_ENV_NAMES = frozenset(
         "INSTRUCTOR_MODEL_NAME",
         "JEV_API_BASE",
         "DAX_LLM_BATCH_SIZE",
-        # Provider endpoint URLs and model-name overrides (not credentials).
-        "ANTHROPIC_API_BASE",
-        "GEMINI_API_BASE",
-        "DEEPSEEK_ENDPOINT",
-        "KIMI_ENDPOINT",
-        "OPENAI_BASE_URL",
+        # Model-name overrides (not credentials). Provider endpoint URLs are no
+        # longer env: they live on each model in Configuration → Models.
         "AGENT_MODEL",
         "CONNECTION_MODEL",
         "CREW_MODEL",

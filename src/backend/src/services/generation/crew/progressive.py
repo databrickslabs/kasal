@@ -8,7 +8,6 @@ request-scoped session is closed by then — every database touch here opens a
 session of its own, on a PRIVATE connection."""
 
 import logging
-import os
 import re
 import traceback
 from collections import defaultdict
@@ -122,7 +121,7 @@ class ProgressiveGenerationMixin:
                     )
                     return
 
-                model = request.model or os.getenv("CREW_MODEL") or DEFAULT_ENGINE_MODEL
+                model = request.model or DEFAULT_ENGINE_MODEL
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
                 # Caps are UPPER BOUNDS, not predictions: the PLAN LLM decides the

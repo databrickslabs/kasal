@@ -707,8 +707,6 @@
   "src/services/powerbi/service.py::BLE001": 1,
   "src/services/powerbi/service.py::G004": 10,
   "src/services/powerbi/service.py::TRY400": 2,
-  "src/services/prompt_optimization/config.py::BLE001": 1,
-  "src/services/prompt_optimization/config.py::G004": 1,
   "src/services/prompt_optimization/crew_runner.py::BLE001": 7,
   "src/services/prompt_optimization/crew_runner.py::G004": 13,
   "src/services/prompt_optimization/crew_runner.py::TRY400": 1,

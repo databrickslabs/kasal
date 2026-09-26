@@ -6,7 +6,6 @@ and determining optimal connections and dependencies.
 """
 
 import logging
-import os
 import traceback
 from typing import Any, Dict, Optional
 
@@ -183,9 +182,8 @@ class ConnectionService:
         # "gpt-4o-mini" normally, "databricks-llama-4-maverick" under service
         # principal auth — which meant a Databricks-only deployment silently
         # needed an OPENAI_API_KEY for connection generation. The single engine
-        # default is already a Databricks endpoint, so the branch is gone;
-        # override per deployment with DEFAULT_LLM_MODEL or CONNECTION_MODEL.
-        model = request.model or os.getenv("CONNECTION_MODEL", DEFAULT_ENGINE_MODEL)
+        # default is already a Databricks endpoint, so the branch is gone.
+        model = request.model or DEFAULT_ENGINE_MODEL
 
         logger.info(f"Generating connections with model: {model}")
         logger.info(

@@ -41,7 +41,7 @@
   "src/backend/src/services/flow_builder/modules/flow_methods.py": 2342,
   "src/backend/src/services/flow_builder/modules/flow_processors.py": 1423,
   "src/backend/src/services/flow_builder/process_executor.py": 1813,
-  "src/backend/src/services/generation/crew/progressive.py": 1524,
+  "src/backend/src/services/generation/crew/progressive.py": 1523,
   "src/backend/src/services/hitl/service.py": 857,
   "src/backend/src/services/llm/handlers/databricks_responses_llm.py": 838,
   "src/backend/src/services/llm/handlers/databricks_retry_llm.py": 1348,

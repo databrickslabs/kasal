@@ -10,7 +10,6 @@ execution.
 
 import json
 import logging
-import os
 from typing import Any, Dict, Optional
 
 from src.core.llm.robust_json import robust_json_parser
@@ -24,7 +23,7 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 # Default model for prompt improvement (same fallback as task generation)
-DEFAULT_IMPROVE_MODEL = os.getenv("DEFAULT_IMPROVE_MODEL", DEFAULT_ENGINE_MODEL)
+DEFAULT_IMPROVE_MODEL = DEFAULT_ENGINE_MODEL
 
 
 class PromptImprovementService:
@@ -85,7 +84,7 @@ class PromptImprovementService:
             A field the LLM omits or returns non-string falls back to its
             original text, so the caller always gets a complete set back.
         """
-        model = model or os.getenv("PROMPT_IMPROVE_MODEL", DEFAULT_IMPROVE_MODEL)
+        model = model or DEFAULT_IMPROVE_MODEL
         system = await TemplateService.get_effective_template_content(
             "improve_prompt", group_context
         )

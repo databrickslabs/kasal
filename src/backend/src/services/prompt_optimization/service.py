@@ -53,11 +53,10 @@ from src.services.prompt_optimization import (
     TemplateRunnerMixin,
     run_state,
 )
-from src.services.prompt_optimization.config import (  # noqa: F401
+from src.services.prompt_optimization.config import (
     DEFAULT_TARGET_MODEL,
     MIN_EXAMPLES,
     TEMPLATE_TASKS,
-    _pin_local_experiment,
 )
 from src.services.prompt_optimization.gepa.crew_doc import (
     _CREW_DOC_FIELD_LABELS,

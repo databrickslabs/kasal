@@ -152,7 +152,7 @@ async def maintain_session_summary(
         if len(fold_transcript) < trigger_chars():
             return False
 
-        model = os.getenv("CHAT_COMPACTION_MODEL") or model_name
+        model = model_name
         if not model:
             return False
         new_summary = await LLMManager.completion(

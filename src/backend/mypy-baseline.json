@@ -7129,16 +7129,6 @@
     },
     {
       "file": "src/services/generation/crew/complete.py",
-      "message": "Argument \"model\" to \"_process_crew_setup\" of \"CompleteGenerationMixin\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/generation/crew/complete.py",
-      "message": "Argument \"model\" to \"completion\" of \"LLMManager\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/generation/crew/complete.py",
       "message": "Incompatible default for argument \"model\" (default has type \"None\", argument has type \"str\")  [assignment]",
       "count": 1
     },
@@ -7294,16 +7284,6 @@
     },
     {
       "file": "src/services/generation/prompt_improvement.py",
-      "message": "Argument \"model\" to \"_log_llm_interaction\" of \"PromptImprovementService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/generation/prompt_improvement.py",
-      "message": "Argument \"model\" to \"completion\" of \"LLMManager\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/generation/prompt_improvement.py",
       "message": "Argument \"response\" to \"_log_llm_interaction\" of \"PromptImprovementService\" has incompatible type \"str | tuple[str, str]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
@@ -7316,16 +7296,6 @@
       "file": "src/services/generation/prompt_improvement.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
-    },
-    {
-      "file": "src/services/generation/tasks.py",
-      "message": "Argument \"model\" to \"_log_llm_interaction\" of \"TaskGenerationService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 5
-    },
-    {
-      "file": "src/services/generation/tasks.py",
-      "message": "Argument \"model\" to \"completion\" of \"LLMManager\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/services/generation/tasks.py",
@@ -8065,66 +8035,6 @@
     {
       "file": "src/services/llm/manager.py",
       "message": "Argument 1 to \"LLM\" has incompatible type \"**dict[str, str | int]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"Literal['completions', 'responses']\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"Literal['openai']\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"bool | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"float | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"int | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"list[str] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"VLLMFunctionCallingLLM\" has incompatible type \"**dict[str, str | int]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/manager.py",
-      "message": "Argument 1 to \"int\" has incompatible type \"Any | str | None\"; expected \"str | Buffer | SupportsInt | SupportsIndex | SupportsTrunc\"  [arg-type]",
       "count": 1
     },
     {

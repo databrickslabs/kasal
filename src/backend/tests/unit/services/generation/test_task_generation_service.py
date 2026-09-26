@@ -289,7 +289,7 @@ class TestGenerateTask:
             assert MockLLM.completion.call_args.kwargs["model"] == "my-custom-model"
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_env_model(self):
+    async def test_falls_back_to_the_engine_default_not_env(self):
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
@@ -304,7 +304,10 @@ class TestGenerateTask:
             await svc.generate_task(request)
 
             MockLLM.completion.assert_awaited_once()
-            assert MockLLM.completion.call_args.kwargs["model"] == "env-model"
+            # The engine default, not the old TASK_MODEL env override.
+            from src.services.generation.tasks import DEFAULT_TASK_MODEL
+
+            assert MockLLM.completion.call_args.kwargs["model"] == DEFAULT_TASK_MODEL
 
     # -- template missing --
 

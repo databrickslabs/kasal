@@ -3117,7 +3117,10 @@ class TestProgressiveGeneration:
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_uses_env_model_fallback(self):
-        """When request.model is None, uses env CREW_MODEL or default."""
+        """When request.model is None, the engine default is used (the old
+        CREW_MODEL env override is ignored)."""
+        from src.services.generation.crew import progressive
+
         request = self._make_progressive_request(model=None)
         gen_id = "gen-model-fallback"
 
@@ -3125,9 +3128,8 @@ class TestProgressiveGeneration:
             with patch.dict(os.environ, {"CREW_MODEL": "env-model"}, clear=False):
                 await self.service.create_crew_progressive(request, None, gen_id)
 
-            # Verify _generate_crew_plan was called with the env model
             call_args = m["plan"].call_args
-            assert call_args.args[2] == "env-model" or call_args[0][2] == "env-model"
+            assert call_args.args[2] == progressive.DEFAULT_ENGINE_MODEL
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_unassigned_tasks_handled(self):

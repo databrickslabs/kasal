@@ -7,9 +7,10 @@ changed:
 
 - **The model is configuration, not a constant.** Default is ``gpt-image-1``;
   set ``model`` in the tool config to use anything else the endpoint serves.
-- **The endpoint is configuration too.** ``OPENAI_BASE_URL`` already redirected
-  the old tool, but nothing said so. A self-hosted or gateway-fronted
-  OpenAI-compatible image endpoint works without touching this file.
+- **The endpoint is configuration too.** Set ``base_url`` in the tool config
+  (Configuration → Tools; it replaced the OPENAI_BASE_URL env var). A
+  self-hosted or gateway-fronted OpenAI-compatible image endpoint works without
+  touching this file.
 - **Both response shapes are handled.** Current image models return
   ``b64_json``; the older ones returned a short-lived ``url``. The old tool read
   ``url`` only, so it would have returned "Failed to generate image" against any
@@ -23,7 +24,6 @@ from one process and the environment is shared by all of them.
 
 import json
 import logging
-import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -63,6 +63,8 @@ class ImageGenerationTool(BaseTool):
     size: Literal["auto", "1024x1024", "1536x1024", "1024x1536"] | None = "1024x1024"
     quality: Literal["auto", "low", "medium", "high"] | None = "auto"
     n: int = 1
+    #: OpenAI-compatible images endpoint (tool config; was OPENAI_BASE_URL).
+    base_url: str = "https://api.openai.com/v1"
     api_key: str | None = Field(default=None, repr=False, exclude=True)
 
     env_vars: list[EnvVar] = Field(
@@ -87,7 +89,7 @@ class ImageGenerationTool(BaseTool):
                 "in the API Keys settings."
             )
 
-        base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        base_url = (self.base_url or "https://api.openai.com/v1").rstrip("/")
         payload: dict[str, Any] = {
             "model": self.model,
             "prompt": image_description,

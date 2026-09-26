@@ -695,10 +695,11 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_model_from_env_var(
+    async def test_empty_model_uses_the_engine_default(
         self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
     ):
-        """When request.model is empty, CONNECTION_MODEL env var is used."""
+        """When request.model is empty, the engine default is used — the old
+        CONNECTION_MODEL env override is ignored."""
         svc = ConnectionService(session=None)
         # Empty string model triggers fallback to env var
         request = _make_request(model="")
@@ -720,7 +721,9 @@ class TestGenerateConnections:
         with patch.dict(os.environ, {"CONNECTION_MODEL": "custom-model"}):
             await svc.generate_connections(request)
 
-        assert "custom-model" in captured_model
+        from src.services.generation.connections import DEFAULT_ENGINE_MODEL
+
+        assert captured_model == [DEFAULT_ENGINE_MODEL]
 
     @pytest.mark.asyncio
     @patch(_LLM_MANAGER_PATCH)

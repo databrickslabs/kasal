@@ -33,6 +33,8 @@ import {
   ButtonGroup,
   DialogContentText
 } from '@mui/material';
+import ModelEndpointFields from './ModelEndpointFields';
+import { endpointError } from './modelEndpoint';
 import SearchIcon from '@mui/icons-material/Search';
 import ModelIcon from '@mui/icons-material/ModelTraining';
 import SaveIcon from '@mui/icons-material/Save';
@@ -156,6 +158,8 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
     const newErrors: Record<string, string> = {};
     if (!editedModel.key) newErrors.key = 'Key is required';
     if (!editedModel.name) newErrors.name = 'Name is required';
+    const endpoint = typeof editedModel.params?.api_base === 'string' ? editedModel.params.api_base : '';
+    if (endpointError(endpoint)) newErrors.api_base = endpointError(endpoint) as string;
 
     if (Object.keys(newErrors).length > 0 || Object.keys(errors).length > 0) {
       setErrors({ ...errors, ...newErrors });
@@ -264,11 +268,21 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
               <MenuItem value="gemini">Gemini</MenuItem>
               <MenuItem value="mistral">Mistral</MenuItem>
               <MenuItem value="ollama">Ollama</MenuItem>
+              <MenuItem value="vllm">vLLM</MenuItem>
+              <MenuItem value="custom">Custom OpenAI-compatible (e.g. KAT Coder)</MenuItem>
+              <MenuItem value="deepseek">DeepSeek</MenuItem>
+              <MenuItem value="kimi">Kimi</MenuItem>
               <MenuItem value="cohere">Cohere</MenuItem>
               <MenuItem value="databricks">Databricks</MenuItem>
               <MenuItem value="local">Local</MenuItem>
             </Select>
           </FormControl>
+
+          <ModelEndpointFields
+            provider={editedModel.provider}
+            params={editedModel.params}
+            onChange={params => setEditedModel(prev => (prev ? { ...prev, params } : null))}
+          />
 
           <Divider sx={{ my: 1.5 }} />
           <Typography variant="subtitle1" color="text.primary" fontWeight="medium" sx={{ pt: 1.5 }}>

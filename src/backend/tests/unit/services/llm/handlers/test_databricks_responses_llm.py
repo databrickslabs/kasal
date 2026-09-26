@@ -1520,12 +1520,24 @@ class TestMaxOutputTokensCap:
         )
         assert self._params(h)["max_output_tokens"] == 4000
 
-    def test_env_override_raises_cap(self, monkeypatch):
+    def test_model_setting_raises_cap(self):
+        """A model raises its own cap (Configuration → Models: output_token_cap)."""
+        h = DatabricksResponsesLLM(
+            model="m",
+            api_key="k",
+            base_url="https://example.com",
+            max_tokens=128000,
+            output_token_cap=64000,
+        )
+        assert self._params(h)["max_output_tokens"] == 64000
+
+    def test_env_var_no_longer_raises_cap(self, monkeypatch):
         monkeypatch.setenv("KASAL_CODEX_MAX_OUTPUT_TOKENS", "64000")
+        monkeypatch.setenv("KASAL_RESPONSES_MAX_OUTPUT_TOKENS", "64000")
         h = DatabricksResponsesLLM(
             model="m", api_key="k", base_url="https://example.com", max_tokens=128000
         )
-        assert self._params(h)["max_output_tokens"] == 64000
+        assert self._params(h)["max_output_tokens"] == 16000
 
 
 class TestSchemaLoggingOnce:

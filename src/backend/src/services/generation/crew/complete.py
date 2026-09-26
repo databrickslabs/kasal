@@ -5,7 +5,6 @@ persisted. Used by the crew-planning dialog; ChatMode and the canvas chat
 input take the progressive path instead."""
 
 import logging
-import os
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -134,7 +133,7 @@ class CompleteGenerationMixin:
             logger.info(f"Tool name to ID mapping: {tool_name_to_id_map}")
 
             # Generate the crew using the LLM
-            model = request.model or os.getenv("CREW_MODEL", DEFAULT_ENGINE_MODEL)
+            model = request.model or DEFAULT_ENGINE_MODEL
 
             # Get and prepare the prompt template with tool descriptions (incl. group/user overrides)
             system_message = await self._prepare_prompt_template(

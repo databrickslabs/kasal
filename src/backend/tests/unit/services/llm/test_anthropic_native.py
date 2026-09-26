@@ -66,12 +66,18 @@ def sse_message(model, blocks, stop):
 async def test_native_messages_thinking_and_tools(
     monkeypatch, model, budget, stream, override
 ):
-    monkeypatch.delenv("ANTHROPIC_API_BASE", raising=False)
+    # The endpoint comes from the model's own settings (Configuration → Models),
+    # not ANTHROPIC_API_BASE; an unrelated provider's env var must not leak in.
+    monkeypatch.setenv("ANTHROPIC_API_BASE", "https://ignored-env.example.com/v1")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://wrong-provider.example.com/v1")
+    model_config = dict(DEFAULT_MODELS[model])
     if override:
-        monkeypatch.setenv("ANTHROPIC_API_BASE", override)
+        model_config["params"] = {
+            **(model_config.get("params") or {}),
+            "api_base": override,
+        }
     service = AsyncMock()
-    service.get_model_config.return_value = DEFAULT_MODELS[model]
+    service.get_model_config.return_value = model_config
     requests = []
     signed = {
         "type": "thinking",

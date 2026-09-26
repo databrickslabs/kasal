@@ -20,6 +20,7 @@ from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.core.logger import LoggerManager
 from src.models.model_config import ModelConfig
 from src.repositories.model_config_repository import ModelConfigRepository
+from src.services.llm.endpoints import SELF_HOSTED_DEFAULTS, model_api_base
 from src.services.settings.api_keys import ApiKeysService
 from src.utils.model_config import get_model_config
 from src.utils.user_context import GroupContext
@@ -46,14 +47,9 @@ def _databricks_configured() -> bool:
     )
 
 
-# Self-hosted providers and the env var holding their base URL (defaults mirror
-# llm_manager's vLLM / Ollama branches). Preferred for the fallback because they
-# cost nothing to call — but only when the box actually answers.
-SELF_HOSTED_ENDPOINTS = {
-    "vllm": ("VLLM_BASE_URL", "http://localhost:8081/v1"),
-    "ollama": ("OLLAMA_API_BASE", "http://localhost:11434"),
-    "custom": ("KAT_BASE_URL", "http://127.0.0.1:8082/v1"),
-}
+# Self-hosted providers are preferred for the fallback because they cost
+# nothing to call — but only when the box actually answers. Their endpoint is
+# the model's own (Configuration → Models; see services/llm/endpoints.py).
 
 # Ranking for fallback candidates: self-hosted first (free), then hosted models
 # that have a usable API key.
@@ -553,7 +549,9 @@ class ModelConfigService:
             "unsupported_params": getattr(m, "unsupported_params", None),
         }
 
-    async def _fallback_candidate_usable(self, provider: str) -> bool:
+    async def _fallback_candidate_usable(
+        self, provider: str, params: Optional[Dict[str, Any]] = None
+    ) -> bool:
         """Can this provider actually serve a request right now?
 
         Self-hosted: the box must answer a TCP connect. Hosted: an API key must
@@ -561,9 +559,9 @@ class ModelConfigService:
         substitution lands on a model that works instead of one that merely
         exists in the catalogue.
         """
-        if provider in SELF_HOSTED_ENDPOINTS:
-            env_var, default = SELF_HOSTED_ENDPOINTS[provider]
-            return await _endpoint_reachable(os.getenv(env_var, default))
+        if provider in SELF_HOSTED_DEFAULTS:
+            url = model_api_base(provider, params)
+            return await _endpoint_reachable(url) if url else False
         if not self.group_id:
             return False
         try:
@@ -621,7 +619,9 @@ class ModelConfigService:
             key=lambda m: _FALLBACK_RANK.get((m.provider or "").lower(), _HOSTED_RANK),
         )
         for m in ranked:
-            if await self._fallback_candidate_usable((m.provider or "").lower()):
+            if await self._fallback_candidate_usable(
+                (m.provider or "").lower(), getattr(m, "params", None)
+            ):
                 return self._as_config(m)
 
         logger.warning(
