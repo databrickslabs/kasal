@@ -252,6 +252,22 @@ def restore_multiprocessing_contexts():
 
 
 @pytest.fixture(autouse=True)
+def restore_engine_settings_snapshot():
+    """Restore the process-wide Configuration → Engines snapshot after each test.
+
+    Engine-config writes (and a lifespan startup) update it, so without this a
+    test that saved a budget override changed the budgets of every later test
+    on the same xdist worker.
+    """
+    from src.services.settings import engine_settings
+
+    saved = dict(engine_settings._snapshot)
+    yield
+    engine_settings._snapshot.clear()
+    engine_settings._snapshot.update(saved)
+
+
+@pytest.fixture(autouse=True)
 def no_leaked_databricks_auth_window(request):
     """Fail a test that leaves a Databricks auth window (sp_auth._pinned) open.
 

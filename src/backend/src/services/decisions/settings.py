@@ -55,7 +55,8 @@ class DecisionSettingsService:
         key = await self.api_keys.find_by_name(JEV_KEY_NAME)
         if update.enabled and not provider.is_configured():
             raise BadRequestError(
-                "Jev is not available on this deployment: JEV_API_BASE is not set"
+                "Jev is not available on this deployment: a system admin must set the "
+                "Jev API URL in Configuration → Engines"
             )
         if update.enabled and not (key and key.encrypted_value):
             raise BadRequestError(

@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.config.settings import settings
 from src.services.decisions import runtime
 from src.services.decisions.contracts import choices_from_response
 from src.services.decisions.policies import question
+from src.services.settings import engine_settings
 
 QUESTIONS = {"q": question("Choose", {"yes": "Yes", "no": "No"})}
 
@@ -26,7 +26,9 @@ def payload(confidence=0.95):
 
 @pytest.fixture
 def gateway(monkeypatch):
-    monkeypatch.setattr(settings, "JEV_API_BASE", "https://example.com")
+    monkeypatch.setitem(
+        engine_settings._snapshot, engine_settings.JEV_API_BASE, "https://example.com"
+    )
     with (
         patch(
             "src.services.decisions.credentials.decision_credential",
@@ -70,9 +72,9 @@ async def test_an_undecryptable_key_falls_back_and_says_why(gateway, caplog):
 async def test_unconfigured_endpoint_is_off_without_reading_credentials(
     gateway, monkeypatch
 ):
-    """No JEV_API_BASE: no credential lookup, no provider call, no trace."""
+    """No Jev API URL: no credential lookup, no provider call, no trace."""
     credential, provider, trace = gateway
-    monkeypatch.setattr(settings, "JEV_API_BASE", "")
+    monkeypatch.setitem(engine_settings._snapshot, engine_settings.JEV_API_BASE, "")
     assert await runtime.decide("test", {}, QUESTIONS, group_id="one") is None
     credential.assert_not_awaited()
     provider.assert_not_awaited()

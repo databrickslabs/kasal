@@ -22,15 +22,15 @@ enforcement or not at all. (When it does: a token ceiling, not a dollar one —
 tokens are counted exactly and for free by the LLM layer, dollars need
 per-model pricing that exists nowhere in this codebase.)
 
-The numbers are a calibrated starting point, not a measurement. Every field is
-env-overridable (``KASAL_BUDGET_<MODE>_<FIELD>``, e.g.
-``KASAL_BUDGET_DEEP_RUN_WALL_CLOCK=7200``) so ops can retune without a deploy.
+The numbers are a calibrated starting point, not a measurement. A system admin
+can override any field in Configuration → Engines → Advanced (stored as the
+``budget_<mode>_<field>`` engine setting; it replaced the
+KASAL_BUDGET_<MODE>_<FIELD> env vars), so ops can retune without a deploy.
 """
 
 import logging
-import os
 from dataclasses import dataclass, fields
-from typing import Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,8 @@ class BudgetProfile:
 
 
 #: The engine's own fallback when nothing sets ``max_execution_time``
-#: (``kernel/agent_builder.DEFAULT_AGENT_MAX_EXECUTION_TIME``, env-overridable,
-#: 900s). Duplicated as a NUMBER rather than imported because this module sits
+#: (``engine_settings.DEFAULT_AGENT_MAX_EXECUTION_TIME``, 900s, overridable in
+#: Configuration → Engines). Duplicated as a NUMBER rather than imported because this module sits
 #: under ``config/`` and ``agent_builder`` pulls in the whole kernel; the test
 #: ``test_deep_is_not_starved_relative_to_an_unprofiled_mode`` fails if the two
 #: drift apart.
@@ -104,31 +104,25 @@ _PROFILES = {
 DEFAULT_MODE = "chat"
 
 
-def _env_override(mode: str, field_name: str, current: int) -> int:
-    raw = os.environ.get(f"KASAL_BUDGET_{mode.upper()}_{field_name.upper()}")
-    if raw is None:
-        return current
-    try:
-        value = int(raw)
-    except ValueError:
-        logger.warning(
-            "ignoring KASAL_BUDGET_%s_%s=%r: not an integer",
-            mode.upper(),
-            field_name.upper(),
-            raw,
-        )
-        return current
-    if value <= 0:
-        # 0 would mean "no rounds at all" rather than "unlimited", which is a
-        # footgun disguised as a kill switch.
-        logger.warning(
-            "ignoring KASAL_BUDGET_%s_%s=%d: must be positive",
-            mode.upper(),
-            field_name.upper(),
-            value,
-        )
-        return current
-    return value
+def _override(mode: str, field_name: str, current: int) -> int:
+    """The Configuration → Engines override for this field, else ``current``."""
+    from src.services.settings import engine_settings
+
+    return engine_settings.get_int(
+        engine_settings.budget_key(mode, field_name), current, minimum=1
+    )
+
+
+def default_profiles() -> Dict[str, Dict[str, int]]:
+    """The built-in budgets per mode (what an unset override falls back to)."""
+    return {
+        mode: {f.name: getattr(profile, f.name) for f in fields(BudgetProfile)}
+        for mode, profile in _PROFILES.items()
+    }
+
+
+def budget_field_names() -> List[str]:
+    return [f.name for f in fields(BudgetProfile)]
 
 
 def resolve_budget_profile(mode: Optional[str]) -> BudgetProfile:
@@ -144,7 +138,7 @@ def resolve_budget_profile(mode: Optional[str]) -> BudgetProfile:
         key, base = DEFAULT_MODE, _PROFILES[DEFAULT_MODE]
 
     overridden = {
-        f.name: _env_override(key, f.name, getattr(base, f.name))
+        f.name: _override(key, f.name, getattr(base, f.name))
         for f in fields(BudgetProfile)
     }
     return BudgetProfile(**overridden)

@@ -3,18 +3,20 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.config.settings import settings
 from src.core.exceptions import BadRequestError, ForbiddenError
 from src.schemas.decision_config import DecisionConfigUpdate
 from src.services.decisions.settings import (
     DecisionCredentialUnreadable,
     DecisionSettingsService,
 )
+from src.services.settings import engine_settings
 
 
 @pytest.fixture
 def service(monkeypatch):
-    monkeypatch.setattr(settings, "JEV_API_BASE", "https://example.com")
+    monkeypatch.setitem(
+        engine_settings._snapshot, engine_settings.JEV_API_BASE, "https://example.com"
+    )
     instance = DecisionSettingsService(AsyncMock(), "workspace-a")
     instance.repository = AsyncMock()
     instance.repository.get.return_value = None
@@ -132,11 +134,11 @@ async def test_an_undecryptable_key_is_not_read_when_not_opted_in(service):
 
 @pytest.mark.asyncio
 async def test_cannot_enable_when_endpoint_not_configured(service, monkeypatch):
-    monkeypatch.setattr(settings, "JEV_API_BASE", "")
+    monkeypatch.setitem(engine_settings._snapshot, engine_settings.JEV_API_BASE, "")
     service.api_keys.find_by_name.return_value = SimpleNamespace(
         encrypted_value="ciphertext"
     )
-    with pytest.raises(BadRequestError, match="JEV_API_BASE"):
+    with pytest.raises(BadRequestError, match="Configuration → Engines"):
         await service.save(DecisionConfigUpdate(enabled=True))
     service.repository.save.assert_not_awaited()
     # Turning it OFF must always work.

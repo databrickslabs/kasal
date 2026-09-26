@@ -1,13 +1,15 @@
 import httpx
 import pytest
 
-from src.config.settings import settings
 from src.services.decisions import provider
+from src.services.settings import engine_settings
 
 
 @pytest.mark.asyncio
 async def test_transport_uses_bearer_and_structured_decisions(monkeypatch):
-    monkeypatch.setattr(settings, "JEV_API_BASE", "https://example.com/")
+    monkeypatch.setitem(
+        engine_settings._snapshot, engine_settings.JEV_API_BASE, "https://example.com/"
+    )
     seen = []
 
     def handle(request):
@@ -24,7 +26,9 @@ async def test_transport_uses_bearer_and_structured_decisions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_transport_rejects_insecure_endpoint(monkeypatch):
-    monkeypatch.setattr(settings, "JEV_API_BASE", "http://example.com")
+    monkeypatch.setitem(
+        engine_settings._snapshot, engine_settings.JEV_API_BASE, "http://example.com"
+    )
     with pytest.raises(ValueError, match="HTTPS"):
         await provider.evaluate("key", {}, {})
 
@@ -33,7 +37,7 @@ async def test_transport_rejects_insecure_endpoint(monkeypatch):
 @pytest.mark.parametrize("value", ["", "   "])
 async def test_no_built_in_endpoint(monkeypatch, value):
     """Unset means unconfigured: there is no default third-party URL."""
-    monkeypatch.setattr(settings, "JEV_API_BASE", value)
+    monkeypatch.setitem(engine_settings._snapshot, engine_settings.JEV_API_BASE, value)
     assert provider.api_base() is None
     assert provider.is_configured() is False
     with pytest.raises(ValueError, match="not configured"):

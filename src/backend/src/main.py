@@ -87,6 +87,23 @@ os.environ["LOG_DIR"] = log_path
 os.makedirs(log_path, exist_ok=True)
 
 
+async def _on_database_ready(system_logger: logging.Logger) -> None:
+    """Startup steps that need the database. Neither may stop the app starting."""
+    # Configuration → Engines settings for synchronous readers (Jev URL, run
+    # budgets, agent time limit). Never raises: defaults apply on failure.
+    from src.services.settings import engine_settings
+
+    await engine_settings.load()
+
+    system_logger.info("Cleaning up stale jobs from previous run...")
+    try:
+        cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
+        if cleaned_jobs > 0:
+            system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
+    except Exception as e:
+        system_logger.error(f"Error cleaning up stale jobs: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -227,16 +244,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         system_logger.error(f"Error checking database: {e}")
 
-    # Clean up stale jobs from previous run
     if db_initialized:
-        system_logger.info("Cleaning up stale jobs from previous run...")
-        try:
-            cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
-            if cleaned_jobs > 0:
-                system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
-        except Exception as e:
-            system_logger.error(f"Error cleaning up stale jobs: {e}")
-            # Don't raise - allow app to start even if cleanup fails
+        await _on_database_ready(system_logger)
 
     # Bound here, unconditionally, because the background tasks below are NOT
     # all conditional. This import used to sit inside the `if db_initialized`

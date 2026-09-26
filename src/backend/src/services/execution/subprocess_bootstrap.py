@@ -51,6 +51,21 @@ def prepare_child_environment(execution_id: str, process_type: str = "crew") -> 
         os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE
 
 
+async def open_child_database() -> bool:
+    """Point this child at the server's database, then load what it configured.
+
+    Re-activates Lakebase (it is not inherited from the parent's hot-swap) and
+    THEN loads the Configuration → Engines settings snapshot, so they are read
+    from the database the server uses. Returns whether Lakebase is active.
+    """
+    from src.db.database_router import activate_lakebase_in_subprocess
+    from src.services.settings import engine_settings
+
+    lakebase_active = await activate_lakebase_in_subprocess()
+    await engine_settings.load()
+    return lakebase_active
+
+
 def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     """
     Configure logging for a subprocess running a crew or flow execution.

@@ -11,7 +11,7 @@ The environment variables that Kasal's backend, launch scripts and frontend read
 - [Security and API limits](#security-and-api-limits)
 - [Execution and LLM tuning](#execution-and-llm-tuning)
 - [Chat, A2UI and generation](#chat-a2ui-and-generation)
-- [Decisions (Jev)](#decisions-jev)
+- [Configuration → Engines system settings](#configuration--engines-system-settings)
 - [Memory, knowledge and recipes](#memory-knowledge-and-recipes)
 - [Event triggers](#event-triggers)
 - [Logging](#logging)
@@ -156,10 +156,7 @@ The execution and LLM variables are:
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `KASAL_LLM_MAX_CONCURRENCY` | `64` | Size of the dedicated thread pool for blocking LLM calls | `src/backend/src/services/llm/manager.py` |
-| `KASAL_AGENT_MAX_EXECUTION_TIME` | `900` | Default wall-clock limit in seconds for one agent's work; `0` disables it. An explicit `max_execution_time` on the agent wins | `src/backend/src/services/execution/kernel/agent_builder.py` |
 | `KASAL_FALLBACK_MODEL` | Unset | Model key to substitute for a Databricks model when no Databricks workspace is available. Ignored unless that model is enabled | `src/backend/src/services/settings/models.py` |
-| `KASAL_THINKING_BUDGET_TOKENS` | `10240` | Default extended-thinking budget when the model config sets none | `src/backend/src/services/llm/manager.py` |
 | `KASAL_RESPONSES_MAX_OUTPUT_TOKENS` | `16000` (falls back to `KASAL_CODEX_MAX_OUTPUT_TOKENS`) | Output-token cap for the Databricks Responses API adapter | `src/backend/src/services/llm/handlers/databricks_responses_llm.py` |
 | `KASAL_REASONING_EFFORT_DISABLED` | Empty | `1`/`true`/`yes` never sends a reasoning-effort parameter | `src/backend/src/utils/model_config.py` |
 | `KASAL_REASONING_EFFORT_MODELS` | Empty | Comma-separated extra model-name substrings that accept reasoning effort | `src/backend/src/utils/model_config.py` |
@@ -208,15 +205,19 @@ These tune the chat surface, generative UI and the crew/task generators:
 | `AGENT_MODEL`, `CREW_MODEL`, `CONNECTION_MODEL`, `DEFAULT_TASK_MODEL`, `TASK_MODEL`, `DEFAULT_IMPROVE_MODEL`, `PROMPT_IMPROVE_MODEL` | `DEFAULT_LLM_MODEL` | Fallbacks for the generators when the request names no model. Prefer choosing the model in the UI | `src/backend/src/services/generation/` |
 | `DAX_LLM_BATCH_SIZE` | `12` | Measures per LLM call in the DAX fallback translator | `src/backend/src/services/tools/metric_view_utils/dax_llm_fallback.py` |
 
-## Decisions (Jev)
+## Configuration → Engines system settings
 
-The Jev decisions provider is off unless the deployment configures its endpoint:
+A system administrator sets these under **Configuration → Engines → System settings**. They apply to every workspace and to runs started after saving. They replaced environment variables that a Databricks App never sets.
 
-| Variable | Default | What it does | Read in |
+| Setting | Default | What it does | Replaced |
 |---|---|---|---|
-| `JEV_API_BASE` | Unset | Base URL of the Jev decisions API, for example `https://jev.example.com`. Unset means Jev is not configured: decisions stay off for every workspace, the runtime reads no credentials, and an admin cannot enable Jev (the save is refused with `400`). When set, each workspace still opts in and stores its key as `JEV_API_KEY` under **Configuration → API Keys** | `src/backend/src/config/settings.py`, `src/backend/src/services/decisions/provider.py` |
+| Jev API URL | Unset | Base URL of the Jev decisions API; it must use `https://`. Unset means Jev is not configured: decisions stay off for every workspace, the runtime reads no credentials, and an admin cannot enable Jev (the save is refused with `400`). When set, each workspace still opts in and stores its key as `JEV_API_KEY` under **Configuration → API Keys** | `JEV_API_BASE` |
+| Advanced → Agent time limit | `900` | Wall-clock seconds for one agent call when the agent sets none; `0` turns it off. An explicit `max_execution_time` on the agent wins | `KASAL_AGENT_MAX_EXECUTION_TIME` |
+| Advanced → Run budget (Deep research) | Built-in profile | Tool rounds and seconds per agent call, seconds per run, and guardrail retries for deep-mode runs. Each field must be at least 1, and **Reset to default** restores the built-in value. Only modes a run applies are shown; today that is deep | `KASAL_BUDGET_<MODE>_<FIELD>` |
 
-It is deployment-owned configuration and has no built-in default; a prompt or tool result never supplies it.
+The settings are `engine_config` rows for engine `kasal`, read and written through `GET` and `PATCH /api/v1/engine-config/settings`. Synchronous readers use an in-process snapshot (`src/backend/src/services/settings/engine_settings.py`): the server loads it at startup, each crew or flow subprocess loads it when it starts, and a save updates it at once.
+
+Two former variables are now constants in `src/backend/src/services/llm/manager.py`: the blocking-LLM thread pool (`LLM_MAX_CONCURRENCY = 64`, formerly `KASAL_LLM_MAX_CONCURRENCY`; the pool is sized at import, so a runtime setting could not apply) and the default extended-thinking budget (`10240` tokens, formerly `KASAL_THINKING_BUDGET_TOKENS`).
 
 ## Memory, knowledge and recipes
 
