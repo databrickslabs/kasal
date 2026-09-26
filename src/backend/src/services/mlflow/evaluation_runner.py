@@ -10,11 +10,43 @@ This module contains:
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().system
+
+
+def _find_text(d: dict, keys: List[str]) -> Optional[str]:
+    """The first non-blank string among ``keys`` of ``d``."""
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
+
+
+def _find_list_or_str(d: dict, keys: List[str]) -> Optional[List[str]]:
+    """The first non-empty list (stringified) or non-blank string among ``keys``."""
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, list) and v:
+            return [str(x) for x in v]
+        if isinstance(v, str) and v.strip():
+            return [v]
+    return None
+
+
+def _to_scorer_model_uri(route: Optional[str]) -> Optional[str]:
+    """A ``provider/model`` judge route as the ``provider:/model`` URI scorers take."""
+    if not route:
+        return None
+    if ":/" in route:
+        return route
+    if "/" in route:
+        provider, model = route.split("/", 1)
+        return f"{provider}:/" + model
+    return route
 
 
 class MLflowEvaluationRunner:
@@ -131,7 +163,7 @@ class MLflowEvaluationRunner:
 
                 # Register dataset as MLflow input
                 try:
-                    ds = mlflow.data.from_pandas(
+                    ds = mlflow.data.from_pandas(  # type: ignore[attr-defined]  # lazy re-export
                         df=eval_df,
                         name="agent_eval_dataset",
                         predictions="predictions",
@@ -142,7 +174,7 @@ class MLflowEvaluationRunner:
 
                 return {
                     "experiment_id": str(
-                        getattr(run, "info", object()).experiment_id
+                        cast(Any, getattr(run, "info", object())).experiment_id
                         if hasattr(getattr(run, "info", object()), "experiment_id")
                         else ""
                     ),
@@ -168,8 +200,8 @@ class MLflowEvaluationRunner:
         """
         import mlflow
 
-        related_trace_ids = []
-        records = []
+        related_trace_ids: List[str] = []
+        records: List[Dict[str, Any]] = []
 
         # First, try to get trace ID from execution history
         stored_trace_id = None
@@ -220,13 +252,13 @@ class MLflowEvaluationRunner:
         return related_trace_ids, records
 
     def _extract_records_from_traces(
-        self, df
+        self, df: Any
     ) -> tuple[List[str], List[Dict[str, Any]]]:
         """Extract evaluation records from trace dataframe."""
         import json as _json
 
-        related_trace_ids = []
-        records = []
+        related_trace_ids: List[str] = []
+        records: List[Dict[str, Any]] = []
 
         df_sel = df
         if "attributes" in df.columns:
@@ -254,7 +286,7 @@ class MLflowEvaluationRunner:
                     else {}
                 )
 
-                def _pick(keys):
+                def _pick(keys: List[str]) -> Any:
                     for kk in keys:
                         v = attrs.get(kk) if isinstance(attrs, dict) else None
                         if (v is None) and (kk in r):
@@ -323,7 +355,7 @@ class MLflowEvaluationRunner:
         except Exception as e:
             logger.warning(f"[MLflowEvaluationRunner] Failed to log parameters: {e}")
 
-    def _log_baseline_metrics(self, eval_df) -> None:
+    def _log_baseline_metrics(self, eval_df: Any) -> None:
         """Log simple baseline metrics."""
         import mlflow
 
@@ -345,7 +377,7 @@ class MLflowEvaluationRunner:
                 mlflow.log_metric("prediction_length_max", float(max(pred_lengths)))
 
             # Word count metrics
-            def _wc(s):
+            def _wc(s: Any) -> float:
                 try:
                     return float(len(str(s).split()))
                 except Exception:
@@ -612,22 +644,6 @@ class MLflowEvaluationRunner:
                                     resp_obj = {}
 
                                 # Heuristics to extract query and contexts from request JSON
-                                def _find_text(d: dict, keys):
-                                    for k in keys:
-                                        v = d.get(k)
-                                        if isinstance(v, str) and v.strip():
-                                            return v
-                                    return None
-
-                                def _find_list_or_str(d: dict, keys):
-                                    for k in keys:
-                                        v = d.get(k)
-                                        if isinstance(v, list) and v:
-                                            return [str(x) for x in v]
-                                        if isinstance(v, str) and v.strip():
-                                            return [v]
-                                    return None
-
                                 inputs_obj = (
                                     req_obj.get("inputs", {})
                                     if isinstance(req_obj.get("inputs", {}), dict)
@@ -731,7 +747,7 @@ class MLflowEvaluationRunner:
                                 )
 
                                 if query or response or all_ctx:
-                                    rec = {
+                                    rec: Dict[str, Any] = {
                                         "inputs": {"query": query},
                                         "outputs": {"response": response},
                                     }
@@ -831,22 +847,7 @@ class MLflowEvaluationRunner:
                     genai_ns = getattr(mlflow, "genai", None)
                     m_scorers = getattr(genai_ns, "scorers", None) if genai_ns else None
 
-                    def _to_scorer_model_uri(route: Optional[str]) -> Optional[str]:
-                        if not route:
-                            return None
-                        try:
-                            if ":/" in route:
-                                return route
-                            if "/" in route:
-                                provider, model = route.split("/", 1)
-                                return f"{provider}:/" + model
-                            if route == "databricks":
-                                return route
-                        except Exception:
-                            pass
-                        return route
-
-                    def _add_scorer(name: str):
+                    def _add_scorer(name: str) -> None:
                         if m_scorers is None:
                             return
                         cls = getattr(m_scorers, name, None)
@@ -909,7 +910,7 @@ class MLflowEvaluationRunner:
 
                 try:
                     ar = mlflow.active_run()
-                    if ar and getattr(ar, "info", object()).run_id != run_id:
+                    if ar and cast(Any, getattr(ar, "info", object())).run_id != run_id:
                         mlflow.end_run()
                 except Exception:
                     pass
@@ -928,7 +929,7 @@ class MLflowEvaluationRunner:
                             f"[MLflowEvaluationRunner] Running mlflow.genai.evaluate for job_id={self.job_id}"
                         )
 
-                        eval_kwargs = {
+                        eval_kwargs: Dict[str, Any] = {
                             "data": eval_data,
                             "scorers": scorers if scorers else [],
                         }
@@ -963,19 +964,6 @@ class MLflowEvaluationRunner:
                     try:
                         # Log scorer info
                         try:
-
-                            def _to_scorer_model_uri(route):
-                                try:
-                                    if not route:
-                                        return None
-                                    if ":/" in route:
-                                        return route
-                                    if "/" in route:
-                                        p, m = route.split("/", 1)
-                                        return f"{p}:/" + m
-                                    return route
-                                except Exception:
-                                    return route
 
                             mlflow.log_params(
                                 {

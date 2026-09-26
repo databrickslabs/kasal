@@ -1,5 +1,6 @@
 import logging
 import queue
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -7,10 +8,10 @@ logger = logging.getLogger(__name__)
 class TraceQueue:
     """Singleton holder for the agent trace queue."""
 
-    _instance = None
-    _queue = None
+    _instance: Optional["TraceQueue"] = None
+    _queue: Optional["queue.Queue[Any]"] = None
 
-    def __new__(cls):
+    def __new__(cls) -> "TraceQueue":
         if cls._instance is None:
             cls._instance = super(TraceQueue, cls).__new__(cls)
             cls._instance._queue = queue.Queue()
@@ -19,10 +20,9 @@ class TraceQueue:
 
     def get_queue(self) -> queue.Queue:
         """Get the singleton queue instance."""
-        logger.debug(
-            f"[TRACE_DEBUG] get_queue called, queue size: {self._queue.qsize()}"
-        )
-        return self._queue
+        q = cast("queue.Queue[Any]", self._queue)  # __new__ always sets it
+        logger.debug(f"[TRACE_DEBUG] get_queue called, queue size: {q.qsize()}")
+        return q
 
 
 # Function to get the singleton queue instance easily

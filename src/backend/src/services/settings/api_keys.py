@@ -151,7 +151,7 @@ class ApiKeysService(BaseService):
 
         # For the response, we need to set the decrypted value
         # This won't be saved to the database, it's just for the API response
-        created_key.value = api_key_data.value
+        setattr(created_key, "value", api_key_data.value)  # response-only, not a column
 
         return created_key
 
@@ -185,10 +185,12 @@ class ApiKeysService(BaseService):
         updated_key = await self.repository.update(api_key.id, update_dict)
 
         self._invalidate_pat_cache()
+        if updated_key is None:  # deleted between the read and the update
+            return None
 
         # For the response, we need to set the decrypted value
         # This won't be saved to the database, it's just for the API response
-        updated_key.value = api_key_data.value
+        setattr(updated_key, "value", api_key_data.value)  # response-only, not a column
 
         return updated_key
 
@@ -226,11 +228,13 @@ class ApiKeysService(BaseService):
         for key in api_keys:
             try:
                 # Set a plain attribute for the value
-                key.value = EncryptionUtils.decrypt_value(key.encrypted_value)
+                setattr(
+                    key, "value", EncryptionUtils.decrypt_value(key.encrypted_value)
+                )
             except Exception as e:
                 logger.error(f"Error decrypting API key '{key.name}': {str(e)}")
                 # If decryption fails, set empty value
-                key.value = ""
+                setattr(key, "value", "")
 
         return api_keys
 
@@ -250,16 +254,18 @@ class ApiKeysService(BaseService):
         for key in api_keys:
             # Check if key has an encrypted value
             has_value = bool(key.encrypted_value and key.encrypted_value.strip())
-            key.value = (
-                "Set" if has_value else "Not set"
-            )  # Status indicator instead of actual value
+            # Status indicator instead of actual value (response-only attribute)
+            setattr(key, "value", "Set" if has_value else "Not set")
 
         return api_keys
 
     @classmethod
     async def get_api_key_value(
-        cls, db: AsyncSession = None, key_name: str = None, group_id: str = None
-    ):
+        cls,
+        db: Optional[AsyncSession] = None,
+        key_name: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Get the value of an API key by name (decrypted).
 
@@ -295,6 +301,8 @@ class ApiKeysService(BaseService):
             service = cls(session, group_id=group_id)
 
             # Find the API key
+            if key_name is None:
+                return None
             api_key = await service.find_by_name(key_name)
             if not api_key:
                 return None

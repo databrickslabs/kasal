@@ -19,7 +19,7 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, cast
 
 from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 from src.services.mlflow.trace_storage import log_trace_storage, select_experiment
@@ -53,7 +53,7 @@ def _build_uc_trace_location(
     catalog: Optional[str],
     schema: Optional[str],
     warehouse_id: Optional[str],
-    log,
+    log: Any,
     *,
     experiment_name: Optional[str] = None,
 ) -> Any:
@@ -670,7 +670,7 @@ async def configure_mlflow_in_subprocess(
                 f"[SUBPROCESS] UC trace storage uses dedicated experiment: {experiment_name}"
             )
 
-        def _set_experiment(name: str):
+        def _set_experiment(name: str) -> Any:
             """Keep an existing UC destination; defaults only provision new ones."""
             if trace_location is not None:
                 exp = select_experiment(mlflow, name, trace_location)
@@ -742,7 +742,7 @@ async def configure_mlflow_in_subprocess(
                 )
             else:
                 mlflow.tracing.set_destination(
-                    _MlflowDbxDest(experiment_id=str(experiment.experiment_id))
+                    _MlflowDbxDest(experiment_id=str(experiment.experiment_id))  # type: ignore[arg-type]  # stub gap
                 )
                 alog.info(
                     f"[SUBPROCESS] MLflow tracing destination set to experiment {experiment.experiment_id}"
@@ -1017,7 +1017,7 @@ async def configure_mlflow_in_subprocess(
 # ---------------------------------------------------------------------------
 
 
-def _try_import_mlflow():
+def _try_import_mlflow() -> Any:
     """Import mlflow if available; return None otherwise."""
     try:
         import mlflow  # type: ignore
@@ -1257,8 +1257,8 @@ def _derive_trace_run_name(
     ``inputs`` rather than at the top level, which is why the previous
     ``config.get("run_name")`` alone produced ``crew_kickoff:Unnamed``.
     """
-    config_inputs = (
-        config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
+    config_inputs = cast(
+        dict, config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
     )
     arg_inputs = inputs if isinstance(inputs, dict) else {}
     for candidate in (

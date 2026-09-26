@@ -405,7 +405,7 @@ class CrewService:
             logger.error(f"Error creating crew with group: {str(e)}")
             raise
 
-    async def find_by_group(self, group_context: GroupContext) -> List[Crew]:
+    async def find_by_group(self, group_context: Optional[GroupContext]) -> List[Crew]:
         """
         Find all crews for the CURRENT workspace (primary group only).
         Returns crews with decrypted tool_configs.
@@ -504,7 +504,9 @@ class CrewService:
         crew = await self.repository.update(id, update_data)
         return self._decrypt_crew_tool_configs(crew)
 
-    async def delete_by_group(self, id: UUID, group_context: GroupContext) -> bool:
+    async def delete_by_group(
+        self, id: UUID, group_context: Optional[GroupContext]
+    ) -> bool:
         """
         Delete a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
 

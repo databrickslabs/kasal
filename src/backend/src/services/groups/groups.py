@@ -39,7 +39,7 @@ class GroupService:
 
         self.user_repo = UserRepository(_User, session)
 
-    async def ensure_group_exists(self, group_context) -> Optional[Group]:
+    async def ensure_group_exists(self, group_context: Any) -> Optional[Group]:
         """
         Ensure group exists, creating it automatically if needed.
 
@@ -99,7 +99,7 @@ class GroupService:
         return group
 
     async def ensure_group_user_exists(
-        self, group_context, user_id: str
+        self, group_context: Any, user_id: str
     ) -> Optional[GroupUser]:
         """
         Ensure group user association exists, creating it automatically if needed.
@@ -288,7 +288,7 @@ class GroupService:
         """
         return await self.group_repo.get(group_id)
 
-    async def update_group(self, group_id: str, **updates) -> Group:
+    async def update_group(self, group_id: str, **updates: Any) -> Group:
         """
         Update a group.
 
@@ -376,7 +376,7 @@ class GroupService:
         group_id: str,
         user_email: str,
         role: GroupUserRole = GroupUserRole.OPERATOR,
-        assigned_by_email: str = None,
+        assigned_by_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Assign a user to a group manually.
@@ -451,6 +451,8 @@ class GroupService:
                 updated_at=datetime.utcnow(),
             )
             group_user = await self.group_user_repo.add(group_user)
+        if group_user is None:  # the row vanished between the read and the update
+            raise ValueError(f"User {actual_user_id} not found in group {group_id}")
 
         logger.info(f"Assigned user {user_email} to group {group_id} with role {role}")
 
@@ -474,7 +476,7 @@ class GroupService:
         }
 
     async def update_group_user(
-        self, group_id: str, user_id: str, **updates
+        self, group_id: str, user_id: str, **updates: Any
     ) -> GroupUser:
         """
         Update a group user.
@@ -500,6 +502,8 @@ class GroupService:
 
         update_data["updated_at"] = datetime.utcnow()
         updated = await self.group_user_repo.update(group_user.id, update_data)
+        if updated is None:  # the row vanished between the read and the update
+            raise ValueError(f"User {user_id} not found in group {group_id}")
 
         # Role/status changed — invalidate cached memberships. We only have
         # user_id here, not email, so clear the whole (small, short-TTL) cache.
@@ -509,7 +513,7 @@ class GroupService:
 
         return updated
 
-    async def remove_user_from_group(self, group_id: str, user_id: str):
+    async def remove_user_from_group(self, group_id: str, user_id: str) -> None:
         """
         Remove a user from a group.
 
@@ -582,9 +586,12 @@ class GroupService:
             int: Total number of groups
         """
         stats = await self.group_repo.get_stats()
-        return stats.get("total_groups", 0)
+        total: int = stats.get("total_groups", 0)
+        return total
 
-    async def create_first_admin_group_for_user(self, user) -> tuple[Group, GroupUser]:
+    async def create_first_admin_group_for_user(
+        self, user: User
+    ) -> tuple[Group, GroupUser]:
         """
         Create the first admin group and assign the user as admin.
         This is called when the first user logs in and no groups exist.

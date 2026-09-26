@@ -428,7 +428,8 @@ class Memory(MemoryHygiene):
             effective_root,
             kind,
         )
-        return future.result()
+        value: list[MemoryRecord] = future.result()
+        return value
 
     def _analyze_for_save(self, content: str) -> "MemoryAnalysis | None":
         """Label one record with the analysis LLM. ``None`` when unavailable.
@@ -663,12 +664,13 @@ class Memory(MemoryHygiene):
         effective_scope = scope or self.root_scope
 
         def _search(text: str) -> list[MemoryRecord]:
-            return self.storage.search(
+            result: list[MemoryRecord] = self.storage.search(
                 text,
                 limit=limit,
                 scope=effective_scope,
                 score_threshold=score_threshold,
             )
+            return result
 
         distilled: str | None = None
         rounds = 0
@@ -716,18 +718,22 @@ class Memory(MemoryHygiene):
     def list_records(
         self, scope: str | None = None, limit: int = 100, offset: int = 0
     ) -> list[MemoryRecord]:
-        return self.storage.list_records(
+        result: list[MemoryRecord] = self.storage.list_records(
             scope or self.root_scope, limit=limit, offset=offset
         )
+        return result
 
     def list_scopes(self, path: str = "/") -> list[str]:
-        return self.storage.list_scopes(path)
+        result: list[str] = self.storage.list_scopes(path)
+        return result
 
     def list_categories(self, path: str = "/") -> list[str]:
-        return self.storage.list_categories(path)
+        result: list[str] = self.storage.list_categories(path)
+        return result
 
     def info(self, path: str = "/") -> ScopeInfo:
-        return self.storage.get_scope_info(path)
+        result: ScopeInfo = self.storage.get_scope_info(path)
+        return result
 
     def scope(self, path: str) -> "Memory":
         """A view of this memory rooted at path (shares storage and hooks)."""
@@ -766,9 +772,10 @@ class Memory(MemoryHygiene):
             "valid_to": valid_to,
             "superseded_by": superseded_by,
         }
-        return self.storage.update(
+        result: MemoryRecord | None = self.storage.update(
             record_id, **{k: v for k, v in changes.items() if v is not None}
         )
+        return result
 
     def reset(self, scope: str | None = None) -> None:
         self.storage.reset(scope)

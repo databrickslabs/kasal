@@ -1,12 +1,16 @@
 """The Chat dispatcher forwards run settings without deriving them from intent."""
 
+from typing import Any, List, Optional
+
 from src.schemas.crew import CrewStreamingRequest
 from src.schemas.dispatcher import DispatcherRequest
 
 
 def streaming_request_for(
-    request: DispatcherRequest, suggested_prompt, effective_tools
-):
+    request: DispatcherRequest,
+    suggested_prompt: Optional[str],
+    effective_tools: Optional[List[Any]],
+) -> CrewStreamingRequest:
     return CrewStreamingRequest(
         prompt=suggested_prompt or request.message,
         # Ground the run with the user's CLEAN message when the

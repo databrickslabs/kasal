@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +61,9 @@ class SchedulerService:
         self._running_tasks: Set[asyncio.Task] = set()
 
     async def create_schedule(
-        self, schedule_data: ScheduleCreate, group_context: GroupContext = None
+        self,
+        schedule_data: ScheduleCreate,
+        group_context: Optional[GroupContext] = None,
     ) -> ScheduleResponse:
         """
         Create a new schedule.
@@ -101,7 +103,7 @@ class SchedulerService:
     async def create_schedule_from_execution(
         self,
         schedule_data: ScheduleCreateFromExecution,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> ScheduleResponse:
         """
         Create a new schedule based on an existing execution.
@@ -235,7 +237,7 @@ class SchedulerService:
             )
 
     async def get_all_schedules(
-        self, group_context: GroupContext = None
+        self, group_context: Optional[GroupContext] = None
     ) -> ScheduleListResponse:
         """
         Get all schedules.
@@ -293,7 +295,7 @@ class SchedulerService:
         return ScheduleResponse.model_validate(schedule)
 
     async def get_schedule_by_id_with_group_check(
-        self, schedule_id: int, group_context: GroupContext = None
+        self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> ScheduleResponse:
         """
         Get a schedule by ID with group isolation.
@@ -357,7 +359,7 @@ class SchedulerService:
         self,
         schedule_id: int,
         schedule_data: ScheduleUpdate,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> ScheduleResponse:
         """
         Update a schedule with group isolation.
@@ -427,7 +429,7 @@ class SchedulerService:
             raise KasalError(detail=f"Failed to delete schedule: {str(e)}")
 
     async def delete_schedule_with_group_check(
-        self, schedule_id: int, group_context: GroupContext = None
+        self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> Dict[str, str]:
         """
         Delete a schedule with group isolation.
@@ -491,7 +493,7 @@ class SchedulerService:
             raise KasalError(detail=f"Failed to toggle schedule: {str(e)}")
 
     async def toggle_schedule_with_group_check(
-        self, schedule_id: int, group_context: GroupContext = None
+        self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> ToggleResponse:
         """
         Toggle a schedule's active state with group isolation.
@@ -855,7 +857,7 @@ class SchedulerService:
         """
         logger.info("Starting scheduler background task...")
 
-        async def scheduler_loop():
+        async def scheduler_loop() -> None:
             while True:
                 try:
                     await self.check_and_run_schedules()
@@ -868,7 +870,7 @@ class SchedulerService:
         self._running_tasks.add(task)
 
         # Add done callback to remove task from set when done
-        def task_done_callback(task):
+        def task_done_callback(task: asyncio.Task[None]) -> None:
             self._running_tasks.discard(task)
             if task.done() and not task.cancelled():
                 exc = task.exception()
@@ -914,7 +916,7 @@ class SchedulerService:
         return jobs
 
     async def get_all_jobs_for_group(
-        self, group_context: GroupContext = None
+        self, group_context: Optional[GroupContext] = None
     ) -> List[SchedulerJobResponse]:
         """
         Get all scheduler jobs for a specific group.
@@ -1015,7 +1017,9 @@ class SchedulerService:
         )
 
     async def create_job_with_group(
-        self, job_create: SchedulerJobCreate, group_context: GroupContext = None
+        self,
+        job_create: SchedulerJobCreate,
+        group_context: Optional[GroupContext] = None,
     ) -> SchedulerJobResponse:
         """
         Create a new scheduler job with group isolation.
@@ -1099,7 +1103,7 @@ class SchedulerService:
             raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Prepare update data
-        update_data = {}
+        update_data: Dict[str, Any] = {}
         if job_update.name is not None:
             update_data["name"] = job_update.name
         if job_update.schedule is not None:
@@ -1120,6 +1124,8 @@ class SchedulerService:
 
         # Update schedule
         updated_schedule = await self.repository.update(job_id, update_data)
+        if updated_schedule is None:
+            raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Convert to job response
         return SchedulerJobResponse(
@@ -1145,7 +1151,7 @@ class SchedulerService:
         self,
         job_id: int,
         job_update: SchedulerJobUpdate,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> SchedulerJobResponse:
         """
         Update a scheduler job with group isolation.
@@ -1172,7 +1178,7 @@ class SchedulerService:
                 raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Prepare update data
-        update_data = {}
+        update_data: Dict[str, Any] = {}
         if job_update.name is not None:
             update_data["name"] = job_update.name
         if job_update.schedule is not None:
@@ -1193,6 +1199,8 @@ class SchedulerService:
 
         # Update schedule
         updated_schedule = await self.repository.update(job_id, update_data)
+        if updated_schedule is None:
+            raise NotFoundError(detail=f"Job with ID {job_id} not found")
 
         # Convert to job response
         return SchedulerJobResponse(

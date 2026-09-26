@@ -73,7 +73,7 @@ class UserService:
         self,
         skip: int = 0,
         limit: int = 100,
-        filters: Dict[str, Any] = None,
+        filters: Optional[Dict[str, Any]] = None,
         search: Optional[str] = None,
     ) -> List[User]:
         """Get a list of users with filtering and search"""

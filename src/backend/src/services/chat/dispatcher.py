@@ -11,7 +11,7 @@ import logging
 import re
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ContextManager, Dict, List, Optional, Tuple
 
 try:
     import mlflow as _mlflow
@@ -349,15 +349,13 @@ class DispatcherService:
     }
 
     def __init__(
-        self, log_service: LLMLogService, template_service: TemplateService, session
-    ):
-        """
-        Initialize the service.
-
-        Args:
-            log_service: Service for logging LLM interactions
-            template_service: Service for template management
-            session: Database session for generation services
+        self,
+        log_service: LLMLogService,
+        template_service: TemplateService,
+        session: Any,
+    ) -> None:
+        """Initialize the service; ``log_service`` records LLM interactions and
+        ``session`` is the database session handed to every generation service.
         """
         self.log_service = log_service
         self.template_service = template_service
@@ -369,7 +367,7 @@ class DispatcherService:
         self.flow_service = FlowService(session)
 
     @classmethod
-    def create(cls, session) -> "DispatcherService":
+    def create(cls, session: Any) -> "DispatcherService":
         """
         Factory method to create a properly configured instance of the service.
 
@@ -394,7 +392,7 @@ class DispatcherService:
         status: str = "success",
         error_message: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> None:
         """
         Log LLM interaction using the log service.
 
@@ -428,7 +426,7 @@ class DispatcherService:
         temperature: float = 0.3,
         max_tokens: int = 4000,
         extra_headers: Optional[dict] = None,
-    ) -> str:
+    ) -> Tuple[str, Optional[str]]:
         """Call LLMManager.completion with retry, timeout, and exponential backoff.
 
         Args:
@@ -451,7 +449,7 @@ class DispatcherService:
 
         for attempt in range(self.LLM_MAX_RETRIES):
             try:
-                completion_kwargs = dict(
+                completion_kwargs: Dict[str, Any] = dict(
                     messages=messages,
                     model=model,
                     temperature=temperature,
@@ -821,7 +819,7 @@ class DispatcherService:
 
     @staticmethod
     def _resolve_effective_tools(
-        requested: Optional[List[str]], enabled_titles
+        requested: Optional[List[str]], enabled_titles: Any
     ) -> List[str]:
         """Restrict the tools available to generation to the workspace's ENABLED set.
 
@@ -962,7 +960,7 @@ Please analyze this message and provide your intent classification."""
         cache_key = hashlib.md5(
             f"{message.strip().lower()}:{model}:{tools_hash}".encode()
         ).hexdigest()
-        cached = await intent_cache.get(group_id, cache_key)
+        cached: Optional[Dict[str, Any]] = await intent_cache.get(group_id, cache_key)
         if cached is not None:
             logger.info(f"Intent cache hit for model {model}")
             cached["source"] = "cache"
@@ -1193,7 +1191,7 @@ Please analyze this message and provide your intent classification."""
     async def dispatch(
         self,
         request: DispatcherRequest,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
         available_tools: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """
@@ -1219,7 +1217,7 @@ Please analyze this message and provide your intent classification."""
                     start_root_trace,
                 )
 
-                trace_ctx = start_root_trace(
+                trace_ctx: ContextManager[Any] = start_root_trace(
                     "dispatcher", inputs={"message": request.message}
                 )
                 logger.info(

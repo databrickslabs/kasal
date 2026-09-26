@@ -17,15 +17,15 @@ logger = LoggerManager.get_instance().system
 class EmbeddingQueueService:
     """Service to batch documentation embedding operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.queue: List[Dict[str, Any]] = []
         self.lock = asyncio.Lock()
         self.batch_size = 10  # Process 10 embeddings at a time
         self.flush_interval = 5.0  # Flush every 5 seconds
-        self._task = None
+        self._task: Optional[asyncio.Task[None]] = None
         self._running = False
 
-    async def start(self):
+    async def start(self) -> None:
         """Start the background queue processor."""
         if not self._running:
             self._running = True
@@ -35,7 +35,7 @@ class EmbeddingQueueService:
             self._task.add_done_callback(self._handle_task_error)
             logger.info("Embedding queue service started")
 
-    def _handle_task_error(self, task):
+    def _handle_task_error(self, task: asyncio.Task[None]) -> None:
         """Handle any errors from the background task."""
         try:
             # This will raise any exception that occurred in the task
@@ -45,7 +45,7 @@ class EmbeddingQueueService:
         except Exception as e:
             logger.error(f"Embedding queue background task error: {e}")
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the background queue processor."""
         self._running = False
         if self._task:
@@ -61,7 +61,7 @@ class EmbeddingQueueService:
         doc_metadata: Optional[Dict[str, Any]] = None,
         group_id: Optional[str] = None,
         file_path: Optional[str] = None,
-    ):
+    ) -> None:
         """Add an embedding to the queue for batch processing."""
         async with self.lock:
             self.queue.append(
@@ -81,7 +81,7 @@ class EmbeddingQueueService:
             if len(self.queue) >= self.batch_size:
                 await self._flush_queue()
 
-    async def _process_queue(self):
+    async def _process_queue(self) -> None:
         """Background task to periodically flush the queue."""
         while self._running:
             try:
@@ -90,7 +90,7 @@ class EmbeddingQueueService:
             except Exception as e:
                 logger.error(f"Error processing embedding queue: {e}")
 
-    async def _flush_queue(self):
+    async def _flush_queue(self) -> None:
         """Flush the queue and batch insert embeddings."""
         async with self.lock:
             if not self.queue:
@@ -102,7 +102,7 @@ class EmbeddingQueueService:
             if batch:
                 await self._batch_insert(batch)
 
-    async def _batch_insert(self, batch: List[Dict[str, Any]]):
+    async def _batch_insert(self, batch: List[Dict[str, Any]]) -> None:
         """Perform batch insert of embeddings.
 
         Router-aware: `documentationembedding` lives in Lakebase when it is
@@ -130,7 +130,9 @@ class EmbeddingQueueService:
             for item in batch:
                 await self._insert_with_retry(item)
 
-    async def _insert_with_retry(self, item: Dict[str, Any], max_retries: int = 3):
+    async def _insert_with_retry(
+        self, item: Dict[str, Any], max_retries: int = 3
+    ) -> None:
         """Insert a single embedding with retry logic.
 
         Same router as _batch_insert — this is its per-item fallback, so a
