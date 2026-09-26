@@ -486,10 +486,12 @@ async def delete_deployment(
     crew_id: str,
     endpoint_name: str,
     group_context: GroupContextDep,
+    session: SessionDep,
 ) -> Dict[str, str]:
     """
     Delete a Model Serving endpoint.
-    Only Admins can delete deployments.
+    Only Admins can delete deployments, and only an endpoint that serves this
+    crew, which must belong to the caller's group.
 
     **Warning:** This operation is irreversible. The endpoint will be permanently deleted.
 
@@ -508,6 +510,16 @@ async def delete_deployment(
     # Validate group context
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
+
+    # The delete runs with the app's credential: refuse any endpoint that is
+    # not this group's deployment of this crew (raises NotFoundError).
+    from src.services.deployment.endpoint_ownership import (
+        ServingEndpointOwnershipService,
+    )
+
+    await ServingEndpointOwnershipService(session).assert_endpoint_belongs_to_crew(
+        crew_id, endpoint_name, group_context.group_ids
+    )
 
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.useragent import with_product

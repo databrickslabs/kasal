@@ -79,6 +79,29 @@ describe('getDatabricksCatalog', () => {
     expect(client.get).toHaveBeenCalledWith('/mcp/databricks/available');
   });
 
+  it('migrates legacy registrations with an explicit POST, never from the GET', async () => {
+    client.get.mockResolvedValue({ data: { legacy_external_count: 2 } });
+    client.post.mockResolvedValueOnce({ data: { migrated: 2 } });
+    expect(await service.getDatabricksCatalog()).toEqual({
+      workspace_url: '',
+      external: [],
+      managed: [],
+    });
+    expect(client.post).toHaveBeenCalledWith('/mcp/databricks/migrate-external-urls');
+  });
+
+  it('does not POST when nothing is pending, and survives a failed migration', async () => {
+    client.get.mockResolvedValue({ data: { legacy_external_count: 0 } });
+    await service.getDatabricksCatalog();
+    expect(client.post).not.toHaveBeenCalledWith('/mcp/databricks/migrate-external-urls');
+
+    client.get.mockResolvedValue({ data: { legacy_external_count: 1 } });
+    client.post.mockRejectedValueOnce(new Error('boom'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await expect(service.getDatabricksCatalog()).resolves.toBeTruthy();
+    warn.mockRestore();
+  });
+
   it('fills defaults when the response is partial', async () => {
     client.get.mockResolvedValue({ data: {} });
     expect(await service.getDatabricksCatalog()).toEqual({

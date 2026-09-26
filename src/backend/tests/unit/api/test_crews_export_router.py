@@ -669,8 +669,15 @@ class TestDeleteDeployment:
         crew_id = "test-crew-123"
         endpoint_name = "test-endpoint"
 
-        with patch(
-            "src.api.crews_export_router.check_role_in_context", return_value=True
+        with (
+            patch(
+                "src.api.crews_export_router.check_role_in_context", return_value=True
+            ),
+            patch(
+                "src.services.deployment.endpoint_ownership."
+                "ServingEndpointOwnershipService.assert_endpoint_belongs_to_crew",
+                new_callable=AsyncMock,
+            ) as mock_check,
         ):
             # Patch the import inside the function
             with patch("databricks.sdk.WorkspaceClient") as mock_ws:
@@ -681,12 +688,16 @@ class TestDeleteDeployment:
                     crew_id=crew_id,
                     endpoint_name=endpoint_name,
                     group_context=valid_group_context,
+                    session=MagicMock(),
                 )
 
                 # Assert inside the context manager where mock is active
                 mock_ws_instance.serving_endpoints.delete.assert_called_once_with(
                     endpoint_name
                 )
+            mock_check.assert_awaited_once_with(
+                crew_id, endpoint_name, valid_group_context.group_ids
+            )
 
         assert result["endpoint_name"] == endpoint_name
         assert "deleted successfully" in result["message"]
@@ -705,6 +716,7 @@ class TestDeleteDeployment:
                     crew_id=crew_id,
                     endpoint_name=endpoint_name,
                     group_context=valid_group_context,
+                    session=MagicMock(),
                 )
 
         assert exc_info.value.status_code == 403
@@ -724,4 +736,29 @@ class TestDeleteDeployment:
                     crew_id="crew-1",
                     endpoint_name="ep-1",
                     group_context=invalid_context,
+                    session=MagicMock(),
                 )
+
+    @pytest.mark.asyncio
+    async def test_delete_refuses_endpoint_not_owned_by_crew(self, valid_group_context):
+        """An endpoint that is not this group's crew deployment is never deleted."""
+        with (
+            patch(
+                "src.api.crews_export_router.check_role_in_context", return_value=True
+            ),
+            patch(
+                "src.services.deployment.endpoint_ownership."
+                "ServingEndpointOwnershipService.assert_endpoint_belongs_to_crew",
+                new_callable=AsyncMock,
+                side_effect=NotFoundError("No deployment"),
+            ),
+            patch("databricks.sdk.WorkspaceClient") as mock_ws,
+        ):
+            with pytest.raises(NotFoundError):
+                await delete_deployment(
+                    crew_id="crew-1",
+                    endpoint_name="someone-elses-endpoint",
+                    group_context=valid_group_context,
+                    session=MagicMock(),
+                )
+            mock_ws.return_value.serving_endpoints.delete.assert_not_called()

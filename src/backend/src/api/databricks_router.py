@@ -3,7 +3,7 @@ from typing import Annotated, Dict, List
 from fastapi import APIRouter, Depends, Query
 
 from src.core.exceptions import ForbiddenError, NotFoundError
-from src.core.permissions import is_workspace_admin
+from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.databricks_config import (
     AIGatewayStatusUpdate,
@@ -256,29 +256,53 @@ async def get_databricks_environment(
     }
 
 
+_HOST_OVERRIDE_DESC = (
+    "Workspace URL. Must match the configured Databricks workspace; the server's "
+    "credential is attached to this request, so any other host is refused."
+)
+
+
+def _check_host_override_role(group_context: GroupContextDep, host: str | None):
+    """A host override is a tool-configuration action: Admin and Editor only.
+
+    The service additionally refuses any host other than the configured
+    workspace, so the role check is defence in depth, not the only guard.
+    """
+    if host and not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError(
+            detail="Only admins and editors can browse a workspace by host"
+        )
+
+
 @router.get("/warehouses", response_model=List[Dict])
 async def list_warehouses(
     service: DatabricksServiceDep,
-    host: str = Query(default=None, description="Override workspace URL"),
+    group_context: GroupContextDep,
+    host: str = Query(default=None, description=_HOST_OVERRIDE_DESC),
 ):
-    """List SQL warehouses in the workspace. Optional ?host= overrides the configured workspace URL."""
+    """List SQL warehouses in the workspace (optional ``host`` = configured workspace only)."""
+    _check_host_override_role(group_context, host)
     return await service.list_warehouses(host=host)
 
 
 @router.get("/catalogs", response_model=List[str])
 async def list_catalogs(
     service: DatabricksServiceDep,
-    host: str = Query(default=None, description="Override workspace URL"),
+    group_context: GroupContextDep,
+    host: str = Query(default=None, description=_HOST_OVERRIDE_DESC),
 ):
-    """List Unity Catalog catalogs in the workspace. Optional ?host= overrides the configured workspace URL."""
+    """List Unity Catalog catalogs (optional ``host`` = configured workspace only)."""
+    _check_host_override_role(group_context, host)
     return await service.list_catalogs(host=host)
 
 
 @router.get("/schemas", response_model=List[str])
 async def list_schemas(
     service: DatabricksServiceDep,
+    group_context: GroupContextDep,
     catalog: str = Query(..., description="Catalog name to list schemas for"),
-    host: str = Query(default=None, description="Override workspace URL"),
+    host: str = Query(default=None, description=_HOST_OVERRIDE_DESC),
 ):
-    """List Unity Catalog schemas for a given catalog. Optional ?host= overrides the configured workspace URL."""
+    """List Unity Catalog schemas for a catalog (optional ``host`` = configured workspace only)."""
+    _check_host_override_role(group_context, host)
     return await service.list_schemas(catalog=catalog, host=host)
