@@ -1,5 +1,8 @@
 # PBI → UCMV: coverage evaluation and best-effort roadmap (SC / PAAT / DCC)
 
+> [!NOTE]
+> **Status: internal / evaluation and roadmap.** An engineering digest of specific customer dataset runs, not user documentation. It names a customer and branch-specific behaviour; review before shipping it in the app bundle.
+
 Consolidated summary of three CCHBC dataset runs (2026-07-28), each analysed
 against the current `feat/pbi-ucmv-fixes-v2` behaviour, plus the concrete repo
 changes they imply. Source analyses live with the run artifacts

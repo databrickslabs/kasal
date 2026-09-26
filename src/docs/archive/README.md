@@ -2,6 +2,9 @@
 
 This folder contains legacy and technical documentation that has been archived during the documentation redesign in January 2025.
 
+> [!WARNING]
+> **Status: archived, not maintained.** These pages describe Kasal before the engine, auth and layout changes that followed. Many of the code paths they cite (for example `src/engines/`, `src/components/`) no longer exist, and their setup and security instructions are out of date. Use the [documentation hub](../README.md) for current information.
+
 ## Organization
 
 ### Technical Documentation (`/technical`)

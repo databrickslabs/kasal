@@ -1,5 +1,8 @@
 # Dual-harness backlog
 
+> [!NOTE]
+> **Status: internal / backlog.** Engineering backlog, not user documentation.
+
 Open items from running Kasal and CrewAI side by side. Each one is written so it
 can be picked up cold: what was observed, why it matters, and where the work is.
 Nothing here is in progress.
