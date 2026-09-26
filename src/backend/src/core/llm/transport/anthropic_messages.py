@@ -1,9 +1,13 @@
 """Translate the shared agent conversation to Anthropic's native Messages API."""
 
 import json
+from collections.abc import Mapping
+from typing import Any
+
+from .prompt_cache import HINT_KEY, mark_native_request
 
 
-def content_blocks(content):
+def content_blocks(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}] if content else []
     result = []
@@ -28,7 +32,10 @@ def content_blocks(content):
                 }
             else:
                 source = {"type": "url", "url": url}
-            result.append({"type": "image", "source": source})
+            image = {"type": "image", "source": source}
+            if "cache_control" in block:
+                image["cache_control"] = block["cache_control"]
+            result.append(image)
         else:
             raise ValueError(
                 f"Unsupported Anthropic content block: {block.get('type')}"
@@ -36,10 +43,17 @@ def content_blocks(content):
     return result
 
 
-def message_params(params, signed_blocks):
-    system, messages = [], []
+def message_params(
+    params: dict[str, Any], signed_blocks: Mapping[tuple[str, ...], list[Any]]
+) -> dict[str, Any]:
+    system: list[dict[str, Any]] = []
+    messages: list[dict[str, Any]] = []
+    # (message index, last block index) of each user turn CrewAI flagged with a
+    # cache hint, recorded as turns coalesce so the marker lands on that turn.
+    hinted: list[tuple[int, int]] = []
     for message in params["messages"]:
         role = message["role"]
+        blocks: list[Any] | None
         if role in ("system", "developer"):
             system.extend(content_blocks(message.get("content")))
             continue
@@ -76,6 +90,8 @@ def message_params(params, signed_blocks):
             messages[-1]["content"].extend(blocks)
         else:
             messages.append({"role": role, "content": list(blocks)})
+        if message["role"] == "user" and message.get(HINT_KEY):
+            hinted.append((len(messages) - 1, len(messages[-1]["content"]) - 1))
     result = {
         "model": params["model"],
         "messages": messages,
@@ -135,4 +151,6 @@ def message_params(params, signed_blocks):
                 "schema": output["json_schema"]["schema"],
             },
         }
+    # Prompt caching: system (or last tool), the rolling tail, CrewAI's hints.
+    mark_native_request(result, hinted)
     return result

@@ -50,3 +50,14 @@ it('keeps loaded results visible and reports partial failures', async () => {
   await waitFor(() => expect(result.current.error).toContain('Some executions'));
   expect(result.current.runs.map(item => item.job_id)).toEqual(['old']);
 });
+it('keeps the detail payload when a newer list summary arrives for the same run', async () => {
+  vi.mocked(runService.getRunByJobId).mockImplementation(async id => ({ ...run(id), result: { output: 'full answer' }, agents_yaml: '{"a":{}}' }));
+  const { result } = renderHook(() => useScopedRuns(['live']));
+  await waitFor(() => expect(result.current.runs[0]?.result).toEqual({ output: 'full answer' }));
+  // A list row: newer status, no result/inputs, empty YAML.
+  act(() => useRunStatusStore.setState({ runHistory: [{ ...run('live', 'a', 'FAILED'), agents_yaml: '', updated_at: '2026-09-01T11:00:00Z' }] }));
+  const merged = result.current.runs[0];
+  expect(merged.status).toBe('FAILED');
+  expect(merged.result).toEqual({ output: 'full answer' });
+  expect(merged.agents_yaml).toBe('{"a":{}}');
+});

@@ -416,6 +416,9 @@ export class RunService {
       crew_id: typeof executionItem.crew_id === 'string' ? executionItem.crew_id : undefined,
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
+      result_preview: executionItem.result_preview as string | undefined,
+      model: (executionItem.model as string | undefined) ?? (inputs?.model as string | undefined),
+      harness: executionItem.harness as string | undefined,
       error: executionItem.error as string | undefined,
       // MLflow integration fields
       mlflow_trace_id: executionItem.mlflow_trace_id as string | undefined,
@@ -443,6 +446,27 @@ export class RunService {
     } catch (error) {
       return null;
     }
+  }
+
+  /**
+   * The run with its full `result` and `inputs`.
+   *
+   * `GET /executions` returns summaries (a `result_preview`, no `result` or
+   * `inputs`, so no `agents_yaml`/`tasks_yaml`); the payload lives on the detail
+   * endpoint. Anything that reads those fields from a list row goes through
+   * here first. A run that already came from the detail endpoint is returned
+   * as is, and so is the list row when the detail cannot be fetched.
+   */
+  public async withPayload(run: Run): Promise<Run> {
+    if (!run.job_id || run.result !== undefined || run.inputs !== undefined) {
+      return run;
+    }
+    const detail = await this.getRunByJobId(run.job_id);
+    if (!detail) return run;
+    const defined = Object.fromEntries(
+      Object.entries(detail).filter(([, value]) => value !== undefined && value !== ''),
+    ) as Partial<Run>;
+    return { ...run, ...defined, id: run.id };
   }
 
   public async getRuns(limit?: number, offset?: number, updated_since?: string): Promise<RunsResponse> {

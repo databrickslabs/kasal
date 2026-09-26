@@ -186,5 +186,7 @@ async def test_native_messages_thinking_and_tools(
         "type": "tool_result",
         "tool_use_id": "lookup-1",
         "content": "Verified content",
+        # Rolling prompt-cache breakpoint on the conversation tail.
+        "cache_control": {"type": "ephemeral"},
     }
     assert "Check a source first." in llm._reasoning_text

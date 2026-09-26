@@ -10,7 +10,7 @@ ImportError is raised on first use if it is missing.
 import logging
 import os
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import closing
 from typing import Any, Literal
 
@@ -45,6 +45,7 @@ from .exceptions import (
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
+from .prompt_cache import CacheMode, cache_mode, chat_messages_for, without_hints
 from .request_deadline import bounded_params, call_deadline, check_request_deadline
 
 # Aliased: `function_calls` is the local variable name throughout the round
@@ -178,20 +179,10 @@ def valid_thinking_efforts(model_name: str | None) -> tuple[str, ...]:
     return allowed_efforts(model_name)
 
 
-def _without_cache_breakpoints(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove CrewAI's internal cache hint without mutating its conversation.
-
-    OpenAI-compatible endpoints reject this top-level field. Preserve all
-    other fields, including Responses reasoning/tool items and content blocks.
-    """
-    return [
-        (
-            {key: value for key, value in message.items() if key != "cache_breakpoint"}
-            if isinstance(message, dict) and "cache_breakpoint" in message
-            else message
-        )
-        for message in messages
-    ]
+# Kept under its old name: the Responses path strips hints unconditionally
+# (Databricks documents no cache_control there), and the Chat Completions path
+# goes through `chat_messages_for`, which strips them for non-Claude endpoints.
+_without_cache_breakpoints = without_hints
 
 
 class OpenAICompletion(ContextWindowBudget, BaseLLM):
@@ -524,6 +515,10 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             "display": "summarized",
         }
 
+    def _prompt_cache_mode(self) -> CacheMode | None:
+        """Which ``cache_control`` dialect this endpoint takes — see prompt_cache."""
+        return cache_mode(self.provider, self.model, self.api)
+
     def _prepare_completion_params(
         self,
         messages: list[dict[str, Any]],
@@ -535,7 +530,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         # processing path, so it is accepted and inert.
         params: dict[str, Any] = {
             "model": self.model,
-            "messages": _without_cache_breakpoints(messages),
+            "messages": chat_messages_for(self._prompt_cache_mode(), messages),
         }
         # The escape hatch goes in FIRST so the declared fields below override
         # it. A typed, validated field must not be silently displaced by a loose
@@ -863,7 +858,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             )
         return ""
 
-    def _chat_stream_chunks(self, params: dict[str, Any]) -> Iterator[Any]:
+    def _chat_stream_chunks(self, params: dict[str, Any]) -> Generator[Any, None, None]:
         """Negotiate usage before model fallback, including errors sent via SSE.
 
         The SDK can accept HTTP 200 and only raise the provider's validation

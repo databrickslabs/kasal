@@ -22,9 +22,35 @@ from src.schemas.execution_history import (
     ExecutionOutputDebugList,
     ExecutionOutputList,
 )
+from src.services.execution.listing import result_preview
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
+
+
+def _summary_item(row: Any) -> ExecutionHistoryItem:
+    """A list item from an ``execution_summary_columns`` projection row."""
+    return ExecutionHistoryItem.model_validate(
+        {
+            "id": row.id,
+            "job_id": row.job_id,
+            "run_name": row.run_name,
+            "status": row.status,
+            "error": row.error,
+            "created_at": row.created_at,
+            "execution_type": row.execution_type or row.input_execution_type,
+            "harness": row.harness,
+            "model": row.model,
+            "group_email": row.group_email,
+            "mlflow_trace_id": row.mlflow_trace_id,
+            "mlflow_experiment_name": row.mlflow_experiment_name,
+            "mlflow_evaluation_run_id": row.mlflow_evaluation_run_id,
+            "flow_uuid": str(row.flow_uuid) if row.flow_uuid else None,
+            "checkpoint_status": row.checkpoint_status,
+            "checkpoint_method": row.checkpoint_method,
+            "result_preview": result_preview(row.result_preview),
+        }
+    )
 
 
 class ExecutionHistoryService:
@@ -90,7 +116,11 @@ class ExecutionHistoryService:
         return masked_inputs
 
     async def get_execution_history(
-        self, limit: int = 50, offset: int = 0, group_ids: List[str] = None
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: List[str] = None,
+        include_payload: bool = False,
     ) -> ExecutionHistoryList:
         """
         Get paginated execution history with group-based filtering.
@@ -99,6 +129,9 @@ class ExecutionHistoryService:
             limit: Maximum number of items to return
             offset: Number of items to skip
             group_ids: List of group IDs for group-based filtering
+            include_payload: Return each run's full ``result``, masked ``input``
+                and ``agents_yaml``/``tasks_yaml``. Off by default: rows are
+                summaries carrying a ``result_preview``.
 
         Returns:
             ExecutionHistoryList with paginated execution history items and metadata
@@ -106,8 +139,15 @@ class ExecutionHistoryService:
         try:
             # Use the repository to get the paginated data and total count
             runs, total_count = await self.history_repo.get_execution_history(
-                limit=limit, offset=offset, group_ids=group_ids
+                limit=limit, offset=offset, group_ids=group_ids, full=include_payload
             )
+            if not include_payload:
+                return ExecutionHistoryList(
+                    executions=[_summary_item(row) for row in runs],
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                )
 
             # Convert each run to a pydantic model, handling string results properly
             import json

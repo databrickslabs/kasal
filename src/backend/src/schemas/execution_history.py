@@ -37,6 +37,14 @@ class ExecutionHistoryItem(BaseModel):
         ),
     )
     result: Optional[Dict[str, Any]] = None
+    result_preview: Optional[str] = Field(
+        None,
+        description=(
+            "First characters of the serialized result. List rows omit `result`, "
+            "`input`, `agents_yaml` and `tasks_yaml` unless `include_payload=true`; "
+            "GET /executions/history/{execution_id} returns them in full."
+        ),
+    )
     group_email: Optional[str] = Field(
         None, description="Email of the user who submitted the execution"
     )

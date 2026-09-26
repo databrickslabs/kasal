@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from uuid import UUID
 
-from sqlalchemy import delete, distinct, func, update
+from sqlalchemy import Text, cast, delete, distinct, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -28,6 +28,49 @@ logger = logging.getLogger(__name__)
 # updates, where None is itself a meaningful value rather than an absent
 # argument.
 _UNSET = object()
+
+#: Characters of the serialized ``result`` a list row carries. Enough for a
+#: status line in a table; the whole payload stays on the detail endpoints.
+RESULT_PREVIEW_CHARS = 280
+
+
+def execution_summary_columns() -> tuple:
+    """The columns a run LIST needs — never the ``result``/``inputs`` blobs.
+
+    LLM results and crew YAML are routinely 10-150 KB per row, and a list page
+    is up to 100 rows. The small JSON fields list views still read (execution
+    type and flow id for rows written before those columns existed, and the
+    model) are extracted in SQL; ``result`` contributes only a truncated
+    preview.
+    """
+    run = ExecutionHistory
+    return (
+        run.id,
+        run.job_id,
+        run.status,
+        run.created_at,
+        run.completed_at,
+        run.run_name,
+        run.error,
+        run.group_id,
+        run.group_email,
+        run.execution_type,
+        run.harness,
+        run.flow_id,
+        run.crew_id,
+        run.flow_uuid,
+        run.checkpoint_status,
+        run.checkpoint_method,
+        run.mlflow_trace_id,
+        run.mlflow_experiment_name,
+        run.mlflow_evaluation_run_id,
+        run.inputs["execution_type"].as_string().label("input_execution_type"),
+        run.inputs["flow_id"].as_string().label("input_flow_id"),
+        run.inputs["model"].as_string().label("model"),
+        func.substr(cast(run.result, Text), 1, RESULT_PREVIEW_CHARS).label(
+            "result_preview"
+        ),
+    )
 
 
 class ExecutionHistoryRepository:
@@ -154,8 +197,12 @@ class ExecutionHistoryRepository:
             await self.session.commit()
 
     async def get_execution_history(
-        self, limit: int = 50, offset: int = 0, group_ids: List[str] = None
-    ) -> tuple[List[ExecutionHistory], int]:
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: Optional[List[str]] = None,
+        full: bool = False,
+    ) -> tuple[List[Any], int]:
         """
         Get paginated execution history with group filtering.
 
@@ -163,9 +210,12 @@ class ExecutionHistoryRepository:
             limit: Maximum number of items to return
             offset: Number of items to skip
             group_ids: List of group IDs for filtering
+            full: Load whole rows (``result``, ``inputs`` and every other
+                column). By default rows are :func:`execution_summary_columns`
+                projections, with attribute access by column name.
 
         Returns:
-            Tuple of (list of Run objects, total count)
+            Tuple of (runs, total count)
         """
         # Use the session from the repository
         if not self.session:
@@ -186,16 +236,16 @@ class ExecutionHistoryRepository:
         total_count_result = await session.execute(count_stmt)
         total_count = total_count_result.scalar() or 0
 
-        # Get paginated runs
+        # Get paginated runs — summary columns only unless asked for payloads.
         stmt = (
-            select(ExecutionHistory)
+            select(*((ExecutionHistory,) if full else execution_summary_columns()))
             .where(base_filter)
             .order_by(ExecutionHistory.created_at.desc())
             .offset(offset)
             .limit(limit)
         )
         result = await session.execute(stmt)
-        runs = result.scalars().all()
+        runs = list(result.scalars().all() if full else result.all())
 
         return runs, total_count
 

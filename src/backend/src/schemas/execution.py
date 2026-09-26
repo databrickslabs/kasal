@@ -250,6 +250,15 @@ class ExecutionResponse(BaseModel):
         None, description="Result data from execution"
     )
     error: Optional[str] = Field(None, description="Error message if execution failed")
+    model: Optional[str] = Field(None, description="Model the run was started with")
+    result_preview: Optional[str] = Field(
+        None,
+        description=(
+            "First characters of the serialized result. Set on LIST rows, which "
+            "omit `result` and `inputs` unless `include_payload=true`; fetch "
+            "GET /executions/{execution_id} for the full result."
+        ),
+    )
     run_name: Optional[str] = Field(
         None, description="Descriptive name for the execution"
     )

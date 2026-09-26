@@ -2,14 +2,18 @@
 
 import json
 from collections import OrderedDict
+from collections.abc import Generator
 from types import SimpleNamespace as NS
+from typing import Any
 
 from .anthropic_messages import message_params
 from .response_parsing import REDACTED_REASONING
 
 
 class AnthropicClient:
-    def __init__(self, *, api_key, base_url, timeout, max_retries):
+    def __init__(
+        self, *, api_key: Any, base_url: Any, timeout: Any, max_retries: int
+    ) -> None:
         from anthropic import Anthropic
 
         self._native = Anthropic(
@@ -18,13 +22,15 @@ class AnthropicClient:
             timeout=timeout,
             max_retries=max_retries,
         )
-        self._signed_blocks = OrderedDict()
+        self._signed_blocks: OrderedDict[tuple[str, ...], list[dict[str, Any]]] = (
+            OrderedDict()
+        )
         self.chat = NS(completions=NS(create=self.create))
 
-    def close(self):
+    def close(self) -> None:
         self._native.close()
 
-    def _message(self, message):
+    def _message(self, message: Any) -> tuple[NS, NS, str]:
         blocks = [b.model_dump(exclude_none=True) for b in message.content]
         calls = [b for b in blocks if b["type"] == "tool_use"]
         if calls:
@@ -42,16 +48,16 @@ class AnthropicClient:
             thinking = REDACTED_REASONING
         usage = message.usage
         cached = getattr(usage, "cache_read_input_tokens", 0) or 0
-        prompt = (
-            usage.input_tokens
-            + cached
-            + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
-        )
+        created = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        # Native input_tokens excludes both cache buckets; prompt_tokens is the
+        # whole prompt, as on every OpenAI-compatible endpoint.
+        prompt = usage.input_tokens + cached + created
         tokens = NS(
             prompt_tokens=prompt,
             completion_tokens=usage.output_tokens,
             total_tokens=prompt + usage.output_tokens,
             prompt_tokens_details=NS(cached_tokens=cached),
+            cache_creation_input_tokens=created,
         )
         tool_calls = [
             NS(
@@ -71,7 +77,7 @@ class AnthropicClient:
             finish,
         )
 
-    def create(self, **params):
+    def create(self, **params: Any) -> Any:
         native = message_params(params, self._signed_blocks)
         if params.get("stream"):
             return self._stream(native)
@@ -79,7 +85,7 @@ class AnthropicClient:
         converted, usage, finish = self._message(message)
         return NS(choices=[NS(message=converted, finish_reason=finish)], usage=usage)
 
-    def _stream(self, params):
+    def _stream(self, params: dict[str, Any]) -> Generator[NS, None, None]:
         with self._native.messages.stream(**params) as stream:
             for event in stream:
                 if event.type != "content_block_delta":
@@ -92,11 +98,11 @@ class AnthropicClient:
             message, usage, finish = self._message(stream.get_final_message())
             # SDK accumulation preserves partial tool JSON and thinking signatures.
             # Tool calls are dispatched only after the complete native message arrives.
-            delta = NS(tool_calls=message.tool_calls)
+            final = NS(tool_calls=message.tool_calls)
             if message.reasoning_content == REDACTED_REASONING:
-                delta.reasoning_content = REDACTED_REASONING
-            yield self._chunk(delta, usage, finish)
+                final.reasoning_content = REDACTED_REASONING
+            yield self._chunk(final, usage, finish)
 
     @staticmethod
-    def _chunk(delta, usage=None, finish=None):
+    def _chunk(delta: NS, usage: Any = None, finish: Any = None) -> NS:
         return NS(choices=[NS(delta=delta, finish_reason=finish)], usage=usage)

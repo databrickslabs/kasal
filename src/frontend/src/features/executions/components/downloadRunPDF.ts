@@ -1,5 +1,5 @@
 import toast from 'react-hot-toast';
-import type { Run } from '../../../api/execution/ExecutionHistoryService';
+import { runService, type Run } from '../../../api/execution/ExecutionHistoryService';
 import { isChunkLoadError } from '../../../shared/errors/chunkErrors';
 
 /**
@@ -8,12 +8,14 @@ import { isChunkLoadError } from '../../../shared/errors/chunkErrors';
  * `@react-pdf/renderer` is large, so the generator is a lazy chunk loaded on
  * first use. The call sites used to `void` the promise: a failed chunk load
  * (typically after a redeploy) or a render error then did nothing visible.
- * This never rejects; every failure becomes an error toast.
+ * List rows are summaries without the full result, so the run is fetched
+ * from the detail endpoint first. This never rejects; every failure becomes
+ * an error toast.
  */
 export async function downloadRunPDF(run: Run): Promise<void> {
   try {
     const { generateRunPDF } = await import('../../../utils/pdfGenerator');
-    await generateRunPDF(run);
+    await generateRunPDF(await runService.withPayload(run));
   } catch (error) {
     console.error('Could not generate the run PDF', error);
     toast.error(

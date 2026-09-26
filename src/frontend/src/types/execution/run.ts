@@ -29,6 +29,7 @@ export interface Run {
   flow_id?: string;
   /** Saved crew definition used by this execution. */
   crew_id?: string;
+  /** Full inputs. Only on runs from the DETAIL endpoint, like `result`. */
   inputs?: {
     agents_yaml?: Record<string, any>;
     tasks_yaml?: Record<string, any>;
@@ -43,7 +44,13 @@ export interface Run {
     flow_config?: Record<string, any>;
     [key: string]: any;
   };
+  /** Full result. Only on runs from the DETAIL endpoint: list rows omit it
+   *  (see `runService.withPayload`). */
   result?: RunResult;
+  /** Start of the serialized result, carried by list rows instead of `result`. */
+  result_preview?: string;
+  /** Model the run was started with (a list-row scalar; `inputs.model` on detail). */
+  model?: string;
   error?: string;
   // MLflow integration fields
   mlflow_trace_id?: string;
