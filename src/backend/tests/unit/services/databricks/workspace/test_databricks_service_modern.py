@@ -1,5 +1,4 @@
 import os
-import warnings
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import httpx
@@ -506,98 +505,6 @@ class TestCheckAppsConfiguration:
 # ===========================================================================
 # setup_endpoint static method (lines 242-272)
 # ===========================================================================
-
-
-class TestSetupEndpoint:
-    """Tests for setup_endpoint static method."""
-
-    def test_valid_config_sets_env_vars(self):
-        """Lines 249-266: Valid config sets DATABRICKS_API_BASE and DATABRICKS_ENDPOINT."""
-        mock_config = MagicMock()
-        mock_config.workspace_url = "https://example.com/"
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = DatabricksService.setup_endpoint(mock_config)
-
-        assert result is True
-        assert (
-            os.environ["DATABRICKS_API_BASE"] == "https://example.com/serving-endpoints"
-        )
-        assert (
-            os.environ["DATABRICKS_ENDPOINT"] == "https://example.com/serving-endpoints"
-        )
-
-    def test_url_already_has_serving_endpoints(self):
-        """Lines 259-262: URL ending with /serving-endpoints is preserved."""
-        mock_config = MagicMock()
-        mock_config.workspace_url = "https://example.com/serving-endpoints"
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = DatabricksService.setup_endpoint(mock_config)
-
-        assert result is True
-        assert (
-            os.environ["DATABRICKS_ENDPOINT"] == "https://example.com/serving-endpoints"
-        )
-
-    def test_no_config_returns_false(self):
-        """Lines 267-269: None config returns False."""
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = DatabricksService.setup_endpoint(None)
-
-        assert result is False
-
-    def test_no_workspace_url_returns_false(self):
-        """Lines 267-269: Config with empty workspace_url returns False."""
-        mock_config = MagicMock()
-        mock_config.workspace_url = ""
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = DatabricksService.setup_endpoint(mock_config)
-
-        assert result is False
-
-    def test_config_without_workspace_url_attr_returns_false(self):
-        """Lines 267-269: Config without workspace_url attribute returns False."""
-        mock_config = MagicMock(spec=[])
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = DatabricksService.setup_endpoint(mock_config)
-
-        assert result is False
-
-    def test_exception_returns_false(self):
-        """Lines 270-272: Exception during setup returns False."""
-        mock_config = MagicMock()
-        mock_config.workspace_url = "https://example.com"
-        # Make rstrip raise to trigger the except branch
-        type(mock_config).workspace_url = PropertyMock(side_effect=RuntimeError("fail"))
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = DatabricksService.setup_endpoint(mock_config)
-
-        assert result is False
-
-    def test_deprecation_warning_emitted(self):
-        """Lines 242-248: DeprecationWarning is emitted."""
-        mock_config = MagicMock()
-        mock_config.workspace_url = "https://example.com"
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            DatabricksService.setup_endpoint(mock_config)
-
-        deprecation_warnings = [
-            x for x in w if issubclass(x.category, DeprecationWarning)
-        ]
-        assert len(deprecation_warnings) >= 1
-        assert "deprecated" in str(deprecation_warnings[0].message).lower()
 
 
 # ===========================================================================

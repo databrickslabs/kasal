@@ -2,7 +2,7 @@
 Unit tests for src/services/otel_tracing/otel_config.py.
 
 Covers:
-  - is_otel_tracing_enabled()
+
   - create_kasal_tracer_provider()
   - shutdown_provider()
 
@@ -22,71 +22,6 @@ def _reset_active_provider():
     import src.services.otel_tracing.otel_config as mod
 
     mod._active_provider = None
-
-
-# ---------------------------------------------------------------------------
-# is_otel_tracing_enabled
-# ---------------------------------------------------------------------------
-
-
-class TestIsOtelTracingEnabled:
-    """Tests for is_otel_tracing_enabled()."""
-
-    def test_returns_true_when_env_not_set(self, monkeypatch):
-        """Default (no env var) should be enabled."""
-        monkeypatch.delenv("KASAL_OTEL_TRACING", raising=False)
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is True
-
-    def test_returns_true_when_env_is_true(self, monkeypatch):
-        """Explicit 'true' should be enabled."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "true")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is True
-
-    def test_returns_true_when_env_is_TRUE_uppercase(self, monkeypatch):
-        """Case-insensitive comparison: 'TRUE' should also be enabled."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "TRUE")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is True
-
-    def test_returns_true_when_env_is_True_mixed(self, monkeypatch):
-        """Case-insensitive comparison: 'True' should also be enabled."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "True")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is True
-
-    def test_returns_false_when_env_is_false(self, monkeypatch):
-        """'false' should disable tracing."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "false")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is False
-
-    def test_returns_false_when_env_is_FALSE_uppercase(self, monkeypatch):
-        """'FALSE' should disable tracing."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "FALSE")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is False
-
-    def test_returns_false_when_env_is_zero(self, monkeypatch):
-        """'0' is not 'true', should disable tracing."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "0")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is False
-
-    def test_returns_false_when_env_is_empty_string(self, monkeypatch):
-        """Empty string is not 'true', should disable tracing."""
-        monkeypatch.setenv("KASAL_OTEL_TRACING", "")
-        from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
-
-        assert is_otel_tracing_enabled() is False
 
 
 # ---------------------------------------------------------------------------

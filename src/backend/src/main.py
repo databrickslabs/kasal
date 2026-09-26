@@ -46,9 +46,6 @@ from src.services.execution.cleanup import (  # noqa: E402 - import follows modu
 from src.services.scheduling.scheduler import (  # noqa: E402 - import follows module initialization
     SchedulerService,
 )
-from src.utils.databricks_url_utils import (  # noqa: E402 - import follows module initialization
-    DatabricksURLUtils,
-)
 from src.utils.memory_paths import warn_if_local_memory_is_ephemeral  # noqa: E402
 
 # Get logger after configuration
@@ -141,13 +138,6 @@ async def lifespan(app: FastAPI):
         _logging.getLogger("src.services.groups.users").setLevel(_logging.WARNING)
     except Exception as _e:
         system_logger.warning(f"Failed to adjust module log levels: {_e}")
-
-    # Validate and fix Databricks environment variables early in startup
-    try:
-        system_logger.info("Validating Databricks environment configuration...")
-        await DatabricksURLUtils.validate_and_fix_environment()
-    except Exception as e:
-        system_logger.warning(f"Error validating Databricks environment: {e}")
 
     # Inside Apps, local (DEFAULT) memory is lost on redeploy: say so once.
     warn_if_local_memory_is_ephemeral()
@@ -813,7 +803,7 @@ class LocalDevAuthMiddleware:
                 "[LOCAL_DEV_AUTH] Development identity fallback is ACTIVE: a "
                 "request without an identity header runs as %s. Unset "
                 "LOCAL_DEV_AUTH to disable it.",
-                settings.LOCAL_DEV_USER_EMAIL or "dev@localhost",
+                settings.LOCAL_DEV_USER_EMAIL,
             )
 
     async def __call__(self, scope, receive, send):
@@ -826,11 +816,11 @@ class LocalDevAuthMiddleware:
                 scope["headers"] = list(scope.get("headers", [])) + [
                     (
                         b"x-forwarded-email",
-                        (settings.LOCAL_DEV_USER_EMAIL or "dev@localhost").encode(),
+                        settings.LOCAL_DEV_USER_EMAIL.encode(),
                     )
                 ]
                 logger.debug(
-                    f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL or 'dev@localhost'}"
+                    f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL}"
                 )
         await self.app(scope, receive, send)
 

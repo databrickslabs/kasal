@@ -29,7 +29,7 @@ Paths below are relative to the repository root. Boolean flags accept `true`/`fa
 Kasal reads configuration from three places:
 
 - **Process environment.** Most variables are read with `os.getenv` at the point of use, often at import time. Set them in your shell, in `run.sh`'s environment, or in `src/app.yaml` for a Databricks App.
-- **`src/backend/src/config/settings.py`.** The pydantic `Settings` class declares `env_file=".env"`, resolved against the **current working directory**, with case-sensitive names. A `.env` file only affects the fields declared on `Settings` (`DATABASE_TYPE`, `SQLITE_DB_PATH`, `POSTGRES_*`, `LOCAL_DEV_USER_EMAIL`, `LITELLM_CACHE_*`, `LOG_LEVEL` and the other fields in that class). Nothing calls `load_dotenv`, so a `.env` file does **not** set any variable read with `os.getenv`. In particular, `LOCAL_DEV_AUTH` in `.env` has no effect: export it instead.
+- **`src/backend/src/config/settings.py`.** The pydantic `Settings` class declares `env_file=".env"`, resolved against the **current working directory**, with case-sensitive names. A `.env` file (like the environment) only affects the fields in `Settings.ENV_FIELDS`: `DATABASE_TYPE`, `DATABASE_URI`, `SYNC_DATABASE_URI`, `SQLITE_DB_PATH`, `POSTGRES_*`, `DEBUG_MODE` and `KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS`. Nothing calls `load_dotenv`, so a `.env` file does **not** set any variable read with `os.getenv`. In particular, `LOCAL_DEV_AUTH` in `.env` has no effect: export it instead.
 - **Vite `.env` files in `src/frontend/`.** Only `VITE_*` variables reach the browser bundle.
 
 > [!IMPORTANT]
@@ -69,7 +69,6 @@ Every protected API route depends on `get_group_context` (`src/backend/src/depen
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `LOCAL_DEV_AUTH` | Unset (`run.sh` sets `true`) | Opt-in. When `1`/`true`/`yes`/`on`, `LocalDevAuthMiddleware` adds `X-Forwarded-Email` to any request that has no identity header. Ignored, with an error log, when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`/`prod` | `src/backend/src/main.py` |
-| `LOCAL_DEV_USER_EMAIL` | Empty, meaning `dev@localhost` | Email the development identity uses | `src/backend/src/config/settings.py` |
 | `ENVIRONMENT` | Unset; treated as `development` where a default is needed | `production`/`prod` disables `LOCAL_DEV_AUTH` and the loopback SSE identity fallback. `development`/`dev`/`local` (the default) allows synthetic emails without a TLD and applies `ADMIN_EMAILS` | `src/backend/src/main.py`, `src/backend/src/dependencies/providers.py`, `src/backend/src/schemas/group.py`, `src/backend/src/services/groups/forwarded_identity.py` |
 | `ADMIN_EMAILS` | Empty | Comma-separated emails that get the admin role when first seen, in development only. Emails matching `admin@localhost`, `admin@` or `testadmin@` also do | `src/backend/src/services/groups/forwarded_identity.py` |
 
@@ -132,11 +131,6 @@ These control encryption, rate limiting and a few request-path caches:
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `ENCRYPTION_KEY` | Unset | Fernet key for stored secrets. Resolution order: this variable, then the `kasal/kasal_encryption_key` secret provisioned by `src/deploy.py`, then a generated key that does not survive a restart (a warning is logged) | `src/backend/src/utils/encryption_utils.py` |
-| `RATE_LIMIT_ENABLED` | `true` | Per-identity rate limit on `/api/`. `false`/`0`/`no`/`off` disables it | `src/backend/src/core/rate_limit.py` |
-| `RATE_LIMIT_DEFAULT` | `600/minute` | Limit string in `limits` syntax | `src/backend/src/core/rate_limit.py` |
-| `RATE_LIMIT_STORAGE_URI` | In-memory | Shared storage, for example `redis://<host>:6379`, for a multi-replica deployment | `src/backend/src/core/rate_limit.py` |
-| `GROUP_MEMBERSHIP_CACHE_TTL` | `30` | Seconds a user's workspace memberships are cached per process | `src/backend/src/utils/user_context.py` |
-| `SSE_HEARTBEAT_SECONDS` | `15` | Keep-alive interval for server-sent event streams, clamped to 5–120 | `src/backend/src/core/sse_manager.py` |
 | `KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS` | Empty | `1`/`true`/`yes` lets trigger webhooks target private or loopback addresses. Leave unset in production | `src/backend/src/services/triggers/queue_consumer_service.py` |
 
 ## Execution and LLM tuning
@@ -160,10 +154,6 @@ The execution and LLM variables are:
 | `KASAL_REASONING_EFFORT_MODELS` | Empty | Comma-separated extra model-name substrings that accept reasoning effort | `src/backend/src/utils/model_config.py` |
 | `KASAL_HARNESS` | Unset (`crewai`) | Harness a spawned run uses when neither the request nor the config chooses one. Normally set by Kasal for the child process | `src/backend/src/services/execution/harnesses/selection.py` |
 | `KASAL_ENGINE_STORAGE_DIR` | `~/.local/share/kasal_engine` | Engine-local storage such as flow checkpoints. `CREWAI_STORAGE_DIR` wins when set | `src/backend/src/utils/storage_paths.py` |
-| `LITELLM_CACHE_ENABLED` | `true` | Response cache for the legacy LiteLLM completion path | `src/backend/src/config/settings.py` |
-| `LITELLM_CACHE_TYPE` | `local` | `local` (in-memory) or `redis` | `src/backend/src/config/settings.py` |
-| `LITELLM_CACHE_TTL` | `3600` | Cache TTL in seconds | `src/backend/src/config/settings.py` |
-| `LITELLM_CACHE_REDIS_HOST`, `LITELLM_CACHE_REDIS_PORT`, `LITELLM_CACHE_REDIS_PASSWORD` | Unset | Redis connection when `LITELLM_CACHE_TYPE=redis` | `src/backend/src/config/settings.py` |
 | `VLLM_BASE_URL` | `http://localhost:8081/v1` | Base URL for models with the `vllm` provider | `src/backend/src/services/llm/manager.py` |
 | `VLLM_API_KEY` | `vllm` | API key sent to vLLM | `src/backend/src/services/llm/manager.py` |
 | `VLLM_SUPPORTS_TOOLS` | `true` | Uses the function-calling adapter for vLLM | `src/backend/src/services/llm/manager.py` |
@@ -211,6 +201,8 @@ A Databricks App sets only the variables its deployment injects, so every tunabl
 | **Prompts** → Advanced (all workspaces) | Workflow recipes: use curated past crews, minimum similarity, holdout fraction, runs mined per pass | `WORKFLOW_RECIPE_EXEMPLARS`, `WORKFLOW_RECIPE_MIN_SIMILARITY`, `WORKFLOW_RECIPE_HOLDOUT`, `WORKFLOW_RECIPE_MINE_BATCH` |
 | System administration → **Models** → Advanced | Fallback model key used instead of a Databricks model when no workspace is available | `KASAL_FALLBACK_MODEL` |
 
+Some former variables are now fixed in code, because nothing in Databricks Apps sets them and none is worth a Configuration field: the rate limit (`600/minute`, in memory), the group-membership cache (30 s), the SSE heartbeat (15 s), the LiteLLM response cache (in memory, 1 h), the local development identity (`dev@localhost`), the API docs (on locally, off in Apps), CORS (the local dev-server origins outside Apps, none inside), seeding (always) and the project name, version and API prefix. `KASAL_OTEL_TRACING`, `KASAL_DEBUG_TRACES`, `BACKEND_CORS_ORIGINS`, `DB_FILE_PATH` and `INSTRUCTOR_MODEL_NAME` were never used and are gone. `Settings` (`src/backend/src/config/settings.py`) reads the environment only for the fields in its `ENV_FIELDS` allow-list: the database connection, which the Apps launcher and local development set, and two development switches that Apps refuses.
+
 The architecture test `src/backend/tests/unit/architecture/test_env_reads_stay_in_config.py` keeps it this way: outside `config/settings.py`, `config/logging.py` and `core/databricks_app.py`, a file may not gain an environment read, and none of the variables above may be read again.
 
 ## Memory, knowledge and recipes
@@ -233,14 +225,13 @@ Logs go to the console and to `src/backend/logs/`. `run.sh --help` lists every p
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `KASAL_LOG_LEVEL` | `INFO` (falls back to `LOG_LEVEL`) | Global level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` or `OFF` | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
+| `KASAL_LOG_LEVEL` | `INFO` | Global level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` or `OFF` | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
 | `KASAL_LOG_APP` | Follows the global level | Level for Kasal's own loggers | `src/backend/src/config/logging.py` |
 | `KASAL_LOG_THIRD_PARTY` | `WARNING` | Level for third-party libraries | `src/backend/src/config/logging.py` |
 | `KASAL_LOG_CONSOLE`, `KASAL_LOG_FILE` | `true` | Console and file output | `src/backend/src/config/logging.py` |
 | `KASAL_LOG_<DOMAIN>` | Global level | Per-domain level, for example `KASAL_LOG_CREW`, `KASAL_LOG_FLOW`, `KASAL_LOG_LLM`, `KASAL_LOG_DATABASE` | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
 | `KASAL_DEBUG_ALL` | `false` | Debug for every logger, including SQL | `src/backend/src/config/logging.py`, `src/backend/src/db/session.py` |
 | `SQL_DEBUG` | `false` | Logs every SQL statement; slow | `src/backend/src/db/session.py` |
-| `KASAL_DEBUG_TRACES` | Empty | Legacy switch for debug trace output in crew subprocesses | `src/backend/src/services/execution/subprocess_bootstrap.py` |
 
 ## Observability, MLflow and OpenTelemetry
 
@@ -254,7 +245,6 @@ Workspace MLflow and telemetry settings are configured in the UI. These variable
 | `MLFLOW_TRACING_SQL_WAREHOUSE_ID` | Unset (`src/app.yaml`: the `sql-warehouse` resource) | Warehouse for trace storage in Unity Catalog | `src/backend/src/services/prompt_optimization/gepa/mlflow_session.py` |
 | `MLFLOW_EVAL_MAX_ROWS` | `200` | Row cap for an evaluation run | `src/backend/src/services/mlflow/evaluation_runner.py` |
 | `MLFLOW_EVAL_JUDGE_MODEL`, `GEPA_JUDGE_MODEL` | Unset | Fallback judge models when none is configured in the UI | `src/backend/src/services/mlflow/service.py`, `src/backend/src/services/prompt_optimization/gepa/judge_model.py` |
-| `KASAL_OTEL_TRACING` | `true` | Kasal's OpenTelemetry tracer for crew runs | `src/backend/src/services/otel_tracing/otel_config.py` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Unset | OTLP collector; Databricks Apps injects it when app telemetry is enabled | `src/backend/src/core/logger.py` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | OTLP protocol | `src/backend/src/core/logger.py` |
 | `OTEL_SERVICE_NAME` | `kasal` | Service name on exported logs | `src/backend/src/core/logger.py` |

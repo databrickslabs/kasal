@@ -408,54 +408,18 @@ litellm.retry_on = ["429", "timeout", "rate_limit_error"]
 
 
 def _configure_litellm_caching() -> None:
-    """Configure the legacy LiteLLM path with memory or Redis caching.
+    """In-memory response cache (1 h) for the legacy LiteLLM path.
 
-    DiskCache deserializes pickle from writable cache files. Never initialize
-    that backend, even for existing deployments explicitly requesting "disk".
-    Native chat/crew/flow calls use the transport layer, not this cache.
+    Native chat/crew/flow calls use the transport layer, not this cache. It was
+    configurable (LITELLM_CACHE_*, with a Redis option) through environment
+    variables a Databricks App never sets. Disk caching stays off: it
+    deserializes pickle from writable cache files.
     """
-    from src.config.settings import settings
-
-    if not settings.LITELLM_CACHE_ENABLED:
-        logger.info("LiteLLM caching disabled (LITELLM_CACHE_ENABLED=false)")
-        return
-
-    cache_type = (settings.LITELLM_CACHE_TYPE or "local").lower()
-    ttl = settings.LITELLM_CACHE_TTL
-
     try:
-        if cache_type == "redis":
-            host = settings.LITELLM_CACHE_REDIS_HOST
-            if not host:
-                logger.warning(
-                    "LITELLM_CACHE_TYPE=redis but LITELLM_CACHE_REDIS_HOST is not set; "
-                    "falling back to in-memory ('local') cache"
-                )
-                cache_type = "local"
-            else:
-                litellm.enable_cache(
-                    type="redis",
-                    host=host,
-                    port=settings.LITELLM_CACHE_REDIS_PORT,
-                    password=settings.LITELLM_CACHE_REDIS_PASSWORD,
-                    ttl=ttl,
-                )
-                logger.info(f"LiteLLM Redis cache enabled (host={host}, ttl={ttl}s)")
-                return
-
-        if cache_type != "local":
-            logger.warning(
-                "Unsupported LiteLLM cache backend %r; using in-memory caching. "
-                "Configure Redis for cross-process caching. Disk caching is disabled "
-                "because it deserializes pickle from writable cache files.",
-                cache_type,
-            )
-            cache_type = "local"
-
-        litellm.enable_cache(type=cache_type, ttl=ttl)
-        logger.info(f"LiteLLM cache enabled (type={cache_type}, ttl={ttl}s)")
-    except Exception as e:
-        logger.warning(f"Failed to configure LiteLLM caching ({cache_type}): {e}")
+        litellm.enable_cache(type="local", ttl=3600)
+        logger.info("LiteLLM cache enabled (type=local, ttl=3600s)")
+    except Exception as e:  # noqa: BLE001 — a cache must never stop startup
+        logger.warning(f"Failed to configure LiteLLM caching: {e}")
 
 
 _configure_litellm_caching()
@@ -1185,8 +1149,6 @@ class LLMManager:
             # The key is passed per-request via llm_params["api_key"] below.
             if not api_key:
                 logger.warning(f"No API key found for Gemini with group_id: {group_id}")
-                # Help Instructor pick the right model family when no key is set.
-                os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
 
             api_base = require_api_base("gemini", model_params, model_name_value)
             prefixed_model = f"gemini/{model_name_value}"

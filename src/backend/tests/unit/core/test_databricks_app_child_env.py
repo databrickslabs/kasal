@@ -100,3 +100,45 @@ class TestChildEnvironment:
         assert "SERPER_API_KEY" in removed
         assert "SERPER_API_KEY" not in os.environ
         assert os.environ["KASAL_LOG_LEVEL"] == "INFO"
+
+
+class TestNoDeadEntries:
+    """Every Kasal entry in the allow-list is something ``src/`` still reads.
+
+    The list used to carry names and prefixes (A2UI_, CHAT_, AGENT_MODEL, …)
+    for settings that had long moved to Configuration, so a child inherited
+    variables nothing read and the list stopped saying what Kasal depends on.
+    """
+
+    @staticmethod
+    def _read_names():
+        import ast
+        import pathlib
+
+        from src.config.settings import Settings
+        from tests.unit.architecture.test_env_reads_stay_in_config import reads_in
+
+        src = pathlib.Path(__file__).resolve().parents[3] / "src"
+        names = set(Settings.model_fields)
+        for path in src.rglob("*.py"):
+            if "/export/templates/" in path.as_posix():
+                continue
+            names.update(reads_in(ast.parse(path.read_text())))
+        return names
+
+    def test_every_kasal_name_and_prefix_is_read(self):
+        from src.core import databricks_app as d
+
+        read = self._read_names()
+        dead_names = sorted(n for n in d._KASAL_ENV_NAMES if n not in read)
+        # LC_* is locale, read by the C library and Python, not by Kasal code.
+        dead_prefixes = sorted(
+            p
+            for p in d.CHILD_ENV_PREFIXES
+            if p != "LC_" and not any(n.startswith(p) for n in read)
+        )
+        assert not dead_names and not dead_prefixes, (dead_names, dead_prefixes)
+
+    def test_retired_settings_are_not_inherited(self):
+        for name in ("A2UI_ENABLED", "CHAT_COMPACTION", "AGENT_MODEL", "VLLM_BASE_URL"):
+            assert not child_env_allowed(name, hosted=True), name

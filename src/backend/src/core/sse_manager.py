@@ -7,7 +7,6 @@ execution updates, traces, and other real-time events to connected clients.
 
 import asyncio
 import json
-import os
 import threading
 import time
 from collections import OrderedDict, deque
@@ -32,28 +31,6 @@ from src.core.logger import LoggerManager
 # as idle. Comment frames (lines starting with ":") are ignored by
 # EventSource clients per the SSE spec, so they are invisible to consumers.
 DEFAULT_HEARTBEAT_SECONDS = 15
-
-# Clamp bounds for the env override — mirrors the router's Query validation.
-_HEARTBEAT_MIN_SECONDS = 5
-_HEARTBEAT_MAX_SECONDS = 120
-
-
-def get_heartbeat_seconds(default: int = DEFAULT_HEARTBEAT_SECONDS) -> int:
-    """
-    Resolve the heartbeat interval, honoring the SSE_HEARTBEAT_SECONDS env var.
-
-    Env-tunable so a Databricks Apps deploy can shorten the keep-alive cadence
-    (e.g. SSE_HEARTBEAT_SECONDS=5) without a code change if the proxy's idle
-    window turns out to be tighter than the default. Invalid values fall back
-    to *default*; valid values are clamped to [5, 120] seconds.
-    """
-    raw = os.getenv("SSE_HEARTBEAT_SECONDS")
-    if raw:
-        try:
-            return max(_HEARTBEAT_MIN_SECONDS, min(_HEARTBEAT_MAX_SECONDS, int(raw)))
-        except (ValueError, TypeError):
-            pass
-    return default
 
 
 class _SSEEncoder(json.JSONEncoder):
@@ -456,8 +433,7 @@ async def event_stream_generator(
         heartbeat_interval: Interval for sending keepalive comments (seconds).
             Heartbeats are SSE comment frames (``: keepalive ...``) emitted
             only when no real event has flowed for the interval, so a proxy
-            (Databricks Apps HTTP/2) never sees an idle stream. ``None`` falls
-            back to the SSE_HEARTBEAT_SECONDS env var, then to
+            (Databricks Apps HTTP/2) never sees an idle stream. ``None`` uses
             ``DEFAULT_HEARTBEAT_SECONDS``.
         last_event_id: If set, replay buffered events after this ID before
             switching to live streaming.  The browser sends this automatically
@@ -467,7 +443,7 @@ async def event_stream_generator(
         SSE-formatted event strings
     """
     if heartbeat_interval is None:
-        heartbeat_interval = get_heartbeat_seconds()
+        heartbeat_interval = DEFAULT_HEARTBEAT_SECONDS
     queue = sse_manager.create_event_queue(job_id, group_ids=group_ids)
     logger.info(
         f"[SSE_STREAM] Generator started | job={job_id} | timeout={timeout}s | "

@@ -15,42 +15,44 @@ Design decisions:
     assets and must not exhaust the budget).
   - **Per identity**: keyed by the proxy-supplied ``X-Forwarded-Email`` (falling
     back to client IP), so one tenant's abuse can't rate-limit another.
-  - **In-memory by default** (correct for a single app instance). For a
-    horizontally-scaled deployment set ``RATE_LIMIT_STORAGE_URI`` (e.g.
+  - **In-memory** (correct for a Databricks App, which is one instance). A
+    horizontally-scaled deployment would pass a shared ``storage_uri`` (e.g.
     ``redis://host:6379``) so the budget is shared across replicas.
   - **Guarded**: if the ``limits`` package is unavailable, the middleware is a
     transparent pass-through (never raises) — so the dependency can roll out via
     the next ``uv sync`` without breaking a running ``--reload`` dev server.
 
-Configuration (env vars):
-  - ``RATE_LIMIT_ENABLED``      — "false"/"0"/"no"/"off" disables it (default on)
-  - ``RATE_LIMIT_DEFAULT``      — limit string, default ``"600/minute"``
-  - ``RATE_LIMIT_STORAGE_URI``  — limits storage URI, default in-memory
+Configuration: constructor arguments, defaulting to :data:`DEFAULT_LIMIT` in
+memory. (They were RATE_LIMIT_* environment variables, which a Databricks App
+never sets.)
 """
 
 import json
 import logging
-import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_DISABLED_VALUES = {"0", "false", "no", "off"}
-
-
-def _rate_limit_enabled() -> bool:
-    val = os.getenv("RATE_LIMIT_ENABLED", "true").strip().lower()
-    return val not in _DISABLED_VALUES
+#: Requests per identity on the /api/ surface.
+DEFAULT_LIMIT = "600/minute"
 
 
 class RateLimitMiddleware:
     """Pure-ASGI per-identity rate limiter for the ``/api/`` surface."""
 
-    def __init__(self, app):
+    def __init__(
+        self,
+        app: Any,
+        *,
+        enabled: bool = True,
+        limit: str = DEFAULT_LIMIT,
+        storage_uri: str = "memory://",
+    ):
         self.app = app
         self._active = False
 
-        if not _rate_limit_enabled():
-            logger.info("[RATE_LIMIT] Disabled via RATE_LIMIT_ENABLED")
+        if not enabled:
+            logger.info("[RATE_LIMIT] Disabled")
             return
 
         try:
@@ -64,8 +66,7 @@ class RateLimitMiddleware:
             )
             return
 
-        limit_str = os.getenv("RATE_LIMIT_DEFAULT", "600/minute")
-        storage_uri = os.getenv("RATE_LIMIT_STORAGE_URI") or "memory://"
+        limit_str = limit
         try:
             self._item = parse(limit_str)
             self._limiter = FixedWindowRateLimiter(

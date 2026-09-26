@@ -488,57 +488,6 @@ class DatabricksService:
             logger.error(f"Error checking Databricks apps configuration: {str(e)}")
             return False, ""
 
-    @staticmethod
-    def setup_endpoint(config) -> bool:
-        """
-        DEPRECATED: Use get_auth_context() from databricks_auth.py instead.
-
-        This method sets process-wide environment variables which causes race conditions
-        in concurrent requests. Use get_auth_context() to get thread-safe AuthContext.
-
-        Set up the DATABRICKS_ENDPOINT and DATABRICKS_API_BASE environment variables from the configuration.
-
-        Args:
-            config: Databricks configuration object with workspace_url attribute
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        import warnings
-
-        warnings.warn(
-            "setup_endpoint() is deprecated and will be removed. "
-            "Use get_auth_context() from databricks_auth.py instead for thread-safe authentication.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        try:
-            if config and hasattr(config, "workspace_url") and config.workspace_url:
-                workspace_url = config.workspace_url.rstrip("/")
-
-                # Set the API_BASE to include /serving-endpoints - this is required by LiteLLM
-                # LiteLLM expects DATABRICKS_API_BASE to point to the serving endpoints
-                os.environ["DATABRICKS_API_BASE"] = f"{workspace_url}/serving-endpoints"
-                logger.info(
-                    f"Set DATABRICKS_API_BASE to {workspace_url}/serving-endpoints"
-                )
-
-                # Ensure the endpoint URL ends with /serving-endpoints
-                if not workspace_url.endswith("/serving-endpoints"):
-                    endpoint_url = f"{workspace_url}/serving-endpoints"
-                else:
-                    endpoint_url = workspace_url
-
-                os.environ["DATABRICKS_ENDPOINT"] = endpoint_url
-                logger.info(f"Set DATABRICKS_ENDPOINT to {endpoint_url}")
-                return True
-            else:
-                logger.warning("No workspace_url found in Databricks configuration")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up Databricks endpoint: {str(e)}")
-            return False
-
     @classmethod
     def from_session(cls, session, api_keys_service=None):
         """

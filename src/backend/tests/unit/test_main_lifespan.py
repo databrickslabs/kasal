@@ -125,46 +125,19 @@ class TestLocalDevAuthMiddlewareEdgeCases:
         assert b"x-forwarded-email" in injected
 
     @pytest.mark.asyncio
-    async def test_email_header_uses_settings_value(self):
-        """Injected email should match LOCAL_DEV_USER_EMAIL setting."""
-        from src.main import LocalDevAuthMiddleware, settings
+    async def test_the_fallback_identity_is_dev_at_localhost(self, monkeypatch):
+        """A constant: LOCAL_DEV_USER_EMAIL is no longer an environment variable
+        (the dev frontend sends its own identity header, which always wins)."""
+        from src.main import LocalDevAuthMiddleware
 
+        monkeypatch.setenv("LOCAL_DEV_USER_EMAIL", "custom@example.com")
         received = []
 
         async def mock_app(scope, receive, send):
             received.append(scope)
 
         middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
-        scope = {"type": "http", "headers": []}
-
-        original = settings.LOCAL_DEV_USER_EMAIL
-        settings.LOCAL_DEV_USER_EMAIL = "custom@example.com"
-        try:
-            await middleware(scope, None, None)
-        finally:
-            settings.LOCAL_DEV_USER_EMAIL = original
-
-        headers = dict(received[0]["headers"])
-        assert headers.get(b"x-forwarded-email") == b"custom@example.com"
-
-    @pytest.mark.asyncio
-    async def test_none_email_falls_back_to_dev_at_localhost(self):
-        from src.main import LocalDevAuthMiddleware, settings
-
-        received = []
-
-        async def mock_app(scope, receive, send):
-            received.append(scope)
-
-        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
-        scope = {"type": "http", "headers": []}
-
-        original = settings.LOCAL_DEV_USER_EMAIL
-        settings.LOCAL_DEV_USER_EMAIL = None
-        try:
-            await middleware(scope, None, None)
-        finally:
-            settings.LOCAL_DEV_USER_EMAIL = original
+        await middleware({"type": "http", "headers": []}, None, None)
 
         headers = dict(received[0]["headers"])
         assert headers.get(b"x-forwarded-email") == b"dev@localhost"
@@ -215,7 +188,6 @@ def _make_lifespan_patches(settings_overrides: dict, extra_patches: dict = None)
     """
     patches = {
         "src.main.LoggerManager": None,  # handled separately as MagicMock
-        "src.main.DatabricksURLUtils.validate_and_fix_environment": AsyncMock(),
         "src.db.session.init_db": AsyncMock(),
         "src.db.session.set_main_event_loop": MagicMock(),
         "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(
@@ -266,7 +238,6 @@ class TestLifespanStartup:
 
         return {
             "src.main.LoggerManager": MagicMock(),
-            "src.main.DatabricksURLUtils.validate_and_fix_environment": AsyncMock(),
             "src.db.session.init_db": AsyncMock(),
             "src.db.session.set_main_event_loop": MagicMock(),
             "src.db.session.dispose_engines": AsyncMock(),

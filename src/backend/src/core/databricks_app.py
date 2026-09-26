@@ -233,8 +233,8 @@ def lakebase_instance_from_config(config: Optional[Mapping[str, object]]) -> str
 # get_auth_context), exactly like the parent.
 # ---------------------------------------------------------------------------
 
-#: Exact names a child inherits.
-CHILD_ENV_NAMES = frozenset(
+#: Read by the OS, Python and HTTP/TLS libraries rather than by Kasal code.
+_PROCESS_ENV_NAMES = frozenset(
     {
         # Process basics.
         "PATH",
@@ -266,47 +266,35 @@ CHILD_ENV_NAMES = frozenset(
         "http_proxy",
         "https_proxy",
         "no_proxy",
-        # Kasal settings without a namespace prefix (see config/settings.py).
-        "PROJECT_NAME",
-        "PROJECT_DESCRIPTION",
-        "VERSION",
-        "API_V1_STR",
-        "AUTO_SEED_DATABASE",
-        "BACKEND_CORS_ORIGINS",
+    }
+)
+
+#: Kasal's own settings without a namespace prefix (see config/settings.py).
+#: Each must be read somewhere in ``src/`` — tests/unit/core checks it.
+_KASAL_ENV_NAMES = frozenset(
+    {
         "SYNC_DATABASE_URI",
-        "SERVER_HOST",
-        "SERVER_PORT",
         "MCP_SERVER_ENABLED",
         "ENCRYPTION_KEY",  # the app's at-rest key: children decrypt DB secrets
         "ENVIRONMENT",
         "DEBUG_MODE",
-        "DOCS_ENABLED",
-        "CORS_ORIGINS",
         "USE_NULLPOOL",
         "SQL_DEBUG",
         "SEED_DEBUG",
-        "DB_FILE_PATH",
-        "FRONTEND_STATIC_DIR",
         "LOCAL_DEV_AUTH",
-        "LOCAL_DEV_USER_EMAIL",
-        "GROUP_MEMBERSHIP_CACHE_TTL",
-        "SSE_HEARTBEAT_SECONDS",
-        "INSTRUCTOR_MODEL_NAME",
-        "DAX_LLM_BATCH_SIZE",
-        # Model-name overrides (not credentials). Provider endpoint URLs are no
-        # longer env: they live on each model in Configuration → Models.
-        "AGENT_MODEL",
-        "CONNECTION_MODEL",
-        "CREW_MODEL",
-        "TASK_MODEL",
-        "PROMPT_IMPROVE_MODEL",
     }
 )
+
+#: Exact names a child inherits.
+CHILD_ENV_NAMES = _PROCESS_ENV_NAMES | _KASAL_ENV_NAMES
 
 #: Prefixes a child inherits: every ``DATABRICKS_*`` the Apps platform injects
 #: (the app service principal included, so a child authenticates as the app),
 #: the Lakebase ``PG*`` binding, the app.yaml ``KASAL_*`` bindings and process
-#: control, database/logging/tracing configuration and Kasal's tuning knobs.
+#: control, and database/logging/tracing configuration. Kasal's tuning knobs are
+#: not here: they are Configuration settings a child loads from the database
+#: (``engine_settings``), not variables it inherits. Only list a prefix that
+#: something in ``src/`` actually reads — ``tests/unit/core/`` checks it.
 CHILD_ENV_PREFIXES = (
     "DATABRICKS_",
     "PG",
@@ -314,29 +302,13 @@ CHILD_ENV_PREFIXES = (
     "POSTGRES_",
     "DATABASE_",
     "SQLITE_",
-    "LAKEBASE_",
     "LOG_",
     "LC_",
     "MLFLOW_",
     "OTEL_",
-    "UVICORN_",
     "CREWAI_",
     "CREW_",
     "FLOW_",
-    "A2UI_",
-    "CHAT_",
-    "KNOWLEDGE_",
-    "EMBEDDING_",
-    "WORKFLOW_RECIPE_",
-    "SCRAPE_",
-    "GEPA_",
-    "DISPATCHER_",
-    "DEFAULT_",
-    "VLLM_",
-    "KAT_",
-    "OLLAMA_",
-    "LITELLM_",
-    "RATE_LIMIT_",
 )
 
 #: A name shaped like a credential. Even under an allowed prefix it is dropped

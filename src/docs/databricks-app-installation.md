@@ -38,7 +38,7 @@ including its startup lifecycle, middleware, and shutdown handlers.
 
 Before accepting requests, Kasal creates the application tables in the assigned
 Lakebase database, applies schema updates, initializes memory tables, and awaits
-seeding when `AUTO_SEED_DATABASE` is enabled (the default). Startup verifies that
+seeding. Startup verifies that
 models, prompt templates, and tools have persisted defaults. A database setup
 failure stops startup instead of serving an application with missing tables.
 Redeploying runs the non-destructive initialization again.

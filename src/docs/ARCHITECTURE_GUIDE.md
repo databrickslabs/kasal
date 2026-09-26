@@ -171,15 +171,14 @@ Where different data types live and why.
 Logs, traces, metrics, and how to access them.
 
 - Central log manager: `core/logger.py` writes to `LOG_DIR`.
-- Logging toggles: `LOG_LEVEL` and `SQL_DEBUG`.
+- Logging toggles: `KASAL_LOG_LEVEL` and `SQL_DEBUG`.
 - Execution logs and traces are persisted and queryable through `api/execution_logs_router.py` and `api/execution_trace_router.py`.
 
 ### Configuration flags (selected)
 
 Important toggles that affect developer and runtime experience. See the [configuration reference](./CONFIGURATION.md) for the full list.
 
-- `DOCS_ENABLED`: enables the FastAPI `/api-docs` pages.
-- `AUTO_SEED_DATABASE`: runs the seeders in the background after database initialization.
+- The FastAPI `/api-docs` pages are on locally and off inside Databricks Apps; the seeders always run in the background after database initialization. Neither is an environment variable.
 - `DATABASE_TYPE`: `sqlite` (the default, with `SQLITE_DB_PATH` defaulting to `src/backend/app.db`) or `postgres`.
 
 ## Related
