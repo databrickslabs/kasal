@@ -18,7 +18,8 @@ import {
 } from '@mui/icons-material';
 import { apiClient } from '../../../shared/api/client';
 import { useMLflowStore } from '../../../store/mlflow';
-import type { MLflowBackend, MLflowSettings } from '../../../types/config/mlflow';
+import type { MLflowBackend, MLflowSettings, MLflowSettingsPatch } from '../../../types/config/mlflow';
+import MLflowJudgeAndAdvanced from './MLflowJudgeAndAdvanced';
 
 /**
  * MLflow tracing settings — their own section, not a corner of the Databricks one.
@@ -95,7 +96,7 @@ const MLflowConfiguration: React.FC = () => {
     void load();
   }, [load]);
 
-  const patch = useCallback(async (body: Partial<MLflowSettings>) => {
+  const patch = useCallback(async (body: MLflowSettingsPatch) => {
     setSaving(true);
     setError(null);
     setSavedMsg(null);
@@ -374,6 +375,8 @@ const MLflowConfiguration: React.FC = () => {
         A separate, more expensive opt-in than tracing: each evaluated run costs an
         extra model call. Requires tracing to be on.
       </Typography>
+
+      <MLflowJudgeAndAdvanced settings={settings} saving={saving} onPatch={patch} />
     </Box>
   );
 };

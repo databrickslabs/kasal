@@ -650,28 +650,17 @@ class MqueryConversionPipelineTool(BaseTool):
             llm_workspace_url = merged_kwargs.get("llm_workspace_url")
             llm_token = merged_kwargs.get("llm_token")
 
-            # Auto-detect Databricks credentials for LLM if not provided
-            if not llm_workspace_url or not llm_token:
-                import os
+            # Missing LLM credentials come from unified auth for this run's
+            # workspace, never DATABRICKS_TOKEN in the (shared) process env.
+            from src.services.tools.async_bridge import workspace_llm_credentials
 
-                # Try to get from environment
-                env_workspace_url = os.environ.get("DATABRICKS_HOST") or os.environ.get(
-                    "DATABRICKS_WORKSPACE_URL"
+            llm_workspace_url, llm_token = workspace_llm_credentials(
+                llm_workspace_url, llm_token
+            )
+            if not (llm_workspace_url and llm_token):
+                logger.warning(
+                    "[TOOL CALL] No LLM credentials resolved. Complex M-Query expressions may not convert properly."
                 )
-                env_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get(
-                    "DATABRICKS_API_KEY"
-                )
-
-                if env_workspace_url and env_token:
-                    llm_workspace_url = llm_workspace_url or env_workspace_url
-                    llm_token = llm_token or env_token
-                    logger.info(
-                        "[TOOL CALL] Auto-detected Databricks credentials for LLM from environment"
-                    )
-                else:
-                    logger.warning(
-                        "[TOOL CALL] LLM credentials not provided and not found in environment. Complex M-Query expressions may not convert properly."
-                    )
 
             # Ensure workspace URL has https:// prefix
             if llm_workspace_url and not llm_workspace_url.startswith("http"):

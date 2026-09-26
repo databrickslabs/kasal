@@ -53,8 +53,16 @@ class MLflowConfig(Base):
     #: than tracing, hence its own flag rather than a mode of ``enabled``.
     evaluation_enabled = Column(Boolean, default=False, nullable=False)
 
-    #: Judge endpoint route, e.g. "databricks:/<endpoint>".
+    #: Judge endpoint route, e.g. "databricks:/<endpoint>". Also the default
+    #: judge for prompt optimization (the Optimize dialog can override it).
     evaluation_judge_model = Column(String, nullable=True)
+
+    #: Advanced: most traces an evaluation run scores. NULL = the default (200).
+    evaluation_max_rows = Column(Integer, nullable=True)
+
+    #: Advanced: how many times prompt optimization samples the correctness
+    #: judge per distinct candidate (median of N). NULL = the default.
+    optimization_judge_samples = Column(Integer, nullable=True)
 
     # Multi-tenant fields — one row per group, same isolation rule as every
     # other configuration table.

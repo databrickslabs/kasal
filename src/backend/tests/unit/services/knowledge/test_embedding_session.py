@@ -65,8 +65,8 @@ class TestResolveLakebaseInstance:
         assert inst == "my-lb"
 
     @pytest.mark.asyncio
-    async def test_env_default_when_instance_missing(self, monkeypatch):
-        monkeypatch.setenv("LAKEBASE_INSTANCE_NAME", "env-lb")
+    async def test_apps_binding_when_instance_missing(self, monkeypatch):
+        monkeypatch.setenv("KASAL_LAKEBASE_RESOURCE", "env-lb")
         with _patch_config(_cfg(MemoryBackendType.LAKEBASE, instance_name=None)):
             inst = await resolve_lakebase_instance(MagicMock(), "g1")
         assert inst == "env-lb"

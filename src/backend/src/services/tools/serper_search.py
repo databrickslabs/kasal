@@ -4,7 +4,6 @@ import importlib
 import importlib.util
 import json
 import logging
-import os
 from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field
@@ -76,6 +75,11 @@ class SerperDevTool(BaseTool):
     country: str | None = ""
     location: str | None = ""
     locale: str | None = ""
+    #: The workspace's Serper key, passed in by whoever builds the tool (Kasal's
+    #: ToolFactory reads it from ApiKeysService; an exported app from its own
+    #: environment). Never read from ``os.environ`` here: Kasal serves many
+    #: workspaces from one process, and the environment is shared by all of them.
+    api_key: str | None = Field(default=None, repr=False, exclude=True)
     env_vars: list[EnvVar] = Field(
         default_factory=lambda: [
             EnvVar(
@@ -189,7 +193,12 @@ class SerperDevTool(BaseTool):
             payload["location"] = self.location
         if self.locale != "":
             payload["hl"] = self.locale
-        headers = {"X-API-KEY": os.environ["SERPER_API_KEY"]}
+        if not self.api_key:
+            raise ValueError(
+                "No Serper API key configured. Add SERPER_API_KEY in the API Keys "
+                "settings."
+            )
+        headers = {"X-API-KEY": self.api_key}
         return _http_json(search_url, payload, headers, timeout=10)
 
     def _process_search_results(

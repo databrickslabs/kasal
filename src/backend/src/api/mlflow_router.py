@@ -39,11 +39,19 @@ async def update_mlflow_settings(
     if not group_ctx or not group_ctx.primary_group_id:
         raise ForbiddenError("Group context required for MLflow operations")
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
+    sent = payload.model_dump(exclude_unset=True)
+    advanced = {
+        k: sent[k]
+        for k in ("evaluation_max_rows", "optimization_judge_samples")
+        if k in sent
+    }
     return MLflowSettings(
         **await svc.update_settings(
             enabled=payload.enabled,
             evaluation_enabled=payload.evaluation_enabled,
             experiment_name=payload.experiment_name,
+            evaluation_judge_model=payload.evaluation_judge_model,
+            advanced=advanced,
         )
     )
 

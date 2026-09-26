@@ -99,8 +99,6 @@ async def execute_db_operation_smart(
     from src.db.database_router import is_lakebase_enabled
 
     if await is_lakebase_enabled():
-        import os
-
         from src.db.database_router import get_lakebase_config_from_db
         from src.db.lakebase_session import get_lakebase_session
         from src.db.lakebase_state import (
@@ -110,9 +108,9 @@ async def execute_db_operation_smart(
         from src.utils.databricks_auth import get_auth_context
 
         config = await get_lakebase_config_from_db()
-        instance_name = (
-            config.get("instance_name") if config else None
-        ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+        from src.core.databricks_app import lakebase_instance_from_config
+
+        instance_name = lakebase_instance_from_config(config)
 
         user_token = None
         user_email = None

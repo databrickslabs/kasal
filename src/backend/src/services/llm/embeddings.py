@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
+from src.services.llm.endpoints import require_ollama_base_url
 from src.services.settings.api_keys import ApiKeysService
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
@@ -427,7 +428,7 @@ async def get_embedding(
             # Use Ollama for embeddings via direct HTTP
             import aiohttp
 
-            api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            api_base = require_ollama_base_url()
             # Strip ollama/ prefix if present for the raw API call
             raw_model = embedding_model.removeprefix("ollama/")
 

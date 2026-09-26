@@ -6,7 +6,6 @@ validating models, and retrieving default settings.
 """
 
 import logging
-import os
 import re
 from typing import Any, Dict, Optional
 
@@ -32,10 +31,10 @@ logger = logging.getLogger(__name__)
 # reasoning and tool use with much higher throughput than frontier-only models.
 # It is a global endpoint, so deployments using this default must enable
 # cross-geography routing in the Databricks workspace.
-DEFAULT_ENGINE_MODEL: (
-    str
-) = DatabricksAppInstallation.from_env().default_model or os.getenv(
-    "DEFAULT_LLM_MODEL", "databricks-gemini-3-8-flash"
+# Inside Databricks Apps: the installed model (the endpoint the app is granted).
+# The old DEFAULT_LLM_MODEL env override is gone.
+DEFAULT_ENGINE_MODEL: str = (
+    DatabricksAppInstallation.from_env().default_model or "databricks-gemini-3-8-flash"
 )
 
 
@@ -120,34 +119,18 @@ def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
     ``model_name`` may carry a provider prefix (``databricks/gpt-5-2``,
     ``openai/gpt-5.2``) — the prefix is stripped before matching.
 
-    Overrides (both read at call time so they work in execution subprocesses):
-      - ``KASAL_REASONING_EFFORT_DISABLED=true`` — kill switch, always False.
-      - ``KASAL_REASONING_EFFORT_MODELS`` — comma-separated extra substrings to
-        treat as supported (e.g. a workspace endpoint we cannot name here).
+    Support comes from the model-capabilities registry; whether a model USES
+    it is its ``reasoning_effort`` setting in Configuration → Models. (The old
+    KASAL_REASONING_EFFORT_DISABLED / _MODELS env overrides are gone.)
     """
     # Defensive isinstance check: callers pass whatever the built LLM reports as
     # its model, which is not guaranteed to be a str.
     if not model_name or not isinstance(model_name, str):
         return False
-    if os.getenv("KASAL_REASONING_EFFORT_DISABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    ):
-        return False
-
     m = model_name.lower()
     # Strip a provider prefix ("databricks/", "openai/", ...) if present.
     if "/" in m:
         m = m.rpartition("/")[2]
-
-    extra = [
-        s.strip().lower()
-        for s in os.getenv("KASAL_REASONING_EFFORT_MODELS", "").split(",")
-        if s.strip()
-    ]
-    if any(s in m for s in extra):
-        return True
 
     if "deep-research" in m:
         return False

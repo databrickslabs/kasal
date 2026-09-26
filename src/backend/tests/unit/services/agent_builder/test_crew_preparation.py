@@ -1158,7 +1158,7 @@ class TestCrewPreparation:
 
     @pytest.mark.asyncio
     async def test_create_crew_openai_api_key_in_databricks(self, crew_preparation):
-        """Test crew creation handles OpenAI API key configuration in Databricks Apps environment."""
+        """A configured OpenAI key is NOT exported into os.environ by crew creation."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
 
@@ -1175,7 +1175,7 @@ class TestCrewPreparation:
                 return_value="test-openai-key",
             ),
             patch.dict("os.environ", {}, clear=True),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
@@ -1186,13 +1186,14 @@ class TestCrewPreparation:
             result = await crew_preparation._create_crew()
 
             assert result is True
-            mock_logger.info.assert_any_call(
-                "OpenAI API key is configured, keeping it for CrewAI"
-            )
+            # The workspace key is never parked in the shared process env.
+            import os
+
+            assert "OPENAI_API_KEY" not in os.environ
 
     @pytest.mark.asyncio
     async def test_create_crew_no_openai_key_in_databricks(self, crew_preparation):
-        """Test crew creation sets dummy OpenAI key when none configured in Databricks Apps environment."""
+        """With no OpenAI key, crew creation no longer plants a dummy one in os.environ."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
 
@@ -1209,7 +1210,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch.dict("os.environ", {}, clear=True),
-            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch("src.services.agent_builder.crew_preparation.logger"),
             patch(
                 "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
@@ -1220,9 +1221,10 @@ class TestCrewPreparation:
             result = await crew_preparation._create_crew()
 
             assert result is True
-            mock_logger.info.assert_any_call(
-                "No OpenAI API key configured, set dummy key for CrewAI validation"
-            )
+            # No dummy key either: nothing on the crew path reads it from env.
+            import os
+
+            assert "OPENAI_API_KEY" not in os.environ
 
     @pytest.mark.asyncio
     async def test_create_crew_openai_key_error_in_databricks(self, crew_preparation):

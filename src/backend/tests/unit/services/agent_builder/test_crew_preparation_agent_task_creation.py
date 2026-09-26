@@ -302,44 +302,6 @@ class TestFindAgentByReference:
 
 
 # ---------------------------------------------------------------------------
-# CrewPreparation._handle_openai_api_key
-# ---------------------------------------------------------------------------
-
-
-class TestHandleOpenAIApiKey:
-    @pytest.mark.asyncio
-    async def test_sets_openai_key_when_found(self):
-        config = {"agents": [], "tasks": [], "group_id": "grp-1"}
-        cp = CrewPreparation(config=config)
-
-        with patch("src.services.settings.api_keys.ApiKeysService") as mock_aks:
-            mock_aks.get_provider_api_key = AsyncMock(return_value="sk-real-key")
-            await cp._handle_openai_api_key()
-
-        assert os.environ.get("OPENAI_API_KEY") == "sk-real-key"
-
-    @pytest.mark.asyncio
-    async def test_sets_dummy_key_when_not_found(self):
-        config = {"agents": [], "tasks": [], "group_id": "grp-1"}
-        cp = CrewPreparation(config=config)
-
-        with patch("src.services.settings.api_keys.ApiKeysService") as mock_aks:
-            mock_aks.get_provider_api_key = AsyncMock(return_value=None)
-            await cp._handle_openai_api_key()
-
-        assert os.environ.get("OPENAI_API_KEY") == "sk-dummy-validation-key"
-
-    @pytest.mark.asyncio
-    async def test_exception_handled_gracefully(self):
-        config = {"agents": [], "tasks": []}
-        cp = CrewPreparation(config=config)
-
-        with patch("src.services.settings.api_keys.ApiKeysService") as mock_aks:
-            mock_aks.get_provider_api_key = AsyncMock(side_effect=Exception("api err"))
-            await cp._handle_openai_api_key()  # Should not raise
-
-
-# ---------------------------------------------------------------------------
 # CrewPreparation._lookup_kasal_agent_uuid_via_service
 # ---------------------------------------------------------------------------
 

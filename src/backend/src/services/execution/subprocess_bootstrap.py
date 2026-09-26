@@ -16,6 +16,41 @@ from src.services.execution.logs.context import (
 )
 
 
+def prepare_child_environment(execution_id: str, process_type: str = "crew") -> None:
+    """The first thing a spawned crew/flow interpreter does with its environment.
+
+    1. Applies the child allow-list (``core/databricks_app``): this interpreter
+       runs ONE workspace's execution, the server that spawned it serves many,
+       so nothing but platform facts (the app service principal included), Kasal
+       settings, process control and DB/logging configuration survives. Never a
+       workspace credential — the run reads its keys through the services.
+       ``multiprocessing`` spawn cannot be handed an environment, hence here.
+       Skipped when this is not a spawned child (unit tests call the child entry
+       points in-process, and must not have the test runner's env scrubbed).
+    2. Marks the subprocess mode and the execution id (orphan detection).
+    3. Pins ``DATABASE_TYPE`` for the BASE engine to what the parent's settings
+       resolved. It names the boot database, not where the run's data lives:
+       with Lakebase active the child re-activates it from the same config
+       (``activate_lakebase_in_subprocess``), exactly like the parent.
+    """
+    import multiprocessing
+
+    if multiprocessing.parent_process() is not None:
+        from src.core.databricks_app import restrict_environment_to_child_allow_list
+
+        restrict_environment_to_child_allow_list()
+
+    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    if process_type == "flow":
+        os.environ["FLOW_SUBPROCESS_MODE"] = "true"
+        os.environ["CREWAI_DEBUG_TRACING"] = "true"
+    os.environ["KASAL_EXECUTION_ID"] = execution_id
+    if "DATABASE_TYPE" not in os.environ:
+        from src.config.settings import settings
+
+        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE
+
+
 def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     """
     Configure logging for a subprocess running a crew or flow execution.

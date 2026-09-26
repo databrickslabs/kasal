@@ -142,7 +142,7 @@ class LakebaseSessionFactory:
 
     def __init__(
         self,
-        instance_name: str = "kasal-lakebase",
+        instance_name: Optional[str] = None,
         user_token: Optional[str] = None,
         user_email: Optional[str] = None,
         group_id: Optional[str] = None,
@@ -157,7 +157,9 @@ class LakebaseSessionFactory:
             group_id: Optional group_id for PAT lookup in background threads
                      where UserContext is not available.
         """
-        self.instance_name = instance_name
+        from src.core.databricks_app import resolve_lakebase_instance_name
+
+        self.instance_name = resolve_lakebase_instance_name(instance_name)
         self.user_token = user_token
         self.user_email = user_email
         self.group_id = group_id
@@ -777,9 +779,11 @@ async def get_lakebase_session(
     if installed:
         instance_name = installed.endpoint or installed.host
 
-    # Get instance name from config if not provided
-    if not instance_name:
-        instance_name = os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+    else:
+        # The configured name, else the Apps binding; never an invented one.
+        from src.core.databricks_app import resolve_lakebase_instance_name
+
+        instance_name = resolve_lakebase_instance_name(instance_name)
 
     # Crew threads: use thread-local factory to avoid event loop conflicts
     if _is_crew_thread():

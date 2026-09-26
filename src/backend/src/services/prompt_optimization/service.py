@@ -53,11 +53,10 @@ from src.services.prompt_optimization import (
     TemplateRunnerMixin,
     run_state,
 )
-from src.services.prompt_optimization.config import (  # noqa: F401
+from src.services.prompt_optimization.config import (
     DEFAULT_TARGET_MODEL,
     MIN_EXAMPLES,
     TEMPLATE_TASKS,
-    _pin_local_experiment,
 )
 from src.services.prompt_optimization.gepa.crew_doc import (
     _CREW_DOC_FIELD_LABELS,
@@ -85,6 +84,7 @@ from src.services.prompt_optimization.gepa.judge_model import (
     _crew_target_model,
     _resolve_judge_model,
     _stored_judge_model_to_key,
+    resolve_run_judge,
 )
 
 # Extracted modules, re-exported so this module stays the single import point
@@ -237,12 +237,12 @@ class PromptOptimizationService(
             )
 
         target_model = request.model or DEFAULT_TARGET_MODEL
-        # NOT `or target_model`: judging with the model under optimization is
-        # self-preference (see _resolve_judge_model).
-        judge_model = _resolve_judge_model(
+        judge_model, _ = await resolve_run_judge(
+            self.session,
             request.judge_model,
             target_model,
             f"Prompt optimization '{request.template_name}'",
+            group_context,
         )
         # Reflection is a Kasal model key like every other model here —
         # invocation goes through LLMManager (keys, endpoints, provider quirks
@@ -349,6 +349,44 @@ class PromptOptimizationService(
                     break
             page += 1
         return examples
+
+    async def _rubric_with_feedback(
+        self, rubric: str, crew: Any, group_context: Optional[GroupContext]
+    ) -> str:
+        """The judge's rubric plus this crew's real user feedback."""
+        # HUMAN JUDGMENT: fold this crew's real user feedback (chat 👍/👎 with
+        # comments) into the judge's rubric so the automated grade reflects what
+        # actual users praised or flagged, not just the task contracts.
+        try:
+            # Feedback is CrewFeedbackService's domain, and its list_for_crew takes
+            # the GroupContext so the scoping stays with the owner.
+            from src.services.catalog.crew_feedback import CrewFeedbackService
+
+            feedback = await CrewFeedbackService(self.session).list_for_crew(
+                str(crew.id), group_context
+            )
+            complaints = [
+                f.comment.strip()
+                for f in feedback
+                if f.rating == "down" and f.comment and f.comment.strip()
+            ][:8]
+            praise = [
+                f.comment.strip()
+                for f in feedback
+                if f.rating == "up" and f.comment and f.comment.strip()
+            ][:4]
+            if complaints:
+                rubric += (
+                    "\nUsers flagged these problems in past runs (penalize any recurrence):\n"
+                    + "\n".join(f"- {c}" for c in complaints)
+                )
+            if praise:
+                rubric += "\nUsers praised (preserve these qualities):\n" + "\n".join(
+                    f"- {p}" for p in praise
+                )
+        except Exception as feedback_err:
+            logger.warning(f"Could not load crew feedback for rubric: {feedback_err}")
+        return rubric
 
     async def _resolve_crew_traces_experiment(
         self, group_context: Optional[GroupContext]
@@ -628,38 +666,7 @@ class PromptOptimizationService(
         if request.guidance:
             rubric += f"\nAdditional guidance: {request.guidance}"
 
-        # HUMAN JUDGMENT: fold this crew's real user feedback (chat 👍/👎 with
-        # comments) into the judge's rubric so the automated grade reflects what
-        # actual users praised or flagged, not just the task contracts.
-        try:
-            # Feedback is CrewFeedbackService's domain, and its list_for_crew takes
-            # the GroupContext so the scoping stays with the owner.
-            from src.services.catalog.crew_feedback import CrewFeedbackService
-
-            feedback = await CrewFeedbackService(self.session).list_for_crew(
-                str(crew.id), group_context
-            )
-            complaints = [
-                f.comment.strip()
-                for f in feedback
-                if f.rating == "down" and f.comment and f.comment.strip()
-            ][:8]
-            praise = [
-                f.comment.strip()
-                for f in feedback
-                if f.rating == "up" and f.comment and f.comment.strip()
-            ][:4]
-            if complaints:
-                rubric += (
-                    "\nUsers flagged these problems in past runs (penalize any recurrence):\n"
-                    + "\n".join(f"- {c}" for c in complaints)
-                )
-            if praise:
-                rubric += "\nUsers praised (preserve these qualities):\n" + "\n".join(
-                    f"- {p}" for p in praise
-                )
-        except Exception as feedback_err:
-            logger.warning(f"Could not load crew feedback for rubric: {feedback_err}")
+        rubric = await self._rubric_with_feedback(rubric, crew, group_context)
 
         # Fall back to the model the crew ACTUALLY runs on, not a global default.
         # Each agent keeps its own ``llm`` during optimization (agents_yaml below
@@ -671,11 +678,14 @@ class PromptOptimizationService(
         target_model = (
             request.model or _crew_target_model(agents) or DEFAULT_TARGET_MODEL
         )
-        # NOT `or target_model`: the crew judge grades deliverables the target
-        # model produced, so target == judge is self-preference — and the crew
-        # judge is the one whose grade drives accept/reject.
-        judge_model = _resolve_judge_model(
-            request.judge_model, target_model, f"Crew optimization '{crew.name}'"
+        # target == judge is self-preference, and the crew judge's grade drives
+        # accept/reject (see resolve_run_judge).
+        judge_model, judge_samples = await resolve_run_judge(
+            self.session,
+            request.judge_model,
+            target_model,
+            f"Crew optimization '{crew.name}'",
+            group_context,
         )
         # A Kasal model key; invoked through LLMManager (no URI/env plumbing).
         reflection_model = request.reflection_model or target_model
@@ -747,6 +757,7 @@ class PromptOptimizationService(
                 cancel_run_id=run_id,
                 group_context=group_context,
                 crew_traces_experiment=crew_traces_experiment,
+                judge_samples=judge_samples,
             )
             # Spawned mid-request but outlives it: routed_scoped_session routes a
             # fresh session for this child task (different current_task()).

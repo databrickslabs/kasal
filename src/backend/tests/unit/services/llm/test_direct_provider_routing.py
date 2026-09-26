@@ -25,15 +25,22 @@ async def test_direct_requests_use_their_endpoint_key_and_bare_model(
     monkeypatch, model, override
 ):
     provider = DEFAULT_MODELS[model]["provider"]
-    endpoint_env = f"{provider.upper()}_API_BASE"
-    monkeypatch.delenv(endpoint_env, raising=False)
+    # The endpoint is the model's own (Configuration → Models); a provider env
+    # var no longer overrides it.
+    monkeypatch.setenv(
+        f"{provider.upper()}_API_BASE", "https://ignored-env.example.com/v1"
+    )
     monkeypatch.setenv("OPENAI_BASE_URL", "https://openai.example.com/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "wrong-provider-test-key")
+    model_config = dict(DEFAULT_MODELS[model])
     if override:
-        monkeypatch.setenv(endpoint_env, override)
+        model_config["params"] = {
+            **(model_config.get("params") or {}),
+            "api_base": override,
+        }
     session = AsyncMock()
     service = AsyncMock()
-    service.get_model_config.return_value = DEFAULT_MODELS[model]
+    service.get_model_config.return_value = model_config
     requests = []
 
     def respond(request):

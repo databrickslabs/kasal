@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type
 
@@ -129,22 +128,20 @@ class PerplexitySearchTool(BaseTool):
 
         # Log all relevant info about key source
         logger.info("Initializing PerplexitySearchTool")
-        logger.info(f"API key provided directly: {bool(api_key)}")
-        logger.info(
-            f"API key in environment: {bool(os.environ.get('PERPLEXITY_API_KEY'))}"
-        )
+        logger.info(f"API key provided: {bool(api_key)}")
         logger.info(f"result_as_answer: {result_as_answer}")
 
-        # Try to get API key from environment or parameter
+        # The key is passed in by whoever builds the tool (ToolFactory reads the
+        # workspace's ApiKeysService; an exported app its own environment). It is
+        # never read from os.environ here: the process environment is shared by
+        # every workspace this server serves.
         if not api_key:
-            api_key = os.environ.get("PERPLEXITY_API_KEY")
-            if not api_key:
-                logger.error(
-                    "No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings."
-                )
-                raise ValueError(
-                    "Perplexity API key is required. Please configure it in the API Keys settings."
-                )
+            logger.error(
+                "No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings."
+            )
+            raise ValueError(
+                "Perplexity API key is required. Please configure it in the API Keys settings."
+            )
 
         self._api_key = api_key
 

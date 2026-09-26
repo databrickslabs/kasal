@@ -82,6 +82,6 @@ async def test_api_key(service: ConnectionServiceDep, group_context: GroupContex
     """
     # Use injected service
     logging.getLogger().info("Testing API keys")
-    results = await service.test_api_keys()
+    results = await service.test_api_keys(group_id=group_context.primary_group_id)
 
     return results

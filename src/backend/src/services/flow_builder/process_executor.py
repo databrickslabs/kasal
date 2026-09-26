@@ -153,28 +153,18 @@ def run_flow_in_process(
     import os
     import sys
 
-    # Mark that we're in subprocess mode for logging purposes
-    os.environ["FLOW_SUBPROCESS_MODE"] = "true"
-    # CRITICAL: Set CREW_SUBPROCESS_MODE so the OTel exporter writes directly to the DB
-    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    # FIRST: allow-listed environment, subprocess mode (flow AND crew, so the
+    # OTel exporter writes directly to the DB), debug tracing, execution id and
+    # the base DATABASE_TYPE (subprocess_bootstrap.prepare_child_environment).
+    from src.services.execution.subprocess_bootstrap import prepare_child_environment
+
+    prepare_child_environment(execution_id, "flow")
 
     # Pin this interpreter's engine from the payload — same contract as the crew
     # subprocess; see services/execution/harness_choice.py.
     from src.services.execution.harness_choice import adopt_in_subprocess
 
     adopt_in_subprocess(flow_config if isinstance(flow_config, dict) else None)
-    # Set debug tracing flag (default to true for comprehensive logging)
-    os.environ["CREWAI_DEBUG_TRACING"] = "true"
-    # CRITICAL: Store execution_id in environment for orphaned process detection
-    # This allows us to find and terminate this process even after server reloads
-    os.environ["KASAL_EXECUTION_ID"] = execution_id
-
-    # Ensure DATABASE_TYPE is set correctly in subprocess
-    if "DATABASE_TYPE" not in os.environ:
-        from src.config.settings import settings
-
-        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
-        print(f"[FLOW_SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
     # Early validation of parameters
     import json
@@ -1497,33 +1487,10 @@ class ProcessFlowExecutor:
             f"[ProcessFlowExecutor] Set KASAL_EXECUTION_ID={execution_id} for subprocess inheritance"
         )
 
-        # Propagate Lakebase config to subprocess so the OTel trace exporter
-        # writes traces to Lakebase instead of the local DB when Lakebase is active.
-        old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
-        old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
-        try:
-            from src.db.database_router import (
-                get_lakebase_config_from_db,
-                is_lakebase_enabled,
-            )
-
-            lakebase_enabled = await is_lakebase_enabled()
-            if lakebase_enabled:
-                os.environ["LAKEBASE_ACTIVE"] = "true"
-                lakebase_config = await get_lakebase_config_from_db()
-                if lakebase_config:
-                    inst = lakebase_config.get("instance_name") or os.environ.get(
-                        "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-                    )
-                    os.environ["LAKEBASE_INSTANCE_NAME"] = inst
-                logger.info(
-                    f"[ProcessFlowExecutor] Lakebase active — set LAKEBASE_ACTIVE=true, "
-                    f"LAKEBASE_INSTANCE_NAME={os.environ.get('LAKEBASE_INSTANCE_NAME')}"
-                )
-            else:
-                os.environ.pop("LAKEBASE_ACTIVE", None)
-        except Exception as e:
-            logger.debug(f"[ProcessFlowExecutor] Could not check Lakebase status: {e}")
+        # Lakebase is NOT propagated through the environment: the child reads
+        # the same configuration and re-activates it itself
+        # (activate_lakebase_in_subprocess). Mutating os.environ here raced
+        # every other concurrent spawn.
 
         try:
             # Create and start the subprocess
@@ -1564,13 +1531,6 @@ class ProcessFlowExecutor:
                 os.environ["KASAL_EXECUTION_ID"] = old_kasal_exec_id
             else:
                 os.environ.pop("KASAL_EXECUTION_ID", None)
-            # Restore Lakebase env vars
-            if old_lakebase_active is not None:
-                os.environ["LAKEBASE_ACTIVE"] = old_lakebase_active
-            else:
-                os.environ.pop("LAKEBASE_ACTIVE", None)
-            if old_lakebase_instance is not None:
-                os.environ["LAKEBASE_INSTANCE_NAME"] = old_lakebase_instance
 
         # Live event relay (LLM token chunks + lifecycle trace frames → SSE).
         # The flow path never had a child→parent reader; the crew path's

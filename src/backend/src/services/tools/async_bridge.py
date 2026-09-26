@@ -17,6 +17,7 @@ import asyncio
 import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +65,27 @@ def run_sync_with_context(fn, timeout: float = DEFAULT_TIMEOUT):
     ctx = contextvars.copy_context()
     with ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(ctx.run, fn).result(timeout=timeout)
+
+
+def workspace_llm_credentials(
+    workspace_url: Optional[str] = None, token: Optional[str] = None
+) -> Tuple[str, str]:
+    """``(workspace_url, token)`` for this run's workspace; given values win.
+
+    For sync tool code that calls a Databricks serving endpoint. Whatever the
+    caller did not supply comes from ``get_auth_context`` (OBO -> this group's
+    PAT -> app SP), never from ``DATABRICKS_TOKEN`` in the process environment,
+    which every workspace shares. Missing values come back as ``""``.
+    """
+    if workspace_url and token:
+        return workspace_url, token
+    from src.utils.databricks_auth import get_auth_context
+
+    try:
+        auth = run_async_with_context(get_auth_context())
+    except Exception as exc:  # noqa: BLE001 — callers degrade to "no LLM"
+        logger.warning("Could not resolve Databricks credentials: %s", exc)
+        auth = None
+    auth_url = (getattr(auth, "workspace_url", "") or "").rstrip("/")
+    auth_token = getattr(auth, "token", "") or ""
+    return workspace_url or auth_url, token or auth_token

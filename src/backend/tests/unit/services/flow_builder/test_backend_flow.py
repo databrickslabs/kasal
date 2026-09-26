@@ -247,11 +247,14 @@ class TestBackendFlow:
         ) as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
+            # The engine default; the old DEFAULT_LLM_MODEL env var is ignored.
+            from src.services.flow_builder.backend_flow import DEFAULT_ENGINE_MODEL
+
             with patch.dict(os.environ, {"DEFAULT_LLM_MODEL": "test-model"}):
                 result = await flow._get_llm()
 
                 assert result == mock_llm
-                mock_llm_manager.get_llm.assert_called_once_with("test-model")
+                mock_llm_manager.get_llm.assert_called_once_with(DEFAULT_ENGINE_MODEL)
 
     @pytest.mark.asyncio
     async def test_get_llm_default_model(self):

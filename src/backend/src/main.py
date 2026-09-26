@@ -49,6 +49,7 @@ from src.services.scheduling.scheduler import (  # noqa: E402 - import follows m
 from src.utils.databricks_url_utils import (  # noqa: E402 - import follows module initialization
     DatabricksURLUtils,
 )
+from src.utils.memory_paths import warn_if_local_memory_is_ephemeral  # noqa: E402
 
 # Get logger after configuration
 logger = logging.getLogger(__name__)
@@ -118,9 +119,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         system_logger.warning(f"Error validating Databricks environment: {e}")
 
-    # CrewAI monkey-patches removed: kasal_engine carries the behavior
-    # natively (event execution_context propagation, memory save hooks,
-    # instructor per-call credentials, tolerant analyze models).
+    # Inside Apps, local (DEFAULT) memory is lost on redeploy: say so once.
+    warn_if_local_memory_is_ephemeral()
 
     # Import needed for DB init
     # pylint: disable=unused-import,import-outside-toplevel
@@ -443,9 +443,9 @@ async def lifespan(app: FastAPI):
 
             if await is_lakebase_enabled():
                 config = await get_lakebase_config_from_db()
-                instance_name = (config or {}).get("instance_name") or os.environ.get(
-                    "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-                )
+                from src.core.databricks_app import lakebase_instance_from_config
+
+                instance_name = lakebase_instance_from_config(config)
                 from src.db.lakebase_session import LakebaseSessionFactory
 
                 lb_factory = LakebaseSessionFactory(instance_name)
@@ -763,9 +763,9 @@ def _local_dev_auth_enabled() -> bool:
     """
     explicit = os.getenv("LOCAL_DEV_AUTH", "").strip().lower()
     wanted = explicit in ("1", "true", "yes", "on")
-    production = bool(os.getenv("DATABRICKS_APP_NAME")) or os.getenv(
-        "ENVIRONMENT", ""
-    ).strip().lower() in ("production", "prod")
+    from src.core.databricks_app import is_production
+
+    production = is_production()
     if production:
         if wanted:
             logger.error(

@@ -47,10 +47,10 @@ class TestPerplexitySearchTool:
         assert tool._max_tokens == custom_max_tokens
 
     @patch.dict("os.environ", {"PERPLEXITY_API_KEY": "env-test-key"})
-    def test_api_key_from_environment(self):
-        """Test that the tool uses API key from environment when not provided."""
-        tool = PerplexitySearchTool()
-        assert tool._api_key == "env-test-key"
+    def test_api_key_is_never_read_from_environment(self):
+        """The shared process env is not a key source: the caller passes one."""
+        with pytest.raises(ValueError, match="Perplexity API key is required"):
+            PerplexitySearchTool()
 
     @patch.dict("os.environ", {}, clear=True)
     def test_api_key_fallback(self):

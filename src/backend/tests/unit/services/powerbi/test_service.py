@@ -271,17 +271,18 @@ class TestPowerBIServiceTokenGeneration:
             mock_credential.get_token.return_value = mock_token
             MockCred.return_value = mock_credential
 
-            with patch.dict(
-                "os.environ",
-                {
-                    "POWERBI_USERNAME": "test@example.com",
-                    "POWERBI_PASSWORD": "test-password",
-                },
-            ):
-                token = await powerbi_service._generate_token(mock_powerbi_config)
+            creds = {
+                "POWERBI_USERNAME": "test@example.com",
+                "POWERBI_PASSWORD": "test-password",
+            }
+            powerbi_service._secrets_service = MagicMock()
+            powerbi_service._secrets_service.get_api_key = AsyncMock(
+                side_effect=lambda name: creds.get(name)
+            )
+            token = await powerbi_service._generate_token(mock_powerbi_config)
 
-                assert token == "test-token-123"
-                MockCred.assert_called_once()
+            assert token == "test-token-123"
+            MockCred.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_generate_token_missing_credentials(
@@ -431,24 +432,16 @@ class TestPowerBIServiceUsernamePasswordSecretsService:
     async def test_generate_token_username_password_secrets_service_exception(
         self, powerbi_service
     ):
-        """Test token generation falls back to env vars when secrets service raises."""
+        """When the secrets service fails there is NO env fallback: the process
+        environment is shared by every workspace."""
         mock_secrets = AsyncMock()
         mock_secrets.get_api_key = AsyncMock(
             side_effect=Exception("Secrets service unavailable")
         )
-
-        # Set _secrets_service to a truthy value so the code enters the if block
         powerbi_service._secrets_service = mock_secrets
-
         config = MockPowerBIConfig()
 
         with patch("azure.identity.UsernamePasswordCredential") as MockCred:
-            mock_credential = MagicMock()
-            mock_token = MagicMock()
-            mock_token.token = "env-fallback-token"
-            mock_credential.get_token.return_value = mock_token
-            MockCred.return_value = mock_credential
-
             with patch.dict(
                 "os.environ",
                 {
@@ -456,19 +449,11 @@ class TestPowerBIServiceUsernamePasswordSecretsService:
                     "POWERBI_PASSWORD": "env-password",
                 },
             ):
-                token = await powerbi_service._generate_token_username_password(
-                    tenant_id="test-tenant", client_id="test-client", config=config
-                )
-
-                assert token == "env-fallback-token"
-                # Verify the credential was created with env var values after secrets failure
-                MockCred.assert_called_once_with(
-                    client_id="test-client",
-                    username="env-user@example.com",
-                    password="env-password",
-                    tenant_id="test-tenant",
-                    client_secret=None,
-                )
+                with pytest.raises(Exception, match="Missing required credentials"):
+                    await powerbi_service._generate_token_username_password(
+                        tenant_id="test-tenant", client_id="test-client", config=config
+                    )
+            MockCred.assert_not_called()
 
 
 class TestPowerBIServiceExecuteQuery:

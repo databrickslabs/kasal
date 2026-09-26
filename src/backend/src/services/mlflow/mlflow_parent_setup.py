@@ -176,11 +176,14 @@ def _setup_sync(
 
         auth_header = headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            os.environ["DATABRICKS_TOKEN"] = auth_header[len("Bearer ") :]
+            # The SP credentials work. Do NOT export the minted bearer as
+            # DATABRICKS_TOKEN: the process environment is shared by every
+            # workspace (and inherited by children), a static bearer expires
+            # within the hour, and with oauth-m2m pinned the SDK mints and
+            # refreshes its own token from the client credentials anyway.
             if not workspace_url.startswith("http"):
                 workspace_url = f"https://{workspace_url}"
             os.environ["DATABRICKS_HOST"] = workspace_url
-            # Env now holds oauth AND a token; pin SPN oauth to disambiguate.
             os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
             auth_method = "service_principal"
             logger.info("[%s] SPN credential set", label)

@@ -53,6 +53,11 @@ export interface ModelConfig {
    * returns the trace.
    */
   returns_thinking_text?: boolean;
+  /**
+   * Per-model settings stored on the model row. Includes the endpoint
+   * (`api_base`) and, for vLLM, `supports_tools` / `tool_choice`.
+   */
+  params?: Record<string, unknown> | null;
 }
 
 export interface Models {

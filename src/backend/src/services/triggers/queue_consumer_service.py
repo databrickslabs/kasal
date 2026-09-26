@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
@@ -135,7 +135,6 @@ class TriggerQueueConsumerService:
                 group_ids=[group_id] if group_id else [],
                 group_email=None,
             )
-            await self._load_databricks_auth()
 
             from src.services.execution.service import ExecutionService
 
@@ -272,10 +271,8 @@ class TriggerQueueConsumerService:
         # UnsafeUrlError is a ValueError, so a blocked URL dead-letters
         # immediately instead of burning retries. Local dev can opt out to
         # deliver to a localhost receiver.
-        _allow_private = os.getenv(
-            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
-        ).lower() in ("1", "true", "yes")
-        if not _allow_private:
+        # Refused inside Databricks Apps (config/settings.py).
+        if not settings.KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS:
             from src.utils.url_security import assert_safe_outbound_url
 
             await assert_safe_outbound_url(url)
@@ -319,9 +316,7 @@ class TriggerQueueConsumerService:
         from src.utils.safe_http import PublicResolver
         from src.utils.url_security import check_url_structure
 
-        allow_private = os.getenv(
-            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
-        ).lower() in ("1", "true", "yes")
+        allow_private = settings.KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS
         if not allow_private:
             check_url_structure(url)
         # The connector uses the resolver's returned IPs directly. Literal IPs
@@ -486,26 +481,3 @@ class TriggerQueueConsumerService:
             return config, (config.execution_type or "crew")
 
         raise ValueError(f"unknown target kind: {kind!r}")
-
-    async def _load_databricks_auth(self) -> None:
-        """Best-effort: put Databricks host/token in env for the launched run.
-
-        Mirrors the scheduler (``run_schedule_job``) so a queue-triggered run
-        authenticates the same way a scheduled one does. Best-effort by design —
-        the subprocess re-resolves auth; failures here must not abort dispatch.
-        """
-        import os
-
-        try:
-            from src.utils.databricks_auth import get_auth_context
-
-            auth = await get_auth_context()
-        except Exception:  # noqa: BLE001
-            return
-        if not auth:
-            return
-        if getattr(auth, "workspace_url", None):
-            os.environ["DATABRICKS_HOST"] = auth.workspace_url
-        if getattr(auth, "token", None):
-            os.environ["DATABRICKS_TOKEN"] = auth.token
-            os.environ["DATABRICKS_API_KEY"] = auth.token

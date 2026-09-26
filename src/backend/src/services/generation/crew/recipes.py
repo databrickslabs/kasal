@@ -80,8 +80,6 @@ class RecipeHooksMixin:
         — recipe work must not reintroduce it just because its own writes look
         harmless.
         """
-        import os as _os
-
         from src.db.database_router import (
             get_lakebase_config_from_db,
             is_lakebase_enabled,
@@ -91,10 +89,9 @@ class RecipeHooksMixin:
 
         if await is_lakebase_enabled():
             lb_config = await get_lakebase_config_from_db()
-            lb_instance = (lb_config or {}).get("instance_name") or _os.environ.get(
-                "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-            )
-            return get_lakebase_session(lb_instance)
+            from src.core.databricks_app import lakebase_instance_from_config
+
+            return get_lakebase_session(lakebase_instance_from_config(lb_config))
         return get_isolated_db_session()
 
     async def _recipe_decision_isolated(

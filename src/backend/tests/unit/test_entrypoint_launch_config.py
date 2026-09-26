@@ -105,3 +105,28 @@ def test_reload_passes_an_import_string_factory():
     run_app = SOURCE.split("def run_app():", 1)[1]
     assert '"entrypoint:build_app"' in run_app
     assert "factory=True" in run_app
+
+
+@pytest.mark.parametrize(
+    ("cli_port", "environ", "port"),
+    [
+        (None, {}, 8000),
+        # Outside Apps a stray DATABRICKS_APP_PORT means nothing.
+        (None, {"DATABRICKS_APP_PORT": "8080"}, 8000),
+        # Inside Apps the platform decides where traffic is forwarded.
+        (None, {"DATABRICKS_APP_NAME": "kasal", "DATABRICKS_APP_PORT": "8080"}, 8080),
+        (None, {"DATABRICKS_APP_NAME": "kasal", "DATABRICKS_APP_PORT": "x"}, 8000),
+        # An explicit --port always wins.
+        (9001, {"DATABRICKS_APP_NAME": "kasal", "DATABRICKS_APP_PORT": "8080"}, 9001),
+    ],
+)
+def test_listen_port(cli_port, environ, port):
+    assert launcher._listen_port(cli_port, environ) == port
+
+
+def test_port_flag_defaults_to_unset_so_the_platform_can_decide():
+    """``create_parser`` sits after the backend import; check its source."""
+    parser_src = SOURCE.split("def create_parser", 1)[1].split("\ndef ", 1)[0]
+    port_arg = parser_src.split('"--port"', 1)[1].split(")", 1)[0]
+    assert "default=None" in port_arg
+    assert "port = _listen_port(args.port)" in SOURCE

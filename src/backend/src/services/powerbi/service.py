@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 from typing import Dict, List, Optional
 
@@ -187,7 +186,7 @@ class PowerBIService:
     ) -> str:
         """
         Generate token using username/password flow.
-        Requires POWERBI_USERNAME and POWERBI_PASSWORD from API Keys Service or environment.
+        Requires POWERBI_USERNAME and POWERBI_PASSWORD from the API Keys Service.
 
         Args:
             tenant_id: Azure AD tenant ID
@@ -198,11 +197,10 @@ class PowerBIService:
             Authentication token string
         """
         try:
-            # Attempt to get credentials from different sources
-            # Priority: API Keys Service > Environment Variables
-            username = None
-            password = None
-            client_secret = None
+            # Credentials come from the workspace's API Keys Service only.
+            username: Optional[str] = None
+            password: Optional[str] = None
+            client_secret: Optional[str] = None
 
             # Try to get from API Keys Service
             if self._secrets_service:
@@ -221,23 +219,14 @@ class PowerBIService:
                         f"Could not get Power BI credentials from API Keys Service: {e}"
                     )
 
-            # Fallback to environment variables
-            if not username:
-                username = os.getenv("POWERBI_USERNAME") or os.getenv(
-                    "SADATAMESHPOWERBIUSERNAME"
-                )
-            if not password:
-                password = os.getenv("POWERBI_PASSWORD") or os.getenv(
-                    "SADATAMESHPOWERBIPASSWORD"
-                )
-            if not client_secret:
-                client_secret = os.getenv("POWERBI_CLIENT_SECRET")
+            # No environment fallback: the process env is shared by every
+            # workspace, so credentials found there are not this caller's.
 
             # Validate credentials
-            if not all([username, password, client_id]):
+            if not username or not password or not client_id:
                 raise ValueError(
                     "Missing required credentials. Please provide username, password, and client_id "
-                    "through API Keys Service or environment variables."
+                    "through the API Keys Service."
                 )
 
             logger.info(

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.config.settings import settings
+from src.core.databricks_app import resolve_lakebase_instance_name
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.dependencies.admin_auth import require_system_admin
@@ -671,7 +672,8 @@ async def migrate_to_lakebase(
     Returns:
         Migration result
     """
-    instance_name = request.get("instance_name", "kasal-lakebase")
+    # The requested instance, else the Apps binding — never an invented name.
+    instance_name = resolve_lakebase_instance_name(request.get("instance_name"))
     endpoint = request.get("endpoint")
     recreate_schema = request.get("recreate_schema", False)
 
@@ -707,7 +709,7 @@ async def migrate_to_lakebase_stream(
             user_email = group_context.group_email if group_context else None
 
             # Get migration parameters
-            instance_name = request.get("instance_name", "kasal-lakebase")
+            instance_name = resolve_lakebase_instance_name(request.get("instance_name"))
             endpoint = request.get("endpoint")
             recreate_schema = request.get("recreate_schema", False)
             migrate_data = request.get(

@@ -33,8 +33,10 @@ import litellm
 from litellm import CustomLogger
 
 from src.core.llm.transport import LLM
+from src.core.llm.transport.completion import NO_API_KEY
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
+from src.services.llm.endpoints import require_api_base
 
 # Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
 # loop's DEFAULT ThreadPoolExecutor (max ~min(32, cpu+4) workers) with every
@@ -102,6 +104,34 @@ log_file_path = os.path.join(log_dir, "llm.log")
 
 # Configure standard Python logger to also write to the llm.log file
 logger = logging.getLogger(__name__)
+
+#: Thinking budget when a model enables extended thinking without one
+#: (was the KASAL_THINKING_BUDGET_TOKENS env var).
+DEFAULT_THINKING_BUDGET_TOKENS = 10240
+
+
+def _responses_output_cap(model_config: Dict[str, Any]) -> Dict[str, int]:
+    """``output_token_cap`` from the model's settings, when it sets one."""
+    cap = (model_config.get("params") or {}).get("output_token_cap")
+    return {"output_token_cap": int(cap)} if cap else {}
+
+
+def _vllm_llm(
+    llm_params: Dict[str, Any], model_config: Dict[str, Any]
+) -> Optional[VLLMFunctionCallingLLM]:
+    """The vLLM function-calling LLM, unless the model turned tool calling off.
+
+    Per-model settings (Configuration → Models), formerly the
+    VLLM_SUPPORTS_TOOLS / VLLM_TOOL_CHOICE env vars.
+    """
+    params = model_config.get("params") or {}
+    if not params.get("supports_tools", True):
+        return None
+    return VLLMFunctionCallingLLM(
+        **llm_params, tool_choice=str(params.get("tool_choice", "auto"))
+    )
+
+
 logger.setLevel(logging.DEBUG)
 
 
@@ -464,6 +494,21 @@ def _is_http_400(exc: Exception) -> bool:
     return False
 
 
+async def _self_hosted_api_key(provider: str, group_id: Optional[str]) -> str:
+    """The workspace's key for a self-hosted endpoint, or a harmless placeholder.
+
+    ``provider`` names the API key (``vllm`` -> VLLM_API_KEY, ``kat`` ->
+    KAT_API_KEY in Configuration -> API Keys). Self-hosted vLLM / KAT servers
+    usually run without auth, so no key is not an error. The key is never read
+    from os.environ (shared by every workspace).
+    """
+    if group_id:
+        key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+        if key:
+            return key
+    return NO_API_KEY
+
+
 class LLMManager:
     """The public facade for LLM work in kasal.
 
@@ -712,6 +757,9 @@ class LLMManager:
             val = getattr(llm, attr, None)
             if val:
                 call_kwargs[attr] = val
+        # litellm falls back to the provider's *_API_KEY in os.environ when no
+        # key is passed; that env is shared by every workspace, so never let it.
+        call_kwargs.setdefault("api_key", NO_API_KEY)
         # Merge telemetry headers with any caller-supplied ones.
         headers = dict(getattr(llm, "extra_headers", None) or {})
         if extra_headers:
@@ -859,13 +907,15 @@ class LLMManager:
         api_key = None
         api_base = None
 
+        model_params = model_config_dict.get("params")  # incl. the endpoint (UI)
+
         # Set the correct provider prefix based on provider
         # Note: group_id is already passed as parameter to this function
         if provider == ModelProvider.DEEPSEEK:
             api_key = await ApiKeysService.get_provider_api_key(
                 provider, group_id=group_id
             )
-            api_base = os.getenv("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
+            api_base = require_api_base("deepseek", model_params, model_name_value)
             # No prefix. DeepSeek's endpoint is OpenAI-compatible and is reached
             # by api_base, so the model field must carry the bare name — this
             # branch sent "deepseek/deepseek-v4-flash" and the API rejected every
@@ -890,10 +940,10 @@ class LLMManager:
                 provider, group_id=group_id
             )
             # Direct Claude uses the native Messages API, including adaptive thinking.
-            api_base = os.getenv("ANTHROPIC_API_BASE") or "https://api.anthropic.com"
+            api_base = require_api_base("anthropic", model_params, model_name_value)
             prefixed_model = f"anthropic/{model_name_value}"
         elif provider == ModelProvider.OLLAMA:
-            api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            api_base = require_api_base("ollama", model_params, model_name_value)
             # Normalize model name: replace hyphen with colon for Ollama models
             normalized_model_name = model_name_value
             if "-" in normalized_model_name:
@@ -1062,6 +1112,7 @@ class LLMManager:
                     timeout=300,
                     max_tokens=llm_params.get("max_completion_tokens")
                     or llm_params.get("max_tokens"),
+                    **_responses_output_cap(model_config_dict),
                 )
 
             # Use DatabricksRetryLLM for all other Databricks models (GPT-OSS, Llama, Claude, etc.)
@@ -1082,8 +1133,8 @@ class LLMManager:
             return DatabricksRetryLLM(**llm_params)
         elif provider == ModelProvider.VLLM:
             # Self-hosted vLLM server — OpenAI-compatible endpoint
-            api_base = os.getenv("VLLM_BASE_URL", "http://localhost:8081/v1")
-            api_key = os.getenv("VLLM_API_KEY", "vllm")
+            api_base = require_api_base("vllm", model_params, model_name_value)
+            api_key = await _self_hosted_api_key("vllm", group_id)
             # No prefix, exactly like the OpenAI branch above. This used to build
             # "openai/<model>" so litellm would route it, and the register_model
             # call that went with it is already gone (the transport asks its own
@@ -1099,8 +1150,8 @@ class LLMManager:
             prefixed_model = model_name_value
         elif provider == ModelProvider.CUSTOM:
             # Custom self-hosted OpenAI-compatible endpoint.
-            api_base = os.getenv("KAT_BASE_URL", "http://127.0.0.1:8082/v1")
-            api_key = os.getenv("KAT_API_KEY", "local-no-auth")
+            api_base = require_api_base("custom", model_params, model_name_value)
+            api_key = await _self_hosted_api_key("kat", group_id)
             prefixed_model = model_name_value
         elif provider == ModelProvider.KIMI:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
@@ -1114,7 +1165,7 @@ class LLMManager:
                     f"No Kimi API key found for workspace '{group_id}'. "
                     f"Add KIMI_API_KEY under Configuration -> API Keys."
                 )
-            api_base = os.getenv("KIMI_ENDPOINT", "https://api.moonshot.ai/v1")
+            api_base = require_api_base("kimi", model_params, model_name_value)
             prefixed_model = f"openai/{model_name_value}"
             # (see the vLLM branch: the litellm.register_model call that used to
             # be here was inert once the engine stopped reading litellm's registry)
@@ -1132,9 +1183,7 @@ class LLMManager:
                 # Help Instructor pick the right model family when no key is set.
                 os.environ["INSTRUCTOR_MODEL_NAME"] = "gemini"
 
-            api_base = os.getenv("GEMINI_API_BASE") or (
-                "https://generativelanguage.googleapis.com/v1beta/openai"
-            )
+            api_base = require_api_base("gemini", model_params, model_name_value)
             prefixed_model = f"gemini/{model_name_value}"
         else:
             # Default fallback for other providers
@@ -1258,7 +1307,7 @@ class LLMManager:
             # a budget) and `thinking_effort` carries the depth instead.
             llm_params["thinking_budget_tokens"] = int(
                 model_config_dict.get("thinking_budget_tokens")
-                or os.getenv("KASAL_THINKING_BUDGET_TOKENS", "10240")
+                or DEFAULT_THINKING_BUDGET_TOKENS
             )
             effort = model_config_dict.get("reasoning_effort")
             if effort:
@@ -1281,11 +1330,10 @@ class LLMManager:
         # help from us — the transport reports every model as tool-capable — and
         # the max_tokens clamp that also lived there is now
         # OpenAICompletion._clamp_output_budget, protecting every provider.
-        if (
-            provider == ModelProvider.VLLM
-            and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true"
+        if provider == ModelProvider.VLLM and (
+            vllm := _vllm_llm(llm_params, model_config_dict)
         ):
-            return VLLMFunctionCallingLLM(**llm_params)
+            return vllm
 
         return LLM(**llm_params)
 

@@ -109,13 +109,13 @@ class TestInit:
 
 
 class TestSaveEnvironmentVars:
-    """Tests for _save_environment_vars."""
+    """Tests for _save_environment_vars: only the non-secret endpoint URLs."""
 
-    def test_saves_existing_vars(self):
-        """Captures current DATABRICKS_* env vars."""
+    _URLS = ("DATABRICKS_BASE_URL", "DATABRICKS_API_BASE", "DATABRICKS_ENDPOINT")
+
+    def test_saves_existing_url_vars_and_never_the_token(self):
         runner = _make_runner()
         env_patch = {
-            "DATABRICKS_HOST": "https://host.example.com",
             "DATABRICKS_TOKEN": "tok-123",
             "DATABRICKS_BASE_URL": "https://base.example.com",
             "DATABRICKS_API_BASE": "https://apibase.example.com",
@@ -124,113 +124,74 @@ class TestSaveEnvironmentVars:
         with patch.dict(os.environ, env_patch, clear=False):
             result = runner._save_environment_vars()
 
-        assert result["DATABRICKS_HOST"] == "https://host.example.com"
-        assert result["DATABRICKS_TOKEN"] == "tok-123"
+        assert set(result) == set(self._URLS)
         assert result["DATABRICKS_BASE_URL"] == "https://base.example.com"
         assert result["DATABRICKS_API_BASE"] == "https://apibase.example.com"
         assert result["DATABRICKS_ENDPOINT"] == "https://endpoint.example.com"
 
     def test_returns_none_for_missing_vars(self):
-        """Returns None for env vars that are not set."""
         runner = _make_runner()
-        clean = {
-            k: None
-            for k in [
-                "DATABRICKS_HOST",
-                "DATABRICKS_TOKEN",
-                "DATABRICKS_BASE_URL",
-                "DATABRICKS_API_BASE",
-                "DATABRICKS_ENDPOINT",
-            ]
-        }
-        # Remove the keys so they are absent
-        env_copy = os.environ.copy()
-        for k in clean:
-            env_copy.pop(k, None)
+        env_copy = {k: v for k, v in os.environ.items() if k not in self._URLS}
         with patch.dict(os.environ, env_copy, clear=True):
             result = runner._save_environment_vars()
 
-        for key in clean:
-            assert result[key] is None
+        assert all(result[key] is None for key in self._URLS)
 
 
 # ===========================================================================
-# TestSetEnvironmentVars
+# TestSetEnvironmentVars / TestRestoreEnvironmentVars
 # ===========================================================================
 
 
 class TestSetEnvironmentVars:
-    """Tests for _set_environment_vars."""
+    """_set_environment_vars opens the scoped sp_auth window; restore closes it."""
 
     @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
-    def test_sets_all_vars(self, mock_construct):
-        """Sets DATABRICKS_HOST, TOKEN, and API base vars from auth context."""
+    def test_window_presents_the_credential_then_restores(self, mock_construct):
         mock_construct.return_value = "https://example.databricks.com/serving-endpoints"
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
 
         with patch.dict(os.environ, {}, clear=True):
+            old = runner._save_environment_vars()
             runner._set_environment_vars(auth_ctx)
-
-            assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
-            assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
-            assert (
-                os.environ["DATABRICKS_BASE_URL"]
-                == "https://example.databricks.com/serving-endpoints"
-            )
-            assert (
-                os.environ["DATABRICKS_API_BASE"]
-                == "https://example.databricks.com/serving-endpoints"
-            )
-            assert (
-                os.environ["DATABRICKS_ENDPOINT"]
-                == "https://example.databricks.com/serving-endpoints"
-            )
+            try:
+                assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
+                assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
+                assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
+                for key in TestSaveEnvironmentVars._URLS:
+                    assert os.environ[key] == mock_construct.return_value
+            finally:
+                runner._restore_environment_vars(old, auth_ctx)
+            # Nothing of the credential outlives the call.
+            assert "DATABRICKS_TOKEN" not in os.environ
+            assert "DATABRICKS_HOST" not in os.environ
+            assert "DATABRICKS_AUTH_TYPE" not in os.environ
+            for key in TestSaveEnvironmentVars._URLS:
+                assert key not in os.environ
 
     @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_skips_api_base_when_empty(self, mock_construct):
-        """Does not set API base vars when construct_llm_base_url returns empty."""
         mock_construct.return_value = ""
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
 
         with patch.dict(os.environ, {}, clear=True):
+            old = runner._save_environment_vars()
             runner._set_environment_vars(auth_ctx)
-
-            assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
-            assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
-            assert "DATABRICKS_BASE_URL" not in os.environ
-            assert "DATABRICKS_API_BASE" not in os.environ
-            assert "DATABRICKS_ENDPOINT" not in os.environ
-
-    @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
-    def test_skips_api_base_when_none(self, mock_construct):
-        """Does not set API base vars when construct_llm_base_url returns None."""
-        mock_construct.return_value = None
-        runner = _make_runner()
-        auth_ctx = _make_auth_ctx()
-
-        with patch.dict(os.environ, {}, clear=True):
-            runner._set_environment_vars(auth_ctx)
-
-            assert "DATABRICKS_BASE_URL" not in os.environ
-
-
-# ===========================================================================
-# TestRestoreEnvironmentVars
-# ===========================================================================
+            try:
+                assert "DATABRICKS_BASE_URL" not in os.environ
+            finally:
+                runner._restore_environment_vars(old, auth_ctx)
 
 
 class TestRestoreEnvironmentVars:
     """Tests for _restore_environment_vars."""
 
-    def test_restores_previously_set_vars(self):
-        """Restores vars that existed before the run."""
+    def test_restores_previously_set_url_vars(self):
         runner = _make_runner()
         old_env = {
-            "DATABRICKS_HOST": "https://original.example.com",
-            "DATABRICKS_TOKEN": "orig-token",
-            "DATABRICKS_BASE_URL": None,
+            "DATABRICKS_BASE_URL": "https://original.example.com",
             "DATABRICKS_API_BASE": None,
             "DATABRICKS_ENDPOINT": None,
         }
@@ -238,35 +199,13 @@ class TestRestoreEnvironmentVars:
 
         with patch.dict(
             os.environ,
-            {"DATABRICKS_HOST": "changed", "DATABRICKS_TOKEN": "changed"},
+            {"DATABRICKS_BASE_URL": "changed", "DATABRICKS_API_BASE": "changed"},
             clear=True,
         ):
             runner._restore_environment_vars(old_env, auth_ctx)
 
-            assert os.environ["DATABRICKS_HOST"] == "https://original.example.com"
-            assert os.environ["DATABRICKS_TOKEN"] == "orig-token"
-
-    def test_deletes_vars_that_were_unset(self):
-        """Removes env vars that were not set before the run."""
-        runner = _make_runner()
-        old_env = {
-            "DATABRICKS_HOST": None,
-            "DATABRICKS_TOKEN": None,
-            "DATABRICKS_BASE_URL": None,
-            "DATABRICKS_API_BASE": None,
-            "DATABRICKS_ENDPOINT": None,
-        }
-        auth_ctx = _make_auth_ctx()
-
-        env_during = {
-            "DATABRICKS_HOST": "temp-host",
-            "DATABRICKS_TOKEN": "temp-token",
-        }
-        with patch.dict(os.environ, env_during, clear=True):
-            runner._restore_environment_vars(old_env, auth_ctx)
-
-            assert "DATABRICKS_HOST" not in os.environ
-            assert "DATABRICKS_TOKEN" not in os.environ
+            assert os.environ["DATABRICKS_BASE_URL"] == "https://original.example.com"
+            assert "DATABRICKS_API_BASE" not in os.environ
 
     def test_noop_when_no_auth_ctx(self):
         """Does nothing when auth_ctx is None."""
@@ -546,9 +485,10 @@ class TestExtractRecordsFromTraces:
         assert len(records) == 1
         assert records[0]["messages"] == "question"
 
-    def test_respects_max_rows_env_var(self):
-        """Limits rows to MLFLOW_EVAL_MAX_ROWS environment variable."""
+    def test_respects_max_rows_setting(self):
+        """Limits rows to the runner's max_rows (Configuration → MLflow → Advanced)."""
         runner = _make_runner()
+        runner.max_rows = 3
         rows = [
             {"execution_id": "exec-123", "prompt": f"q{i}", "output": f"a{i}"}
             for i in range(10)
@@ -560,8 +500,7 @@ class TestExtractRecordsFromTraces:
             }
         )
 
-        with patch.dict(os.environ, {"MLFLOW_EVAL_MAX_ROWS": "3"}):
-            _, records = runner._extract_records_from_traces(df)
+        _, records = runner._extract_records_from_traces(df)
 
         assert len(records) == 3
 
@@ -743,7 +682,11 @@ class TestCreateRun:
             result = runner.create_run(auth_ctx)
 
             assert result["run_id"] == "run-abc"
-            assert result["experiment_name"] == "/Shared/kasal-crew-execution-traces"
+            # No experiment configured: the private per-environment fallback, never /Shared.
+            assert (
+                result["experiment_name"]
+                == "/Users/tests@example.com/kasal-crew-traces"
+            )
             assert "experiment_id" in result
 
     def test_create_run_sets_and_restores_env_vars(self):

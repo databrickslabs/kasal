@@ -1,11 +1,10 @@
 """Static configuration for prompt optimization: model defaults, the task
-catalogue GEPA can optimize, and the MLflow experiment pin.
+catalogue GEPA can optimize.
 
 Separate from the service so the mixins can read it without importing the
 service back (which would be a cycle)."""
 
 import logging
-import os
 from typing import Any, Dict
 
 from src.services.prompt_optimization.gepa.crew_doc import (
@@ -14,14 +13,13 @@ from src.services.prompt_optimization.gepa.crew_doc import (
 from src.services.prompt_optimization.gepa.grading import (
     _job_name_score,
 )
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 logger = logging.getLogger(__name__)
 
 
-# Same fallback chain as the dispatcher: intent classification rides a fast model.
-DEFAULT_TARGET_MODEL = os.getenv(
-    "DEFAULT_DISPATCHER_MODEL", "databricks-llama-4-maverick"
-)
+# The engine default (the installed model inside Databricks Apps).
+DEFAULT_TARGET_MODEL = DEFAULT_ENGINE_MODEL
 
 
 MIN_EXAMPLES = 5
@@ -122,21 +120,3 @@ TEMPLATE_TASKS: Dict[str, Dict[str, Any]] = {
         ),
     },
 }
-
-
-def _pin_local_experiment() -> None:
-    """Pin the MLflow experiment for judge/scorer operations.
-
-    Scorers are PER-EXPERIMENT. The optimization runs pin the launch
-    experiment ('kasal' by default), but a fresh worker's active experiment
-    is Default/0 — a judge registered or listed there silently diverges from
-    everything else (risk observed live while chasing a judge that never
-    appeared). Every judge CRUD body must call this after set_tracking_uri.
-    """
-    import mlflow
-
-    exp_name = os.environ.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
-    try:
-        mlflow.set_experiment(exp_name)
-    except Exception as exp_err:
-        logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")

@@ -1,7 +1,8 @@
+import logging
 import os
 from typing import Any, List, Optional, Union
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.core.paths import BACKEND_ROOT
@@ -16,6 +17,10 @@ class Settings(BaseSettings):
     # BACKEND_CORS_ORIGINS is a comma-separated list of origins
     # e.g: "http://localhost,http://localhost:8080"
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    # The localhost dev-server origins are the default OUTSIDE Databricks Apps
+    # only (see _apply_databricks_apps_policy): there the SPA is served from the
+    # app's own origin, and a credentialed CORS allowance for localhost is
+    # something any page on the viewer's machine could use.
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -129,6 +134,11 @@ class Settings(BaseSettings):
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True
 
+    # Deliver trigger webhooks to loopback/private addresses (skips the SSRF
+    # check). A local-dev convenience for a localhost receiver; refused inside
+    # Databricks Apps.
+    KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS: bool = False
+
     # Response caching for the legacy LiteLLM completion_with_usage path.
     # Native chat/crew/flow calls use the transport layer. Disk caching is
     # disabled because its default serializer reads pickle from writable files.
@@ -144,6 +154,47 @@ class Settings(BaseSettings):
     LITELLM_CACHE_REDIS_PASSWORD: Optional[str] = os.getenv(
         "LITELLM_CACHE_REDIS_PASSWORD"
     )
+
+    @model_validator(mode="after")
+    def _apply_databricks_apps_policy(self) -> "Settings":
+        """Inside Databricks Apps, development-only flags do nothing.
+
+        ``DEBUG_MODE`` (cross-workspace debug endpoints),
+        ``KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS`` (disables the webhook
+        SSRF check) and ``DOCS_ENABLED`` (serves the OpenAPI schema) are forced
+        off, with an error logged when one was set; ``CORS_ORIGINS`` keeps its
+        localhost default only outside Apps. Hosting is DERIVED from the
+        platform's own variables, never from ``ENVIRONMENT``.
+        """
+        from src.core.databricks_app import on_databricks_apps
+
+        if not on_databricks_apps():
+            return self
+        log = logging.getLogger(__name__)
+        for flag in (
+            "DEBUG_MODE",
+            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS",
+            "DOCS_ENABLED",
+        ):
+            if flag in self.model_fields_set and getattr(self, flag):
+                log.error(
+                    "%s is set but ignored inside Databricks Apps (unsafe there)",
+                    flag,
+                )
+            setattr(self, flag, False)
+        if "CORS_ORIGINS" not in self.model_fields_set:
+            self.CORS_ORIGINS = []
+        if os.getenv("ENVIRONMENT", "").strip().lower() not in (
+            "",
+            "production",
+            "prod",
+        ):
+            log.warning(
+                "ENVIRONMENT=%s is ignored: inside Databricks Apps Kasal always "
+                "runs as production",
+                os.getenv("ENVIRONMENT"),
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

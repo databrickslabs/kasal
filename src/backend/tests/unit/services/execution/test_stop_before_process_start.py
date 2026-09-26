@@ -2,9 +2,14 @@
 
 The run is out of the admission queue but not yet in the executor's
 ``_running_processes``: ``terminate_execution`` used to find nothing, report
-"not found", and the child spawned and ran to completion anyway. The stop is
-injected at the first ``await`` after admission (the Lakebase check), which is
-inside exactly that window.
+"not found", and the child spawned and ran to completion anyway.
+
+The window no longer contains an ``await`` (the Lakebase env propagation is gone:
+children activate Lakebase themselves), so a real stop cannot interleave there
+today. ``claim_start`` still guards it, so the stop is injected the way
+``terminate_execution`` records it for an admitted-but-unstarted run —
+``run_admission.cancel_waiting`` — while the process object is being built,
+immediately before ``claim_start``.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,11 +20,14 @@ from src.services.execution.run_admission import run_admission
 
 
 def _stop_during_prep(executor, execution_id, outcome):
-    async def is_lakebase_enabled():
-        outcome["stop"] = await executor.terminate_execution(execution_id)
-        return False
+    """Record a stop while the child process object is built, before claim_start."""
+    build = executor._ctx.Process
 
-    return patch("src.db.database_router.is_lakebase_enabled", is_lakebase_enabled)
+    def process_factory(*args, **kwargs):
+        outcome["stop"] = run_admission.cancel_waiting(execution_id)
+        return build.return_value
+
+    return patch.object(build, "side_effect", process_factory)
 
 
 def _mock_context(executor):

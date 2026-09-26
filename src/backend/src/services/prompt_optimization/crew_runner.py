@@ -13,6 +13,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Optional
 
+from src.core.databricks_app import fallback_trace_experiment
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.crew_doc import (
     _distill_requirements,
@@ -66,6 +67,7 @@ class CrewRunnerMixin:
         cancel_run_id: str = "",
         group_context: Optional[GroupContext] = None,
         crew_traces_experiment: str = "",
+        judge_samples: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
         template body's MLflow span setup; predict = execute the crew.
@@ -154,21 +156,13 @@ class CrewRunnerMixin:
             # run searching the default experiment).
             # Pin on BOTH backends — scorers/judges are per-experiment, so the
             # scorer lookup below must run against the same experiment they were
-            # registered on. Local uses the launch experiment name; Databricks
-            # uses the shared crew-traces path (where judges are registered by
-            # JudgeOperationsMixin, and where this run's traces already land).
-            exp_name = (
-                saved_exp_env.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
-                if local_mode
-                else (
-                    crew_traces_experiment
-                    or os.getenv(
-                        "MLFLOW_CREW_TRACES_EXPERIMENT",
-                        "/Shared/kasal-crew-execution-traces",
-                    )
-                )
+            # registered on: the one Configuration → MLflow resolves to
+            # (``crew_traces_experiment``, where judges are registered by
+            # JudgeOperationsMixin and this run's traces land), on either backend.
+            exp_name = crew_traces_experiment or fallback_trace_experiment(
+                getattr(group_context, "primary_group_id", None)
             )
-            try:
+            try:  # None (nothing configured) raises and is logged, never invented
                 mlflow.set_experiment(exp_name)
             except Exception as exp_err:
                 logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")
@@ -678,7 +672,7 @@ class CrewRunnerMixin:
                 # minutes apart. N samples reduced by median absorb that. The
                 # per-candidate cost is bounded because judge_cache means a
                 # DISTINCT deliverable is only ever sampled once per run.
-                sample_count = _judge_sample_count()
+                sample_count = _judge_sample_count(judge_samples)
                 samples: List[tuple] = []
                 judge_error: Optional[Exception] = None
                 for index in range(sample_count):

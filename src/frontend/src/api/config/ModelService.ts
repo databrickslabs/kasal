@@ -29,6 +29,8 @@ interface ApiModelResponse {
   allowed_efforts?: string[];
   refused_params?: string[];
   returns_thinking_text?: boolean;
+  // Per-model settings (endpoint `api_base`, vLLM tool options).
+  params?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -173,6 +175,7 @@ export class ModelService {
         allowed_efforts: model.allowed_efforts ?? [],
         refused_params: model.refused_params ?? [],
         returns_thinking_text: model.returns_thinking_text === true,
+        params: model.params ?? null,
         enabled: model.enabled !== false // Default to enabled if not specified
       };
     });
@@ -252,6 +255,8 @@ export class ModelService {
               refused_params: Array.isArray((value as Record<string, unknown>).refused_params)
                 ? ((value as Record<string, unknown>).refused_params as unknown[]).map(String) : [],
               returns_thinking_text: 'returns_thinking_text' in value ? Boolean(value.returns_thinking_text) : false,
+              params: 'params' in value && value.params && typeof value.params === 'object'
+                ? (value.params as Record<string, unknown>) : null,
               enabled: 'enabled' in value ? Boolean(value.enabled) : true,
               created_at: 'created_at' in value ? String(value.created_at) : new Date().toISOString(),
               updated_at: 'updated_at' in value ? String(value.updated_at) : new Date().toISOString()
@@ -352,6 +357,7 @@ export class ModelService {
           context_window: model.context_window,
           max_output_tokens: model.max_output_tokens,
           extended_thinking: model.extended_thinking,
+          params: model.params ?? undefined,
           enabled: model.enabled
         }).catch(error => {
           // If model doesn't exist, create it
@@ -364,6 +370,7 @@ export class ModelService {
               context_window: model.context_window,
               max_output_tokens: model.max_output_tokens,
               extended_thinking: model.extended_thinking,
+              params: model.params ?? undefined,
               enabled: model.enabled
             });
           }
@@ -631,6 +638,7 @@ export class ModelService {
         context_window: model.context_window,
         max_output_tokens: model.max_output_tokens,
         extended_thinking: model.extended_thinking,
+        params: model.params ?? undefined,
         enabled: model.enabled !== false
       });
 

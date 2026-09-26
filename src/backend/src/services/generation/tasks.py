@@ -6,7 +6,6 @@ using LLM models and prompt templates.
 """
 
 import logging
-import os
 import re
 from typing import Any, Optional
 
@@ -22,8 +21,8 @@ from src.utils.user_context import GroupContext
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Per-feature override with the shared engine default as its fallback.
-DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", DEFAULT_ENGINE_MODEL)
+# The shared engine default (the installed model inside Databricks Apps).
+DEFAULT_TASK_MODEL = DEFAULT_ENGINE_MODEL
 
 
 class TaskGenerationService:
@@ -89,7 +88,7 @@ class TaskGenerationService:
         sentence describing what makes the task's output valid and complete —
         the text that goes in ``llm_guardrail.description``.
         """
-        model = model or os.getenv("TASK_MODEL", DEFAULT_TASK_MODEL)
+        model = model or DEFAULT_TASK_MODEL
         system = (
             "You write validation criteria for an AI task-output guardrail. "
             "Given a task's description and expected output, respond with ONE "
@@ -203,8 +202,8 @@ class TaskGenerationService:
             ValueError: If required prompt template is not found
             Exception: For other errors
         """
-        # Get model from request or fallback to environment variables
-        model = request.model or os.getenv("TASK_MODEL", DEFAULT_TASK_MODEL)
+        # The model the request chose, else the engine default
+        model = request.model or DEFAULT_TASK_MODEL
         logger.info(f"Using model for task generation: {model}")
 
         # Get composed prompt template from database (base + group/user overrides)

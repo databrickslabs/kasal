@@ -184,14 +184,40 @@ class TestCreateDocumentationEmbedding:
         mock_queue = AsyncMock()
         doc_create = _make_doc_embedding_create()
 
+        # The SESSION's dialect decides, not DATABASE_TYPE (which names the
+        # base engine: SQLite inside Databricks Apps even on Lakebase).
+        session.get_bind = MagicMock(return_value=MagicMock(dialect=MagicMock()))
+        session.get_bind.return_value.dialect.name = "sqlite"
         with (
-            patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}),
+            patch.dict(os.environ, {"DATABASE_TYPE": "postgres"}),
             patch(_EMBEDDING_QUEUE, mock_queue),
         ):
             result = await svc.create_documentation_embedding(doc_create)
 
         mock_queue.add_embedding.assert_awaited_once()
         assert str(result.id).startswith("queued-")
+
+    @pytest.mark.asyncio
+    async def test_lakebase_session_skips_the_sqlite_queue_even_if_base_is_sqlite(
+        self,
+    ):
+        """Inside Apps DATABASE_TYPE=sqlite (the boot DB) while the session is
+        Lakebase Postgres: the write must go to Postgres, not the SQLite queue."""
+        session = _make_mock_session()
+        session.get_bind = MagicMock(return_value=MagicMock(dialect=MagicMock()))
+        session.get_bind.return_value.dialect.name = "postgresql"
+        svc = _make_service(session=session)
+        mock_queue = AsyncMock()
+        with (
+            patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}),
+            patch(_EMBEDDING_QUEUE, mock_queue),
+            patch.object(svc, "repository", create=True),
+        ):
+            try:
+                await svc.create_documentation_embedding(_make_doc_embedding_create())
+            except Exception:  # noqa: BLE001 - only the routing matters here
+                pass
+        mock_queue.add_embedding.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_create_uses_postgres_repository(self):

@@ -179,8 +179,11 @@ class TestSetupSyncAuth:
             ):
                 ok = _setup_sync("/Shared/base", "c", "s", "wh", "X")
         assert ok is True
-        # Bearer from authenticate() replaces the PAT; SPN vars preserved.
-        assert os.environ.get("DATABRICKS_TOKEN") == "tok"
+        # The minted bearer is never exported into the shared env (the SDK
+        # refreshes its own from the SP credentials, pinned to oauth-m2m); the
+        # platform-injected SP vars stay.
+        assert os.environ.get("DATABRICKS_TOKEN") != "tok"
+        assert os.environ.get("DATABRICKS_AUTH_TYPE") == "oauth-m2m"
         assert os.environ.get("DATABRICKS_CLIENT_ID") == "cid"
         assert os.environ.get("DATABRICKS_CLIENT_SECRET") == "csecret"
         mock_mlflow.set_tracking_uri.assert_called_with("databricks")

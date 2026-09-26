@@ -88,10 +88,15 @@ def test_set_environment_vars_with_api_base():
         "src.utils.databricks_url_utils.DatabricksURLUtils.construct_serving_endpoints_url",
         return_value="https://myhost.databricks.com/serving-endpoints",
     ):
+        old_env = r._save_environment_vars()
         r._set_environment_vars(auth)
 
-    assert os.environ.get("DATABRICKS_HOST") == "https://myhost.databricks.com"
-    assert os.environ.get("DATABRICKS_TOKEN") == "tok123"
+    try:
+        assert os.environ.get("DATABRICKS_HOST") == "https://myhost.databricks.com"
+        assert os.environ.get("DATABRICKS_TOKEN") == "tok123"
+    finally:
+        r._restore_environment_vars(old_env, auth)
+    assert os.environ.get("DATABRICKS_TOKEN") != "tok123"
 
 
 def test_set_environment_vars_no_api_base():
@@ -102,9 +107,13 @@ def test_set_environment_vars_no_api_base():
         "src.utils.databricks_url_utils.DatabricksURLUtils.construct_serving_endpoints_url",
         return_value=None,
     ):
+        old_env = r._save_environment_vars()
         r._set_environment_vars(auth)
 
-    assert os.environ.get("DATABRICKS_HOST") == "https://myhost.databricks.com"
+    try:
+        assert os.environ.get("DATABRICKS_HOST") == "https://myhost.databricks.com"
+    finally:
+        r._restore_environment_vars(old_env, auth)
 
 
 # ---------------------------------------------------------------------------

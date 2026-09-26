@@ -288,8 +288,12 @@ class TestLocalFallbackConfig:
     async def test_custom_endpoint_fallback_without_provider_key(
         self, monkeypatch, reachable
     ):
-        svc = self._svc([mk_model("KAT-Coder", provider="custom")])
-        monkeypatch.setenv("KAT_BASE_URL", "http://10.0.0.61:8082/v1")
+        # The endpoint is the model's own setting (Configuration → Models);
+        # KAT_BASE_URL is no longer read.
+        model = mk_model("KAT-Coder", provider="custom")
+        model.params = {"api_base": "http://10.0.0.61:8082/v1"}
+        svc = self._svc([model])
+        monkeypatch.setenv("KAT_BASE_URL", "http://ignored.example.com/v1")
         probe = AsyncMock(return_value=reachable)
         monkeypatch.setattr("src.services.settings.models._endpoint_reachable", probe)
         _patch_keys(monkeypatch, None)

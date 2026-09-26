@@ -601,7 +601,6 @@ class AnalyticsExportService:
         Avoids get_auth_context() to prevent the slow SPN token-refresh path;
         instead uses the same safe auth strategy as DashboardRepository.
         """
-        import os as _os
 
         import httpx
 
@@ -617,14 +616,14 @@ class AnalyticsExportService:
         if not workspace_url:
             raise RuntimeError("No Databricks workspace URL configured")
 
-        # ── PAT: OBO → env var → DB lookup ────────────────────────────────────
-        # Check env var before DB to avoid slow connection if DB is unreachable.
+        # ── PAT: OBO → local-dev env PAT → this workspace's DB key ────────────
+        # The env PAT is honoured OUTSIDE Databricks Apps only: inside, the
+        # process env is shared by every workspace (see local_dev_pat).
         token: Optional[str] = self._user_token
         if not token:
-            for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                token = _os.environ.get(env_key)
-                if token:
-                    break
+            from src.utils.databricks_auth import local_dev_pat
+
+            token = local_dev_pat()
         if not token:
             try:
                 from src.db.session import routed_scoped_session

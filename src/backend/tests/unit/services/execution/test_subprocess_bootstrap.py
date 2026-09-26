@@ -241,3 +241,42 @@ class TestConfigureSubprocessLogging:
             with patch("logging.FileHandler") as mock_fh:
                 mock_fh.return_value = MagicMock()
                 configure_subprocess_logging("exec-env-logdir", "crew")
+
+
+class TestPrepareChildEnvironment:
+    """The first thing a spawned crew/flow interpreter does."""
+
+    def test_in_process_callers_keep_their_environment(self, monkeypatch):
+        """Unit tests call the child entry points in-process: never scrub then."""
+        from src.services.execution.subprocess_bootstrap import (
+            prepare_child_environment,
+        )
+
+        monkeypatch.setenv("SOME_TEST_ONLY_VAR", "kept")
+        with (
+            patch.dict(os.environ),  # restores what the child entry sets
+            patch("multiprocessing.parent_process", return_value=None),
+        ):
+            prepare_child_environment("exec-1", "crew")
+            assert os.environ["SOME_TEST_ONLY_VAR"] == "kept"
+            assert os.environ["KASAL_EXECUTION_ID"] == "exec-1"
+            assert os.environ["CREW_SUBPROCESS_MODE"] == "true"
+
+    def test_a_spawned_child_applies_the_allow_list(self, monkeypatch):
+        from src.services.execution.subprocess_bootstrap import (
+            prepare_child_environment,
+        )
+
+        monkeypatch.setenv("SERPER_API_KEY", "leak")
+        monkeypatch.setenv("KASAL_LOG_LEVEL", "INFO")
+        with (
+            patch.dict(os.environ),
+            patch("multiprocessing.parent_process", return_value=MagicMock()),
+            patch(
+                "src.core.databricks_app.restrict_environment_to_child_allow_list"
+            ) as restrict,
+        ):
+            prepare_child_environment("exec-2", "flow")
+            assert os.environ["FLOW_SUBPROCESS_MODE"] == "true"
+            assert os.environ["CREWAI_DEBUG_TRACING"] == "true"
+        restrict.assert_called_once_with()

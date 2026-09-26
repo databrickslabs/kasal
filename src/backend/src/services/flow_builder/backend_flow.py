@@ -219,8 +219,8 @@ class BackendFlow:
         This ensures API keys are properly set from the database.
         """
         try:
-            # Get the default model name from environment or use a default
-            model_name = os.getenv("DEFAULT_LLM_MODEL", DEFAULT_ENGINE_MODEL)
+            # The engine default (the installed model inside Databricks Apps)
+            model_name = DEFAULT_ENGINE_MODEL
             logger.info(f"Getting LLM model: {model_name} for flow execution")
 
             # Use LLMManager to get a properly configured LLM

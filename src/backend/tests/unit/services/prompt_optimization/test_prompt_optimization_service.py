@@ -20,6 +20,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# Load the real MLflow auth helpers now, before _fake_stack / fake_mlflow stub
+# databricks.sdk: the crew runner imports sp_auth mid-run, and sp_auth imports
+# utils.databricks_auth lazily (which needs the real WorkspaceClient). Under
+# the stub either import fails; without these the file only passed when an
+# earlier test had happened to import them first.
+import src.services.mlflow.sp_auth
+import src.utils.databricks_auth  # noqa: F401 — loaded before the SDK stub
 from src.core.exceptions import BadRequestError
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.services.catalog.agents import AgentService
@@ -165,11 +172,24 @@ def configured_judge(monkeypatch):
     """Every test runs against a PROPERLY CONFIGURED system.
 
     Starting an optimization now refuses when no judge is set, because a judge
-    that defaults to the model under optimization grades its own work. Tests
-    that exercise judge resolution itself override this with their own
-    monkeypatch.setenv / delenv.
+    that defaults to the model under optimization grades its own work. The
+    workspace judge comes from Configuration → MLflow (not GEPA_JUDGE_MODEL);
+    tests that exercise judge resolution pass ``configured=`` directly.
     """
-    monkeypatch.setenv("GEPA_JUDGE_MODEL", "independent-judge")
+    from src.services.mlflow.service import MLflowService
+
+    monkeypatch.setattr(
+        MLflowService,
+        "configured_judge_model",
+        AsyncMock(return_value="independent-judge"),
+    )
+    monkeypatch.setattr(
+        MLflowService,
+        "advanced_settings",
+        AsyncMock(
+            return_value={"evaluation_max_rows": 200, "optimization_judge_samples": 3}
+        ),
+    )
 
 
 @contextlib.contextmanager
@@ -904,6 +924,12 @@ def fake_mlflow(monkeypatch):
     monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
     monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
+    # The experiment comes from Configuration → MLflow via MLflowService, which
+    # these stubbed-mlflow tests do not load.
+    monkeypatch.setattr(
+        "src.services.prompt_optimization.gepa.mlflow_session.configured_experiment",
+        AsyncMock(return_value="kasal"),
+    )
     return store
 
 
@@ -1339,42 +1365,42 @@ class TestJudgeModelResolution:
     warned about — a warning still produced an authoritative-looking number that
     nobody could distinguish from a real gain."""
 
-    def test_explicit_request_value_wins(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_MODEL", "configured-judge")
-        assert _resolve_judge_model("asked-for", "target", "x") == "asked-for"
+    def test_explicit_request_value_wins(self):
+        assert (
+            _resolve_judge_model(
+                "asked-for", "target", "x", configured="configured-judge"
+            )
+            == "asked-for"
+        )
 
-    def test_configured_default_used_when_unset(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_MODEL", "configured-judge")
-        assert _resolve_judge_model(None, "target", "x") == "configured-judge"
-        assert _resolve_judge_model("   ", "target", "x") == "configured-judge"
+    def test_configured_default_used_when_unset(self):
+        judge = "configured-judge"
+        assert _resolve_judge_model(None, "target", "x", configured=judge) == judge
+        assert _resolve_judge_model("   ", "target", "x", configured=judge) == judge
 
     def test_configured_default_equal_to_target_is_refused(self, monkeypatch):
-        """A GEPA_JUDGE_MODEL that happens to BE the target buys nothing, and
+        """A configured judge that happens to BE the target buys nothing, and
         must not look like a deliberate, safe choice."""
-        monkeypatch.setenv("GEPA_JUDGE_MODEL", "target")
         with pytest.raises(BadRequestError) as err:
-            _resolve_judge_model(None, "target", "run x")
-        assert "GEPA_JUDGE_MODEL" in str(err.value)
+            _resolve_judge_model(None, "target", "run x", configured="target")
+        assert "Configuration → MLflow" in str(err.value)
 
     def test_no_judge_configured_is_refused(self, monkeypatch):
         """Silently falling back to the target is what made every unconfigured
         run report a meaningless score."""
-        monkeypatch.delenv("GEPA_JUDGE_MODEL", raising=False)
         with pytest.raises(BadRequestError) as err:
-            _resolve_judge_model(None, "the-target", "run x")
+            _resolve_judge_model(None, "the-target", "run x", configured=None)
         assert "the-target" in str(err.value)
-        assert "judge_model" in str(err.value)
+        assert "Optimize dialog" in str(err.value)
 
     def test_explicitly_choosing_the_target_is_refused(self, monkeypatch):
         """The hand-picked case: the old guard only covered defaulting, so
         selecting the same model in both dropdowns sailed through."""
-        monkeypatch.delenv("GEPA_JUDGE_MODEL", raising=False)
         with pytest.raises(BadRequestError):
             _resolve_judge_model("t", "t", "run x")
 
     @pytest.mark.asyncio
-    async def test_start_optimization_records_a_non_target_judge(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_MODEL", "independent-judge")
+    async def test_start_optimization_records_a_non_target_judge(self):
         svc, patches = _service()
         with _all(patches):
             result = await svc.start_optimization(
@@ -1398,23 +1424,16 @@ class TestJudgeModelResolution:
 
 
 class TestJudgeSampling:
-    def test_default_and_env_override(self, monkeypatch):
-        monkeypatch.delenv("GEPA_JUDGE_SAMPLES", raising=False)
+    def test_default_and_configured_value(self):
+        """The count comes from Configuration → MLflow → Advanced, passed in."""
         assert _judge_sample_count() == svc_module.DEFAULT_JUDGE_SAMPLES
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "5")
-        assert _judge_sample_count() == 5
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
-        assert _judge_sample_count() == 1
+        assert _judge_sample_count(None) == svc_module.DEFAULT_JUDGE_SAMPLES
+        assert _judge_sample_count(5) == 5
+        assert _judge_sample_count(1) == 1
 
-    def test_bounds_and_garbage(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "0")
-        assert _judge_sample_count() == 1
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "99")
-        assert _judge_sample_count() == 9
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "three")
-        assert _judge_sample_count() == svc_module.DEFAULT_JUDGE_SAMPLES
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "  ")
-        assert _judge_sample_count() == svc_module.DEFAULT_JUDGE_SAMPLES
+    def test_bounds(self):
+        assert _judge_sample_count(0) == 1
+        assert _judge_sample_count(99) == 9
 
     def test_median_ignores_a_wild_outlier(self):
         """The observed failure: identical prompts graded 0.0 and 4/10 minutes
@@ -2166,9 +2185,6 @@ class TestCrewOptimizationOrchestration:
                 final_eval_score=0.7,
             )
 
-        if samples_env is not None:
-            monkeypatch.setenv("GEPA_JUDGE_SAMPLES", samples_env)
-
         with _fake_stack(optimize_prompts, _fake_completion(handler, calls)) as stack:
             with patch.object(gepa_reflection, "_sync_run_crew", fake_run_crew):
                 result = PromptOptimizationService._execute_crew_optimization_sync(
@@ -2189,6 +2205,9 @@ class TestCrewOptimizationOrchestration:
                     crew_id="crew-uuid",
                     cancel_run_id=self.RUN_ID,
                     group_context=None,
+                    judge_samples=(
+                        int(samples_env) if samples_env is not None else None
+                    ),
                 )
         return SimpleNamespace(
             result=result,
@@ -2204,7 +2223,6 @@ class TestCrewOptimizationOrchestration:
     def test_aligned_judge_retrieval_reaches_the_scoring_prompt(self, monkeypatch):
         from src.services.prompt_optimization.judge_registry import JudgeSpec
 
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         spec = JudgeSpec(
             "crew_x__accuracy",
             "Rate {{ outputs }}",
@@ -2221,7 +2239,7 @@ class TestCrewOptimizationOrchestration:
             ) as retrieve,
         ):
             registry.return_value.list.return_value = [spec]
-            run = self._drive([_crew_fixture()[0]])
+            run = self._drive([_crew_fixture()[0]], samples_env="1")
         retrieve.assert_called_once()
         assert retrieve.call_args.kwargs["outputs"] == run.scored[0][0]
         assert any(
@@ -2232,10 +2250,9 @@ class TestCrewOptimizationOrchestration:
         """The user's budget is a promise about REAL crew executions (tools,
         emails, DB writes). GEPA overshoots its own metric budget, so the cap is
         enforced here — over-budget candidates get a free empty result."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
         docs = [base] + [_variant(base, m) for m in ("a", "b", "c")]
-        run = self._drive(docs, max_metric_calls=2)
+        run = self._drive(docs, max_metric_calls=2, samples_env="1")
         assert run.executions["n"] == 2
         assert svc_module._RUNS[self.RUN_ID]["executions_used"] == 2
         # Over-cap candidates scored 0 without executing and without a judge call.
@@ -2247,9 +2264,8 @@ class TestCrewOptimizationOrchestration:
     def test_cap_needs_the_run_entry_to_count_against(self, monkeypatch):
         """Sanity-check the mechanism: the counter lives on the in-process run
         entry, which start_crew_optimization always creates."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        self._drive([base], max_metric_calls=2)
+        self._drive([base], max_metric_calls=2, samples_env="1")
         assert svc_module._RUNS[self.RUN_ID]["candidates_tried"] == 1
 
     # -- caching -------------------------------------------------------------
@@ -2258,10 +2274,11 @@ class TestCrewOptimizationOrchestration:
         """GEPA re-evaluates the same doc many times (smoke test, baseline valset
         pass, a fresh minibatch pass every iteration). Uncached, those re-runs
         ate a small budget re-measuring the baseline."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
         other = _variant(base, "z")
-        run = self._drive([base, base, other, base], max_metric_calls=10)
+        run = self._drive(
+            [base, base, other, base], max_metric_calls=10, samples_env="1"
+        )
         assert run.executions["n"] == 2  # two DISTINCT docs, four evaluations
         # The repeat returned the cached deliverable, not an empty string.
         assert run.scored[1][0] == run.scored[0][0]
@@ -2269,9 +2286,8 @@ class TestCrewOptimizationOrchestration:
     def test_identical_deliverable_is_judged_once(self, monkeypatch):
         """judge_cache: re-scoring the same text must be free, which is also what
         keeps baseline comparisons stable inside a run."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([base, base, base], max_metric_calls=10)
+        run = self._drive([base, base, base], max_metric_calls=10, samples_env="1")
         grading = [c for c in run.calls if "HARSH grader" in c["text"]]
         assert len(grading) == 1
         assert (
@@ -2280,9 +2296,10 @@ class TestCrewOptimizationOrchestration:
         )
 
     def test_malformed_candidate_is_rejected_for_free(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([base, '{"instruction": "be better"}'], max_metric_calls=10)
+        run = self._drive(
+            [base, '{"instruction": "be better"}'], max_metric_calls=10, samples_env="1"
+        )
         assert run.executions["n"] == 1
         assert run.scored[1][0] == ""
 
@@ -2290,7 +2307,6 @@ class TestCrewOptimizationOrchestration:
 
     def test_cancel_flag_stops_the_loop(self, monkeypatch):
         """Honored BEFORE the next crew execution — an in-flight one finishes."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
         docs = [base] + [_variant(base, m) for m in ("a", "b")]
 
@@ -2299,7 +2315,12 @@ class TestCrewOptimizationOrchestration:
                 svc_module._RUNS[self.RUN_ID]["cancel_requested"] = True
 
         with pytest.raises(RuntimeError, match="Cancelled by user"):
-            self._drive(docs, max_metric_calls=10, on_candidate=cancel_before_second)
+            self._drive(
+                docs,
+                max_metric_calls=10,
+                on_candidate=cancel_before_second,
+                samples_env="1",
+            )
         # The first candidate executed; nothing after the flag did.
         assert svc_module._RUNS[self.RUN_ID]["executions_used"] == 1
 
@@ -2308,9 +2329,10 @@ class TestCrewOptimizationOrchestration:
     def test_judge_commits_a_reference_before_grading_anything(self, monkeypatch):
         """A reference-free judge is exploitable by the optimizer; the judge must
         write its own answer BEFORE it sees a candidate."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([base, _variant(base, "a")], max_metric_calls=10)
+        run = self._drive(
+            [base, _variant(base, "a")], max_metric_calls=10, samples_env="1"
+        )
         kinds = [
             (
                 "reference"
@@ -2328,9 +2350,8 @@ class TestCrewOptimizationOrchestration:
         assert "Deliverable number" not in reference_call["text"]
 
     def test_grading_prompt_carries_the_committed_reference(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([base], max_metric_calls=10)
+        run = self._drive([base], max_metric_calls=10, samples_env="1")
         grading = next(c for c in run.calls if "HARSH grader" in c["text"])
         assert "REFERENCE ANSWER: expect a table." in grading["text"]
         assert "committed" in grading["text"]
@@ -2341,7 +2362,6 @@ class TestCrewOptimizationOrchestration:
     ):
         """If the reference call dies the run still completes — reference-free —
         but says so, because that is the exploitable mode."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
         calls = []
         scored = []
@@ -2458,7 +2478,6 @@ class TestCrewOptimizationOrchestration:
 
     def test_partial_judge_outage_still_yields_a_median(self, monkeypatch):
         """Some samples failing is survivable; only a total outage is fatal."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "3")
         base, _, _, _ = _crew_fixture()
         baseline_doc, keys, agents_yaml, tasks_yaml = _crew_fixture()
         calls = []
@@ -2524,13 +2543,13 @@ class TestCrewOptimizationOrchestration:
                     crew_id="crew-uuid",
                     cancel_run_id=self.RUN_ID,
                     group_context=None,
+                    judge_samples=3,
                 )
         assert scored[0].value == pytest.approx(0.8)
 
     def test_total_judge_outage_is_loud(self, monkeypatch):
         """Silent zeros flatten the landscape and make a run look like 'no
         improvement possible' — a dead judge must raise."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "2")
         base, _, _, _ = _crew_fixture()
 
         def handler(call):
@@ -2541,9 +2560,9 @@ class TestCrewOptimizationOrchestration:
             raise RuntimeError("judge provider is down")
 
         with pytest.raises(RuntimeError, match="judge provider is down"):
-            self._drive_with_handler(handler, [base])
+            self._drive_with_handler(handler, [base], judge_samples=2)
 
-    def _drive_with_handler(self, handler, docs):
+    def _drive_with_handler(self, handler, docs, judge_samples=None):
         baseline_doc, keys, agents_yaml, tasks_yaml = _crew_fixture()
         calls = []
         svc_module._RUNS[self.RUN_ID] = {
@@ -2596,6 +2615,7 @@ class TestCrewOptimizationOrchestration:
                     crew_id="crew-uuid",
                     cancel_run_id=self.RUN_ID,
                     group_context=None,
+                    judge_samples=judge_samples,
                 )
 
     # -- wiring --------------------------------------------------------------
@@ -2604,18 +2624,20 @@ class TestCrewOptimizationOrchestration:
         self, monkeypatch
     ):
         """The mutated GOAL must actually reach the crew that gets executed."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([_variant(base, "solar")], max_metric_calls=10)
+        run = self._drive(
+            [_variant(base, "solar")], max_metric_calls=10, samples_env="1"
+        )
         agents_over, _ = run.executions["payloads"][0]
         assert agents_over["Researcher"]["goal"] == "Find facts about solar"
         # The internal routing key must never reach the engine.
         assert "_field_prefix" not in agents_over["Researcher"]
 
     def test_result_reports_the_parsed_optimized_fields(self, monkeypatch):
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([_variant(base, "wind")], max_metric_calls=10)
+        run = self._drive(
+            [_variant(base, "wind")], max_metric_calls=10, samples_env="1"
+        )
         assert (
             run.result["optimized_fields"]["agent.a1.goal"] == "Find facts about wind"
         )
@@ -2625,15 +2647,13 @@ class TestCrewOptimizationOrchestration:
     def test_reflection_is_preflighted_before_any_execution(self, monkeypatch):
         """A dead reflection model does not fail a run — GEPA just proposes
         nothing after burning the whole budget. So it is pinged first."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([base], max_metric_calls=10)
+        run = self._drive([base], max_metric_calls=10, samples_env="1")
         assert "reply with OK" in run.calls[0]["text"]
         assert run.calls[0]["model"] == "reflect-model"
 
     def test_gepa_kwargs_keep_the_document_contract(self, monkeypatch):
         """These were each learned from a failure mode; losing one regresses it."""
-        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
         captured = {}
 

@@ -781,7 +781,11 @@ asyncio.run(run_tool())
             f.write(script_content)
 
         # Run the script in a separate process using async subprocess
-        env = os.environ.copy()
+        # Allow-listed, never a copy of the whole environment: this helper
+        # runs one workspace's tool, the server serves many.
+        from src.core.databricks_app import child_environment
+
+        env = child_environment()
         env["PYTHONPATH"] = backend_dir
 
         process = await asyncio.create_subprocess_exec(

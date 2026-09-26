@@ -5,7 +5,6 @@ This file contains the FlowRunnerService which handles running flow executions i
 It uses the BackendFlow class (from backend_flow.py) to interact with the CrewAI Flow engine.
 """
 
-import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Union
@@ -22,7 +21,6 @@ from src.schemas.flow_execution import (
 from src.services.flow_builder.backend_flow import BackendFlow
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.execution_service import FlowExecutionService
-from src.services.settings.api_keys import ApiKeysService
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow
@@ -470,40 +468,10 @@ class FlowRunnerService:
                     execution_id=execution_id, status=FlowExecutionStatus.PREPARING
                 )
 
-                # Initialize API keys before execution
-                try:
-                    # SECURITY: Get group_id from config for multi-tenant isolation
-                    group_id = config.get("group_id") if config else None
-
-                    # Initialize all the API keys needed for execution
-                    for provider in ["OPENAI", "ANTHROPIC", "PERPLEXITY", "SERPER"]:
-                        try:
-                            # Since this is an async method in a sync context, use sync approach
-                            provider_key = await ApiKeysService.get_provider_api_key(
-                                provider, group_id=group_id
-                            )
-                            if not provider_key:
-                                logger.warning(
-                                    f"No API key found for provider: {provider}"
-                                )
-                            else:
-                                # Set the environment variable for the provider
-                                env_var_name = f"{provider}_API_KEY"
-                                os.environ[env_var_name] = provider_key
-                                logger.info(
-                                    f"Set {env_var_name} for dynamic flow execution"
-                                )
-                        except Exception as key_error:
-                            logger.warning(
-                                f"Error loading API key for {provider}: {key_error}"
-                            )
-
-                    logger.info(
-                        "API keys have been initialized for dynamic flow execution"
-                    )
-                except Exception as e:
-                    logger.warning(f"Error initializing API keys: {e}")
-                    # Continue with execution, as keys might be available through other means
+                # Provider API keys are NOT exported into os.environ: the
+                # process env is shared by every workspace. Each LLM and tool
+                # receives this workspace's key explicitly (LLMManager and
+                # ToolFactory read ApiKeysService for the run's group).
 
                 # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
                 from src.services.flow_builder.backend_flow import BackendFlow
@@ -775,83 +743,6 @@ class FlowRunnerService:
                 )
                 return {"success": False, "error": str(e), "execution_id": execution_id}
 
-    async def _get_required_providers(
-        self,
-        session: AsyncSession,
-        config: Dict[str, Any],
-        group_id: Optional[str] = None,
-    ) -> List[str]:
-        """
-        Extract unique providers required for this flow execution based on configured models.
-
-        Args:
-            session: Database session to use for lookups
-            config: Flow configuration containing model information
-            group_id: Group ID for multi-tenant isolation
-
-        Returns:
-            List of unique provider names (uppercase) needed for this execution
-        """
-        providers = set()
-
-        # Extract all model names from config
-        model_names = []
-
-        # Main model
-        if "model" in config:
-            model_names.append(config["model"])
-
-        # Check for crew config models
-        crew_config = config.get("crew", {})
-        if "reasoning_llm" in crew_config:
-            model_names.append(crew_config["reasoning_llm"])
-        if "manager_llm" in crew_config:
-            model_names.append(crew_config["manager_llm"])
-
-        # Check for models in top-level config (alternative location)
-        if "reasoning_llm" in config:
-            model_names.append(config["reasoning_llm"])
-        if "manager_llm" in config:
-            model_names.append(config["manager_llm"])
-
-        logger.info(
-            f"Extracted {len(model_names)} model references from config: {model_names}"
-        )
-
-        # Get provider for each model using the provided session
-        from src.services.settings.models import ModelConfigService
-
-        for model_name in model_names:
-            if not model_name:
-                continue
-
-            try:
-                # Use the existing session rather than acquiring another
-                model_service = ModelConfigService(session, group_id=group_id)
-                model_config = await model_service.get_model_config(model_name)
-
-                if model_config and "provider" in model_config:
-                    provider = model_config["provider"]
-                    if provider:
-                        # Convert provider to uppercase for consistency (OPENAI, ANTHROPIC, etc.)
-                        provider_upper = provider.upper()
-                        providers.add(provider_upper)
-                        logger.info(
-                            f"Model '{model_name}' uses provider: {provider_upper}"
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"Could not determine provider for model '{model_name}': {e}"
-                )
-                # Continue with other models rather than failing
-
-        provider_list = list(providers)
-        logger.info(
-            f"Flow execution requires {len(provider_list)} unique providers: {provider_list}"
-        )
-
-        return provider_list
-
     async def _run_flow_execution(
         self,
         execution_id: int,
@@ -901,51 +792,10 @@ class FlowRunnerService:
                     execution_id=execution_id, status=FlowExecutionStatus.PREPARING
                 )
 
-                # Initialize API keys before execution
-                try:
-                    # SECURITY: Get group_id from config for multi-tenant isolation
-                    group_id = config.get("group_id") if config else None
-
-                    # Get only the providers actually needed for this flow's configured models
-                    required_providers = await self._get_required_providers(
-                        session, config, group_id
-                    )
-
-                    if not required_providers:
-                        logger.warning(
-                            "No providers identified from model configuration - flow may not have models configured"
-                        )
-                    else:
-                        logger.info(
-                            f"Initializing API keys for {len(required_providers)} required providers: {required_providers}"
-                        )
-
-                    # Initialize only the API keys needed for the configured models
-                    for provider in required_providers:
-                        try:
-                            provider_key = await ApiKeysService.get_provider_api_key(
-                                provider, group_id=group_id
-                            )
-                            if not provider_key:
-                                logger.warning(
-                                    f"No API key found for provider: {provider} with group_id: {group_id}"
-                                )
-                            else:
-                                # Set the environment variable for the provider
-                                env_var_name = f"{provider}_API_KEY"
-                                os.environ[env_var_name] = provider_key
-                                logger.info(f"Set {env_var_name} for flow execution")
-                        except Exception as key_error:
-                            logger.warning(
-                                f"Error loading API key for {provider}: {key_error}"
-                            )
-
-                    logger.info(
-                        f"API keys initialized for {len(required_providers)} providers"
-                    )
-                except Exception as e:
-                    logger.warning(f"Error initializing API keys: {e}")
-                    # Continue with execution, as keys might be available through other means
+                # Provider API keys are NOT exported into os.environ: the
+                # process env is shared by every workspace. Each LLM and tool
+                # receives this workspace's key explicitly (LLMManager and
+                # ToolFactory read ApiKeysService for the run's group).
 
                 # Initialize BackendFlow with the flow_id and job_id
                 backend_flow = BackendFlow(job_id=job_id, flow_id=flow_id)

@@ -41,6 +41,9 @@ from typing import Any
 from src.core.events import LLMCallType, LLMStreamChunkEvent, event_bus
 from src.core.llm.transport import OpenAICompletion
 
+#: Output cap for the Responses API when the model sets none.
+DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS = 16000
+
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).
 logger = logging.getLogger("crew")
@@ -54,10 +57,19 @@ class DatabricksResponsesLLM(OpenAICompletion):
     text-only responses that skip tool calls.
     """
 
+    #: Output cap for this model (Configuration → Models: params.output_token_cap;
+    #: was the KASAL_RESPONSES/CODEX_MAX_OUTPUT_TOKENS env vars).
+    output_token_cap: int = DEFAULT_RESPONSES_MAX_OUTPUT_TOKENS
+
     def __init__(self, **kwargs: Any) -> None:
         # Force Responses API — codex only works with this endpoint
         kwargs.setdefault("api", "responses")
+        # BaseLLM routes unknown kwargs into additional_params (sent on the
+        # wire), so the cap is taken out and set as the declared field.
+        cap = kwargs.pop("output_token_cap", None)
         super().__init__(**kwargs)
+        if cap:
+            self.output_token_cap = int(cap)
 
         # Store raw output items (with phase) from the last response.
         # These are injected into the ``input`` array on the next call
@@ -142,17 +154,9 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # (max_output_tokens=128000), which used to flow into every request —
         # ~30x the largest response ever observed (p99 well under 4k tokens)
         # and an open invitation for a runaway generation to bill 128k output
-        # tokens. Override via KASAL_RESPONSES_MAX_OUTPUT_TOKENS when a workload
-        # genuinely needs more. Keep the older Codex setting as a compatibility
-        # fallback for existing deployments.
-        import os as _os
-
-        cap = int(
-            _os.environ.get(
-                "KASAL_RESPONSES_MAX_OUTPUT_TOKENS",
-                _os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"),
-            )
-        )
+        # tokens. A model that genuinely needs more raises its own cap in
+        # Configuration → Models (params.output_token_cap).
+        cap = self.output_token_cap
         current = params.get("max_output_tokens")
         if current is None:
             explicit = getattr(self, "max_completion_tokens", None) or getattr(

@@ -37,6 +37,7 @@ from src.services.a2ui.stream import (
     surface_to_messages,
 )
 from src.services.a2ui.structured_text import render_research_envelope
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -563,7 +564,7 @@ async def compose_surface(
         )
         return None
 
-    model_name = model or os.getenv("CREW_MODEL") or "databricks-llama-4-maverick"
+    model_name = model or DEFAULT_ENGINE_MODEL  # the installed model in Apps
 
     try:
         from src.services.llm.manager import LLMManager

@@ -7,7 +7,6 @@ and managing secrets in Databricks Secret Store.
 
 import base64
 import logging
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
@@ -431,101 +430,6 @@ class DatabricksSecretsService(BaseService):
             True if successful, else False
         """
         return await self.set_databricks_secret_value(scope, "DATABRICKS_TOKEN", token)
-
-    @classmethod
-    async def setup_provider_api_key(cls, db: Any, key_name: str) -> bool:
-        """
-        Set up an API key for a provider from database.
-
-        Args:
-            db: Database session
-            key_name: Name of the API key to set up
-
-        Returns:
-            True if successful, else False
-        """
-        try:
-            # Use ApiKeysService to get the key first
-            from src.services.settings.api_keys import ApiKeysService
-
-            # SECURITY: Get group_id (db parameter might be session or group_id depending on caller)
-            # This is a class method so we need to infer group_id from context
-            from src.utils.user_context import UserContext
-
-            try:
-                group_context = UserContext.get_group_context()
-                group_id = (
-                    group_context.primary_group_id
-                    if group_context and hasattr(group_context, "primary_group_id")
-                    else None
-                )
-            except Exception:
-                group_id = None
-
-            # Try to get API key from API keys table
-            value = await ApiKeysService.get_api_key_value(
-                db, key_name, group_id=group_id
-            )
-
-            # If not found in API keys, try Databricks secrets
-            if not value:
-                # Create an instance to use instance methods
-                service = cls(db)
-
-                try:
-                    # Since we're creating a new instance, databricks_service won't be set
-                    # Import DatabricksService here to avoid circular imports
-                    from src.services.databricks.workspace.service import (
-                        DatabricksService,
-                    )
-
-                    service.databricks_service = DatabricksService(db)
-
-                    # Get secret scope from config
-                    workspace_url, scope = await service.validate_databricks_config()
-                    if workspace_url and scope:
-                        # Try to get from Databricks
-                        value = await service.get_databricks_secret_value(
-                            scope, key_name
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"Could not get secret scope for key '{key_name}': {str(e)}"
-                    )
-
-            # Set environment variable if value found
-            if value:
-                os.environ[key_name] = value
-                logger.info(f"API key '{key_name}' set up successfully")
-                return True
-            else:
-                logger.warning(f"API key '{key_name}' not found")
-                return False
-        except Exception as e:
-            logger.error(f"Error setting up API key '{key_name}': {str(e)}")
-            return False
-
-    @staticmethod
-    def _setup_provider_api_key_sync(db: Any, key_name: str) -> bool:
-        """
-        Set up an API key for any provider from the database (synchronous).
-
-        Args:
-            db: Database session
-            key_name: Name of the API key
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Import here to avoid circular imports
-            from src.services.settings.api_keys import ApiKeysService
-
-            # Use the dedicated static method for synchronous API key setup
-            return ApiKeysService.setup_provider_api_key_sync(db, key_name)
-        except Exception as e:
-            logger.error(f"Error setting up API key '{key_name}' (sync): {str(e)}")
-            return False
 
     async def get_personal_access_token(self) -> str:
         """

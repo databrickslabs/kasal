@@ -79,6 +79,10 @@ CUSTOM_TOOLS_DIR = Path(__file__).parent.parent / "tools"
 #   bundle      — (filename, source) self-contained impl to ship under `tools/`;
 #                 source is "bundled" (BUNDLED_TOOLS_DIR) or "custom" (CUSTOM_TOOLS_DIR)
 #   special     — custom factory builder key (e.g. "genie")
+#   api_key_env — the env var the EXPORTED app passes as the tool's ``api_key``.
+#                 Kasal's tools never read keys from the environment themselves
+#                 (one Kasal process serves many workspaces); a standalone app
+#                 is single-tenant, so its own env is the right source there.
 _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
     # These three used to map onto crewai_tools (SerperDevTool, ScrapeWebsiteTool,
     # DallETool) because the exported app could not ship a Kasal BaseTool. It
@@ -94,6 +98,7 @@ _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
         "class": "SerperDevTool",
         "config_keys": ["n_results", "country", "locale", "location", "search_type"],
         "env": ["SERPER_API_KEY"],
+        "api_key_env": "SERPER_API_KEY",
     },
     "ScrapeWebsiteTool": {
         "import": (
@@ -113,6 +118,7 @@ _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
         "class": "ImageGenerationTool",
         "config_keys": ["model", "size", "quality", "n"],
         "env": ["OPENAI_API_KEY"],
+        "api_key_env": "OPENAI_API_KEY",
     },
     "PerplexityTool": {
         "import": "from tools.perplexity_tool import PerplexitySearchTool",
@@ -132,6 +138,7 @@ _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
             "web_search_options",
         ],
         "env": ["PERPLEXITY_API_KEY"],
+        "api_key_env": "PERPLEXITY_API_KEY",
         "deps": ['"requests>=2.31.0"'],
         "bundle": ("perplexity_tool.py", "custom"),
     },
@@ -670,7 +677,10 @@ class DatabricksAppExporter(BaseExporter):
         if title == "SerperDevTool" and cfg.get("endpoint_type") in ("search", "news"):
             cfg = {**cfg, "search_type": cfg["endpoint_type"]}
         clean = self._clean_config(cfg, spec.get("config_keys", []))
-        return f"{cls}(**{clean!r})" if clean else f"{cls}()"
+        args = [f"**{clean!r}"] if clean else []
+        if spec.get("api_key_env"):
+            args.insert(0, f'api_key=os.environ.get("{spec["api_key_env"]}")')
+        return f"{cls}({', '.join(args)})"
 
     def _tool_map(
         self,

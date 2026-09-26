@@ -15,18 +15,16 @@ explicit and in one place, rather than inherited from whatever the endpoint
 happens to do.
 """
 
-from unittest.mock import patch
-
 from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
 
 TOOLS = [{"type": "function", "function": {"name": "PerplexityTool"}}]
 ASK = [{"role": "user", "content": "gather swiss news from today"}]
 
 
-def _params(messages=ASK, tools=TOOLS, **env):
-    with patch.dict("os.environ", env, clear=False):
-        llm = VLLMFunctionCallingLLM(model="Qwen3-Coder-30B-A3B-Instruct")
-        return llm._prepare_completion_params(messages, tools=tools)
+def _params(messages=ASK, tools=TOOLS, tool_choice=None):
+    kwargs = {} if tool_choice is None else {"tool_choice": tool_choice}
+    llm = VLLMFunctionCallingLLM(model="Qwen3-Coder-30B-A3B-Instruct", **kwargs)
+    return llm._prepare_completion_params(messages, tools=tools)
 
 
 class TestTheModelDecides:
@@ -72,13 +70,20 @@ class TestItNeverOverridesTheCaller:
         assert params["tool_choice"] == pinned
 
 
-class TestPerDeploymentOverride:
+class TestPerModelSetting:
+    """tool_choice is the model's setting in Configuration → Models
+    (params["tool_choice"]), not the old VLLM_TOOL_CHOICE env var."""
+
     def test_the_value_can_be_changed(self):
-        """One deployment restoring the old behaviour must not require a code
-        change — and must be visible as a deliberate choice when it happens."""
-        assert _params(VLLM_TOOL_CHOICE="required")["tool_choice"] == "required"
+        """One model restoring the old behaviour must not require a code change
+        — and must be visible as a deliberate choice when it happens."""
+        assert _params(tool_choice="required")["tool_choice"] == "required"
 
     def test_it_can_be_switched_off_entirely(self):
-        """Falsy or 'default' sends nothing and lets the server decide."""
-        assert "tool_choice" not in _params(VLLM_TOOL_CHOICE="default")
-        assert "tool_choice" not in _params(VLLM_TOOL_CHOICE="")
+        """Empty or 'default' sends nothing and lets the server decide."""
+        assert "tool_choice" not in _params(tool_choice="default")
+        assert "tool_choice" not in _params(tool_choice="")
+
+    def test_the_env_var_is_ignored(self, monkeypatch):
+        monkeypatch.setenv("VLLM_TOOL_CHOICE", "required")
+        assert _params()["tool_choice"] == "auto"

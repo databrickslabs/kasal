@@ -143,6 +143,30 @@ def _bind_host(environ=os.environ) -> str:
     return "0.0.0.0" if environ.get("DATABRICKS_APP_NAME") else "127.0.0.1"
 
 
+DEFAULT_PORT = 8000
+
+
+def _listen_port(cli_port: "int | None", environ=os.environ) -> int:
+    """The port to bind: ``--port``, else the platform's, else 8000.
+
+    Inside Databricks Apps (``DATABRICKS_APP_NAME`` set) the platform injects
+    ``DATABRICKS_APP_PORT`` and forwards traffic THERE; binding a hard-coded 8000
+    only worked while the two happened to agree.
+    """
+    if cli_port is not None:
+        return cli_port
+    platform_port = environ.get("DATABRICKS_APP_PORT", "").strip()
+    if environ.get("DATABRICKS_APP_NAME") and platform_port:
+        try:
+            return int(platform_port)
+        except ValueError:
+            print(
+                f"Ignoring invalid DATABRICKS_APP_PORT={platform_port!r}",
+                file=sys.stderr,
+            )
+    return DEFAULT_PORT
+
+
 def _environment_overrides(environment: "str | None", environ=os.environ):
     """What ``--environment`` sets. Only ``dev`` changes anything.
 
@@ -206,7 +230,13 @@ def create_parser():
         ),
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port to run the server on"
+        "--port",
+        type=int,
+        default=None,
+        help=(
+            "Port to run the server on (default: DATABRICKS_APP_PORT inside "
+            f"Databricks Apps, else {DEFAULT_PORT})"
+        ),
     )
     parser.add_argument(
         "--reload",
@@ -479,7 +509,8 @@ def run_app():
         import uvicorn
 
         host = _bind_host()
-        logger.info(f"Starting server on {host}:{args.port}")
+        port = _listen_port(args.port)
+        logger.info(f"Starting server on {host}:{port}")
         if args.reload:
             # Uvicorn can only reload an import string: it re-imports the app
             # in a fresh worker process on every change.
@@ -487,14 +518,14 @@ def run_app():
                 "entrypoint:build_app",
                 factory=True,
                 host=host,
-                port=args.port,
+                port=port,
                 reload=True,
                 reload_dirs=[str(backend_dir / "src")],
                 app_dir=str(project_root),
                 log_level="info",
             )
         else:
-            uvicorn.run(build_app(), host=host, port=args.port, log_level="info")
+            uvicorn.run(build_app(), host=host, port=port, log_level="info")
     except Exception as e:
         logger.error(f"Error starting Kasal application: {e}")
         import traceback

@@ -1,7 +1,6 @@
 """FastAPI session, request-context and generic dependency providers."""
 
 import logging
-import os
 from typing import Annotated, Callable, Optional, Type
 
 from fastapi import Depends, Header, Request
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
+from src.core.databricks_app import is_production
 from src.core.exceptions import ForbiddenError, KasalError, UnauthorizedError
 from src.db.base import Base
 from src.db.database_router import get_smart_db_session
@@ -101,9 +101,7 @@ async def get_group_context(
     # in Databricks Apps, production, non-SSE routes, or non-loopback requests.
     path = getattr(getattr(request, "url", None), "path", "")
     client_host = getattr(getattr(request, "client", None), "host", "")
-    production = running_in_databricks_apps() or os.getenv(
-        "ENVIRONMENT", ""
-    ).strip().lower() in ("production", "prod")
+    production = running_in_databricks_apps() or is_production()
     local_sse = (
         not production
         and isinstance(path, str)

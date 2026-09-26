@@ -26,14 +26,6 @@ class PowerBIConnectorToolSchema(BaseModel):
     # tool_configs (see __init__) — exposing them as LLM-fillable parameters
     # bloated every LLM call and invited the model to echo credentials.
 
-    username_env: Optional[str] = Field(
-        None,
-        description="Environment variable name containing service account username (alternative to direct username)",
-    )
-    password_env: Optional[str] = Field(
-        None,
-        description="Environment variable name containing service account password (alternative to direct password)",
-    )
     outbound_format: str = Field(
         "dax",
         description="Target output format: 'dax', 'sql', 'uc_metrics', or 'yaml' (default: 'dax')",
@@ -119,20 +111,6 @@ class PowerBIConnectorTool(BaseTool):
     )
     ```
 
-    Example usage with service account (env vars):
-    ```
-    result = powerbi_connector_tool._run(
-        semantic_model_id="abc123",
-        group_id="workspace456",
-        tenant_id="tenant789",
-        client_id="client123",
-        username_env="POWERBI_USERNAME",
-        password_env="POWERBI_PASSWORD",
-        auth_method="service_account",
-        outbound_format="sql"
-    )
-    ```
-
     Output formats:
     - **dax**: List of DAX measures with names and expressions
     - **sql**: SQL query for the target dialect
@@ -173,8 +151,6 @@ class PowerBIConnectorTool(BaseTool):
             auth_method: Authentication method: 'service_principal', 'service_account', or auto
             username: Service account username (for service_account auth)
             password: Service account password (for service_account auth)
-            username_env: Env var name for username (for service_account auth)
-            password_env: Env var name for password (for service_account auth)
             outbound_format: Target format (dax/sql/uc_metrics/yaml)
             include_hidden: Include hidden measures
             filter_pattern: Regex to filter measure names
@@ -197,8 +173,6 @@ class PowerBIConnectorTool(BaseTool):
             auth_method = kwargs.get("auth_method")
             username = kwargs.get("username")
             password = kwargs.get("password")
-            username_env = kwargs.get("username_env")
-            password_env = kwargs.get("password_env")
             outbound_format = kwargs.get("outbound_format", "dax")
             include_hidden = kwargs.get("include_hidden", False)
             filter_pattern = kwargs.get("filter_pattern")
@@ -215,9 +189,7 @@ class PowerBIConnectorTool(BaseTool):
             has_access_token = bool(access_token)
             has_service_principal = bool(client_id and client_secret and tenant_id)
             has_service_account = bool(
-                client_id
-                and tenant_id
-                and ((username and password) or (username_env and password_env))
+                client_id and tenant_id and username and password
             )
 
             if not any([has_access_token, has_service_principal, has_service_account]):
@@ -225,7 +197,7 @@ class PowerBIConnectorTool(BaseTool):
                     "Error: Missing authentication. Provide one of:\n"
                     "1. access_token (OAuth token)\n"
                     "2. Service Principal: client_id, client_secret, tenant_id\n"
-                    "3. Service Account: client_id, tenant_id, and (username+password or username_env+password_env)"
+                    "3. Service Account: client_id, tenant_id, username and password"
                 )
 
             # Map outbound format string to enum
@@ -263,8 +235,6 @@ class PowerBIConnectorTool(BaseTool):
                 "auth_method": auth_method,
                 "username": username,
                 "password": password,
-                "username_env": username_env,
-                "password_env": password_env,
                 "info_table_name": info_table_name,
             }
 

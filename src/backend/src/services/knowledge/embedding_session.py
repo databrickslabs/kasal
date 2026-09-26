@@ -150,7 +150,9 @@ async def resolve_lakebase_instance(
             lakebase_config = getattr(config, "lakebase_config", None)
             if lakebase_config is not None:
                 instance = getattr(lakebase_config, "instance_name", None)
-            resolved = instance or os.getenv("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+            from src.core.databricks_app import resolve_lakebase_instance_name
+
+            resolved = resolve_lakebase_instance_name(instance)
             logger.info(
                 f"[KNOWLEDGE] resolve_lakebase_instance: group={group_id} "
                 f"backend=LAKEBASE -> instance={resolved}"

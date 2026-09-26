@@ -36,6 +36,7 @@ class MLflowEvaluationRunner:
         judge_model_route: str,
         judge_model_defaulted: bool,
         experiment_name: Optional[str] = None,
+        max_rows: int = 200,
     ):
         """
         Initialize evaluation runner.
@@ -49,8 +50,9 @@ class MLflowEvaluationRunner:
             judge_model_defaulted: Whether judge model is using default value
             experiment_name: The crew-traces experiment to evaluate against,
                 resolved from the MLflow configuration (Configuration.tsx) by the
-                async caller — the source of truth. Falls back to the env/default
-                when not supplied (None) so out-of-band callers still work.
+                async caller — the source of truth. Without one, the
+                per-teamspace fallback (``fallback_trace_experiment``).
+            max_rows: Most trace rows to score (Configuration → MLflow → Advanced).
         """
         self.exec_obj = exec_obj
         self.job_id = job_id
@@ -59,6 +61,7 @@ class MLflowEvaluationRunner:
         self.judge_model_route = judge_model_route
         self.judge_model_defaulted = judge_model_defaulted
         self.experiment_name = experiment_name
+        self.max_rows = max_rows
 
     def create_run(self, auth_ctx: Optional[Any]) -> Dict[str, Any]:
         """
@@ -84,9 +87,7 @@ class MLflowEvaluationRunner:
             # experiment (Configuration.tsx) is the source of truth; env/default
             # only when the caller supplied nothing.
             mlflow.set_tracking_uri("databricks")
-            eval_exp_name = self.experiment_name or os.getenv(
-                "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
-            )
+            eval_exp_name = self._experiment()
 
             mlflow.set_experiment(eval_exp_name)
 
@@ -192,10 +193,7 @@ class MLflowEvaluationRunner:
             try:
                 search_traces = getattr(mlflow, "search_traces", None)
                 if callable(search_traces):
-                    traces_exp_name = self.experiment_name or os.getenv(
-                        "MLFLOW_CREW_TRACES_EXPERIMENT",
-                        "/Shared/kasal-crew-execution-traces",
-                    )
+                    traces_exp_name = self._experiment()
 
                     traces_exp = mlflow.get_experiment_by_name(traces_exp_name)
 
@@ -249,8 +247,7 @@ class MLflowEvaluationRunner:
 
         # Build records from trace rows
         try:
-            max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
-            for _, r in df_sel.head(max_rows).iterrows():
+            for _, r in df_sel.head(self.max_rows).iterrows():
                 attrs = (
                     r.get("attributes", {})
                     if isinstance(r.get("attributes", {}), dict)
@@ -401,35 +398,66 @@ class MLflowEvaluationRunner:
         except Exception:
             pass
 
+    def _experiment(self) -> str:
+        """The configured experiment, else the per-teamspace fallback.
+
+        Never the old shared ``/Shared/kasal-crew-execution-traces``: it was
+        readable by every workspace user and shared by every teamspace.
+        """
+        from src.core.databricks_app import fallback_trace_experiment
+
+        name = self.experiment_name or fallback_trace_experiment(
+            getattr(self.exec_obj, "group_id", None)
+        )
+        if not name:
+            raise ValueError(
+                "No MLflow experiment is configured for this teamspace: set one "
+                "in Configuration -> MLflow"
+            )
+        return name
+
+    #: Non-secret endpoint URLs the judge path reads from the environment.
+    _URL_ENV_KEYS = (
+        "DATABRICKS_BASE_URL",
+        "DATABRICKS_API_BASE",
+        "DATABRICKS_ENDPOINT",
+    )
+
     def _save_environment_vars(self) -> Dict[str, Optional[str]]:
-        """Save current environment variables."""
-        return {
-            "DATABRICKS_HOST": os.environ.get("DATABRICKS_HOST"),
-            "DATABRICKS_TOKEN": os.environ.get("DATABRICKS_TOKEN"),
-            "DATABRICKS_BASE_URL": os.environ.get("DATABRICKS_BASE_URL"),
-            "DATABRICKS_API_BASE": os.environ.get("DATABRICKS_API_BASE"),
-            "DATABRICKS_ENDPOINT": os.environ.get("DATABRICKS_ENDPOINT"),
-        }
+        """Save the (non-secret) endpoint URL variables this run overrides."""
+        return {k: os.environ.get(k) for k in self._URL_ENV_KEYS}
 
     def _set_environment_vars(self, auth_ctx: Any) -> None:
-        """Set environment variables from auth context."""
+        """Present ``auth_ctx`` to MLflow for the rest of this call.
+
+        MLflow reads Databricks credentials only from the process environment.
+        The host and token go in through ``single_auth_env`` — the one scoped
+        window that may write a token there, exclusive per credential so a
+        concurrent evaluation for another workspace never sees this one's — and
+        are removed by :meth:`_restore_environment_vars`.
+        """
+        from contextlib import ExitStack
+
+        from src.services.mlflow.sp_auth import single_auth_env
         from src.utils.databricks_url_utils import DatabricksURLUtils
 
-        os.environ["DATABRICKS_HOST"] = auth_ctx.workspace_url
-        os.environ["DATABRICKS_TOKEN"] = auth_ctx.token
+        window = ExitStack()
+        self._auth_window: Optional[ExitStack] = window
+        window.enter_context(
+            single_auth_env(host=auth_ctx.workspace_url, token=auth_ctx.token)
+        )
 
         api_base = (
             DatabricksURLUtils.construct_llm_base_url(auth_ctx.workspace_url) or ""
         )
         if api_base:
-            os.environ["DATABRICKS_BASE_URL"] = api_base
-            os.environ["DATABRICKS_API_BASE"] = api_base
-            os.environ["DATABRICKS_ENDPOINT"] = api_base
+            for key in self._URL_ENV_KEYS:
+                os.environ[key] = api_base
 
     def _restore_environment_vars(
         self, old_env: Dict[str, Optional[str]], auth_ctx: Optional[Any]
     ) -> None:
-        """Restore original environment variables."""
+        """Close the auth window and restore the endpoint URL variables."""
         if not auth_ctx:
             return
 
@@ -438,6 +466,10 @@ class MLflowEvaluationRunner:
                 os.environ[key] = value
             elif key in os.environ:
                 del os.environ[key]
+        window = getattr(self, "_auth_window", None)
+        if window is not None:
+            self._auth_window = None
+            window.close()
 
     def complete_evaluation(self, run_id: str, auth_ctx: Optional[Any]) -> None:
         """

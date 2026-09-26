@@ -40,9 +40,11 @@ class DocumentationEmbeddingService:
         if not self.session:
             raise ValueError("Session is required for database operations")
 
-        import os
-
-        database_type = os.getenv("DATABASE_TYPE", "postgres").lower()
+        # The session's own dialect decides: DATABASE_TYPE names the BASE
+        # engine (SQLite inside Databricks Apps) even when this session is
+        # Lakebase Postgres, which sent Lakebase writes to the SQLite queue.
+        bind = self.session.get_bind() if hasattr(self.session, "get_bind") else None
+        database_type = getattr(getattr(bind, "dialect", None), "name", "postgresql")
 
         # Use the batching queue for SQLite to reduce write-lock contention.
         if database_type == "sqlite":

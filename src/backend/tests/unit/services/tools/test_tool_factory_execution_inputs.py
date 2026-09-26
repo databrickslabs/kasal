@@ -468,7 +468,7 @@ class TestPerplexityToolSpecific:
         factory._tool_implementations["PerplexityTool"] = mock_perplexity_class
 
         with patch.object(factory, "get_tool_info", return_value=tool_info):
-            with patch("os.environ.get", return_value="pplx-env-key"):
+            with patch.object(factory, "_get_api_key", return_value="pplx-ws-key"):
                 factory.create_tool("PerplexityTool")
 
         if mock_perplexity_class.called:

@@ -464,11 +464,13 @@ class CrewMemoryService:
             memory_config.backend_type == MemoryBackendType.DEFAULT
             and not custom_embedder
             and not crew_kwargs.get("embedder")
-            and not os.environ.get("OPENAI_API_KEY")
         ):
+            # No env fallback: a provider key reaches the embedder only through
+            # the workspace's configured embedder (EmbedderConfigBuilder reads
+            # ApiKeysService), never from the shared process environment.
             reason = (
-                "DEFAULT backend and no embedder at all: no Databricks embedder, "
-                "no configured provider, and OPENAI_API_KEY unset"
+                "DEFAULT backend and no embedder at all: no Databricks embedder "
+                "and no configured provider"
             )
             logger.warning("Disabling memory — %s", reason)
             self.last_memory_error = reason
@@ -562,18 +564,10 @@ class CrewMemoryService:
                 embedder = custom_embedder
             if embedder is None:
                 embedder = build_litellm_embedder(crew_kwargs.get("embedder"))
-            if embedder is None and os.environ.get("OPENAI_API_KEY"):
-                embedder = build_litellm_embedder(
-                    {
-                        "provider": "openai",
-                        "config": {"model": "text-embedding-3-small"},
-                    }
-                )
             if embedder is None:
                 self.last_memory_error = (
                     "no embedding route: no Databricks embedder, "
-                    f"configured={crew_kwargs.get('embedder')!r}, "
-                    f"OPENAI_API_KEY={'set' if os.environ.get('OPENAI_API_KEY') else 'unset'}"
+                    f"configured={crew_kwargs.get('embedder')!r}"
                 )
                 return None
 

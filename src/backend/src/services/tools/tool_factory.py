@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from typing import Any, Dict, Optional, Union
 
 from src.services.tools.a2a_agent_tool import A2AAgentTool
@@ -236,6 +235,13 @@ except ImportError as e:
 
 # Setup logger
 logger = logging.getLogger(__name__)
+
+# Tools built through the generic branch of ``create_tool`` that need a provider
+# key. The key is read from the workspace's ApiKeysService and passed as
+# ``api_key`` — never through os.environ, which every workspace shares.
+_TOOL_API_KEY_NAMES: Dict[str, str] = {
+    "Image Generation Tool": "OPENAI_API_KEY",
+}
 
 # Import request-scoped session helper
 from src.db.session import (  # noqa: E402 - import follows module initialization
@@ -499,70 +505,10 @@ class ToolFactory:
             try:
                 await self._load_available_tools_async()
 
-                # Setup API keys if we have the service
-                if self.api_keys_service:
-                    # Pre-load common API keys into environment
-                    api_keys_to_load = [
-                        "SERPER_API_KEY",
-                        "PERPLEXITY_API_KEY",
-                        "OPENAI_API_KEY",
-                        "DATABRICKS_API_KEY",
-                    ]
-                    for key_name in api_keys_to_load:
-                        try:
-                            # Use utility function to avoid event loop issues.
-                            # _smart, NOT _with_fresh_engine: the latter is pinned
-                            # to the local engine (it imports nullpool_engine
-                            # directly), so on Lakebase it queries a DB that has
-                            # no apikey row and every key silently pre-loads as
-                            # absent.
-                            from src.utils.asyncio_utils import (
-                                execute_db_operation_smart,
-                            )
-
-                            # Get group_id from config or api_keys_service
-                            group_id = None
-                            try:
-                                group_id = (
-                                    self.config.get("group_id")
-                                    if isinstance(self.config, dict)
-                                    else None
-                                )
-                            except Exception:
-                                pass
-
-                            # If not in config, try to get from api_keys_service
-                            if not group_id and self.api_keys_service:
-                                group_id = getattr(
-                                    self.api_keys_service, "group_id", None
-                                )
-
-                            async def _get_key_operation(session):
-                                # SECURITY: Re-use the api_keys_service with group_id for multi-tenant isolation
-                                from src.services.settings.api_keys import (
-                                    ApiKeysService,
-                                )
-
-                                api_keys_service = ApiKeysService(
-                                    session, group_id=group_id
-                                )
-                                return await api_keys_service.find_by_name(key_name)
-
-                            api_key_obj = await execute_db_operation_smart(
-                                _get_key_operation
-                            )
-
-                            if api_key_obj and api_key_obj.encrypted_value:
-                                # Decrypt the value
-                                api_key = EncryptionUtils.decrypt_value(
-                                    api_key_obj.encrypted_value
-                                )
-                                os.environ[key_name] = api_key
-                                logger.info(
-                                    f"Pre-loaded {key_name} from ApiKeysService"
-                                )
-                        except Exception as e:
-                            logger.error(f"Error pre-loading {key_name}: {str(e)}")
+                # API keys are NOT pre-loaded into os.environ: the process
+                # environment is shared by every workspace a request serves, so a
+                # key written there leaks across tenants. Each tool that needs a
+                # key receives it explicitly at construction (see _get_api_key).
 
                 self._initialized = True
             except Exception as e:
@@ -596,30 +542,6 @@ class ToolFactory:
                 try:
                     asyncio.set_event_loop(loop)
                     loop.run_until_complete(self._load_available_tools_async())
-
-                    # Also pre-load API keys if we have the service
-                    if self.api_keys_service:
-                        # Pre-load common API keys into environment
-                        api_keys_to_load = [
-                            "SERPER_API_KEY",
-                            "PERPLEXITY_API_KEY",
-                            "OPENAI_API_KEY",
-                            "DATABRICKS_API_KEY",
-                        ]
-                        for key_name in api_keys_to_load:
-                            try:
-                                api_key = loop.run_until_complete(
-                                    self._get_api_key_async(key_name)
-                                )
-                                if api_key:
-                                    os.environ[key_name] = api_key
-                                    logger.info(
-                                        f"Pre-loaded {key_name} from ApiKeysService (sync)"
-                                    )
-                            except Exception as e:
-                                logger.error(
-                                    f"Error pre-loading {key_name} (sync): {str(e)}"
-                                )
                 finally:
                     loop.close()
         except Exception as e:
@@ -1254,72 +1176,9 @@ class ToolFactory:
                 # Use parameters directly from tool config
                 api_key = tool_config.get("api_key", "")
 
-                # Try to get the key from environment first
-                perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
-
-                # If not found in environment, try to get it from the service
-                if not perplexity_api_key and not api_key:
-                    # Use the API keys service if provided, otherwise use the normal methods
-                    if self.api_keys_service is not None:
-                        logger.info("Using ApiKeysService to get PERPLEXITY_API_KEY")
-                        try:
-                            # Check if we're in an async context
-                            asyncio.get_running_loop()
-                            # Use ThreadPoolExecutor to call async method from sync context
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "PERPLEXITY_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # Not in async context
-                            loop = asyncio.new_event_loop()
-                            try:
-                                asyncio.set_event_loop(loop)
-                                db_api_key = loop.run_until_complete(
-                                    self._get_api_key_async("PERPLEXITY_API_KEY")
-                                )
-                            finally:
-                                loop.close()
-
-                        # Assign the retrieved key to perplexity_api_key
-                        if db_api_key:
-                            os.environ["PERPLEXITY_API_KEY"] = db_api_key
-                            perplexity_api_key = db_api_key
-                            logger.info(
-                                "Retrieved PERPLEXITY_API_KEY from ApiKeysService"
-                            )
-                    else:
-                        # Fallback to original method
-                        logger.info(
-                            "No ApiKeysService provided, using fallback method for PERPLEXITY_API_KEY"
-                        )
-                        try:
-                            # Check if we're already in an event loop
-                            asyncio.get_running_loop()
-                            # We're in an async context, use ThreadPoolExecutor
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "PERPLEXITY_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # We're not in an async context, use direct method
-                            db_api_key = self._get_api_key("PERPLEXITY_API_KEY")
-
-                        if db_api_key:
-                            # Set in environment for tools that read from there
-                            os.environ["PERPLEXITY_API_KEY"] = db_api_key
-                            perplexity_api_key = db_api_key
-
-                # Use tool configuration or environment
-                final_api_key = api_key or perplexity_api_key
+                # The key comes from THIS workspace's ApiKeysService, never the
+                # process environment (shared by every tenant).
+                final_api_key = api_key or self._get_api_key("PERPLEXITY_API_KEY")
 
                 # Add api key to config and create with all parameters from config
                 tool_config_with_key = {**tool_config}
@@ -1362,64 +1221,9 @@ class ToolFactory:
                 # Get API key from tool config
                 api_key = tool_config.get("serper_api_key", "")
 
-                # Try to get the key from environment first
-                serper_api_key = os.environ.get("SERPER_API_KEY")
-
-                # If not found in environment, try to get it from the service
-                if not serper_api_key and not api_key:
-                    # Use the API keys service if provided, otherwise use the normal methods
-                    if self.api_keys_service is not None:
-                        logger.info("Using ApiKeysService to get SERPER_API_KEY")
-                        try:
-                            # Check if we're in an async context
-                            asyncio.get_running_loop()
-                            # Use ThreadPoolExecutor to call async method from sync context
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "SERPER_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # Not in async context
-                            loop = asyncio.new_event_loop()
-                            try:
-                                asyncio.set_event_loop(loop)
-                                db_api_key = loop.run_until_complete(
-                                    self._get_api_key_async("SERPER_API_KEY")
-                                )
-                            finally:
-                                loop.close()
-                    else:
-                        # Fallback to original method
-                        logger.info(
-                            "No ApiKeysService provided, using fallback method for SERPER_API_KEY"
-                        )
-                        try:
-                            # Check if we're already in an event loop
-                            asyncio.get_running_loop()
-                            # We're in an async context, use ThreadPoolExecutor
-                            import concurrent.futures
-
-                            with concurrent.futures.ThreadPoolExecutor() as pool:
-                                db_api_key = pool.submit(
-                                    self._run_in_new_loop,
-                                    self._get_api_key_async,
-                                    "SERPER_API_KEY",
-                                ).result()
-                        except RuntimeError:
-                            # We're not in an async context, use direct method
-                            db_api_key = self._get_api_key("SERPER_API_KEY")
-
-                        if db_api_key:
-                            # Set in environment for tools that read from there
-                            os.environ["SERPER_API_KEY"] = db_api_key
-                            serper_api_key = db_api_key
-
-                # Use tool configuration or environment
-                final_api_key = api_key or serper_api_key
+                # The key comes from THIS workspace's ApiKeysService, never the
+                # process environment (shared by every tenant).
+                final_api_key = api_key or self._get_api_key("SERPER_API_KEY")
 
                 # Add api key to config and create with all parameters from config
                 tool_config_with_key = {**tool_config}
@@ -2581,6 +2385,13 @@ class ToolFactory:
 
             # For all other tools (ScrapeWebsiteTool, ImageGenerationTool, DAX Generator, etc.)
             else:
+                # A tool that needs a provider key gets THIS workspace's key,
+                # passed explicitly, never through the shared process env.
+                key_name = _TOOL_API_KEY_NAMES.get(tool_name)
+                if key_name:
+                    tool_config = dict(tool_config or {})
+                    if not tool_config.get("api_key"):
+                        tool_config["api_key"] = self._get_api_key(key_name)
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):
                     # Prefer result_as_answer from DB/merged config over the parameter default

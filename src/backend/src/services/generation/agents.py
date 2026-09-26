@@ -8,7 +8,6 @@ structured CrewAI agent configurations.
 
 import json
 import logging
-import os
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -148,7 +147,7 @@ class AgentGenerationService:
             Exception: For any other errors during generation
         """
         # Default values
-        model = model or os.getenv("AGENT_MODEL", DEFAULT_ENGINE_MODEL)
+        model = model or DEFAULT_ENGINE_MODEL
         tools = tools or []
 
         logger.info(f"Generating agent with model: {model}")
