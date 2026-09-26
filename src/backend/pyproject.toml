@@ -216,7 +216,7 @@ select = ["E", "F"]
 ignore = ["E501"]
 
 # RUF100: a `noqa` that suppresses nothing is a lie about the code next to it, and
-# it hides the day the suppressed rule would fire for real. The ~550 dead ones that
+# it hides the day the suppressed rule would fire for real. The 110 dead ones that
 # had piled up were removed mechanically (ruff's fix for RUF100 touches noqa
 # comments and nothing else).
 extend-select = ["RUF100"]
