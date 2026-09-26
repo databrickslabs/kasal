@@ -11,6 +11,10 @@ from src.schemas.databricks_config import (
     DatabricksConfigCreate,
     DatabricksConfigResponse,
 )
+from src.services.databricks.workspace.host_guard import (
+    assert_host_is_configured_workspace,
+    normalize_workspace_host,
+)
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
@@ -587,15 +591,17 @@ class DatabricksService:
 
         headers = auth.get_headers()
 
+        config = await self.repository.get_active_config(group_id=self.group_id)
+        workspace_url = config.workspace_url if config and config.workspace_url else ""
+        if not workspace_url:
+            workspace_url = os.getenv("DATABRICKS_HOST", "")
         if host:
-            workspace_url = host
-        else:
-            config = await self.repository.get_active_config(group_id=self.group_id)
-            workspace_url = ""
-            if config and config.workspace_url:
-                workspace_url = config.workspace_url
-            if not workspace_url:
-                workspace_url = os.getenv("DATABRICKS_HOST", "")
+            # The credential above is attached to this request: never send it to
+            # a caller-chosen host. Only the configured workspace is accepted.
+            assert_host_is_configured_workspace(
+                host, (workspace_url, auth.workspace_url)
+            )
+            workspace_url = f"https://{normalize_workspace_host(host)}"
 
         if not workspace_url:
             raise KasalError(
@@ -616,8 +622,13 @@ class DatabricksService:
             response = await client.get(url, headers=headers)
 
         if response.status_code != 200:
+            logger.warning(
+                "List warehouses failed: %s %s",
+                response.status_code,
+                response.text[:500],
+            )
             raise KasalError(
-                detail=f"Failed to list warehouses: {response.status_code} {response.text}"
+                detail=f"Failed to list warehouses: {response.status_code}"
             )
 
         data = response.json()
@@ -635,9 +646,10 @@ class DatabricksService:
             response = await client.get(url, headers=headers)
 
         if response.status_code != 200:
-            raise KasalError(
-                detail=f"Failed to list catalogs: {response.status_code} {response.text}"
+            logger.warning(
+                "List catalogs failed: %s %s", response.status_code, response.text[:500]
             )
+            raise KasalError(detail=f"Failed to list catalogs: {response.status_code}")
 
         data = response.json()
         return [c["name"] for c in data.get("catalogs", [])]
@@ -653,9 +665,10 @@ class DatabricksService:
             )
 
         if response.status_code != 200:
-            raise KasalError(
-                detail=f"Failed to list schemas: {response.status_code} {response.text}"
+            logger.warning(
+                "List schemas failed: %s %s", response.status_code, response.text[:500]
             )
+            raise KasalError(detail=f"Failed to list schemas: {response.status_code}")
 
         data = response.json()
         return [s["name"] for s in data.get("schemas", [])]
@@ -681,11 +694,12 @@ class DatabricksService:
             )
 
         if response.status_code != 200:
-            raise KasalError(
-                detail=(
-                    f"Failed to list functions: {response.status_code} {response.text}"
-                )
+            logger.warning(
+                "List functions failed: %s %s",
+                response.status_code,
+                response.text[:500],
             )
+            raise KasalError(detail=f"Failed to list functions: {response.status_code}")
 
         data = response.json()
         return [
