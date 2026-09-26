@@ -75,6 +75,7 @@ try:
 except Exception:
     pass
 
+import asyncio
 import logging
 import multiprocessing as mp
 import os
@@ -82,6 +83,11 @@ import signal
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, Optional
+
+from src.services.execution.process_tree import (
+    terminate_owned_processes,
+    terminate_process_tree,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1792,6 +1798,32 @@ def run_crew_in_process(
             logger.error(f"Error during final cleanup: {cleanup_error}")
 
 
+def _drain_result_queue(result_queue, sink: list, child_exited, max_wait: float):
+    """Read the run's single result so the child's pipe never fills.
+
+    Polls in short slices and stops shortly after ``child_exited`` is set,
+    instead of blocking for the whole run timeout when the child died without
+    putting a result (stop, OOM, crash).
+    """
+    import queue as _queue
+    import time as _time
+
+    deadline = _time.monotonic() + max_wait
+    last_read = False
+    while _time.monotonic() < deadline:
+        # Decide BEFORE reading: a child flushes its queue before it exits,
+        # so one read that starts after the exit is conclusive.
+        last_read = child_exited.is_set()
+        try:
+            sink.append(result_queue.get(timeout=0.5))
+            return
+        except _queue.Empty:
+            if last_read:
+                return
+        except Exception:
+            return
+
+
 class ProcessCrewExecutor:
     """High-performance process-based executor for isolated CrewAI execution.
 
@@ -2054,7 +2086,6 @@ class ProcessCrewExecutor:
                 is_lakebase_enabled,
             )
 
-            loop = asyncio.get_running_loop()
             lakebase_enabled = await is_lakebase_enabled()
             if lakebase_enabled:
                 os.environ["LAKEBASE_ACTIVE"] = "true"
@@ -2137,29 +2168,36 @@ class ProcessCrewExecutor:
             # process.join(), nobody reads → classic deadlock.
             #
             # Fix: drain the result_queue in a background thread while joining.
+            # Both waits run off the event loop, on the bounded run-wait pool,
+            # so they neither freeze the loop nor starve Chat's default pool.
             import threading as _threading
 
+            from src.services.execution.blocking_pools import (
+                RUN_WAIT_EXECUTOR,
+                run_in_pool,
+            )
+
             drained_result: list = []
-
-            def _drain_queue():
-                """Read result_queue in a background thread so the pipe never fills."""
-                try:
-                    r = result_queue.get(timeout=(timeout or 3700))
-                    drained_result.append(r)
-                except Exception:
-                    pass
-
-            drain_thread = _threading.Thread(target=_drain_queue, daemon=True)
+            child_exited = _threading.Event()
+            drain_thread = _threading.Thread(
+                target=_drain_result_queue,
+                args=(result_queue, drained_result, child_exited, timeout or 3700),
+                daemon=True,
+            )
             drain_thread.start()
 
-            loop = asyncio.get_event_loop()
-            if timeout:
-                future = loop.run_in_executor(None, process.join, timeout)
-                await asyncio.wait_for(future, timeout=timeout)
-            else:
-                await loop.run_in_executor(None, process.join)
+            try:
+                future = run_in_pool(RUN_WAIT_EXECUTOR, process.join, timeout)
+                if timeout:
+                    await asyncio.wait_for(future, timeout=timeout)
+                else:
+                    await future
+            finally:
+                # The child's data is flushed before it exits, so the drain
+                # thread needs only one more short read to finish.
+                child_exited.set()
 
-            drain_thread.join(timeout=10)  # give it a moment to finish
+            await run_in_pool(RUN_WAIT_EXECUTOR, drain_thread.join, 10)
 
             # The child has exited, so everything it wrote is already in the
             # queue. Append a parent-side EOF so the relay drains the final
@@ -2260,144 +2298,15 @@ class ProcessCrewExecutor:
         finally:
             self._metrics["active_executions"] -= 1
 
-            # CRITICAL: Terminate the process to prevent zombie processes
-            if execution_id in self._running_processes:
-                process = self._running_processes[execution_id]
-                if process.is_alive():
-                    try:
-                        # First try graceful termination
-                        logger.info(
-                            f"Terminating process {process.pid} for execution {execution_id}"
-                        )
-                        process.terminate()
-
-                        # Wait up to 2 seconds for graceful termination
-                        process.join(timeout=2)
-
-                        if process.is_alive():
-                            # Force kill if still alive
-                            logger.warning(
-                                f"Force killing process {process.pid} for execution {execution_id}"
-                            )
-                            process.kill()
-                            process.join(timeout=1)  # Wait briefly for kill
-
-                        logger.info(f"Process {process.pid} terminated successfully")
-                    except Exception as e:
-                        logger.error(
-                            f"Error terminating process for {execution_id}: {e}"
-                        )
-                        # Try psutil as fallback
-                        try:
-                            import psutil
-
-                            psutil_proc = psutil.Process(process.pid)
-                            psutil_proc.kill()
-                            logger.info(
-                                f"Force killed process {process.pid} using psutil"
-                            )
-                        except Exception:
-                            pass
-
-                # Remove from tracking
-                del self._running_processes[execution_id]
-
-            # Additional cleanup: Kill any lingering child processes
-            # This runs after successful completion, error, or timeout
-            try:
-                # Try psutil first (best option)
-                import psutil
-
-                # Try to find and kill any processes still running with our execution ID
-                # Look for processes that might be orphaned
-                for proc in psutil.process_iter(["pid", "name", "cmdline", "ppid"]):
-                    try:
-                        # Check if process command line contains our execution ID
-                        cmdline = proc.info.get("cmdline", [])
-                        if cmdline and any(execution_id in str(arg) for arg in cmdline):
-                            logger.warning(
-                                f"Found orphaned process {proc.info['pid']} for execution {execution_id}, terminating..."
-                            )
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=2)  # Wait up to 2 seconds
-                            except psutil.TimeoutExpired:
-                                proc.kill()  # Force kill if still running
-                                logger.warning(
-                                    f"Force killed orphaned process {proc.info['pid']}"
-                                )
-                    except (
-                        psutil.NoSuchProcess,
-                        psutil.AccessDenied,
-                        psutil.ZombieProcess,
-                    ):
-                        pass  # Process already gone or we can't access it
-
-                # Also check for any multiprocessing.spawn processes without proper parents
-                # These are often left over from ProcessPoolExecutor
-                for proc in psutil.process_iter(["pid", "name", "ppid", "create_time"]):
-                    try:
-                        proc_info = proc.info
-                        # Look for Python processes spawned by multiprocessing
-                        if proc_info["name"] and "python" in proc_info["name"].lower():
-                            # Check if parent is dead (ppid = 1 on Unix means orphaned)
-                            if proc_info["ppid"] == 1:
-                                # Check if it was created recently (within last 10 minutes)
-                                create_time = datetime.fromtimestamp(proc.create_time())
-                                age_minutes = (
-                                    datetime.now() - create_time
-                                ).total_seconds() / 60
-                                if age_minutes < 10:
-                                    logger.info(
-                                        f"Found recent orphaned Python process {proc_info['pid']} (age: {age_minutes:.1f} min)"
-                                    )
-                                    # Don't auto-kill these - just log for now
-                                    # proc.terminate()
-                    except (
-                        psutil.NoSuchProcess,
-                        psutil.AccessDenied,
-                        psutil.ZombieProcess,
-                    ):
-                        pass
-
-            except ImportError:
-                # Fallback: Use subprocess to find and kill processes (Unix/Linux/macOS)
-                logger.info("psutil not available, using fallback process cleanup")
+            # CRITICAL: Terminate the process to prevent zombie processes.
+            # Only the tree this executor started is touched — the tracked
+            # Process and its own descendants, never a host-wide scan.
+            process = self._running_processes.pop(execution_id, None)
+            if process is not None:
                 try:
-                    import signal
-                    import subprocess
-
-                    # Try to find processes with our execution ID using ps command
-                    result = subprocess.run(
-                        ["ps", "aux"], capture_output=True, text=True, timeout=5
-                    )
-
-                    if result.returncode == 0:
-                        # Parse ps output to find processes with our execution ID
-                        for line in result.stdout.split("\n"):
-                            if (
-                                execution_id[:8] in line
-                                and "multiprocessing.spawn" in line
-                            ):
-                                # Extract PID (second column in ps aux output)
-                                parts = line.split()
-                                if len(parts) > 1:
-                                    try:
-                                        pid = int(parts[1])
-                                        logger.info(
-                                            f"Found orphaned process {pid} with execution ID, terminating..."
-                                        )
-                                        os.kill(pid, signal.SIGTERM)
-                                    except (ValueError, OSError) as e:
-                                        logger.debug(f"Could not kill process: {e}")
-
+                    await asyncio.to_thread(terminate_process_tree, process)
                 except Exception as e:
-                    logger.debug(f"Fallback process cleanup failed: {e}")
-
-            except Exception as cleanup_error:
-                logger.error(
-                    f"Error during process cleanup for {execution_id}: {cleanup_error}"
-                )
+                    logger.error(f"Error terminating process for {execution_id}: {e}")
 
             # Cleanup tracking
             if execution_id in self._running_futures:
@@ -2498,7 +2407,10 @@ class ProcessCrewExecutor:
         """
         Forcefully terminate a running execution process.
 
-        This directly kills the process, ensuring complete cleanup.
+        Stops the tracked Process and its own descendants. When the handle is
+        no longer tracked, falls back to this server's descendants whose
+        ``KASAL_EXECUTION_ID`` equals ``execution_id`` exactly. It never scans
+        processes this server did not start.
 
         Args:
             execution_id: The execution to terminate
@@ -2508,183 +2420,37 @@ class ProcessCrewExecutor:
         """
         terminated = False
 
-        # Terminate the process if it exists
-        if execution_id in self._running_processes:
-            process = self._running_processes[execution_id]
-
-            if process.is_alive():
-                try:
-                    pid = process.pid
-                    logger.info(
-                        f"Terminating process {pid} for execution {execution_id}"
-                    )
-
-                    # Try graceful termination first
-                    process.terminate()
-
-                    # Give it a moment to terminate (non-blocking check)
-                    process.join(timeout=0.5)
-
-                    if process.is_alive():
-                        # Force kill if still alive
-                        logger.warning(
-                            f"Force killing process {pid} for execution {execution_id}"
-                        )
-                        process.kill()
-                        process.join(timeout=0.5)
-
-                    logger.info(
-                        f"Successfully terminated process {pid} for execution {execution_id}"
-                    )
-                    terminated = True
-
-                except Exception as e:
-                    logger.error(f"Error terminating process for {execution_id}: {e}")
-                    # Try psutil as fallback
-                    try:
-                        import psutil
-
-                        if process.pid:
-                            psutil_proc = psutil.Process(process.pid)
-                            psutil_proc.kill()
-                            logger.info("Force killed process using psutil")
-                            terminated = True
-                    except Exception:
-                        pass
-            else:
-                logger.info(f"Process for execution {execution_id} already terminated")
+        process = self._running_processes.pop(execution_id, None)
+        if process is not None:
+            try:
+                logger.info(
+                    f"Terminating process {process.pid} for execution {execution_id}"
+                )
+                await asyncio.to_thread(
+                    terminate_process_tree, process, grace_timeout=0.5
+                )
                 terminated = True
+            except Exception as e:
+                logger.error(f"Error terminating process for {execution_id}: {e}")
 
-            # Remove from tracking
-            del self._running_processes[execution_id]
-
-        # If not found in tracking (e.g., server reloaded), search ALL processes
         if not terminated:
             logger.info(
-                f"[ProcessCrewExecutor] Process not in tracking, searching all processes for {execution_id}..."
+                f"[ProcessCrewExecutor] {execution_id} not tracked; checking this "
+                f"server's own subprocesses"
             )
-            terminated = self._terminate_orphaned_process(execution_id)
+            try:
+                terminated = (
+                    await asyncio.to_thread(terminate_owned_processes, execution_id) > 0
+                )
+            except Exception as e:
+                logger.error(
+                    f"[ProcessCrewExecutor] Error terminating owned processes: {e}"
+                )
 
         if terminated:
             self._metrics["terminated_executions"] += 1
 
         return terminated
-
-    def _terminate_orphaned_process(self, execution_id: str) -> bool:
-        """
-        Find and terminate orphaned crew processes by searching all running processes.
-
-        This handles the case where the server was reloaded and we lost the process reference.
-        It searches for processes that have the KASAL_EXECUTION_ID environment variable.
-
-        Args:
-            execution_id: The execution ID to search for
-
-        Returns:
-            True if a matching process was found and terminated
-        """
-        try:
-            import psutil
-
-            # Use short execution_id for matching (first 8 chars is common in logs)
-            exec_id_short = execution_id[:8]
-            killed_count = 0
-
-            logger.info(
-                f"[ProcessCrewExecutor] Searching for orphaned processes with execution_id {exec_id_short}..."
-            )
-
-            # Search ALL processes, not just children of current process
-            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-                try:
-                    # Skip non-Python processes for efficiency
-                    proc_name = proc.info.get("name", "").lower()
-                    if "python" not in proc_name:
-                        continue
-
-                    # Check command line for execution_id
-                    cmdline = proc.info.get("cmdline", [])
-                    cmdline_str = " ".join(cmdline) if cmdline else ""
-
-                    # Check for KASAL_EXECUTION_ID environment variable (most reliable)
-                    kasal_exec_id = None
-                    try:
-                        env = proc.environ()
-                        kasal_exec_id = env.get("KASAL_EXECUTION_ID", "")
-                    except (psutil.AccessDenied, psutil.NoSuchProcess):
-                        pass
-
-                    # Check if this process matches our execution
-                    is_match = False
-                    if kasal_exec_id:
-                        is_match = (
-                            kasal_exec_id == execution_id
-                            or kasal_exec_id.startswith(exec_id_short)
-                        )
-                    elif execution_id in cmdline_str or exec_id_short in cmdline_str:
-                        is_match = True
-
-                    if is_match:
-                        pid = proc.info["pid"]
-                        logger.info(
-                            f"[ProcessCrewExecutor] Found matching process {pid}, terminating..."
-                        )
-
-                        # Kill the process and all its children
-                        try:
-                            parent = psutil.Process(pid)
-                            children = parent.children(recursive=True)
-
-                            # Terminate children first
-                            for child in children:
-                                try:
-                                    child.kill()
-                                    logger.info(
-                                        f"[ProcessCrewExecutor] Terminated child process {child.pid}"
-                                    )
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-
-                            # Give children time to terminate
-                            if children:
-                                psutil.wait_procs(children, timeout=2)
-
-                            # Now kill the parent
-                            parent.kill()
-                            logger.info(
-                                f"[ProcessCrewExecutor] Successfully terminated orphaned process {pid}"
-                            )
-                            killed_count += 1
-
-                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                            logger.warning(
-                                f"[ProcessCrewExecutor] Could not terminate process {pid}: {e}"
-                            )
-
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-            if killed_count > 0:
-                logger.info(
-                    f"[ProcessCrewExecutor] Terminated {killed_count} orphaned processes for {execution_id}"
-                )
-                return True
-            else:
-                logger.warning(
-                    f"[ProcessCrewExecutor] No orphaned processes found for {execution_id}"
-                )
-                return False
-
-        except ImportError:
-            logger.error(
-                "[ProcessCrewExecutor] psutil not available for orphaned process cleanup"
-            )
-            return False
-        except Exception as e:
-            logger.error(
-                f"[ProcessCrewExecutor] Error searching for orphaned processes: {e}"
-            )
-            return False
 
     def get_metrics(self) -> Dict[str, Any]:
         """
@@ -2704,145 +2470,26 @@ class ProcessCrewExecutor:
         """
         logger.info("Shutting down ProcessCrewExecutor")
 
-        # Terminate all running processes
+        # Terminate every tracked process together with its own descendants.
+        # Nothing else: other children of this server (flow runs, MCP servers)
+        # are not this executor's to stop.
         for execution_id, process in list(self._running_processes.items()):
-            if process.is_alive():
-                try:
-                    logger.info(
-                        f"Terminating process {process.pid} for execution {execution_id}"
-                    )
-                    process.terminate()
-                    if wait:
-                        process.join(timeout=2)
-                        if process.is_alive():
-                            process.kill()
-                            process.join(timeout=1)
-                except Exception as e:
-                    logger.error(f"Error terminating process for {execution_id}: {e}")
+            try:
+                logger.info(
+                    f"Terminating process {process.pid} for execution {execution_id}"
+                )
+                terminate_process_tree(process, wait=wait)
+            except Exception as e:
+                logger.error(f"Error terminating process for {execution_id}: {e}")
 
         # Clear all tracking
         self._running_processes.clear()
         self._running_futures.clear()
         self._running_executors.clear()
 
-        # Extra cleanup: Kill any remaining worker processes from the pool
-        try:
-            import os
-
-            import psutil
-
-            current_pid = os.getpid()
-            current_process = psutil.Process(current_pid)
-
-            # Find all child processes (workers from ProcessPoolExecutor)
-            children = current_process.children(recursive=True)
-            if children:
-                logger.info(f"Found {len(children)} child processes to clean up")
-                for child in children:
-                    try:
-                        logger.info(f"Terminating child process {child.pid}")
-                        child.terminate()
-                    except psutil.NoSuchProcess:
-                        pass
-
-                # Give them time to terminate gracefully
-                gone, alive = psutil.wait_procs(children, timeout=3)
-
-                # Force kill any that didn't terminate
-                for p in alive:
-                    try:
-                        logger.warning(f"Force killing stubborn child process {p.pid}")
-                        p.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-        except Exception as e:
-            logger.error(f"Error during executor shutdown cleanup: {e}")
-
         logger.info(
             f"ProcessCrewExecutor shutdown complete. Final metrics: {self.get_metrics()}"
         )
-
-    @staticmethod
-    def kill_orphan_crew_processes():
-        """
-        Static method to find and kill orphaned crew processes.
-        Can be called independently to clean up stale processes.
-        """
-        try:
-            import psutil
-
-            killed_count = 0
-
-            logger.info("Scanning for orphaned crew processes...")
-
-            for proc in psutil.process_iter(
-                ["pid", "name", "cmdline", "ppid", "create_time"]
-            ):
-                try:
-                    proc_info = proc.info
-                    cmdline = proc_info.get("cmdline", [])
-
-                    # Look for processes that might be crew-related
-                    is_crew_process = False
-
-                    # Check if command line contains crew-related keywords
-                    if cmdline:
-                        cmd_str = " ".join(str(arg) for arg in cmdline)
-                        crew_keywords = [
-                            "run_crew_in_process",
-                            "CrewAI",
-                            "crew.kickoff",
-                            "multiprocessing.spawn",
-                            "ProcessPoolExecutor",
-                        ]
-                        if any(keyword in cmd_str for keyword in crew_keywords):
-                            is_crew_process = True
-
-                    # Check for orphaned Python processes (ppid = 1)
-                    if proc_info["name"] and "python" in proc_info["name"].lower():
-                        if proc_info["ppid"] == 1:  # Orphaned process
-                            is_crew_process = True
-
-                    if is_crew_process:
-                        # Check age - only kill if older than 1 minute
-                        create_time = datetime.fromtimestamp(proc.create_time())
-                        age_minutes = (
-                            datetime.now() - create_time
-                        ).total_seconds() / 60
-
-                        if (
-                            age_minutes > 1
-                        ):  # Process is old enough to be considered orphaned
-                            logger.warning(
-                                f"Killing orphaned crew process {proc_info['pid']} (age: {age_minutes:.1f} min)"
-                            )
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=2)
-                            except psutil.TimeoutExpired:
-                                proc.kill()
-                            killed_count += 1
-
-                except (
-                    psutil.NoSuchProcess,
-                    psutil.AccessDenied,
-                    psutil.ZombieProcess,
-                ):
-                    pass
-
-            if killed_count > 0:
-                logger.info(f"Killed {killed_count} orphaned crew processes")
-            else:
-                logger.info("No orphaned crew processes found")
-
-            return killed_count
-
-        except ImportError:
-            logger.error("psutil not available - cannot clean orphan processes")
-            return 0
-        except Exception as e:
-            logger.error(f"Error killing orphan processes: {e}")
-            return 0
 
     def __enter__(self):
         """Context manager entry."""

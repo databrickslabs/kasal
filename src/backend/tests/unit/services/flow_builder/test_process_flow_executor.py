@@ -412,34 +412,30 @@ class TestTerminateExecution:
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
         e = ProcessFlowExecutor()
-        with patch.object(
-            e, "_terminate_orphaned_process", new_callable=AsyncMock, return_value=False
-        ):
+        with patch(
+            "src.services.flow_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ) as owned:
             assert await e.terminate_execution("x") is False
+        owned.assert_called_once_with("x", graceful=False)
 
     @pytest.mark.asyncio
-    async def test_exc_psutil_success(self):
-        """Exception during is_alive inside try block triggers psutil fallback.
-        First is_alive at line 1182 (logging) must succeed, second at 1184 raises."""
+    async def test_tracked_kill_error_falls_back_to_owned_processes(self):
+        """A failure stopping the tracked handle falls back to this server's
+        own subprocesses carrying the exact execution id."""
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
         e = ProcessFlowExecutor()
         p = MagicMock(pid=4)
-        # First call at line 1182 (logging) -> True, second call at line 1184 raises
         p.is_alive.side_effect = [True, RuntimeError("err")]
         e._running_processes["e1"] = p
-        mock_psutil_proc = MagicMock()
-        with patch.object(
-            e, "_terminate_orphaned_process", new_callable=AsyncMock, return_value=False
-        ):
-            with patch.dict(
-                "sys.modules",
-                {"psutil": MagicMock(Process=MagicMock(return_value=mock_psutil_proc))},
-            ):
-                r = await e.terminate_execution("e1")
-        # psutil fallback should have succeeded
+        with patch(
+            "src.services.flow_builder.process_executor.terminate_owned_processes",
+            return_value=1,
+        ) as owned:
+            r = await e.terminate_execution("e1")
         assert r is True
-        mock_psutil_proc.kill.assert_called_once()
+        owned.assert_called_once_with("e1", graceful=False)
 
     @pytest.mark.asyncio
     async def test_non_graceful(self):
@@ -480,9 +476,8 @@ class TestTerminateExecution:
         assert "e1" not in e._running_processes and "e1" not in e._running_futures
 
     @pytest.mark.asyncio
-    async def test_psutil_fail(self):
-        """Exception in try block + psutil fallback also fails.
-        First is_alive at line 1182 (logging) succeeds, second at 1184 raises."""
+    async def test_tracked_kill_error_and_nothing_owned(self):
+        """Stopping the tracked handle fails and nothing of ours matches."""
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
         e = ProcessFlowExecutor()
@@ -490,305 +485,12 @@ class TestTerminateExecution:
         # First call at 1182 (logging) -> True, second call at 1184 raises
         p.is_alive.side_effect = [True, RuntimeError("err")]
         e._running_processes["e1"] = p
-        with patch.object(
-            e, "_terminate_orphaned_process", new_callable=AsyncMock, return_value=False
+        with patch(
+            "src.services.flow_builder.process_executor.terminate_owned_processes",
+            return_value=0,
         ):
-            with patch("psutil.Process", side_effect=Exception("no process")):
-                await e.terminate_execution("e1")
+            assert await e.terminate_execution("e1") is False
         assert "e1" not in e._running_processes
-
-
-def _psutil_mock(**kw):
-    m = MagicMock()
-    m.NoSuchProcess = type("N", (Exception,), {})
-    m.AccessDenied = type("A", (Exception,), {})
-    m.TimeoutExpired = type("T", (Exception,), {})
-    for k, v in kw.items():
-        setattr(m, k, v)
-    return m
-
-
-class TestTerminateOrphanedProcess:
-    @pytest.mark.asyncio
-    async def test_import_err(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        with patch.dict("sys.modules", {"psutil": None}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process("e1") is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_no_match(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        mp = _psutil_mock()
-        pr = MagicMock()
-        pr.info = {"pid": 1, "name": "python3", "cmdline": ["other"]}
-        pr.environ.return_value = {}
-        mp.process_iter.return_value = [pr]
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process(
-                    "exec_nf_12345678"
-                )
-                is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_match_env(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "exec12345678abc"
-        mp = _psutil_mock()
-        parent = MagicMock()
-        parent.children.return_value = [MagicMock(pid=9)]
-        parent.kill = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 5, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"KASAL_EXECUTION_ID": eid}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process(
-                    eid, graceful=False
-                )
-                is True
-            )
-
-    @pytest.mark.asyncio
-    async def test_match_cmdline(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "cmdline__12345678"
-        mp = _psutil_mock()
-        parent = MagicMock()
-        parent.children.return_value = []
-        parent.kill = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 6, "name": "python3", "cmdline": ["python", eid]}
-        pr.environ.return_value = {}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert await ProcessFlowExecutor()._terminate_orphaned_process(eid) is True
-
-    @pytest.mark.asyncio
-    async def test_graceful_ok(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "graceful__12345678"
-        mp = _psutil_mock()
-        child = MagicMock(pid=7)
-        parent = MagicMock()
-        parent.children.return_value = [child]
-        parent.terminate = MagicMock()
-        parent.wait = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 8, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"KASAL_EXECUTION_ID": eid}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process(
-                    eid, graceful=True
-                )
-                is True
-            )
-        child.terminate.assert_called()
-        parent.terminate.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_graceful_timeout_kills(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "grace_k__12345678"
-        mp = _psutil_mock()
-        TE = type("TE", (Exception,), {})
-        mp.TimeoutExpired = TE
-        parent = MagicMock()
-        parent.children.return_value = []
-        parent.terminate = MagicMock()
-        parent.wait.side_effect = TE("t")
-        parent.kill = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 9, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"KASAL_EXECUTION_ID": eid}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process(
-                    eid, graceful=True
-                )
-                is True
-            )
-        parent.kill.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_skip_non_python(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        mp = _psutil_mock()
-        pr = MagicMock()
-        pr.info = {"pid": 1, "name": "bash", "cmdline": []}
-        mp.process_iter.return_value = [pr]
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process("e_12345678")
-                is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_access_denied(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        mp = _psutil_mock()
-        AD = type("AD", (Exception,), {})
-        mp.AccessDenied = AD
-        pr = MagicMock()
-        pr.info = {"pid": 2, "name": "python3", "cmdline": ["other"]}
-        pr.environ.side_effect = AD("no")
-        mp.process_iter.return_value = [pr]
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process("e_ad_12345678")
-                is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_legacy(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        mp = _psutil_mock()
-        pr = MagicMock()
-        pr.info = {"pid": 3, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"FLOW_SUBPROCESS_MODE": "true"}
-        mp.process_iter.return_value = [pr]
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process(
-                    "e_leg_12345678"
-                )
-                is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_general_exc(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        mp = _psutil_mock()
-        mp.process_iter.side_effect = RuntimeError("oops")
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process("e_ge_12345678")
-                is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_nosuch_kill(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "nosuch___12345678"
-        mp = _psutil_mock()
-        NSP = type("NSP", (Exception,), {})
-        mp.NoSuchProcess = NSP
-        parent = MagicMock()
-        parent.children.return_value = []
-        parent.kill.side_effect = NSP("gone")
-        pr = MagicMock()
-        pr.info = {"pid": 4, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"KASAL_EXECUTION_ID": eid}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert await ProcessFlowExecutor()._terminate_orphaned_process(eid) is False
-
-    @pytest.mark.asyncio
-    async def test_nosuch_iter(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        mp = _psutil_mock()
-        NSP = type("NSP", (Exception,), {})
-        mp.NoSuchProcess = NSP
-        pr = MagicMock()
-        pr.info.get = MagicMock(side_effect=NSP("gone"))
-        mp.process_iter.return_value = [pr]
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process("e_it_12345678")
-                is False
-            )
-
-    @pytest.mark.asyncio
-    async def test_child_nosuch(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "child_gn_12345678"
-        mp = _psutil_mock()
-        NSP = type("NSP", (Exception,), {})
-        mp.NoSuchProcess = NSP
-        child = MagicMock(pid=11)
-        child.kill.side_effect = NSP("gone")
-        parent = MagicMock()
-        parent.children.return_value = [child]
-        parent.kill = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 5, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"KASAL_EXECUTION_ID": eid}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert (
-                await ProcessFlowExecutor()._terminate_orphaned_process(
-                    eid, graceful=False
-                )
-                is True
-            )
-
-    @pytest.mark.asyncio
-    async def test_short_env(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "short123_full_exec"
-        mp = _psutil_mock()
-        parent = MagicMock()
-        parent.children.return_value = []
-        parent.kill = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 50, "name": "python3", "cmdline": []}
-        pr.environ.return_value = {"KASAL_EXECUTION_ID": "short123"}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert await ProcessFlowExecutor()._terminate_orphaned_process(eid) is True
-
-    @pytest.mark.asyncio
-    async def test_short_cmdline(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        eid = "shortcmd_full_exec"
-        mp = _psutil_mock()
-        parent = MagicMock()
-        parent.children.return_value = []
-        parent.kill = MagicMock()
-        pr = MagicMock()
-        pr.info = {"pid": 51, "name": "python3", "cmdline": ["python", "shortcmd"]}
-        pr.environ.return_value = {}
-        mp.process_iter.return_value = [pr]
-        mp.Process.return_value = parent
-        mp.wait_procs = MagicMock()
-        with patch.dict("sys.modules", {"psutil": mp}):
-            assert await ProcessFlowExecutor()._terminate_orphaned_process(eid) is True
 
 
 class TestProcessLogQueue:

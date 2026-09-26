@@ -37,15 +37,12 @@ Targets uncovered lines:
   1304-1323 terminate_execution process alive
   1328,1330-1360 terminate_execution psutil fallback
   1377-1378 terminate_execution not in tracking
-  1386-1403 _terminate_orphaned_process (found+killed)
-  1408-1409 _terminate_orphaned_process psutil error
   1418-1461 _relay_task_events (event types, broadcasting)
   1482-1483 _process_log_queue (no crew.log)
   1490-1491 _process_log_queue write logs
   1501-1521 _process_log_queue error path
   1541-1542 shutdown with running processes
   1557-1558 shutdown psutil cleanup
-  1567-1574 kill_orphan_crew_processes
   1780   ExecutionMode.should_use_process require_isolation
   1805   ExecutionMode.should_use_process expected_duration
   1838-1843 ExecutionMode.should_use_process experimental
@@ -466,7 +463,10 @@ class TestTerminateExecution:
 
         executor._running_processes["exec-term"] = mock_process
 
-        with patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await executor.terminate_execution("exec-term")
 
         assert result is True
@@ -486,7 +486,10 @@ class TestTerminateExecution:
 
         executor._running_processes["exec-kill"] = mock_process
 
-        with patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await executor.terminate_execution("exec-kill")
 
         assert result is True
@@ -502,7 +505,10 @@ class TestTerminateExecution:
 
         executor._running_processes["exec-dead"] = mock_process
 
-        with patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             result = await executor.terminate_execution("exec-dead")
 
         assert result is True
@@ -512,8 +518,9 @@ class TestTerminateExecution:
         """When execution not in tracking, searches for orphaned process."""
         executor = _make_executor()
 
-        with patch.object(
-            executor, "_terminate_orphaned_process", return_value=True
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=1,
         ) as mock_orphan:
             result = await executor.terminate_execution("exec-not-tracked")
 
@@ -537,7 +544,10 @@ class TestTerminateExecution:
 
         with (
             patch("psutil.Process", return_value=mock_psutil_proc),
-            patch.object(executor, "_terminate_orphaned_process", return_value=False),
+            patch(
+                "src.services.agent_builder.process_executor.terminate_owned_processes",
+                return_value=0,
+            ),
         ):
             result = await executor.terminate_execution("exec-err")
 
@@ -552,81 +562,13 @@ class TestTerminateExecution:
         executor._running_processes["exec-metric"] = mock_process
 
         initial = executor._metrics["terminated_executions"]
-        with patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with patch(
+            "src.services.agent_builder.process_executor.terminate_owned_processes",
+            return_value=0,
+        ):
             await executor.terminate_execution("exec-metric")
 
         assert executor._metrics["terminated_executions"] == initial + 1
-
-
-# ---------------------------------------------------------------------------
-# _terminate_orphaned_process
-# ---------------------------------------------------------------------------
-
-
-class TestTerminateOrphanedProcess:
-
-    def test_no_matching_process_returns_false(self):
-        executor = _make_executor()
-        mock_proc = MagicMock()
-        mock_proc.info = {"pid": 1, "name": "python", "cmdline": ["python", "other.py"]}
-        mock_proc.environ = MagicMock(return_value={})
-
-        with patch("psutil.process_iter", return_value=[mock_proc]):
-            result = executor._terminate_orphaned_process("abc12345-unique-id-no-match")
-
-        assert result is False
-
-    def test_matching_process_by_env_var_is_killed(self):
-        executor = _make_executor()
-        exec_id = "exec-orphan-12345"
-
-        mock_child = MagicMock()
-        mock_parent_proc = MagicMock()
-        mock_parent_proc.children = MagicMock(return_value=[mock_child])
-        mock_parent_proc.kill = MagicMock()
-
-        mock_proc = MagicMock()
-        mock_proc.info = {
-            "pid": 9999,
-            "name": "python",
-            "cmdline": ["python", "run.py"],
-        }
-        mock_proc.environ = MagicMock(return_value={"KASAL_EXECUTION_ID": exec_id})
-
-        with (
-            patch("psutil.process_iter", return_value=[mock_proc]),
-            patch("psutil.Process", return_value=mock_parent_proc),
-            patch("psutil.wait_procs", return_value=([], [])),
-        ):
-            result = executor._terminate_orphaned_process(exec_id)
-
-        assert result is True
-        mock_parent_proc.kill.assert_called_once()
-
-    def test_psutil_import_error_returns_false(self):
-        executor = _make_executor()
-        with patch.dict("sys.modules", {"psutil": None}):
-            import sys
-
-            original = sys.modules.get("psutil")
-            sys.modules["psutil"] = None
-            try:
-                result = executor._terminate_orphaned_process("exec-x")
-            except (ImportError, TypeError):
-                result = False
-            finally:
-                if original is not None:
-                    sys.modules["psutil"] = original
-                elif "psutil" in sys.modules:
-                    del sys.modules["psutil"]
-        # Either False or we just verify it handled the error
-        assert isinstance(result, bool)
-
-    def test_generic_exception_returns_false(self):
-        executor = _make_executor()
-        with patch("psutil.process_iter", side_effect=RuntimeError("psutil failed")):
-            result = executor._terminate_orphaned_process("exec-broken")
-        assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -714,71 +656,6 @@ class TestShutdown:
         executor = _make_executor()
         with patch("psutil.Process", side_effect=Exception("psutil error")):
             executor.shutdown()  # Should not raise
-
-
-# ---------------------------------------------------------------------------
-# kill_orphan_crew_processes (static method)
-# ---------------------------------------------------------------------------
-
-
-class TestKillOrphanCrewProcesses:
-
-    def test_no_orphaned_processes_returns_0(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        # No matching processes
-        mock_proc = MagicMock()
-        mock_proc.info = {
-            "pid": 1,
-            "name": "chrome",
-            "cmdline": [],
-            "ppid": 1000,
-            "create_time": 0,
-        }
-        mock_proc.create_time = MagicMock(return_value=0)
-
-        with patch("psutil.process_iter", return_value=[]):
-            result = ProcessCrewExecutor.kill_orphan_crew_processes()
-
-        assert result == 0
-
-    def test_orphaned_python_process_with_crew_keyword_is_killed(self):
-        import time
-
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        mock_proc = MagicMock()
-        # Old orphaned process
-        old_time = time.time() - 300  # 5 minutes ago
-        mock_proc.info = {
-            "pid": 5555,
-            "name": "python",
-            "cmdline": ["python", "run_crew_in_process", "--flag"],
-            "ppid": 1,
-            "create_time": old_time,
-        }
-        mock_proc.create_time = MagicMock(return_value=old_time)
-        mock_proc.terminate = MagicMock()
-        mock_proc.wait = MagicMock()
-
-        with patch("psutil.process_iter", return_value=[mock_proc]):
-            result = ProcessCrewExecutor.kill_orphan_crew_processes()
-
-        assert result >= 0  # May be 1 or 0 depending on orphan detection
-
-    def test_psutil_import_error_returns_0(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        with patch("psutil.process_iter", side_effect=ImportError("no psutil")):
-            result = ProcessCrewExecutor.kill_orphan_crew_processes()
-        assert result == 0
-
-    def test_exception_returns_0(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        with patch("psutil.process_iter", side_effect=RuntimeError("bad")):
-            result = ProcessCrewExecutor.kill_orphan_crew_processes()
-        assert result == 0
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 Service for deploying crews to Databricks Model Serving.
 """
 
+import asyncio
 import json
 import logging
 import shutil
@@ -135,8 +136,20 @@ class CrewDeploymentService:
     async def _create_mlflow_model(
         self, crew_data: Dict[str, Any], config: ModelServingConfig
     ) -> tuple[str, str]:
+        """Create and log the MLflow model, off the event loop.
+
+        MLflow logging and registry polling are synchronous network calls
+        that take tens of seconds; run on the loop they froze every request.
         """
-        Create and log MLflow model
+        return await asyncio.to_thread(
+            self._create_mlflow_model_blocking, crew_data, config
+        )
+
+    def _create_mlflow_model_blocking(
+        self, crew_data: Dict[str, Any], config: ModelServingConfig
+    ) -> tuple[str, str]:
+        """
+        Create and log MLflow model (blocking; call via _create_mlflow_model)
 
         Args:
             crew_data: Crew configuration data
@@ -240,8 +253,20 @@ class CrewDeploymentService:
     async def _deploy_to_endpoint(
         self, model_name: str, model_version: str, config: ModelServingConfig
     ) -> tuple[str, DeploymentStatus]:
+        """Deploy to a Model Serving endpoint, off the event loop.
+
+        The Databricks SDK client is synchronous.
         """
-        Deploy model to Model Serving endpoint
+        return await asyncio.to_thread(
+            self._deploy_to_endpoint_blocking, model_name, model_version, config
+        )
+
+    def _deploy_to_endpoint_blocking(
+        self, model_name: str, model_version: str, config: ModelServingConfig
+    ) -> tuple[str, DeploymentStatus]:
+        """
+        Deploy model to Model Serving endpoint (blocking; call via
+        _deploy_to_endpoint)
 
         Args:
             model_name: Name of registered model
