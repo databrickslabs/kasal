@@ -54,15 +54,15 @@ from .response_parsing import (
     answer_from_reasoning,
     builtin_tool_outputs,
     chat_token_usage,
-    merge_tool_call_metadata,
-    tool_call_metadata,
 )
 from .response_parsing import function_calls as parse_function_calls
 from .response_parsing import (
+    merge_tool_call_metadata,
     reasoning_items,
     responses_reasoning_text,
     responses_token_usage,
     split_message_content,
+    tool_call_metadata,
 )
 from .rpm import throttle
 from .tool_rounds import (
@@ -176,6 +176,22 @@ def valid_thinking_efforts(model_name: str | None) -> tuple[str, ...]:
     for most of them, which is why this delegates to the registry.
     """
     return allowed_efforts(model_name)
+
+
+def _without_cache_breakpoints(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove CrewAI's internal cache hint without mutating its conversation.
+
+    OpenAI-compatible endpoints reject this top-level field. Preserve all
+    other fields, including Responses reasoning/tool items and content blocks.
+    """
+    return [
+        (
+            {key: value for key, value in message.items() if key != "cache_breakpoint"}
+            if isinstance(message, dict) and "cache_breakpoint" in message
+            else message
+        )
+        for message in messages
+    ]
 
 
 class OpenAICompletion(ContextWindowBudget, BaseLLM):
@@ -517,7 +533,10 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         # skip_file_processing: crewAI 1.14.5 signature compatibility — kasal's
         # LLM subclasses pass it through; the engine has no file-input
         # processing path, so it is accepted and inert.
-        params: dict[str, Any] = {"model": self.model, "messages": messages}
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": _without_cache_breakpoints(messages),
+        }
         # The escape hatch goes in FIRST so the declared fields below override
         # it. A typed, validated field must not be silently displaced by a loose
         # dict — and it is the order CrewAI's native provider uses
@@ -1057,7 +1076,10 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         tools: list[dict[str, Any]] | None = None,
         response_model: type[BaseModel] | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"model": self.model, "input": messages}
+        params: dict[str, Any] = {
+            "model": self.model,
+            "input": _without_cache_breakpoints(messages),
+        }
         # First, for the same reason as the chat path: declared fields win.
         params.update(self.additional_params)
         if self.instructions is not None:
