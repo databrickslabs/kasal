@@ -82,41 +82,6 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def get_api_key_value(self, key_name: str) -> Optional[str]:
-        """
-        Get the decrypted value of an API key by name.
-
-        Args:
-            key_name: Name of the API key
-
-        Returns:
-            Decrypted API key value if found, None otherwise
-        """
-        api_key = await self.find_by_name(key_name)
-        if not api_key:
-            return None
-
-        # Decrypt the API key value
-        try:
-            from src.utils.encryption_utils import EncryptionUtils
-
-            return EncryptionUtils.decrypt_value(api_key.encrypted_value)
-        except Exception:
-            return None
-
-    async def get_provider_api_key(self, provider: str) -> Optional[str]:
-        """
-        Get API key for a specific provider.
-
-        Args:
-            provider: Provider name (e.g., 'openai', 'databricks')
-
-        Returns:
-            Decrypted API key value if found, None otherwise
-        """
-        key_name = f"{provider.upper()}_API_KEY"
-        return await self.get_api_key_value(key_name)
-
     async def delete(self, id: int) -> bool:
         """
         Override delete method to ensure proper deletion of API keys.
