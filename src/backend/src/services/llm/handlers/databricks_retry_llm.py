@@ -11,11 +11,23 @@ rather than a simple string, which requires special handling for CrewAI integrat
 import asyncio
 import concurrent.futures
 import time as _time_mod
-from typing import Any, ClassVar, Dict, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    ClassVar,
+    Coroutine,
+    Dict,
+    List,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import litellm
 
-from src.core.llm.transport import LLM, LLMContextLengthExceededError
+from src.core.llm.transport import LLM, LLMContextLengthExceededError, OpenAICompletion
 
 # Use centralized logger
 from src.core.logger import get_logger
@@ -23,8 +35,13 @@ from src.core.logger import get_logger
 # Configure logger using centralized configuration
 logger = get_logger(__name__)
 
+if TYPE_CHECKING:
+    from src.services.llm.handlers.model_fallback import ModelCandidate
 
-def _get_retry_tracer():
+_T = TypeVar("_T")
+
+
+def _get_retry_tracer() -> Any:
     """Lazily obtain an OTel tracer for LLM retry instrumentation.
 
     Returns ``None`` when OpenTelemetry is not installed or no global
@@ -70,14 +87,14 @@ _PLACEHOLDER_NUDGE = (
 )
 
 
-def _is_placeholder_response(response) -> bool:
+def _is_placeholder_response(response: Any) -> bool:
     """True when the model's text answer is only the tool-call placeholder."""
     if not isinstance(response, str):
         return False
     return response.strip().rstrip(".").strip().lower() == "calling tools"
 
 
-def _append_placeholder_nudge(messages) -> None:
+def _append_placeholder_nudge(messages: Any) -> None:
     """Append the corrective nudge (once) so the retry breaks the mimicry."""
     if not isinstance(messages, list):
         return
@@ -92,7 +109,7 @@ def _append_placeholder_nudge(messages) -> None:
 _NO_FALLBACK = object()
 
 
-async def _with_lakebase_release(coro):
+async def _with_lakebase_release(coro: Awaitable[_T]) -> _T:
     """Await ``coro``, then return any thread-local Lakebase connection to its
     pool BEFORE the surrounding ``asyncio.run`` tears down this throwaway loop.
 
@@ -114,7 +131,7 @@ async def _with_lakebase_release(coro):
             pass
 
 
-def _run_coro_sync(coro):
+def _run_coro_sync(coro: Coroutine[Any, Any, _T]) -> _T:
     """Run an async coroutine to completion from a synchronous context.
 
     DatabricksRetryLLM.call() runs in a CrewAI worker thread (no running event
@@ -175,7 +192,7 @@ class DatabricksRetryLLM(LLM):
     # tools + structured output coexist. For deterministic structured output WITH
     # tools on Databricks, use a Responses-API (codex) model.
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize the Databricks Retry LLM wrapper."""
         # Set default timeout if not provided to prevent hanging requests
         if "timeout" not in kwargs:
@@ -230,10 +247,12 @@ class DatabricksRetryLLM(LLM):
         # Candidates are loaded lazily on first need (keeps the happy path free
         # of an extra DB query). _active_fallback, once set, short-circuits all
         # later calls so we don't re-fail on the original model every turn.
-        self._fallback_candidates = None  # lazy: None=unloaded, []=none available
+        self._fallback_candidates: Optional[List[ModelCandidate]] = (
+            None  # lazy: None=unloaded, []=none available
+        )
         self._tried_models = {self._current_model_key()}
-        self._fallback_llm_cache: Dict[str, Any] = {}
-        self._active_fallback = None
+        self._fallback_llm_cache: Dict[str, OpenAICompletion] = {}
+        self._active_fallback: Optional[OpenAICompletion] = None
 
         logger.info(
             f"Initialized DatabricksRetryLLM wrapper for model: {self._original_model_name} (timeout: {timeout_val}s, litellm.request_timeout: {litellm.request_timeout}s)"
@@ -247,7 +266,7 @@ class DatabricksRetryLLM(LLM):
 
     # ---- model fallback -------------------------------------------------
 
-    def _ensure_fallback_candidates(self):
+    def _ensure_fallback_candidates(self) -> List["ModelCandidate"]:
         """Lazily load the enabled-model candidate list (once)."""
         if self._fallback_candidates is None:
             try:
@@ -265,7 +284,9 @@ class DatabricksRetryLLM(LLM):
                 self._fallback_candidates = []
         return self._fallback_candidates
 
-    def _select_fallback(self, candidates, reason):
+    def _select_fallback(
+        self, candidates: List["ModelCandidate"], reason: str
+    ) -> Optional["ModelCandidate"]:
         """Choose the next model for ``reason`` given what's already been tried."""
         from src.services.llm.handlers.model_fallback import select_fallback
 
@@ -286,7 +307,9 @@ class DatabricksRetryLLM(LLM):
             current_model=self._current_model_key(),
         )
 
-    def _emit_fallback_span(self, reason, candidate, method):
+    def _emit_fallback_span(
+        self, reason: str, candidate: "ModelCandidate", method: str
+    ) -> None:
         """Surface the model switch in the trace (mirrors _emit_retry_span)."""
         try:
             self._emit_retry_span(
@@ -301,7 +324,9 @@ class DatabricksRetryLLM(LLM):
         except Exception:
             pass
 
-    def _build_fallback_llm(self, candidate):
+    def _build_fallback_llm(
+        self, candidate: "ModelCandidate"
+    ) -> Optional[OpenAICompletion]:
         """Build (and cache) a fully-configured LLM for ``candidate`` via the
         normal config path, so it reuses the correct per-model params/auth.
         Returns None if it can't be built (e.g. no group_id)."""
@@ -327,7 +352,9 @@ class DatabricksRetryLLM(LLM):
             )
             return None
 
-    async def _abuild_fallback_llm(self, candidate):
+    async def _abuild_fallback_llm(
+        self, candidate: "ModelCandidate"
+    ) -> Optional[OpenAICompletion]:
         """Async variant of _build_fallback_llm (no event-loop juggling)."""
         if candidate.name in self._fallback_llm_cache:
             return self._fallback_llm_cache[candidate.name]
@@ -347,7 +374,7 @@ class DatabricksRetryLLM(LLM):
             return None
 
     @staticmethod
-    def _disable_nested_fallback(llm):
+    def _disable_nested_fallback(llm: Any) -> None:
         """Stop a fallback LLM from spawning its own fallbacks — the original
         wrapper owns the chain and tracks what's been tried."""
         try:
@@ -376,7 +403,7 @@ class DatabricksRetryLLM(LLM):
             return False
         return super().supports_stop_words()
 
-    def _get_crew_logger(self):
+    def _get_crew_logger(self) -> Any:
         """Get the crew logger for subprocess-compatible logging."""
         try:
             from src.core.logger import LoggerManager
@@ -580,10 +607,11 @@ class DatabricksRetryLLM(LLM):
             Backoff time in seconds
         """
         if is_rate_limit:
-            backoff = self.RATE_LIMIT_INITIAL_BACKOFF * (2**attempt)
+            backoff: float = self.RATE_LIMIT_INITIAL_BACKOFF * (2**attempt)
             return min(backoff, self.RATE_LIMIT_MAX_BACKOFF)
         else:
-            return self.INITIAL_BACKOFF * (2**attempt)
+            backoff = self.INITIAL_BACKOFF * (2**attempt)  # int**int is Any
+            return backoff
 
     def _get_max_retries(self, is_rate_limit: bool) -> int:
         """Get max retries based on error type.
@@ -679,7 +707,7 @@ class DatabricksRetryLLM(LLM):
             pass  # tracing must never break the hot path
 
     @staticmethod
-    def _sanitize_messages_for_databricks(messages):
+    def _sanitize_messages_for_databricks(messages: Any) -> Any:
         """Fix messages that would be rejected by Databricks API.
 
         Databricks (Claude-based endpoints) rejects:
@@ -740,7 +768,7 @@ class DatabricksRetryLLM(LLM):
 
         return messages
 
-    def _fix_message_format_for_llama(self, messages, crew_log):
+    def _fix_message_format_for_llama(self, messages: Any, crew_log: Any) -> Any:
         """
         Fix message format for Llama models only.
 
@@ -773,7 +801,9 @@ class DatabricksRetryLLM(LLM):
 
         return messages
 
-    def _maybe_model_fallback(self, exc, method, call_kwargs):
+    def _maybe_model_fallback(
+        self, exc: BaseException, method: str, call_kwargs: Dict[str, Any]
+    ) -> Any:
         """On a model-swappable failure, switch to another enabled model and
         return its result; otherwise return the _NO_FALLBACK sentinel so the
         caller preserves its existing error handling. Synchronous path.
@@ -833,7 +863,9 @@ class DatabricksRetryLLM(LLM):
                 continue
         return _NO_FALLBACK
 
-    async def _amaybe_model_fallback(self, exc, method, call_kwargs):
+    async def _amaybe_model_fallback(
+        self, exc: BaseException, method: str, call_kwargs: Dict[str, Any]
+    ) -> Any:
         """Async variant of _maybe_model_fallback (cascades on swappable failures)."""
         from src.services.llm.handlers.model_fallback import classify_llm_error
 
@@ -878,7 +910,7 @@ class DatabricksRetryLLM(LLM):
                 continue
         return _NO_FALLBACK
 
-    def _coerce_to_response_model(self, result, kwargs):
+    def _coerce_to_response_model(self, result: Any, kwargs: Dict[str, Any]) -> Any:
         """Parse a JSON-string result into ``response_model``.
 
         The parsing itself lives in ``BaseLLM._validate_structured_output`` — the
@@ -894,14 +926,14 @@ class DatabricksRetryLLM(LLM):
 
     def call(
         self,
-        messages,
-        tools=None,
-        callbacks=None,
-        available_functions=None,
-        from_task=None,
-        from_agent=None,
-        **kwargs,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
-    ):
+        messages: Union[str, List[Dict[str, Any]]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        callbacks: Optional[List[Any]] = None,
+        available_functions: Optional[Dict[str, Callable[..., Any]]] = None,
+        from_task: Any = None,
+        from_agent: Any = None,
+        **kwargs: Any,  # Accept additional kwargs for CrewAI 1.9.x compatibility (e.g., response_model)
+    ) -> Any:
         """
         Override the call method to add retry logic for empty responses.
 
@@ -1130,14 +1162,14 @@ class DatabricksRetryLLM(LLM):
 
     async def acall(
         self,
-        messages,
-        tools=None,
-        callbacks=None,
-        available_functions=None,
-        from_task=None,
-        from_agent=None,
-        **kwargs,  # e.g. response_model (CrewAI structured outputs)
-    ):
+        messages: Union[str, List[Dict[str, Any]]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        callbacks: Optional[List[Any]] = None,
+        available_functions: Optional[Dict[str, Callable[..., Any]]] = None,
+        from_task: Any = None,
+        from_agent: Any = None,
+        **kwargs: Any,  # e.g. response_model (CrewAI structured outputs)
+    ) -> Any:
         """Async counterpart of call() with model fallback.
 
         The base LLM.acall (used by CrewAI's context-window summarization,
@@ -1208,7 +1240,7 @@ class DatabricksRetryLLM(LLM):
 # (see src.core.llm.transport.completion.OpenAICompletion._call_completions_api).
 
 
-def _resolve_schema_refs(schema):
+def _resolve_schema_refs(schema: Any) -> Any:
     """Recursively resolve ``$ref`` references in a JSON Schema and remove ``$defs``.
 
     Gemini models served via Databricks reject tool parameter schemas that
@@ -1221,7 +1253,7 @@ def _resolve_schema_refs(schema):
 
     defs = schema.get("$defs") or schema.get("definitions") or {}
 
-    def _resolve(node):
+    def _resolve(node: Any) -> Any:
         if isinstance(node, dict):
             if "$ref" in node:
                 ref_path = node["$ref"]  # e.g. "#/$defs/Foo"
@@ -1252,7 +1284,7 @@ def _is_gemini_model(model: str) -> bool:
     return "gemini" in model.lower()
 
 
-def _merge_system_messages_for_gemini(messages, model):
+def _merge_system_messages_for_gemini(messages: Any, model: str) -> Any:
     """Merge multiple system messages into one for Gemini models.
 
     Gemini models on Databricks reject conversations with more than one
@@ -1293,7 +1325,7 @@ def _merge_system_messages_for_gemini(messages, model):
     return messages
 
 
-def _strip_tool_strict(tools) -> None:
+def _strip_tool_strict(tools: Any) -> None:
     """Remove ``strict`` from tool function schemas.
 
     CrewAI's tool converter (``crewai.utilities.agent_utils``) stamps
@@ -1317,7 +1349,7 @@ def _strip_tool_strict(tools) -> None:
         tool.pop("strict", None)
 
 
-def _sanitize_tools_for_gemini(tools, model):
+def _sanitize_tools_for_gemini(tools: Any, model: str) -> None:
     """Remove ``$defs``/``$ref`` from tool function schemas for Gemini models.
 
     Modifies the tools list **in-place** when the model is Gemini.

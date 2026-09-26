@@ -7,7 +7,7 @@ actual model rebuild + delegation lives in ``DatabricksRetryLLM``.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Set
+from typing import Any, Iterable, List, Optional, Set
 
 # Fallback reasons — a model swap can plausibly help for these.
 CONTEXT_WINDOW = "context_window"  # prompt exceeded the model's context window
@@ -67,7 +67,9 @@ def mark_endpoint_missing(model_name: Optional[str]) -> None:
 
 def is_endpoint_missing(model_name: Optional[str]) -> bool:
     """True if this model was previously seen to have no serving endpoint here."""
-    return bool(model_name) and model_name.split("/")[-1] in _KNOWN_MISSING_ENDPOINTS
+    if not model_name:
+        return False
+    return model_name.split("/")[-1] in _KNOWN_MISSING_ENDPOINTS
 
 
 def reset_known_missing_endpoints() -> None:
@@ -83,12 +85,12 @@ class ModelCandidate:
     context_window: int = 0
 
 
-def _iter_exc(exc) -> List[BaseException]:
+def _iter_exc(exc: Optional[BaseException]) -> List[BaseException]:
     """All exceptions in the tree: the exc, ExceptionGroup sub-exceptions, and
     __cause__ chain (litellm/anyio wrap the real error several layers deep)."""
     seen_ids: Set[int] = set()
     out: List[BaseException] = []
-    stack = [exc]
+    stack: List[Optional[BaseException]] = [exc]
     while stack:
         e = stack.pop()
         if e is None or id(e) in seen_ids:
@@ -103,7 +105,7 @@ def _iter_exc(exc) -> List[BaseException]:
     return out
 
 
-def _status_code(exc) -> Optional[int]:
+def _status_code(exc: Optional[BaseException]) -> Optional[int]:
     """The HTTP status buried anywhere in the exception tree, if any."""
     for e in _iter_exc(exc):
         for attr in ("status_code", "status"):
@@ -116,7 +118,7 @@ def _status_code(exc) -> Optional[int]:
     return None
 
 
-def _text(exc) -> str:
+def _text(exc: Optional[BaseException]) -> str:
     """Lowercased class names + messages across the whole exception tree."""
     parts: List[str] = []
     for e in _iter_exc(exc):
@@ -128,7 +130,7 @@ def _text(exc) -> str:
     return " ".join(parts).lower()
 
 
-def classify_llm_error(exc) -> Optional[str]:
+def classify_llm_error(exc: Optional[BaseException]) -> Optional[str]:
     """Classify an LLM exception into a fallback reason, or None when a model
     swap won't help (auth, user-stop, transient, malformed input, unknown).
 
@@ -171,7 +173,7 @@ def classify_llm_error(exc) -> Optional[str]:
     return None
 
 
-def _model_family(name) -> str:
+def _model_family(name: Optional[str]) -> str:
     """A coarse model-family token from a model key, used to avoid bouncing
     between models that share a family-wide incompatibility (e.g. all gemini-*
     reject multi-turn tool calls the same way). Drops a leading provider
@@ -235,7 +237,9 @@ def select_fallback(
     return max(avail, key=lambda c: c.context_window)
 
 
-def candidates_from_model_configs(models, current_model_key) -> List[ModelCandidate]:
+def candidates_from_model_configs(
+    models: Optional[Iterable[Any]], current_model_key: Optional[str]
+) -> List[ModelCandidate]:
     """Filter enabled model-config rows into fallback ModelCandidates.
 
     Keeps Databricks-served, non-codex models (those can be rebuilt and swapped

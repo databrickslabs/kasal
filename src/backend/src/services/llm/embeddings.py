@@ -12,7 +12,7 @@ Five knowledge/RAG services use them, all through ``LLMManager.get_embedding`` /
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, overload
 
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
@@ -29,6 +29,14 @@ embedding_logger = LoggerManager.get_instance().documentation_embedding
 _embedding_failures: Dict[str, Dict[str, float]] = {}
 _EMBEDDING_FAILURE_THRESHOLD = 3
 _CIRCUIT_RESET_SECONDS = 300
+
+
+@overload
+def _get_group_id_from_context(required: Literal[True] = ...) -> str: ...
+
+
+@overload
+def _get_group_id_from_context(required: bool) -> Optional[str]: ...
 
 
 def _get_group_id_from_context(required: bool = True) -> Optional[str]:
@@ -115,7 +123,7 @@ async def get_embeddings(
         async with shared_client_session() as session:
             for start in range(0, len(texts), batch_size):
                 batch = texts[start : start + batch_size]
-                payload = {"input": batch}
+                payload: Dict[str, Any] = {"input": batch}
                 if body_model:
                     payload["model"] = body_model
                 try:
@@ -218,7 +226,6 @@ async def get_embedding(
             f"Creating embedding using provider: {provider}, model: {embedding_model}"
         )
 
-        # Handle different embedding providers
         if provider == "databricks" or "databricks" in embedding_model:
             # Use unified Databricks authentication for embeddings
             try:
@@ -302,7 +309,9 @@ async def get_embedding(
                         "Content-Type": "application/json",
                     }
 
-                payload = {"input": [text] if isinstance(text, str) else text}
+                payload: Dict[str, Any] = {
+                    "input": [text] if isinstance(text, str) else text
+                }
                 if body_model:
                     payload["model"] = body_model
 
@@ -322,7 +331,7 @@ async def get_embedding(
                             result = await response.json()
                             # Databricks embedding API returns embeddings in 'data' field
                             if "data" in result and len(result["data"]) > 0:
-                                embedding = result["data"][0].get(
+                                embedding: List[float] = result["data"][0].get(
                                     "embedding", result["data"][0]
                                 )
                                 embedding_logger.info(
@@ -505,7 +514,7 @@ async def get_embedding(
                         return None
                     result = await resp.json()
                     embedding_data = result.get("embedding", {})
-                    values = embedding_data.get("values", [])
+                    values: List[float] = embedding_data.get("values", [])
                     if values:
                         embedding_logger.info(
                             f"Successfully created embedding with {len(values)} dimensions using Google"
@@ -580,7 +589,6 @@ async def get_embedding(
         _embedding_failures[provider]["count"] += 1
         _embedding_failures[provider]["last_failure"] = time.time()
 
-        # Log circuit breaker status
         failure_count = _embedding_failures[provider]["count"]
         if failure_count >= _EMBEDDING_FAILURE_THRESHOLD:
             embedding_logger.error(
