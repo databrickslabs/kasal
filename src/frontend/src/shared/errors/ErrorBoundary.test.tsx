@@ -82,17 +82,53 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('content')).toBeInTheDocument();
   });
 
-  it('renders as a dialog for lazily loaded dialogs, and can be closed', async () => {
+  it('renders as a dialog for lazily loaded dialogs, and Close really closes it', async () => {
     shouldThrow = CHUNK_ERROR;
-    render(<ErrorBoundary variant="dialog"><Bomb /></ErrorBoundary>);
+    const onDismiss = vi.fn();
+    render(<ErrorBoundary variant="dialog" onDismiss={onDismiss}><Bomb /></ErrorBoundary>);
 
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('Kasal has been updated');
     fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
     expect(reload).toHaveBeenCalledTimes(1);
 
-    shouldThrow = null;
+    // The child still throws: a lazy chunk caches its rejection, so the error
+    // does not go away by itself. Close must not re-render into it.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('content')).not.toBeInTheDocument();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a failed React.lazy dialog even though lazy caches the rejection', async () => {
+    const Broken = lazy(() => Promise.reject(CHUNK_ERROR));
+    render(
+      <ErrorBoundary variant="dialog">
+        <Suspense fallback={null}>
+          <Broken />
+        </Suspense>
+      </ErrorBoundary>,
+    );
+
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    // Before the fix Close reset the boundary, the cached rejection threw
+    // again and the same dialog came straight back.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('renders the children again when a reset key changes after a dismiss', async () => {
+    shouldThrow = CHUNK_ERROR;
+    const { rerender } = render(
+      <ErrorBoundary variant="dialog" resetKeys={[1]}><Bomb /></ErrorBoundary>,
+    );
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    shouldThrow = null;
+    rerender(<ErrorBoundary variant="dialog" resetKeys={[2]}><Bomb /></ErrorBoundary>);
     expect(screen.getByText('content')).toBeInTheDocument();
   });
 

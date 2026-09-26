@@ -564,7 +564,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
           </Box>}
 
           {selectedRunId && (
-            <LazyDialogBoundary>
+            <LazyDialogBoundary open={showTraceOpen} onClose={handleCloseTrace}>
               <LazyShowTraceTimeline
                 open={showTraceOpen}
                 onClose={handleCloseTrace}
@@ -578,7 +578,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
 
 
           {showLogsDialog && selectedJobId && (
-            <LazyDialogBoundary>
+            <LazyDialogBoundary open={showLogsDialog} onClose={handleCloseLogs}>
               <LazyShowLogs
                 open={showLogsDialog}
                 onClose={handleCloseLogs}
@@ -613,7 +613,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
             onCronExpressionChange={(e) => setCronExpression(e.target.value)}
           />
 
-          <MountWhenOpened open={isOpen && !!selectedRun}>
+          <MountWhenOpened open={isOpen && !!selectedRun} onClose={closeRunResult}>
             <LazyShowResult
               open={isOpen && !!selectedRun}
               onClose={closeRunResult}
@@ -622,7 +622,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
             />
           </MountWhenOpened>
 
-          <MountWhenOpened open={recipesDialogOpen}>
+          <MountWhenOpened open={recipesDialogOpen} onClose={() => setRecipesDialogOpen(false)}>
             <LazyRecipeEffectivenessDialog
               open={recipesDialogOpen}
               onClose={() => setRecipesDialogOpen(false)}
