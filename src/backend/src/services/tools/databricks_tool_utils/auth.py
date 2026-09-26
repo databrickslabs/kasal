@@ -17,13 +17,19 @@ from typing import TYPE_CHECKING, Optional
 from src.services.databricks.workspace.host_guard import (
     assert_credentialed_host,
     assert_host_is_configured_workspace,
+    assert_mcp_credential_host,
 )
 from src.services.tools.async_bridge import run_async_with_context
 
 if TYPE_CHECKING:
     from src.utils.databricks_auth import AuthContext
 
-__all__ = ["apply_host_override", "resolve_tool_auth", "assert_tool_host"]
+__all__ = [
+    "apply_host_override",
+    "resolve_tool_auth",
+    "assert_tool_host",
+    "assert_mcp_server_host",
+]
 
 _SUBJECT = "Tool databricks_host"
 
@@ -62,3 +68,12 @@ def resolve_tool_auth(
 async def assert_tool_host(host: Optional[str]) -> str:
     """Refuse a tool-configured host unless the credentials belong to it."""
     return await assert_credentialed_host(host, subject=_SUBJECT)
+
+
+def assert_mcp_server_host(auth: "AuthContext", server_url: Optional[str]) -> str:
+    """Refuse ``server_url`` unless ``auth``'s credential may be sent there.
+
+    The MCP server URL is tenant-configured. Only the credential's own
+    workspace, or a Databricks App of that workspace, may receive it (V3-2).
+    """
+    return assert_mcp_credential_host(server_url, auth.workspace_url)

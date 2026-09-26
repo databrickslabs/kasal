@@ -12,6 +12,8 @@ Authentication is set per server with `auth_type`:
 - `api_key`: a bearer token you supply (stored encrypted)
 - `databricks_spn`: Databricks service-principal credentials, used for managed Databricks servers
 
+Kasal sends Databricks credentials (the user's OBO token, the workspace's PAT or the app's service-principal token) only to the workspace the credential belongs to, or to a Databricks App of that workspace (`https://<app>-<workspace-id>.<region>.databricksapps.com`, checked against `DATABRICKS_WORKSPACE_ID`). A server on any other host, including another Databricks workspace or another workspace's app, gets no Databricks credential: the run skips it with a warning and the connection test fails. Use `api_key` for those servers.
+
 ## Databricks managed servers
 
 Teamspace admins can browse and register Databricks-hosted MCP servers from the chat picker. The catalog is served by `GET /mcp/databricks/available` and is admin-only. Each managed server is registered as a Kasal MCP server with `auth_type=databricks_spn` and `server_type=streamable`.

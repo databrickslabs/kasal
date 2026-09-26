@@ -509,8 +509,11 @@ class MCPIntegration:
 
             if is_databricks_mcp or auth_type in ("databricks_spn", "databricks_obo"):
                 # Databricks MCP proxy endpoints require Databricks auth (OBO → PAT → SPN)
+                from src.core.exceptions import ForbiddenError
+                from src.services.tools.databricks_tool_utils import (
+                    assert_mcp_server_host,
+                )
                 from src.utils.databricks_auth import get_auth_context
-                from src.utils.url_security import is_trusted_databricks_host
 
                 # Reject insecure legacy configurations before resolving credentials.
                 if urlparse(server_url).scheme.lower() != "https":
@@ -526,23 +529,24 @@ class MCPIntegration:
                     user_token=user_token, group_id=group_id
                 )
                 if auth_context and auth_context.token:
-                    # SECURITY (SSRF / confused deputy): only ever forward a
-                    # Databricks credential to a verified Databricks host. The
-                    # server_url is tenant-controlled, so without this check a
-                    # registered URL pointing at an attacker host would receive
-                    # the OBO/PAT/SPN token and could replay it against the
-                    # workspace.
-                    workspace_host = getattr(auth_context, "workspace_url", None)
-                    if not is_trusted_databricks_host(server_url, workspace_host):
+                    # SECURITY (SSRF / confused deputy): the server_url is
+                    # tenant-configured. A Databricks credential goes only to the
+                    # workspace it was issued for, or to a Databricks App of that
+                    # workspace — not to any *.databricks.com / *.databricksapps.com
+                    # host, which includes workspaces and apps an attacker owns
+                    # (audit V3-2).
+                    try:
+                        assert_mcp_server_host(auth_context, server_url)
+                    except ForbiddenError:
                         mcp_err = MCPConnectionError(
                             server_name=server_name,
                             server_url=server_url,
                             detail=(
                                 f"MCP server '{server_name}': refusing to send Databricks "
-                                f"credentials to non-Databricks host '{server_url}'. "
-                                f"Databricks authentication is only permitted for the "
-                                f"configured workspace host or *.databricks.com endpoints. "
-                                f"Use api_key authentication for third-party MCP servers."
+                                f"credentials to '{server_url}'. Databricks authentication "
+                                f"is only permitted for this workspace's own host or its "
+                                f"Databricks Apps. Use api_key authentication for any "
+                                f"other MCP server."
                             ),
                         )
                         logger.error(mcp_err.detail)

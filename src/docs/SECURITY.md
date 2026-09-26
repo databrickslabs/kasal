@@ -76,6 +76,8 @@ Every other source of a host is untrusted and checked against the credentialed h
 - **The `?host=` override** on the listing endpoints, which must name the same host.
 - **A tool's `databricks_host`.** LLM-facing tool arguments and tool configurations can name a host, so every override goes through `src/backend/src/services/tools/databricks_tool_utils/` (`resolve_tool_auth`, `apply_host_override`, `assert_tool_host`). An override may only re-spell the credentialed host; any other host fails the tool's authentication. The Genie space generator, dashboard creator, Power BI visual-to-UCMV mapper, UCMV Genie config generator, metric view deployer and Databricks Jobs tools, and the metric view Unity Catalog query helper, all use it.
 
+- **An MCP server URL.** Workspace admins register MCP servers, so a server using Databricks authentication receives the credential only when its host is the credentialed host or a Databricks App of the same workspace (the app hostname carries the workspace ID). This applies to runs (`services/tools/mcp_integration.py`) and to the connection test. Any other host needs `api_key` authentication.
+
 Hosts compare as normalised hostnames: scheme, case, trailing slash, path and the default port do not matter, a different host or port does, and a non-`https` scheme is refused outright.
 
 ## Teamspace isolation
