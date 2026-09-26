@@ -1,6 +1,7 @@
 """Workspace opt-in; credentials belong to the existing API key service."""
 
 import logging
+from typing import cast
 
 from sqlalchemy.exc import IntegrityError
 
@@ -71,7 +72,7 @@ class DecisionSettingsService:
         if not key or not key.encrypted_value:
             return None
         try:
-            return EncryptionUtils.decrypt_value(key.encrypted_value)
+            return EncryptionUtils.decrypt_value(cast(str, key.encrypted_value))
         except Exception as exc:
             # Never log the value or the ciphertext.
             logger.warning(
