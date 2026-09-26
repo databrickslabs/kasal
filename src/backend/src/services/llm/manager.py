@@ -663,8 +663,12 @@ class LLMManager:
         ):
             llm.max_tokens = 4000
         if extra_headers:
-            # Pass extra_headers to the underlying litellm call via LLM extra_headers param
-            llm.extra_headers = extra_headers
+            # Request options live in additional_params: an attribute set after
+            # construction is stored on the object and never sent.
+            llm.additional_params["extra_headers"] = {
+                **(llm.additional_params.get("extra_headers") or {}),
+                **extra_headers,
+            }
 
         # Emit an MLflow LLM span for this call so the model + messages +
         # response show up in the active trace (generation/dispatcher root, or a
