@@ -85,8 +85,14 @@ access token for Databricks calls, but it does **not** establish identity.
 | --- | --- |
 | No trusted identity header | `401` |
 | An identity that maps to no workspace (for example a name without `@`) | `401` |
-| `group_id` is not one of your workspaces, or cannot be resolved | `403` |
+| `group_id` is not one of your workspaces, or cannot be resolved | `403`, with fixed detail text (below) |
 | The workspace resolver fails unexpectedly | `503` (retry) |
+
+A `403` from this check never echoes the requested group or the resolver's
+reason. Its `detail` is one of two fixed strings: `Access denied: no access to
+group` when `group_id` is not one of your workspaces (the frontend matches this
+phrase to drop a stale saved workspace), or `Access denied: workspace could not
+be resolved` for any other refusal. The reason is logged server-side.
 
 Only public routes such as the health checks skip this dependency.
 
@@ -201,8 +207,8 @@ configuration — there is no per-crew run endpoint.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `POST` | `/executions` | Start a run (crew or flow) and return its `execution_id` |
-| `GET` | `/executions` | List runs (`limit` 1–100, default 50; `offset`) |
-| `GET` | `/executions/{execution_id}` | Full record including the result |
+| `GET` | `/executions` | List runs as summary rows (`limit` 1–100, default 50; `offset`; `include_payload`) |
+| `GET` | `/executions/{execution_id}` | Full record including `result` and `inputs` |
 | `GET` | `/executions/{execution_id}/status` | Status only — the polling endpoint |
 | `POST` | `/executions/{execution_id}/stop` | Ask a run to stop |
 | `POST` | `/executions/{execution_id}/force-stop` | Kill it |
@@ -215,6 +221,22 @@ configuration — there is no per-crew run endpoint.
 
 **Status values:** `PENDING`, `PREPARING`, `RUNNING`, `COMPLETED`, `FAILED`,
 `CANCELLED`, `STOPPED`.
+
+**List rows are summaries.** `GET /executions` returns each run without its
+`result` and `inputs`: ids, status, timestamps, run name, error, group,
+execution type, harness, flow and crew ids, the MLflow and checkpoint fields,
+the model, and `result_preview`, the first 280 characters of the serialized
+result. Read `GET /executions/{execution_id}` for the full result, or pass
+`?include_payload=true` to get full rows in bulk.
+
+**Over the concurrent-run limit, a run queues.** Crew and flow runs share one
+limit per server process (see [run concurrency limit](#run-concurrency-limit)).
+A run started while every slot is in use is still accepted: its status is
+`PENDING` with a message such as `Queued: all 16 run slots are in use (position
+2). The run starts when a slot frees.` Queued runs start first in, first out,
+and switch to `RUNNING` when admitted. `POST /executions/{execution_id}/stop`
+on a queued run removes it from the queue, so it never starts. A run's timeout
+counts from when its process starts, not from when it was queued.
 
 There is **no `/executions/{id}/logs`**. Per-step detail is in the traces
 (below); process logs are streamed over SSE.
@@ -263,14 +285,19 @@ either `flow_id` or an inline `nodes` / `edges` definition.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/executions/history` | Paged run history for the teamspace |
-| `GET` | `/executions/history/{execution_id}` | One historical run |
+| `GET` | `/executions/history` | Paged run history for the teamspace, as summary rows (`include_payload`) |
+| `GET` | `/executions/history/{execution_id}` | One historical run, including `result`, `input`, `agents_yaml` and `tasks_yaml` |
 | `DELETE` | `/executions/history/{execution_id}` | Delete one |
 | `DELETE` | `/executions/history` | Delete all history for the teamspace |
-| `GET` | `/executions/history/all-groups` | Across teamspaces (admin) |
+| `GET` | `/executions/history/all-groups` | Across teamspaces (admin), as summary rows (`include_payload`) |
 | `GET` | `/executions/{execution_id}/outputs` | Task outputs recorded for a run |
 | `PATCH` | `/executions/{job_id}/result` | Amend a stored result |
 | `DELETE` | `/executions/{job_id}` | Delete a run record |
+
+Like `GET /executions`, the two history list endpoints omit `result`, `input`,
+`agents_yaml` and `tasks_yaml` from each row and return `result_preview`
+instead. Add `?include_payload=true` for full rows, or read one run from
+`GET /executions/history/{execution_id}`.
 
 ---
 
@@ -392,7 +419,34 @@ A run's harness is decided once, at creation, and recorded on its row; changing
 this setting never re-points a run already under way.
 
 The same router also carries the rest of `engine-config` (16 routes) —
-`flow_enabled`, OpenTelemetry switches and similar.
+`flow_enabled`, OpenTelemetry switches and similar. Creating or changing a row
+requires a system admin (`403` otherwise).
+
+### Run concurrency limit
+
+Crew and flow runs share one concurrent-run limit per server process, read from
+the engine-config row `engine_name="kasal"`, `config_key="max_concurrent_runs"`.
+With no row, or a disabled or non-integer one, the limit is 16. A value above 16
+is capped at 16, the size of the thread pools each live run holds a thread in,
+and a value below 1 counts as 1. The value is re-read at most every 30 seconds,
+so a change applies to runs admitted after that.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/engine-config` | Create the row: `engine_name`, `engine_type`, `config_key`, `config_value` (a string), optional `enabled` and `description` |
+| `GET` | `/engine-config/engine/kasal/config/max_concurrent_runs` | Read it (`404` when unset) |
+| `PATCH` | `/engine-config/engine/kasal/config/max_concurrent_runs/value` | Change the value: `{"config_value": "8"}` |
+
+To set the limit to 8 the first time:
+
+```bash
+curl -X POST https://<your-app>.databricksapps.com/api/v1/engine-config \
+  -H "Content-Type: application/json" \
+  -H "X-Forwarded-Email: admin@example.com" \
+  -d '{"engine_name": "kasal", "engine_type": "system", "config_key": "max_concurrent_runs", "config_value": "8"}'
+```
+
+For what a queued run looks like, see [Executions](#executions).
 
 ---
 
@@ -406,7 +460,7 @@ in the OpenAPI schema rather than repeated here:
 | `memory-backend` | 22 | Memory backends, Databricks Vector Search, indices |
 | `database-management` | 21 | Connections, migrations, maintenance |
 | `mcp` | 20 | MCP servers, tools, connection testing; the Databricks MCP catalog and the admin-only `POST /mcp/databricks/migrate-external-urls` |
-| `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`) |
+| `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`); creating a template configuration (`is_template: true`), or updating or deleting one, is system-admin only |
 | `chat-history` | 16 | Chat sessions and their messages |
 | `prompt optimization` | 15 | GEPA prompt optimisation |
 | `databricks-secrets` | 14 | Secret scopes and values |
@@ -416,9 +470,9 @@ in the OpenAPI schema rather than repeated here:
 | `skills` | 10 | Skill definitions attached to agents |
 | `templates` | 9 | Prompt templates |
 | `mlflow` | 9 | Experiments, traces, evaluation |
-| `databricks` | 9 | Workspace configuration and auth; the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for the configured workspace |
+| `databricks` | 9 | Workspace configuration and auth. `POST /databricks/config` refuses a `workspace_url` that is not `https` or whose host is not the credentialed workspace (`403`); the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for that same workspace |
 | `a2a` / `a2a-agents` | 17 | Agent-to-agent protocol |
-| `crews-export` | 8 | Export a crew as a standalone Databricks App or Model Serving endpoint; deleting an endpoint is admin-only and limited to endpoints serving that crew |
+| `crews-export` | 8 | Export a crew as a standalone Databricks App or Model Serving endpoint. `GET /crews/{crew_id}/deployment/status` (editors and admins) and `DELETE /crews/{crew_id}/deployment/{endpoint_name}` (admins) only act on an endpoint that serves that crew in your group, and answer `404` for any other |
 | `users` | 7 | Users and permissions |
 | `Server-Sent Events` | 6 | Live run streaming |
 | `schemas` | 6 | Structured-output schema definitions |

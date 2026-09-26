@@ -118,10 +118,14 @@ How a run is prepared, executed and observed. The `execution_type` on the reques
 
 ### Subprocess safety
 
-Two small modules keep the subprocess paths from harming the server they run in:
+Four modules keep the subprocess paths from harming the server they run in, and from harming each other:
 
-- `services/execution/process_tree.py` terminates only the process trees this server spawned. A run's subprocess is the `multiprocessing.Process` the executor holds, and its children are found through `psutil`. When that handle is gone, the only fallback is a descendant of this server whose `KASAL_EXECUTION_ID` equals the execution ID exactly. The module never scans the whole host, so it cannot kill an unrelated `uvicorn`, `mlflow server` or test process.
-- `services/execution/blocking_pools.py` gives the subprocess paths two bounded thread pools (16 threads each): one for whole-run waits and one for event-relay reads. Keeping these off the event loop's default executor stops a few long builds from starving Chat turns, and keeping the two pools apart prevents a deadlock where waits fill the pool and the relays that let a child exit cannot run.
+- `services/execution/run_admission.py` is one concurrent-run limit shared by crew and flow runs, per server process. Runs are admitted asynchronously (the API, the scheduler, event triggers and resume return before the subprocess spawns), so a run over the limit is queued rather than rejected: its row goes to `PENDING` with a `Queued: …` message naming the limit and its position, it waits on an asyncio future rather than a pool thread, and it is admitted first in, first out as slots free, then set to `RUNNING`. A stop request removes a queued run from the queue, so it never spawns. The limit comes from the engine-config row `engine_name="kasal"`, `config_key="max_concurrent_runs"`, defaults to 16 and is capped at the pool size below, because a higher limit would bring back runs waiting silently inside a pool.
+- `services/execution/run_wait.py` waits for a run's subprocess and collects its result. It reads the result queue while the child runs, since a result larger than the pipe buffer would otherwise deadlock a child that cannot finish its write. Each run holds exactly one pool thread (its result reader); the exit wait polls on the event loop. The run's timeout deadline is computed when the process starts, so time spent queued for admission does not count.
+- `services/execution/blocking_pools.py` gives the subprocess paths two bounded thread pools (16 threads each): one for the result readers and one for event-relay reads. Keeping these off the event loop's default executor stops a few long builds from starving Chat turns, and keeping the two pools apart prevents a deadlock where readers fill the pool and the relays that let a child exit cannot run. Because admission keeps live runs at or below the pool size, nothing waits for a thread.
+- `services/execution/process_tree.py` terminates only the process trees this server spawned. A run's subprocess is the `multiprocessing.Process` the executor holds, and its children are found through `psutil`. When that handle is gone, the only fallback is a descendant of this server whose `KASAL_EXECUTION_ID` equals the execution ID exactly. The module never scans the whole host, so it cannot kill an unrelated `uvicorn`, `mlflow server` or test process. Errors are narrowed to `psutil` errors, and a stop that did not happen is reported as failed.
+
+For how to set the limit, see the [configuration reference](./CONFIGURATION.md#concurrent-run-limit).
 
 ### Background processing
 
@@ -176,7 +180,7 @@ Important toggles that affect developer and runtime experience. See the [configu
 
 - `DOCS_ENABLED`: enables the FastAPI `/api-docs` pages.
 - `AUTO_SEED_DATABASE`: runs the seeders in the background after database initialization.
-- `DATABASE_TYPE`: `sqlite` (with `SQLITE_DB_PATH`) or `postgres`.
+- `DATABASE_TYPE`: `sqlite` (the default, with `SQLITE_DB_PATH` defaulting to `src/backend/app.db`) or `postgres`.
 
 ## Related
 

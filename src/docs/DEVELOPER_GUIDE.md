@@ -57,7 +57,11 @@ npm ci
 npm start          # Vite dev server on http://localhost:3000
 ```
 
-In development the frontend calls `http://localhost:8000/api/v1` directly (`src/frontend/src/shared/api/client.ts`), and the Vite proxy also targets port 8000. If you move the backend with `KASAL_PORT`, start the frontend with `VITE_API_URL=http://localhost:<port>/api/v1`.
+In development the frontend calls the backend directly at `http://localhost:<port>/api/v1` (`src/frontend/src/shared/api/client.ts`), and the Vite `/api` proxy targets the same port. The port comes from `VITE_KASAL_PORT`, else `KASAL_PORT`, else `8000` (`src/frontend/vite.config.ts`), so if you move the backend with `KASAL_PORT`, start the frontend with the same value:
+
+```bash
+KASAL_PORT=8001 npm start
+```
 
 Interactive API docs are served at `/api-docs` on the backend. For every environment variable, see the [configuration reference](./CONFIGURATION.md).
 
@@ -78,7 +82,7 @@ To start the backend without `run.sh`:
 
 ```bash
 cd src/backend
-export DATABASE_TYPE=sqlite LOCAL_DEV_AUTH=true
+export LOCAL_DEV_AUTH=true
 .venv/bin/uvicorn src.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -86,22 +90,23 @@ For the full auth model, see the [security reference](./SECURITY.md) and the [AP
 
 ## Choose a database
 
-The default database depends on how you start the backend:
+The backend, `alembic` and `python run_seeders.py` all read `src/backend/src/config/settings.py`, so they share one default: SQLite at the absolute path `src/backend/app.db`, whatever directory you run them from. `run.sh` changes into `src/backend` itself and no longer sets `SQLITE_DB_PATH`. The other entry points keep their own files:
 
 | Entry point | Default database | SQLite file |
 |---|---|---|
-| `./run.sh` | SQLite | `./app.db`, relative to where you run it; run it from `src/backend` |
-| `uvicorn`, `alembic`, `python run_seeders.py` (through `Settings`) | PostgreSQL (`DATABASE_TYPE` defaults to `postgres`) | `src/backend/app.db` when `DATABASE_TYPE=sqlite` |
+| `./run.sh`, `uvicorn`, `alembic`, `python run_seeders.py` | SQLite (`DATABASE_TYPE` defaults to `sqlite`) | `src/backend/app.db` |
 | `python src/entrypoint.py` | SQLite (`--db-type sqlite`) | `src/kasal.db` |
 | `kasal` (pip package) | SQLite | `~/.kasal/kasal.db` |
 
-So if you use `run.sh` with SQLite, prefix the other commands with `DATABASE_TYPE=sqlite`, or they target a PostgreSQL server on `localhost:5432`:
+To apply migrations and seed the default database:
 
 ```bash
 cd src/backend
-DATABASE_TYPE=sqlite uv run alembic upgrade head
-DATABASE_TYPE=sqlite uv run python run_seeders.py
+uv run alembic upgrade head
+uv run python run_seeders.py
 ```
+
+To use PostgreSQL, start the server with `./run.sh postgres` and set `DATABASE_TYPE=postgres` (plus the `POSTGRES_*` variables) on every other command you run. To use another SQLite file, set `SQLITE_DB_PATH` the same way.
 
 Alembic does not run at startup. The app builds its schema with `init_db()` (`create_all` plus the self-heal steps in `src/backend/src/db/self_heal/`), so a column added to an existing table needs a self-heal step as well as a migration. Seeders run in the background at startup while `AUTO_SEED_DATABASE` is on.
 

@@ -60,8 +60,38 @@ services/
     │                        #   service. Path adapters live with their path:
     │                        #   {agent,flow}_builder/checkpoint_adapter.py
     ├── logs/                # execution-log capture → queue → DB
+    ├── run_admission.py     # ONE concurrent-run limit for crew + flow runs
+    ├── run_wait.py          # wait for a run's child + read its result
+    ├── blocking_pools.py    # the two bounded pools the subprocess paths use
+    ├── process_tree.py      # stop only the process trees WE spawned
     └── subprocess_bootstrap.py  # what a spawned interpreter calls first
 ```
+
+The four parent-side subprocess modules, shared by both subprocess paths:
+
+- `run_admission.py`: `run_admission.slot(...)` gates every crew and flow run
+  in this server process. The limit is the engine-config row
+  `engine_name="kasal"`, `config_key="max_concurrent_runs"` (no env var;
+  default and ceiling are the pool size, 16; re-read at most every 30 s). Over
+  the limit a run QUEUES, it is not rejected: status `PENDING` with a
+  "Queued: …" message, FIFO admission, back to `RUNNING` when admitted.
+  `cancel_waiting()` is how a stop removes a queued run so it never spawns.
+- `run_wait.py`: `collect_result()` drains the result queue WHILE the child
+  runs (a result bigger than the pipe buffer deadlocks a join-then-read), holds
+  one `RUN_WAIT_EXECUTOR` thread per run, and polls the exit on the loop.
+  `run_deadline()` is taken right after `process.start()`, so a run's timeout
+  starts when its process starts, never while it is queued.
+  `flush_queues_before_exit()` is the child's half (needed before `os._exit`).
+- `blocking_pools.py`: `RUN_WAIT_EXECUTOR` (result readers) and
+  `EVENT_RELAY_EXECUTOR` (relay reads), 16 threads each, off the default
+  executor so builds cannot starve Chat. Two pools, not one, or readers can
+  starve the relays their children need to exit. Raising the pool size raises
+  the admission ceiling; the two numbers move together.
+- `process_tree.py`: terminates the `multiprocessing.Process` the executor
+  holds plus its `psutil` descendants; the only fallback is a descendant of this
+  server whose `KASAL_EXECUTION_ID` matches exactly. Never iterates
+  `psutil.process_iter()`. Errors are narrowed to `psutil.Error`, and a stop
+  that did not happen is reported as failed.
 
 ## Rules
 

@@ -102,11 +102,11 @@ uv run lint-imports
 
 **Database Changes:**
 ```bash
-# Create migration for model changes. Alembic reads Settings, whose DATABASE_TYPE
-# defaults to postgres, so point it at the SQLite file run.sh uses:
+# Create migration for model changes. Alembic reads Settings, which defaults to
+# the same SQLite file run.sh uses (src/backend/app.db):
 cd src/backend
-DATABASE_TYPE=sqlite uv run alembic revision --autogenerate -m "description"
-DATABASE_TYPE=sqlite uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "description"
+uv run alembic upgrade head
 ```
 
 Alembic does not run at startup: the app builds its schema with `init_db()`. A column added to an existing table also needs a step in `src/backend/src/db/self_heal/columns.py` (a new table: `tables.py`), or existing installs never get it.

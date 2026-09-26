@@ -42,7 +42,7 @@ cd kasal/src/backend
 ./run.sh
 ```
 
-`run.sh` runs `uv sync --frozen`, then serves the API at `http://127.0.0.1:8000` with auto-reload. By default it uses a SQLite file, `app.db`, in the directory you start it from, so always start it from `src/backend`.
+`run.sh` runs `uv sync --frozen`, then serves the API at `http://127.0.0.1:8000` with auto-reload. By default it uses the SQLite file `src/backend/app.db`, whatever directory you start it from; `alembic` and the seeders use the same file.
 
 In another terminal, start the frontend:
 
@@ -58,7 +58,7 @@ The app is served at `http://localhost:3000`.
 
 - **Loopback only.** The server binds to `127.0.0.1`. Set `KASAL_BIND_HOST=0.0.0.0` only if you mean to expose it, and read the warning `run.sh` prints first.
 - **A development identity.** `run.sh` sets `LOCAL_DEV_AUTH=true`, so a request without an identity header runs as `LOCAL_DEV_USER_EMAIL` (default `dev@localhost`). If you start `uvicorn` yourself without it, every API call returns 401.
-- **A safe port check.** If port 8000 is held by something other than a Kasal server from this checkout, `run.sh` refuses to start. Use `KASAL_PORT=<port>`, or set `KASAL_KILL_PORT_OWNER=true` to terminate the owner.
+- **A safe port check.** If port 8000 is held by something other than a Kasal server from this checkout, `run.sh` refuses to start. Use `KASAL_PORT=<port>`, or set `KASAL_KILL_PORT_OWNER=true` to terminate the owner. The dev frontend reads the same `KASAL_PORT` (or `VITE_KASAL_PORT`), so start it with the same value, for example `KASAL_PORT=8001 npm start`.
 
 Run `./run.sh -h` for the logging flags and `./run.sh postgres` to use PostgreSQL instead. For the full list of settings, see the [configuration reference](./CONFIGURATION.md); for day-to-day development, see the [developer guide](./DEVELOPER_GUIDE.md).
 
