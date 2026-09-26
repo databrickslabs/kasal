@@ -8,12 +8,13 @@ is to extract a valid dictionary or return None without structural repair.
 import json
 import logging
 import re
+from typing import Any
 
 # Preserve the existing logger name for log filters and observability.
 logger = logging.getLogger("src.utils.prompt_utils")
 
 
-def _repair_json_structure(s):
+def _repair_json_structure(s: str) -> str:
     """Single-pass, string-aware structural repair of brace/bracket nesting.
 
     Drops spurious or mismatched closing tokens (e.g. a model emitting an extra
@@ -21,8 +22,8 @@ def _repair_json_structure(s):
     missing at the end. Also strips trailing commas before closers. Returns a
     best-effort repaired string; the caller still validates with json.loads.
     """
-    out = []
-    stack = []
+    out: list[str] = []
+    stack: list[str] = []
     in_str = False
     esc = False
     for ch in s:
@@ -59,7 +60,7 @@ def _repair_json_structure(s):
     return re.sub(r",\s*([\]}])", r"\1", repaired)
 
 
-def robust_json_parser(text):
+def robust_json_parser(text: str) -> Any:
     """
     Parse JSON with advanced error recovery for LLM outputs.
 

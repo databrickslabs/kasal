@@ -5,6 +5,9 @@ Steps are imported by name into this module so a test can
 """
 
 import logging
+from typing import Awaitable, Callable
+
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.db.self_heal.columns import (
     _ensure_agent_columns,
@@ -54,7 +57,7 @@ from src.db.self_heal.tables import (
 logger = logging.getLogger(__name__)
 
 
-async def run_schema_self_heal(conn) -> None:
+async def run_schema_self_heal(conn: AsyncConnection) -> None:
     """Create missing tables and add missing columns on an existing DB.
 
     ``create_all`` fully creates a NEW table but never ALTERs an existing one, so
@@ -147,7 +150,9 @@ async def run_schema_self_heal(conn) -> None:
         await _run_self_heal_step(conn, step)
 
 
-async def _run_self_heal_step(conn, step) -> None:
+async def _run_self_heal_step(
+    conn: AsyncConnection, step: Callable[[AsyncConnection], Awaitable[None]]
+) -> None:
     """Run one self-heal step so its failure cannot abort the ones after it.
 
     ``conn.begin_nested()`` is a SAVEPOINT: releasing it on success keeps the

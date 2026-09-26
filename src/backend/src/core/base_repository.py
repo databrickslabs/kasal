@@ -14,9 +14,10 @@ and is enforced by
 """
 
 import uuid
-from typing import Generic, List, Optional, Type, TypeVar, Union
+from typing import Any, Generic, List, Optional, Type, TypeVar, Union, cast
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypeVar as DefaultedTypeVar
 
@@ -254,7 +255,8 @@ class BaseRepository(Generic[ModelType, IdT]):
                 from sqlalchemy import delete as sql_delete
 
                 stmt = sql_delete(self.model).where(self.model.id == id)
-                result = await self.session.execute(stmt)
+                # A DML statement returns a CursorResult (typed as plain Result).
+                result = cast(CursorResult[Any], await self.session.execute(stmt))
                 logger.info(
                     f"[BASE REPO DELETE] Executed SQL DELETE for {self.model.__name__} ID={id}, rows affected: {result.rowcount}"
                 )

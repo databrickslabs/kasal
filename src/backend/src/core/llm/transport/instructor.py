@@ -48,7 +48,8 @@ def strip_numeric_bounds(schema: dict[str, Any]) -> dict[str, Any]:
             return [clean(item) for item in node]
         return node
 
-    return clean(schema)
+    cleaned: dict[str, Any] = clean(schema)
+    return cleaned
 
 
 class InternalInstructor(Generic[T]):
@@ -84,7 +85,8 @@ class InternalInstructor(Generic[T]):
 
     def _extract_provider(self) -> str:
         if self.llm is not None and getattr(self.llm, "provider", None):
-            return self.llm.provider
+            provider: str = self.llm.provider
+            return provider
         if isinstance(self.llm, str):
             return self.llm.partition("/")[0] or "openai"
         if self.llm is not None and hasattr(self.llm, "model"):

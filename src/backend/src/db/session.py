@@ -3,12 +3,13 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
-from typing import AsyncGenerator, Optional
+from contextvars import ContextVar, Token
+from typing import Any, AsyncGenerator, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -63,14 +64,14 @@ if SQL_DEBUG:
 
 # Create a SQLAlchemy logger using the LoggerManager
 class SQLAlchemyLogger:
-    def __init__(self):
+    def __init__(self) -> None:
         self.formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-        self.log_dir = logger_manager._log_dir
+        self.log_dir = logger_manager.log_dir
         self.setup_logger()
 
-    def setup_logger(self):
+    def setup_logger(self) -> None:
         # Create sqlalchemy.log file handler
         sqlalchemy_log_file = self.log_dir / "sqlalchemy.log"
 
@@ -137,10 +138,10 @@ from sqlalchemy.pool import (  # noqa: E402 - import follows module initializati
 use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
 
 # Track the main event loop for intelligent engine selection
-main_event_loop = None
+main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-def set_main_event_loop():
+def set_main_event_loop() -> None:
     """
     Capture the main event loop when the FastAPI app starts.
     This should be called from the lifespan/startup event.
@@ -163,7 +164,7 @@ except RuntimeError:
 
 
 # Determine isolation level based on database type
-def get_isolation_level(database_uri: str) -> str:
+def get_isolation_level(database_uri: str) -> Optional[str]:
     """Get appropriate isolation level based on database type."""
     if database_uri.startswith("sqlite"):
         # SQLite with SQLAlchemy: Use None for autocommit behavior with async
@@ -174,7 +175,7 @@ def get_isolation_level(database_uri: str) -> str:
         return "READ COMMITTED"
 
 
-def get_sqlite_connect_args(database_uri: str) -> dict:
+def get_sqlite_connect_args(database_uri: str) -> Dict[str, Any]:
     """Get SQLite-specific connection arguments for better concurrent access."""
     if database_uri.startswith("sqlite"):
         return {
@@ -185,7 +186,7 @@ def get_sqlite_connect_args(database_uri: str) -> dict:
     return {}
 
 
-def get_sqlite_poolclass():
+def get_sqlite_poolclass() -> type[StaticPool]:
     """Pool class for the SQLite engine: StaticPool.
 
     NullPool opens a FRESH aiosqlite connection per checkout, so every
@@ -298,7 +299,7 @@ else:
 _sqlite_configured_logged = False
 
 
-def configure_sqlite(dbapi_connection, connection_record):
+def configure_sqlite(dbapi_connection: Any, connection_record: Any) -> None:
     """Configure SQLite connection for better performance and concurrency."""
     global _sqlite_configured_logged
     if str(settings.DATABASE_URI).startswith("sqlite"):
@@ -359,6 +360,10 @@ _local_session_factory = async_sessionmaker(
 )
 
 
+# Anything that, called with no arguments, returns a new AsyncSession.
+_SessionFactory = Callable[[], AsyncSession]
+
+
 class _SwappableSessionFactory:
     """Wrapper around async_sessionmaker that can be hot-swapped to Lakebase.
 
@@ -369,20 +374,20 @@ class _SwappableSessionFactory:
     producing Lakebase sessions — zero call-site changes required.
     """
 
-    def __init__(self, default_factory):
+    def __init__(self, default_factory: _SessionFactory) -> None:
         self._factory = default_factory
         self._is_lakebase = False
-        self._on_swap_callbacks = []
+        self._on_swap_callbacks: list[Callable[[], object]] = []
 
     # --- async_sessionmaker-compatible interface ---
 
-    def __call__(self):
+    def __call__(self) -> AsyncSession:
         """Return a new AsyncSession (same as async_sessionmaker.__call__)."""
         return self._factory()
 
     # --- swap-invalidation hooks ---
 
-    def register_on_swap(self, callback):
+    def register_on_swap(self, callback: Callable[[], object]) -> None:
         """Register a zero-arg callback fired whenever the active DB is swapped
         (Lakebase activate/deactivate). Use it to flush in-memory caches keyed to
         the OLD database — e.g. ExecutionService's execution registry — so a
@@ -390,7 +395,7 @@ class _SwappableSessionFactory:
         the previous DB (the 'Execution not found' 404 storm)."""
         self._on_swap_callbacks.append(callback)
 
-    def _fire_swap_callbacks(self):
+    def _fire_swap_callbacks(self) -> None:
         for cb in self._on_swap_callbacks:
             try:
                 cb()
@@ -399,7 +404,7 @@ class _SwappableSessionFactory:
 
     # --- hot-swap API ---
 
-    def activate_lakebase(self, lakebase_factory):
+    def activate_lakebase(self, lakebase_factory: _SessionFactory) -> None:
         """Replace the underlying factory with a Lakebase-backed one."""
         changed = not self._is_lakebase
         self._factory = lakebase_factory
@@ -411,7 +416,7 @@ class _SwappableSessionFactory:
         if changed:
             self._fire_swap_callbacks()
 
-    def deactivate_lakebase(self):
+    def deactivate_lakebase(self) -> None:
         """Revert to the local (SQLite / PG) factory."""
         changed = self._is_lakebase
         self._factory = _local_session_factory
@@ -444,12 +449,17 @@ _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
 # reuse the session only for code running in the request's OWN task and route a
 # fresh connection for everything spawned off it. Callers can no longer forget to
 # detach — the primitive is safe by default.
-_request_session_owner: ContextVar[Optional["asyncio.Task"]] = ContextVar(
+_request_session_owner: ContextVar[Optional["asyncio.Task[Any]"]] = ContextVar(
     "_request_session_owner", default=None
 )
 
 
-def _enter_request_session(session: AsyncSession):
+_RequestSessionTokens = Tuple[
+    Token[Optional[AsyncSession]], Optional[Token[Optional["asyncio.Task[Any]"]]]
+]
+
+
+def _enter_request_session(session: AsyncSession) -> _RequestSessionTokens:
     """Publish ``session`` as the request-scoped session, owned by the CURRENT task.
 
     Returns opaque tokens to hand back to :func:`_exit_request_session`. Every
@@ -457,7 +467,7 @@ def _enter_request_session(session: AsyncSession):
     owner can never drift apart. Recording the owner is what makes reuse
     task-scoped (see ``_request_session_owner``)."""
     session_token = _request_session.set(session)
-    owner_token = None
+    owner_token: Optional[Token[Optional["asyncio.Task[Any]"]]] = None
     try:
         owner_token = _request_session_owner.set(asyncio.current_task())
     except Exception:  # no running loop is not fatal; reuse just won't match
@@ -465,7 +475,7 @@ def _enter_request_session(session: AsyncSession):
     return session_token, owner_token
 
 
-def _exit_request_session(tokens) -> None:
+def _exit_request_session(tokens: _RequestSessionTokens) -> None:
     """Undo :func:`_enter_request_session`. Tolerates a token created in a
     different async context (generator GC'd or cancelled across tasks)."""
     session_token, owner_token = tokens
@@ -520,7 +530,7 @@ def _usable_for_more_sql(session: AsyncSession) -> bool:
 
 
 @asynccontextmanager
-async def routed_scoped_session():
+async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
     """The one way to get a session outside an HTTP request.
 
     Three branches, in order:
@@ -597,8 +607,8 @@ async def routed_scoped_session():
 
 
 # Create separate session factories for pooled and nullpool engines
-pooled_session_factory = None
-nullpool_session_factory = None
+pooled_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+nullpool_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
 if not str(settings.DATABASE_URI).startswith("sqlite"):
     # For PostgreSQL, create session factories for both engines
@@ -644,11 +654,11 @@ if not str(settings.DATABASE_URI).startswith("sqlite"):
 # connection (its own aiosqlite queue) is immune to that interference.
 # PostgreSQL/Lakebase already give each pooled checkout a private connection, so
 # this only needs special handling for SQLite.
-_isolated_sqlite_engine = None
-_isolated_sqlite_session_factory = None
+_isolated_sqlite_engine: Optional[AsyncEngine] = None
+_isolated_sqlite_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
 
-def _get_isolated_sqlite_session_factory():
+def _get_isolated_sqlite_session_factory() -> async_sessionmaker[AsyncSession]:
     """Lazily build a NullPool engine + sessionmaker on a private connection.
 
     NullPool hands out a FRESH aiosqlite connection per checkout (closed on
@@ -680,7 +690,7 @@ def _get_isolated_sqlite_session_factory():
 
 
 @asynccontextmanager
-async def get_isolated_db_session():
+async def get_isolated_db_session() -> AsyncIterator[AsyncSession]:
     """Yield a session whose connection is NOT shared with any other session.
 
     Use for a multi-step unit of work that interleaves DB writes with long
@@ -767,6 +777,7 @@ async def init_db() -> None:
         importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
         from src.db.all_models import Base
 
+        sqlite_db_path: str = settings.SQLITE_DB_PATH or ""  # has a default
         # For PostgreSQL, check if database exists and create if not
         if str(settings.DATABASE_URI).startswith("postgresql"):
             import asyncpg
@@ -816,7 +827,7 @@ async def init_db() -> None:
 
         # For SQLite, ensure database file exists
         if str(settings.DATABASE_URI).startswith("sqlite"):
-            db_path = settings.SQLITE_DB_PATH
+            db_path = sqlite_db_path
 
             # Get absolute path if relative
             if not os.path.isabs(db_path):
@@ -841,8 +852,8 @@ async def init_db() -> None:
                 # Initialize it as a sqlite database
                 import sqlite3
 
-                conn = sqlite3.connect(db_path)
-                conn.close()
+                sqlite_conn = sqlite3.connect(db_path)
+                sqlite_conn.close()
                 logger.info(f"Empty database file created at {db_path}")
 
         # Create all tables in a completely separate, isolated transaction
@@ -854,11 +865,11 @@ async def init_db() -> None:
             try:
                 import sqlite3
 
-                conn = sqlite3.connect(os.path.abspath(settings.SQLITE_DB_PATH))
-                cursor = conn.cursor()
+                sqlite_conn = sqlite3.connect(os.path.abspath(sqlite_db_path))
+                cursor = sqlite_conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = cursor.fetchall()
-                conn.close()
+                sqlite_conn.close()
 
                 if len(tables) > 1:  # SQLite has a sqlite_master table by default
                     logger.info(
@@ -871,7 +882,7 @@ async def init_db() -> None:
         # Only create tables if they don't already exist
         if not tables_exist:
             # Use a fresh engine for initialization with settings optimized for table creation
-            init_engine_opts = {
+            init_engine_opts: Dict[str, Any] = {
                 "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
                 "future": True,
             }
@@ -890,7 +901,6 @@ async def init_db() -> None:
                 str(settings.DATABASE_URI), **init_engine_opts
             )
 
-            # First ensure connection works
             async with engine_for_init.connect() as conn:
                 logger.info("Database connection established")
 
@@ -930,7 +940,6 @@ async def init_db() -> None:
                 logger.error(traceback.format_exc())
                 raise
 
-            # Close the engine after use
             await engine_for_init.dispose()
 
             logger.info("Database tables initialized successfully")
@@ -956,18 +965,18 @@ async def init_db() -> None:
             import sqlite3
 
             try:
-                db_path_to_check = os.path.abspath(settings.SQLITE_DB_PATH)
+                db_path_to_check = os.path.abspath(sqlite_db_path)
                 logger.info(f"Verifying tables in: {db_path_to_check}")
 
                 if (
                     os.path.exists(db_path_to_check)
                     and os.path.getsize(db_path_to_check) > 0
                 ):
-                    conn = sqlite3.connect(db_path_to_check)
-                    cursor = conn.cursor()
+                    sqlite_conn = sqlite3.connect(db_path_to_check)
+                    cursor = sqlite_conn.cursor()
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                     tables = cursor.fetchall()
-                    conn.close()
+                    sqlite_conn.close()
 
                     table_count = len(tables)
                     logger.info(
@@ -1005,7 +1014,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         AsyncSession: SQLAlchemy async session
     """
     # Default to async_session_factory; in tests (pytest), this allows monkeypatching
-    smart_session_factory = async_session_factory
+    smart_session_factory: Optional[_SessionFactory] = async_session_factory
 
     # In normal runtime (not under pytest), select appropriate factory by context
     if not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -1044,7 +1053,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # Use the selected session factory
+            # Only None on SQLite, whose branch never selects the PG factories.
+            assert smart_session_factory is not None
             async with smart_session_factory() as session:
                 # Publish session into ContextVar so that
                 # request_scoped_session() returns the same session

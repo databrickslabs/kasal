@@ -31,6 +31,8 @@ import json
 import logging
 from typing import Any
 
+from starlette.types import Receive, Scope, Send
+
 logger = logging.getLogger(__name__)
 
 #: Requests per identity on the /api/ surface.
@@ -47,7 +49,7 @@ class RateLimitMiddleware:
         enabled: bool = True,
         limit: str = DEFAULT_LIMIT,
         storage_uri: str = "memory://",
-    ):
+    ) -> None:
         self.app = app
         self._active = False
 
@@ -106,16 +108,17 @@ class RateLimitMiddleware:
         return True
 
     @staticmethod
-    def _identity(scope) -> str:
+    def _identity(scope: Scope) -> str:
         headers = dict(scope.get("headers") or [])
         for h in (b"x-forwarded-email", b"x-auth-request-email"):
             val = headers.get(h)
             if val:
-                return "user:" + val.decode("latin-1", "replace")
+                decoded: str = val.decode("latin-1", "replace")
+                return "user:" + decoded
         client = scope.get("client")
         return f"ip:{client[0]}" if client else "ip:unknown"
 
-    async def _send_429(self, send) -> None:
+    async def _send_429(self, send: Send) -> None:
         body = json.dumps(
             {"detail": "Rate limit exceeded. Please slow down and try again shortly."}
         ).encode()
@@ -132,7 +135,7 @@ class RateLimitMiddleware:
         )
         await send({"type": "http.response.body", "body": body})
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
             not self._active
             or scope.get("type") != "http"

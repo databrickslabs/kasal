@@ -7,13 +7,17 @@ second pass the configured URI still says sqlite.
 """
 
 import logging
+from typing import Union
+
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _conn_is_sqlite(conn) -> bool:
+def _conn_is_sqlite(conn: Union[AsyncConnection, Connection]) -> bool:
     """Whether THIS connection is SQLite — asked of the connection, not the env.
 
     Every ``_ensure_*`` helper branches on dialect, and reading
@@ -35,12 +39,13 @@ def _conn_is_sqlite(conn) -> bool:
     Asking the connection removes the coupling entirely.
     """
     try:
-        return conn.engine.dialect.name == "sqlite"
+        is_sqlite: bool = conn.engine.dialect.name == "sqlite"
+        return is_sqlite
     except Exception:  # noqa: BLE001 — fall back to the configured default
         return str(settings.DATABASE_URI).startswith("sqlite")
 
 
-async def _pg_columns(conn, table: str) -> set[str]:
+async def _pg_columns(conn: AsyncConnection, table: str) -> set[str]:
     """Column names of ``table`` on PostgreSQL; empty set if it does not exist.
 
     The Postgres counterpart of ``PRAGMA table_info``. Reading the catalogue
