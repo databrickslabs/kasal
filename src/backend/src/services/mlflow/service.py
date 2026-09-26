@@ -126,7 +126,7 @@ class MLflowService:
             installed = await DatabricksService(
                 self.session, group_id=self.group_id
             ).get_databricks_config()
-            resource_error = installed.resource_error
+            resource_error = installed.resource_error if installed else None
         local_uri = None if is_databricks_app() else local.local_tracking_uri()
         local_available = bool(local_uri)
         local_backend = {

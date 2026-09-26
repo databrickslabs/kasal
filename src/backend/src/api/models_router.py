@@ -14,6 +14,7 @@ from src.schemas.model_config import (
     ModelToggleUpdate,
 )
 from src.services.settings.models import ModelConfigService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(
     prefix="/models",
@@ -57,7 +58,7 @@ async def get_model_config_service(
 ModelConfigServiceDep = Annotated[ModelConfigService, Depends(get_model_config_service)]
 
 
-def _require_system_admin(group_context, action: str) -> None:
+def _require_system_admin(group_context: GroupContext, action: str) -> None:
     """Model rows are resolved by KEY with no group scope, and the row without a
     group is every workspace's catalog, so creating, editing, deleting and the
     bulk enable/disable are system-admin actions (audit H2, like R2-04 for the

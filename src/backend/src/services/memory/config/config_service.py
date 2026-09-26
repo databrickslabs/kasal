@@ -33,7 +33,7 @@ class MemoryConfigService:
         self.repository = MemoryBackendRepository(session)
 
     async def get_active_config(
-        self, group_id: str = None
+        self, group_id: Optional[str] = None
     ) -> Optional[MemoryBackendConfig]:
         """
         Get the active memory backend configuration.

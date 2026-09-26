@@ -208,7 +208,7 @@ async def create_group(
     group = await service.create_group(
         name=group_data.name,
         description=group_data.description,
-        created_by_email=admin_user.email,
+        created_by_email=str(admin_user.email),
     )
 
     # Get user count (will be 0 for new group)

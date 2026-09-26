@@ -3,6 +3,7 @@
 import asyncio
 import re
 import uuid
+from typing import Any
 
 from sqlalchemy.engine import URL
 
@@ -13,7 +14,7 @@ _BRANCH_PATH = re.compile(r"projects/[^/]+/branches/[^/]+")
 _DATABASE_PATH = re.compile(r"(projects/[^/]+/branches/[^/]+)/databases/[^/]+")
 
 
-def _database_resource(app):
+def _database_resource(app: Any) -> Any:
     """PG* variables describe the first database; require an unambiguous binding."""
     databases = [
         item
@@ -38,7 +39,9 @@ def _database_resource(app):
     return item
 
 
-async def _autoscaling_endpoint(client, attached, resource: LakebaseAppResource) -> str:
+async def _autoscaling_endpoint(
+    client: Any, attached: Any, resource: LakebaseAppResource
+) -> str:
     """Resolve only the attached branch, matching PGHOST rather than list order."""
     branch = (attached.branch or "").strip()
     database = (attached.database or "").strip()
@@ -90,17 +93,19 @@ async def _autoscaling_endpoint(client, attached, resource: LakebaseAppResource)
             "Could not uniquely match PGHOST to an endpoint in the attached Lakebase branch. "
             "Check the database resource and remove manual PGHOST overrides before redeploying."
         )
-    return matches[0].name
+    name: str = matches[0].name
+    return name
 
 
-async def resource_token(client, resource: LakebaseAppResource) -> str:
+async def resource_token(client: Any, resource: LakebaseAppResource) -> str:
     """Mint for the assigned endpoint or resolve the attached database's actual type."""
     endpoint = resource.endpoint.strip().lstrip("/")
     if _ENDPOINT_PATH.fullmatch(endpoint):
         credential = await asyncio.to_thread(
             client.postgres.generate_database_credential, endpoint=endpoint
         )
-        return credential.token
+        token: str = credential.token
+        return token
 
     # A hostname or absent valueFrom is not evidence of a Provisioned database.
     # Use the native resource metadata; its key is a label, not database identity.
@@ -128,7 +133,8 @@ async def resource_token(client, resource: LakebaseAppResource) -> str:
             request_id=str(uuid.uuid4()),
             instance_names=[attached.database.instance_name],
         )
-    return credential.token
+    resolved: str = credential.token
+    return resolved
 
 
 def resource_url(resource: LakebaseAppResource) -> str:
@@ -158,7 +164,10 @@ async def initialize_resource_database() -> None:
     factory = LakebaseSessionFactory(resource.endpoint or resource.host)
     try:
         await factory.create_engine()
-        async with factory._engine.begin() as connection:
+        engine = factory._engine
+        if engine is None:
+            raise RuntimeError("Lakebase engine was not created")
+        async with engine.begin() as connection:
             vector = await connection.execute(
                 text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
             )
@@ -173,7 +182,7 @@ async def initialize_resource_database() -> None:
         # write credentials. The transaction serializes competing startups.
         from src.utils.databricks_app_keys import initialize_app_keys
 
-        async with factory._engine.begin() as connection:
+        async with engine.begin() as connection:
             await initialize_app_keys(connection)
         async_session_factory.activate_lakebase(factory._session_factory)
         mark_lakebase_activated()

@@ -181,7 +181,10 @@ class EmbedderConfigBuilder:
             installed_model = is_installed_model(model_name)
             if installed_model:
                 auth = await get_model_auth_context(model_name, group_id=self.group_id)
-                auth_headers, error = auth.get_headers(), None
+                if auth is None:
+                    auth_headers, error = None, "App authentication is unavailable"
+                else:
+                    auth_headers, error = auth.get_headers(), None
             else:
                 auth_headers, error = await get_databricks_auth_headers(
                     user_token=self.user_token
@@ -220,7 +223,7 @@ class EmbedderConfigBuilder:
                     api_key: str = None,
                     api_base: str = None,
                     model: str = None,
-                    auth_headers: dict = None,
+                    auth_headers: Optional[dict] = None,
                     user_token: str = None,
                 ):
                     self.api_key = api_key

@@ -133,7 +133,7 @@ def create_callback_from_string(
 
             installation = DatabricksAppInstallation.from_env()
             installed_path = (
-                installation.output_path(group_id)
+                installation.output_path(group_id or "")
                 if installation.output_volume
                 else None
             )

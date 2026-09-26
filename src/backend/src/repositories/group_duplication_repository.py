@@ -7,6 +7,7 @@ accidentally become part of duplication.
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Any, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,13 +53,15 @@ class GroupDuplicationRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def _rows(self, model, source_id: str):
+    async def _rows(self, model: Any, source_id: str) -> Sequence[Any]:
         result = await self.session.execute(
             select(model).where(model.group_id == source_id)
         )
         return result.scalars().unique().all()
 
-    def _copy(self, row, target_id: str, actor_email: str, **overrides):
+    def _copy(
+        self, row: Any, target_id: str, actor_email: str, **overrides: Any
+    ) -> Any:
         model = type(row)
         data = {
             column.key: deepcopy(getattr(row, column.key))
@@ -86,12 +89,12 @@ class GroupDuplicationRepository:
 
     async def copy_configuration(
         self, source_id: str, target_id: str, actor_email: str
-    ):
+    ) -> None:
         # Preserve encrypted credentials as ciphertext; duplication never returns
         # them to a client or forwards them to an external service.
         for model in CONFIGURATION_MODELS:
             for row in await self._rows(model, source_id):
-                overrides = {}
+                overrides: dict[str, Any] = {}
                 if model is A2AAgent:
                     overrides = {
                         "cached_card": None,
@@ -103,7 +106,7 @@ class GroupDuplicationRepository:
         # Workspace-owned tools get new IDs; catalog tool mappings keep their
         # shared catalog IDs. A source mapping must never point to the old
         # workspace's tool after copying.
-        tool_ids = {}
+        tool_ids: dict[Any, Any] = {}
         for tool in await self._rows(Tool, source_id):
             copied = self._copy(tool, target_id, actor_email)
             await self.session.flush()
@@ -134,7 +137,7 @@ class GroupDuplicationRepository:
         actor_id: str,
         actor_email: str,
         include_members: bool,
-    ):
+    ) -> None:
         if include_members:
             for membership in await self._rows(GroupUser, source_id):
                 if membership.user_id == actor_id:

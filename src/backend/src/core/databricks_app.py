@@ -21,7 +21,9 @@ class DatabricksAppInstallation:
     default_model: str = ""
 
     @classmethod
-    def from_env(cls, env: Optional[Mapping[str, str]] = None):
+    def from_env(
+        cls, env: Optional[Mapping[str, str]] = None
+    ) -> "DatabricksAppInstallation":
         env = os.environ if env is None else env
 
         def value(key: str) -> str:
@@ -80,7 +82,7 @@ class LakebaseAppResource:
     endpoint: str = ""
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls) -> Optional["LakebaseAppResource"]:
         if not is_databricks_app():
             return None
         host, database, user = (

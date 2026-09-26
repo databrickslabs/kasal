@@ -2,8 +2,6 @@
 friendly table names and model column names to the real physical names from the
 Power Query M. Fixtures mirror the JTI ConsumerExperience cases."""
 
-from types import SimpleNamespace
-
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TableInfo,

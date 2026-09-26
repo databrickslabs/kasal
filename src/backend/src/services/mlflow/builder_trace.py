@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
 from src.services.mlflow.mlflow_parent_setup import configure_parent_mlflow_tracing
 from src.services.mlflow.session import tag_session
@@ -11,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def builder_mlflow_trace(session, mode, request, group_context, job_id):
+async def builder_mlflow_trace(
+    session: Any, mode: str, request: Any, group_context: Any, job_id: str
+) -> AsyncIterator[Any]:
     enabled = await configure_parent_mlflow_tracing(
         session, group_context, label="Builder"
     )

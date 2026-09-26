@@ -572,7 +572,9 @@ async def configure_mlflow_in_subprocess(
                     and DatabricksAppInstallation.from_env().output_volume
                 ):
                     experiment_name = (
-                        DatabricksAppInstallation.from_env().experiment_name(group_id)
+                        DatabricksAppInstallation.from_env().experiment_name(
+                            group_id or ""
+                        )
                     )
                 fresh_config = await databricks_service.get_databricks_config()
                 if fresh_config:
@@ -655,7 +657,7 @@ async def configure_mlflow_in_subprocess(
                 return exp
             return mlflow.set_experiment(name)
 
-        experiment = None
+        experiment: Any = None
         experiment_id = None
         # Candidate experiment names. For UC trace storage we self-heal: if the
         # dedicated UC experiment somehow got poisoned by a managed trace, fall

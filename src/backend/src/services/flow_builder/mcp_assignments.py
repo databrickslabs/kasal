@@ -1,8 +1,15 @@
 """Apply generated MCP choices to one flow task without mutating a saved crew."""
 
+from typing import Any, Optional
 
-def apply_flow_mcp_assignments(configs, task_id, crew_id, flow_data):
-    matches = []
+
+def apply_flow_mcp_assignments(
+    configs: Optional[dict[str, Any]],
+    task_id: object,
+    crew_id: object,
+    flow_data: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    matches: list[list[str]] = []
     for node in (flow_data or {}).get("nodes", []):
         data = node.get("data", {})
         if str(data.get("crewId")) != str(crew_id):
@@ -33,8 +40,10 @@ def apply_flow_mcp_assignments(configs, task_id, crew_id, flow_data):
     }
 
 
-def flow_task_tool_ids(task_id, crew_id, flow_data):
-    result = []
+def flow_task_tool_ids(
+    task_id: object, crew_id: object, flow_data: Optional[dict[str, Any]]
+) -> list[str]:
+    result: list[str] = []
     for node in (flow_data or {}).get("nodes", []):
         data = node.get("data", {})
         if str(data.get("crewId")) != str(crew_id):

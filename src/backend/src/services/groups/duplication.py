@@ -1,6 +1,11 @@
 """Transactional creation of a teamspace from another team's configuration."""
 
+from typing import cast
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import BadRequestError, NotFoundError
+from src.models.enums import GroupStatus
 from src.models.user import User
 from src.repositories.group_duplication_repository import GroupDuplicationRepository
 from src.schemas.group import GroupDuplicateRequest, GroupResponse
@@ -9,7 +14,7 @@ from src.utils.user_context import clear_membership_cache
 
 
 class GroupDuplicationService:
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.groups = GroupService(session)
         self.repository = GroupDuplicationRepository(session)
@@ -25,23 +30,25 @@ class GroupDuplicationService:
                 "Choose a teamspace to duplicate, rather than a Personal Space"
             )
 
+        actor_id, actor_email = str(actor.id), str(actor.email)
         try:
             target = await self.groups.create_group(
                 name=request.name,
                 description=request.description,
-                created_by_email=actor.email,
+                created_by_email=actor_email,
             )
-            await self.repository.copy_configuration(source_id, target.id, actor.email)
+            await self.repository.copy_configuration(source_id, target.id, actor_email)
             await self.repository.copy_members(
-                source_id, target.id, actor.id, actor.email, request.include_members
+                source_id, target.id, actor_id, actor_email, request.include_members
             )
             response = GroupResponse(
                 id=target.id,
                 name=target.name,
                 description=target.description,
-                status=target.status,
+                # Stored as a string; the schema validates it into GroupStatus.
+                status=cast(GroupStatus, target.status),
                 auto_created=False,
-                created_by_email=actor.email,
+                created_by_email=actor_email,
                 created_at=target.created_at,
                 updated_at=target.updated_at,
                 user_count=await self.groups.get_group_user_count(target.id),

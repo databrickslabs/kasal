@@ -95,7 +95,7 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         logger.debug("Reasoning is disabled for execution")
 
     # Create engine configuration
-    engine_config = {
+    engine_config: Dict[str, Any] = {
         "agents": agents_data,
         "tasks": tasks_data,
         "tools": tools,

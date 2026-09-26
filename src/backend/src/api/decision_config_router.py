@@ -17,8 +17,12 @@ router = APIRouter(prefix="/decision-config", tags=["decision-config"])
 
 
 @router.get("", response_model=DecisionConfigResponse)
-async def get_config(session: SessionDep, group_context: GroupContextDep):
-    return await DecisionSettingsService(session, group_context.primary_group_id).get()
+async def get_config(
+    session: SessionDep, group_context: GroupContextDep
+) -> DecisionConfigResponse:
+    # An empty workspace id is rejected by the service with a BadRequestError.
+    group_id = group_context.primary_group_id or ""
+    return await DecisionSettingsService(session, group_id).get()
 
 
 @router.put("", response_model=DecisionConfigResponse)
@@ -26,12 +30,11 @@ async def update_config(
     config: DecisionConfigUpdate,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> DecisionConfigResponse:
     if not is_workspace_admin(group_context):
         raise ForbiddenError("Only workspace admins can configure Jev")
-    return await DecisionSettingsService(session, group_context.primary_group_id).save(
-        config
-    )
+    group_id = group_context.primary_group_id or ""
+    return await DecisionSettingsService(session, group_id).save(config)
 
 
 @router.post("/recommend", response_model=DecisionRecommendationResponse)
@@ -39,7 +42,10 @@ async def recommend_settings(
     body: DecisionRecommendationRequest,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> DecisionRecommendationResponse:
     from src.services.decisions.recommendations import recommend
 
-    return await recommend(session, group_context, body.prompt)
+    result: DecisionRecommendationResponse = await recommend(
+        session, group_context, body.prompt
+    )
+    return result

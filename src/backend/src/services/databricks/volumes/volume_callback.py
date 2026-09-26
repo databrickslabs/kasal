@@ -288,7 +288,9 @@ class DatabricksVolumeCallback(KasalCallback):
 
         installation = DatabricksAppInstallation.from_env()
         if installation.output_volume:
-            if self.volume_path.rstrip("/") != installation.output_path(self.group_id):
+            if self.volume_path.rstrip("/") != installation.output_path(
+                self.group_id or ""
+            ):
                 raise ValueError(
                     "Installed output storage must use this team's assigned directory"
                 )
@@ -308,7 +310,7 @@ class DatabricksVolumeCallback(KasalCallback):
             await asyncio.to_thread(
                 client.files.upload,
                 file_path=full_path,
-                content=io.BytesIO(content.encode("utf-8")),
+                contents=io.BytesIO(content.encode("utf-8")),
                 overwrite=True,
             )
             return full_path
@@ -363,7 +365,7 @@ class DatabricksVolumeCallback(KasalCallback):
         await asyncio.to_thread(
             client.files.upload,
             file_path=full_path,
-            content=binary_content,
+            contents=binary_content,
             overwrite=True,
         )
 

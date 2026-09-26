@@ -35,9 +35,8 @@ async def test_slide_edit_uses_shared_agent_capabilities(monkeypatch):
         agentbricks_endpoints=["researcher"],
         skills=["research"],
     )
-    result = await agent_refine.start_slide_refinement(
-        body, None, SimpleNamespace(primary_group_id="workspace-1")
-    )
+    group_context = SimpleNamespace(primary_group_id="workspace-1")
+    result = await agent_refine.start_slide_refinement(body, None, group_context)
     assert result == {"job_id": "run-1"}
     config = launch.call_args.kwargs["config"]
     assert config.execution_type == "agent"
@@ -53,7 +52,9 @@ async def test_slide_edit_uses_shared_agent_capabilities(monkeypatch):
     task = next(iter(config.tasks_yaml.values()))
     assert body.instruction in task["description"]
     assert body.slide in task["description"]
-    enabled.assert_awaited_once_with("workspace-1")
+    # The whole context, as ToolService expects: a bare group id string made it
+    # fall back to base tools and ignore the workspace's tool mappings.
+    enabled.assert_awaited_once_with(group_context)
 
 
 @pytest.mark.asyncio

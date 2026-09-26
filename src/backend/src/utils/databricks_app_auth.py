@@ -3,12 +3,18 @@
 import asyncio
 import os
 from functools import lru_cache
+from typing import TYPE_CHECKING, Optional
 
 from src.core.databricks_app import DatabricksAppInstallation
 
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
+
+    from src.utils.databricks_auth import AuthContext
+
 
 @lru_cache(maxsize=4)
-def _client(host: str, client_id: str, client_secret: str):
+def _client(host: str, client_id: str, client_secret: str) -> "WorkspaceClient":
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.useragent import with_product
 
@@ -34,7 +40,7 @@ def is_installed_model(model: str) -> bool:
     )
 
 
-def get_app_client():
+def get_app_client() -> "WorkspaceClient":
     """Blocking SDK construction; async callers must offload it."""
     installation = DatabricksAppInstallation.from_env()
     if not installation.hosted:
@@ -46,12 +52,14 @@ def get_app_client():
     )
 
 
-def get_app_headers():
+def get_app_headers() -> dict[str, str]:
     """SDK authentication refreshes expiring credentials for long-running jobs."""
     return get_app_client().config.authenticate()
 
 
-async def get_model_auth_context(model: str, *, user_token=None, group_id=None):
+async def get_model_auth_context(
+    model: str, *, user_token: Optional[str] = None, group_id: Optional[str] = None
+) -> Optional["AuthContext"]:
     from src.utils.databricks_auth import AuthContext, get_auth_context
 
     if not is_installed_model(model):

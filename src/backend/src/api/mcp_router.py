@@ -8,6 +8,7 @@ import logging
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.permissions import check_role_in_context, is_system_admin
@@ -25,6 +26,7 @@ from src.schemas.mcp import (
 )
 from src.services.mcp.mcp_client.legacy_urls import MCPLegacyUrlService
 from src.services.mcp.mcp_client.service import MCPService
+from src.utils.user_context import GroupContext
 
 # Create router instance
 router = APIRouter(
@@ -57,7 +59,7 @@ async def get_mcp_service(session: SessionDep) -> MCPService:
 MCPServiceDep = Annotated[MCPService, Depends(get_mcp_service)]
 
 
-def _is_global_admin(group_context) -> bool:
+def _is_global_admin(group_context: Optional[GroupContext]) -> bool:
     """
     Whether the caller may manage GLOBAL (base) MCP servers: system admins only.
 
@@ -231,7 +233,7 @@ def _mcp_service_parent(name: str) -> Optional[str]:
     return f"schemas/{parts[0]}.{parts[1]}"
 
 
-def _require_catalog_admin(group_context) -> None:
+def _require_catalog_admin(group_context: GroupContext) -> None:
     if not (
         check_role_in_context(group_context, ["admin"])
         or _is_global_admin(group_context)
@@ -239,7 +241,9 @@ def _require_catalog_admin(group_context) -> None:
         raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
 
-async def _resolve_catalog_workspace(request: Request, group_context):
+async def _resolve_catalog_workspace(
+    request: Request, group_context: Optional[GroupContext]
+) -> tuple[str, Optional[str]]:
     """``(workspace_url, user_token)`` for the Databricks MCP catalog, or 503."""
     from src.utils.databricks_auth import (
         extract_user_token_from_request,
@@ -270,7 +274,10 @@ async def _resolve_catalog_workspace(request: Request, group_context):
 
 
 async def _discover_external_options(
-    session, workspace_url: str, user_token: Optional[str], group_id: Optional[str]
+    session: AsyncSession,
+    workspace_url: str,
+    user_token: Optional[str],
+    group_id: Optional[str],
 ) -> List[Dict[str, Any]]:
     """The workspace's external MCP options (read-only)."""
     service_parents: List[str] = []
@@ -441,7 +448,7 @@ async def get_databricks_mcp_options(
 
 @router.post("/databricks/migrate-external-urls")
 async def migrate_external_mcp_urls(
-    request: Request, session: SessionDep, group_context: GroupContextDep = None
+    request: Request, session: SessionDep, group_context: GroupContextDep
 ) -> Dict[str, int]:
     """Re-point this workspace's MCP registrations from the legacy
     ``/api/2.0/mcp/external/`` proxy to their UC MCP Service (AI Gateway) URL.

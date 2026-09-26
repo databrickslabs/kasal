@@ -413,7 +413,9 @@ class FlowGenerationService:
                     mcp_names = {cap["name"] for cap in mcp_capabilities}
                     for node in draft.nodes:
                         cid = str(node.data.crewId)
-                        node.data.mcpAssignments = {
+                        # NodeData allows extra fields; these two are read back
+                        # from the saved flow by flow_builder.mcp_assignments.
+                        mcp_assignments = {
                             task["id"]: [
                                 name
                                 for name in assignments[f"{cid}/{task['id']}"]
@@ -421,7 +423,7 @@ class FlowGenerationService:
                             ]
                             for task in catalog[cid]["tasks"]
                         }
-                        node.data.toolAssignments = {
+                        tool_assignments = {
                             task["id"]: [
                                 cap["tool_id"]
                                 for cap in selected_tools
@@ -429,6 +431,8 @@ class FlowGenerationService:
                             ]
                             for task in catalog[cid]["tasks"]
                         }
+                        setattr(node.data, "mcpAssignments", mcp_assignments)
+                        setattr(node.data, "toolAssignments", tool_assignments)
                 return draft
             except (ValueError, TypeError) as exc:
                 if repaired:
