@@ -864,15 +864,17 @@ class TestGetPersonalAccessToken:
 
     @pytest.mark.asyncio
     async def test_returns_token_value(self):
-        service = _make_service()
+        service = _make_service(group_id="g1")
         mock_aks = AsyncMock()
         mock_aks.get_api_key_value = AsyncMock(return_value="pat-value")
         service.api_keys_service = mock_aks
 
         result = await service.get_personal_access_token()
         assert result == "pat-value"
+        # key_name + group_id by keyword: positionally the name landed in the
+        # deprecated `db` slot and group_id was missing (always ValueError).
         mock_aks.get_api_key_value.assert_awaited_once_with(
-            "DATABRICKS_PERSONAL_ACCESS_TOKEN"
+            key_name="DATABRICKS_PERSONAL_ACCESS_TOKEN", group_id="g1"
         )
 
     @pytest.mark.asyncio
@@ -966,7 +968,8 @@ class TestGetAllDatabricksTokens:
         service = _make_service()
         mock_aks = AsyncMock()
 
-        async def mock_get(key):
+        async def mock_get(key_name, group_id):
+            key = key_name
             mapping = {
                 "DATABRICKS_TOKEN": "tok1",
                 "DATABRICKS_API_KEY": "tok2",
@@ -985,7 +988,8 @@ class TestGetAllDatabricksTokens:
         service = _make_service()
         mock_aks = AsyncMock()
 
-        async def mock_get(key):
+        async def mock_get(key_name, group_id):
+            key = key_name
             if key == "DATABRICKS_TOKEN":
                 return "tok1"
             return None

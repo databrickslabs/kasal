@@ -32,8 +32,8 @@ class DatabricksVolumeCallback(KasalCallback):
         task_key: Optional[str] = None,
         execution_name: Optional[str] = None,
         group_id: Optional[str] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize the Databricks Volume callback.
 
@@ -72,7 +72,7 @@ class DatabricksVolumeCallback(KasalCallback):
         self.execution_name = execution_name
 
         # Initialize Databricks client
-        self._client = None
+        self._client: Optional[WorkspaceClient] = None
 
     async def _ensure_auth(self) -> None:
         """Ensure authentication context is initialized."""
@@ -254,7 +254,7 @@ class DatabricksVolumeCallback(KasalCallback):
 
         else:  # Default to text format
             if hasattr(output, "raw"):
-                return output.raw
+                return str(output.raw)
             return str(output)
 
     async def _upload_to_volume(self, file_path: str, content: str) -> str:

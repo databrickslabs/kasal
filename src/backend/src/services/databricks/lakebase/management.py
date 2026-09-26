@@ -4,8 +4,9 @@ Database Management Service for export/import operations with Databricks volumes
 
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
+from sqlalchemy.engine import CursorResult, Result
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import settings
@@ -17,6 +18,11 @@ from src.repositories.database_backup_repository import DatabaseBackupRepository
 # Session is now injected via dependency injection, not created here
 
 logger = LoggerManager.get_instance().system
+
+
+def _rowcount(result: Result[Any]) -> int:
+    """Rows affected by a DML statement (its Result is a CursorResult)."""
+    return cast(CursorResult[Any], result).rowcount
 
 
 class DatabaseManagementService:
@@ -464,16 +470,16 @@ class DatabaseManagementService:
             # IMPORTANT: Read config directly from database_router to avoid circular dependency
             lakebase_enabled = False
             lakebase_instance = None
-            lakebase_config = {}
+            lakebase_config: Dict[str, Any] = {}
             try:
                 from src.db.database_router import get_lakebase_config_from_db
 
                 # Use database_router's function which properly handles fallback DB
-                lakebase_config = await get_lakebase_config_from_db()
+                lakebase_config = await get_lakebase_config_from_db() or {}
                 if lakebase_config:
                     # Lakebase is only truly enabled if migration is completed
                     # This matches the logic in database_router.is_lakebase_enabled()
-                    lakebase_enabled = (
+                    lakebase_enabled = bool(
                         lakebase_config.get("enabled", False)
                         and lakebase_config.get("endpoint")
                         and (
@@ -492,7 +498,8 @@ class DatabaseManagementService:
             # Even if Lakebase is configured, the session might be SQLite if connection failed
             actual_session_db_type = "unknown"
             if self.session and self.session.bind:
-                db_url = str(self.session.bind.url)
+                # AsyncConnection binds carry no .url; they fall to "unknown"
+                db_url = str(getattr(self.session.bind, "url", ""))
                 if "sqlite" in db_url.lower():
                     actual_session_db_type = "sqlite"
                 elif "postgresql" in db_url.lower() or "postgres" in db_url.lower():
@@ -719,21 +726,21 @@ class DatabaseManagementService:
                     ExecutionTrace.run_id.in_(old_exec_ids_stmt)
                 )
                 trace_ref_result = await session.execute(trace_by_ref_stmt)
-                trace_count = trace_ref_result.rowcount
+                trace_count = _rowcount(trace_ref_result)
 
                 # Delete traces linked to old executions by job_id (run_id often NULL)
                 trace_by_jobid_stmt = delete(ExecutionTrace).where(
                     ExecutionTrace.job_id.in_(old_exec_jobids_stmt)
                 )
                 trace_jobid_result = await session.execute(trace_by_jobid_stmt)
-                trace_count += trace_jobid_result.rowcount
+                trace_count += _rowcount(trace_jobid_result)
 
                 # Also delete any orphaned traces older than cutoff by date
                 trace_by_date_stmt = delete(ExecutionTrace).where(
                     ExecutionTrace.created_at < cutoff
                 )
                 trace_date_result = await session.execute(trace_by_date_stmt)
-                trace_count += trace_date_result.rowcount
+                trace_count += _rowcount(trace_date_result)
 
                 await session.flush()
 
@@ -743,13 +750,13 @@ class DatabaseManagementService:
                 # 3. Delete LLM logs inline (no dedicated repo needed)
                 llm_stmt = delete(LLMLog).where(LLMLog.created_at < cutoff)
                 llm_result = await session.execute(llm_stmt)
-                llm_count = llm_result.rowcount
+                llm_count = _rowcount(llm_result)
 
                 # 3b. Delete old ChatMode conversation history (no FK to
                 #     executionhistory; purged by its own timestamp).
                 chat_stmt = delete(ChatHistory).where(ChatHistory.timestamp < cutoff)
                 chat_result = await session.execute(chat_stmt)
-                chat_count = chat_result.rowcount
+                chat_count = _rowcount(chat_result)
 
                 # 3c. Delete old uploaded knowledge embeddings (no FK; purged by
                 #     created_at). NOTE: documentation_embeddings is intentionally
@@ -758,7 +765,7 @@ class DatabaseManagementService:
                     KnowledgeEmbedding.created_at < cutoff
                 )
                 knowledge_result = await session.execute(knowledge_stmt)
-                knowledge_count = knowledge_result.rowcount
+                knowledge_count = _rowcount(knowledge_result)
                 await session.flush()
 
                 # 4. Delete billing usage rows that reference old executions.

@@ -14,9 +14,9 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
-from sqlalchemy import MetaData, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import MetaData, Table, text
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from src.core.base_service import BaseService
 from src.db.base import Base
@@ -158,7 +158,7 @@ def _owner_remediation(stmt: str) -> str:
 class LakebaseSchemaService(BaseService):
     """Service for managing Lakebase database schema operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize Lakebase schema service.
 
@@ -385,7 +385,9 @@ class LakebaseSchemaService(BaseService):
             raise
 
     @staticmethod
-    def _get_dependency_waves(tables) -> Tuple[List[List[str]], Dict[str, Any]]:
+    def _get_dependency_waves(
+        tables: List[Table],
+    ) -> Tuple[List[List[str]], Dict[str, Any]]:
         """Group tables into parallel waves based on FK dependencies.
 
         Tables in the same wave have no FK dependencies on each other,
@@ -436,7 +438,7 @@ class LakebaseSchemaService(BaseService):
         Returns:
             List of (table_name, success, error_message) tuples.
         """
-        results = []
+        results: List[Tuple[str, bool, Optional[str]]] = []
         with engine.begin() as conn:
             # Include public: `CREATE EXTENSION vector` installs the pgvector
             # `vector` type into public, so a search_path of `kasal` alone can't
@@ -482,7 +484,7 @@ class LakebaseSchemaService(BaseService):
     )
 
     @staticmethod
-    async def _exec_ddl_tolerant_async(conn, stmt: str) -> None:
+    async def _exec_ddl_tolerant_async(conn: AsyncConnection, stmt: str) -> None:
         """Run one idempotent DDL statement inside a SAVEPOINT.
 
         The savepoint keeps an orphaned-owner failure (Postgres 42501 'must be
@@ -500,7 +502,7 @@ class LakebaseSchemaService(BaseService):
             raise
 
     @staticmethod
-    def _exec_ddl_tolerant_sync(conn, stmt: str) -> None:
+    def _exec_ddl_tolerant_sync(conn: Connection, stmt: str) -> None:
         """Sync counterpart of _exec_ddl_tolerant_async (savepoint-isolated)."""
         try:
             with conn.begin_nested():
@@ -511,7 +513,7 @@ class LakebaseSchemaService(BaseService):
                 return
             raise
 
-    async def _ensure_doc_embeddings_columns_async(self, conn) -> None:
+    async def _ensure_doc_embeddings_columns_async(self, conn: AsyncConnection) -> None:
         """Bring the documentation_embeddings table up to the pgvector schema (async).
 
         Each DDL runs in its own savepoint and tolerates the orphaned-owner case
@@ -534,7 +536,7 @@ class LakebaseSchemaService(BaseService):
                 "'CREATE EXTENSION IF NOT EXISTS vector;' then re-run initialization."
             )
 
-    def _ensure_doc_embeddings_columns_sync(self, conn) -> None:
+    def _ensure_doc_embeddings_columns_sync(self, conn: Connection) -> None:
         """Bring the documentation_embeddings table up to the pgvector schema (sync)."""
         for stmt in self._DOC_EMB_PLAIN_DDL:
             self._exec_ddl_tolerant_sync(conn, stmt)
@@ -704,7 +706,9 @@ class LakebaseSchemaService(BaseService):
             yield {"type": "error", "message": f"Error creating tables: {e}"}
             raise
 
-    async def set_search_path_async(self, connection, schema: str = "kasal") -> None:
+    async def set_search_path_async(
+        self, connection: AsyncConnection, schema: str = "kasal"
+    ) -> None:
         """
         Set the search path for a database connection (async version).
 
@@ -724,7 +728,9 @@ class LakebaseSchemaService(BaseService):
             logger.error(f"Error setting search path: {e}")
             raise
 
-    def set_search_path_sync(self, connection, schema: str = "kasal") -> None:
+    def set_search_path_sync(
+        self, connection: Connection, schema: str = "kasal"
+    ) -> None:
         """
         Set the search path for a database connection (sync version).
 

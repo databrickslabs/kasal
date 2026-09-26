@@ -1,8 +1,9 @@
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
 from src.core.exceptions import ForbiddenError, KasalError
@@ -17,6 +18,10 @@ from src.services.databricks.workspace.host_guard import (
 )
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 
+if TYPE_CHECKING:
+    from src.services.databricks.secrets.service import DatabricksSecretsService
+    from src.services.settings.api_keys import ApiKeysService
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,8 +31,11 @@ class DatabricksService:
     """
 
     def __init__(
-        self, session, group_id: Optional[str] = None, user_token: Optional[str] = None
-    ):
+        self,
+        session: AsyncSession,
+        group_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
         """
         Initialize the service with session.
 
@@ -45,16 +53,18 @@ class DatabricksService:
         self.group_id = group_id
         self._user_token = user_token
         # Don't create secrets_service here to avoid circular dependency
-        self._secrets_service = None
+        self._secrets_service: Optional["DatabricksSecretsService"] = None
 
     @property
-    def secrets_service(self):
+    def secrets_service(self) -> "DatabricksSecretsService":
         """Lazy load secrets_service to avoid circular dependency."""
         if self._secrets_service is None:
             # Import here to avoid circular imports at module level
             from src.services.databricks.secrets.service import DatabricksSecretsService
 
-            self._secrets_service = DatabricksSecretsService(self.session)
+            self._secrets_service = DatabricksSecretsService(
+                self.session, group_id=self.group_id
+            )
         return self._secrets_service
 
     @staticmethod
@@ -155,7 +165,9 @@ class DatabricksService:
             # Propagate the AI Gateway toggle to the runtime so subsequent LLM /
             # embedding calls route correctly without a restart, and invalidate the
             # cached Databricks auth config so the new flag/workspace reload.
-            self._apply_ai_gateway_env(config_data.get("ai_gateway_enabled", False))
+            self._apply_ai_gateway_env(
+                bool(config_data.get("ai_gateway_enabled", False))
+            )
 
             # New catalog/schema/warehouse/experiment must reach parent-process
             # MLflow tracing on the next dispatch, not after the memo TTL.
@@ -489,7 +501,11 @@ class DatabricksService:
             return False, ""
 
     @classmethod
-    def from_session(cls, session, api_keys_service=None):
+    def from_session(
+        cls,
+        session: AsyncSession,
+        api_keys_service: Optional["ApiKeysService"] = None,
+    ) -> "DatabricksService":
         """
         Create a service instance from a database session.
 

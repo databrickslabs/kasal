@@ -7,13 +7,17 @@ and managing secrets in Databricks Secret Store.
 
 import base64
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import aiohttp
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+if TYPE_CHECKING:
+    from src.services.databricks.workspace.service import DatabricksService
+    from src.services.settings.api_keys import ApiKeysService
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -33,11 +37,12 @@ class DatabricksSecretsService(BaseService):
         self.session = session
         self.group_id = group_id  # SECURITY: Store for multi-tenant API key operations
         self.databricks_repository = DatabricksConfigRepository(session)
-        self.api_keys_service = None
-        self._databricks_service = None  # Will be created lazily
+        self.api_keys_service: Optional["ApiKeysService"] = None
+        # Created lazily
+        self._databricks_service: Optional["DatabricksService"] = None
 
     @property
-    def databricks_service(self):
+    def databricks_service(self) -> "DatabricksService":
         """Lazy load databricks_service to avoid circular dependency."""
         if self._databricks_service is None:
             # Import here to avoid circular imports at module level
@@ -46,7 +51,7 @@ class DatabricksSecretsService(BaseService):
             self._databricks_service = DatabricksService(self.session)
         return self._databricks_service
 
-    def set_databricks_service(self, databricks_service):
+    def set_databricks_service(self, databricks_service: "DatabricksService") -> None:
         """
         Set the databricks_service to resolve circular dependency.
 
@@ -55,10 +60,10 @@ class DatabricksSecretsService(BaseService):
         """
         # This method is needed to prevent circular dependency issues
         # when DatabricksService and DatabricksSecretsService reference each other
-        if not hasattr(self, "databricks_service") or self.databricks_service is None:
-            self.databricks_service = databricks_service
+        if self._databricks_service is None:
+            self._databricks_service = databricks_service
 
-    def set_api_keys_service(self, api_keys_service):
+    def set_api_keys_service(self, api_keys_service: "ApiKeysService") -> None:
         """
         Set the API keys service for accessing API keys.
 
@@ -77,13 +82,6 @@ class DatabricksSecretsService(BaseService):
         Raises:
             ValueError: If Databricks is not configured properly
         """
-        # If databricks_service is not set, we need to import it here
-        if self.databricks_service is None:
-            # Import here to avoid circular imports
-            from src.services.databricks.workspace.service import DatabricksService
-
-            self.databricks_service = DatabricksService(self.session)
-
         config = await self.databricks_service.get_databricks_config()
         if not config:
             raise ValueError("Databricks configuration not found")
@@ -115,13 +113,6 @@ class DatabricksSecretsService(BaseService):
             List of secret metadata dicts (value field is always empty)
         """
         try:
-            # If databricks_service is not set, we need to import it here
-            if self.databricks_service is None:
-                # Import here to avoid circular imports
-                from src.services.databricks.workspace.service import DatabricksService
-
-                self.databricks_service = DatabricksService(self.session)
-
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
@@ -192,13 +183,6 @@ class DatabricksSecretsService(BaseService):
             Secret value if found, else empty string
         """
         try:
-            # If databricks_service is not set, we need to import it here
-            if self.databricks_service is None:
-                # Import here to avoid circular imports
-                from src.services.databricks.workspace.service import DatabricksService
-
-                self.databricks_service = DatabricksService(self.session)
-
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
@@ -228,7 +212,7 @@ class DatabricksSecretsService(BaseService):
                     if response.status == 200:
                         result = await response.json()
                         # Handle base64 encoded values from Databricks
-                        secret_value_encoded = result.get("value", "")
+                        secret_value_encoded: str = result.get("value", "")
                         try:
                             secret_value = base64.b64decode(
                                 secret_value_encoded
@@ -261,13 +245,6 @@ class DatabricksSecretsService(BaseService):
             True if successful, else False
         """
         try:
-            # If databricks_service is not set, we need to import it here
-            if self.databricks_service is None:
-                # Import here to avoid circular imports
-                from src.services.databricks.workspace.service import DatabricksService
-
-                self.databricks_service = DatabricksService(self.session)
-
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
@@ -323,13 +300,6 @@ class DatabricksSecretsService(BaseService):
             True if successful, else False
         """
         try:
-            # If databricks_service is not set, we need to import it here
-            if self.databricks_service is None:
-                # Import here to avoid circular imports
-                from src.services.databricks.workspace.service import DatabricksService
-
-                self.databricks_service = DatabricksService(self.session)
-
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
@@ -445,7 +415,7 @@ class DatabricksSecretsService(BaseService):
 
             # Use the service method to get the API key value
             token = await self.api_keys_service.get_api_key_value(
-                "DATABRICKS_PERSONAL_ACCESS_TOKEN"
+                key_name="DATABRICKS_PERSONAL_ACCESS_TOKEN", group_id=self.group_id
             )
             return token or ""
         except Exception as e:
@@ -471,6 +441,8 @@ class DatabricksSecretsService(BaseService):
             from src.services.settings.api_keys import ApiKeysService
 
             # SECURITY: Pass group_id for multi-tenant isolation
+            if self.group_id is None:
+                raise ValueError("SECURITY: group_id is required")
             key = await ApiKeysService.get_provider_api_key(
                 provider, group_id=self.group_id
             )
@@ -486,7 +458,7 @@ class DatabricksSecretsService(BaseService):
         Returns:
             List[str]: List of available tokens
         """
-        tokens = []
+        tokens: List[str] = []
         try:
             # Check for all possible Databricks token types
             token_keys = [
@@ -498,7 +470,9 @@ class DatabricksSecretsService(BaseService):
             for key in token_keys:
                 if not self.api_keys_service:
                     continue
-                value = await self.api_keys_service.get_api_key_value(key)
+                value = await self.api_keys_service.get_api_key_value(
+                    key_name=key, group_id=self.group_id
+                )
                 if value:
                     tokens.append(value)
 
