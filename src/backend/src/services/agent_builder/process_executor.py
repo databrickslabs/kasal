@@ -148,8 +148,11 @@ def run_crew_in_process(
     import os
     import sys
 
-    # Mark that we're in subprocess mode for logging purposes
-    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    # FIRST: allow-listed environment, subprocess mode, execution id and the
+    # base DATABASE_TYPE (see subprocess_bootstrap.prepare_child_environment).
+    from src.services.execution.subprocess_bootstrap import prepare_child_environment
+
+    prepare_child_environment(execution_id, "crew")
 
     # Pin the engine for this whole interpreter, from the payload the parent
     # decided it with. Process-wide rather than a ContextVar because a crew
@@ -158,17 +161,6 @@ def run_crew_in_process(
     from src.services.execution.harness_choice import adopt_in_subprocess
 
     adopt_in_subprocess(crew_config if isinstance(crew_config, dict) else None)
-    # CRITICAL: Store execution_id in environment for orphaned process detection
-    # This allows us to find and terminate this process even after server reloads
-    os.environ["KASAL_EXECUTION_ID"] = execution_id
-
-    # Ensure DATABASE_TYPE is set correctly in subprocess
-    # The subprocess needs to know which database to use
-    if "DATABASE_TYPE" not in os.environ:
-        from src.config.settings import settings
-
-        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
-        print(f"[SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
     # No monkey-patches to install: kasal_engine carries the patched
     # behavior natively in both the parent and this spawned subprocess.

@@ -153,28 +153,18 @@ def run_flow_in_process(
     import os
     import sys
 
-    # Mark that we're in subprocess mode for logging purposes
-    os.environ["FLOW_SUBPROCESS_MODE"] = "true"
-    # CRITICAL: Set CREW_SUBPROCESS_MODE so the OTel exporter writes directly to the DB
-    os.environ["CREW_SUBPROCESS_MODE"] = "true"
+    # FIRST: allow-listed environment, subprocess mode (flow AND crew, so the
+    # OTel exporter writes directly to the DB), debug tracing, execution id and
+    # the base DATABASE_TYPE (subprocess_bootstrap.prepare_child_environment).
+    from src.services.execution.subprocess_bootstrap import prepare_child_environment
+
+    prepare_child_environment(execution_id, "flow")
 
     # Pin this interpreter's engine from the payload — same contract as the crew
     # subprocess; see services/execution/harness_choice.py.
     from src.services.execution.harness_choice import adopt_in_subprocess
 
     adopt_in_subprocess(flow_config if isinstance(flow_config, dict) else None)
-    # Set debug tracing flag (default to true for comprehensive logging)
-    os.environ["CREWAI_DEBUG_TRACING"] = "true"
-    # CRITICAL: Store execution_id in environment for orphaned process detection
-    # This allows us to find and terminate this process even after server reloads
-    os.environ["KASAL_EXECUTION_ID"] = execution_id
-
-    # Ensure DATABASE_TYPE is set correctly in subprocess
-    if "DATABASE_TYPE" not in os.environ:
-        from src.config.settings import settings
-
-        os.environ["DATABASE_TYPE"] = settings.DATABASE_TYPE or "postgres"
-        print(f"[FLOW_SUBPROCESS] Set DATABASE_TYPE to: {os.environ['DATABASE_TYPE']}")
 
     # Early validation of parameters
     import json
