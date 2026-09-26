@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, TypeVar, Union
 
 from src.services.tools.a2a_agent_tool import A2AAgentTool
 from src.services.tools.async_bridge import run_async_with_context
@@ -8,6 +8,40 @@ from src.services.tools.base import BaseTool
 
 # Import only the CrewAI tools we're keeping
 from src.services.tools.image_generation import ImageGenerationTool
+
+# Optional tool classes (None when their module failed to import) — see optional_tools.
+from src.services.tools.optional_tools import (  # tests patch these names here
+    AgentBricksTool,
+    ConfigGeneratorTool,
+    DatabricksDashboardCreatorTool,
+    DatabricksJobsTool,
+    DatabricksKnowledgeSearchTool,
+    DaxToSqlTranslatorTool,
+    GenieSpaceGeneratorTool,
+    GenieTool,
+    GmailTool,
+    MCPTool,
+    MeasureConversionPipelineTool,
+    MetricViewDeployerTool,
+    MetricViewValidatorTool,
+    MqueryConversionPipelineTool,
+    PbiMeasureAllocatorTool,
+    PBIVisualUCMVMapperTool,
+    PerplexitySearchTool,
+    PipelineConfigGeneratorTool,
+    PowerBIAnalysisTool,
+    PowerBIConnectorTool,
+    PowerBIDaxExecutorTool,
+    PowerBIFieldParametersCalculationGroupsTool,
+    PowerBIHierarchiesTool,
+    PowerBIMetadataReducerTool,
+    PowerBIRelationshipsTool,
+    PowerBIReportReferencesTool,
+    PowerBISemanticModelDaxTool,
+    PowerBISemanticModelFetcherTool,
+    UCMetricViewGeneratorTool,
+    UCMVGenieConfigGeneratorTool,
+)
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
 from src.services.tools.tool_policies import extract_tool_policies, stamp_tool_policies
@@ -16,225 +50,16 @@ from src.services.tools.tool_policies import extract_tool_policies, stamp_tool_p
 # access_token, ...) before they are written to logs / the volume log sink.
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 
-# Import custom tools - Using proper import paths
-try:
-    from .perplexity_tool import PerplexitySearchTool
-except ImportError:
-    try:
-        from .perplexity_tool import PerplexitySearchTool
-    except ImportError:
-        PerplexitySearchTool = None
-        logging.warning("Could not import PerplexitySearchTool")
-
-try:
-    from .genie_tool import GenieTool
-except ImportError:
-    try:
-        from .genie_tool import GenieTool
-    except ImportError:
-        GenieTool = None
-        logging.warning("Could not import GenieTool")
-
-try:
-    from .agentbricks_tool import AgentBricksTool
-except ImportError:
-    try:
-        from .agentbricks_tool import AgentBricksTool
-    except ImportError:
-        AgentBricksTool = None
-        logging.warning("Could not import AgentBricksTool")
-
-try:
-    from .databricks_jobs_tool import DatabricksJobsTool
-except ImportError:
-    try:
-        from .databricks_jobs_tool import DatabricksJobsTool
-    except ImportError:
-        DatabricksJobsTool = None
-        logging.warning("Could not import DatabricksJobsTool")
-
-try:
-    from .databricks_knowledge_search_tool import DatabricksKnowledgeSearchTool
-except ImportError:
-    try:
-        from .databricks_knowledge_search_tool import DatabricksKnowledgeSearchTool
-    except ImportError:
-        DatabricksKnowledgeSearchTool = None
-        logging.warning("Could not import DatabricksKnowledgeSearchTool")
-
-try:
-    from .gmail_tool import GmailTool
-except ImportError:
-    GmailTool = None
-    logging.warning("Could not import GmailTool")
-
-try:
-    from .powerbi_analysis_tool import PowerBIAnalysisTool
-except ImportError:
-    try:
-        from .powerbi_analysis_tool import PowerBIAnalysisTool
-    except ImportError:
-        PowerBIAnalysisTool = None
-        logging.warning("Could not import PowerBIAnalysisTool")
-
-# MCPTool - Import from mcp_adapter
-try:
-    from src.services.tools.mcp_adapter import MCPTool
-except ImportError:
-    MCPTool = None
-    logging.warning("Could not import MCPTool - MCP integration may not be available")
-
-# Converter tools - Power BI connector and universal pipeline
-try:
-    from .measure_conversion_pipeline_tool import MeasureConversionPipelineTool
-    from .powerbi_connector_tool import PowerBIConnectorTool
-except ImportError as e:
-    PowerBIConnectorTool = None
-    MeasureConversionPipelineTool = None
-    logging.warning(f"Could not import converter tools: {e}")
-
-# M-Query Conversion Pipeline Tool
-try:
-    from .mquery_conversion_pipeline_tool import MqueryConversionPipelineTool
-except ImportError as e:
-    MqueryConversionPipelineTool = None
-    logging.warning(f"Could not import MqueryConversionPipelineTool: {e}")
-
-# Power BI Relationships Tool
-try:
-    from .powerbi_relationships_tool import PowerBIRelationshipsTool
-except ImportError as e:
-    PowerBIRelationshipsTool = None
-    logging.warning(f"Could not import PowerBIRelationshipsTool: {e}")
-
-# Power BI Hierarchies Tool
-try:
-    from .powerbi_hierarchies_tool import PowerBIHierarchiesTool
-except ImportError as e:
-    PowerBIHierarchiesTool = None
-    logging.warning(f"Could not import PowerBIHierarchiesTool: {e}")
-
-# Power BI Field Parameters & Calculation Groups Tool
-try:
-    from .powerbi_field_parameters_calculation_groups_tool import (
-        PowerBIFieldParametersCalculationGroupsTool,
-    )
-except ImportError as e:
-    PowerBIFieldParametersCalculationGroupsTool = None
-    logging.warning(
-        f"Could not import PowerBIFieldParametersCalculationGroupsTool: {e}"
-    )
-
-# Power BI Report References Tool
-try:
-    from .powerbi_report_references_tool import PowerBIReportReferencesTool
-except ImportError as e:
-    PowerBIReportReferencesTool = None
-    logging.warning(f"Could not import PowerBIReportReferencesTool: {e}")
-
-# Power BI Semantic Model Fetcher Tool
-try:
-    from .powerbi_semantic_model_fetcher_tool import PowerBISemanticModelFetcherTool
-except ImportError as e:
-    PowerBISemanticModelFetcherTool = None
-    logging.warning(f"Could not import PowerBISemanticModelFetcherTool: {e}")
-
-# Power BI Semantic Model DAX Generator Tool
-try:
-    from .powerbi_semantic_model_dax_tool import PowerBISemanticModelDaxTool
-except ImportError as e:
-    PowerBISemanticModelDaxTool = None
-    logging.warning(f"Could not import PowerBISemanticModelDaxTool: {e}")
-
-# Power BI Metadata Reducer Tool
-try:
-    from .powerbi_metadata_reducer_tool import PowerBIMetadataReducerTool
-except ImportError as e:
-    PowerBIMetadataReducerTool = None
-    logging.warning(f"Could not import PowerBIMetadataReducerTool: {e}")
-
-# Power BI DAX Executor Tool
-try:
-    from .powerbi_dax_executor_tool import PowerBIDaxExecutorTool
-except Exception as e:
-    PowerBIDaxExecutorTool = None
-    logging.warning(f"Could not import PowerBIDaxExecutorTool: {e}")
-
-# UC Metric View Tools
-try:
-    from .dax_to_sql_translator_tool import DaxToSqlTranslatorTool
-except ImportError as e:
-    DaxToSqlTranslatorTool = None
-    logging.warning(f"Could not import DaxToSqlTranslatorTool: {e}")
-
-try:
-    from .uc_metric_view_generator_tool import UCMetricViewGeneratorTool
-except ImportError as e:
-    UCMetricViewGeneratorTool = None
-    logging.warning(f"Could not import UCMetricViewGeneratorTool: {e}")
-
-try:
-    from .pbi_measure_allocator_tool import PbiMeasureAllocatorTool
-except ImportError as e:
-    PbiMeasureAllocatorTool = None
-    logging.warning(f"Could not import PbiMeasureAllocatorTool: {e}")
-
-try:
-    from .metric_view_deployer_tool import MetricViewDeployerTool
-except ImportError as e:
-    MetricViewDeployerTool = None
-    logging.warning(f"Could not import MetricViewDeployerTool: {e}")
-
-try:
-    from .metric_view_validator_tool import MetricViewValidatorTool
-except ImportError as e:
-    MetricViewValidatorTool = None
-    logging.warning(f"Could not import MetricViewValidatorTool: {e}")
-
-# Config Generator Tool
-try:
-    from .config_generator_tool import ConfigGeneratorTool
-except ImportError as e:
-    ConfigGeneratorTool = None
-    logging.warning(f"Could not import ConfigGeneratorTool: {e}")
-
-# Pipeline Config Generator Tool (API-direct, no LLM)
-try:
-    from .pipeline_config_generator_tool import PipelineConfigGeneratorTool
-except ImportError as e:
-    PipelineConfigGeneratorTool = None
-    logging.warning(f"Could not import PipelineConfigGeneratorTool: {e}")
-
-# Genie Space Generator Tool
-try:
-    from .genie_space_generator_tool import GenieSpaceGeneratorTool
-except ImportError as e:
-    GenieSpaceGeneratorTool = None
-    logging.warning(f"Could not import GenieSpaceGeneratorTool: {e}")
-
-# UCMV Genie Space Config Generator Tool
-try:
-    from .ucmv_genie_config_generator_tool import UCMVGenieConfigGeneratorTool
-except ImportError as e:
-    UCMVGenieConfigGeneratorTool = None
-    logging.warning(f"Could not import UCMVGenieConfigGeneratorTool: {e}")
-
-# PBI Visual-UCMV Mapper Tool (94)
-try:
-    from .pbi_visual_ucmv_mapper_tool import PBIVisualUCMVMapperTool
-except ImportError as e:
-    PBIVisualUCMVMapperTool = None
-    logging.warning(f"Could not import PBIVisualUCMVMapperTool: {e}")
-
-# Databricks Dashboard Creator Tool (95)
-try:
-    from .databricks_dashboard_creator_tool import DatabricksDashboardCreatorTool
-except ImportError as e:
-    DatabricksDashboardCreatorTool = None
-    logging.warning(f"Could not import DatabricksDashboardCreatorTool: {e}")
-
 # Setup logger
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+# What create_tool returns: a tool, a list of tools (MCP / A2A fan-out), the
+# ``(True, [])`` MCPTool marker, or None when nothing could be built.
+ToolBuildResult = Optional[Union[BaseTool, list, Tuple[bool, list]]]
+# A registered tool class, as the factory calls it. MCPTool is registered only as
+# a marker and never instantiated through this.
+_ToolCtor = Callable[..., BaseTool]
 
 # Tools built through the generic branch of ``create_tool`` that need a provider
 # key. The key is read from the workspace's ApiKeysService and passed as
@@ -248,6 +73,7 @@ from src.db.session import (  # noqa: E402 - import follows module initializatio
     routed_scoped_session,
 )
 from src.schemas.tool import (  # noqa: E402 - import follows module initialization
+    ToolResponse,
     ToolUpdate,
 )
 from src.services.tools.tool_service import (  # noqa: E402 - import follows module initialization
@@ -259,7 +85,12 @@ from src.utils.encryption_utils import (  # noqa: E402 - import follows module i
 
 
 class ToolFactory:
-    def __init__(self, config, api_keys_service=None, user_token=None):
+    def __init__(
+        self,
+        config: Any,
+        api_keys_service: Optional[Any] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
         """
         Initialize the tool factory with configuration
 
@@ -272,8 +103,8 @@ class ToolFactory:
         self.api_keys_service = api_keys_service
         self.user_token = user_token
         # Store tools by both ID and title for easy lookup
-        self._available_tools: Dict[str, object] = {}
-        self._tool_implementations = {}
+        self._available_tools: Dict[str, ToolResponse] = {}
+        self._tool_implementations: Dict[str, Any] = {}
 
         # Map tool names to their implementations - ONLY THE TOOLS WE'RE KEEPING
         self._tool_implementations = {
@@ -483,7 +314,12 @@ class ToolFactory:
             return (False, f"Authentication validation error: {str(e)}")
 
     @classmethod
-    async def create(cls, config, api_keys_service=None, user_token=None):
+    async def create(
+        cls,
+        config: Any,
+        api_keys_service: Optional[Any] = None,
+        user_token: Optional[str] = None,
+    ) -> "ToolFactory":
         """
         Async factory method to create and initialize a ToolFactory instance.
 
@@ -499,7 +335,7 @@ class ToolFactory:
         await instance.initialize()
         return instance
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize the tool factory asynchronously"""
         if not self._initialized:
             try:
@@ -515,7 +351,7 @@ class ToolFactory:
                 logger.error(f"Error during async initialization: {e}")
                 raise
 
-    def _sync_load_available_tools(self):
+    def _sync_load_available_tools(self) -> None:
         """
         Synchronous method to load available tools
         This uses a new event loop - DO NOT CALL from inside an async context
@@ -550,7 +386,7 @@ class ToolFactory:
 
             logger.error(traceback.format_exc())
 
-    async def _load_available_tools_async(self):
+    async def _load_available_tools_async(self) -> None:
         """Load all available tools from the service asynchronously"""
         try:
             # Get services using session factory
@@ -600,7 +436,7 @@ class ToolFactory:
 
             logger.error(traceback.format_exc())
 
-    def get_tool_info(self, tool_identifier: Union[str, int]) -> Optional[object]:
+    def get_tool_info(self, tool_identifier: Union[str, int]) -> Optional[ToolResponse]:
         """
         Get tool information by ID or title
 
@@ -681,7 +517,7 @@ class ToolFactory:
             if not group_id and self.api_keys_service:
                 group_id = getattr(self.api_keys_service, "group_id", None)
 
-            async def _get_key_on_own_session(session):
+            async def _get_key_on_own_session(session: Any) -> Optional[str]:
                 from src.services.settings.api_keys import ApiKeysService
 
                 # SECURITY: Create service with group_id for multi-tenant isolation
@@ -694,11 +530,13 @@ class ToolFactory:
                 return None
 
             # Own session (router-selected) to avoid transaction conflicts
-            decrypted_value = await execute_db_operation_smart(_get_key_on_own_session)
+            own_session_value = await execute_db_operation_smart(
+                _get_key_on_own_session
+            )
 
-            if decrypted_value:
+            if own_session_value:
                 logger.info(f"Using {key_name} from isolated database operation")
-                return decrypted_value
+                return own_session_value
             else:
                 logger.warning(f"{key_name} not found via isolated database operation")
                 return None
@@ -748,7 +586,9 @@ class ToolFactory:
             logger.warning(f"Continuing without {key_name}")
             return None
 
-    def _run_in_new_loop(self, async_func, *args, **kwargs):
+    def _run_in_new_loop(
+        self, async_func: Callable[..., Awaitable[_T]], *args: Any, **kwargs: Any
+    ) -> _T:
         """Run an async function in a new event loop in a separate thread"""
         loop = asyncio.new_event_loop()
         try:
@@ -758,7 +598,7 @@ class ToolFactory:
             loop.close()
 
     def update_tool_config(
-        self, tool_identifier: Union[str, int], config_update: Dict[str, any]
+        self, tool_identifier: Union[str, int], config_update: Dict[str, Any]
     ) -> bool:
         """
         Update a tool's configuration through the service layer
@@ -818,8 +658,11 @@ class ToolFactory:
             return False
 
     async def _update_tool_config_async(
-        self, tool_identifier, tool_info, config_update
-    ):
+        self,
+        tool_identifier: Union[str, int],
+        tool_info: Any,
+        config_update: Dict[str, Any],
+    ) -> bool:
         """Async implementation of tool config update"""
         # Get services using session factory
 
@@ -869,7 +712,7 @@ class ToolFactory:
         tool_identifier: Union[str, int],
         result_as_answer: bool = False,
         tool_config_override: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Union[BaseTool, list]]:
+    ) -> ToolBuildResult:
         """
         Create a tool instance based on its identifier.
 
@@ -885,7 +728,7 @@ class ToolFactory:
         # must not reach `tool_class(**tool_config)`) and stashes them here;
         # stamp them on the instance(s) so the engine hooks read one attribute
         # regardless of which branch built the tool.
-        self._pending_policies = {}
+        self._pending_policies: Dict[str, Dict[str, Any]] = {}
         result = self._create_tool_impl(
             tool_identifier, result_as_answer, tool_config_override
         )
@@ -916,7 +759,7 @@ class ToolFactory:
         tool_identifier: Union[str, int],
         result_as_answer: bool = False,
         tool_config_override: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Union[BaseTool, list]]:
+    ) -> ToolBuildResult:
         # Get tool info from our cached tools obtained from the service
         tool_info = self.get_tool_info(tool_identifier)
         if not tool_info:
@@ -936,7 +779,7 @@ class ToolFactory:
             return None
 
         tool_name = tool_info.title
-        tool_class = self._tool_implementations.get(tool_name)
+        tool_class: Optional[_ToolCtor] = self._tool_implementations.get(tool_name)
 
         if not tool_class:
             logger.warning(f"No implementation found for tool '{tool_name}'")
@@ -1051,12 +894,10 @@ class ToolFactory:
                             f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config"
                         )
 
-                    # Inject key execution input values into tool_config if not already present.
-                    # This ensures tools like the DAX Generator get user_question reliably
-                    # instead of depending on the LLM agent to pass it at runtime.
-                    # Context enrichment fields are also injected so dynamic crew inputs
-                    # (active_filters, business_mappings, etc.) reach the LLM generation stage.
-                    _empty_values = (None, {}, [], "")
+                    # Inject key execution inputs (user_question, context enrichment such as
+                    # active_filters/business_mappings) into tool_config when absent, so tools
+                    # like the DAX Generator get them without relying on the LLM agent.
+                    _empty_values: tuple = (None, {}, [], "")
                     for input_key in [
                         "user_question",
                         "active_filters",
@@ -1387,10 +1228,12 @@ class ToolFactory:
                                 DatabricksConfigProvider,
                             )
 
-                            async def get_databricks_config():
+                            async def get_databricks_config() -> Optional[str]:
                                 config = await DatabricksConfigProvider.get()
                                 if config and config.workspace_url:
-                                    workspace_url = config.workspace_url.rstrip("/")
+                                    workspace_url = str(config.workspace_url).rstrip(
+                                        "/"
+                                    )
                                     if not workspace_url.startswith("https://"):
                                         workspace_url = f"https://{workspace_url}"
                                     return workspace_url
@@ -1460,7 +1303,7 @@ class ToolFactory:
                     f"GenieTool raw tool_config: {mask_sensitive_fields(tool_config)}"
                 )
                 logger.info(
-                    f"GenieTool tool_config_override: {mask_sensitive_fields(tool_config_override)}"
+                    f"GenieTool tool_config_override: {mask_sensitive_fields(tool_config_override or {})}"
                 )
 
                 # Create a copy of the config
@@ -1756,7 +1599,7 @@ class ToolFactory:
                     f"AgentBricksTool raw tool_config: {mask_sensitive_fields(tool_config)}"
                 )
                 logger.info(
-                    f"AgentBricksTool tool_config_override: {mask_sensitive_fields(tool_config_override)}"
+                    f"AgentBricksTool tool_config_override: {mask_sensitive_fields(tool_config_override or {})}"
                 )
 
                 # Create a copy of the config
@@ -1919,9 +1762,8 @@ class ToolFactory:
                     # DO NOT PASS execution_id - we want to search all documents!
                     # "execution_id": self.config.get('execution_id') or self.config.get('run_id'),
                     "user_token": self.user_token,
-                    # Per-user knowledge isolation: search only returns chunks
-                    # uploaded by the executing user (set by the engine from
-                    # the group context).
+                    # Per-user knowledge isolation: search only returns chunks uploaded
+                    # by the executing user (set by the engine from the group context).
                     "user_email": self.config.get("user_email"),
                 }
                 # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
@@ -1933,8 +1775,9 @@ class ToolFactory:
                     sorted(tool_args),
                 )
 
-                tool = DatabricksKnowledgeSearchTool(**tool_args)
-                return tool
+                if DatabricksKnowledgeSearchTool is None:  # its module failed to import
+                    return None
+                return DatabricksKnowledgeSearchTool(**tool_args)
 
             elif tool_name == "Power BI Comprehensive Analysis Tool":
                 # Create Power BI Comprehensive Analysis Tool with Power BI and LLM configuration
@@ -2418,27 +2261,29 @@ class ToolFactory:
             logger.error(traceback.format_exc())
             return None
 
-    def register_tool_implementation(self, tool_name: str, tool_class):
+    def register_tool_implementation(self, tool_name: str, tool_class: Any) -> None:
         """Register a tool implementation class for a given tool name"""
         self._tool_implementations[tool_name] = tool_class
         logger.info(f"Registered tool implementation for {tool_name}")
 
-    def register_tool_implementations(self, implementations_dict: Dict[str, object]):
+    def register_tool_implementations(
+        self, implementations_dict: Dict[str, object]
+    ) -> None:
         """Register multiple tool implementations at once"""
         self._tool_implementations.update(implementations_dict)
         logger.info(f"Registered {len(implementations_dict)} tool implementations")
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Clean up resources used by the factory
         """
         logger.info("Cleaning up tool factory resources")
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup resources when the object is garbage collected"""
         self.cleanup()
 
-    async def cleanup_after_crew_execution(self):
+    async def cleanup_after_crew_execution(self) -> None:
         """
         Clean up resources after a crew execution.
         This is intended to be called after a crew has finished its work.
@@ -2458,7 +2303,7 @@ class ToolFactory:
 
                 with ThreadPoolExecutor() as pool:
 
-                    def run_cleanup():
+                    def run_cleanup() -> None:
                         try:
                             self.cleanup()
                             logger.info("Cleanup completed in background thread")

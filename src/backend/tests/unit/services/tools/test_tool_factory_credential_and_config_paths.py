@@ -1452,7 +1452,8 @@ class TestDatabricksJobsToolAuthPaths:
 
 
 class TestImportFallbackCoverage:
-    """Covers the import-time ``except ImportError`` fallbacks in tool_factory."""
+    """Covers the import-time ``except ImportError`` fallbacks (optional_tools,
+    re-exported by tool_factory)."""
 
     def test_perplexity_import_fallback_sets_none(self):
         """When PerplexitySearchTool cannot be imported, the name falls back to None.
@@ -1479,7 +1480,8 @@ class TestImportFallbackCoverage:
         import importlib.util
         import sys
 
-        origin = importlib.util.find_spec("src.services.tools.tool_factory").origin
+        # The fallbacks live in optional_tools (tool_factory re-exports the names).
+        origin = importlib.util.find_spec("src.services.tools.optional_tools").origin
         spec = importlib.util.spec_from_file_location(
             "src.services.tools._tool_factory_fallback_probe", origin
         )
