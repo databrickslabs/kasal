@@ -365,10 +365,12 @@ async def test_update_group_success():
     group.name = "Old"
     group.updated_at = None
     svc.group_repo.get = AsyncMock(return_value=group)
-    svc.group_repo.update = AsyncMock(return_value=group)
+    svc.group_repo.add = AsyncMock(return_value=group)
 
     result = await svc.update_group("g1", name="New")
-    assert result is not None
+    assert result is group
+    assert group.name == "New"
+    svc.group_repo.add.assert_awaited_once_with(group)
 
 
 # ---------------------------------------------------------------------------

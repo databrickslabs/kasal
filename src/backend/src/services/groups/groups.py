@@ -310,7 +310,9 @@ class GroupService:
                 setattr(group, field, value)
 
         group.updated_at = datetime.utcnow()
-        return await self.group_repo.update(group)
+        # The row is already loaded and modified in this session: flush it.
+        # (`update(id, values)` takes a key and a dict, not the object.)
+        return await self.group_repo.add(group)
 
     async def get_group_user_count(self, group_id: str) -> int:
         """
