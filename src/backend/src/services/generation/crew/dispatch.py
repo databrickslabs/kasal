@@ -2,15 +2,26 @@
 
 import asyncio
 import uuid
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.core.events.bus import current_event_context
 from src.core.sse_manager import sse_manager
 from src.services.chat.streaming_request import streaming_request_for
 
+if TYPE_CHECKING:
+    from src.schemas.dispatcher import DispatcherRequest
+    from src.services.generation.crews import CrewGenerationService
+    from src.utils.user_context import GroupContext
+
 
 async def dispatch_progressive(
-    service, request, prompt, tools, group_context, mlflow_enabled
-):
+    service: "CrewGenerationService",
+    request: "DispatcherRequest",
+    prompt: Optional[str],
+    tools: Optional[List[Any]],
+    group_context: "GroupContext",
+    mlflow_enabled: bool,
+) -> Dict[str, Any]:
     trace_job_id = current_event_context().get("generation_job_id")
     generation_id = trace_job_id or str(uuid.uuid4())
     sse_manager.register_job_owner(

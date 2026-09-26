@@ -8,7 +8,7 @@ using LLM models and prompt templates.
 import json
 import logging
 import traceback
-from typing import Optional
+from typing import Any, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.schemas.template_generation import (
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class TemplateGenerationService:
     """Service for template generation operations."""
 
-    def __init__(self, session, group_id: str):
+    def __init__(self, session: Any, group_id: str):
         """
         Initialize the service with session.
 

@@ -54,7 +54,10 @@ from src.schemas.deep_research import (
     DEEP_RESEARCH_ENVELOPE_SCHEMA,
     DEFAULT_DEEP_GATE,
 )
-from src.services.execution.config.budget_profile import resolve_budget_profile
+from src.services.execution.config.budget_profile import (
+    BudgetProfile,
+    resolve_budget_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +120,7 @@ def apply_answer_mode(
     )
 
 
-def _apply_agent_budget(spec: Dict[str, Any], profile) -> None:
+def _apply_agent_budget(spec: Dict[str, Any], profile: BudgetProfile) -> None:
     """Per-agent caps: the mode's numbers are a FLOOR, not a default.
 
     This was ``setdefault`` — "an explicit value in the plan is a decision, and
@@ -151,7 +154,7 @@ def _positive(value: Any) -> int:
 def _apply_task_verification(
     entry: Dict[str, Any],
     source: Dict[str, Any],
-    profile,
+    profile: BudgetProfile,
 ) -> None:
     """Turn on the verification that was already generated for this task."""
     # THE two-line fix the audit found: the guardrail exists, has always
