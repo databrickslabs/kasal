@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Run } from '../../api/execution/ExecutionHistoryService';
+import { useShallow } from 'zustand/react/shallow';
 import { useRunStatusStore } from '../../store/runStatus';
 import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +31,13 @@ export const useRunHistory = (jobIds?: string[]) => {
     error: workspaceError,
     fetchInitialRunHistory,
     setError
-  } = useRunStatusStore();
+  } = useRunStatusStore(useShallow(state => ({
+    runHistory: state.runHistory,
+    isLoading: state.isLoading,
+    error: state.error,
+    fetchInitialRunHistory: state.fetchInitialRunHistory,
+    setError: state.setError,
+  })));
 
   const runHistory = isScoped ? scoped.runs : workspaceRuns;
   const isLoading = isScoped ? scoped.loading : workspaceLoading;

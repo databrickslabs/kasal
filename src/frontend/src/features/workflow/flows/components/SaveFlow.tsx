@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { uniqueBy } from '../../../../shared/lib/collections';
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
@@ -25,7 +26,10 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
 
-  const { activeCanvasId, updateCanvasFlowInfo } = useBuilderCanvasStore();
+  const { activeCanvasId, updateCanvasFlowInfo } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    updateCanvasFlowInfo: state.updateCanvasFlowInfo,
+  })));
 
   // Listen for the custom event to open the save flow dialog
   useEffect(() => {

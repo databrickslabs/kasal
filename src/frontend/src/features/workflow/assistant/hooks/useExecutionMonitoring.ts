@@ -71,7 +71,7 @@ export const useExecutionMonitoring = (
   }, [executingJobId, recoveryKey]);
 
   // Get Zustand store methods
-  const { addMessage } = useChatMessagesStore();
+  const addMessage = useChatMessagesStore(state => state.addMessage);
 
   // Listen for execution events
   useEffect(() => {

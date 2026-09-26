@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../../../api/chat/ChatHistoryService';
@@ -10,7 +11,10 @@ export const useChatSession = (providedChatSessionId?: string) => {
   const [sessionId, setSessionId] = useState<string>(providedChatSessionId || uuidv4());
 
   // Use Zustand store for messages
-  const { setMessages: setZustandMessages, addMessage } = useChatMessagesStore();
+  const { setMessages: setZustandMessages, addMessage } = useChatMessagesStore(useShallow(state => ({
+    setMessages: state.setMessages,
+    addMessage: state.addMessage,
+  })));
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [currentSessionName, setCurrentSessionName] = useState('New Chat');

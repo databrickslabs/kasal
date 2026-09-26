@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Typography,
@@ -55,7 +56,11 @@ import { matchesSearch } from './searchApiKeys';
 
 function APIKeys(): JSX.Element {
   const { secrets: apiKeys, loading, error, updateSecrets: updateApiKeys } = useAPIKeys();
-  const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore();
+  const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore(useShallow(state => ({
+    editDialogOpen: state.editDialogOpen,
+    providerToEdit: state.providerToEdit,
+    closeApiKeyEditor: state.closeApiKeyEditor,
+  })));
   const [editDialog, setEditDialog] = useState<boolean>(false);
   const [editingApiKey, setEditingApiKey] = useState<ApiKeyWithMasked | null>(null);
 

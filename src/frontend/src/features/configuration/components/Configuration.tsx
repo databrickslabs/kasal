@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdornment, InputLabel, List, ListItemButton, ListItemIcon, ListItemText, MenuItem, Select, TextField, Typography } from '@mui/material';
 import { Zap, Search, X, Settings2, SlidersHorizontal, Bot, Wrench, BookOpen, MessageSquare, Brain, LayoutTemplate, Cloud, Plug, Network, Activity, KeyRound, Users, Cpu, Database, Boxes, Building2, UserRound, ShieldCheck } from 'lucide-react';
@@ -66,7 +67,13 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   const loadEventTriggers = useEventTriggersStore(state => state.load);
   useEffect(() => { void loadEventTriggers(); }, [loadEventTriggers]);
   const dark = useThemeStore(state => state.isDarkMode);
-  const { userRole, isLoading, isSystemAdmin, isPersonalWorkspaceManager, loadPermissions } = usePermissionStore();
+  const { userRole, isLoading, isSystemAdmin, isPersonalWorkspaceManager, loadPermissions } = usePermissionStore(useShallow(state => ({
+    userRole: state.userRole,
+    isLoading: state.isLoading,
+    isSystemAdmin: state.isSystemAdmin,
+    isPersonalWorkspaceManager: state.isPersonalWorkspaceManager,
+    loadPermissions: state.loadPermissions,
+  })));
   const email = useUserStore(state => state.currentUser?.email);
   const groupId = useGroupStore(state => state.currentGroupId);
   const teamspaces = useGroupStore(state => state.groups);

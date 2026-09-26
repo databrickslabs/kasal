@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import './notifications/apiNotifications';
 import { useEffect, lazy, Suspense } from 'react';
 import { Box, CircularProgress } from '@mui/material';
@@ -40,8 +41,11 @@ function App() {
   usePermissionLoader();
 
   // Get stores for group initialization (same logic as GroupSelector)
-  const { currentUser, fetchCurrentUser } = useUserStore();
-  const { fetchMyGroups } = useGroupStore();
+  const { currentUser, fetchCurrentUser } = useUserStore(useShallow(state => ({
+    currentUser: state.currentUser,
+    fetchCurrentUser: state.fetchCurrentUser,
+  })));
+  const fetchMyGroups = useGroupStore(state => state.fetchMyGroups);
 
   // Initialize user on mount
   useEffect(() => {

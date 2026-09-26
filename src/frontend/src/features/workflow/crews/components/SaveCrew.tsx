@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { CrewService } from '../../../../api/workflow/CrewService';
@@ -28,7 +29,10 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
 
-  const { activeCanvasId, updateCanvasCrewInfo } = useBuilderCanvasStore();
+  const { activeCanvasId, updateCanvasCrewInfo } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    updateCanvasCrewInfo: state.updateCanvasCrewInfo,
+  })));
 
   // Get execution configuration from the store
   const {
@@ -37,7 +41,13 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     reasoningLLM,
     reasoningConfig,
     managerLLM
-  } = useCrewExecutionStore();
+  } = useCrewExecutionStore(useShallow(state => ({
+    processType: state.processType,
+    reasoningEnabled: state.reasoningEnabled,
+    reasoningLLM: state.reasoningLLM,
+    reasoningConfig: state.reasoningConfig,
+    managerLLM: state.managerLLM,
+  })));
 
   // Listen for the custom event to open the save crew dialog
   useEffect(() => {

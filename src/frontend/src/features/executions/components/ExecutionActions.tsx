@@ -56,7 +56,7 @@ const RunActions: React.FC<RunActionsProps> = ({
   onStatusChange
 }) => {
   const { t } = useTranslation();
-  const { useNewExecutionUI } = useUserPreferencesStore();
+  const useNewExecutionUI = useUserPreferencesStore(state => state.useNewExecutionUI);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
 

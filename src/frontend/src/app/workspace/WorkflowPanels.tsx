@@ -80,7 +80,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   onOpenTutorial,
   onOpenConfiguration,
 }) => {
-  const { kasalFlowEnabled } = useFlowConfigStore();
+  const kasalFlowEnabled = useFlowConfigStore(state => state.kasalFlowEnabled);
   if (areFlowsVisible && kasalFlowEnabled) {
       // Show ONLY FlowCanvas when flows are visible
       return (

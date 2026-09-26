@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import type { PopoverActions } from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
 import { Badge, Box, CircularProgress, Divider, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
@@ -95,7 +96,14 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
   const menuObserver = useRef<ResizeObserver | null>(null);
   const open = Boolean(anchorEl);
   const { processType, setProcessType, managerLLM, setManagerLLM,
-    reasoningConfig, setReasoningConfig } = useCrewExecutionStore();
+    reasoningConfig, setReasoningConfig } = useCrewExecutionStore(useShallow(state => ({
+    processType: state.processType,
+    setProcessType: state.setProcessType,
+    managerLLM: state.managerLLM,
+    setManagerLLM: state.setManagerLLM,
+    reasoningConfig: state.reasoningConfig,
+    setReasoningConfig: state.setReasoningConfig,
+  })));
   const { agentModelNames } = useReasoningSupport(models, selectedModel);
   const hasNonDefault = processType !== 'sequential' || Boolean(reasoningConfig.execution_effort);
   const effort = reasoningConfig.execution_effort;

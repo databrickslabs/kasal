@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback } from 'react';
 import { Node, ReactFlowInstance } from 'reactflow';
 import { AgentService } from '../../api/workflow/AgentService';
@@ -14,7 +15,10 @@ export const useToolHandlers = ({
   setSuccessMessage,
   setShowSuccess
 }: UseToolHandlersProps) => {
-  const errorStore = useErrorStore();
+  const errorStore = useErrorStore(useShallow(state => ({
+    setErrorMessage: state.setErrorMessage,
+    setShowError: state.setShowError,
+  })));
 
   const handleChangeToolsForAllAgents = useCallback(async (selectedTools: string[]) => {
     if (!reactFlowInstanceRef.current) return;

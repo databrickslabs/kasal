@@ -5,6 +5,7 @@
  * Just enter workspace URL and click setup - everything else is automatic.
  */
 
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Autocomplete,
@@ -72,7 +73,10 @@ export const MemoryConfiguration: React.FC = () => {
   const [lakebaseTableStats, setLakebaseTableStats] = useState<Record<string, { table_name: string; exists: boolean; row_count: number }> | null>(null);
   const [memoryBrowserOpen, setMemoryBrowserOpen] = useState(false);
   
-  const { updateConfig, config } = useMemoryBackendStore();
+  const { updateConfig, config } = useMemoryBackendStore(useShallow(state => ({
+    updateConfig: state.updateConfig,
+    config: state.config,
+  })));
   
   
   // Load existing configuration and detect workspace URL on mount

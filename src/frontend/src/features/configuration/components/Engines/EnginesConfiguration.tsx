@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useEffect, useState } from 'react';
 import {
   Box,
@@ -26,7 +27,10 @@ import { useEventTriggersStore } from '../../../../store/eventTriggers';
 import HarnessSelector from './HarnessSelector';
 
 const EnginesConfiguration: React.FC = () => {
-  const { inputMode, setInputMode } = useCrewExecutionStore();
+  const { inputMode, setInputMode } = useCrewExecutionStore(useShallow(state => ({
+    inputMode: state.inputMode,
+    setInputMode: state.setInputMode,
+  })));
   // Event Triggers lives in a shared store so this toggle and the workflow
   // right-sidebar action stay in sync live (no refresh needed).
   const eventTriggersEnabled = useEventTriggersStore((s) => s.enabled);

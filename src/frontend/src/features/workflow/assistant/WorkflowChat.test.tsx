@@ -129,9 +129,7 @@ vi.mock('../../../store/knowledgeConfigStore', () => ({
 }));
 
 vi.mock('../../../store/modelConfig', () => ({
-  useModelConfigStore: () => ({
-    refreshKey: 0,
-  }),
+  useModelConfigStore: (selector?: (s: { refreshKey: number }) => unknown) => (selector ? selector({ refreshKey: 0 }) : { refreshKey: 0 }),
 }));
 
 vi.mock('../../../store/uiLayout', () => ({

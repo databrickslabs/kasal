@@ -80,7 +80,7 @@ type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
 };
 
 const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
-  const { updateAgent } = useAgentStore();
+  const updateAgent = useAgentStore(state => state.updateAgent);
   const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
   const [loadingModels, setLoadingModels] = useState(true);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
