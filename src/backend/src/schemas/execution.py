@@ -7,6 +7,7 @@ in execution-related API requests and responses.
 
 import json
 import time
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -117,7 +118,8 @@ class CrewConfig(BaseModel):
             "verification the mode implies. Absent for canvas crews."
         ),
     )
-    flow_id: Optional[str] = Field(
+    # A string on the wire; the executions router normalises it to a UUID.
+    flow_id: Optional[Union[str, uuid.UUID]] = Field(
         None, description="ID of the saved flow (for checkpoint tracking)"
     )
     crew_id: Optional[str] = Field(

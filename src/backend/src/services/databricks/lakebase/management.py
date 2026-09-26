@@ -839,7 +839,7 @@ class DatabaseManagementService:
 
     async def check_user_permission(
         self,
-        user_email: str,
+        user_email: Optional[str],
         session: Optional[AsyncSession] = None,
         user_token: Optional[str] = None,
     ) -> Dict[str, Any]:
