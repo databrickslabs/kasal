@@ -19,7 +19,7 @@ async def dispatch_progressive(
     request: "DispatcherRequest",
     prompt: Optional[str],
     tools: Optional[List[Any]],
-    group_context: "GroupContext",
+    group_context: Optional["GroupContext"],
     mlflow_enabled: bool,
 ) -> Dict[str, Any]:
     trace_job_id = current_event_context().get("generation_job_id")
@@ -38,7 +38,9 @@ async def dispatch_progressive(
         # call and retry, not just the initial dispatcher completion.
         await work
         terminal = sse_manager.get_terminal_event(
-            generation_id, group_ids=group_context.group_ids
+            generation_id,
+            # No group: the job was registered without an owner (above).
+            group_ids=group_context.group_ids if group_context else None,
         )
         if terminal is not None and terminal.event == "generation_failed":
             raise ValueError(terminal.data.get("error", "Crew generation failed"))

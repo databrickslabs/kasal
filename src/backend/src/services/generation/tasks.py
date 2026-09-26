@@ -463,7 +463,7 @@ class TaskGenerationService:
     async def generate_and_save_task(
         self,
         request: TaskGenerationRequest,
-        group_context: GroupContext,
+        group_context: Optional[GroupContext],
         fast_planning: bool = False,
     ) -> dict:
         """
