@@ -521,7 +521,7 @@ class MLflowEvaluationRunner:
             try:
                 if "contexts" in eval_df.columns:
                     try:
-                        has_ctx_col = (
+                        has_ctx_col = bool(
                             eval_df["contexts"]
                             .astype(str)
                             .str.strip()
@@ -535,7 +535,7 @@ class MLflowEvaluationRunner:
                         )
                 if "references" in eval_df.columns:
                     try:
-                        has_ref_col = (
+                        has_ref_col = bool(
                             eval_df["references"]
                             .astype(str)
                             .str.strip()

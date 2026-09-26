@@ -160,7 +160,7 @@ class DatabricksAuthService:
         client_id = client_id or self.client_id
         client_secret = client_secret or self.client_secret
 
-        if not all([client_id, client_secret]):
+        if not client_id or not client_secret:
             raise ValueError(
                 "Incomplete Service Principal credentials. Required: client_id, client_secret"
             )

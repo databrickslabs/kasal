@@ -530,13 +530,14 @@ class MQueryParser:
         col_idx = {h: i + 1 for i, h in enumerate(headers)}
         tables: dict[str, TableInfo] = {}
         for r in range(2, ws.max_row + 1):
-            table_name = ws.cell(row=r, column=col_idx["Table Name"]).value
+            raw_table_name = ws.cell(row=r, column=col_idx["Table Name"]).value
             status = str(
                 ws.cell(row=r, column=col_idx["Validation Passed"]).value or ""
             )
             sql = str(ws.cell(row=r, column=col_idx["Transpiled SQL"]).value or "")
-            if not table_name or not sql:
+            if not raw_table_name or not sql:
                 continue
+            table_name = str(raw_table_name)
             if not isinstance(status, str) or not status.startswith("Yes"):
                 if not ("SUM(" in sql.upper() and "GROUP BY" in sql.upper()):
                     continue

@@ -1074,11 +1074,6 @@
     },
     {
       "file": "src/db/session.py",
-      "message": "Skipping analyzing \"asyncpg\": module is installed, but missing library stubs or py.typed marker  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/db/session.py",
       "message": "Value of type variable \"AnyOrLiteralStr\" of \"dirname\" cannot be \"str | None\"  [type-var]",
       "count": 1
     },
@@ -2289,11 +2284,6 @@
     },
     {
       "file": "src/services/agent_builder/process_executor.py",
-      "message": "Cannot find implementation or library stub for module named \"openinference.instrumentation.crewai\"  [import-not-found]",
-      "count": 1
-    },
-    {
-      "file": "src/services/agent_builder/process_executor.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 5
     },
@@ -2803,11 +2793,6 @@
       "count": 1
     },
     {
-      "file": "src/services/converters/common/transformers/yaml.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
       "file": "src/services/converters/common/translators/dependencies.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
@@ -2925,11 +2910,6 @@
     {
       "file": "src/services/converters/formats/powerbi/connector.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/powerbi/connector.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
       "count": 1
     },
     {
@@ -3229,11 +3209,6 @@
     },
     {
       "file": "src/services/converters/formats/uc_metrics/authentication.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/authentication.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 1
     },
@@ -3250,16 +3225,6 @@
     {
       "file": "src/services/converters/formats/uc_metrics/connector.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/connector.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/connector.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -3305,11 +3270,6 @@
     {
       "file": "src/services/converters/formats/uc_metrics/uc_metrics_to_sql.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/converters/formats/uc_metrics/uc_metrics_to_sql.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -3409,17 +3369,7 @@
     },
     {
       "file": "src/services/databricks/analytics/export.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 1
     },
     {
@@ -3729,11 +3679,6 @@
     },
     {
       "file": "src/services/deployment/crew.py",
-      "message": "Library stubs not installed for \"pandas\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/deployment/crew.py",
       "message": "Missing positional argument \"name\" in call to \"EndpointCoreConfigInput\"  [call-arg]",
       "count": 1
     },
@@ -3895,11 +3840,6 @@
     {
       "file": "src/services/execution/config/embedder_config_builder.py",
       "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/config/embedder_config_builder.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
       "count": 1
     },
     {
@@ -4613,16 +4553,6 @@
       "count": 1
     },
     {
-      "file": "src/services/export/databricks_app_exporter.py",
-      "message": "Library stubs not installed for \"aiofiles\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/export/runtime_vendor.py",
-      "message": "Library stubs not installed for \"aiofiles\"  [import-untyped]",
-      "count": 1
-    },
-    {
       "file": "src/services/export/ui_document.py",
       "message": "Returning Any from function declared to return \"dict[str, Any] | list[Any] | None\"  [no-any-return]",
       "count": 2
@@ -4636,16 +4566,6 @@
       "file": "src/services/export/yaml_generator.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
       "count": 1
-    },
-    {
-      "file": "src/services/export/yaml_generator.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/export/yaml_generator.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 2
     },
     {
       "file": "src/services/external/artifacts.py",
@@ -5036,11 +4956,6 @@
       "file": "src/services/flow_builder/modules/task_adapter.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/services/flow_builder/process_executor.py",
-      "message": "Cannot find implementation or library stub for module named \"openinference.instrumentation.crewai\"  [import-not-found]",
-      "count": 1
     },
     {
       "file": "src/services/flow_builder/process_executor.py",
@@ -5658,11 +5573,6 @@
       "count": 1
     },
     {
-      "file": "src/services/knowledge/databricks_service.py",
-      "message": "Library stubs not installed for \"openpyxl\"  [import-untyped]",
-      "count": 1
-    },
-    {
       "file": "src/services/knowledge/embedding_queue.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 8
@@ -6059,11 +5969,6 @@
     },
     {
       "file": "src/services/mlflow/evaluation_runner.py",
-      "message": "Library stubs not installed for \"pandas\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/mlflow/evaluation_runner.py",
       "message": "Module has no attribute \"from_pandas\"  [attr-defined]",
       "count": 1
     },
@@ -6209,11 +6114,6 @@
     },
     {
       "file": "src/services/powerbi/pipeline_config.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/pipeline_config.py",
       "message": "Returning Any from function declared to return \"dict[Any, Any] | None\"  [no-any-return]",
       "count": 1
     },
@@ -6355,11 +6255,6 @@
     {
       "file": "src/services/prompt_optimization/gepa/memalign_bridge.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/gepa/memalign_bridge.py",
-      "message": "Skipping analyzing \"dspy\": module is installed, but missing library stubs or py.typed marker  [import-untyped]",
       "count": 1
     },
     {
@@ -6753,11 +6648,6 @@
       "count": 1
     },
     {
-      "file": "src/services/skills/parser.py",
-      "message": "Skipping analyzing \"skills_ref\": module is installed, but missing library stubs or py.typed marker  [import-untyped]",
-      "count": 1
-    },
-    {
       "file": "src/services/skills/service.py",
       "message": "Argument 1 to \"validate_row\" has incompatible type \"str | Any | dict[str, Any]\"; expected \"str\"  [arg-type]",
       "count": 1
@@ -6945,11 +6835,6 @@
     {
       "file": "src/services/tools/databricks_dashboard_creator_tool.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/databricks_dashboard_creator_tool.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
       "count": 1
     },
     {
@@ -7155,11 +7040,6 @@
     {
       "file": "src/services/tools/genie_space_generator_tool.py",
       "message": "Incompatible return value type (got \"Sequence[str]\", expected \"SupportsDunderLT[Any] | SupportsDunderGT[Any]\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/genie_space_generator_tool.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
       "count": 1
     },
     {
@@ -7408,11 +7288,6 @@
       "count": 1
     },
     {
-      "file": "src/services/tools/metric_view_deployer_tool.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
       "file": "src/services/tools/metric_view_utils/dax_llm_fallback.py",
       "message": "Returning Any from function declared to return \"dict[Any, Any]\"  [no-any-return]",
       "count": 1
@@ -7485,11 +7360,6 @@
     {
       "file": "src/services/tools/metric_view_utils/mquery_parser.py",
       "message": "Incompatible types in assignment (expression has type \"Match[str] | None\", variable has type \"Match[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/metric_view_utils/mquery_parser.py",
-      "message": "Library stubs not installed for \"openpyxl\"  [import-untyped]",
       "count": 1
     },
     {
@@ -7684,11 +7554,6 @@
     },
     {
       "file": "src/services/tools/metric_view_validation_utils/databricks_parser.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/metric_view_validation_utils/databricks_parser.py",
       "message": "Need type annotation for \"measures\" (hint: \"measures: list[<type>] = ...\")  [var-annotated]",
       "count": 1
     },
@@ -7725,11 +7590,6 @@
     {
       "file": "src/services/tools/metric_view_validation_utils/measure_table_mapping_parser.py",
       "message": "Need type annotation for \"mappings\" (hint: \"mappings: list[<type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/metric_view_validation_utils/pipeline.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -7829,17 +7689,7 @@
     },
     {
       "file": "src/services/tools/pbi_visual_ucmv_mapper_tool.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pbi_visual_ucmv_mapper_tool.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/perplexity_tool.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
       "count": 1
     },
     {
@@ -8519,11 +8369,6 @@
     },
     {
       "file": "src/services/tools/uc_metric_view_generator_tool.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/uc_metric_view_generator_tool.py",
       "message": "Need type annotation for \"extract\" (hint: \"extract: list[<type>] = ...\")  [var-annotated]",
       "count": 1
     },
@@ -8535,11 +8380,6 @@
     {
       "file": "src/services/tools/ucmv_genie_config_generator_tool.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/ucmv_genie_config_generator_tool.py",
-      "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
     {
@@ -8656,16 +8496,6 @@
       "file": "src/utils/asyncio_utils.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 1
-    },
-    {
-      "file": "src/utils/cron_utils.py",
-      "message": "Library stubs not installed for \"croniter\"  [import-untyped]",
-      "count": 1
-    },
-    {
-      "file": "src/utils/cron_utils.py",
-      "message": "Returning Any from function declared to return \"datetime\"  [no-any-return]",
-      "count": 2
     },
     {
       "file": "src/utils/databricks_auth.py",
@@ -8871,11 +8701,6 @@
       "file": "src/utils/telemetry.py",
       "message": "Incompatible default for argument \"product\" (default has type \"None\", argument has type \"str\")  [assignment]",
       "count": 2
-    },
-    {
-      "file": "src/utils/telemetry.py",
-      "message": "Library stubs not installed for \"requests\"  [import-untyped]",
-      "count": 1
     },
     {
       "file": "src/utils/telemetry.py",
