@@ -153,14 +153,19 @@ class TestConcurrentTasksDoNotShareTheFlag:
         factory, _ = _raw_factory_mock()
 
         async def one():
-            with (
-                patch("src.db.database_router.get_smart_db_session", fake_router),
-                patch("src.db.session.async_session_factory", factory),
-            ):
-                async with da._auth_scoped_session():
-                    await asyncio.sleep(0)  # let the sibling run mid-flight
+            async with da._auth_scoped_session():
+                await asyncio.sleep(0)  # let the sibling run mid-flight
 
-        await asyncio.gather(*(asyncio.create_task(one()) for _ in range(4)))
+        # Patch ONCE, outside the tasks. Entering/exiting ``patch`` inside each
+        # interleaved task restores in the wrong order: the last task to exit
+        # "restores" a sibling's mock, which then leaks into every later test
+        # on the worker (tests/unit/db/test_isolated_db_session.py saw a
+        # MagicMock async_session_factory).
+        with (
+            patch("src.db.database_router.get_smart_db_session", fake_router),
+            patch("src.db.session.async_session_factory", factory),
+        ):
+            await asyncio.gather(*(asyncio.create_task(one()) for _ in range(4)))
 
         # Each task routed independently; none was demoted by a sibling.
         assert used == ["router"] * 4

@@ -146,6 +146,9 @@ _SOURCED_FROM_KASAL: frozenset = frozenset(
         "CrewCheckpointRestoredEvent",
         "TaskCheckpointRestoredEvent",
         "FlowCheckpointSavedEvent",
+        # services/decisions/telemetry.py — Jev decision policies emit on
+        # Kasal's bus directly; CrewAI has no counterpart to bridge.
+        "DecisionEvaluatedEvent",
         # Emitted by neither today; listed so the completeness test is honest
         # about them rather than silently passing.
         "KnowledgeRetrievalStartedEvent",

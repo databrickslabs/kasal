@@ -7,12 +7,12 @@ def test_group_context_repr_omits_access_token_and_user():
     ctx = GroupContext(
         group_ids=["g1"],
         group_email="a@example.com",
-        access_token="dapi-secret-token-value",
+        access_token="FAKE-bearer-token-for-repr-test",
         current_user=object(),
     )
     text = f"{ctx} {ctx!r} {str(ctx)}"
 
-    assert "dapi-secret-token-value" not in text
+    assert "FAKE-bearer-token-for-repr-test" not in text
     assert "current_user" not in text
     assert "g1" in text  # the useful fields are still there
-    assert ctx.access_token == "dapi-secret-token-value"
+    assert ctx.access_token == "FAKE-bearer-token-for-repr-test"

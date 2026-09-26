@@ -40,6 +40,20 @@ def make_gc(role="admin"):
     )
 
 
+# The caller's email arrives through ``RequestEmailDep`` (the shared identity
+# resolver, which 401s when there is none and owns the header precedence; see
+# tests/unit/api/test_external_identity_precedence.py). These handlers are
+# therefore always called with a resolved ``user_email``.
+
+
+def _user_and_group_services(user, groups):
+    mock_user_svc = AsyncMock()
+    mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=user)
+    mock_group_svc = AsyncMock()
+    mock_group_svc.get_user_groups = AsyncMock(return_value=groups)
+    return mock_user_svc, mock_group_svc
+
+
 class TestDebugExecutionGroups:
     @pytest.mark.asyncio
     async def test_returns_404_when_debug_mode_off(self):
@@ -50,47 +64,18 @@ class TestDebugExecutionGroups:
             from fastapi import HTTPException
 
             with pytest.raises(HTTPException) as exc_info:
-                await debug_execution_groups(session=session)
+                await debug_execution_groups(
+                    session=session, user_email="user@test.com"
+                )
             assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_returns_groups_info_when_debug_mode_on_no_email(self):
-        """debug_execution_groups returns groups data when DEBUG_MODE is True, no email."""
+    async def test_returns_groups_info_when_user_not_found(self):
+        """With DEBUG_MODE on, execution groups are listed even if the user is unknown."""
         session = MagicMock()
         mock_svc = AsyncMock()
         mock_svc.get_execution_groups_with_counts = AsyncMock(return_value=[("g1", 5)])
-
-        with (
-            patch("src.api.execution_history_router.settings") as mock_settings,
-            patch(
-                "src.api.execution_history_router.ExecutionHistoryService",
-                return_value=mock_svc,
-            ),
-        ):
-            mock_settings.DEBUG_MODE = True
-            result = await debug_execution_groups(
-                session=session,
-                x_forwarded_email=None,
-                x_auth_request_email=None,
-            )
-            assert result["total_unique_groups"] == 1
-            assert result["user_email"] is None
-            assert len(result["all_execution_groups"]) == 1
-
-    @pytest.mark.asyncio
-    async def test_returns_user_groups_when_email_header_provided(self):
-        """debug_execution_groups fetches user groups when email is in headers."""
-        session = MagicMock()
-        mock_svc = AsyncMock()
-        mock_svc.get_execution_groups_with_counts = AsyncMock(return_value=[("g1", 3)])
-
-        mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
-        mock_user_svc = AsyncMock()
-        mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
-
-        mock_group = SimpleNamespace(id="g1", name="Group 1")
-        mock_group_svc = AsyncMock()
-        mock_group_svc.get_user_groups = AsyncMock(return_value=[mock_group])
+        mock_user_svc, mock_group_svc = _user_and_group_services(None, [])
 
         with (
             patch("src.api.execution_history_router.settings") as mock_settings,
@@ -109,64 +94,91 @@ class TestDebugExecutionGroups:
         ):
             mock_settings.DEBUG_MODE = True
             result = await debug_execution_groups(
-                session=session,
-                x_auth_request_email="user@test.com",
-                x_forwarded_email=None,
+                session=session, user_email="ghost@test.com"
             )
-            assert result["user_email"] == "user@test.com"
-            assert len(result["user_groups"]) == 1
+        assert result["total_unique_groups"] == 1
+        assert result["user_email"] == "ghost@test.com"
+        assert result["user_groups"] == []
+        assert result["all_execution_groups"] == [
+            {"group_id": "g1", "execution_count": 5}
+        ]
+        mock_group_svc.get_user_groups.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_user_groups_for_resolved_email(self):
+        """debug_execution_groups fetches the resolved caller's groups."""
+        session = MagicMock()
+        mock_svc = AsyncMock()
+        mock_svc.get_execution_groups_with_counts = AsyncMock(return_value=[("g1", 3)])
+
+        mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
+        mock_group = SimpleNamespace(id="g1", name="Group 1")
+        mock_user_svc, mock_group_svc = _user_and_group_services(
+            mock_user, [mock_group]
+        )
+
+        with (
+            patch("src.api.execution_history_router.settings") as mock_settings,
+            patch(
+                "src.api.execution_history_router.ExecutionHistoryService",
+                return_value=mock_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.UserService",
+                return_value=mock_user_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.GroupService",
+                return_value=mock_group_svc,
+            ),
+        ):
+            mock_settings.DEBUG_MODE = True
+            result = await debug_execution_groups(
+                session=session, user_email="user@test.com"
+            )
+        assert result["user_email"] == "user@test.com"
+        assert result["user_groups"] == [{"id": "g1", "name": "Group 1"}]
+        mock_user_svc.get_or_create_user_by_email.assert_awaited_once_with(
+            "user@test.com"
+        )
+        mock_group_svc.get_user_groups.assert_awaited_once_with("u1")
 
 
 class TestGetAllGroupsExecutionHistory:
-    @pytest.mark.asyncio
-    async def test_returns_empty_when_no_email(self):
-        """Returns empty list when no email header present."""
-        session = MagicMock()
-        service = AsyncMock()
-        result = await get_all_groups_execution_history(
-            session=session,
-            service=service,
-            limit=50,
-            offset=0,
-            x_forwarded_email=None,
-            x_auth_request_email=None,
-        )
-        assert result.total == 0
-        assert result.executions == []
-
     @pytest.mark.asyncio
     async def test_returns_empty_when_user_not_found(self):
         """Returns empty list when user cannot be found."""
         session = MagicMock()
         service = AsyncMock()
-        mock_user_svc = AsyncMock()
-        mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=None)
+        mock_user_svc, _ = _user_and_group_services(None, [])
 
         with patch(
             "src.api.execution_history_router.UserService", return_value=mock_user_svc
         ):
             result = await get_all_groups_execution_history(
                 session=session,
-                service=service,
+                user_email="user@test.com",
                 limit=50,
                 offset=0,
-                x_auth_request_email="user@test.com",
-                x_forwarded_email=None,
+                include_payload=False,
+                service=service,
             )
         assert result.total == 0
+        assert result.executions == []
+        mock_user_svc.get_or_create_user_by_email.assert_awaited_once_with(
+            "user@test.com"
+        )
+        service.get_execution_history.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_fetches_executions_for_all_groups(self):
-        """Returns executions from all user groups."""
+        """Returns executions from all user groups plus the personal workspace."""
         session = MagicMock()
-
         mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
-        mock_user_svc = AsyncMock()
-        mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
-
         mock_group = SimpleNamespace(id="g1", name="Group 1")
-        mock_group_svc = AsyncMock()
-        mock_group_svc.get_user_groups = AsyncMock(return_value=[mock_group])
+        mock_user_svc, mock_group_svc = _user_and_group_services(
+            mock_user, [mock_group]
+        )
 
         expected_list = ExecutionHistoryList(executions=[], total=3, offset=0, limit=50)
         service = AsyncMock()
@@ -184,24 +196,23 @@ class TestGetAllGroupsExecutionHistory:
         ):
             result = await get_all_groups_execution_history(
                 session=session,
-                service=service,
+                user_email="user@test.com",
                 limit=50,
                 offset=0,
-                x_auth_request_email="user@test.com",
-                x_forwarded_email=None,
+                include_payload=False,
+                service=service,
             )
         assert result.total == 3
+        service.get_execution_history.assert_awaited_once_with(
+            50, 0, group_ids=["g1", "user_allocated"], include_payload=False
+        )
 
     @pytest.mark.asyncio
     async def test_adds_personal_workspace_to_groups(self):
-        """Adds personal workspace ID to group list for data access."""
+        """Adds the allocated personal workspace ID to the group list."""
         session = MagicMock()
         mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
-        mock_user_svc = AsyncMock()
-        mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
-
-        mock_group_svc = AsyncMock()
-        mock_group_svc.get_user_groups = AsyncMock(return_value=[])
+        mock_user_svc, mock_group_svc = _user_and_group_services(mock_user, [])
 
         expected_list = ExecutionHistoryList(executions=[], total=0, offset=0, limit=50)
         service = AsyncMock()
@@ -219,40 +230,48 @@ class TestGetAllGroupsExecutionHistory:
         ):
             await get_all_groups_execution_history(
                 session=session,
-                service=service,
+                user_email="alice@example.com",
                 limit=50,
                 offset=0,
-                x_auth_request_email="alice@example.com",
-                x_forwarded_email=None,
+                include_payload=False,
+                service=service,
             )
-        # Verify get_execution_history was called with group_ids containing personal workspace
         call_kwargs = service.get_execution_history.call_args
-        group_ids = call_kwargs[1].get("group_ids") or []
-        assert any("user_" in gid for gid in group_ids)
+        assert call_kwargs.kwargs["group_ids"] == ["user_allocated"]
 
     @pytest.mark.asyncio
-    async def test_uses_forwarded_email_fallback(self):
-        """Falls back to x_forwarded_email when auth email not provided."""
+    async def test_include_payload_is_forwarded(self):
+        """include_payload=True is passed through to the service."""
         session = MagicMock()
-        mock_user_svc = AsyncMock()
-        mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=None)
-
+        mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
+        mock_user_svc, mock_group_svc = _user_and_group_services(mock_user, [])
         service = AsyncMock()
-
-        with patch(
-            "src.api.execution_history_router.UserService", return_value=mock_user_svc
-        ):
-            result = await get_all_groups_execution_history(
-                session=session,
-                service=service,
-                limit=50,
-                offset=0,
-                x_auth_request_email=None,
-                x_forwarded_email="fwd@example.com",
+        service.get_execution_history = AsyncMock(
+            return_value=ExecutionHistoryList(
+                executions=[], total=0, offset=10, limit=20
             )
-        assert result.total == 0
-        mock_user_svc.get_or_create_user_by_email.assert_called_once_with(
-            "fwd@example.com"
+        )
+
+        with (
+            patch(
+                "src.api.execution_history_router.UserService",
+                return_value=mock_user_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.GroupService",
+                return_value=mock_group_svc,
+            ),
+        ):
+            await get_all_groups_execution_history(
+                session=session,
+                user_email="alice@example.com",
+                limit=20,
+                offset=10,
+                include_payload=True,
+                service=service,
+            )
+        service.get_execution_history.assert_awaited_once_with(
+            20, 10, group_ids=["user_allocated"], include_payload=True
         )
 
 
