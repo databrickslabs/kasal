@@ -74,7 +74,7 @@ Locally there is no proxy, so Kasal offers an opt-in development identity:
 - `LOCAL_DEV_AUTH=true` makes `LocalDevAuthMiddleware` (`src/backend/src/main.py`) add `X-Forwarded-Email: <LOCAL_DEV_USER_EMAIL>` to any request that has no identity header.
 - `LOCAL_DEV_USER_EMAIL` sets that user. The default is `dev@localhost`.
 - `run.sh` sets `LOCAL_DEV_AUTH=true` for you. If you start `uvicorn` or `src/entrypoint.py` yourself, export it first, or every API call returns 401.
-- It is refused in production: when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`, the flag is ignored and an error is logged. `python src/entrypoint.py --environment dev` sets `DATABRICKS_APP_NAME`, so it switches the development identity off too.
+- It is refused in production: when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`, the flag is ignored and an error is logged. `python src/entrypoint.py --environment dev` turns it on, the same as `run.sh`.
 
 `LOCAL_DEV_AUTH` is read with `os.getenv`, so putting it in a `.env` file has no effect. Export it in your shell.
 

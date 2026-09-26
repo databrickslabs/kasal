@@ -59,7 +59,7 @@ The server variables are:
 
 `run.sh` changes into `src/backend` before it starts, whatever directory you call it from. It also exports these on your behalf: `DATABASE_TYPE` (see [Database](#database)), `LOCAL_DEV_AUTH=true` unless already set, `KASAL_LOG_LEVEL=INFO` and `KASAL_LOG_THIRD_PARTY=WARNING` unless already set, `USE_NULLPOOL=true` and `CREWAI_DISABLE_TELEMETRY=true`. Its `-q`, `-v`, `-d`, `--no-console` and `--no-file` flags set the logging variables described under [Logging](#logging).
 
-The production entrypoint `src/entrypoint.py` (used by `src/app.yaml`) takes `--db-type`, `--db-url`, `--port` (default `8000`), `--reload`, `--debug` and `--environment dev|prod` flags rather than variables. `--environment dev` sets `KASAL_DEPLOYMENT_MODE=local` and `DATABRICKS_APP_NAME=kasal-local-test`.
+The production entrypoint `src/entrypoint.py` (used by `src/app.yaml`) takes `--db-type`, `--db-url`, `--port` (default `8000`), `--reload`, `--debug` and `--environment dev|prod` flags rather than variables. `--environment dev` makes it a local run like `run.sh`: it sets `KASAL_DEPLOYMENT_MODE=local` and `LOCAL_DEV_AUTH=true` (unless you set `LOCAL_DEV_AUTH` yourself); `prod`, or no flag, changes nothing. `--reload` restarts on changes under `src/backend/src`. It binds `KASAL_BIND_HOST` if set, otherwise `0.0.0.0` inside Databricks Apps (`DATABRICKS_APP_NAME` set) and `127.0.0.1` everywhere else.
 
 ## Local development identity
 
@@ -80,7 +80,7 @@ Kasal uses SQLite or PostgreSQL through async SQLAlchemy, or Lakebase inside Dat
 
 - **`Settings` (`src/backend/src/config/settings.py`)**, which `run.sh`, `uvicorn`, `alembic` (`src/backend/migrations/env.py`) and `python run_seeders.py` all go through: `DATABASE_TYPE` defaults to `sqlite`, and `SQLITE_DB_PATH` defaults to the absolute path `src/backend/app.db`, so the working directory does not matter and every command opens the same file.
 - **`run.sh`**: defaults to SQLite (`./run.sh postgres` switches) and exports only `DATABASE_TYPE`. It does not set `SQLITE_DB_PATH`, so it uses the `Settings` default or the value you exported.
-- **`src/entrypoint.py`**: `--db-type` defaults to `sqlite` with `SQLITE_DB_PATH` defaulting to `src/kasal.db`, and it exports `DATABASE_URI`/`DATABASE_URL` directly. With `--db-type postgres` and no `--db-url`, it falls back to a local `postgres` database on `localhost:5432`.
+- **`src/entrypoint.py`**: `--db-type` defaults to `sqlite` with `SQLITE_DB_PATH` defaulting to `src/kasal.db`, and it exports `DATABASE_TYPE`, `DATABASE_URI`/`DATABASE_URL` and `SYNC_DATABASE_URI` directly, so the crew and flow subprocesses agree with the server. With `--db-type postgres`, a `postgresql://` (or `postgres://`) `--db-url` is rewritten to `postgresql+asyncpg://`; with no `--db-url`, it falls back to a local `postgres` database on `localhost:5432`.
 - **The `kasal` command from the pip package (`packaging/kasal/cli.py`)**: defaults `DATABASE_TYPE` to `sqlite` and `SQLITE_DB_PATH` to `~/.kasal/kasal.db` (or `<--data-dir>/kasal.db`), without overriding values already in the environment. It does not set `LOCAL_DEV_AUTH`. For more information, see [installing Kasal with pip](./PIP_PACKAGE.md).
 - **Databricks Apps with a Lakebase resource attached**: when `PGHOST`, `PGDATABASE` and `PGUSER` are injected by the platform, `init_db` uses the Lakebase resource and the variables above do not apply.
 
