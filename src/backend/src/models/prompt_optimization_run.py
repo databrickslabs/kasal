@@ -15,19 +15,11 @@ so runs orphaned by a restart can be told apart from live ones.
 """
 
 from datetime import datetime
+from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    Float,
-    Index,
-    Integer,
-    String,
-    Text,
-)
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -43,63 +35,69 @@ class PromptOptimizationRun(Base):
 
     # The service's short hex run_id is the PK — it is what the API, the
     # frontend and the in-memory cache already key on.
-    id = Column(String(64), primary_key=True, default=generate_uuid)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
 
     # 'template' (a seeded meta-prompt) or 'crew' (a saved crew's prompt fields)
-    kind = Column(String(16), nullable=False, default="template")
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="template")
     # Display/target identifier: the template name, or 'crew:<crew name>'
-    target_name = Column(String(255), nullable=False)
+    target_name: Mapped[str] = mapped_column(String(255), nullable=False)
     # Set for crew runs — the concrete crew whose agent/task rows get written
-    crew_id = Column(String(64), nullable=True, index=True)
+    crew_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
 
-    status = Column(String(16), nullable=False, default="pending")
-    error = Column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Model wiring, recorded so a run's result can be interpreted later —
     # notably whether judge_model == model (self-preference, see the service).
-    model = Column(String(255), nullable=True)
-    judge_model = Column(String(255), nullable=True)
-    reflection_model = Column(String(255), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    judge_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reflection_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Budget + progress
-    budget = Column(Integer, nullable=True)
-    dataset_size = Column(Integer, nullable=False, default=0)
-    executions_used = Column(Integer, nullable=True)
-    execution_cap = Column(Integer, nullable=True)
-    candidates_tried = Column(Integer, nullable=True)
-    human_feedback_count = Column(Integer, nullable=True)
+    budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    dataset_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    executions_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    execution_cap: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    candidates_tried: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    human_feedback_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    initial_score = Column(Float, nullable=True)
-    final_score = Column(Float, nullable=True)
+    initial_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    final_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # The proposal. Template runs use the *_template text columns; crew runs
     # additionally carry the per-field maps ('agent.<id>.role' -> text).
-    baseline_template = Column(Text, nullable=True)
-    optimized_template = Column(Text, nullable=True)
-    baseline_fields = Column(JSON, nullable=True)
-    optimized_fields = Column(JSON, nullable=True)
+    baseline_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    optimized_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    baseline_fields: Mapped[Any] = mapped_column(JSON, nullable=True)
+    optimized_fields: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # REVERSIBILITY: the values every touched field held immediately BEFORE
     # the apply wrote over them, captured at apply time (NOT the run's
     # baseline — the rows may have been edited between run and apply).
     # Crew runs: {'agent.<id>.role': '...'}. Template runs: {'template': '...'}.
-    before_image = Column(JSON, nullable=True)
+    before_image: Mapped[Any] = mapped_column(JSON, nullable=True)
 
-    applied = Column(Boolean, nullable=False, default=False)
-    applied_at = Column(DateTime, nullable=True)
-    applied_by = Column(String(255), nullable=True)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    applied_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
     # Bumped by the run's heartbeat while it is active: a pending/running row
     # whose updated_at has gone stale was orphaned by a backend restart.
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
     # Multi-group fields (REQUIRED for all models)
-    group_id = Column(String(100), index=True, nullable=True)
-    group_email = Column(String(255), nullable=True)
-    created_by_email = Column(String(255), nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    group_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_by_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     __table_args__ = (
         Index("idx_prompt_opt_runs_group_created", "group_id", "created_at"),

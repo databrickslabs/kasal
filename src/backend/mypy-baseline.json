@@ -199,11 +199,6 @@
     },
     {
       "file": "src/api/execution_history_router.py",
-      "message": "Argument 1 to \"get_user_groups\" of \"GroupService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/api/execution_history_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 10
     },
@@ -324,21 +319,6 @@
     },
     {
       "file": "src/api/group_router.py",
-      "message": "Argument \"assigned_by_email\" to \"assign_user_to_group\" of \"GroupService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"get_user_group_membership\" of \"GroupService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/api/group_router.py",
-      "message": "Argument 1 to \"get_user_memberships\" of \"GroupService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/group_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
     },
@@ -393,16 +373,6 @@
       "count": 1
     },
     {
-      "file": "src/api/hitl_router.py",
-      "message": "Argument 1 to \"_project_output_for_ui\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/hitl_router.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
       "file": "src/api/kpi_conversion_router.py",
       "message": "Argument \"format\" to \"validate\" of \"KPIConversionService\" has incompatible type \"src.schemas.kpi_conversion.ConversionFormat\"; expected \"src.services.converters.base.converter.ConversionFormat\"  [arg-type]",
       "count": 1
@@ -439,11 +409,6 @@
     },
     {
       "file": "src/api/mcp_router.py",
-      "message": "Argument 1 to \"_mcp_service_parent\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/mcp_router.py",
       "message": "Incompatible default for argument \"group_context\" (default has type \"None\", argument has type \"GroupContext\")  [assignment]",
       "count": 22
     },
@@ -475,7 +440,7 @@
     {
       "file": "src/api/memory_backend/configs_router.py",
       "message": "Argument 1 to \"delete_memory_backend\" of \"MemoryBackendService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 2
+      "count": 1
     },
     {
       "file": "src/api/memory_backend/configs_router.py",
@@ -505,11 +470,6 @@
     {
       "file": "src/api/memory_backend/configs_router.py",
       "message": "Argument 1 to \"update_memory_backend\" of \"MemoryBackendService\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/memory_backend/configs_router.py",
-      "message": "Argument 2 to \"delete_memory_backend\" of \"MemoryBackendService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -614,11 +574,6 @@
     },
     {
       "file": "src/api/tasks_router.py",
-      "message": "Argument 1 to \"safe_log_tool_configs\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/tasks_router.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 7
     },
@@ -641,16 +596,6 @@
       "file": "src/api/tools_router.py",
       "message": "Incompatible default for argument \"group_context\" (default has type \"None\", argument has type \"GroupContext\")  [assignment]",
       "count": 12
-    },
-    {
-      "file": "src/api/users_router.py",
-      "message": "Argument 1 to \"get_user_complete\" of \"UserService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/api/users_router.py",
-      "message": "Argument 1 to \"update_user\" of \"UserService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/api/users_router.py",
@@ -1344,11 +1289,6 @@
     },
     {
       "file": "src/models/hitl_approval.py",
-      "message": "Incompatible return value type (got \"ColumnElement[bool]\", expected \"bool\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/models/hitl_approval.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 2
     },
@@ -1368,18 +1308,8 @@
       "count": 3
     },
     {
-      "file": "src/models/memory_backend.py",
-      "message": "Need type annotation for \"backend_type\"  [var-annotated]",
-      "count": 1
-    },
-    {
       "file": "src/models/powerbi_extraction.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/models/powerbi_semantic_model_cache.py",
-      "message": "Incompatible return value type (got \"ColumnElement[bool]\", expected \"bool\")  [return-value]",
       "count": 1
     },
     {
@@ -1433,16 +1363,6 @@
       "count": 1
     },
     {
-      "file": "src/models/user.py",
-      "message": "Need type annotation for \"role\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/models/user.py",
-      "message": "Need type annotation for \"status\"  [var-annotated]",
-      "count": 1
-    },
-    {
       "file": "src/repositories/a2a_agent_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
       "count": 1
@@ -1450,21 +1370,6 @@
     {
       "file": "src/repositories/a2a_push_config_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agent_repository.py",
-      "message": "Argument 1 of \"delete\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agent_repository.py",
-      "message": "Argument 1 of \"get\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/agent_repository.py",
-      "message": "Argument 1 of \"update\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
       "count": 1
     },
     {
@@ -1508,11 +1413,6 @@
       "count": 1
     },
     {
-      "file": "src/repositories/api_key_repository.py",
-      "message": "Argument 1 of \"delete\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
       "file": "src/repositories/billing_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
       "count": 1
@@ -1525,11 +1425,6 @@
     {
       "file": "src/repositories/chat_asset_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/chat_asset_repository.py",
-      "message": "Argument 1 to \"defer\" has incompatible type \"Column[bytes]\"; expected \"Literal['*'] | QueryableAttribute[Any]\"  [arg-type]",
       "count": 1
     },
     {
@@ -1553,21 +1448,6 @@
       "count": 1
     },
     {
-      "file": "src/repositories/chat_session_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/chat_session_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 4
-    },
-    {
-      "file": "src/repositories/chat_session_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
-    },
-    {
       "file": "src/repositories/conversion_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
       "count": 1
@@ -1575,11 +1455,6 @@
     {
       "file": "src/repositories/conversion_repository.py",
       "message": "Argument 1 to \"append\" of \"list\" has incompatible type \"ColumnElement[bool]\"; expected \"BinaryExpression[bool]\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/conversion_repository.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
       "count": 3
     },
     {
@@ -1616,11 +1491,6 @@
       "file": "src/repositories/crew_generator_repository.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/repositories/crew_generator_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"list[str]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/repositories/crew_publication_repository.py",
@@ -1694,17 +1564,7 @@
     },
     {
       "file": "src/repositories/database_config_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/database_config_repository.py",
       "message": "Returning Any from function declared to return \"LakebaseConfig\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/databricks_config_repository.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
       "count": 1
     },
     {
@@ -1730,16 +1590,6 @@
     {
       "file": "src/repositories/documentation_embedding_repository.py",
       "message": "Argument 1 of \"create\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"dict[Any, Any]\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/documentation_embedding_repository.py",
-      "message": "Argument 1 of \"delete\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/documentation_embedding_repository.py",
-      "message": "Argument 1 of \"update\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
       "count": 1
     },
     {
@@ -1778,31 +1628,6 @@
       "count": 1
     },
     {
-      "file": "src/repositories/engine_config_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/engine_config_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/engine_config_repository.py",
-      "message": "Returning Any from function declared to return \"bool\"  [no-any-return]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/engine_config_repository.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/event_subscription_repository.py",
-      "message": "Need type annotation for \"target\"  [var-annotated]",
-      "count": 1
-    },
-    {
       "file": "src/repositories/execution_history_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
       "count": 14
@@ -1821,41 +1646,6 @@
       "file": "src/repositories/execution_history_repository.py",
       "message": "Incompatible default for argument \"group_ids\" (default has type \"None\", argument has type \"list[str]\")  [assignment]",
       "count": 7
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible return value type (got \"Column[Any]\", expected \"dict[str, Any] | None\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[Any] | dict[Any, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any] | None\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 4
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "List item 0 has incompatible type \"Column[str]\"; expected \"str | None\"  [list-item]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/execution_history_repository.py",
-      "message": "Need type annotation for \"checkpoint_data\"  [var-annotated]",
-      "count": 1
     },
     {
       "file": "src/repositories/execution_history_repository.py",
@@ -2084,26 +1874,6 @@
     },
     {
       "file": "src/repositories/hitl_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/hitl_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/hitl_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/hitl_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 5
-    },
-    {
-      "file": "src/repositories/hitl_repository.py",
       "message": "Returning Any from function declared to return \"int\"  [no-any-return]",
       "count": 2
     },
@@ -2123,58 +1893,13 @@
       "count": 3
     },
     {
-      "file": "src/repositories/mcp_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 6
-    },
-    {
-      "file": "src/repositories/memory_backend_repository.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/repositories/memory_backend_repository.py",
       "message": "Incompatible return value type (got \"Sequence[MemoryBackend]\", expected \"list[MemoryBackend]\")  [return-value]",
       "count": 3
     },
     {
-      "file": "src/repositories/memory_backend_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/memory_maintenance_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/memory_maintenance_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/memory_maintenance_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/memory_maintenance_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
       "file": "src/repositories/memory_maintenance_repository.py",
       "message": "Unsupported operand types for <= (\"str\" and \"datetime\")  [operator]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/mlflow_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/mlflow_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
       "count": 1
     },
     {
@@ -2194,16 +1919,6 @@
     },
     {
       "file": "src/repositories/model_config_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 3
-    },
-    {
-      "file": "src/repositories/model_config_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/model_config_repository.py",
       "message": "Returning Any from function declared to return \"bool\"  [no-any-return]",
       "count": 1
     },
@@ -2214,42 +1929,7 @@
     },
     {
       "file": "src/repositories/powerbi_context_config_repository.py",
-      "message": "Key expression in dictionary comprehension has incompatible type \"Column[str]\"; expected type \"str\"  [misc]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/powerbi_context_config_repository.py",
       "message": "Returning Any from function declared to return \"int\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/powerbi_context_config_repository.py",
-      "message": "Value expression in dictionary comprehension has incompatible type \"Column[Any]\"; expected type \"list[str]\"  [misc]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/powerbi_context_config_repository.py",
-      "message": "Value expression in dictionary comprehension has incompatible type \"Column[str]\"; expected type \"str\"  [misc]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/powerbi_semantic_model_cache_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"date\", variable has type \"Column[date]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/powerbi_semantic_model_cache_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/schedule_repository.py",
-      "message": "Argument 1 to \"calculate_next_run_from_last\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/repositories/schedule_repository.py",
-      "message": "Argument 2 to \"calculate_next_run_from_last\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
       "count": 2
     },
     {
@@ -2258,24 +1938,9 @@
       "count": 2
     },
     {
-      "file": "src/repositories/schedule_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/schedule_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 3
-    },
-    {
       "file": "src/repositories/schema_repository.py",
       "message": "\"Coroutine[Any, Any, Result[tuple[Schema]]]\" has no attribute \"scalars\"  [attr-defined]",
       "count": 2
-    },
-    {
-      "file": "src/repositories/schema_repository.py",
-      "message": "Argument 1 of \"update\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
     },
     {
       "file": "src/repositories/schema_repository.py",
@@ -2286,31 +1951,6 @@
       "file": "src/repositories/skill_repository.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
-    },
-    {
-      "file": "src/repositories/task_repository.py",
-      "message": "Argument 1 of \"delete\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/task_repository.py",
-      "message": "Argument 1 of \"get\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/task_repository.py",
-      "message": "Argument 1 of \"update\" is incompatible with supertype \"src.core.base_repository.BaseRepository\"; supertype defines the argument type as \"int | UUID\"  [override]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/tool_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/repositories/tool_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 2
     },
     {
       "file": "src/repositories/tool_repository.py",
@@ -2326,11 +1966,6 @@
       "file": "src/repositories/trigger_queue_repository.py",
       "message": "\"Result[Any]\" has no attribute \"rowcount\"  [attr-defined]",
       "count": 2
-    },
-    {
-      "file": "src/repositories/user_repository.py",
-      "message": "Incompatible types in assignment (expression has type \"Function[Any]\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/repositories/workflow_recipe_repository.py",
@@ -2543,44 +2178,9 @@
       "count": 2
     },
     {
-      "file": "src/seeds/skills.py",
-      "message": "Argument 2 to \"_replace_files\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/seeds/skills.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
       "file": "src/seeds/tools.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/services/a2a/a2a_client/agent_service.py",
-      "message": "Argument 1 to \"card_url_for\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_client/agent_service.py",
-      "message": "Argument 1 to \"interface_url_of\" has incompatible type \"Column[Any] | dict[Any, Any]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_client/agent_service.py",
-      "message": "Argument 1 to \"skills_of\" has incompatible type \"Column[Any] | dict[Any, Any]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_client/agent_service.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_client/agent_service.py",
-      "message": "Need type annotation for \"card\"  [var-annotated]",
-      "count": 1
     },
     {
       "file": "src/services/a2a/a2a_client/client.py",
@@ -2591,21 +2191,6 @@
       "file": "src/services/a2a/a2a_server/push.py",
       "message": "Argument 3 to \"find_for_task_and_url\" of \"A2APushConfigRepository\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_server/push.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_server/push.py",
-      "message": "Incompatible types in assignment (expression has type \"int\", variable has type \"Column[int]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/a2a/a2a_server/push.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
     },
     {
       "file": "src/services/a2a/a2a_server/render.py",
@@ -2804,22 +2389,7 @@
     },
     {
       "file": "src/services/catalog/agents.py",
-      "message": "Argument 1 to \"decrypt_sensitive_fields\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/agents.py",
-      "message": "Argument 2 to \"_delete_agents_and_tasks\" of \"AgentService\" has incompatible type \"list[Column[Any]]\"; expected \"list[str]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/agents.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/agents.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
       "count": 1
     },
     {
@@ -2843,26 +2413,6 @@
       "count": 1
     },
     {
-      "file": "src/services/catalog/crews.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/crews.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/schemas.py",
-      "message": "Argument 1 to \"delete\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/schemas.py",
-      "message": "Argument 1 to \"update\" of \"SchemaRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/services/catalog/schemas.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 1
@@ -2883,59 +2433,14 @@
       "count": 1
     },
     {
-      "file": "src/services/catalog/tasks.py",
-      "message": "Argument 1 to \"delete\" of \"TaskRepository\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Argument 1 to \"delete\" of \"TemplateRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Argument 1 to \"find_by_name_and_group\" of \"TemplateRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/services/catalog/templates.py",
       "message": "Argument 1 to \"find_by_name_and_group\" of \"TemplateRepository\" has incompatible type \"object\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
       "file": "src/services/catalog/templates.py",
-      "message": "Argument 1 to \"update_template\" of \"TemplateRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/catalog/templates.py",
       "message": "Incompatible default for argument \"default_template\" (default has type \"None\", argument has type \"str\")  [assignment]",
       "count": 2
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Incompatible return value type (got \"Column[str]\", expected \"str\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[str] | str\", variable has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[str]\", variable has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Invalid index type \"Column[str]\" for \"dict[str, PromptTemplate]\"; expected type \"str\"  [index]",
-      "count": 1
-    },
-    {
-      "file": "src/services/catalog/templates.py",
-      "message": "Invalid index type \"tuple[Column[str], Column[str]]\" for \"dict[tuple[str, str | None], PromptTemplate]\"; expected type \"tuple[str, str | None]\"  [index]",
-      "count": 1
     },
     {
       "file": "src/services/catalog/templates.py",
@@ -2950,11 +2455,6 @@
     {
       "file": "src/services/catalog/templates.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/services/chat/capability_dispatch.py",
-      "message": "Argument 1 to \"_entity_key\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
       "count": 2
     },
     {
@@ -2986,11 +2486,6 @@
       "file": "src/services/chat/conversation_preamble.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/chat/dispatcher.py",
-      "message": "\"Crew\" has no attribute \"flow_config\"  [attr-defined]",
-      "count": 4
     },
     {
       "file": "src/services/chat/dispatcher.py",
@@ -3029,16 +2524,6 @@
     },
     {
       "file": "src/services/chat/dispatcher.py",
-      "message": "Argument 1 to \"delete_by_group\" of \"CrewService\" has incompatible type \"Column[Any]\"; expected \"UUID\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/chat/dispatcher.py",
-      "message": "Argument 1 to \"force_delete_flow_with_executions_with_group_check\" of \"FlowService\" has incompatible type \"Column[Any]\"; expected \"UUID\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/chat/dispatcher.py",
       "message": "Cannot determine type of \"content\"  [has-type]",
       "count": 3
     },
@@ -3071,11 +2556,6 @@
       "file": "src/services/chat/dispatcher.py",
       "message": "Incompatible types in assignment (expression has type \"nullcontext[None]\", variable has type \"_GeneratorContextManager[Any, None, None]\")  [assignment]",
       "count": 2
-    },
-    {
-      "file": "src/services/chat/dispatcher.py",
-      "message": "List comprehension has incompatible type List[Flow]; expected List[Crew]  [misc]",
-      "count": 3
     },
     {
       "file": "src/services/chat/dispatcher.py",
@@ -3929,11 +3409,6 @@
     },
     {
       "file": "src/services/databricks/analytics/export.py",
-      "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/databricks/analytics/export.py",
       "message": "Library stubs not installed for \"yaml\"  [import-untyped]",
       "count": 1
     },
@@ -4238,26 +3713,6 @@
       "count": 1
     },
     {
-      "file": "src/services/deployment/app.py",
-      "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "\"Column[Any]\" has no attribute \"__iter__\"; maybe \"__str__\"? (not iterable)  [attr-defined]",
-      "count": 2
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Argument 1 to \"append\" of \"list\" has incompatible type \"str\"; expected \"Column[str]\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/services/deployment/crew.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
       "count": 2
@@ -4266,11 +3721,6 @@
       "file": "src/services/deployment/crew.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/deployment/crew.py",
-      "message": "Incompatible return value type (got \"list[Column[str]]\", expected \"list[str]\")  [return-value]",
-      "count": 1
     },
     {
       "file": "src/services/deployment/crew.py",
@@ -4299,28 +3749,8 @@
     },
     {
       "file": "src/services/deployment/crew_export.py",
-      "message": "\"Column[Any]\" has no attribute \"__iter__\"; maybe \"__str__\"? (not iterable)  [attr-defined]",
-      "count": 2
-    },
-    {
-      "file": "src/services/deployment/crew_export.py",
-      "message": "Argument 1 to \"append\" of \"list\" has incompatible type \"str\"; expected \"Column[str]\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/deployment/crew_export.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/services/deployment/crew_export.py",
-      "message": "Incompatible return value type (got \"list[Column[str]]\", expected \"list[str]\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/deployment/crew_export.py",
-      "message": "Invalid index type \"Column[str]\" for \"dict[str, dict[str, Any]]\"; expected type \"str\"  [index]",
-      "count": 1
     },
     {
       "file": "src/services/deployment/crew_export.py",
@@ -4336,11 +3766,6 @@
       "file": "src/services/execution/broadcast.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 5
-    },
-    {
-      "file": "src/services/execution/broadcast.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[str]\", target has type \"str\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/services/execution/checkpointing/lifecycle.py",
@@ -4374,22 +3799,7 @@
     },
     {
       "file": "src/services/execution/checkpointing/service.py",
-      "message": "Argument 1 to \"get_checkpoint\" of \"CheckpointService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/service.py",
-      "message": "Argument 1 to \"resumable_blocker\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/service.py",
       "message": "Argument 2 to \"_summarise\" of \"CheckpointService\" has incompatible type \"list[str] | None\"; expected \"dict[str, str] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/checkpointing/service.py",
-      "message": "Argument 2 to \"resumable_blocker\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
       "count": 1
     },
     {
@@ -4416,16 +3826,6 @@
       "file": "src/services/execution/checkpointing/store.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/execution/cleanup.py",
-      "message": "Argument \"job_id\" to \"update_status\" of \"ExecutionStatusService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/cleanup.py",
-      "message": "Incompatible return value type (got \"list[Column[str]]\", expected \"list[str]\")  [return-value]",
-      "count": 1
     },
     {
       "file": "src/services/execution/config/agent_settings_snapshot.py",
@@ -4793,21 +4193,6 @@
       "count": 2
     },
     {
-      "file": "src/services/execution/kernel/tool_approval.py",
-      "message": "Incompatible return value type (got \"Column[str] | None\", expected \"str | None\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/kernel/tool_approval.py",
-      "message": "Incompatible types in assignment (expression has type \"Any | str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/kernel/tool_approval.py",
-      "message": "Need type annotation for \"config\"  [var-annotated]",
-      "count": 1
-    },
-    {
       "file": "src/services/execution/kernel/tool_helpers.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
@@ -5054,11 +4439,6 @@
     },
     {
       "file": "src/services/execution/service.py",
-      "message": "Argument \"group_id\" to \"add_execution_to_memory\" of \"ExecutionService\" has incompatible type \"str | None\"; expected \"int | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/service.py",
       "message": "Argument \"group_ids\" to \"get_execution_by_id\" of \"ExecutionHistoryRepository\" has incompatible type \"list[str] | None\"; expected \"list[str]\"  [arg-type]",
       "count": 1
     },
@@ -5079,47 +4459,7 @@
     },
     {
       "file": "src/services/execution/service.py",
-      "message": "Argument \"run_name\" to \"add_execution_to_memory\" of \"ExecutionService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 1 to \"_mask_inputs_sensitive_data\" of \"ExecutionService\" has incompatible type \"Column[Any] | Any\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 1 to \"is_resumable_execution\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
       "message": "Argument 1 to \"len\" has incompatible type \"list[dict[str, Any]] | None\"; expected \"Sized\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 1 to \"normalize\" has incompatible type \"Column[Any]\"; expected \"dict[str, Any] | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 1 to \"resumable_blocker\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 2 to \"resumable_blocker\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 3 to \"build_crew_resume_config\" has incompatible type \"Column[Any] | dict[Any, Any]\"; expected \"dict[str, Any]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Argument 3 to \"build_flow_resume_config\" has incompatible type \"Column[Any] | dict[Any, Any]\"; expected \"dict[str, Any]\"  [arg-type]",
       "count": 1
     },
     {
@@ -5136,11 +4476,6 @@
       "file": "src/services/execution/service.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 4
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Incompatible default for argument \"created_at\" (default has type \"None\", argument has type \"datetime\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/services/execution/service.py",
@@ -5164,22 +4499,7 @@
     },
     {
       "file": "src/services/execution/service.py",
-      "message": "Incompatible types in assignment (expression has type \"UUID | None\", variable has type \"Column[UUID]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Incompatible types in assignment (expression has type \"UUID\", variable has type \"str | None\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
       "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", target has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
       "count": 1
     },
     {
@@ -5204,18 +4524,8 @@
     },
     {
       "file": "src/services/execution/service.py",
-      "message": "Need type annotation for \"stored_inputs\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/service.py",
       "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
       "count": 2
-    },
-    {
-      "file": "src/services/execution/status.py",
-      "message": "Argument \"execution_id\" to \"update_execution\" of \"ExecutionRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/execution/status.py",
@@ -5389,21 +4699,6 @@
     },
     {
       "file": "src/services/flow_builder/backend_flow.py",
-      "message": "Incompatible return value type (got \"None\", expected \"dict[Any, Any]\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/backend_flow.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"None\")  [assignment]",
-      "count": 3
-    },
-    {
-      "file": "src/services/flow_builder/backend_flow.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Column[Any]]\", variable has type \"None\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/backend_flow.py",
       "message": "Need type annotation for \"_config\" (hint: \"_config: dict[<type>, <type>] = ...\")  [var-annotated]",
       "count": 1
     },
@@ -5421,11 +4716,6 @@
       "file": "src/services/flow_builder/backend_flow.py",
       "message": "Returning Any from function declared to return \"str | None\"  [no-any-return]",
       "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/backend_flow.py",
-      "message": "Unsupported target for indexed assignment (\"None\")  [index]",
-      "count": 6
     },
     {
       "file": "src/services/flow_builder/checkpoint_adapter.py",
@@ -5509,26 +4799,6 @@
     },
     {
       "file": "src/services/flow_builder/execution_service.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[str]\", variable has type \"str | None\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/execution_service.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/execution_service.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/flow_builder/execution_service.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/flow_builder/execution_service.py",
       "message": "Returning Any from function declared to return \"ExecutionHistory\"  [no-any-return]",
       "count": 2
     },
@@ -5544,28 +4814,8 @@
     },
     {
       "file": "src/services/flow_builder/flow_runner_service.py",
-      "message": "Argument 1 to \"_run_dynamic_flow\" of \"FlowRunnerService\" has incompatible type \"Column[Any] | Any\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/flow_runner_service.py",
-      "message": "Argument 1 to \"_run_flow_execution\" of \"FlowRunnerService\" has incompatible type \"Column[Any] | Any\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/flow_runner_service.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 3
-    },
-    {
-      "file": "src/services/flow_builder/flow_runner_service.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"None\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/flow_service.py",
-      "message": "Argument 1 to \"force_delete_flow_with_executions\" of \"FlowService\" has incompatible type \"Column[Any]\"; expected \"UUID\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/flow_builder/flow_service.py",
@@ -5741,11 +4991,6 @@
       "file": "src/services/flow_builder/modules/flow_methods.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/flow_builder/modules/flow_methods.py",
-      "message": "Incompatible return value type (got \"tuple[Column[int] | int, Column[int] | int]\", expected \"tuple[int, int]\")  [return-value]",
-      "count": 1
     },
     {
       "file": "src/services/flow_builder/modules/flow_methods.py",
@@ -6213,11 +5458,6 @@
       "count": 1
     },
     {
-      "file": "src/services/groups/forwarded_identity.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
       "file": "src/services/groups/group_tools.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
       "count": 1
@@ -6225,36 +5465,6 @@
     {
       "file": "src/services/groups/group_tools.py",
       "message": "Returning Any from function declared to return \"bool\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Argument 1 to \"delete\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Argument 1 to \"get_user_groups\" of \"GroupService\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Group\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Argument 2 to \"get_by_group_and_user\" of \"GroupUserRepository\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {
@@ -6270,11 +5480,6 @@
     {
       "file": "src/services/groups/groups.py",
       "message": "Incompatible default for argument \"assigned_by_email\" (default has type \"None\", argument has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
-      "message": "Incompatible return value type (got \"Group | None\", expected \"Group\")  [return-value]",
       "count": 1
     },
     {
@@ -6329,72 +5534,12 @@
     },
     {
       "file": "src/services/groups/groups.py",
-      "message": "Missing positional argument \"obj_in\" in call to \"update\" of \"BaseRepository\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/groups.py",
       "message": "Returning Any from function declared to return \"int\"  [no-any-return]",
       "count": 1
     },
     {
       "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"allocate_personal_group_id\" of \"UserRepository\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"delete\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"generate_individual_group_id\" of \"GroupContext\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 9
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"has_legacy_personal_collision\" of \"UserRepository\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Argument 1 to \"update_last_login\" of \"UserRepository\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
       "message": "Incompatible default for argument \"filters\" (default has type \"None\", argument has type \"dict[str, Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/groups/users.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/guardrails/core/human_review_guardrail.py",
-      "message": "Incompatible return value type (got \"tuple[Column[str], Column[str]]\", expected \"tuple[str | None, str | None]\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/guardrails/core/human_review_guardrail.py",
-      "message": "Incompatible types in assignment (expression has type \"Any | str\", variable has type \"Column[str]\")  [assignment]",
       "count": 1
     },
     {
@@ -6484,78 +5629,13 @@
     },
     {
       "file": "src/services/hitl/service.py",
-      "message": "Argument \"approval_id\" to \"update_status\" of \"HITLApprovalRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"execution_id\" to \"_update_execution_status\" of \"HITLService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Argument \"group_email\" to \"GroupContext\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
       "message": "Argument 1 to \"get_by_id\" of \"HITLApprovalRepository\" has incompatible type \"str\"; expected \"int\"  [arg-type]",
       "count": 1
     },
     {
       "file": "src/services/hitl/service.py",
-      "message": "Argument 1 to \"get_run_by_job_id\" of \"ExecutionService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "Incompatible return value type (got \"list[Column[Any]]\", expected \"list[int]\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/service.py",
-      "message": "No overload variant of \"get\" of \"dict\" matches argument type \"str\"  [call-overload]",
-      "count": 2
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "\"Column[Any]\" has no attribute \"__iter__\"; maybe \"__str__\"? (not iterable)  [attr-defined]",
-      "count": 3
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"approval_id\" to \"mark_webhook_sent\" of \"HITLApprovalRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"flow_id\" to \"get_for_event\" of \"HITLWebhookRepository\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument \"group_id\" to \"get_for_event\" of \"HITLWebhookRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument 1 to \"assert_safe_outbound_url\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument 1 to \"post\" of \"AsyncClient\" has incompatible type \"Column[str]\"; expected \"URL | str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/hitl/webhook.py",
-      "message": "Argument 2 to \"_generate_signature\" of \"HITLWebhookService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/hitl/webhook.py",
@@ -6765,31 +5845,6 @@
     {
       "file": "src/services/mcp/mcp_server/sessions.py",
       "message": "Incompatible types in assignment (expression has type \"dict[Any, Any]\", target has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/memory/config/backend_base_service.py",
-      "message": "Argument 1 to \"delete\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/memory/config/backend_base_service.py",
-      "message": "Argument 1 to \"delete\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/memory/config/backend_base_service.py",
-      "message": "Argument 1 to \"get\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/memory/config/backend_base_service.py",
-      "message": "Argument 2 to \"set_default\" of \"MemoryBackendRepository\" has incompatible type \"Column[Any]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/memory/config/backend_base_service.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"Column[Any]\")  [assignment]",
       "count": 1
     },
     {
@@ -7119,11 +6174,6 @@
     },
     {
       "file": "src/services/powerbi/conversions.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"str\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/conversions.py",
       "message": "Function is missing a type annotation for one or more arguments  [no-untyped-def]",
       "count": 1
     },
@@ -7188,16 +6238,6 @@
       "count": 2
     },
     {
-      "file": "src/services/powerbi/semantic_model_cache.py",
-      "message": "Incompatible return value type (got \"Column[Any]\", expected \"dict[str, Any] | None\")  [return-value]",
-      "count": 1
-    },
-    {
-      "file": "src/services/powerbi/service.py",
-      "message": "Argument \"semantic_model_id\" to \"_execute_query\" of \"PowerBIService\" has incompatible type \"str | Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
       "file": "src/services/powerbi/service.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
@@ -7240,11 +6280,6 @@
     {
       "file": "src/services/prompt_optimization/alignment.py",
       "message": "Argument 2 to \"get_with_group_check\" of \"AgentService\" has incompatible type \"GroupContext | None\"; expected \"GroupContext\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/alignment.py",
-      "message": "Item \"Column[Any]\" of \"Column[Any] | list[Never]\" has no attribute \"__iter__\" (not iterable)  [union-attr]",
       "count": 1
     },
     {
@@ -7399,11 +6434,6 @@
     },
     {
       "file": "src/services/prompt_optimization/runs.py",
-      "message": "\"Column[Any]\" has no attribute \"__iter__\"; maybe \"__str__\"? (not iterable)  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/runs.py",
       "message": "\"RunRegistryMixin\" has no attribute \"run_repository\"  [attr-defined]",
       "count": 11
     },
@@ -7411,11 +6441,6 @@
       "file": "src/services/prompt_optimization/runs.py",
       "message": "\"RunRegistryMixin\" has no attribute \"session\"  [attr-defined]",
       "count": 8
-    },
-    {
-      "file": "src/services/prompt_optimization/runs.py",
-      "message": "Argument 1 to \"update_with_group_check\" of \"TemplateService\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 2
     },
     {
       "file": "src/services/prompt_optimization/runs.py",
@@ -7484,27 +6509,7 @@
     },
     {
       "file": "src/services/prompt_optimization/service.py",
-      "message": "Generator has incompatible item type \"ColumnElement[Any] | str\"; expected \"str\"  [misc]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/service.py",
-      "message": "Item \"Column[Any]\" of \"Column[Any] | list[Never]\" has no attribute \"__iter__\" (not iterable)  [union-attr]",
-      "count": 2
-    },
-    {
-      "file": "src/services/prompt_optimization/service.py",
-      "message": "Need type annotation for \"agents_yaml\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/service.py",
       "message": "Need type annotation for \"examples\" (hint: \"examples: list[<type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/prompt_optimization/service.py",
-      "message": "Need type annotation for \"tasks_yaml\"  [var-annotated]",
       "count": 1
     },
     {
@@ -7519,47 +6524,7 @@
     },
     {
       "file": "src/services/publications/publication.py",
-      "message": "Argument \"entity_id\" to \"delete_by_entity\" of \"PublicationRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "Argument \"entity_type\" to \"delete_by_entity\" of \"PublicationRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/publications/publication.py",
       "message": "Argument 1 to \"get_flows_by_ids\" of \"FlowService\" has incompatible type \"list[str]\"; expected \"list[UUID | str]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any] | None\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "Incompatible types in assignment (expression has type \"list[Literal['mcp', 'a2a', 'chat']]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 4
-    },
-    {
-      "file": "src/services/publications/publication.py",
-      "message": "No overload variant of \"get\" of \"dict\" matches argument type \"Column[str]\"  [call-overload]",
       "count": 1
     },
     {
@@ -7574,117 +6539,12 @@
     },
     {
       "file": "src/services/recipes/recipes.py",
-      "message": "Argument 1 to \"_trace_shape\" of \"WorkflowRecipeService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Argument 1 to \"build_intent_text\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Argument 1 to \"embed\" of \"WorkflowRecipeService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Argument 2 to \"embed\" of \"WorkflowRecipeService\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"Any | None\", variable has type \"Column[int]\")  [assignment]",
-      "count": 3
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
       "message": "Incompatible types in assignment (expression has type \"Any | None\", variable has type \"ExecutionHistory\")  [assignment]",
       "count": 1
     },
     {
       "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"ColumnElement[int] | int\", variable has type \"Column[int]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime | None\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"int\", variable has type \"Column[int]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"list[Any]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"list[float]\", variable has type \"Column[Any]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Item \"Column[Any]\" of \"Column[Any] | list[Never]\" has no attribute \"__iter__\" (not iterable)  [union-attr]",
-      "count": 2
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Need type annotation for \"inputs\" (hint: \"inputs: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 2
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
-      "message": "Unsupported operand types for in (\"Any | None\" and \"set[str]\")  [operator]",
-      "count": 1
-    },
-    {
-      "file": "src/services/recipes/recipes.py",
       "message": "Value of type variable \"SupportsRichComparisonT\" of \"max\" cannot be \"Any | None\"  [type-var]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"group_email\" to \"GroupContext\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"group_email\" to \"create_run_record\" of \"ExecutionService\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument \"group_id\" to \"create_run_record\" of \"ExecutionService\" has incompatible type \"Column[str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument 1 to \"calculate_next_run_from_last\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument 1 to \"ensure_utc\" has incompatible type \"Column[datetime]\"; expected \"datetime | None\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Argument 1 to \"run_schedule_job\" of \"SchedulerService\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
       "count": 1
     },
     {
@@ -7706,11 +6566,6 @@
       "file": "src/services/scheduling/scheduler.py",
       "message": "Incompatible types in assignment (expression has type \"bool\", target has type \"str\")  [assignment]",
       "count": 2
-    },
-    {
-      "file": "src/services/scheduling/scheduler.py",
-      "message": "Incompatible types in assignment (expression has type \"datetime\", variable has type \"Column[datetime]\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/services/scheduling/scheduler.py",
@@ -7789,21 +6644,6 @@
     },
     {
       "file": "src/services/settings/api_keys.py",
-      "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/settings/api_keys.py",
-      "message": "Argument 1 to \"delete\" of \"ApiKeyRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/api_keys.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/api_keys.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
     },
@@ -7874,33 +6714,8 @@
     },
     {
       "file": "src/services/settings/models.py",
-      "message": "Argument 1 to \"invalidate\" of \"TTLCache\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/settings/models.py",
       "message": "Argument 1 to \"set\" of \"TTLCache\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 2
-    },
-    {
-      "file": "src/services/settings/models.py",
-      "message": "Argument 1 to \"toggle_enabled_in_group\" of \"ModelConfigRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/models.py",
-      "message": "Argument 1 to \"update\" of \"BaseRepository\" has incompatible type \"Column[Any]\"; expected \"int | UUID\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/models.py",
-      "message": "Argument 2 to \"find_by_key_and_group\" of \"ModelConfigRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/models.py",
-      "message": "Argument 2 to \"toggle_enabled_in_group\" of \"ModelConfigRepository\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
     },
     {
       "file": "src/services/settings/models.py",
@@ -7928,21 +6743,6 @@
       "count": 1
     },
     {
-      "file": "src/services/settings/ui.py",
-      "message": "Incompatible types in assignment (expression has type \"bool\", variable has type \"Column[bool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/settings/ui.py",
-      "message": "Incompatible types in assignment (expression has type \"str | None\", variable has type \"Column[str]\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/settings/ui.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"Column[str]\")  [assignment]",
-      "count": 1
-    },
-    {
       "file": "src/services/skills/generation.py",
       "message": "Argument \"model\" to \"completion\" of \"LLMManager\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
       "count": 1
@@ -7953,24 +6753,9 @@
       "count": 1
     },
     {
-      "file": "src/services/skills/loader.py",
-      "message": "Set comprehension has incompatible type Set[Column[str]]; expected Set[str | None]  [misc]",
-      "count": 1
-    },
-    {
       "file": "src/services/skills/parser.py",
       "message": "Skipping analyzing \"skills_ref\": module is installed, but missing library stubs or py.typed marker  [import-untyped]",
       "count": 1
-    },
-    {
-      "file": "src/services/skills/service.py",
-      "message": "Argument 1 to \"find_visible\" of \"SkillRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/skills/service.py",
-      "message": "Argument 1 to \"replace_files\" of \"SkillRepository\" has incompatible type \"Column[Any]\"; expected \"int\"  [arg-type]",
-      "count": 3
     },
     {
       "file": "src/services/skills/service.py",
@@ -8020,16 +6805,6 @@
     {
       "file": "src/services/tools/a2a_agent_tool.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/a2a_tool_builder.py",
-      "message": "Argument 1 to \"resolve_for_call\" of \"A2AAgentService\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/a2a_tool_builder.py",
-      "message": "Generator has incompatible item type \"Column[str]\"; expected \"str\"  [misc]",
       "count": 1
     },
     {
@@ -9704,11 +8479,6 @@
     },
     {
       "file": "src/services/tools/tool_service.py",
-      "message": "Key expression in dictionary comprehension has incompatible type \"Column[int]\"; expected type \"int\"  [misc]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_service.py",
       "message": "Returning Any from function declared to return \"ToolListResponse\"  [no-any-return]",
       "count": 1
     },
@@ -9809,18 +8579,8 @@
     },
     {
       "file": "src/services/trace/broadcast.py",
-      "message": "Argument 2 to \"suppresses_poller_broadcast\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/trace/broadcast.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 5
-    },
-    {
-      "file": "src/services/trace/broadcast.py",
-      "message": "Incompatible types in assignment (expression has type \"Column[Any]\", target has type \"int\")  [assignment]",
-      "count": 1
     },
     {
       "file": "src/services/trace/queue.py",
@@ -9888,31 +8648,6 @@
       "count": 2
     },
     {
-      "file": "src/services/triggers/emit_service.py",
-      "message": "Argument 4 to \"_inputs_for\" of \"EmitService\" has incompatible type \"Column[str] | None\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/triggers/emit_service.py",
-      "message": "Need type annotation for \"tgt\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "Incompatible return value type (got \"Column[str]\", expected \"str\")  [return-value]",
-      "count": 2
-    },
-    {
-      "file": "src/services/triggers/queue_consumer_service.py",
-      "message": "No overload variant of \"get\" of \"dict\" matches argument type \"str\"  [call-overload]",
-      "count": 1
-    },
-    {
-      "file": "src/services/triggers/queue_service.py",
-      "message": "No overload variant of \"get\" of \"dict\" matches argument type \"str\"  [call-overload]",
-      "count": 1
-    },
-    {
       "file": "src/utils/aiohttp_session.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 1
@@ -9940,11 +8675,6 @@
     {
       "file": "src/utils/databricks_auth.py",
       "message": "Argument 1 to \"_create_bearer_headers\" of \"DatabricksAuth\" has incompatible type \"str | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/utils/databricks_auth.py",
-      "message": "Argument 1 to \"decrypt_value\" of \"EncryptionUtils\" has incompatible type \"Column[str]\"; expected \"str\"  [arg-type]",
       "count": 1
     },
     {

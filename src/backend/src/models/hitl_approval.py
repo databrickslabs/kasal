@@ -6,18 +6,10 @@ that pause flow execution and wait for human decision.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-)
-from sqlalchemy.orm import relationship
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
 
@@ -119,29 +111,29 @@ class HITLApproval(Base):
 
     __tablename__ = "hitl_approvals"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
     # Execution reference
     # CASCADE delete: When execution is deleted, delete all associated HITL approvals
-    execution_id = Column(
+    execution_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("executionhistory.job_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    flow_id = Column(String, nullable=False, index=True)
-    gate_node_id = Column(String, nullable=False, index=True)
-    crew_sequence = Column(
+    flow_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    gate_node_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    crew_sequence: Mapped[int] = mapped_column(
         Integer, nullable=False
     )  # Which crew completed before this gate
 
     # Status
-    status = Column(
+    status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=HITLApprovalStatus.PENDING, index=True
     )
 
     # Gate configuration
-    gate_config = Column(JSON, nullable=False, default=dict)
+    gate_config: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
     # Structure:
     # {
     #     "message": "Review output before proceeding",
@@ -152,32 +144,46 @@ class HITLApproval(Base):
     # }
 
     # Context for approver
-    previous_crew_name = Column(String(255), nullable=True)
-    previous_crew_output = Column(Text, nullable=True)  # Output to review
-    flow_state_snapshot = Column(JSON, nullable=True, default=dict)  # State at gate
+    previous_crew_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    previous_crew_output: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # Output to review
+    flow_state_snapshot: Mapped[Any] = mapped_column(
+        JSON, nullable=True, default=dict
+    )  # State at gate
 
     # Response
-    responded_by = Column(String(255), nullable=True)
-    responded_at = Column(DateTime(timezone=True), nullable=True)
-    approval_comment = Column(Text, nullable=True)
-    rejection_reason = Column(Text, nullable=True)
-    rejection_action = Column(String(50), nullable=True)  # 'reject' or 'retry'
+    responded_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    responded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    approval_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejection_action: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # 'reject' or 'retry'
 
     # Timeout
-    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # Webhook notification tracking
-    webhook_sent = Column(Boolean, default=False, nullable=False)
-    webhook_sent_at = Column(DateTime(timezone=True), nullable=True)
-    webhook_response = Column(JSON, nullable=True)
+    webhook_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    webhook_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    webhook_response: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # Audit
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    group_id = Column(String(100), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
     # Relationships
     execution = relationship(
@@ -266,36 +272,41 @@ class HITLWebhook(Base):
 
     __tablename__ = "hitl_webhooks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    group_id = Column(String(100), nullable=False, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    group_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
     # Optional: scope webhook to a specific flow (null = applies to all flows in group)
-    flow_id = Column(String(100), nullable=True, index=True)
+    flow_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
 
-    name = Column(String(255), nullable=False)
-    url = Column(String(1000), nullable=False)
-    enabled = Column(Boolean, default=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Events to trigger webhook
     # ["gate_reached", "gate_approved", "gate_rejected", "gate_timeout"]
-    events = Column(JSON, default=lambda: ["gate_reached"], nullable=False)
+    events: Mapped[Any] = mapped_column(
+        JSON, default=lambda: ["gate_reached"], nullable=False
+    )
 
     # Custom headers (e.g., for authentication)
-    headers = Column(JSON, default=dict, nullable=True)
+    headers: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
 
     # Secret for webhook signature verification
-    secret = Column(String(255), nullable=True)
+    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Audit
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
     )
 
     def __init__(self, **kwargs):

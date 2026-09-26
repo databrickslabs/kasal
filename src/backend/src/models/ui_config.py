@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -18,12 +20,12 @@ class UIConfig(Base):
 
     __tablename__ = "ui_config"
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Master switch — ON by default. Output formatting is handled by the
     # UI-document emission, so workspaces render through the design-system UI
     # renderer unless an admin explicitly turns this off.
-    enabled = Column(Boolean, default=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Which component catalog agents may use:
     #   "full"    — everything bundled (default)
@@ -33,28 +35,37 @@ class UIConfig(Base):
     #               does not pick up components added to A2UI later)
     # Defaults to "full" so saving a config doesn't silently strip rich surfaces.
     # (Legacy rows stored as "basic" still resolve to full — see resolve_catalog.)
-    catalog_type = Column(String(50), default="full", nullable=False)
+    catalog_type: Mapped[str] = mapped_column(
+        String(50), default="full", nullable=False
+    )
     # Custom catalog JSON (only used when catalog_type == "custom").
-    catalog_json = Column(Text, nullable=True)
+    catalog_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Component names switched OFF, as a JSON array (only for "select"). Stored as
     # EXCLUSIONS, not inclusions, so a workspace automatically gains components as
     # A2UI grows instead of freezing at the set that existed when it was saved.
-    disabled_components = Column(Text, nullable=True)
+    disabled_components: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Renderer style overrides (accent color, density, theme) as JSON.
-    style_json = Column(Text, nullable=True)
+    style_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # This workspace's overrides of the system A2UI defaults (JSON object; keys
     # from services/a2ui/settings.OVERRIDABLE). NULL uses every default.
-    settings_json = Column(Text, nullable=True)
+    settings_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Multi-tenant fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), index=True, nullable=True)  # Audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), index=True, nullable=True
+    )  # Audit
 
-    created_at = Column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=True,
     )
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
     )

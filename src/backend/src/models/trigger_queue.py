@@ -16,8 +16,10 @@ does not run at startup here (see the migration for the alembic-managed path).
 """
 
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, DateTime, Index, Integer, String
+from sqlalchemy import JSON, DateTime, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -33,36 +35,46 @@ STATUS_DEAD = "dead"
 class TriggerQueue(Base):
     """One queued event that should trigger a crew/flow run."""
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Tenancy — becomes the run's GroupContext; the one field trusted end-to-end.
-    group_id = Column(String(100), nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Routing. In Phase 1 the row names its ``target`` directly; ``event_type`` is
     # reserved for Phase 2 subscription matching (topic mode).
-    event_type = Column(String(255), nullable=True)
-    target = Column(
+    event_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    target: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # {"kind": "flow"|"inline", "id"?, "config"?, "harness"?}
-    payload = Column(JSON, default=dict)  # the event body (inputs live here)
+    payload: Mapped[Any] = mapped_column(
+        JSON, default=dict, nullable=True
+    )  # the event body (inputs live here)
 
     # Delivery state.
-    status = Column(String(20), default=STATUS_PENDING, nullable=False)
-    attempts = Column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default=STATUS_PENDING, nullable=False
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Visibility: NULL means "available now"; a future time delays/backs off.
-    available_at = Column(DateTime, nullable=True)
+    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # When the row was claimed — used to reclaim rows stuck by a crashed worker.
-    claimed_at = Column(DateTime, nullable=True)
-    last_error = Column(String, nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Correlation envelope (threads a chain of crew→crew hand-offs).
-    correlation_id = Column(String(100), nullable=True)
-    causation_run_id = Column(String(100), nullable=True)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    causation_run_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # Dedupe: a producer that re-emits the same logical event can't double-fire.
-    idempotency_key = Column(String(255), nullable=True, unique=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, unique=True
+    )
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     __table_args__ = (
         # The claim scan filters on status + available_at and orders by created_at.

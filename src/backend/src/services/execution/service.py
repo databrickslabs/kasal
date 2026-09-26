@@ -566,9 +566,9 @@ class ExecutionService:
     def add_execution_to_memory(
         execution_id: str,
         status: str,
-        run_name: str,
-        created_at: datetime = None,
-        group_id: Optional[int] = None,
+        run_name: Optional[str],
+        created_at: Optional[datetime] = None,
+        group_id: Optional[str] = None,
         group_email: Optional[str] = None,
     ) -> None:
         """
@@ -1545,7 +1545,7 @@ class ExecutionService:
             sanitized_inputs = ExecutionService.sanitize_for_database(masked_inputs)
 
             # Create execution data with RUNNING status for immediate visibility
-            execution_data = {
+            execution_data: Dict[str, Any] = {
                 "job_id": execution_id,
                 "status": ExecutionStatus.RUNNING.value,  # Start with RUNNING status for immediate visibility
                 "inputs": sanitized_inputs,
@@ -1591,9 +1591,9 @@ class ExecutionService:
                 import uuid as uuid_module
 
                 # Ensure flow_id is a UUID object for the database
-                if isinstance(flow_id, str):
-                    flow_id = uuid_module.UUID(flow_id)
-                execution_data["flow_id"] = flow_id
+                execution_data["flow_id"] = (
+                    uuid_module.UUID(flow_id) if isinstance(flow_id, str) else flow_id
+                )
                 logger.info(
                     f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
                 )
@@ -1963,7 +1963,7 @@ class ExecutionService:
             f"(source status: {source.status}, restored units: {restored_units})"
         )
 
-        execution_data = {
+        execution_data: Dict[str, Any] = {
             "job_id": new_execution_id,
             "status": ExecutionStatus.RUNNING.value,
             # The definition that will actually RUN, which is the rebuilt one

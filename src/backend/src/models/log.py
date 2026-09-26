@@ -1,6 +1,8 @@
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String
+from sqlalchemy import JSON, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -11,23 +13,33 @@ class LLMLog(Base):
     Enhanced with group isolation for multi-group deployments.
     """
 
-    id = Column(Integer, primary_key=True)
-    endpoint = Column(String, nullable=False)  # e.g., 'generate-crew', 'generate-agent'
-    prompt = Column(String, nullable=False)  # The input prompt
-    response = Column(String, nullable=False)  # The LLM response
-    model = Column(String, nullable=False)  # e.g., 'gpt-4'
-    tokens_used = Column(Integer)  # Total tokens used
-    duration_ms = Column(Integer)  # Time taken in milliseconds
-    status = Column(String, nullable=False)  # 'success' or 'error'
-    error_message = Column(String)  # Error message if any
-    created_at = Column(
-        DateTime, default=datetime.utcnow
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    endpoint: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # e.g., 'generate-crew', 'generate-agent'
+    prompt: Mapped[str] = mapped_column(String, nullable=False)  # The input prompt
+    response: Mapped[str] = mapped_column(String, nullable=False)  # The LLM response
+    model: Mapped[str] = mapped_column(String, nullable=False)  # e.g., 'gpt-4'
+    tokens_used: Mapped[Optional[int]] = mapped_column(Integer)  # Total tokens used
+    duration_ms: Mapped[Optional[int]] = mapped_column(
+        Integer
+    )  # Time taken in milliseconds
+    status: Mapped[str] = mapped_column(String, nullable=False)  # 'success' or 'error'
+    error_message: Mapped[Optional[str]] = mapped_column(String)  # Error message if any
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
     )  # Use timezone-naive UTC time
-    extra_data = Column(JSON)  # Any additional metadata
+    extra_data: Mapped[Any] = mapped_column(
+        JSON, nullable=True
+    )  # Any additional metadata
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    group_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    group_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     def __init__(self, **kwargs):
         super(LLMLog, self).__init__(**kwargs)

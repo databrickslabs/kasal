@@ -25,6 +25,8 @@ except ImportError:
 from src.core.cache import intent_cache
 from src.core.exceptions import BadRequestError
 from src.core.llm.robust_json import robust_json_parser
+from src.models.crew import Crew
+from src.models.flow import Flow
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest
 
@@ -49,9 +51,35 @@ from .model_policy import (
     DEFAULT_DISPATCHER_MODEL,
     DISPATCHER_FALLBACK_MODELS,
 )
+from .name_match import match_by_name
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def _crew_plan(crew: Crew) -> Dict[str, Any]:
+    """The saved crew as the canvas loads it."""
+    return {
+        "id": str(crew.id),
+        "name": crew.name,
+        "nodes": crew.nodes or [],
+        "edges": crew.edges or [],
+        "process": crew.process,
+        "memory": crew.memory,
+        "verbose": crew.verbose,
+        "max_rpm": crew.max_rpm,
+    }
+
+
+def _flow_payload(flow: Flow) -> Dict[str, Any]:
+    """The saved flow as the canvas loads it."""
+    return {
+        "id": str(flow.id),
+        "name": flow.name,
+        "nodes": flow.nodes or [],
+        "edges": flow.edges or [],
+        "flow_config": flow.flow_config or {},
+    }
 
 
 class DispatcherService:
@@ -1407,61 +1435,21 @@ Please analyze this message and provide your intent classification."""
                             "message": "Executing crew on canvas...",
                         }
                     else:
-                        matches = [
-                            c for c in crews if run_name.lower() in c.name.lower()
-                        ]
-                        exact_matches = [
-                            c for c in matches if c.name.lower() == run_name.lower()
-                        ]
-                        if exact_matches:
-                            matches = exact_matches
-                        if len(matches) == 1:
-                            crew = matches[0]
+                        crew, matches = match_by_name(crews, run_name)
+                        if crew is not None:
                             generation_result = {
                                 "type": "execute_crew",
-                                "plan": {
-                                    "id": str(crew.id),
-                                    "name": crew.name,
-                                    "nodes": crew.nodes or [],
-                                    "edges": crew.edges or [],
-                                    "process": crew.process,
-                                    "memory": crew.memory,
-                                    "verbose": crew.verbose,
-                                    "max_rpm": crew.max_rpm,
-                                },
+                                "plan": _crew_plan(crew),
                                 "message": f"Loading and executing crew '{crew.name}'...",
                             }
-                        elif len(matches) > 1:
-                            unique_names = {c.name.lower() for c in matches}
-                            if len(unique_names) == 1:
-                                crew = sorted(
-                                    matches,
-                                    key=lambda c: c.updated_at or c.created_at,
-                                    reverse=True,
-                                )[0]
-                                generation_result = {
-                                    "type": "execute_crew",
-                                    "plan": {
-                                        "id": str(crew.id),
-                                        "name": crew.name,
-                                        "nodes": crew.nodes or [],
-                                        "edges": crew.edges or [],
-                                        "process": crew.process,
-                                        "memory": crew.memory,
-                                        "verbose": crew.verbose,
-                                        "max_rpm": crew.max_rpm,
-                                    },
-                                    "message": f"Loading and executing crew '{crew.name}'...",
-                                }
-                            else:
-                                generation_result = {
-                                    "type": "catalog_list",
-                                    "plans": [
-                                        {"id": str(c.id), "name": c.name}
-                                        for c in matches
-                                    ],
-                                    "message": f"Multiple crews match '{run_name}'. Please be more specific:",
-                                }
+                        elif matches:
+                            generation_result = {
+                                "type": "catalog_list",
+                                "plans": [
+                                    {"id": str(c.id), "name": c.name} for c in matches
+                                ],
+                                "message": f"Multiple crews match '{run_name}'. Please be more specific:",
+                            }
                         else:
                             generation_result = {
                                 "type": "execute_crew",
@@ -1485,55 +1473,22 @@ Please analyze this message and provide your intent classification."""
                             "message": "Executing flow on canvas...",
                         }
                     else:
-                        matches = [
-                            f for f in flows if run_name.lower() in f.name.lower()
-                        ]
-                        exact_matches = [
-                            f for f in matches if f.name.lower() == run_name.lower()
-                        ]
-                        if exact_matches:
-                            matches = exact_matches
-                        if len(matches) == 1:
-                            flow = matches[0]
+                        flow, flow_matches = match_by_name(flows, run_name)
+                        if flow is not None:
                             generation_result = {
                                 "type": "execute_flow",
-                                "flow": {
-                                    "id": str(flow.id),
-                                    "name": flow.name,
-                                    "nodes": flow.nodes or [],
-                                    "edges": flow.edges or [],
-                                    "flow_config": flow.flow_config or {},
-                                },
+                                "flow": _flow_payload(flow),
                                 "message": f"Loading and executing flow '{flow.name}'...",
                             }
-                        elif len(matches) > 1:
-                            unique_names = {f.name.lower() for f in matches}
-                            if len(unique_names) == 1:
-                                flow = sorted(
-                                    matches,
-                                    key=lambda f: f.updated_at or f.created_at,
-                                    reverse=True,
-                                )[0]
-                                generation_result = {
-                                    "type": "execute_flow",
-                                    "flow": {
-                                        "id": str(flow.id),
-                                        "name": flow.name,
-                                        "nodes": flow.nodes or [],
-                                        "edges": flow.edges or [],
-                                        "flow_config": flow.flow_config or {},
-                                    },
-                                    "message": f"Loading and executing flow '{flow.name}'...",
-                                }
-                            else:
-                                generation_result = {
-                                    "type": "flow_list",
-                                    "flows": [
-                                        {"id": str(f.id), "name": f.name}
-                                        for f in matches
-                                    ],
-                                    "message": f"Multiple flows match '{run_name}'. Please be more specific:",
-                                }
+                        elif flow_matches:
+                            generation_result = {
+                                "type": "flow_list",
+                                "flows": [
+                                    {"id": str(f.id), "name": f.name}
+                                    for f in flow_matches
+                                ],
+                                "message": f"Multiple flows match '{run_name}'. Please be more specific:",
+                            }
                         else:
                             generation_result = {
                                 "type": "execute_flow",
@@ -1604,67 +1559,23 @@ Please analyze this message and provide your intent classification."""
                         }
                     else:
                         # Search by name (case-insensitive partial match)
-                        matches = [
-                            c for c in crews if search_name.lower() in c.name.lower()
-                        ]
-                        # Prioritize exact name matches to avoid infinite loops
-                        # when multiple items share the same name
-                        exact_matches = [
-                            c for c in matches if c.name.lower() == search_name.lower()
-                        ]
-                        if exact_matches:
-                            matches = exact_matches
-                        if len(matches) == 1:
-                            crew = matches[0]
+                        crew, matches = match_by_name(crews, search_name)
+                        if crew is not None:
+                            # Several matches sharing one name: the most recent.
+                            recent = " (most recent)" if len(matches) > 1 else ""
                             generation_result = {
                                 "type": "catalog_load",
-                                "plan": {
-                                    "id": str(crew.id),
-                                    "name": crew.name,
-                                    "nodes": crew.nodes or [],
-                                    "edges": crew.edges or [],
-                                    "process": crew.process,
-                                    "memory": crew.memory,
-                                    "verbose": crew.verbose,
-                                    "max_rpm": crew.max_rpm,
-                                },
-                                "message": f"Loaded plan '{crew.name}' onto the canvas.",
+                                "plan": _crew_plan(crew),
+                                "message": f"Loaded plan '{crew.name}'{recent} onto the canvas.",
                             }
-                        elif len(matches) > 1:
-                            # Multiple matches — check if they all share the
-                            # same name (duplicates). If so, load the most
-                            # recent one instead of showing an ambiguous list.
-                            unique_names = {c.name.lower() for c in matches}
-                            if len(unique_names) == 1:
-                                # All duplicates — pick most recently updated
-                                crew = sorted(
-                                    matches,
-                                    key=lambda c: c.updated_at or c.created_at,
-                                    reverse=True,
-                                )[0]
-                                generation_result = {
-                                    "type": "catalog_load",
-                                    "plan": {
-                                        "id": str(crew.id),
-                                        "name": crew.name,
-                                        "nodes": crew.nodes or [],
-                                        "edges": crew.edges or [],
-                                        "process": crew.process,
-                                        "memory": crew.memory,
-                                        "verbose": crew.verbose,
-                                        "max_rpm": crew.max_rpm,
-                                    },
-                                    "message": f"Loaded plan '{crew.name}' (most recent) onto the canvas.",
-                                }
-                            else:
-                                generation_result = {
-                                    "type": "catalog_list",
-                                    "plans": [
-                                        {"id": str(c.id), "name": c.name}
-                                        for c in matches
-                                    ],
-                                    "message": f"Multiple plans match '{search_name}'. Please be more specific:",
-                                }
+                        elif matches:
+                            generation_result = {
+                                "type": "catalog_list",
+                                "plans": [
+                                    {"id": str(c.id), "name": c.name} for c in matches
+                                ],
+                                "message": f"Multiple plans match '{search_name}'. Please be more specific:",
+                            }
                         else:
                             generation_result = {
                                 "type": "catalog_load",
@@ -1790,61 +1701,24 @@ Please analyze this message and provide your intent classification."""
                         }
                     else:
                         # Search by name (case-insensitive partial match)
-                        matches = [
-                            f for f in flows if search_name.lower() in f.name.lower()
-                        ]
-                        # Prioritize exact name matches to avoid infinite loops
-                        # when multiple items share the same name
-                        exact_matches = [
-                            f for f in matches if f.name.lower() == search_name.lower()
-                        ]
-                        if exact_matches:
-                            matches = exact_matches
-                        if len(matches) == 1:
-                            flow = matches[0]
+                        flow, flow_matches = match_by_name(flows, search_name)
+                        if flow is not None:
+                            # Several flow_matches sharing one name: the most recent.
+                            recent = " (most recent)" if len(flow_matches) > 1 else ""
                             generation_result = {
                                 "type": "flow_load",
-                                "flow": {
-                                    "id": str(flow.id),
-                                    "name": flow.name,
-                                    "nodes": flow.nodes or [],
-                                    "edges": flow.edges or [],
-                                    "flow_config": flow.flow_config or {},
-                                },
-                                "message": f"Loaded flow '{flow.name}' onto the canvas.",
+                                "flow": _flow_payload(flow),
+                                "message": f"Loaded flow '{flow.name}'{recent} onto the canvas.",
                             }
-                        elif len(matches) > 1:
-                            # Multiple matches — check if they all share the
-                            # same name (duplicates). If so, load the most
-                            # recent one instead of showing an ambiguous list.
-                            unique_names = {f.name.lower() for f in matches}
-                            if len(unique_names) == 1:
-                                # All duplicates — pick most recently updated
-                                flow = sorted(
-                                    matches,
-                                    key=lambda f: f.updated_at or f.created_at,
-                                    reverse=True,
-                                )[0]
-                                generation_result = {
-                                    "type": "flow_load",
-                                    "flow": {
-                                        "id": str(flow.id),
-                                        "name": flow.name,
-                                        "nodes": flow.nodes or [],
-                                        "edges": flow.edges or [],
-                                        "flow_config": flow.flow_config or {},
-                                    },
-                                    "message": f"Loaded flow '{flow.name}' (most recent) onto the canvas.",
-                                }
-                            else:
-                                generation_result = {
-                                    "type": "flow_list",
-                                    "flows": [
-                                        {"id": str(f.id), "name": f.name}
-                                        for f in matches
-                                    ],
-                                    "message": f"Multiple flows match '{search_name}'. Please be more specific:",
-                                }
+                        elif flow_matches:
+                            generation_result = {
+                                "type": "flow_list",
+                                "flows": [
+                                    {"id": str(f.id), "name": f.name}
+                                    for f in flow_matches
+                                ],
+                                "message": f"Multiple flows match '{search_name}'. Please be more specific:",
+                            }
                         else:
                             generation_result = {
                                 "type": "flow_load",
@@ -1879,47 +1753,24 @@ Please analyze this message and provide your intent classification."""
                             "message": "Please specify a crew name to delete. Usage: `/delete crew <name>`",
                         }
                     else:
-                        matches = [
-                            c for c in crews if delete_name.lower() in c.name.lower()
-                        ]
-                        exact_matches = [
-                            c for c in matches if c.name.lower() == delete_name.lower()
-                        ]
-                        if exact_matches:
-                            matches = exact_matches
-                        if len(matches) == 1:
-                            crew = matches[0]
+                        crew, matches = match_by_name(crews, delete_name)
+                        if crew is not None:
                             await self.catalog_service.delete_by_group(
                                 crew.id, group_context
                             )
+                            recent = " (most recent)" if len(matches) > 1 else ""
                             generation_result = {
                                 "type": "catalog_delete",
-                                "message": f"Crew '{crew.name}' has been deleted.",
+                                "message": f"Crew '{crew.name}'{recent} has been deleted.",
                             }
-                        elif len(matches) > 1:
-                            unique_names = {c.name.lower() for c in matches}
-                            if len(unique_names) == 1:
-                                crew = sorted(
-                                    matches,
-                                    key=lambda c: c.updated_at or c.created_at,
-                                    reverse=True,
-                                )[0]
-                                await self.catalog_service.delete_by_group(
-                                    crew.id, group_context
-                                )
-                                generation_result = {
-                                    "type": "catalog_delete",
-                                    "message": f"Crew '{crew.name}' (most recent) has been deleted.",
-                                }
-                            else:
-                                generation_result = {
-                                    "type": "catalog_list",
-                                    "plans": [
-                                        {"id": str(c.id), "name": c.name}
-                                        for c in matches
-                                    ],
-                                    "message": f"Multiple crews match '{delete_name}'. Please be more specific:",
-                                }
+                        elif matches:
+                            generation_result = {
+                                "type": "catalog_list",
+                                "plans": [
+                                    {"id": str(c.id), "name": c.name} for c in matches
+                                ],
+                                "message": f"Multiple crews match '{delete_name}'. Please be more specific:",
+                            }
                         else:
                             generation_result = {
                                 "type": "catalog_delete",
@@ -1940,47 +1791,25 @@ Please analyze this message and provide your intent classification."""
                             "message": "Please specify a flow name to delete. Usage: `/delete flow <name>`",
                         }
                     else:
-                        matches = [
-                            f for f in flows if delete_name.lower() in f.name.lower()
-                        ]
-                        exact_matches = [
-                            f for f in matches if f.name.lower() == delete_name.lower()
-                        ]
-                        if exact_matches:
-                            matches = exact_matches
-                        if len(matches) == 1:
-                            flow = matches[0]
+                        flow, flow_matches = match_by_name(flows, delete_name)
+                        if flow is not None:
                             await self.flow_service.force_delete_flow_with_executions_with_group_check(
                                 flow.id, group_context
                             )
+                            recent = " (most recent)" if len(flow_matches) > 1 else ""
                             generation_result = {
                                 "type": "flow_delete",
-                                "message": f"Flow '{flow.name}' has been deleted.",
+                                "message": f"Flow '{flow.name}'{recent} has been deleted.",
                             }
-                        elif len(matches) > 1:
-                            unique_names = {f.name.lower() for f in matches}
-                            if len(unique_names) == 1:
-                                flow = sorted(
-                                    matches,
-                                    key=lambda f: f.updated_at or f.created_at,
-                                    reverse=True,
-                                )[0]
-                                await self.flow_service.force_delete_flow_with_executions_with_group_check(
-                                    flow.id, group_context
-                                )
-                                generation_result = {
-                                    "type": "flow_delete",
-                                    "message": f"Flow '{flow.name}' (most recent) has been deleted.",
-                                }
-                            else:
-                                generation_result = {
-                                    "type": "flow_list",
-                                    "flows": [
-                                        {"id": str(f.id), "name": f.name}
-                                        for f in matches
-                                    ],
-                                    "message": f"Multiple flows match '{delete_name}'. Please be more specific:",
-                                }
+                        elif flow_matches:
+                            generation_result = {
+                                "type": "flow_list",
+                                "flows": [
+                                    {"id": str(f.id), "name": f.name}
+                                    for f in flow_matches
+                                ],
+                                "message": f"Multiple flows match '{delete_name}'. Please be more specific:",
+                            }
                         else:
                             generation_result = {
                                 "type": "flow_delete",

@@ -1088,7 +1088,8 @@ class ExecutionHistoryRepository:
 
             if not execution:
                 return None
-            return execution.checkpoint_data
+            checkpoint: Optional[Dict[str, Any]] = execution.checkpoint_data
+            return checkpoint
 
         except Exception as e:
             logger.error(

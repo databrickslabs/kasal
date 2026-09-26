@@ -1,14 +1,8 @@
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -23,23 +17,29 @@ class PromptTemplate(Base):
         UniqueConstraint("name", "group_id", name="uq_prompttemplate_name_group"),
     )
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # Allow same name across groups; uniqueness enforced by composite constraint above
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
-    template = Column(Text, nullable=False)  # The actual prompt template text
-    is_active = Column(Boolean, default=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    template: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # The actual prompt template text
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     # Metadata
-    created_at = Column(
-        DateTime, default=datetime.utcnow
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
     )  # Use timezone-naive UTC time
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
     )  # Use timezone-naive UTC time
 
     def __init__(self, **kwargs):

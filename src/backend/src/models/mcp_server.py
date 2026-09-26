@@ -1,14 +1,8 @@
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    Integer,
-    String,
-    UniqueConstraint,
-)
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -26,25 +20,41 @@ class MCPServer(Base):
         UniqueConstraint("name", "group_id", name="uq_mcpserver_name_group"),
     )
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    server_url = Column(String, nullable=False)
-    encrypted_api_key = Column(String, nullable=True)  # Encrypted API key
-    server_type = Column(String, default="sse")  # "sse" or "streamable"
-    auth_type = Column(String, default="api_key")  # "api_key" or "databricks_spn"
-    enabled = Column(Boolean, default=False)
-    global_enabled = Column(Boolean, default=False)  # Enable across all agents/tasks
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    server_url: Mapped[str] = mapped_column(String, nullable=False)
+    encrypted_api_key: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True
+    )  # Encrypted API key
+    server_type: Mapped[str] = mapped_column(
+        String, default="sse", nullable=True
+    )  # "sse" or "streamable"
+    auth_type: Mapped[str] = mapped_column(
+        String, default="api_key", nullable=True
+    )  # "api_key" or "databricks_spn"
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    global_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=True
+    )  # Enable across all agents/tasks
     # NEW: Workspace scoping (nullable for base entries)
-    group_id = Column(String, nullable=True)
-    timeout_seconds = Column(Integer, default=30)
-    max_retries = Column(Integer, default=3)
-    model_mapping_enabled = Column(Boolean, default=False)
-    rate_limit = Column(Integer, default=60)  # Requests per minute
-    additional_config = Column(
-        JSON, default=dict
+    group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=True)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=True)
+    model_mapping_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=True
+    )
+    rate_limit: Mapped[int] = mapped_column(
+        Integer, default=60, nullable=True
+    )  # Requests per minute
+    additional_config: Mapped[Any] = mapped_column(
+        JSON, default=dict, nullable=True
     )  # Additional configuration parameters
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     def __init__(self, **kwargs):
         super(MCPServer, self).__init__(**kwargs)

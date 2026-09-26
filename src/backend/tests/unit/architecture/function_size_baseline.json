@@ -14,7 +14,7 @@
   "src/backend/src/services/agent_builder/task_adapter.py::create_task": 473,
   "src/backend/src/services/chat/conversation_preamble.py::build_conversation_preamble": 208,
   "src/backend/src/services/chat/dispatcher.py::DispatcherService.detect_intent": 225,
-  "src/backend/src/services/chat/dispatcher.py::DispatcherService.dispatch": 894,
+  "src/backend/src/services/chat/dispatcher.py::DispatcherService.dispatch": 695,
   "src/backend/src/services/chat/service.py::LightAgentService.run_light_agent_execution": 1396,
   "src/backend/src/services/converters/formats/powerbi/dax_parser.py::DAXExpressionParser._tokenize": 311,
   "src/backend/src/services/databricks/lakebase/management.py::DatabaseManagementService.run_housekeeping": 206,

@@ -1,6 +1,8 @@
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -13,20 +15,28 @@ class Tool(Base):
 
     __tablename__ = "tools"
 
-    id = Column(Integer, primary_key=True)
-    title = Column(String, nullable=False)
-    description = Column(String, nullable=False)
-    icon = Column(String, nullable=False)
-    config = Column(JSON, default=dict)
-    enabled = Column(Boolean, default=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    icon: Mapped[str] = mapped_column(String, nullable=False)
+    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     def __init__(self, **kwargs):
         super(Tool, self).__init__(**kwargs)

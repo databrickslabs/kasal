@@ -27,7 +27,7 @@ def _attach_similarity(row: Any, similarity: Optional[float]) -> None:
         pass
 
 
-class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
+class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, int]):
     """Repository for managing documentation / knowledge embeddings.
 
     Model-agnostic: defaults to the built-in ``DocumentationEmbedding`` table,

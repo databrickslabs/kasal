@@ -1,4 +1,8 @@
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+from datetime import datetime
+from typing import Any, Optional
+
+from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from sqlalchemy.types import UserDefinedType
 
@@ -112,19 +116,28 @@ class DocumentationEmbedding(Base):
 
     __tablename__ = "documentation_embeddings"
 
-    id = Column(Integer, primary_key=True, index=True)
-    source = Column(String, index=True, nullable=False)
-    title = Column(String, index=True, nullable=False)
-    content = Column(Text, nullable=False)
-    embedding = Column(Vector(1024), nullable=False)
-    doc_metadata = Column(JSON, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Any] = mapped_column(Vector(1024), nullable=False)
+    doc_metadata: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Multi-tenant knowledge scoping: uploaded knowledge files live in this same
     # pgvector table (Lakebase). Built-in CrewAI docs leave these NULL.
-    group_id = Column(String(100), index=True, nullable=True)  # workspace isolation
-    file_path = Column(String, index=True, nullable=True)  # source knowledge file
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # workspace isolation
+    file_path: Mapped[Optional[str]] = mapped_column(
+        String, index=True, nullable=True
+    )  # source knowledge file
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=True,
     )
 
     def __repr__(self):
@@ -143,20 +156,31 @@ class KnowledgeEmbedding(Base):
 
     __tablename__ = "knowledge_embeddings"
 
-    id = Column(Integer, primary_key=True, index=True)
-    source = Column(String, index=True, nullable=False)
-    title = Column(String, index=True, nullable=False)
-    content = Column(Text, nullable=False)
-    embedding = Column(Vector(1024), nullable=False)
-    doc_metadata = Column(JSON, nullable=True)
-    group_id = Column(String(100), index=True, nullable=True)  # workspace isolation
-    file_path = Column(String, index=True, nullable=True)  # source knowledge file
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Any] = mapped_column(Vector(1024), nullable=False)
+    doc_metadata: Mapped[Any] = mapped_column(JSON, nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # workspace isolation
+    file_path: Mapped[Optional[str]] = mapped_column(
+        String, index=True, nullable=True
+    )  # source knowledge file
     # Uploader email — per-user isolation of uploaded knowledge within a group
     # (NULL on legacy rows, treated as group-shared).
-    created_by = Column(String(255), index=True, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    created_by: Mapped[Optional[str]] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=True,
     )
 
     def __repr__(self):

@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -15,22 +17,32 @@ class Flow(Base):
 
     __tablename__ = "flows"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String, nullable=False)
-    crew_id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    crew_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("crews.id", ondelete="CASCADE"), nullable=True
     )
-    nodes = Column(JSON, default=list)
-    edges = Column(JSON, default=list)
-    flow_config = Column(JSON, default=dict)
+    nodes: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    edges: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    flow_config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     def __init__(self, **kwargs):
         super(Flow, self).__init__(**kwargs)

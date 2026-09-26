@@ -1,18 +1,11 @@
+import uuid
 from datetime import datetime, timezone
+from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-)
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
 
@@ -88,61 +81,76 @@ class ExecutionHistory(Base):
         Index("idx_executionhistory_group_created", "group_id", "created_at"),
     )
 
-    id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(
-        String, primary_key=False, unique=True, default=generate_job_id, index=True
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    job_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=False,
+        unique=True,
+        default=generate_job_id,
+        index=True,
+        nullable=True,
     )
     # status/created_at are indexed: the trace broadcaster scans status IN
     # ('RUNNING', ...) every second and the executions list orders by
     # created_at DESC on the most-polled endpoint. (Existing deployed DBs get
     # these via the _ensure_hot_polling_indexes self-heal.)
-    status = Column(String, nullable=False, default="pending", index=True)
-    inputs = Column(JSON, default=dict)
-    result = Column(JSON)
-    error = Column(String)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending", index=True
+    )
+    inputs: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
+    result: Mapped[Any] = mapped_column(JSON, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(String)
     # LEGACY: kept so pre-planner-removal rows still read back. Never written from
     # a request any more (the planner is gone), so new rows use the False default.
-    planning = Column(Boolean, default=False)
-    trigger_type = Column(String, default="api")
-    created_at = Column(
-        DateTime, default=datetime.utcnow, index=True
+    planning: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    trigger_type: Mapped[str] = mapped_column(String, default="api", nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True, nullable=True
     )  # Use timezone-naive UTC time
-    run_name = Column(String)
-    completed_at = Column(DateTime)
+    run_name: Mapped[Optional[str]] = mapped_column(String)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # Stop execution fields
-    stopped_at = Column(DateTime, nullable=True)  # When the execution was stopped
-    stop_reason = Column(
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )  # When the execution was stopped
+    stop_reason: Mapped[Optional[str]] = mapped_column(
         String, nullable=True
     )  # Reason for stopping (user requested, timeout, etc.)
-    stop_requested_by = Column(
+    stop_requested_by: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
     )  # User who requested the stop
-    partial_results = Column(
+    partial_results: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # Store partial results before stopping
-    is_stopping = Column(
+    is_stopping: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )  # Flag to indicate execution is in stopping state
 
     # MLflow integration fields
-    mlflow_trace_id = Column(
+    mlflow_trace_id: Mapped[Optional[str]] = mapped_column(
         String, nullable=True, index=True
     )  # MLflow trace ID for evaluation linking
-    mlflow_experiment_name = Column(
+    mlflow_experiment_name: Mapped[Optional[str]] = mapped_column(
         String, nullable=True
     )  # MLflow experiment name for reference
-    mlflow_evaluation_run_id = Column(
+    mlflow_evaluation_run_id: Mapped[Optional[str]] = mapped_column(
         String, nullable=True, index=True
     )  # MLflow evaluation run ID
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    group_email = Column(String(255), index=True, nullable=True)  # User email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    group_email: Mapped[Optional[str]] = mapped_column(
+        String(255), index=True, nullable=True
+    )  # User email for audit
 
     # Execution type and flow fields (consolidated from flow_executions table)
-    execution_type = Column(String(20), default="crew", index=True)  # 'crew' or 'flow'
-    flow_id = Column(
+    execution_type: Mapped[str] = mapped_column(
+        String(20), default="crew", index=True, nullable=True
+    )  # 'crew' or 'flow'
+    flow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )  # Optional reference to saved flow
     # The saved crew this run was built from, when it had one.
@@ -153,16 +161,18 @@ class ExecutionHistory(Base):
     # invisible to it. An ad-hoc run from an unsaved canvas has no row to point
     # at and leaves this null, which is what makes the snapshot the fallback
     # rather than the source.
-    crew_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    crew_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
 
     # Checkpoint/Persistence fields for CrewAI Flow state management
-    flow_uuid = Column(
+    flow_uuid: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, index=True
     )  # CrewAI's state.id for @persist
-    checkpoint_status = Column(
+    checkpoint_status: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True, default=None
     )  # 'active', 'resumed', 'expired', None
-    checkpoint_method = Column(
+    checkpoint_method: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
     )  # Last checkpointed method name
     # The execution this one was resumed FROM, if any.
@@ -176,7 +186,9 @@ class ExecutionHistory(Base):
     # Deliberately NOT a ForeignKey: purging an old run must not cascade away
     # the successful resume that replaced it, and execution_history is already
     # reached by job_id from several tables without FK constraints.
-    resumed_from_execution_id = Column(Integer, nullable=True, index=True)
+    resumed_from_execution_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, index=True
+    )
     # A SHARED JSON bag, not the checkpoint's private space. Keys in use:
     #   "checkpoint"     — the unified resume record (crew tasks OR flow crews);
     #                      shape and versioning owned by
@@ -184,7 +196,7 @@ class ExecutionHistory(Base):
     #   "edited_config"  — HITL edits replayed by flow_methods.py
     #   "ucmv_yaml_edits" — user-edited metric-view YAML
     # Anything writing here must MERGE, never replace the column wholesale.
-    checkpoint_data = Column(JSON, nullable=True, default=None)
+    checkpoint_data: Mapped[Any] = mapped_column(JSON, nullable=True, default=None)
 
     # Which agent runtime ran this — "kasal" or "crewai". Resolved ONCE when the
     # row is created and read back from here forever after, rather than
@@ -194,7 +206,9 @@ class ExecutionHistory(Base):
     #
     # NULL on every row written before the engine layer existed, and read as
     # "kasal" — which is what those runs actually used.
-    harness = Column(String(20), nullable=True, index=True)
+    harness: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, index=True
+    )
 
     # Relationships
     task_statuses = relationship(
@@ -279,17 +293,21 @@ class TaskStatus(Base):
 
     __tablename__ = "taskstatus"
 
-    id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(String, ForeignKey("executionhistory.job_id"), index=True)
-    task_id = Column(String, nullable=False, index=True)
-    status = Column(String, nullable=False)  # 'running', 'completed', or 'failed'
-    agent_name = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    job_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("executionhistory.job_id"), index=True
+    )
+    task_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # 'running', 'completed', or 'failed'
+    agent_name: Mapped[Optional[str]] = mapped_column(
         String, nullable=True
     )  # Store the name of the agent handling this task
-    started_at = Column(
-        DateTime, default=datetime.utcnow
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
     )  # Use timezone-naive UTC time
-    completed_at = Column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="task_statuses")
@@ -335,13 +353,17 @@ class ErrorTrace(Base):
 
     __tablename__ = "errortrace"
 
-    id = Column(Integer, primary_key=True, index=True)
-    run_id = Column(Integer, ForeignKey("executionhistory.id"), index=True)
-    task_key = Column(String, nullable=False, index=True)
-    error_type = Column(String, nullable=False)
-    error_message = Column(String, nullable=False)
-    timestamp = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    error_metadata = Column(JSON, default=dict)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("executionhistory.id"), index=True
+    )
+    task_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    error_type: Mapped[str] = mapped_column(String, nullable=False)
+    error_message: Mapped[str] = mapped_column(String, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc), nullable=True
+    )
+    error_metadata: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
 
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="error_traces")

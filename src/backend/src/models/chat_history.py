@@ -1,7 +1,9 @@
 from datetime import datetime
+from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, DateTime, Index, String, Text
+from sqlalchemy import JSON, DateTime, Index, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -18,21 +20,37 @@ class ChatHistory(Base):
 
     __tablename__ = "chat_history"
 
-    id = Column(String, primary_key=True, default=generate_uuid)
-    session_id = Column(String, nullable=False, index=True)  # Group related messages
-    user_id = Column(String, nullable=False, index=True)  # User identifier
-    message_type = Column(String, nullable=False)  # 'user' or 'assistant'
-    content = Column(Text, nullable=False)  # Message content
-    intent = Column(String, nullable=True)  # Detected intent (generate_agent, etc.)
-    confidence = Column(String, nullable=True)  # Confidence score as string
-    generation_result = Column(JSON, nullable=True)  # Generated agent/task/crew data
-    timestamp = Column(
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(
+        String, nullable=False, index=True
+    )  # Group related messages
+    user_id: Mapped[str] = mapped_column(
+        String, nullable=False, index=True
+    )  # User identifier
+    message_type: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # 'user' or 'assistant'
+    content: Mapped[str] = mapped_column(Text, nullable=False)  # Message content
+    intent: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True
+    )  # Detected intent (generate_agent, etc.)
+    confidence: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True
+    )  # Confidence score as string
+    generation_result: Mapped[Any] = mapped_column(
+        JSON, nullable=True
+    )  # Generated agent/task/crew data
+    timestamp: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )  # Timezone-naive UTC
 
     # Multi-group fields (REQUIRED for all models)
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    group_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    group_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     # Database indexes for performance
     __table_args__ = (

@@ -402,7 +402,7 @@ class TriggerQueueConsumerService:
                 from src.services.catalog.crews import CrewService
 
                 crew = await CrewService(session).get(uuid.UUID(str(tid)))
-                if crew and getattr(crew, "name", None):
+                if crew and crew.name:
                     return crew.name
             elif execution_type == "flow" and tid:
                 from src.services.flow_builder.flow_service import FlowService

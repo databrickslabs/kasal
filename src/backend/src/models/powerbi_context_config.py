@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import Index, UniqueConstraint
 
 from src.db.base import Base
@@ -15,25 +17,28 @@ class PowerBIBusinessMapping(Base):
 
     __tablename__ = "powerbi_business_mappings"
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Multi-tenant isolation
-    group_id = Column(String(255), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
     # Power BI resource identification
-    semantic_model_id = Column(String(255), nullable=False)
+    semantic_model_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Business mapping
-    natural_term = Column(String(500), nullable=False)
-    dax_expression = Column(Text, nullable=False)
-    description = Column(Text, nullable=True)
+    natural_term: Mapped[str] = mapped_column(String(500), nullable=False)
+    dax_expression: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now(timezone.utc),
         onupdate=datetime.now(timezone.utc),
+        nullable=True,
     )
 
     # Unique constraint: one mapping per term per model per group
@@ -57,24 +62,29 @@ class PowerBIFieldSynonym(Base):
 
     __tablename__ = "powerbi_field_synonyms"
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Multi-tenant isolation
-    group_id = Column(String(255), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
     # Power BI resource identification
-    semantic_model_id = Column(String(255), nullable=False)
+    semantic_model_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Field synonym mapping
-    field_name = Column(String(255), nullable=False)
-    synonyms = Column(JSON, nullable=False)  # List of alternative names
+    field_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    synonyms: Mapped[Any] = mapped_column(
+        JSON, nullable=False
+    )  # List of alternative names
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now(timezone.utc),
         onupdate=datetime.now(timezone.utc),
+        nullable=True,
     )
 
     # Unique constraint: one synonym set per field per model per group

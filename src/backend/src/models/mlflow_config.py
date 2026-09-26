@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -27,13 +29,13 @@ class MLflowConfig(Base):
     later release once this table has proven itself.
     """
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     #: Whether crew executions are traced to MLflow at all. Which BACKEND they
     #: are traced to is derived (Databricks when configured, else a local
     #: server) and deliberately not stored — a stored backend choice can only
     #: ever disagree with what is actually available.
-    enabled = Column(Boolean, default=False, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     #: Experiment to trace into, or NULL to let the backend name it.
     #:
@@ -47,36 +49,47 @@ class MLflowConfig(Base):
     #: Stored without a workspace-path prefix; the Databricks backend adds
     #: ``/Shared/`` and the local one does not (see
     #: services/mlflow/local.local_experiment_name).
-    experiment_name = Column(String, nullable=True)
+    experiment_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     #: LLM-judge evaluation of finished runs — a separate, more expensive opt-in
     #: than tracing, hence its own flag rather than a mode of ``enabled``.
-    evaluation_enabled = Column(Boolean, default=False, nullable=False)
+    evaluation_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
 
     #: Judge endpoint route, e.g. "databricks:/<endpoint>". Also the default
     #: judge for prompt optimization (the Optimize dialog can override it).
-    evaluation_judge_model = Column(String, nullable=True)
+    evaluation_judge_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     #: Advanced: most traces an evaluation run scores. NULL = the default (200).
-    evaluation_max_rows = Column(Integer, nullable=True)
+    evaluation_max_rows: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     #: Advanced: how many times prompt optimization samples the correctness
     #: judge per distinct candidate (median of N). NULL = the default.
-    optimization_judge_samples = Column(Integer, nullable=True)
+    optimization_judge_samples: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
 
     #: A local (OSS) MLflow server to trace to, e.g. http://127.0.0.1:5555.
     #: NULL = none. Ignored inside Databricks Apps. It replaced launching the
     #: backend with MCP_SERVER_ENABLED + MLFLOW_TRACKING_URI.
-    local_tracking_uri = Column(String, nullable=True)
+    local_tracking_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Multi-tenant fields — one row per group, same isolation rule as every
     # other configuration table.
-    group_id = Column(String(100), index=True, nullable=True)
-    created_by_email = Column(String(255), index=True, nullable=True)
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), index=True, nullable=True
+    )
 
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.now(timezone.utc), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.now(timezone.utc),
         onupdate=datetime.now(timezone.utc),
+        nullable=True,
     )

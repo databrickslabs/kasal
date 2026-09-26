@@ -1,7 +1,9 @@
 import json
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String
+from sqlalchemy import JSON, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -13,17 +15,33 @@ class Schema(Base):
 
     __tablename__ = "schema"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, unique=True)
-    description = Column(String, nullable=False)
-    schema_type = Column(String, nullable=False)  # e.g., 'data_model', 'tool_config'
-    schema_definition = Column(JSON, nullable=False)  # Schema definition in JSON format
-    field_descriptions = Column(JSON, default=dict)  # Descriptions for each field
-    keywords = Column(JSON, default=list)  # List of related keywords
-    tools = Column(JSON, default=list)  # Tools that can use this schema
-    example_data = Column(JSON)  # Example data conforming to this schema
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    schema_type: Mapped[str] = mapped_column(
+        String, nullable=False
+    )  # e.g., 'data_model', 'tool_config'
+    schema_definition: Mapped[Any] = mapped_column(
+        JSON, nullable=False
+    )  # Schema definition in JSON format
+    field_descriptions: Mapped[Any] = mapped_column(
+        JSON, default=dict, nullable=True
+    )  # Descriptions for each field
+    keywords: Mapped[Any] = mapped_column(
+        JSON, default=list, nullable=True
+    )  # List of related keywords
+    tools: Mapped[Any] = mapped_column(
+        JSON, default=list, nullable=True
+    )  # Tools that can use this schema
+    example_data: Mapped[Any] = mapped_column(
+        JSON, nullable=True
+    )  # Example data conforming to this schema
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
     def __init__(self, **kwargs):
         """

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -740,6 +740,8 @@ class SchedulerService:
                     logger_manager.scheduler.debug("Current schedules status:")
                     for schedule in all_schedules:
                         # Handle timezone-naive datetimes from database
+                        next_run: Optional[datetime]
+                        last_run: Optional[datetime]
                         if schedule.next_run_at and schedule.next_run_at.tzinfo is None:
                             next_run = schedule.next_run_at.replace(tzinfo=timezone.utc)
                         else:

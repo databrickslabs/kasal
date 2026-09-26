@@ -805,6 +805,8 @@ class ModelConfigService:
                 raise ForbiddenError(detail="Group context required to toggle models")
 
             primary_group_id = group_context.primary_group_id
+            if primary_group_id is None:
+                raise ForbiddenError(detail="Group context required to toggle models")
 
             # Helper to invalidate cache after mutation
             async def _invalidate_cache():

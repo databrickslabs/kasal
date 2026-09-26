@@ -8,7 +8,7 @@ from src.core.base_repository import BaseRepository
 from src.models.api_key import ApiKey
 
 
-class ApiKeyRepository(BaseRepository[ApiKey]):
+class ApiKeyRepository(BaseRepository[ApiKey, int]):
     """
     Repository for ApiKey model with custom query methods.
     Inherits base CRUD operations from BaseRepository.

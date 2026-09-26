@@ -1,6 +1,8 @@
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -11,16 +13,18 @@ class ModelConfig(Base):
     Enhanced with group isolation for multi-tenant deployments.
     """
 
-    id = Column(Integer, primary_key=True)
-    key = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(
         String, nullable=False
     )  # Removed unique=True to allow same key for different groups
-    name = Column(String, nullable=False)
-    provider = Column(String)
-    temperature = Column(Float)
-    context_window = Column(Integer)
-    max_output_tokens = Column(Integer)
-    extended_thinking = Column(Boolean, default=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[Optional[str]] = mapped_column(String)
+    temperature: Mapped[Optional[float]] = mapped_column(Float)
+    context_window: Mapped[Optional[int]] = mapped_column(Integer)
+    max_output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    extended_thinking: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=True
+    )
     #: Thinking depth, for the two Anthropic modes. Which one applies is a
     #: property of the model, not a choice — `transport.thinking_mode()` decides,
     #: and sending the wrong one is a 400:
@@ -28,9 +32,11 @@ class ModelConfig(Base):
     #:   * "adaptive" models (Claude 4.7+/5/Fable) use `reasoning_effort`
     #: Both NULL means "on with the endpoint's own default" once
     #: `extended_thinking` is set. An agent may override either per run.
-    thinking_budget_tokens = Column(Integer, nullable=True)
-    reasoning_effort = Column(String, nullable=True)
-    enabled = Column(Boolean, default=True)
+    thinking_budget_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    reasoning_effort: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
 
     #: Sampling parameters sent with every request to this model.
     #:
@@ -51,7 +57,7 @@ class ModelConfig(Base):
     #: you fix one task and break another. Measured, not assumed —
     #: ``frequency_penalty=0.3`` cured a repeating list and simultaneously turned
     #: a 12-row markdown table from 681 characters into 9679 and a truncation.
-    params = Column(JSON, nullable=True)
+    params: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     #: Parameter names this endpoint REFUSES, e.g. ``["temperature", "stop"]``.
     #:
@@ -62,11 +68,19 @@ class ModelConfig(Base):
     #: checks in the manager. There is no litellm ``drop_params`` net on this
     #: path — a param that is set IS sent — so being wrong here is a 400, and
     #: the answer belongs beside the model it describes.
-    unsupported_params = Column(JSON, nullable=True)
+    unsupported_params: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # Multi-tenant fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
