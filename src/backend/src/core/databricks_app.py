@@ -162,16 +162,14 @@ def fallback_trace_experiment(group_id: Optional[str]) -> Optional[str]:
       (:meth:`DatabricksAppInstallation.experiment_name`) — private to the
       teamspace, unlike the old shared ``/Shared/kasal-crew-execution-traces``
       that every workspace user could read;
-    - in local dev only, ``MLFLOW_CREW_TRACES_EXPERIMENT`` (moving to the
-      Configuration UI);
     - otherwise ``None``: the caller skips or reports it, never invents a path.
+      Outside Apps the experiment comes from Configuration → MLflow (callers go
+      through ``MLflowService.configured_crew_traces_experiment``).
     """
     installation = DatabricksAppInstallation.from_env()
     if installation.hosted:
         return installation.experiment_name(group_id) if group_id else None
-    if on_databricks_apps():
-        return None
-    return os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT", "").strip() or None
+    return None
 
 
 def apps_data_dir(name: str) -> Optional[Path]:

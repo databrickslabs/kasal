@@ -36,6 +36,7 @@ class MLflowEvaluationRunner:
         judge_model_route: str,
         judge_model_defaulted: bool,
         experiment_name: Optional[str] = None,
+        max_rows: int = 200,
     ):
         """
         Initialize evaluation runner.
@@ -51,6 +52,7 @@ class MLflowEvaluationRunner:
                 resolved from the MLflow configuration (Configuration.tsx) by the
                 async caller — the source of truth. Without one, the
                 per-teamspace fallback (``fallback_trace_experiment``).
+            max_rows: Most trace rows to score (Configuration → MLflow → Advanced).
         """
         self.exec_obj = exec_obj
         self.job_id = job_id
@@ -59,6 +61,7 @@ class MLflowEvaluationRunner:
         self.judge_model_route = judge_model_route
         self.judge_model_defaulted = judge_model_defaulted
         self.experiment_name = experiment_name
+        self.max_rows = max_rows
 
     def create_run(self, auth_ctx: Optional[Any]) -> Dict[str, Any]:
         """
@@ -244,8 +247,7 @@ class MLflowEvaluationRunner:
 
         # Build records from trace rows
         try:
-            max_rows = int(os.getenv("MLFLOW_EVAL_MAX_ROWS", "200"))
-            for _, r in df_sel.head(max_rows).iterrows():
+            for _, r in df_sel.head(self.max_rows).iterrows():
                 attrs = (
                     r.get("attributes", {})
                     if isinstance(r.get("attributes", {}), dict)

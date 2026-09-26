@@ -54,7 +54,7 @@
   "src/backend/src/services/otel_tracing/event_bridge.py": 1418,
   "src/backend/src/services/otel_tracing/mlflow_exporter.py": 946,
   "src/backend/src/services/powerbi/pipeline_config.py": 2271,
-  "src/backend/src/services/prompt_optimization/crew_runner.py": 971,
+  "src/backend/src/services/prompt_optimization/crew_runner.py": 965,
   "src/backend/src/services/recipes/recipes.py": 1065,
   "src/backend/src/services/scheduling/scheduler.py": 1242,
   "src/backend/src/services/settings/models.py": 887,

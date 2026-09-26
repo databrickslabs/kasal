@@ -10,9 +10,9 @@ Revision ID: 20260424_unify_memory
 Revises: 51c143594378
 Create Date: 2026-04-24
 """
+
 from alembic import op
 import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
 revision = "20260424_unify_memory"

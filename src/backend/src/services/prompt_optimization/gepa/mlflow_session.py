@@ -54,6 +54,23 @@ class MLflowBackend:
     warehouse_id: Optional[str] = None
 
 
+async def configured_experiment(session: Any, group_id: Optional[str]) -> str:
+    """The experiment Configuration → MLflow resolves to for this workspace.
+
+    The configured name, else the per-teamspace default — the one crew traces
+    land in. Never a launch env var or an invented "kasal".
+    """
+    if not group_id:
+        from src.services.mlflow import local
+
+        return local.local_experiment_name(None, None)
+    from src.services.mlflow.service import MLflowService
+
+    return await MLflowService(
+        session, group_id=group_id
+    ).configured_crew_traces_experiment()
+
+
 async def resolve_mlflow_backend(
     session: Any, group_context: Optional[Any]
 ) -> Optional[MLflowBackend]:
@@ -80,7 +97,14 @@ async def resolve_mlflow_backend(
                     "[judges] no MLflow server at %s; judge operation skipped", uri
                 )
                 return None
-            exp = os.environ.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
+            exp = await configured_experiment(
+                session,
+                (
+                    getattr(group_context, "primary_group_id", None)
+                    if group_context
+                    else None
+                ),
+            )
             return MLflowBackend(kind="local", experiment=exp, uri=uri)
 
     # 2. Databricks managed MLflow: a workspace is configured for this group.

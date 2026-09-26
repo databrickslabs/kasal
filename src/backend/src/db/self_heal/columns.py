@@ -207,6 +207,19 @@ async def _ensure_memory_backend_columns(conn: AsyncConnection) -> None:
     )
 
 
+async def _ensure_mlflow_config_columns(conn: AsyncConnection) -> None:
+    """mlflowconfig Advanced settings moved out of env vars (MLFLOW_EVAL_MAX_ROWS,
+    GEPA_JUDGE_SAMPLES). Nullable: NULL keeps the built-in default."""
+    await ensure_columns(
+        conn,
+        "mlflowconfig",
+        [
+            ("evaluation_max_rows", "INTEGER", "INTEGER"),
+            ("optimization_judge_samples", "INTEGER", "INTEGER"),
+        ],
+    )
+
+
 async def _ensure_databricks_config_columns(conn: AsyncConnection) -> None:
     """databricksconfig.ai_gateway_enabled — defaults to false (serving-endpoint
     routing) so an existing install keeps its behaviour."""

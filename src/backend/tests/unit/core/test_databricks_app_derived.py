@@ -92,7 +92,9 @@ class TestTraceExperimentFallback:
     def test_inside_apps_without_a_teamspace_there_is_none(self, hosted):
         assert app.fallback_trace_experiment(None) is None
 
-    def test_local_dev_reads_the_env_override_only(self, env):
+    def test_outside_apps_there_is_none_and_env_is_ignored(self, env):
+        """Outside Apps the experiment comes from Configuration → MLflow; the
+        old MLFLOW_CREW_TRACES_EXPERIMENT override is not read any more."""
         assert app.fallback_trace_experiment("team-a") is None
         env.setenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Users/me/traces")
-        assert app.fallback_trace_experiment("team-a") == "/Users/me/traces"
+        assert app.fallback_trace_experiment("team-a") is None

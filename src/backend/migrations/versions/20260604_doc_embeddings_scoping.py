@@ -20,8 +20,8 @@ Revision ID: 20260604_doc_emb_scope
 Revises: 20260511_add_lakebase_enum
 Create Date: 2026-06-04
 """
-from alembic import op
 
+from alembic import op
 
 revision = "20260604_doc_emb_scope"
 down_revision = "20260511_add_lakebase_enum"
@@ -78,9 +78,13 @@ def upgrade() -> None:
             ).fetchall()
         }
         if "group_id" not in existing:
-            op.execute("ALTER TABLE documentation_embeddings ADD COLUMN group_id VARCHAR(100)")
+            op.execute(
+                "ALTER TABLE documentation_embeddings ADD COLUMN group_id VARCHAR(100)"
+            )
         if "file_path" not in existing:
-            op.execute("ALTER TABLE documentation_embeddings ADD COLUMN file_path VARCHAR")
+            op.execute(
+                "ALTER TABLE documentation_embeddings ADD COLUMN file_path VARCHAR"
+            )
 
 
 def downgrade() -> None:
@@ -91,7 +95,11 @@ def downgrade() -> None:
         op.execute("DROP INDEX IF EXISTS idx_doc_emb_group_id")
         op.execute("DROP INDEX IF EXISTS idx_doc_emb_file_path")
         op.execute("DROP INDEX IF EXISTS idx_doc_emb_embedding")
-        op.execute("ALTER TABLE documentation_embeddings DROP COLUMN IF EXISTS group_id")
-        op.execute("ALTER TABLE documentation_embeddings DROP COLUMN IF EXISTS file_path")
+        op.execute(
+            "ALTER TABLE documentation_embeddings DROP COLUMN IF EXISTS group_id"
+        )
+        op.execute(
+            "ALTER TABLE documentation_embeddings DROP COLUMN IF EXISTS file_path"
+        )
         # The embedding column is intentionally kept on downgrade (it may hold data).
     # SQLite downgrade is a no-op: dropping columns requires a table rebuild.

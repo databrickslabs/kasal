@@ -717,7 +717,7 @@
   "src/services/prompt_optimization/gepa/mlflow_session.py::G004": 3,
   "src/services/prompt_optimization/gepa/reflection.py::B904": 1,
   "src/services/prompt_optimization/gepa/reflection.py::BLE001": 1,
-  "src/services/prompt_optimization/gepa/reflection.py::G004": 2,
+  "src/services/prompt_optimization/gepa/reflection.py::G004": 1,
   "src/services/prompt_optimization/judges.py::BLE001": 2,
   "src/services/prompt_optimization/judges.py::S110": 2,
   "src/services/prompt_optimization/run_state.py::BLE001": 1,

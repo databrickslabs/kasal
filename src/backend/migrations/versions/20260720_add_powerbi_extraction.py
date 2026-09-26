@@ -11,9 +11,9 @@ are healed at startup by _ensure_powerbi_extraction_table (src/db/session.py)
 with the same table; this migration keeps the Alembic chain in sync. checkfirst
 / IF NOT EXISTS make both paths idempotent.
 """
+
 from alembic import op
 import sqlalchemy as sa
-
 
 revision = "20260720_powerbi_extraction"
 down_revision = "20260709_hot_polling_indexes"
@@ -50,15 +50,28 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_powerbi_extraction_execution_id", "powerbi_extraction", ["execution_id"])
-    op.create_index("ix_powerbi_extraction_workspace_id", "powerbi_extraction", ["workspace_id"])
-    op.create_index("ix_powerbi_extraction_dataset_id", "powerbi_extraction", ["dataset_id"])
-    op.create_index("ix_powerbi_extraction_group_id", "powerbi_extraction", ["group_id"])
     op.create_index(
-        "ix_powerbi_extraction_group_created", "powerbi_extraction", ["group_id", "created_at"])
+        "ix_powerbi_extraction_execution_id", "powerbi_extraction", ["execution_id"]
+    )
+    op.create_index(
+        "ix_powerbi_extraction_workspace_id", "powerbi_extraction", ["workspace_id"]
+    )
+    op.create_index(
+        "ix_powerbi_extraction_dataset_id", "powerbi_extraction", ["dataset_id"]
+    )
+    op.create_index(
+        "ix_powerbi_extraction_group_id", "powerbi_extraction", ["group_id"]
+    )
+    op.create_index(
+        "ix_powerbi_extraction_group_created",
+        "powerbi_extraction",
+        ["group_id", "created_at"],
+    )
     op.create_index(
         "ix_powerbi_extraction_workspace_dataset",
-        "powerbi_extraction", ["workspace_id", "dataset_id"])
+        "powerbi_extraction",
+        ["workspace_id", "dataset_id"],
+    )
 
 
 def downgrade() -> None:

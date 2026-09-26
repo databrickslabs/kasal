@@ -8,6 +8,7 @@ from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 from src.core.logger import LoggerManager
 from src.repositories.mlflow_repository import MLflowRepository
 from src.services.execution.service import ExecutionService
+from src.services.prompt_optimization.gepa.reflection import DEFAULT_JUDGE_SAMPLES
 from src.services.settings.models import ModelConfigService
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
@@ -18,6 +19,10 @@ with_product(
 
 # Route MLflowService logs to system.log for user visibility
 logger = LoggerManager.get_instance().system
+
+#: Built-in defaults for the Advanced MLflow settings (Configuration → MLflow).
+DEFAULT_EVALUATION_MAX_ROWS = 200
+DEFAULT_OPTIMIZATION_JUDGE_SAMPLES = DEFAULT_JUDGE_SAMPLES
 
 
 class MLflowService:
@@ -163,6 +168,10 @@ class MLflowService:
             "enabled": enabled,
             "evaluation_enabled": evaluation_enabled,
             "experiment_name": experiment_name,
+            "evaluation_judge_model": await self.repo.get_evaluation_judge_model(
+                group_id=self.group_id
+            ),
+            **await self.advanced_settings(),
             "backend": backend,
             "available": available,
         }
@@ -172,8 +181,14 @@ class MLflowService:
         enabled: Optional[bool] = None,
         evaluation_enabled: Optional[bool] = None,
         experiment_name: Optional[str] = None,
+        evaluation_judge_model: Optional[str] = None,
+        advanced: Optional[Dict[str, Optional[int]]] = None,
     ) -> Dict[str, Any]:
-        """Apply a partial update; an omitted field is left alone."""
+        """Apply a partial update; an omitted field is left alone.
+
+        ``advanced`` holds only the Advanced fields the caller sent; a None value
+        resets that field to its built-in default.
+        """
         if is_databricks_app() and experiment_name is not None:
             raise ValueError(
                 "Hosted trace destinations are managed by the installation"
@@ -186,6 +201,12 @@ class MLflowService:
             )
         if experiment_name is not None:
             await self.repo.set_experiment_name(experiment_name, group_id=self.group_id)
+        if evaluation_judge_model is not None:
+            await self.repo.set_evaluation_judge_model(
+                evaluation_judge_model, group_id=self.group_id
+            )
+        if advanced:
+            await self.repo.set_advanced(advanced, group_id=self.group_id)
 
         # Provision the destination when tracing is enabled or renamed, so the
         # first run can use it. Hosted apps use their volume's namespace and
@@ -243,6 +264,30 @@ class MLflowService:
             logger.warning(
                 f"[MLflowService] Could not create experiment {exp_path}: {exc}"
             )
+
+    async def configured_judge_model(self) -> Optional[str]:
+        """The workspace's judge model key, or None when there is none.
+
+        Configuration → MLflow's judge first; inside Databricks Apps the
+        installed default model (the serving endpoint the app is granted) next,
+        so a judge never falls back to an endpoint the app cannot query. Also the
+        default judge for prompt optimization (the Optimize dialog can override).
+        """
+        configured = await self.repo.get_evaluation_judge_model(group_id=self.group_id)
+        if configured:
+            return configured
+        installed = DatabricksAppInstallation.from_env()
+        return installed.default_model or None if installed.hosted else None
+
+    async def advanced_settings(self) -> Dict[str, int]:
+        """Advanced MLflow settings with the built-in defaults filled in."""
+        stored = await self.repo.get_advanced(group_id=self.group_id)
+        return {
+            "evaluation_max_rows": stored.get("evaluation_max_rows")
+            or DEFAULT_EVALUATION_MAX_ROWS,
+            "optimization_judge_samples": stored.get("optimization_judge_samples")
+            or DEFAULT_OPTIMIZATION_JUDGE_SAMPLES,
+        }
 
     async def configured_crew_traces_experiment(self) -> str:
         """The experiment crew traces, judges, GEPA runs, and eval all pin.
@@ -677,17 +722,9 @@ class MLflowService:
         Returns:
             Properly formatted model name for LiteLLM (e.g., "databricks/databricks-claude-sonnet-4-5")
         """
-        import os
-
-        # Get configured judge model from database if not provided
+        # Configuration → MLflow judge, else the installed default model
         if not configured_judge_model:
-            configured_judge_model = await self.repo.get_evaluation_judge_model(
-                group_id=self.group_id
-            )
-
-        # Fall back to environment variable
-        if not configured_judge_model:
-            configured_judge_model = os.getenv("MLFLOW_EVAL_JUDGE_MODEL")
+            configured_judge_model = await self.configured_judge_model()
 
         # Default to databricks-claude-sonnet-4-5 if nothing configured
         if not configured_judge_model:
@@ -861,6 +898,7 @@ class MLflowService:
             # Evaluate against the SAME experiment tracing/GEPA use — the
             # configured name (Configuration.tsx), not a hardcoded default.
             experiment_name=await self.configured_crew_traces_experiment(),
+            max_rows=(await self.advanced_settings())["evaluation_max_rows"],
         )
 
         # Create evaluation run in background thread

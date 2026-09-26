@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,5 +112,36 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         cfg.experiment_name = (name or "").strip() or None
+        await self.session.commit()
+        return True
+
+    async def set_evaluation_judge_model(
+        self, model: Optional[str], group_id: Optional[str] = None
+    ) -> bool:
+        cfg = await self._ensure(group_id)
+        setattr(cfg, "evaluation_judge_model", (model or "").strip() or None)
+        await self.session.commit()
+        return True
+
+    async def get_advanced(
+        self, group_id: Optional[str] = None
+    ) -> Dict[str, Optional[int]]:
+        """The Advanced settings; None means "use the built-in default"."""
+        cfg = await self._get(group_id)
+        return {
+            "evaluation_max_rows": getattr(cfg, "evaluation_max_rows", None),
+            "optimization_judge_samples": getattr(
+                cfg, "optimization_judge_samples", None
+            ),
+        }
+
+    async def set_advanced(
+        self, values: Dict[str, Optional[int]], group_id: Optional[str] = None
+    ) -> bool:
+        """Set the given Advanced settings; a None value resets one to its default."""
+        cfg = await self._ensure(group_id)
+        for field in ("evaluation_max_rows", "optimization_judge_samples"):
+            if field in values:
+                setattr(cfg, field, values[field])
         await self.session.commit()
         return True

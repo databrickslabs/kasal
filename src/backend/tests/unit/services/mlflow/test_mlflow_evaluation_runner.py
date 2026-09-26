@@ -485,9 +485,10 @@ class TestExtractRecordsFromTraces:
         assert len(records) == 1
         assert records[0]["messages"] == "question"
 
-    def test_respects_max_rows_env_var(self):
-        """Limits rows to MLFLOW_EVAL_MAX_ROWS environment variable."""
+    def test_respects_max_rows_setting(self):
+        """Limits rows to the runner's max_rows (Configuration → MLflow → Advanced)."""
         runner = _make_runner()
+        runner.max_rows = 3
         rows = [
             {"execution_id": "exec-123", "prompt": f"q{i}", "output": f"a{i}"}
             for i in range(10)
@@ -499,8 +500,7 @@ class TestExtractRecordsFromTraces:
             }
         )
 
-        with patch.dict(os.environ, {"MLFLOW_EVAL_MAX_ROWS": "3"}):
-            _, records = runner._extract_records_from_traces(df)
+        _, records = runner._extract_records_from_traces(df)
 
         assert len(records) == 3
 

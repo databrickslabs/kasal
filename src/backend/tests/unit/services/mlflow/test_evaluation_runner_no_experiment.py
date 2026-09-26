@@ -20,12 +20,13 @@ def _runner(experiment_name=None):
     )
 
 
-def test_configured_experiment_wins(monkeypatch):
-    monkeypatch.setenv("MLFLOW_CREW_TRACES_EXPERIMENT", "/Users/dev/local")
+def test_configured_experiment_wins():
     assert _runner("/Users/team/configured")._experiment() == "/Users/team/configured"
 
 
 def test_nothing_configured_stops_instead_of_using_shared(monkeypatch):
-    monkeypatch.delenv("MLFLOW_CREW_TRACES_EXPERIMENT", raising=False)
+    monkeypatch.setattr(
+        "src.core.databricks_app.fallback_trace_experiment", lambda group_id: None
+    )
     with pytest.raises(ValueError, match="No MLflow experiment is configured"):
         _runner()._experiment()

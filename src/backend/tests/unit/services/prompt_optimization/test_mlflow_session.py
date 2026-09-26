@@ -19,11 +19,19 @@ class TestResolveBackend:
         monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
         monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
-        with patch("src.services.mlflow.local.is_reachable", return_value=True):
+        with (
+            patch("src.services.mlflow.local.is_reachable", return_value=True),
+            patch.object(
+                ms, "configured_experiment", AsyncMock(return_value="team-traces")
+            ) as configured,
+        ):
             backend = await ms.resolve_mlflow_backend(MagicMock(), MagicMock())
         assert backend is not None
         assert backend.kind == "local"
         assert backend.uri == "http://127.0.0.1:5555"
+        # The experiment comes from Configuration → MLflow, not MLFLOW_EXPERIMENT_NAME.
+        assert backend.experiment == "team-traces"
+        configured.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_local_none_when_no_server_is_listening(self, monkeypatch):

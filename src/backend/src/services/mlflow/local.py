@@ -106,7 +106,9 @@ def local_experiment_name(
     become an experiment literally named "/Shared/…", which works but reads as a
     mistake, so the workspace prefix is stripped.
     """
-    name = (configured or os.getenv("MLFLOW_CREW_TRACES_EXPERIMENT") or "").strip()
+    # From the MLflow configuration only (Configuration → MLflow); the old
+    # MLFLOW_CREW_TRACES_EXPERIMENT env override is gone.
+    name = (configured or "").strip()
     if not name:
         return experiment_slug(teamspace)
     if name.startswith("/Shared/"):

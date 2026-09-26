@@ -14,6 +14,7 @@ Existing deployed DBs are healed at startup by _ensure_hot_polling_indexes
 (src/db/session.py) with the same index names; this migration keeps the
 Alembic chain in sync. IF NOT EXISTS makes both paths idempotent.
 """
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -23,7 +24,11 @@ branch_labels = None
 depends_on = None
 
 _INDEXES = (
-    ("idx_executionhistory_group_created", "executionhistory", "(group_id, created_at)"),
+    (
+        "idx_executionhistory_group_created",
+        "executionhistory",
+        "(group_id, created_at)",
+    ),
     ("ix_executionhistory_status", "executionhistory", "(status)"),
     ("ix_executionhistory_created_at", "executionhistory", "(created_at)"),
     ("ix_execution_trace_run_id", "execution_trace", "(run_id)"),

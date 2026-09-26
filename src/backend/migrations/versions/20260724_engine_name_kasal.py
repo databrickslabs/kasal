@@ -10,12 +10,12 @@ Revises: 20260720_powerbi_extraction
 Create Date: 2026-07-24 22:30:00.000000
 
 """
+
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
-revision = '20260724_engine_name_kasal'
-down_revision = '20260720_powerbi_extraction'
+revision = "20260724_engine_name_kasal"
+down_revision = "20260720_powerbi_extraction"
 branch_labels = None
 depends_on = None
 

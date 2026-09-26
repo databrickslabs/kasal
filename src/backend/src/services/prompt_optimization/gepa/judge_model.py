@@ -6,7 +6,6 @@ instead of the task.
 """
 
 import logging
-import os
 from typing import Any, Optional
 
 from src.core.exceptions import BadRequestError
@@ -46,7 +45,12 @@ def _crew_target_model(agents: Any) -> Optional[str]:
     return Counter(declared).most_common(1)[0][0]
 
 
-def _resolve_judge_model(requested: Optional[str], target_model: str, what: str) -> str:
+def _resolve_judge_model(
+    requested: Optional[str],
+    target_model: str,
+    what: str,
+    configured: Optional[str] = None,
+) -> str:
     """Pick the correctness judge's model. It may never be the target.
 
     Resolution order:
@@ -80,10 +84,12 @@ def _resolve_judge_model(requested: Optional[str], target_model: str, what: str)
             )
         return chosen
 
-    configured = (os.getenv("GEPA_JUDGE_MODEL") or "").strip()
+    # The workspace's judge (Configuration → MLflow; inside Apps the installed
+    # model when none is set) — passed in by the caller, never read from env.
+    configured = (configured or "").strip()
     if configured and configured != target_model:
         logger.info(
-            "%s: judge model defaulted to GEPA_JUDGE_MODEL=%s (target=%s)",
+            "%s: judge model defaulted to the configured judge %s (target=%s)",
             what,
             configured,
             target_model,
@@ -92,14 +98,47 @@ def _resolve_judge_model(requested: Optional[str], target_model: str, what: str)
 
     if configured:
         raise BadRequestError(
-            f"{what}: GEPA_JUDGE_MODEL is '{configured}', which is also the "
+            f"{what}: the configured judge model '{configured}' is also the "
             f"model under optimization. A model grading its own output prefers "
-            f"it. Set GEPA_JUDGE_MODEL to a different model, or pass an "
-            f"explicit judge_model."
+            f"it. Pick a different judge in Configuration → MLflow, or choose "
+            f"one in the Optimize dialog."
         )
     raise BadRequestError(
         f"{what}: no judge model configured. The judge decides which candidate "
         f"prompts win, so it cannot silently fall back to the model under "
-        f"optimization ('{target_model}') — that grades its own work. Pass "
-        f"judge_model on the request, or set GEPA_JUDGE_MODEL."
+        f"optimization ('{target_model}') — that grades its own work. Choose a "
+        f"judge in the Optimize dialog, or set one in Configuration → MLflow."
     )
+
+
+async def resolve_run_judge(
+    session: Any,
+    requested: Optional[str],
+    target_model: str,
+    what: str,
+    group_context: Any,
+) -> "tuple[str, Optional[int]]":
+    """The judge for one optimization run, and how many times to sample it.
+
+    The Optimize dialog's explicit ``requested`` judge wins; otherwise the
+    workspace's judge from Configuration → MLflow (inside Apps the installed
+    model when none is set). NOT ``or target_model``: judging with the model
+    under optimization is self-preference (see :func:`_resolve_judge_model`).
+    The sample count is Configuration → MLflow → Advanced ("Judge samples").
+    These replace the GEPA_JUDGE_MODEL / GEPA_JUDGE_SAMPLES env vars.
+    """
+    configured: Optional[str] = None
+    samples: Optional[int] = None
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    if group_id:
+        from src.services.mlflow.service import MLflowService
+
+        mlflow_service = MLflowService(session, group_id=group_id)
+        configured = await mlflow_service.configured_judge_model()
+        samples = (await mlflow_service.advanced_settings())[
+            "optimization_judge_samples"
+        ]
+    judge = _resolve_judge_model(requested, target_model, what, configured=configured)
+    return judge, samples
