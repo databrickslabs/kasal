@@ -14,8 +14,8 @@ Revision ID: 20260511_add_lakebase_enum
 Revises: 20260424_unify_memory
 Create Date: 2026-05-11
 """
-
 from alembic import op
+
 
 revision = "20260511_add_lakebase_enum"
 down_revision = "20260424_unify_memory"

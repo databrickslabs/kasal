@@ -39,9 +39,8 @@ def upgrade() -> None:
         sa.Column("last_status", sa.String(length=32), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("last_attempt_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "consecutive_failures", sa.Integer(), nullable=False, server_default="0"
-        ),
+        sa.Column("consecutive_failures", sa.Integer(), nullable=False,
+                  server_default="0"),
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),

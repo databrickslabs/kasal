@@ -8,7 +8,6 @@ Adds OTel span hierarchy columns (span_id, trace_id, parent_span_id) and
 OTel-native columns (span_name, status_code, duration_ms) to the
 execution_trace table. All nullable — existing rows get NULL.
 """
-
 from alembic import op
 import sqlalchemy as sa
 
@@ -47,8 +46,12 @@ def upgrade() -> None:
         sa.Column("duration_ms", sa.Integer(), nullable=True),
     )
     # Indexes for hierarchy lookups
-    op.create_index("ix_execution_trace_span_id", "execution_trace", ["span_id"])
-    op.create_index("ix_execution_trace_trace_id", "execution_trace", ["trace_id"])
+    op.create_index(
+        "ix_execution_trace_span_id", "execution_trace", ["span_id"]
+    )
+    op.create_index(
+        "ix_execution_trace_trace_id", "execution_trace", ["trace_id"]
+    )
 
 
 def downgrade() -> None:

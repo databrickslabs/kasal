@@ -25,22 +25,22 @@ Revises: 20260724_engine_name_kasal
 Create Date: 2026-07-25 10:00:00.000000
 
 """
-
 import sqlalchemy as sa
 from alembic import op
 
+
 # revision identifiers, used by Alembic.
-revision = "20260725_drop_planner_columns"
-down_revision = "20260724_engine_name_kasal"
+revision = '20260725_drop_planner_columns'
+down_revision = '20260724_engine_name_kasal'
 branch_labels = None
 depends_on = None
 
 
 # (table, column) pairs, dropped in upgrade / re-added in downgrade.
 _COLUMNS = (
-    ("crews", "planning", sa.Boolean()),
-    ("crews", "planning_llm", sa.String(length=255)),
-    ("schedule", "planning", sa.Boolean()),
+    ('crews', 'planning', sa.Boolean()),
+    ('crews', 'planning_llm', sa.String(length=255)),
+    ('schedule', 'planning', sa.Boolean()),
 )
 
 
@@ -58,15 +58,14 @@ def _existing_columns(table: str) -> set:
     inspector = sa.inspect(bind)
     if table not in inspector.get_table_names():
         return set()
-    return {c["name"] for c in inspector.get_columns(table)}
+    return {c['name'] for c in inspector.get_columns(table)}
 
 
 def upgrade():
-    for table in ("crews", "schedule"):
+    for table in ('crews', 'schedule'):
         existing = _existing_columns(table)
         targets = [
-            c
-            for t, c, _ in _COLUMNS
+            c for t, c, _ in _COLUMNS
             if t == table and (existing is None or c in existing)
         ]
         if not targets:
@@ -78,11 +77,10 @@ def upgrade():
 
 def downgrade():
     # Re-added as nullable (no backfill possible — the values were meaningless).
-    for table in ("crews", "schedule"):
+    for table in ('crews', 'schedule'):
         existing = _existing_columns(table)
         targets = [
-            (c, t_)
-            for t, c, t_ in _COLUMNS
+            (c, t_) for t, c, t_ in _COLUMNS
             if t == table and (existing is None or c not in existing)
         ]
         if not targets:

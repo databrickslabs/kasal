@@ -68,13 +68,9 @@ def upgrade() -> None:
     op.create_index("ix_workflow_recipe_trials_group_id", _TABLE, ["group_id"])
     op.create_index("ix_workflow_recipe_trials_prompt_hash", _TABLE, ["prompt_hash"])
     op.create_index("ix_workflow_recipe_trials_arm", _TABLE, ["arm"])
-    op.create_index(
-        "ix_workflow_recipe_trials_linked_job_id", _TABLE, ["linked_job_id"]
-    )
+    op.create_index("ix_workflow_recipe_trials_linked_job_id", _TABLE, ["linked_job_id"])
     op.create_index("idx_recipe_trials_group_arm", _TABLE, ["group_id", "arm"])
-    op.create_index(
-        "idx_recipe_trials_unlinked", _TABLE, ["linked_job_id", "created_at"]
-    )
+    op.create_index("idx_recipe_trials_unlinked", _TABLE, ["linked_job_id", "created_at"])
 
 
 def downgrade() -> None:

@@ -5,7 +5,6 @@ Revises: be5bfc77b066
 Create Date: 2025-04-22 17:16:04.024360
 
 """
-
 from typing import Sequence, Union
 from uuid import uuid4
 
@@ -13,9 +12,10 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+
 # revision identifiers, used by Alembic.
-revision: str = "f1224c788466"
-down_revision: Union[str, None] = "be5bfc77b066"
+revision: str = 'f1224c788466'
+down_revision: Union[str, None] = 'be5bfc77b066'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -23,38 +23,34 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # Ensure UUID extension is available
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
-
+    
     # Create a temporary table with UUID primary keys
     op.create_table(
-        "crews_temp",
-        sa.Column(
-            "id",
-            postgresql.UUID(as_uuid=True),
-            primary_key=True,
-            server_default=sa.text("uuid_generate_v4()"),
-        ),
-        sa.Column("name", sa.String(), nullable=True),
-        sa.Column("agent_ids", postgresql.JSONB(), nullable=True),
-        sa.Column("task_ids", postgresql.JSONB(), nullable=True),
-        sa.Column("nodes", postgresql.JSONB(), nullable=True),
-        sa.Column("edges", postgresql.JSONB(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        'crews_temp',
+        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('uuid_generate_v4()')),
+        sa.Column('name', sa.String(), nullable=True),
+        sa.Column('agent_ids', postgresql.JSONB(), nullable=True),
+        sa.Column('task_ids', postgresql.JSONB(), nullable=True),
+        sa.Column('nodes', postgresql.JSONB(), nullable=True),
+        sa.Column('edges', postgresql.JSONB(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=True),
+        sa.Column('updated_at', sa.DateTime(), nullable=True),
     )
-
+    
     # Create indexes
-    op.create_index(op.f("ix_crews_temp_id"), "crews_temp", ["id"], unique=False)
-    op.create_index(op.f("ix_crews_temp_name"), "crews_temp", ["name"], unique=False)
-
+    op.create_index(op.f('ix_crews_temp_id'), 'crews_temp', ['id'], unique=False)
+    op.create_index(op.f('ix_crews_temp_name'), 'crews_temp', ['name'], unique=False)
+    
     # Create a mapping table to keep track of old and new IDs
     op.create_table(
-        "crew_id_mapping",
-        sa.Column("old_id", sa.Integer(), primary_key=True),
-        sa.Column("new_id", postgresql.UUID(as_uuid=True), nullable=False),
+        'crew_id_mapping',
+        sa.Column('old_id', sa.Integer(), primary_key=True),
+        sa.Column('new_id', postgresql.UUID(as_uuid=True), nullable=False),
     )
-
+    
     # Copy data from the original table to the temporary table with new UUIDs
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO crews_temp (id, name, agent_ids, task_ids, nodes, edges, created_at, updated_at)
         SELECT 
             uuid_generate_v4() as id,
@@ -66,19 +62,23 @@ def upgrade() -> None:
             created_at,
             updated_at
         FROM crews
-        """)
-
+        """
+    )
+    
     # Populate the mapping table to link old integer IDs to new UUIDs
-    op.execute("""
+    op.execute(
+        """
         INSERT INTO crew_id_mapping (old_id, new_id)
         SELECT c.id, ct.id
         FROM crews c
         JOIN crews_temp ct ON c.name = ct.name AND 
                               c.created_at = ct.created_at
-        """)
-
+        """
+    )
+    
     # First check and drop any foreign key constraints related to crews
-    op.execute("""
+    op.execute(
+        """
         DO $$
         DECLARE
             fk_constraint_name text;
@@ -103,10 +103,12 @@ def upgrade() -> None:
             END IF;
         END;
         $$;
-        """)
-
+        """
+    )
+    
     # Then handle the crew_id column in flows table
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF EXISTS (
@@ -136,14 +138,16 @@ def upgrade() -> None:
             END IF;
         END
         $$;
-        """)
-
+        """
+    )
+    
     # Rename crews tables to swap them
     op.execute("ALTER TABLE crews RENAME TO crews_old")
     op.execute("ALTER TABLE crews_temp RENAME TO crews")
-
+    
     # Add back foreign key constraint if needed
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF EXISTS (
@@ -160,15 +164,17 @@ def upgrade() -> None:
             END IF;
         END
         $$;
-        """)
-
+        """
+    )
+    
     # Drop the old table
-    op.drop_table("crews_old")
+    op.drop_table('crews_old')
 
 
 def downgrade() -> None:
     # First drop any foreign key constraints to the crews table
-    op.execute("""
+    op.execute(
+        """
         DO $$
         DECLARE
             fk_constraint_name text;
@@ -193,27 +199,29 @@ def downgrade() -> None:
             END IF;
         END;
         $$;
-        """)
-
+        """
+    )
+    
     # Create a temporary integer ID table
     op.create_table(
-        "crews_temp",
-        sa.Column("id", sa.Integer(), autoincrement=True, primary_key=True),
-        sa.Column("name", sa.String(), nullable=True),
-        sa.Column("agent_ids", postgresql.JSONB(), nullable=True),
-        sa.Column("task_ids", postgresql.JSONB(), nullable=True),
-        sa.Column("nodes", postgresql.JSONB(), nullable=True),
-        sa.Column("edges", postgresql.JSONB(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        'crews_temp',
+        sa.Column('id', sa.Integer(), autoincrement=True, primary_key=True),
+        sa.Column('name', sa.String(), nullable=True),
+        sa.Column('agent_ids', postgresql.JSONB(), nullable=True),
+        sa.Column('task_ids', postgresql.JSONB(), nullable=True),
+        sa.Column('nodes', postgresql.JSONB(), nullable=True),
+        sa.Column('edges', postgresql.JSONB(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=True),
+        sa.Column('updated_at', sa.DateTime(), nullable=True),
     )
-
+    
     # Create indexes
-    op.create_index(op.f("ix_crews_temp_id"), "crews_temp", ["id"], unique=False)
-    op.create_index(op.f("ix_crews_temp_name"), "crews_temp", ["name"], unique=False)
-
+    op.create_index(op.f('ix_crews_temp_id'), 'crews_temp', ['id'], unique=False)
+    op.create_index(op.f('ix_crews_temp_name'), 'crews_temp', ['name'], unique=False)
+    
     # Check if the mapping table exists
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF EXISTS (
@@ -275,14 +283,16 @@ def downgrade() -> None:
             END IF;
         END
         $$;
-        """)
-
+        """
+    )
+    
     # Rename tables to swap them
     op.execute("ALTER TABLE crews RENAME TO crews_old")
     op.execute("ALTER TABLE crews_temp RENAME TO crews")
-
+    
     # Add back foreign key constraint if needed
-    op.execute("""
+    op.execute(
+        """
         DO $$
         BEGIN
             IF EXISTS (
@@ -299,8 +309,9 @@ def downgrade() -> None:
             END IF;
         END
         $$;
-        """)
-
+        """
+    )
+    
     # Drop the old table and mapping table
-    op.drop_table("crews_old")
-    op.execute("DROP TABLE IF EXISTS crew_id_mapping")
+    op.drop_table('crews_old')
+    op.execute("DROP TABLE IF EXISTS crew_id_mapping") 

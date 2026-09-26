@@ -4,12 +4,11 @@ Revision ID: update_user_roles_3tier
 Revises: latest
 Create Date: 2025-09-20
 """
-
 from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers
-revision = "update_user_roles_3tier"
+revision = 'update_user_roles_3tier'
 down_revision = None  # Will be set to latest
 branch_labels = None
 depends_on = None
@@ -41,7 +40,7 @@ def upgrade():
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
-    if "user_roles" in inspector.get_table_names():
+    if 'user_roles' in inspector.get_table_names():
         op.execute("""
             UPDATE user_roles
             SET role_name = CASE
@@ -54,7 +53,7 @@ def upgrade():
         """)
 
     # Update roles table if it exists
-    if "roles" in inspector.get_table_names():
+    if 'roles' in inspector.get_table_names():
         # Delete old roles
         op.execute("DELETE FROM roles WHERE name IN ('manager', 'user', 'viewer')")
 
@@ -103,7 +102,7 @@ def downgrade():
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
-    if "user_roles" in inspector.get_table_names():
+    if 'user_roles' in inspector.get_table_names():
         op.execute("""
             UPDATE user_roles
             SET role_name = CASE

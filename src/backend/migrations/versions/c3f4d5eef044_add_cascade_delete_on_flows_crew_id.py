@@ -7,7 +7,6 @@ Create Date: 2026-02-10
 Adds ON DELETE CASCADE to flows.crew_id foreign key so that deleting
 a crew automatically deletes its associated flows.
 """
-
 from alembic import op
 import sqlalchemy as sa
 
