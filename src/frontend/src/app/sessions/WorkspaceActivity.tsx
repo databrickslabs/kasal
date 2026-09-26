@@ -7,6 +7,7 @@ import { kasalStageSurface } from '../../theme/kasalSurfaces';
 import { useGroupStore } from '../../store/groups';
 import { usePermissionStore } from '../../store/permissions';
 import SidebarAction from '../../components/SidebarAction';
+import { ErrorBoundary } from '../../shared/errors/ErrorBoundary';
 
 const ExecutionHistory = lazy(() => import('../../features/executions/components/ExecutionHistory'));
 const Schedules = lazy(() => import('../../features/workflow/scheduling/components/ScheduleDialog'));
@@ -56,14 +57,16 @@ export function WorkspaceActivity({ expanded }: { expanded: boolean }) {
         </Button>)}
       </Box>}
       {open && <Box key={`${groupId}:${activeSection}`} sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <Suspense fallback={<Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={24} color="inherit" aria-label="Loading activity" /></Box>}>
-          {activeSection === 'executions' && <ExecutionHistory key={scope} embedded jobIds={scope === 'session' ? ids : undefined} title="Executions" />}
-          {activeSection === 'billing' && <Billing key={scope} executionIds={scope === 'session' ? ids : undefined} />}
-          {activeSection === 'schedules' && <Schedules embedded open onClose={() => setOpen(false)} nodes={[]} edges={[]} selectedModel="" />}
-          {activeSection === 'logs' && <Box sx={{ p: 2.5, pt: 1, flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
-            <ModelCalls embedded />
-          </Box>}
-        </Suspense>
+        <ErrorBoundary resetKeys={[activeSection, scope]}>
+          <Suspense fallback={<Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={24} color="inherit" aria-label="Loading activity" /></Box>}>
+            {activeSection === 'executions' && <ExecutionHistory key={scope} embedded jobIds={scope === 'session' ? ids : undefined} title="Executions" />}
+            {activeSection === 'billing' && <Billing key={scope} executionIds={scope === 'session' ? ids : undefined} />}
+            {activeSection === 'schedules' && <Schedules embedded open onClose={() => setOpen(false)} nodes={[]} edges={[]} selectedModel="" />}
+            {activeSection === 'logs' && <Box sx={{ p: 2.5, pt: 1, flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
+              <ModelCalls embedded />
+            </Box>}
+          </Suspense>
+        </ErrorBoundary>
       </Box>}
     </Dialog>
   </>;
