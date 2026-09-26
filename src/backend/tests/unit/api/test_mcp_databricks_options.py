@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.api.mcp_router import (
-    _heal_external_mcp_urls,
     _list_external_mcp_options,
     _mcp_service_parent,
     get_databricks_mcp_options,
@@ -737,54 +736,6 @@ async def test_external_options_include_uc_mcp_services():
 def test_mcp_service_parent_requires_a_three_part_name():
     assert _mcp_service_parent("kasal.agents.websearch") == "schemas/kasal.agents"
     assert _mcp_service_parent("websearch_connection") is None
-
-
-@pytest.mark.asyncio
-async def test_heal_external_mcp_urls_updates_only_confirmed_rows_in_scope():
-    rows = [
-        SimpleNamespace(
-            id=1,
-            name="kasal.agents.websearch",
-            group_id=None,
-            server_url="https://ws/api/2.0/mcp/external/websearch_connection",
-        ),
-        SimpleNamespace(
-            id=2,
-            name="kasal.agents.websearch",
-            group_id="team-1",
-            server_url="https://ws/api/2.0/mcp/external/websearch_connection",
-        ),
-        SimpleNamespace(
-            id=3,
-            name="kasal.agents.websearch",
-            group_id="team-2",
-            server_url="https://ws/api/2.0/mcp/external/websearch_connection",
-        ),
-        SimpleNamespace(
-            id=4,
-            name="kasal.agents.websearch",
-            group_id="team-1",
-            server_url="https://custom.example.com/mcp",
-        ),
-    ]
-    repository = MagicMock()
-    repository.list = AsyncMock(return_value=rows)
-    repository.update = AsyncMock()
-    option = {
-        "name": "kasal.agents.websearch",
-        "server_url": "https://ws/ai-gateway/mcp-services/kasal.agents.websearch",
-    }
-
-    with patch(
-        "src.repositories.mcp_repository.MCPServerRepository",
-        MagicMock(return_value=repository),
-    ):
-        changed = await _heal_external_mcp_urls(
-            AsyncMock(), [option], "team-1", include_base=True
-        )
-
-    assert changed == 2
-    assert [call.args[0] for call in repository.update.await_args_list] == [1, 2]
 
 
 @pytest.mark.asyncio

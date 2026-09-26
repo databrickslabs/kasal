@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -112,6 +112,28 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         view (Configuration → System Administration → MCP (Global)).
         """
         query = select(self.model).where(self.model.group_id.is_(None))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def find_legacy_external_in_scope(
+        self, group_id: Optional[str], include_base: bool
+    ) -> List[MCPServer]:
+        """Servers still on the legacy ``/api/2.0/mcp/external/`` proxy, limited
+        to ``group_id``'s own rows and, when ``include_base``, the base rows.
+
+        Filtered in SQL so one tenant's request never loads another's rows.
+        """
+        scopes = []
+        if group_id:
+            scopes.append(self.model.group_id == group_id)
+        if include_base:
+            scopes.append(self.model.group_id.is_(None))
+        if not scopes:
+            return []
+        query = select(self.model).where(
+            or_(*scopes),
+            self.model.server_url.like("%/api/2.0/mcp/external/%"),
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

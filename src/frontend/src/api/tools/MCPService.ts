@@ -280,7 +280,18 @@ export class MCPService {
    */
   async getDatabricksCatalog(): Promise<DatabricksMcpCatalog> {
     try {
-      const response = await apiClient.get<Partial<DatabricksMcpCatalog>>('/mcp/databricks/available');
+      const response = await apiClient.get<
+        Partial<DatabricksMcpCatalog> & { legacy_external_count?: number }
+      >('/mcp/databricks/available');
+      // The GET is read-only; it reports registrations still on the legacy
+      // external-MCP proxy and the migration is an explicit POST.
+      if ((response.data.legacy_external_count ?? 0) > 0) {
+        try {
+          await apiClient.post('/mcp/databricks/migrate-external-urls');
+        } catch (migrateError) {
+          console.warn('Could not migrate legacy external MCP registrations', migrateError);
+        }
+      }
       return {
         workspace_url: response.data.workspace_url ?? '',
         external: response.data.external ?? [],
