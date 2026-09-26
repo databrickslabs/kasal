@@ -2259,6 +2259,7 @@ class ExecutionService:
             f"[STOP] execution_id: {execution_id}, stop_type: {stop_type}, reason: {reason}"
         )
 
+        partial_results = None
         try:
             # Update execution status to STOPPING
             if db:
@@ -2271,7 +2272,6 @@ class ExecutionService:
                 # Get current execution state for partial results
                 execution = await history_repo.get_execution_by_job_id(execution_id)
 
-                partial_results = None
                 if preserve_partial_results and execution:
                     partial_results = execution.result
 
@@ -2315,42 +2315,28 @@ class ExecutionService:
                     )
                 else:
                     crew_logger.info(
-                        f"[STOP] Execution {execution_id} not found in ProcessFlowExecutor tracking - trying psutil fallback"
+                        f"[STOP] Execution {execution_id} not found in ProcessFlowExecutor tracking - checking this server's own subprocesses"
                     )
-                    # Fallback: Use psutil to find and kill processes by execution_id
-                    try:
-                        import psutil
+                    # Only this server's descendants whose KASAL_EXECUTION_ID
+                    # equals the id exactly; an empty id matches nothing. Never
+                    # a command-line substring (an empty id is in every one).
+                    from src.services.execution.process_tree import (
+                        terminate_owned_processes,
+                    )
 
-                        current_process = psutil.Process()
-                        children = current_process.children(recursive=True)
-                        killed_count = 0
-                        for child in children:
-                            try:
-                                # Check if this process is related to our execution
-                                cmdline = " ".join(child.cmdline())
-                                if (
-                                    execution_id in cmdline
-                                    or execution_id[:8] in cmdline
-                                ):
-                                    crew_logger.info(
-                                        f"[STOP] Found process {child.pid} matching execution {execution_id}, terminating..."
-                                    )
-                                    child.terminate()
-                                    killed_count += 1
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                        if killed_count > 0:
-                            crew_logger.info(
-                                f"[STOP] Terminated {killed_count} processes via psutil fallback"
-                            )
-                            flow_terminated = True
-                        else:
-                            crew_logger.info(
-                                f"[STOP] No matching processes found via psutil for {execution_id}"
-                            )
-                    except Exception as psutil_error:
-                        crew_logger.warning(
-                            f"[STOP] psutil fallback failed: {psutil_error}"
+                    killed_count = await asyncio.to_thread(
+                        terminate_owned_processes,
+                        execution_id,
+                        graceful=(stop_type == "graceful"),
+                    )
+                    if killed_count > 0:
+                        crew_logger.info(
+                            f"[STOP] Terminated {killed_count} owned processes for {execution_id}"
+                        )
+                        flow_terminated = True
+                    else:
+                        crew_logger.info(
+                            f"[STOP] No owned processes found for {execution_id}"
                         )
 
             except Exception as flow_error:
