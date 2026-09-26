@@ -771,24 +771,32 @@ class TestListExecutions:
             created_at=datetime(2024, 1, 1),
             completed_at=datetime(2024, 1, 2),
             run_name="run-1",
-            result=None,
             error=None,
             group_email="u@e.com",
             group_id="g1",
-            inputs=None,
             execution_type=None,
+            input_execution_type="flow",
+            harness="kasal",
             flow_id=None,
+            input_flow_id="f-1",
+            crew_id=None,
+            model="m",
+            result_preview='{"content": "done"}',
         )
 
         ExecutionService.executions.clear()
 
         mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([fake_exec], 1))
+        mock_repo.get_execution_summaries = AsyncMock(return_value=[fake_exec])
         with _mock_execution_repo(mock_repo):
             results = await svc.list_executions(group_ids=["g1"])
 
         assert len(results) == 1
         assert results[0]["execution_id"] == "job-1"
+        assert results[0]["execution_type"] == "flow"
+        assert results[0]["flow_id"] == "f-1"
+        assert results[0]["result_preview"] == '{"content": "done"}'
+        assert "result" not in results[0] and "inputs" not in results[0]
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
@@ -802,7 +810,7 @@ class TestListExecutions:
         }
 
         mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([], 0))
+        mock_repo.get_execution_summaries = AsyncMock(return_value=[])
         with _mock_execution_repo(mock_repo):
             results = await svc.list_executions()
 
@@ -1899,6 +1907,12 @@ class TestTheRunListSaysWhichHarnessRanEach:
             harness="crewai",
             agents_yaml=None,
             tasks_yaml=None,
+            # summary-projection columns
+            crew_id=None,
+            input_execution_type=None,
+            input_flow_id=None,
+            model=None,
+            result_preview=None,
         )
         for key, value in overrides.items():
             setattr(row, key, value)
@@ -1908,7 +1922,7 @@ class TestTheRunListSaysWhichHarnessRanEach:
     async def test_each_row_carries_its_harness(self):
         svc = make_service(session=AsyncMock())
         mock_repo = AsyncMock()
-        mock_repo.get_execution_history = AsyncMock(return_value=([self._row()], 1))
+        mock_repo.get_execution_summaries = AsyncMock(return_value=[self._row()])
         with patch(
             "src.repositories.execution_repository.ExecutionRepository",
             MagicMock(return_value=mock_repo),
@@ -1928,6 +1942,7 @@ class TestTheRunListSaysWhichHarnessRanEach:
             "src.repositories.execution_repository.ExecutionRepository",
             MagicMock(return_value=mock_repo),
         ):
-            rows = await svc.list_executions(group_ids=["g1"])
+            # Whole ORM rows (include_payload) are read with getattr.
+            rows = await svc.list_executions(group_ids=["g1"], include_payload=True)
 
         assert rows and rows[0]["harness"] is None

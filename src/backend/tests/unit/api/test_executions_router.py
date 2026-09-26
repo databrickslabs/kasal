@@ -358,6 +358,41 @@ async def test_list_executions_scopes_to_selected_workspace(MockExecSvc):
 
 @pytest.mark.asyncio
 @patch("src.api.executions_router.ExecutionService")
+async def test_list_executions_rows_are_summaries_unless_payload_requested(
+    MockExecSvc,
+):
+    """The list carries a result preview; the payload is opt-in per request."""
+    from datetime import datetime
+
+    svc = AsyncMock()
+    svc.list_executions = AsyncMock(
+        return_value=[
+            {
+                "execution_id": "e1",
+                "status": "completed",
+                "created_at": datetime(2026, 1, 1),
+                "model": "m",
+                "result_preview": '{"content": "done"}',
+            }
+        ]
+    )
+    MockExecSvc.return_value = svc
+    ctx = Ctx(group_ids=["g1"])
+
+    out = await list_executions(group_context=ctx, db=MagicMock(), x_group_id="g1")
+    assert out[0].result is None and out[0].inputs is None
+    assert out[0].result_preview == '{"content": "done"}'
+    assert out[0].model == "m"
+    assert svc.list_executions.call_args.kwargs["include_payload"] is False
+
+    await list_executions(
+        group_context=ctx, db=MagicMock(), x_group_id="g1", include_payload=True
+    )
+    assert svc.list_executions.call_args.kwargs["include_payload"] is True
+
+
+@pytest.mark.asyncio
+@patch("src.api.executions_router.ExecutionService")
 async def test_list_executions_no_workspace_selected_fails_closed(MockExecSvc):
     """With no selected workspace (no group_id header) the endpoint fails closed
     (empty group filter) rather than returning the union of the user's groups."""

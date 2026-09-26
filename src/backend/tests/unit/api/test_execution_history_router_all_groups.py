@@ -269,7 +269,7 @@ class TestGetExecutionHistory:
             group_context=ctx, limit=50, offset=0, service=service
         )
         service.get_execution_history.assert_called_once_with(
-            50, 0, group_ids=ctx.group_ids
+            50, 0, group_ids=ctx.group_ids, include_payload=False
         )
         assert result == expected
 

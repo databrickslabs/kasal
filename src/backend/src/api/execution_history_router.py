@@ -5,7 +5,7 @@ This module provides API endpoints for retrieving, managing, and deleting
 execution history records and related data.
 """
 
-from typing import Any, Dict
+from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -76,6 +76,9 @@ async def get_all_groups_execution_history(
     user_email: RequestEmailDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    # Rows are summaries unless the caller opts in; the full payload is on
+    # GET /executions/history/{execution_id}.
+    include_payload: Annotated[bool, Query()] = False,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
 ):
     """
@@ -119,7 +122,9 @@ async def get_all_groups_execution_history(
     )
 
     # Fetch executions from all groups
-    result = await service.get_execution_history(limit, offset, group_ids=group_ids)
+    result = await service.get_execution_history(
+        limit, offset, group_ids=group_ids, include_payload=include_payload
+    )
 
     logger.debug(f"Found {result.total} total executions across all groups")
 
@@ -131,6 +136,9 @@ async def get_execution_history(
     group_context: GroupContextDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    # Rows are summaries unless the caller opts in; the full payload is on
+    # GET /executions/history/{execution_id}.
+    include_payload: Annotated[bool, Query()] = False,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
 ):
     """
@@ -146,7 +154,10 @@ async def get_execution_history(
         ExecutionHistoryList with paginated execution history
     """
     return await service.get_execution_history(
-        limit, offset, group_ids=group_context.group_ids
+        limit,
+        offset,
+        group_ids=group_context.group_ids,
+        include_payload=include_payload,
     )
 
 

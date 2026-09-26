@@ -252,6 +252,10 @@ async def list_executions(
     # (megabytes of result JSON) in one request on the most-polled endpoint.
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    # Rows are summaries (no result/inputs, a short result_preview). The full
+    # payload belongs to GET /executions/{execution_id}; this opt-in exists for
+    # a caller that genuinely needs it in bulk.
+    include_payload: Annotated[bool, Query()] = False,
 ):
     """
     List executions for the explicitly selected workspace only.
@@ -296,6 +300,7 @@ async def list_executions(
         user_email=None,  # Don't filter by user - show all executions in the selected workspace
         limit=limit,
         offset=offset,
+        include_payload=include_payload,
     )
 
     logger.info(

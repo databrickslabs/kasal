@@ -14,6 +14,7 @@ from sqlalchemy.future import select
 
 from src.core.base_repository import BaseRepository
 from src.models.execution_history import ExecutionHistory
+from src.repositories.execution_history_repository import execution_summary_columns
 from src.schemas.execution import ExecutionStatus
 
 
@@ -29,30 +30,14 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         """
         super().__init__(ExecutionHistory, session)
 
-    async def get_execution_history(
-        self,
-        limit: int = 50,
-        offset: int = 0,
-        group_ids: List[str] = None,
-        status_filter: List[str] = None,
-        user_email: str = None,
-        system_level: bool = False,
-        include_count: bool = False,
-    ) -> Tuple[List[ExecutionHistory], int]:
-        """
-        Get paginated execution history with group and user filtering.
-
-        Args:
-            limit: Maximum number of items to return
-            offset: Number of items to skip
-            group_ids: List of group IDs for filtering
-            status_filter: List of status values to filter by
-            user_email: User email for user-level filtering
-            system_level: If True, bypass group filtering for system operations
-
-        Returns:
-            Tuple of (list of executions, total count)
-        """
+    @staticmethod
+    def _history_filter(
+        group_ids: Optional[List[str]],
+        status_filter: Optional[List[str]],
+        user_email: Optional[str],
+        system_level: bool,
+    ) -> Any:
+        """The WHERE clause shared by the full and summary history lists."""
         # Build base filter with group filtering
         base_filter = True
         if system_level:
@@ -102,6 +87,35 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
                 pass
             else:
                 base_filter = base_filter & status_condition
+        return base_filter
+
+    async def get_execution_history(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: List[str] = None,
+        status_filter: List[str] = None,
+        user_email: str = None,
+        system_level: bool = False,
+        include_count: bool = False,
+    ) -> Tuple[List[ExecutionHistory], int]:
+        """
+        Get paginated execution history with group and user filtering.
+
+        Args:
+            limit: Maximum number of items to return
+            offset: Number of items to skip
+            group_ids: List of group IDs for filtering
+            status_filter: List of status values to filter by
+            user_email: User email for user-level filtering
+            system_level: If True, bypass group filtering for system operations
+
+        Returns:
+            Tuple of (list of executions, total count)
+        """
+        base_filter = self._history_filter(
+            group_ids, status_filter, user_email, system_level
+        )
 
         # Total count is OPT-IN: every caller of the hot list path discarded
         # it, yet the COUNT(*) doubled DB round trips on the most-polled
@@ -126,6 +140,30 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         executions = result.scalars().all()
 
         return executions, total_count
+
+    async def get_execution_summaries(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: Optional[List[str]] = None,
+        user_email: Optional[str] = None,
+    ) -> List[Any]:
+        """One page of runs for a LIST view: summary columns, no payload blobs.
+
+        Same group isolation as :meth:`get_execution_history` (strict, NULL
+        group_id excluded, empty/absent group list returns nothing). Rows carry
+        attribute access by column name; see ``execution_summary_columns``.
+        """
+        base_filter = self._history_filter(group_ids, None, user_email, False)
+        stmt = (
+            select(*execution_summary_columns())
+            .where(base_filter)
+            .order_by(ExecutionHistory.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.all())
 
     async def get_execution_by_job_id(
         self, job_id: str, group_ids: List[str] = None

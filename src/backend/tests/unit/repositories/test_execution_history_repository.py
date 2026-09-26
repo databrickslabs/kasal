@@ -73,7 +73,7 @@ class TestGetExecutionHistory:
         )
 
         runs, total = await repository.get_execution_history(
-            limit=50, offset=0, group_ids=["group-1"]
+            limit=50, offset=0, group_ids=["group-1"], full=True
         )
 
         assert len(runs) == 2
@@ -101,7 +101,9 @@ class TestGetExecutionHistory:
             side_effect=[mock_count_result, mock_exec_result]
         )
 
-        runs, total = await repository.get_execution_history(limit=50, offset=0)
+        runs, total = await repository.get_execution_history(
+            limit=50, offset=0, full=True
+        )
 
         assert len(runs) == 3
         assert total == 3
@@ -121,7 +123,9 @@ class TestGetExecutionHistory:
             side_effect=[mock_count_result, mock_exec_result]
         )
 
-        runs, total = await repository.get_execution_history(limit=1, offset=2)
+        runs, total = await repository.get_execution_history(
+            limit=1, offset=2, full=True
+        )
 
         assert len(runs) == 1
         assert total == 10
@@ -151,7 +155,7 @@ class TestGetExecutionHistory:
             side_effect=[mock_count_result, mock_exec_result]
         )
 
-        runs, total = await repository.get_execution_history(group_ids=[])
+        runs, total = await repository.get_execution_history(group_ids=[], full=True)
 
         assert len(runs) == 1
 

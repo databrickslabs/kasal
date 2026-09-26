@@ -279,7 +279,22 @@ class TestGetExecutionHistory:
         assert data["total"] == 2
         assert len(data["executions"]) == 2
         mock_execution_history_service.get_execution_history.assert_called_once_with(
-            50, 0, group_ids=mock_group_context.group_ids
+            50, 0, group_ids=mock_group_context.group_ids, include_payload=False
+        )
+
+    def test_get_execution_history_payload_is_opt_in(
+        self, client, mock_execution_history_service, mock_group_context
+    ):
+        """List rows are summaries unless the caller asks for payloads."""
+        mock_execution_history_service.get_execution_history.return_value = (
+            MockExecutionHistoryList(executions=[], total=0, limit=50, offset=0)
+        )
+
+        response = client.get("/executions/history?include_payload=true")
+
+        assert response.status_code == 200
+        mock_execution_history_service.get_execution_history.assert_called_once_with(
+            50, 0, group_ids=mock_group_context.group_ids, include_payload=True
         )
 
     def test_get_execution_history_with_pagination(
@@ -299,7 +314,7 @@ class TestGetExecutionHistory:
         assert data["limit"] == 10
         assert data["offset"] == 20
         mock_execution_history_service.get_execution_history.assert_called_once_with(
-            10, 20, group_ids=mock_group_context.group_ids
+            10, 20, group_ids=mock_group_context.group_ids, include_payload=False
         )
 
     def test_get_execution_history_invalid_params(

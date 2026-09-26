@@ -730,6 +730,7 @@ class TestExecutionService:
             mock_repo.get_execution_history = AsyncMock(
                 return_value=(mock_executions, len(mock_executions))
             )
+            mock_repo.get_execution_summaries = AsyncMock(return_value=mock_executions)
             mock_repo_class.return_value = mock_repo
 
             service = ExecutionService(session=mock_session)
@@ -740,6 +741,13 @@ class TestExecutionService:
             assert result[0]["status"] == ExecutionStatus.COMPLETED.value
             assert result[1]["execution_id"] == "exec-2"
             assert result[1]["status"] == ExecutionStatus.RUNNING.value
+            # List rows are summaries: the payload stays on the detail endpoint.
+            assert "result" not in result[0] and "inputs" not in result[0]
+            mock_repo.get_execution_history.assert_not_called()
+
+            full = await service.list_executions(["group-1"], include_payload=True)
+            assert full[0]["result"] == {"output": "result1"}
+            assert full[0]["inputs"] is None  # empty inputs are not masked
 
     @pytest.mark.asyncio
     async def test_list_executions_with_memory_executions(self):
@@ -771,8 +779,8 @@ class TestExecutionService:
             "src.repositories.execution_repository.ExecutionRepository"
         ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_history = AsyncMock(
-                return_value=([mock_db_execution], 1)
+            mock_repo.get_execution_summaries = AsyncMock(
+                return_value=[mock_db_execution]
             )
             mock_repo_class.return_value = mock_repo
 
@@ -1368,9 +1376,7 @@ class TestExecutionWorkflowIntegration:
             "src.repositories.execution_repository.ExecutionRepository"
         ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_history = AsyncMock(
-                return_value=([], 0)
-            )  # Empty DB
+            mock_repo.get_execution_summaries = AsyncMock(return_value=[])  # Empty DB
             mock_repo_class.return_value = mock_repo
 
             service = ExecutionService(session=mock_session)

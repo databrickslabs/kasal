@@ -924,6 +924,7 @@ class ExecutionService:
         user_email: str = None,
         limit: int = 50,
         offset: int = 0,
+        include_payload: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         List executions from both database and in-memory storage with group and user filtering.
@@ -933,114 +934,42 @@ class ExecutionService:
             user_email: User email for user-level filtering
             limit: Maximum number of executions to return
             offset: Number of executions to skip
+            include_payload: Also return each run's full ``result``, masked
+                ``inputs`` and ``agents_yaml``/``tasks_yaml``. Off by default:
+                list rows are summaries with a ``result_preview`` (see
+                ``services/execution/listing.py``).
 
         Returns:
             List of execution data dictionaries
         """
         try:
-            # Get executions from database using ExecutionRepository
             from src.repositories.execution_repository import ExecutionRepository
-
-            logger.debug(
-                f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}"
-            )
+            from src.services.execution.listing import full_row, summary_row
 
             if self.session:
-                logger.debug(
-                    f"[list_executions] Using injected database session: {self.session}"
-                )
                 repo = ExecutionRepository(self.session)
-                logger.debug(f"[list_executions] Created repository: {repo}")
-
-                # Get executions with group and user filtering using the correct repository method
-                logger.debug(
-                    f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}"
-                )
-                db_executions_list, total_count = await repo.get_execution_history(
-                    limit=limit,
-                    offset=offset,
-                    group_ids=group_ids,
-                    user_email=user_email,
-                )
-                logger.debug(
-                    f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}"
-                )
-
-                logger.debug(
-                    f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}"
-                )
-
-                # Debug what we got
-                if db_executions_list:
-                    logger.debug(
-                        f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}"
+                if include_payload:
+                    runs, _ = await repo.get_execution_history(
+                        limit=limit,
+                        offset=offset,
+                        group_ids=group_ids,
+                        user_email=user_email,
                     )
+                    db_executions = [
+                        full_row(run, self._mask_inputs_sensitive_data) for run in runs
+                    ]
                 else:
-                    logger.warning(
-                        f"[list_executions] No executions found for group_ids: {group_ids}"
+                    rows = await repo.get_execution_summaries(
+                        limit=limit,
+                        offset=offset,
+                        group_ids=group_ids,
+                        user_email=user_email,
                     )
-
-                # Convert to list of dicts, including inputs with agents_yaml and tasks_yaml
-                import json
-
-                db_executions = []
-                for e in db_executions_list:
-                    # Mask sensitive data in inputs before returning to API
-                    masked_inputs = (
-                        self._mask_inputs_sensitive_data(e.inputs) if e.inputs else None
-                    )
-
-                    exec_dict = {
-                        "execution_id": e.job_id,
-                        "status": e.status,
-                        "created_at": e.created_at,
-                        "completed_at": e.completed_at,
-                        "run_name": e.run_name,
-                        "result": e.result,
-                        "error": e.error,
-                        "group_email": e.group_email,
-                        "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
-                        "inputs": masked_inputs,  # Include the masked inputs field (sensitive data redacted)
-                        # Flow scheduling support - include execution_type and flow_id
-                        "execution_type": getattr(e, "execution_type", None)
-                        or (
-                            masked_inputs.get("execution_type")
-                            if masked_inputs
-                            else None
-                        )
-                        or "crew",
-                        # Which runtime ran it, so the run list can say so. The
-                        # column is added by the startup self-heal, hence
-                        # getattr: a row that predates it still lists.
-                        "harness": getattr(e, "harness", None),
-                        "flow_id": (
-                            str(e.flow_id)
-                            if getattr(e, "flow_id", None)
-                            else (
-                                masked_inputs.get("flow_id") if masked_inputs else None
-                            )
-                        ),
-                        "crew_id": (
-                            str(e.crew_id) if getattr(e, "crew_id", None) else None
-                        ),
-                    }
-
-                    # Also extract agents_yaml and tasks_yaml from masked inputs for direct access
-                    if masked_inputs and isinstance(masked_inputs, dict):
-                        if "agents_yaml" in masked_inputs:
-                            exec_dict["agents_yaml"] = (
-                                json.dumps(masked_inputs["agents_yaml"])
-                                if isinstance(masked_inputs["agents_yaml"], dict)
-                                else masked_inputs.get("agents_yaml", "")
-                            )
-                        if "tasks_yaml" in masked_inputs:
-                            exec_dict["tasks_yaml"] = (
-                                json.dumps(masked_inputs["tasks_yaml"])
-                                if isinstance(masked_inputs["tasks_yaml"], dict)
-                                else masked_inputs.get("tasks_yaml", "")
-                            )
-
-                    db_executions.append(exec_dict)
+                    db_executions = [summary_row(row) for row in rows]
+                logger.debug(
+                    f"[list_executions] {len(db_executions)} executions for "
+                    f"group_ids={group_ids} (include_payload={include_payload})"
+                )
             else:
                 logger.error("[list_executions] No database session available")
                 db_executions = []
@@ -1058,6 +987,9 @@ class ExecutionService:
             results = db_executions.copy()
             for execution_id, data in memory_executions.items():
                 execution_data = data.copy()
+                if not include_payload:
+                    for key in ("result", "inputs", "agents_yaml", "tasks_yaml"):
+                        execution_data.pop(key, None)
                 if "execution_id" not in execution_data:
                     execution_data["execution_id"] = execution_id
                 results.append(execution_data)
