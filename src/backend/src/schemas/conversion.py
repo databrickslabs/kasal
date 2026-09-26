@@ -5,9 +5,9 @@ Pydantic schemas for converter models and API validation
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ===== ENUMS =====
 
@@ -125,7 +125,7 @@ class ConversionHistoryResponse(ConversionHistoryBase):
     input_data: Optional[Dict[str, Any]] = Field(None, description="Input data")
     output_data: Optional[Dict[str, Any]] = Field(None, description="Output data")
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversionHistoryListResponse(BaseModel):
@@ -211,7 +211,7 @@ class ConversionJobResponse(ConversionJobBase):
     started_at: Optional[datetime] = Field(None, description="Start timestamp")
     completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversionJobListResponse(BaseModel):
@@ -294,7 +294,7 @@ class SavedConfigurationResponse(SavedConfigurationBase):
         None, description="Additional metadata"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SavedConfigurationListResponse(BaseModel):

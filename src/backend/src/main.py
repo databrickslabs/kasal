@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import AsyncIterator, Dict, Optional
 
 # CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
 # This must be done before importing any modules that might create database connections
@@ -28,6 +28,7 @@ from fastapi.responses import (  # noqa: E402 - import follows module initializa
     JSONResponse,
 )
 from sqlalchemy import text  # noqa: E402 - import follows module initialization
+from starlette.types import ASGIApp, Message, Receive, Scope, Send  # noqa: E402
 
 from src.api import api_router  # noqa: E402 - import follows module initialization
 from src.config.settings import (  # noqa: E402 - import follows module initialization
@@ -36,6 +37,7 @@ from src.config.settings import (  # noqa: E402 - import follows module initiali
 from src.core.logger import (  # noqa: E402 - import follows module initialization
     LoggerManager,
 )
+from src.core.paths import BACKEND_ROOT  # noqa: E402
 from src.db.session import (  # noqa: E402 - import follows module initialization
     async_session_factory,
     get_db,
@@ -110,7 +112,7 @@ async def _on_database_ready(system_logger: logging.Logger) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Lifespan manager for the FastAPI application.
 
@@ -196,16 +198,14 @@ async def lifespan(app: FastAPI):
     try:
         # Simple check for tables - just check if the database file exists with content
         if str(settings.DATABASE_URI).startswith("sqlite") and not installed_database:
-            db_path = settings.SQLITE_DB_PATH
+            db_path = settings.SQLITE_DB_PATH or str(BACKEND_ROOT / "app.db")
 
-            # Get absolute path if relative
             if not os.path.isabs(db_path):
                 db_path = os.path.abspath(db_path)
 
             system_logger.info(f"Checking database at: {db_path}")
 
             if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
-                # Try to execute a simple query to verify tables
                 try:
                     # Direct SQLite check - more reliable than trying to use SQLAlchemy
                     import sqlite3
@@ -258,7 +258,7 @@ async def lifespan(app: FastAPI):
     # status update silently failed after subprocess completion.
     if db_initialized:
 
-        async def _zombie_cleanup_loop():
+        async def _zombie_cleanup_loop() -> None:
             import asyncio as _asyncio
 
             while True:
@@ -280,7 +280,7 @@ async def lifespan(app: FastAPI):
     # workspace where nobody uploads again keeps them indefinitely. This sweep
     # is what makes "we keep uploads for the knowledge TTL" true of the
     # database rather than only of what search will show.
-    async def _knowledge_ttl_loop():
+    async def _knowledge_ttl_loop() -> None:
         import asyncio as _a
 
         from src.services.knowledge.retention import sweep_expired_knowledge
@@ -306,7 +306,7 @@ async def lifespan(app: FastAPI):
     # eventually reached, and gives the expensive passes (the LLM merge,
     # supersession, forgetting) somewhere to run that is not a user's teardown
     # path. Kill switch: Configuration → Engines → Advanced.
-    async def _memory_sweep_loop():
+    async def _memory_sweep_loop() -> None:
         import asyncio as _a
 
         from src.services.memory.maintenance.sweep import (
@@ -342,7 +342,7 @@ async def lifespan(app: FastAPI):
     # predates the feature.
     if db_initialized:
 
-        async def _workflow_recipe_backfill():
+        async def _workflow_recipe_backfill() -> None:
             from src.services.recipes.mining import mine_now
 
             try:
@@ -384,7 +384,7 @@ async def lifespan(app: FastAPI):
 
                 system_logger.info("Starting seeders in background...")
 
-                async def run_seeders_background():
+                async def run_seeders_background() -> None:
                     try:
                         system_logger.info("Background seeders started...")
                         await run_all_seeders()
@@ -457,7 +457,9 @@ async def lifespan(app: FastAPI):
 
                 lb_factory = LakebaseSessionFactory(instance_name)
                 await lb_factory.create_engine()
-                async_session_factory.activate_lakebase(lb_factory._session_factory)
+                lb_session_factory = lb_factory._session_factory
+                assert lb_session_factory is not None  # create_engine() set it
+                async_session_factory.activate_lakebase(lb_session_factory)
                 from src.db.lakebase_state import mark_lakebase_activated
 
                 mark_lakebase_activated()
@@ -475,9 +477,9 @@ async def lifespan(app: FastAPI):
                 try:
                     from src.db.session import run_schema_self_heal
 
-                    async with lb_factory._session_factory() as _heal_session:
-                        conn = await _heal_session.connection()
-                        await run_schema_self_heal(conn)
+                    async with lb_session_factory() as _heal_session:
+                        heal_conn = await _heal_session.connection()
+                        await run_schema_self_heal(heal_conn)
                         await _heal_session.commit()
                     system_logger.info("Lakebase schema self-heal complete")
                 except Exception as _heal_err:
@@ -530,7 +532,7 @@ async def lifespan(app: FastAPI):
                 except Exception:  # noqa: BLE001
                     return False
 
-            async def _trigger_queue_loop():
+            async def _trigger_queue_loop() -> None:
                 await asyncio.sleep(_trigger_interval())  # let the app finish booting
                 ticks = 0
                 while True:
@@ -790,7 +792,7 @@ class LocalDevAuthMiddleware:
     outside production, refused inside it.
     """
 
-    def __init__(self, app, enabled: Optional[bool] = None):
+    def __init__(self, app: ASGIApp, enabled: Optional[bool] = None) -> None:
         self.app = app
         self.enabled = _local_dev_auth_enabled() if enabled is None else enabled
         if self.enabled:
@@ -801,7 +803,7 @@ class LocalDevAuthMiddleware:
                 settings.LOCAL_DEV_USER_EMAIL,
             )
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if self.enabled and scope["type"] == "http":
             headers = dict(scope.get("headers", []))
             if (
@@ -889,15 +891,15 @@ class SecurityHeadersMiddleware:
         (b"referrer-policy", b"strict-origin-when-cross-origin"),
     ]
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        async def send_with_security_headers(message):
+        async def send_with_security_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 headers.extend(self._SECURITY_HEADERS)
@@ -998,8 +1000,8 @@ from src.api.mcp_jsonrpc_router import (  # noqa: E402 - import follows module i
 app.include_router(_mcp_jsonrpc_router)
 
 
-@app.get("/health")
-async def health():
+@app.get("/health", response_model=None)
+async def health() -> Dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
 

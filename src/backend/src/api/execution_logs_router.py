@@ -71,7 +71,7 @@ async def get_execution_logs(
     group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
-):
+) -> List[ExecutionLogResponse]:
     """
     Get historical execution logs for the current tenant.
 
@@ -100,7 +100,7 @@ async def get_run_logs(
     group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
-):
+) -> ExecutionLogsResponse:
     """
     Get historical logs for a specific run within the current tenant.
 
@@ -130,7 +130,7 @@ async def get_execution_logs_main(
     group_context: GroupContextDep,
     limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
-):
+) -> List[ExecutionLogResponse]:
     """Get execution logs via main router."""
     logs = await service.get_execution_logs_by_group(
         execution_id, group_context, limit, offset
@@ -142,7 +142,7 @@ async def get_execution_logs_main(
 async def create_execution_log(
     log_data: Dict,
     group_context: GroupContextDep,
-):
+) -> None:
     """Create an execution log via main router."""
     raise HTTPException(
         status_code=501, detail="Execution log creation not implemented"

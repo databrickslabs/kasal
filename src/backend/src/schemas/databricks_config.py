@@ -51,7 +51,7 @@ class DatabricksConfigCreate(DatabricksConfigBase):
         return []
 
     @model_validator(mode="after")
-    def validate_required_fields(self):
+    def validate_required_fields(self) -> "DatabricksConfigCreate":
         """Validate required fields based on configuration."""
         # Only validate if Databricks is enabled
         if not self.enabled or is_databricks_app():
@@ -79,8 +79,12 @@ class DatabricksConfigCreate(DatabricksConfigBase):
         return self
 
 
-class DatabricksConfigUpdate(DatabricksConfigBase):
-    """Schema for updating Databricks configuration."""
+class DatabricksConfigUpdate(BaseModel):
+    """Schema for updating Databricks configuration.
+
+    Every DatabricksConfigBase field, each optional (a partial update). Declared
+    on BaseModel rather than narrowing the base's non-optional fields.
+    """
 
     workspace_url: Optional[str] = None
     warehouse_id: Optional[str] = None

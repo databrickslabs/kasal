@@ -1,6 +1,7 @@
 """Chat assets — images attached in the chat, uploaded, served and deleted."""
 
 import logging
+from typing import Any, Dict
 
 from fastapi import APIRouter, File, Form, Response, UploadFile
 
@@ -30,7 +31,7 @@ async def upload_asset(
     session_id: str = Form(""),
     width: int = Form(0),
     height: int = Form(0),
-):
+) -> Dict[str, Any]:
     """Store an image attached in the chat. The browser reports the pixel
     size (it has already decoded the image to show a thumbnail)."""
     data = await file.read(MAX_BYTES + 1)
@@ -49,7 +50,9 @@ async def upload_asset(
 
 
 @router.get("/{asset_id}")
-async def get_asset(asset_id: str, session: SessionDep, group_context: GroupContextDep):
+async def get_asset(
+    asset_id: str, session: SessionDep, group_context: GroupContextDep
+) -> Response:
     """The image bytes. Immutable by id, so the browser may cache them."""
     asset = await ChatAssetService(session).get(asset_id, group_context)
     if asset is None:
@@ -64,7 +67,7 @@ async def get_asset(asset_id: str, session: SessionDep, group_context: GroupCont
 @router.delete("/{asset_id}", status_code=204)
 async def delete_asset(
     asset_id: str, session: SessionDep, group_context: GroupContextDep
-):
+) -> Response:
     if not await ChatAssetService(session).delete(asset_id, group_context):
         raise NotFoundError("Asset not found")
     return Response(status_code=204)

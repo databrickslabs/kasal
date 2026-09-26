@@ -414,7 +414,7 @@ class TestGetExecutionById:
         assert data["id"] == 1
         assert data["job_id"] == "exec-123"
         mock_execution_history_service.get_execution_by_id.assert_called_once_with(
-            1, group_ids=mock_group_context.group_ids
+            1, tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_by_id_not_found(
@@ -479,7 +479,7 @@ class TestGetExecutionOutputs:
         assert len(data["outputs"]) == 2
         assert data["execution_id"] == "exec-123"
         mock_execution_history_service.get_execution_outputs.assert_called_once_with(
-            "exec-123", 1000, 0, group_ids=mock_group_context.group_ids
+            "exec-123", 1000, 0, tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_outputs_with_pagination(
@@ -500,7 +500,7 @@ class TestGetExecutionOutputs:
         assert data["offset"] == 50
         assert data["execution_id"] == "exec-123"
         mock_execution_history_service.get_execution_outputs.assert_called_once_with(
-            "exec-123", 100, 50, group_ids=mock_group_context.group_ids
+            "exec-123", 100, 50, tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_outputs_invalid_params(
@@ -556,7 +556,7 @@ class TestGetExecutionDebugOutputs:
         assert data["total_outputs"] == 2
         assert len(data["outputs"]) == 2
         mock_execution_history_service.get_debug_outputs.assert_called_once_with(
-            "exec-123", group_ids=mock_group_context.group_ids
+            "exec-123", tenant_ids=mock_group_context.group_ids
         )
 
     def test_get_execution_debug_outputs_not_found(

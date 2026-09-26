@@ -12,9 +12,10 @@ cannot reach a task operation without a caller.
 """
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi.responses import StreamingResponse
 
 from src.core.exceptions import KasalError, NotFoundError, UnprocessableEntityError
 from src.dependencies.providers import SessionDep
@@ -89,7 +90,9 @@ CallerDep = Annotated[ExternalCaller, Depends(get_a2a_caller)]
 
 
 @well_known_router.get("/.well-known/agent.json", response_model=AgentCard)
-async def agent_card(request: Request, caller: CallerDep, session: SessionDep):
+async def agent_card(
+    request: Request, caller: CallerDep, session: SessionDep
+) -> AgentCard:
     """The Agent Card.
 
     Served at the DOMAIN ROOT, not under the API prefix. A well-known URI is
@@ -118,7 +121,7 @@ async def agent_card(request: Request, caller: CallerDep, session: SessionDep):
 @router.post("/a2a/v1/message:send", response_model=Task)
 async def send_message(
     body: SendMessageRequest, caller: CallerDep, session: SessionDep
-):
+) -> Task:
     """Start a task, or answer one that is waiting for input.
 
     Returns the task handle IMMEDIATELY. Crew runs take minutes and the budget
@@ -160,14 +163,13 @@ _SSE_HEADERS = {
 @router.post("/a2a/v1/message:stream")
 async def stream_message(
     body: SendMessageRequest, caller: CallerDep, session: SessionDep
-):
+) -> StreamingResponse:
     """SendStreamingMessage — start a task and stream its progress.
 
     Start and subscribe in one call. Doing it as two (send, then subscribe)
     leaves a window in which a fast task finishes before the subscription opens,
     and the caller waits forever for events about a task that is already done.
     """
-    from fastapi.responses import StreamingResponse
 
     from src.services.a2a.a2a_server import stream as a2a_stream
 
@@ -200,13 +202,14 @@ async def stream_message(
 
 
 @router.get("/a2a/v1/tasks/{task_id}:subscribe")
-async def subscribe_to_task(task_id: str, caller: CallerDep, session: SessionDep):
+async def subscribe_to_task(
+    task_id: str, caller: CallerDep, session: SessionDep
+) -> StreamingResponse:
     """SubscribeToTask — attach to a task already running.
 
     The reconnect path: a dropped stream does not lose the task, and a caller
     that started one with message:send can still follow it.
     """
-    from fastapi.responses import StreamingResponse
 
     from src.services.a2a.a2a_server import stream as a2a_stream
 
@@ -225,7 +228,7 @@ async def subscribe_to_task(task_id: str, caller: CallerDep, session: SessionDep
 
 
 @router.get("/a2a/v1/tasks/{task_id}", response_model=Task)
-async def get_task(task_id: str, caller: CallerDep, session: SessionDep):
+async def get_task(task_id: str, caller: CallerDep, session: SessionDep) -> Task:
     """A task's state, its output, or the question it is waiting on."""
     try:
         return await a2a_tasks.get_task(caller, task_id, session=session)
@@ -236,7 +239,7 @@ async def get_task(task_id: str, caller: CallerDep, session: SessionDep):
 
 
 @router.post("/a2a/v1/tasks/{task_id}:cancel", response_model=Task)
-async def cancel_task(task_id: str, caller: CallerDep, session: SessionDep):
+async def cancel_task(task_id: str, caller: CallerDep, session: SessionDep) -> Task:
     """Stop a task."""
     try:
         return await a2a_tasks.cancel_task(caller, task_id, session=session)
@@ -244,12 +247,12 @@ async def cancel_task(task_id: str, caller: CallerDep, session: SessionDep):
         raise NotFoundError(str(exc))
 
 
-@router.get("/a2a/v1/tasks")
+@router.get("/a2a/v1/tasks", response_model=None)
 async def list_tasks(
     caller: CallerDep,
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-):
+) -> Dict[str, Any]:
     """This caller's tasks, group-scoped.
 
     An unscoped ListTasks is a cross-tenant leak in a single call, which is why
@@ -267,13 +270,13 @@ async def list_tasks(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/a2a/v1/tasks/{task_id}/pushNotificationConfigs")
+@router.post("/a2a/v1/tasks/{task_id}/pushNotificationConfigs", response_model=None)
 async def create_push_config(
     task_id: str,
     body: PushConfigRequest,
     caller: CallerDep,
     session: SessionDep,
-):
+) -> Dict[str, Any]:
     """Register a webhook for a task.
 
     The URL is validated here as well as at delivery: refusing an unusable
@@ -295,8 +298,10 @@ async def create_push_config(
         raise UnprocessableEntityError(str(exc))
 
 
-@router.get("/a2a/v1/tasks/{task_id}/pushNotificationConfigs")
-async def list_push_configs(task_id: str, caller: CallerDep, session: SessionDep):
+@router.get("/a2a/v1/tasks/{task_id}/pushNotificationConfigs", response_model=None)
+async def list_push_configs(
+    task_id: str, caller: CallerDep, session: SessionDep
+) -> Dict[str, Any]:
     """Webhooks registered on a task. Tokens and secrets are never returned."""
     return {"configs": await a2a_push.list_for_task(caller, task_id, session=session)}
 
@@ -307,7 +312,7 @@ async def list_push_configs(task_id: str, caller: CallerDep, session: SessionDep
 )
 async def delete_push_config(
     task_id: str, config_id: int, caller: CallerDep, session: SessionDep
-):
+) -> None:
     """Remove a webhook."""
     if not await a2a_push.delete(caller, config_id, session=session):
         raise NotFoundError("No such push notification config")

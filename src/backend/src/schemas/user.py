@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
@@ -23,7 +23,7 @@ class UserBase(BaseModel):
     email: str  # Changed from EmailStr to str to allow localhost domains in development
 
     @field_validator("username", mode="before")
-    def username_validator(cls, v):
+    def username_validator(cls, v: Any) -> Any:
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError(
                 "Username can only contain letters, numbers, underscores, and hyphens"
@@ -33,7 +33,7 @@ class UserBase(BaseModel):
         return v
 
     @field_validator("email", mode="before")
-    def email_validator(cls, v):
+    def email_validator(cls, v: Any) -> Any:
         # Accept any stored value on read — partial emails may exist in the DB
         # from incremental header processing. Write-path validation is handled
         # by UserUpdate (EmailStr) and get_or_create_user_by_email.
@@ -68,7 +68,7 @@ class UserUpdate(BaseModel):
     status: Optional[UserStatus] = None
 
     @field_validator("username", mode="before")
-    def username_validator(cls, v):
+    def username_validator(cls, v: Any) -> Any:
         if v is None:
             return v
         if not re.match(r"^[a-zA-Z0-9_-]+$", v):

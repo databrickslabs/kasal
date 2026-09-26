@@ -32,9 +32,9 @@ router = APIRouter(prefix="/api/agentbricks", tags=["agentbricks"])
 @router.get("/endpoints", response_model=AgentBricksEndpointsResponse)
 async def get_agentbricks_endpoints(
     request: Request,
+    group_context: GroupContextDep,
     ready_only: bool = True,
     search_query: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> AgentBricksEndpointsResponse:
     """
     Fetch available AgentBricks endpoints from Databricks.
@@ -81,7 +81,7 @@ async def get_agentbricks_endpoints(
 async def search_agentbricks_endpoints(
     request: Request,
     endpoints_request: AgentBricksEndpointsRequest,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> AgentBricksEndpointsResponse:
     """
     Search and filter AgentBricks endpoints from Databricks.
@@ -118,7 +118,7 @@ async def search_agentbricks_endpoints(
 
 @router.get("/endpoints/{endpoint_name}", response_model=AgentBricksEndpoint)
 async def get_agentbricks_endpoint_details(
-    endpoint_name: str, request: Request, group_context: GroupContextDep = None
+    endpoint_name: str, request: Request, group_context: GroupContextDep
 ) -> AgentBricksEndpoint:
     """
     Get details for a specific AgentBricks endpoint.
@@ -157,7 +157,7 @@ async def get_agentbricks_endpoint_details(
 async def query_agentbricks_endpoint(
     request: Request,
     query_request: AgentBricksQueryRequest,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> AgentBricksQueryResponse:
     """
     Query an AgentBricks endpoint with messages.
@@ -198,7 +198,7 @@ async def query_agentbricks_endpoint(
 async def execute_agentbricks_query(
     request: Request,
     execution_request: AgentBricksExecutionRequest,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> AgentBricksExecutionResponse:
     """
     Execute a simplified query to an AgentBricks endpoint.

@@ -5,7 +5,7 @@ This module provides a router for Databricks secrets CRUD operations.
 """
 
 import logging
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, status
 
@@ -24,6 +24,7 @@ from src.schemas.databricks_secret import (
     SecretUpdate,
 )
 from src.services.databricks.secrets.service import DatabricksSecretsService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(
     prefix="/databricks-secrets",
@@ -57,7 +58,7 @@ DatabricksSecretsServiceDep = Annotated[
 ]
 
 
-def _require_secret_admin(group_context) -> None:
+def _require_secret_admin(group_context: GroupContext) -> None:
     """
     SECURITY: Databricks secrets live in a shared, workspace-level scope and are
     used by all tenants for backend integrations. Only admins may create,
@@ -71,7 +72,7 @@ def _require_secret_admin(group_context) -> None:
 async def get_databricks_secrets(
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> List[Dict[str, str]]:
     """
     Get all secrets from Databricks secret store.
 
@@ -115,7 +116,7 @@ async def create_databricks_secret(
     secret_data: SecretCreate,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Create a new secret in Databricks.
 
@@ -159,7 +160,7 @@ async def update_databricks_secret(
     secret_data: SecretUpdate,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Update an existing secret in Databricks.
 
@@ -210,7 +211,7 @@ async def delete_databricks_secret(
     secret_name: str,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> None:
     """
     Delete a secret from Databricks.
 
@@ -234,11 +235,11 @@ async def delete_databricks_secret(
         raise BadRequestError("Databricks not properly configured for secret storage")
 
 
-@router.post("/scopes", status_code=status.HTTP_200_OK)
+@router.post("/scopes", response_model=None, status_code=status.HTTP_200_OK)
 async def create_databricks_secret_scope(
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Create a secret scope in Databricks if it doesn't exist.
 
@@ -284,7 +285,7 @@ async def create_databricks_secret_scope(
 async def get_secrets(
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> List[Dict]:
     """Legacy endpoint for getting all secrets from a specific Databricks scope."""
     try:
         workspace_url, scope = await service.validate_databricks_config()
@@ -297,13 +298,13 @@ async def get_secrets(
         return []
 
 
-@router.put("/secrets/{key}", status_code=status.HTTP_200_OK)
+@router.put("/secrets/{key}", response_model=None, status_code=status.HTTP_200_OK)
 async def set_secret(
     key: str,
     secret_data: SecretUpdate,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """Legacy endpoint for setting a secret value in Databricks."""
     _require_secret_admin(group_context)
     workspace_url, scope = await service.validate_databricks_config()
@@ -322,7 +323,7 @@ async def delete_secret_endpoint(
     key: str,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> None:
     """Legacy endpoint for deleting a secret from Databricks."""
     _require_secret_admin(group_context)
     workspace_url, scope = await service.validate_databricks_config()
@@ -331,11 +332,11 @@ async def delete_secret_endpoint(
         raise NotFoundError(f"Secret '{key}' not found in scope '{scope}'")
 
 
-@router.post("/secret-scopes", status_code=status.HTTP_200_OK)
+@router.post("/secret-scopes", response_model=None, status_code=status.HTTP_200_OK)
 async def create_secret_scope_endpoint(
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """Legacy endpoint for creating a secret scope if it doesn't exist."""
     _require_secret_admin(group_context)
     workspace_url, scope = await service.validate_databricks_config()
@@ -366,7 +367,7 @@ async def set_databricks_token(
     request: DatabricksTokenRequest,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, str]:
     """Set Databricks token in the configuration."""
     _require_secret_admin(group_context)
     try:
@@ -404,7 +405,7 @@ async def get_legacy_api_keys(
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
     source: Optional[str] = None,
-):
+) -> List[Dict[str, str]]:
     """Legacy endpoint for getting all API keys."""
     logger.info(
         "Legacy API keys GET endpoint called - redirecting to Databricks secrets"
@@ -417,7 +418,7 @@ async def create_legacy_api_key(
     secret_data: SecretCreate,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """Legacy endpoint for creating a new API key."""
     logger.info(
         f"Legacy API key CREATE endpoint called for key '{secret_data.name}' - redirecting to Databricks secrets"
@@ -431,7 +432,7 @@ async def update_legacy_api_key(
     secret_data: SecretUpdate,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> Dict[str, Any]:
     """Legacy endpoint for updating an API key."""
     logger.info(
         f"Legacy API key UPDATE endpoint called for key '{secret_name}' - redirecting to Databricks secrets"
@@ -446,7 +447,7 @@ async def delete_legacy_api_key(
     secret_name: str,
     group_context: GroupContextDep,
     service: DatabricksSecretsServiceDep,
-):
+) -> None:
     """Legacy endpoint for deleting an API key."""
     logger.info(
         f"Legacy API key DELETE endpoint called for key '{secret_name}' - redirecting to Databricks secrets"

@@ -18,7 +18,7 @@ class ModelRate(BaseModel):
 
     @field_validator("model")
     @classmethod
-    def clean_model(cls, value):
+    def clean_model(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("A model name is required")
@@ -32,7 +32,7 @@ class BillingQuery(BaseModel):
 
     @field_validator("start", "end")
     @classmethod
-    def utc(cls, value):
+    def utc(cls, value: datetime) -> datetime:
         return (
             value.replace(tzinfo=timezone.utc)
             if value.tzinfo is None
@@ -40,7 +40,7 @@ class BillingQuery(BaseModel):
         )
 
     @model_validator(mode="after")
-    def valid_period(self):
+    def valid_period(self) -> "BillingQuery":
         if not timedelta(0) < self.end - self.start <= timedelta(days=366):
             raise ValueError("Choose a period of up to one year")
         return self

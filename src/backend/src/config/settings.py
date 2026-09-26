@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Any, ClassVar, List, Optional, Tuple, Type
 
-from pydantic import field_validator, model_validator
+from pydantic import ValidationInfo, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URI: Optional[str] = None
 
     @field_validator("DATABASE_URI", mode="before")
-    def assemble_db_connection(cls, v: Optional[str], info) -> Any:
+    def assemble_db_connection(cls, v: Optional[str], info: ValidationInfo) -> Any:
         if isinstance(v, str):
             return v
 
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
             return f"postgresql+asyncpg://{info.data.get('POSTGRES_USER')}:{info.data.get('POSTGRES_PASSWORD')}@{info.data.get('POSTGRES_SERVER')}:{info.data.get('POSTGRES_PORT', 5432)}/{info.data.get('POSTGRES_DB') or ''}"
 
     @field_validator("SYNC_DATABASE_URI", mode="before")
-    def assemble_sync_db_connection(cls, v: Optional[str], info) -> Any:
+    def assemble_sync_db_connection(cls, v: Optional[str], info: ValidationInfo) -> Any:
         if isinstance(v, str):
             return v
 

@@ -2,7 +2,10 @@
 API endpoints for flow executions.
 """
 
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.dependencies.providers import GroupContextDep, get_db
@@ -16,10 +19,12 @@ router = APIRouter(
 )
 
 
-@router.post("", status_code=status.HTTP_202_ACCEPTED)
+@router.post("", response_model=None, status_code=status.HTTP_202_ACCEPTED)
 async def execute_flow(
-    request: FlowExecutionRequest, group_context: GroupContextDep, db=Depends(get_db)
-):
+    request: FlowExecutionRequest,
+    group_context: GroupContextDep,
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
     """
     Start a flow execution asynchronously.
 
@@ -34,8 +39,11 @@ async def execute_flow(
 
     # SECURITY: pass the caller's group context so the flow's group ownership is
     # enforced and the execution record is tagged with the caller's group_id.
+    # The schema admits an int, but flow ids are UUIDs: hand the service a string
+    # so it reports the malformed id the same way it does any other.
+    flow_id = request.flow_id
     result = await service.run_flow(
-        flow_id=request.flow_id,
+        flow_id=str(flow_id) if isinstance(flow_id, int) else flow_id,
         job_id=request.job_id,
         run_name=request.run_name,
         config=request.config,
@@ -53,10 +61,12 @@ async def execute_flow(
         raise BadRequestError(result.get("error", "Flow execution failed"))
 
 
-@router.get("/{execution_id}")
+@router.get("/{execution_id}", response_model=None)
 async def get_flow_execution(
-    execution_id: int, group_context: GroupContextDep, db=Depends(get_db)
-):
+    execution_id: int,
+    group_context: GroupContextDep,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
     """
     Get details of a flow execution.
 
@@ -83,10 +93,10 @@ async def get_flow_execution(
         raise NotFoundError(result.get("error", "Flow execution not found"))
 
 
-@router.get("/by-flow/{flow_id}")
+@router.get("/by-flow/{flow_id}", response_model=None)
 async def get_flow_executions_by_flow(
-    flow_id: str, group_context: GroupContextDep, db=Depends(get_db)
-):
+    flow_id: str, group_context: GroupContextDep, db: AsyncSession = Depends(get_db)
+) -> Any:
     """
     Get all executions for a specific flow.
 

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, status
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context, is_system_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.model_config import ModelConfig
 from src.schemas.model_config import (
     ModelConfigCreate,
     ModelConfigResponse,
@@ -73,7 +74,7 @@ def _require_system_admin(group_context: GroupContext, action: str) -> None:
 async def get_models(
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelListResponse:
     """
     Get all model configurations.
 
@@ -101,7 +102,7 @@ async def get_models(
 async def get_enabled_models(
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelListResponse:
     """
     Get only enabled model configurations.
 
@@ -122,7 +123,7 @@ async def get_enabled_models(
 @router.get("/global", response_model=ModelListResponse)
 async def get_global_models(
     service: ModelConfigServiceDep,
-):
+) -> ModelListResponse:
     """
     Get global (system-wide) model configurations (group_id is NULL).
     """
@@ -137,7 +138,7 @@ async def toggle_global_model(
     toggle_data: ModelToggleUpdate,
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelConfig:
     """
     Toggle enabled on a global (system-wide) model configuration.
     Requires admin permissions.
@@ -164,7 +165,7 @@ async def get_model(
     model_key: str,
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelConfig:
     """
     Get a specific model configuration by key.
 
@@ -195,7 +196,7 @@ async def create_model(
     model: ModelConfigCreate,
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelConfig:
     """
     Create a new model configuration.
     Only system admins can create model configurations (the catalog is global).
@@ -226,7 +227,7 @@ async def update_model(
     model: ModelConfigUpdate,
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelConfig:
     """
     Update an existing model configuration.
     Only system admins can update model configurations (the catalog is global).
@@ -261,7 +262,7 @@ async def toggle_model(
     toggle_data: ModelToggleUpdate,
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelConfig:
     """
     Enable or disable a model configuration.
     Only Admins can toggle model configurations.
@@ -302,7 +303,7 @@ async def delete_model(
     model_key: str,
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete a model configuration.
     Only system admins can delete model configurations (the catalog is global).
@@ -330,7 +331,7 @@ async def delete_model(
 async def enable_all_models(
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelListResponse:
     """
     Enable all model configurations.
     Only system admins: this flips every row, for every workspace.
@@ -355,7 +356,7 @@ async def enable_all_models(
 async def disable_all_models(
     service: ModelConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> ModelListResponse:
     """
     Disable all model configurations.
     Only system admins: this flips every row, for every workspace.

@@ -131,7 +131,7 @@ class TaskInDBBase(TaskBase):
 
     @field_validator("llm_guardrail", mode="before")
     @classmethod
-    def parse_llm_guardrail(cls, v):
+    def parse_llm_guardrail(cls, v: Any) -> Any:
         """Parse llm_guardrail if it's a JSON string from database."""
         if isinstance(v, str):
             try:

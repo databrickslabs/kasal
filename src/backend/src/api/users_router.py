@@ -122,13 +122,13 @@ async def search_user_directory(
     return await search_directory(search.strip(), UserContext.get_user_token())
 
 
-@router.get("/{user_id}")
+@router.get("/{user_id}", response_model=None)
 async def read_user(
     user_id: str,
     service: Annotated[UserService, Depends(get_user_service)],
     admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
-):
+) -> Any:  # ORM User (or None-guarded above)
     """Get user by ID (system admin only)"""
     # Use injected service
     user = await service.get_user_complete(user_id)

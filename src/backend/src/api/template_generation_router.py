@@ -69,8 +69,8 @@ router = APIRouter(
 async def generate_templates(
     request: TemplateGenerationRequest,
     service: TemplateGenerationServiceDep,
-    group_context: GroupContextDep = None,
-):
+    group_context: GroupContextDep,
+) -> TemplateGenerationResponse:
     """
     Generate templates for an agent based on role, goal, and backstory.
 

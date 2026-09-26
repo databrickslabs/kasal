@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Annotated, List
+from typing import Annotated, Any, Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, status
@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEntityError
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.crew import Crew
 from src.schemas.crew import CrewCreate, CrewResponse, CrewUpdate
 from src.schemas.crew_feedback import (
     CrewFeedbackCreateRequest,
@@ -39,7 +40,7 @@ def get_crew_service(session: SessionDep) -> CrewService:
     return CrewService(session)
 
 
-def _crew_to_response(crew) -> CrewResponse:
+def _crew_to_response(crew: Crew) -> CrewResponse:
     """Serialize a Crew model to CrewResponse including ALL execution-config fields.
 
     Building CrewResponse field-by-field previously listed only id/name/ids/nodes/
@@ -75,7 +76,7 @@ def _crew_to_response(crew) -> CrewResponse:
 async def list_crews(
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
-):
+) -> List[CrewResponse]:
     """
     Retrieve all crews for the current group.
 
@@ -98,7 +99,7 @@ def get_crew_feedback_service(session: SessionDep) -> CrewFeedbackService:
 async def crew_feedback_summary(
     group_context: GroupContextDep,
     service: Annotated[CrewFeedbackService, Depends(get_crew_feedback_service)],
-):
+) -> List[CrewFeedbackSummaryEntry]:
     """Per-crew thumbs up/down counts for this workspace's catalog view.
 
     NOTE: registered BEFORE /{crew_id} — a literal segment would otherwise be
@@ -119,7 +120,7 @@ async def add_crew_feedback(
     request: CrewFeedbackCreateRequest,
     group_context: GroupContextDep,
     service: Annotated[CrewFeedbackService, Depends(get_crew_feedback_service)],
-):
+) -> CrewFeedbackResponse:
     """Record a thumbs up/down on a cataloged crew (down requires a comment)."""
     try:
         record = await service.add_feedback(
@@ -138,7 +139,7 @@ async def list_crew_feedback(
     crew_id: Annotated[UUID, Path(title="The ID of the crew")],
     group_context: GroupContextDep,
     service: Annotated[CrewFeedbackService, Depends(get_crew_feedback_service)],
-):
+) -> List[CrewFeedbackResponse]:
     """All feedback entries for a crew (newest first) — incl. down-vote comments."""
     records = await service.list_for_crew(str(crew_id), group_context)
     return [CrewFeedbackResponse.model_validate(r) for r in records]
@@ -149,7 +150,7 @@ async def get_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to get")],
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
-):
+) -> CrewResponse:
     """
     Get a specific crew by ID for the current group.
 
@@ -179,7 +180,7 @@ async def create_crew(
         False,
         description="Replace an existing crew of the same name instead of failing with 409.",
     ),
-):
+) -> CrewResponse:
     """
     Create a new crew for the current group.
     Only Editors and Admins can create crews.
@@ -210,11 +211,11 @@ async def create_crew(
         raise UnprocessableEntityError(str(e))
 
 
-@router.post("/debug")
+@router.post("/debug", response_model=None)
 async def debug_crew_data(
     crew_in: CrewCreate,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Debug endpoint to validate crew data structure without saving.
 
@@ -263,7 +264,7 @@ async def update_crew(
     crew_update: CrewUpdate,
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
-):
+) -> CrewResponse:
     """
     Update a crew for the current group.
     Only Editors and Admins can update crews.
@@ -301,7 +302,7 @@ async def delete_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to delete")],
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete a crew for the current group.
     Only Editors and Admins can delete crews.
@@ -327,7 +328,7 @@ async def delete_crew(
 async def delete_all_crews(
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete all crews for the current group.
     Only Admins can delete all crews.
@@ -364,7 +365,7 @@ async def publish_crew(
     crew_service: Annotated[CrewService, Depends(get_crew_service)],
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> CrewPublicationResponse:
     """Expose a crew over the listed external protocols.
 
     Idempotent: publishing an already-published crew updates its record.
@@ -393,7 +394,7 @@ async def get_crew_publication(
     crew_id: Annotated[UUID, Path(title="The ID of the crew")],
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> CrewPublicationResponse:
     """The crew's publication record, or 404 if it is not published."""
     row = await service.repository.find_by_entity(
         entity_type="crew",
@@ -411,7 +412,7 @@ async def update_crew_publication(
     publication: CrewPublicationUpdate,
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> CrewPublicationResponse:
     """Adjust an existing publication. Omitted fields are left alone."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can change a publication")
@@ -429,7 +430,7 @@ async def unpublish_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to unpublish")],
     service: Annotated[PublicationService, Depends(get_publication_service)],
     group_context: GroupContextDep,
-):
+) -> None:
     """Withdraw a crew from every external surface."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can unpublish crews")

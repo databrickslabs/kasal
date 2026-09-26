@@ -80,7 +80,7 @@ async def get_all_groups_execution_history(
     # GET /executions/history/{execution_id}.
     include_payload: Annotated[bool, Query()] = False,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionHistoryList:
     """
     Get execution history from all groups the user belongs to.
 
@@ -140,7 +140,7 @@ async def get_execution_history(
     # GET /executions/history/{execution_id}.
     include_payload: Annotated[bool, Query()] = False,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionHistoryList:
     """
     Get a paginated list of execution history with group filtering.
 
@@ -166,8 +166,7 @@ async def check_execution_exists(
     execution_id: int,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-    response: Response = None,
-):
+) -> Response:
     """
     Check if an execution exists by ID. This is a lightweight HEAD request
     that returns only status code without a response body.
@@ -175,7 +174,6 @@ async def check_execution_exists(
     Args:
         execution_id: Database ID of the execution
         service: ExecutionHistoryService instance
-        response: FastAPI Response object
 
     Returns:
         HTTP 200 OK if the execution exists, HTTP 404 Not Found otherwise
@@ -194,7 +192,7 @@ async def get_execution_by_id(
     execution_id: int,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionHistoryItem:
     """
     Get execution details by ID with group filtering.
 
@@ -207,7 +205,7 @@ async def get_execution_by_id(
         ExecutionHistoryItem with execution details
     """
     execution = await service.get_execution_by_id(
-        execution_id, group_ids=group_context.group_ids
+        execution_id, tenant_ids=group_context.group_ids
     )
     if not execution:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
@@ -221,7 +219,7 @@ async def get_execution_outputs(
     limit: int = Query(1000, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionOutputList:
     """
     Get outputs for an execution.
 
@@ -235,7 +233,7 @@ async def get_execution_outputs(
         ExecutionOutputList with paginated execution outputs
     """
     return await service.get_execution_outputs(
-        execution_id, limit, offset, group_ids=group_context.group_ids
+        execution_id, limit, offset, tenant_ids=group_context.group_ids
     )
 
 
@@ -244,7 +242,7 @@ async def get_execution_debug_outputs(
     execution_id: str,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> ExecutionOutputDebugList:
     """
     Get debug information about outputs for an execution.
 
@@ -256,7 +254,7 @@ async def get_execution_debug_outputs(
         ExecutionOutputDebugList with debug information
     """
     debug_info = await service.get_debug_outputs(
-        execution_id, group_ids=group_context.group_ids
+        execution_id, tenant_ids=group_context.group_ids
     )
     if not debug_info:
         raise NotFoundError(f"Execution with ID {execution_id} not found")
@@ -269,7 +267,7 @@ async def update_execution_result(
     request: UpdateExecutionResultRequest,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> Dict[str, Any]:
     """
     Update the result data for an execution by job_id.
 
@@ -300,7 +298,7 @@ async def update_execution_result(
 async def delete_all_executions(
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> DeleteResponse:
     """
     Delete all executions and their associated data for the user's groups.
 
@@ -318,7 +316,7 @@ async def delete_execution(
     execution_id: int,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> DeleteResponse:
     """
     Delete a specific execution and its associated data.
 
@@ -342,7 +340,7 @@ async def delete_execution_by_job_id(
     job_id: str,
     group_context: GroupContextDep,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
-):
+) -> DeleteResponse:
     """
     Delete an execution by its job_id.
 
