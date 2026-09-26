@@ -18,7 +18,7 @@ Teamspace admins can browse and register Databricks-hosted MCP servers from the 
 
 The catalog groups servers into two families:
 
-- `external`: MCP servers registered inside Databricks as Unity Catalog HTTP connections flagged as MCP connections (the workspace UI lists these under AI Gateway, MCPs). Kasal proxies them at `/api/2.0/mcp/external/{connection_name}`. These are listed using the caller's own credentials, so a user sees only the connections their Unity Catalog permissions allow.
+- `external`: MCP servers registered inside Databricks. Unity Catalog MCP Services are registered at their AI Gateway URL (`/ai-gateway/mcp-services/{catalog}.{schema}.{name}`); HTTP connections flagged as MCP connections use the older proxy, `/api/2.0/mcp/external/{connection_name}`. These are listed using the caller's own credentials, so a user sees only the servers their Unity Catalog permissions allow.
 - `managed`: the workspace's managed MCP server types.
 
 The managed types are:
@@ -27,6 +27,15 @@ The managed types are:
 - Unity Catalog Functions: run the functions in a catalog and schema. The picker offers the catalog and schema from the teamspace's Databricks configuration when configured (`/api/2.0/mcp/functions/{catalog}/{schema}`), plus the built-in `system.ai` functions such as `python_exec` (`/api/2.0/mcp/functions/system/ai`).
 - Genie: pick a Genie space. This type is expandable, so it is not enumerated up front (a workspace can have thousands of spaces). Drilling in calls `GET /mcp/databricks/genie-spaces`, which is searchable and paginated; each space registers at `/api/2.0/mcp/genie/{space_id}`.
 - Vector Search (AI Search): pick a vector search index. This type is also expandable. Drilling in calls `GET /mcp/databricks/ai-search-indexes`, which lists the workspace's indexes; each registers at `/api/2.0/mcp/ai-search/{catalog}/{schema}/{index}`.
+
+### Move registrations off the legacy external proxy
+
+Registrations made before UC MCP Services existed point at `/api/2.0/mcp/external/{connection}`. When the workspace's UC MCP Services listing has a service with the same name, the registration can be re-pointed at its `/ai-gateway/mcp-services/` URL:
+
+- `GET /mcp/databricks/available` is read-only. It reports `legacy_external_count`, the number of registrations that would change, and never rewrites anything.
+- `POST /mcp/databricks/migrate-external-urls` performs the rewrite and returns `{"migrated": <count>}`. Only workspace admins and system admins can call it (403 otherwise); it returns 503 when the workspace connection cannot be authenticated.
+
+Only rows in the caller's workspace change, plus the base rows when the caller is a system admin. Custom endpoints are never rewritten. The logic lives in `src/backend/src/services/mcp/mcp_client/legacy_urls.py`.
 
 ## External and custom servers
 
