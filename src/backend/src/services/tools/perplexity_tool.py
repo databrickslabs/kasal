@@ -148,12 +148,8 @@ class PerplexitySearchTool(BaseTool):
 
         self._api_key = api_key
 
-        # Safely log a portion of the key for diagnostic purposes
         if api_key:
-            masked_key = (
-                f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
-            )
-            logger.info(f"Initialized Perplexity tool with API key: {masked_key}")
+            logger.info("Initialized Perplexity tool with an API key")
         else:
             logger.error("Failed to initialize Perplexity tool with a valid API key")
 
