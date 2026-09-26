@@ -16,7 +16,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, overload
 
 from pydantic import BaseModel, Field
 
@@ -136,6 +136,12 @@ def wholly_failed_tools() -> list[str]:
     return sorted(n for n, o in tool_ledger().items() if o.wholly_failed)
 
 
+@overload
+def interpolate_text(text: str, inputs: dict[str, Any]) -> str: ...
+@overload
+def interpolate_text(text: None, inputs: dict[str, Any]) -> None: ...
+@overload
+def interpolate_text(text: str | None, inputs: dict[str, Any]) -> str | None: ...
 def interpolate_text(text: str | None, inputs: dict[str, Any]) -> str | None:
     """Replace {key} placeholders present in inputs; leave others untouched."""
     if text is None or not inputs:
@@ -304,7 +310,7 @@ def wrap_tool(
     # field on BaseTool and seeded per tool since the engine was vendored, and
     # was plumbed all the way to the instance without anything reading it; the
     # tool-call loop reads it here (see transport/tool_rounds).
-    run.result_as_answer = bool(getattr(tool, "result_as_answer", False))
+    run.result_as_answer = bool(getattr(tool, "result_as_answer", False))  # type: ignore[attr-defined]  # mypy: no attrs on functions
     return run
 
 
@@ -477,7 +483,7 @@ def run_agent(
 
             # The transport reads these off the callable itself.
             watched.__name__ = getattr(fn, "__name__", name)
-            watched.result_as_answer = getattr(fn, "result_as_answer", False)
+            watched.result_as_answer = getattr(fn, "result_as_answer", False)  # type: ignore[attr-defined]  # mypy: no attrs on functions
             return watched
 
         functions = {name: _watch(name, fn) for name, fn in functions.items()}

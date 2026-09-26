@@ -65,8 +65,8 @@ class TaskOutput(BaseModel):
             return self.pydantic.model_dump()
         return {}
 
-    @property
-    def json(self) -> str | None:
+    @property  # CrewAI-compatible property; shadows pydantic's deprecated json()
+    def json(self) -> str | None:  # type: ignore[override]
         if self.output_format != OutputFormat.JSON:
             raise ValueError(
                 "No JSON output found in the final task. Make sure to set the "
@@ -128,8 +128,8 @@ class CrewOutput(BaseModel):
             if t.degraded and t.degradation_reason
         ]
 
-    @property
-    def json(self) -> str | None:
+    @property  # CrewAI-compatible property; shadows pydantic's deprecated json()
+    def json(self) -> str | None:  # type: ignore[override]
         return json.dumps(self.json_dict) if self.json_dict is not None else None
 
     def to_dict(self) -> dict[str, Any]:

@@ -7,6 +7,9 @@ for executions based on agents and tasks configuration.
 
 import logging
 import traceback
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.execution import (
     ExecutionNameGenerationRequest,
@@ -15,6 +18,9 @@ from src.schemas.execution import (
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 
+if TYPE_CHECKING:
+    from src.services.catalog.templates import TemplateService
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -22,7 +28,12 @@ logger = logging.getLogger(__name__)
 class ExecutionNameService:
     """Service for execution name generation operations."""
 
-    def __init__(self, log_service, template_service, session=None):
+    def __init__(
+        self,
+        log_service: Optional[LLMLogService],
+        template_service: Optional["TemplateService"],
+        session: Optional[AsyncSession] = None,
+    ) -> None:
         """
         Initialize the service.
 
@@ -37,7 +48,7 @@ class ExecutionNameService:
         self._session = session
 
     @classmethod
-    def create(cls, session) -> "ExecutionNameService":
+    def create(cls, session: Optional[AsyncSession]) -> "ExecutionNameService":
         """
         Factory method to create a properly configured instance of the service.
 

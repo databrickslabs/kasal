@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 def _unit_index(unit: Dict[str, Any]) -> Optional[int]:
     """Numeric position of a unit, or None when it has no usable one."""
+    candidate: Any
     for candidate in (unit.get("index"), unit.get("key")):
         try:
             return int(candidate)

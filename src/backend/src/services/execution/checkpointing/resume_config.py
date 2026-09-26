@@ -28,7 +28,7 @@ checks able to fire at all.
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 from src.schemas.execution import CrewConfig
 from src.services.execution.checkpointing.record import ordered_units
@@ -193,7 +193,7 @@ async def build_flow_resume_config(
 
     if from_unit not in (None, ""):
         try:
-            resume_at = int(from_unit)
+            resume_at = int(cast(str, from_unit))  # None/'' excluded above
         except (TypeError, ValueError):
             raise ValueError(f"Invalid resume point '{from_unit}'")
     elif units:

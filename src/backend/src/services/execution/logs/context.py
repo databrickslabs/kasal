@@ -10,7 +10,7 @@ import contextvars
 import logging
 import re
 from contextlib import contextmanager
-from typing import Optional
+from typing import Iterator, Literal, Optional
 
 # Context variable for execution context (works with async/await)
 _execution_context: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
@@ -24,7 +24,12 @@ class ExecutionContextFormatter(logging.Formatter):
     Preserves the prefix from the original format string.
     """
 
-    def __init__(self, fmt=None, datefmt=None, style="%"):
+    def __init__(
+        self,
+        fmt: Optional[str] = None,
+        datefmt: Optional[str] = None,
+        style: Literal["%", "{", "$"] = "%",
+    ) -> None:
         super().__init__(fmt, datefmt, style)
         # Extract prefix from original format (e.g., "[FLOW]" or "[CREW]")
         self._original_fmt = fmt or "[CREW] %(asctime)s - %(levelname)s - %(message)s"
@@ -33,18 +38,18 @@ class ExecutionContextFormatter(logging.Formatter):
         match = re.match(r"(\[[\w]+\])", self._original_fmt)
         self._prefix = match.group(1) if match else "[CREW]"
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         # Get execution ID from context variable (works with async/await)
         execution_id = _execution_context.get()
 
         if execution_id:
             # Add execution ID to the format
-            record.exec_id = f"[{execution_id[:8]}]"
+            record.exec_id = f"[{execution_id[:8]}]"  # type: ignore[attr-defined]  # LogRecord takes extra attrs
         else:
-            record.exec_id = ""
+            record.exec_id = ""  # type: ignore[attr-defined]  # LogRecord takes extra attrs
 
         # Use the original format with execution ID, preserving the prefix
-        if record.exec_id:
+        if record.exec_id:  # type: ignore[attr-defined]  # set just above
             self._style._fmt = (
                 f"{self._prefix}%(exec_id)s %(asctime)s - %(levelname)s - %(message)s"
             )
@@ -56,7 +61,7 @@ class ExecutionContextFormatter(logging.Formatter):
         return super().format(record)
 
 
-def set_execution_context(execution_id: str):
+def set_execution_context(execution_id: str) -> None:
     """
     Set the execution ID for the current context (works with async/await).
 
@@ -76,7 +81,7 @@ def current_execution_id() -> Optional[str]:
     return _execution_context.get()
 
 
-def clear_execution_context():
+def clear_execution_context() -> None:
     """
     Clear the execution context for the current context (works with async/await).
     """
@@ -84,7 +89,7 @@ def clear_execution_context():
 
 
 @contextmanager
-def execution_logging_context(execution_id: str):
+def execution_logging_context(execution_id: str) -> Iterator[None]:
     """
     Context manager for execution-specific logging.
 

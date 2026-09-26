@@ -22,7 +22,7 @@ machinery is skipped for tool gates (the blocked thread resumes itself).
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from src.services.execution.runtime import (
     ToolExecutionBlockedError,
@@ -143,7 +143,9 @@ async def _approval_status(approval_id: str) -> Optional[str]:
         return status.value if hasattr(status, "value") else str(status)
 
 
-def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupContext]):
+def make_tool_approval_hook(
+    execution_id: str, group_context: Optional[GroupContext]
+) -> Callable[[Any, Dict[str, Any], Any, Any], None]:
     """Build the pre-execution hook for one execution's tool calls."""
     from src.services.hitl.notify import notify_input_needed
     from src.services.tools.async_bridge import run_async_with_context
@@ -268,7 +270,7 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
 
 def install_tool_approval_hook(
     execution_id: str, group_context: Optional[GroupContext]
-):
+) -> Callable[[], None]:
     """Register the hook; returns a callable that unregisters it."""
     hook = make_tool_approval_hook(execution_id, group_context)
     register_tool_hooks(pre=hook)

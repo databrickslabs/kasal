@@ -20,10 +20,10 @@ class ManagerConfigBuilder:
     def __init__(
         self,
         config: Dict[str, Any],
-        tool_service=None,
-        tool_factory=None,
+        tool_service: Any = None,
+        tool_factory: Any = None,
         user_token: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the ManagerConfigBuilder
 

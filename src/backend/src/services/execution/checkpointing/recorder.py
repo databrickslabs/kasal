@@ -53,7 +53,7 @@ class CheckpointRecorder:
         """(event class, handler) pairs this recorder listens on."""
         raise NotImplementedError
 
-    def register(self, bus=None) -> "CheckpointRecorder":
+    def register(self, bus: Any = None) -> "CheckpointRecorder":
         """Subscribe on the run's event bus.
 
         Args:

@@ -3,6 +3,7 @@
 import logging
 import threading
 import warnings
+from typing import Any, Optional
 
 # Suppress known deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
@@ -28,10 +29,11 @@ logger = logging.getLogger(__name__)
 class ExecutionLogCapture:
     """Install process-wide logging handlers once per interpreter."""
 
-    _instance = None
+    _instance: Optional["ExecutionLogCapture"] = None
+    _initialized: bool
     _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args: Any, **kwargs: Any) -> "ExecutionLogCapture":
         """Ensure singleton instance."""
         with cls._lock:
             if cls._instance is None:
@@ -39,7 +41,7 @@ class ExecutionLogCapture:
                 cls._instance._initialized = False
             return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the logger if not already initialized."""
         if not getattr(self, "_initialized", False):
             # Get the crew logger from LoggerManager
@@ -51,7 +53,7 @@ class ExecutionLogCapture:
             # Mark as initialized
             self._initialized = True
 
-    def _setup_engine_logging(self):
+    def _setup_engine_logging(self) -> None:
         """Set up redirection for the kasal engine's standard logging to our crew logger."""
         try:
             # Get the engine's loggers
@@ -65,7 +67,7 @@ class ExecutionLogCapture:
             crew_logger = self._crew_logger
 
             class EngineRedirectHandler(logging.Handler):
-                def emit(self, record):
+                def emit(self, record: logging.LogRecord) -> None:
                     # Get the log message
                     msg = self.format(record)
                     # Forward to our crew logger with the same level

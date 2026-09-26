@@ -17,6 +17,8 @@ Two calling conventions, because there are two callers:
 import logging
 from typing import Any, Dict, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.services.execution.checkpointing.record import (
     CHECKPOINT_KEY,
     LEGACY_CREW_KEY,
@@ -53,7 +55,7 @@ async def record_unit(
     from src.services.execution.checkpointing.lifecycle import CheckpointStatus
     from src.utils.asyncio_utils import execute_db_operation_smart
 
-    async def _op(session):
+    async def _op(session: AsyncSession) -> bool:
         repo = ExecutionHistoryRepository(session)
         existing = await repo.get_checkpoint_data(job_id)
 
@@ -97,7 +99,7 @@ async def clear(job_id: str) -> bool:
     )
     from src.utils.asyncio_utils import execute_db_operation_smart
 
-    async def _op(session):
+    async def _op(session: AsyncSession) -> bool:
         repo = ExecutionHistoryRepository(session)
         existing = await repo.get_checkpoint_data(job_id)
 
@@ -135,7 +137,7 @@ async def clear(job_id: str) -> bool:
 
 
 async def read_record(
-    session,
+    session: AsyncSession,
     job_id: str,
     group_ids: Optional[list] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -154,7 +156,7 @@ async def read_record(
 
 
 async def write_record(
-    session,
+    session: AsyncSession,
     job_id: str,
     record: Optional[Dict[str, Any]],
     checkpoint_status: Any = None,

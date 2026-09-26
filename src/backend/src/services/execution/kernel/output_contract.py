@@ -7,6 +7,7 @@ out.
 """
 
 import json
+from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.services.guardrails.wrapper import GuardrailWrapper
@@ -15,7 +16,9 @@ logger = LoggerManager.get_instance().crew
 guardrail_logger = LoggerManager.get_instance().guardrails
 
 
-def apply_output_schema(task_args, task_config, task_key):
+def apply_output_schema(
+    task_args: Dict[str, Any], task_config: Dict[str, Any], task_key: str
+) -> Optional[GuardrailWrapper]:
     """Resolve an INLINE JSON Schema onto the task, and return its parse gate.
 
     Two deliberate choices here.
@@ -62,7 +65,9 @@ def apply_output_schema(task_args, task_config, task_key):
     return GuardrailWrapper(SchemaGateGuardrail(model), task_key)
 
 
-def build_detection_gate(task_config, task_key):
+def build_detection_gate(
+    task_config: Dict[str, Any], task_key: str
+) -> Optional[GuardrailWrapper]:
     """A DetectionRuleGuardrail from the task's ``gate``, or None."""
     gate = task_config["gate"]
     if isinstance(gate, str):

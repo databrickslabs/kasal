@@ -61,7 +61,7 @@ class ExecutionStatusService:
 
         try:
             # Define the database operation
-            async def _update_operation(session):
+            async def _update_operation(session: AsyncSession) -> bool:
                 repo = ExecutionRepository(session)
 
                 # Find the execution record by job_id (string UUID)
@@ -121,7 +121,7 @@ class ExecutionStatusService:
                     return True
 
                 # Prepare complete update data with all fields
-                update_data = {
+                update_data: Dict[str, Any] = {
                     "status": status,
                     "error": message,  # Changed from "message" to "error" to match the database column
                 }
@@ -137,7 +137,7 @@ class ExecutionStatusService:
                         # Check if we need to serialize to JSON
                         if isinstance(result, (dict, list)):
                             # For dict or list, store as is (SQLAlchemy handles JSON conversion)
-                            stored_result = result
+                            stored_result: Any = result
                         else:
                             # For other types, convert to string representation
                             stored_result = str(result)
@@ -420,7 +420,7 @@ class ExecutionStatusService:
 
         try:
             # Define the database operation
-            async def _update_trace_operation(session):
+            async def _update_trace_operation(session: AsyncSession) -> bool:
                 repo = ExecutionRepository(session)
 
                 # Find the execution record by job_id
@@ -511,7 +511,7 @@ class ExecutionStatusService:
 
         try:
 
-            async def _update_name_operation(session):
+            async def _update_name_operation(session: AsyncSession) -> bool:
                 repo = ExecutionRepository(session)
 
                 execution_record = await repo.get_execution_by_job_id(job_id=job_id)
@@ -623,7 +623,7 @@ class ExecutionStatusService:
 
         try:
             # Define the database operation
-            async def _get_operation(session):
+            async def _get_operation(session: AsyncSession) -> Any:
                 repo = ExecutionRepository(session)
                 return await repo.get_execution_by_job_id(job_id=execution_id)
 
@@ -638,7 +638,9 @@ class ExecutionStatusService:
 
     @staticmethod
     @staticmethod
-    async def _fill_harness(session, execution_data: Dict[str, Any]) -> None:
+    async def _fill_harness(
+        session: AsyncSession, execution_data: Dict[str, Any]
+    ) -> None:
         """Record which agent runtime this run uses, if the caller did not say.
 
         Decided ONCE, here, and read back from the row forever after — a run
@@ -807,7 +809,7 @@ class ExecutionStatusService:
             from datetime import datetime as dt
 
             job_id = execution_data.get("job_id", "")
-            created_at = execution_data.get("created_at")
+            created_at: Any = execution_data.get("created_at")
             if hasattr(created_at, "isoformat"):
                 created_at = created_at.isoformat()
             elif not isinstance(created_at, str):
