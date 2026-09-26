@@ -60,6 +60,9 @@ _BASELINE = {
     # module it could sit beside, and putting it next to db/session.py would
     # imply it only covers that file.
     "architecture/test_sessions_go_through_the_router.py",
+    # Walks EVERY registered route of the assembled app (hence src.main) and
+    # asserts each one resolves a caller identity or is explicitly public.
+    "architecture/test_api_routes_require_identity.py",
     "api/test_memory_backend_router.py",
     "services/agent_builder/test_execution_runner_callbacks.py",
     "services/chat/test_context_compaction_event.py",
