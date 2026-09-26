@@ -1,11 +1,13 @@
 """Translate the shared agent conversation to Anthropic's native Messages API."""
 
 import json
+from collections.abc import Mapping
+from typing import Any
 
 from .prompt_cache import HINT_KEY, mark_native_request
 
 
-def content_blocks(content):
+def content_blocks(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}] if content else []
     result = []
@@ -41,13 +43,17 @@ def content_blocks(content):
     return result
 
 
-def message_params(params, signed_blocks):
-    system, messages = [], []
+def message_params(
+    params: dict[str, Any], signed_blocks: Mapping[tuple[str, ...], list[Any]]
+) -> dict[str, Any]:
+    system: list[dict[str, Any]] = []
+    messages: list[dict[str, Any]] = []
     # (message index, last block index) of each user turn CrewAI flagged with a
     # cache hint, recorded as turns coalesce so the marker lands on that turn.
-    hinted = []
+    hinted: list[tuple[int, int]] = []
     for message in params["messages"]:
         role = message["role"]
+        blocks: list[Any] | None
         if role in ("system", "developer"):
             system.extend(content_blocks(message.get("content")))
             continue

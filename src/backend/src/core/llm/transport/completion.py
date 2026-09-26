@@ -10,7 +10,7 @@ ImportError is raised on first use if it is missing.
 import logging
 import os
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import closing
 from typing import Any, Literal
 
@@ -858,7 +858,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             )
         return ""
 
-    def _chat_stream_chunks(self, params: dict[str, Any]) -> Iterator[Any]:
+    def _chat_stream_chunks(self, params: dict[str, Any]) -> Generator[Any, None, None]:
         """Negotiate usage before model fallback, including errors sent via SSE.
 
         The SDK can accept HTTP 200 and only raise the provider's validation
