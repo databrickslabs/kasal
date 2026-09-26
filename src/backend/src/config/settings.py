@@ -113,10 +113,18 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8000
     DEBUG_MODE: bool = False
 
-    # Local development fallback user.
-    # Set this in your .env file when running outside Databricks Apps.
-    # Leave empty (the default) in production — the platform provides X-Forwarded-Email.
+    # Local development fallback user: the identity a request WITHOUT an
+    # identity header runs as, when LOCAL_DEV_AUTH=true (run.sh sets it; see
+    # main._local_dev_auth_enabled). Empty means "dev@localhost". Ignored in
+    # Databricks Apps and with ENVIRONMENT=production, where the platform proxy
+    # provides X-Forwarded-Email.
     LOCAL_DEV_USER_EMAIL: str = os.getenv("LOCAL_DEV_USER_EMAIL", "")
+
+    # Base URL of the Jev decisions API (services/decisions/provider.py), e.g.
+    # "https://jev.example.com". Deployment-owned: never taken from a prompt or
+    # a tool result. Empty (the default) means the provider is not configured,
+    # so decisions stay off for every workspace and admins cannot enable them.
+    JEV_API_BASE: str = os.getenv("JEV_API_BASE", "")
 
     # Add the following setting to control database seeding
     AUTO_SEED_DATABASE: bool = True

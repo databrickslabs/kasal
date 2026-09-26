@@ -44,8 +44,11 @@ async def decide(
             not 2 <= len(q["criteria"]) <= 255 for q in questions.values()
         ):
             return None
+        # No endpoint configured for this deployment: off, silently.
+        if not provider.is_configured():
+            return None
         async with asyncio.timeout(6):
-            from src.db.decision_context import decision_credential
+            from src.services.decisions.credentials import decision_credential
 
             key = await decision_credential(group_id)
             if not key:

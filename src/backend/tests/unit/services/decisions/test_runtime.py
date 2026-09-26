@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.config.settings import settings
 from src.services.decisions import runtime
 from src.services.decisions.contracts import choices_from_response
 from src.services.decisions.policies import question
@@ -25,10 +26,11 @@ def payload(confidence=0.95):
 
 @pytest.fixture
 def gateway(monkeypatch):
-    monkeypatch.setenv("JEV_API_BASE", "https://example.com")
+    monkeypatch.setattr(settings, "JEV_API_BASE", "https://example.com")
     with (
         patch(
-            "src.db.decision_context.decision_credential", new_callable=AsyncMock
+            "src.services.decisions.credentials.decision_credential",
+            new_callable=AsyncMock,
         ) as credential,
         patch(
             "src.services.decisions.provider.evaluate", new_callable=AsyncMock
@@ -46,6 +48,19 @@ async def test_disabled_workspace_never_calls_provider_or_traces(gateway):
     credential.return_value = None
     assert await runtime.decide("test", {}, QUESTIONS, group_id="one") is None
     credential.assert_awaited_once_with("one")
+    provider.assert_not_awaited()
+    trace.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_endpoint_is_off_without_reading_credentials(
+    gateway, monkeypatch
+):
+    """No JEV_API_BASE: no credential lookup, no provider call, no trace."""
+    credential, provider, trace = gateway
+    monkeypatch.setattr(settings, "JEV_API_BASE", "")
+    assert await runtime.decide("test", {}, QUESTIONS, group_id="one") is None
+    credential.assert_not_awaited()
     provider.assert_not_awaited()
     trace.assert_not_called()
 

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from src.config.settings import settings
 from src.core.exceptions import BadRequestError, ForbiddenError
 from src.schemas.decision_config import DecisionConfigUpdate
 from src.services.decisions.settings import DecisionSettingsService
@@ -10,7 +11,7 @@ from src.services.decisions.settings import DecisionSettingsService
 
 @pytest.fixture
 def service(monkeypatch):
-    monkeypatch.setenv("JEV_API_BASE", "https://example.com")
+    monkeypatch.setattr(settings, "JEV_API_BASE", "https://example.com")
     instance = DecisionSettingsService(AsyncMock(), "workspace-a")
     instance.repository = AsyncMock()
     instance.repository.get.return_value = None
@@ -49,18 +50,65 @@ async def test_cannot_enable_without_existing_api_key(service):
 
 
 @pytest.mark.asyncio
-async def test_runtime_uses_existing_provider_key_service_only_when_enabled(service):
-    with patch(
-        "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
-        new_callable=AsyncMock,
-    ) as keys:
+async def test_runtime_reads_key_on_its_own_session_only_when_enabled(service):
+    """The key is read through the injected ApiKeysService, on this session.
+
+    ``ApiKeysService.get_provider_api_key`` opens a second session of its own,
+    so it must not be used here (two sessions per decision call).
+    """
+    with (
+        patch(
+            "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+            new_callable=AsyncMock,
+        ) as second_session_lookup,
+        patch(
+            "src.services.decisions.settings.EncryptionUtils.decrypt_value",
+            return_value="secret",
+        ) as decrypt,
+    ):
         service.repository.get.return_value = SimpleNamespace(enabled=False)
         assert await service.credential() is None
-        keys.assert_not_awaited()
+        service.api_keys.find_by_name.assert_not_awaited()
+
         service.repository.get.return_value = SimpleNamespace(enabled=True)
-        keys.return_value = "secret"
+        service.api_keys.find_by_name.return_value = SimpleNamespace(
+            encrypted_value="ciphertext"
+        )
         assert await service.credential() == "secret"
-        keys.assert_awaited_once_with("jev", group_id="workspace-a")
+        service.api_keys.find_by_name.assert_awaited_with("JEV_API_KEY")
+        decrypt.assert_called_once_with("ciphertext")
+        second_session_lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_credential_is_none_without_key_or_when_decrypt_fails(service, caplog):
+    service.repository.get.return_value = SimpleNamespace(enabled=True)
+    service.api_keys.find_by_name.return_value = None
+    assert await service.credential() is None
+
+    service.api_keys.find_by_name.return_value = SimpleNamespace(
+        encrypted_value="ciphertext"
+    )
+    with patch(
+        "src.services.decisions.settings.EncryptionUtils.decrypt_value",
+        side_effect=ValueError("ciphertext"),
+    ):
+        assert await service.credential() is None
+    assert "ciphertext" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cannot_enable_when_endpoint_not_configured(service, monkeypatch):
+    monkeypatch.setattr(settings, "JEV_API_BASE", "")
+    service.api_keys.find_by_name.return_value = SimpleNamespace(
+        encrypted_value="ciphertext"
+    )
+    with pytest.raises(BadRequestError, match="JEV_API_BASE"):
+        await service.save(DecisionConfigUpdate(enabled=True))
+    service.repository.save.assert_not_awaited()
+    # Turning it OFF must always work.
+    await service.save(DecisionConfigUpdate(enabled=False))
+    service.repository.save.assert_awaited_once_with("workspace-a", False)
 
 
 @pytest.mark.asyncio
