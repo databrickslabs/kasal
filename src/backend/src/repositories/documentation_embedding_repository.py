@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Type, Union, cast
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, overload
 
 from sqlalchemy import desc, select
 from sqlalchemy.engine import CursorResult
@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from src.core.base_repository import BaseRepository
-from src.models.documentation_embedding import DocumentationEmbedding
+from src.models.documentation_embedding import (
+    DocumentationEmbedding,
+    KnowledgeEmbedding,
+)
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 
 #: Where a similarity search stashes each row's score.
@@ -16,6 +19,9 @@ from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 #: so the score rides along on the instance rather than changing every signature
 #: to a (row, score) tuple. Transient by nature — never persisted.
 SIMILARITY_ATTR = "_kasal_similarity"
+
+#: The embedding table a repository instance targets; both share one layout.
+E = TypeVar("E", DocumentationEmbedding, KnowledgeEmbedding)
 
 
 def _attach_similarity(row: Any, similarity: Optional[float]) -> None:
@@ -28,7 +34,7 @@ def _attach_similarity(row: Any, similarity: Optional[float]) -> None:
         pass
 
 
-class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, int]):
+class DocumentationEmbeddingRepository(BaseRepository[E, int]):
     """Repository for managing documentation / knowledge embeddings.
 
     Model-agnostic: defaults to the built-in ``DocumentationEmbedding`` table,
@@ -38,18 +44,27 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
     table's ownership constraints). Both tables share the same column layout.
     """
 
+    @overload
+    def __init__(
+        self: "DocumentationEmbeddingRepository[DocumentationEmbedding]",
+        db: Union[AsyncSession, Session],
+    ) -> None: ...
+
+    @overload
+    def __init__(self, db: Union[AsyncSession, Session], model: Type[E]) -> None: ...
+
     def __init__(
         self,
         db: Union[AsyncSession, Session],
-        model: Type[DocumentationEmbedding] = DocumentationEmbedding,
-    ):
+        model: Any = DocumentationEmbedding,
+    ) -> None:
         """Initialize repository with database session and target model."""
         # Dual-mode: the async-only methods below go through ``self.session``;
         # a sync ``Session`` (guardrail callers) only reaches the
         # ``isinstance(self.db, AsyncSession)``-guarded ones, via ``self.db``.
         super().__init__(model, cast(AsyncSession, db))
         self.db = db
-        self._model = model
+        self._model: Type[E] = model
 
     def _owner_kwargs(self, item: DocumentationEmbeddingCreate) -> dict:
         """created_by only exists on models that carry the column (e.g.
@@ -59,9 +74,11 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         return {}
 
     async def create(
-        self, doc_embedding: DocumentationEmbeddingCreate
-    ) -> DocumentationEmbedding:
+        self, doc_embedding: Union[DocumentationEmbeddingCreate, Dict[str, Any]]
+    ) -> E:
         """Create a new documentation embedding in the database."""
+        if isinstance(doc_embedding, dict):  # the BaseRepository.create contract
+            doc_embedding = DocumentationEmbeddingCreate(**doc_embedding)
         db_embedding = self._model(
             source=doc_embedding.source,
             title=doc_embedding.title,
@@ -79,7 +96,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
     async def bulk_create(
         self,
         items: List[DocumentationEmbeddingCreate],
-    ) -> List[DocumentationEmbedding]:
+    ) -> List[E]:
         """Insert many embeddings in one transaction on the current session.
 
         Used by knowledge-file ingest: all chunk rows are written through the
@@ -107,7 +124,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             self.db.flush()
         return objs
 
-    async def get_by_id(self, embedding_id: int) -> Optional[DocumentationEmbedding]:
+    async def get_by_id(self, embedding_id: int) -> Optional[E]:
         """Get a specific documentation embedding by ID."""
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(
@@ -121,9 +138,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                 .first()
             )
 
-    async def get_all(
-        self, skip: int = 0, limit: int = 100
-    ) -> List[DocumentationEmbedding]:
+    async def get_all(self, skip: int = 0, limit: int = 100) -> List[E]:
         """Get a list of documentation embeddings with pagination."""
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(
@@ -135,7 +150,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
 
     async def update(
         self, embedding_id: int, update_data: Dict[str, Any]
-    ) -> Optional[DocumentationEmbedding]:
+    ) -> Optional[E]:
         """Update a documentation embedding by ID with the provided data."""
         db_embedding = await self.get_by_id(embedding_id)
         if db_embedding:
@@ -314,7 +329,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
             return
         await self.session.execute(sa_insert(self._model).values(rows))
 
-    async def insert_raw(self, row: Dict[str, Any]) -> DocumentationEmbedding:
+    async def insert_raw(self, row: Dict[str, Any]) -> E:
         """Insert one plain-dict embedding row and return the new instance.
 
         Used by the embedding queue's per-item retry path after a batch insert
@@ -333,7 +348,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         limit: int = 5,
         group_id: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
-    ) -> List[DocumentationEmbedding]:
+    ) -> List[E]:
         """
         Search for similar embeddings using cosine similarity.
         Handles both PostgreSQL with pgvector and SQLite.
@@ -372,7 +387,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
 
     async def search_by_source(
         self, source: str, skip: int = 0, limit: int = 100
-    ) -> List[DocumentationEmbedding]:
+    ) -> List[E]:
         """Search for documentation embeddings by source."""
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(
@@ -393,7 +408,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
 
     async def search_by_title(
         self, title: str, skip: int = 0, limit: int = 100
-    ) -> List[DocumentationEmbedding]:
+    ) -> List[E]:
         """Search for documentation embeddings by title."""
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(
@@ -412,7 +427,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
                 .all()
             )
 
-    async def get_recent(self, limit: int = 10) -> List[DocumentationEmbedding]:
+    async def get_recent(self, limit: int = 10) -> List[E]:
         """Get most recently created documentation embeddings."""
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(
@@ -454,7 +469,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         limit: int,
         group_id: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
-    ) -> List[DocumentationEmbedding]:
+    ) -> List[E]:
         """SQLite implementation: fetch the scoped rows and rank by cosine
         similarity in Python.
 
@@ -542,7 +557,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding, in
         limit: int,
         group_id: Optional[str] = None,
         file_paths: Optional[List[str]] = None,
-    ) -> List[DocumentationEmbedding]:
+    ) -> List[E]:
         """PostgreSQL implementation using pgvector extension."""
 
         # Format the embedding as a vector string for PostgreSQL

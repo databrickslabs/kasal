@@ -219,7 +219,7 @@ class ExecutionHistoryService:
         try:
             # Use the repository to get the data
             run = await self.history_repo.get_execution_by_id(
-                execution_id, tenant_ids=tenant_ids
+                execution_id, group_ids=tenant_ids
             )
 
             if not run:
@@ -323,7 +323,7 @@ class ExecutionHistoryService:
             # First verify the execution belongs to the user's tenant
             if tenant_ids:
                 execution = await self.history_repo.get_execution_by_job_id(
-                    execution_id, tenant_ids=tenant_ids
+                    execution_id, group_ids=tenant_ids
                 )
                 if not execution:
                     # Execution doesn't exist or doesn't belong to user's tenants
@@ -342,7 +342,7 @@ class ExecutionHistoryService:
 
             # Get total count
             total_count = await self.logs_repo.count_by_execution_id(
-                self.session, execution_id=execution_id
+                execution_id=execution_id
             )
 
             # Convert to schema objects
@@ -391,7 +391,7 @@ class ExecutionHistoryService:
         try:
             # Check if the run exists and belongs to user's tenant
             run = await self.history_repo.get_execution_by_job_id(
-                execution_id, tenant_ids=tenant_ids
+                execution_id, group_ids=tenant_ids
             )
 
             if not run:
@@ -606,7 +606,8 @@ class ExecutionHistoryService:
             output_count = await logs_service.delete_by_execution_id(job_id)
 
             # Delete execution using repository (after dependent records are gone)
-            result = await self.history_repo.delete_execution(execution_id)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution(execution_id) or {}
 
             # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution.kasal_service import (
@@ -688,7 +689,8 @@ class ExecutionHistoryService:
             output_count = await logs_service.delete_by_execution_id(job_id)
 
             # Delete execution using repository (after dependent records are gone)
-            result = await self.history_repo.delete_execution_by_job_id(job_id)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution_by_job_id(job_id) or {}
 
             # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution.kasal_service import (

@@ -7,7 +7,7 @@ This service manages execution status operations:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,9 @@ from src.core.sse_manager import SSEEvent, sse_manager
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
 from src.utils.asyncio_utils import execute_db_operation_smart
+
+if TYPE_CHECKING:
+    from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -637,7 +640,6 @@ class ExecutionStatusService:
             return None
 
     @staticmethod
-    @staticmethod
     async def _fill_harness(
         session: AsyncSession, execution_data: Dict[str, Any]
     ) -> None:
@@ -669,9 +671,10 @@ class ExecutionStatusService:
                 f"engine ({e}); leaving it unrecorded"
             )
 
+    @staticmethod
     async def create_execution(
         execution_data: Dict[str, Any],
-        group_context=None,
+        group_context: Optional["GroupContext"] = None,
         session: AsyncSession | None = None,
     ) -> bool:
         """
