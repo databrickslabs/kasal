@@ -21,13 +21,14 @@ from src.schemas.skill import (
     SkillCreate,
     SkillDraftRequest,
     SkillDraftResponse,
+    SkillDraftStarted,
     SkillListResponse,
     SkillResponse,
     SkillUpdate,
     SkillValidationResult,
     UcSyncTarget,
 )
-from src.services.skills import packaging, parser
+from src.services.skills import draft_job, packaging, parser
 from src.services.skills.generation import SkillGenerationService
 from src.services.skills.service import SkillService
 from src.services.skills.uc_sync import SkillUcSyncService
@@ -152,6 +153,32 @@ async def draft_skill(
         model=body.model,
         session=session,
     )
+
+
+@router.post(
+    "/drafts",
+    response_model=SkillDraftStarted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_skill_draft(
+    body: SkillDraftRequest, session: SessionDep, group_context: GroupContextDep
+) -> SkillDraftStarted:
+    """Start drafting a skill; answer with the run's job id before any LLM call.
+
+    The same draft as ``POST /skills/draft``, run in the background so the chat
+    can open the run activity — the LLM request, then its response — while the
+    model is still working. The draft is the run's result
+    (``result.skill_draft`` on ``GET /executions/{job_id}``).
+    """
+    _require_author(group_context)
+    job_id = await draft_job.start(
+        body.request,
+        group_context,
+        session,
+        transcript=[t.model_dump() for t in (body.transcript or [])] or None,
+        model=body.model,
+    )
+    return SkillDraftStarted(job_id=job_id)
 
 
 @router.post("", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)

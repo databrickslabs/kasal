@@ -465,7 +465,7 @@ in the OpenAPI schema rather than repeated here:
 | `powerbi` | 14 | Semantic models, business mappings, field synonyms, query |
 | `groups` | 12 | Teamspaces and membership |
 | `Human in the Loop` | 10 | Approval gates for tool calls |
-| `skills` | 10 | Skill definitions attached to agents |
+| `skills` | 16 | Skill definitions attached to agents; `POST /skills/drafts` drafts one with an LLM as a traced run (see [LLM architecture](./LLM_ARCHITECTURE.md#tracing-a-standalone-generation-call)) |
 | `templates` | 9 | Prompt templates |
 | `mlflow` | 9 | Experiments, traces, evaluation |
 | `databricks` | 9 | Workspace configuration and auth. `POST /databricks/config` refuses a `workspace_url` that is not `https` or whose host is not the credentialed workspace (`403`); the warehouse, catalog and schema listings accept `?host=` only for admins and editors, and only for that same workspace |
