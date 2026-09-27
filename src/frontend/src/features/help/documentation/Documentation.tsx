@@ -64,6 +64,7 @@ const docSections: DocSection[] = [
       { label: 'Tools', file: 'TOOLS' },
       { label: 'MCP Servers', file: 'MCP' },
       { label: 'Models', file: 'MODELS' },
+      { label: 'Decision Model', file: 'DECISION_MODEL' },
       { label: 'Memory', file: 'MEMORY' },
       { label: 'Checkpointing', file: 'CHECKPOINTING' },
       { label: 'Security', file: 'SECURITY' },

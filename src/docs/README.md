@@ -52,6 +52,7 @@ Understand why Kasal is built the way it is.
 - [Why Kasal](./WHY_KASAL.md): the problems Kasal solves and who it's for on Databricks.
 - [Solution architecture](./ARCHITECTURE_GUIDE.md): platform layers, request lifecycle, and the security model.
 - [LLM architecture](./LLM_ARCHITECTURE.md): the four layers behind a model call — facade, configuration, endpoint policy, transport — and which one owns what.
+- [Decision model](./DECISION_MODEL.md): the optional, per-workspace provider (Jev today) that makes bounded choices among candidates Kasal already authorized, what it sends, and how it falls back.
 - [Memory](./MEMORY.md): what a memory record is, how it is written and recalled, the passes that keep the store true, and which tuning knobs actually do something.
 - [Flows](./flows.md): what a flow is, how one is authored and compiled, and how state, routing, checkpoints and approval gates work end to end.
 - [Conversational flow state](./conversational-flow-state.md): channels, reducers, and the thread that lets a flow answer a follow-up question instead of starting over.
