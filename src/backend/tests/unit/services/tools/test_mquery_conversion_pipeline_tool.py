@@ -2101,6 +2101,11 @@ class TestInsertStaticTable:
 # ===========================================================================
 
 
+# Patch what the tool calls. Patching the transport LLM class made the lazy manager
+# import subclass a MagicMock and poisoned later tests in the same xdist worker.
+_COMPLETION = "src.services.llm.manager.LLMManager.completion"
+
+
 class TestLlmGenerateInsertSql:
     """Tests for _llm_generate_insert_sql fallback path."""
 
@@ -2112,13 +2117,9 @@ class TestLlmGenerateInsertSql:
 
     def test_llm_unavailable_uses_fallback(self):
         """When LLM raises an exception, fallback mechanical generation is used."""
-        from unittest.mock import patch as _patch
-
         rows = [{"id": 1, "name": "Alice"}]
 
-        with _patch(
-            "src.core.llm.transport.LLM", side_effect=Exception("LLM unavailable")
-        ):
+        with patch(_COMPLETION, side_effect=Exception("LLM unavailable")):
             create_sql, insert_sqls = self._run(
                 self.tool._llm_generate_insert_sql(
                     "T1", "main.default.t1", ["id", "name"], rows, {}
@@ -2131,7 +2132,7 @@ class TestLlmGenerateInsertSql:
 
     def test_fallback_generates_create_table(self):
         rows = [{"col1": "text", "col2": 42}]
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             create_sql, _inserts = self._run(
                 self.tool._llm_generate_insert_sql(
                     "T2", "main.default.t2", ["col1", "col2"], rows, {}
@@ -2143,7 +2144,7 @@ class TestLlmGenerateInsertSql:
 
     def test_batch_insert_generated_for_rows(self):
         rows = [{"col1": "A", "col2": 1}, {"col1": "B", "col2": 2}]
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             create_sql, insert_sqls = self._run(
                 self.tool._llm_generate_insert_sql(
                     "T3", "main.default.t3", ["col1", "col2"], rows, {}
@@ -2155,7 +2156,7 @@ class TestLlmGenerateInsertSql:
 
     def test_integer_values_escaped_properly(self):
         rows = [{"num_col": 42}]
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             _create, insert_sqls = self._run(
                 self.tool._llm_generate_insert_sql(
                     "T4", "main.default.t4", ["num_col"], rows, {}
@@ -2167,7 +2168,7 @@ class TestLlmGenerateInsertSql:
 
     def test_null_values_escaped(self):
         rows = [{"col1": None}]
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             _create, insert_sqls = self._run(
                 self.tool._llm_generate_insert_sql(
                     "T5", "main.default.t5", ["col1"], rows, {}
@@ -2180,7 +2181,7 @@ class TestLlmGenerateInsertSql:
     def test_boolean_values_escaped(self):
         rows = [{"flag": "true"}]
         # Force col type to BOOLEAN by making _infer_schema_types return it
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             with patch.object(
                 self.tool, "_infer_schema_types", return_value={"flag": "BOOLEAN"}
             ):
@@ -2195,7 +2196,7 @@ class TestLlmGenerateInsertSql:
 
     def test_date_values_escaped(self):
         rows = [{"dt": "2024-01-15"}]
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             with patch.object(
                 self.tool, "_infer_schema_types", return_value={"dt": "DATE"}
             ):
@@ -2210,7 +2211,7 @@ class TestLlmGenerateInsertSql:
 
     def test_timestamp_values_escaped(self):
         rows = [{"ts": "2024-01-15 12:00:00"}]
-        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
+        with patch(_COMPLETION, side_effect=Exception("no LLM")):
             with patch.object(
                 self.tool, "_infer_schema_types", return_value={"ts": "TIMESTAMP"}
             ):
@@ -2230,10 +2231,7 @@ class TestLlmGenerateInsertSql:
         )
         rows = [{"col1": "val"}]
 
-        mock_llm = MagicMock()
-        mock_llm.call.return_value = create_response
-
-        with patch("src.core.llm.transport.LLM", return_value=mock_llm):
+        with patch(_COMPLETION, return_value=create_response) as completion:
             create_sql, _inserts = self._run(
                 self.tool._llm_generate_insert_sql(
                     "T9",
@@ -2248,6 +2246,7 @@ class TestLlmGenerateInsertSql:
                 )
             )
 
+        completion.assert_awaited_once()
         assert "CREATE TABLE" in create_sql.upper()
 
 

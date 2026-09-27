@@ -11,13 +11,13 @@ The GitHub Actions workflows in `.github/workflows/`, what each job checks, whic
 
 ## Workflows at a glance
 
-Every workflow runs on pull requests, on pushes to `main` and on manual dispatch; the security workflows also run weekly. All of them check out the code with `persist-credentials: false` and pin third-party actions to full commit SHAs.
+Every workflow runs on pull requests, on pushes to `main` and on manual dispatch; the security workflows also run weekly. All of them check out the code with `persist-credentials: false`, pin third-party actions to full commit SHAs, and run on `ubuntu-24.04` rather than `ubuntu-latest`, so a runner-image change (`ubuntu-latest` becomes Ubuntu 26.04 on 2026-10-19) happens when someone moves the pin, not on its own.
 
 The workflows are:
 
 | Workflow | File | Jobs | Schedule |
 |---|---|---|---|
-| Code Quality | `quality.yml` | `backend-tests`, `backend-lint`, `migrations`, `frontend`, `frontend-coverage` | None |
+| Code Quality | `quality.yml` | `backend-tests`, `backend-coverage`, `backend-lint`, `migrations`, `frontend`, `frontend-coverage` | None |
 | CodeQL | `codeql.yml` | `analyze` (Python, JavaScript/TypeScript) | Mondays 05:30 UTC |
 | Secret Scan | `secret-scan.yml` | `gitleaks` | Mondays 05:00 UTC |
 | Dependency Audit | `dependency-audit.yml` | `lockfile-hygiene`, `python-cve`, `npm-cve` | Mondays 06:00 UTC |
@@ -26,16 +26,17 @@ Dependabot (`.github/dependabot.yml`) is configuration, not a workflow; see [Dep
 
 ## Code quality
 
-`quality.yml` runs five independent jobs, so a failing test does not hide lint feedback.
+`quality.yml` runs six independent jobs, so a failing test does not hide lint feedback.
 
 The jobs are:
 
 | Job | What it runs | Gates |
 |---|---|---|
-| `backend-tests` | `uv sync --frozen`, then `run_tests.py --parallel 2 --skip-lint --coverage` on Python 3.11. Uploads `coverage.xml` | Tests gate. Coverage is report-only: no `fail_under` is set yet |
-| `backend-lint` | `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync --frozen` installs them | Yes |
+| `backend-tests` | `uv sync --frozen`, then `run_tests.py --parallel 4 --skip-lint` on Python 3.11, without coverage (40-minute timeout) | Yes |
+| `backend-coverage` | The same suite under branch coverage: `run_tests.py --parallel 4 --skip-lint --coverage` (75-minute timeout). Uploads `coverage.xml` | Yes: fails below `fail_under = 80` in `[tool.coverage.report]` in `src/backend/pyproject.toml` (85% measured on 2026-09-27) |
+| `backend-lint` | Step 1, `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync --frozen` installs them. Step 2, `pytest tests/unit/architecture`: the architecture tests and the shrink-only ratchets (file and function size, ruff rule counts, env reads, HTTP exception text). The size ratchet also covers `src/frontend/src`, so a frontend-only change can fail this backend check | Yes |
 | `migrations` | On a `pgvector/pgvector:pg16` service: exactly one Alembic head; `init_db()` builds the app schema on an empty PostgreSQL; `alembic upgrade head` from empty | The first two gate. The upgrade step is report-only (`continue-on-error`) |
-| `frontend` | Node 22: `npm ci`, `npm run test:run` (Vitest), `npm run lint` (ESLint), `npm run build` (`tsc -b` and `vite build`) | Yes. ESLint warnings do not fail the job; errors do |
+| `frontend` | Node 22: `npm ci`, `npm run test:run -- --testTimeout=30000` (Vitest), `npm run lint -- --max-warnings <N>` (ESLint), `npm run build` (`tsc -b` and `vite build`) | Yes. ESLint errors fail the job, and so do warnings above the ceiling in the workflow; lower the ceiling when you fix warnings, never raise it |
 | `frontend-coverage` | `vitest run --coverage` with `VITEST_COVERAGE_REPORT_ONLY=1`, which drops the per-path thresholds in `vitest.config.ts`. Uploads `coverage/` | No: the job is `continue-on-error` |
 
 The `migrations` job exists because the app does not run Alembic at startup. It builds its schema with `init_db()` (`create_all` plus the self-heal steps in `src/backend/src/db/self_heal/`), and the unit tests run on SQLite, so this job is the check that the models build a working schema on PostgreSQL.
@@ -95,7 +96,6 @@ To reproduce the supply-chain checks, run `uv lock --check` in `src/backend` and
 
 These checks run but cannot fail a pull request yet. Each workflow file records its own follow-up:
 
-- **Backend coverage**: set `fail_under` in `[tool.coverage.report]` in `src/backend/pyproject.toml` from the reported total, then ratchet it up.
 - **Frontend coverage**: set the per-path floors in `vitest.config.ts` from the first report, remove `VITEST_COVERAGE_REPORT_ONLY`, then drop `continue-on-error`.
 - **`alembic upgrade head` from empty**: the migration history has several roots and no baseline revision, so it cannot build a database from nothing. Add a baseline (or squash), then make the step gate and add `alembic check`.
 - **Full-history secret scan**: triage the historical hits, rotate anything real, record the rest in a `.gitleaksignore`, then let the weekly scan gate.
