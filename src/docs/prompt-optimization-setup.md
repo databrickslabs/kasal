@@ -186,6 +186,13 @@ always, plus Correctness when the evaluation rows carry a reference answer. The
 retrieval judges are skipped with a log message. They read retrieved documents
 from trace spans, and evaluation rows only carry context as a plain column.
 
+Evaluation judges are called the same way as Optimize's: through the LLM
+manager, with a Kasal model and the workspace's keys and auth, not MLflow's own
+model routing. The model is the evaluation judge in **Configuration → MLflow**
+(inside Databricks Apps, the installed model when none is set), otherwise the
+default model. If that is not a model Kasal knows, the run skips its judges
+with a warning in the log, and still logs its dataset and baseline metrics.
+
 ## Aligning judges to your grades (MemAlign)
 
 Kasal's LLM judges score every candidate prompt set GEPA tries. A judge is

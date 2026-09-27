@@ -52,7 +52,9 @@ narrow hooks, installed once on first use, consult it BEFORE the environment:
    ``asyncio.to_thread`` does. ``mlflow.genai.evaluate`` and
    ``optimize_prompts`` fan out onto their own pools; without this their scorer
    and predict threads would see no credential. Outside a scope ``submit`` is
-   untouched.
+   untouched. :func:`propagate_context` opts a block into the same copying
+   without a credential (the built-in judge route an evaluation arms, which
+   must reach ``evaluate``'s scorer threads whether or not a scope is open).
 
 Nothing is written to ``os.environ``, there is no lock, and two identities can
 run side by side for as long as they like: each sees only its own token.
@@ -103,6 +105,13 @@ class ScopedCredentials:
 
 _CREDENTIALS: contextvars.ContextVar[Optional[ScopedCredentials]] = (
     contextvars.ContextVar("kasal_mlflow_databricks_credentials", default=None)
+)
+
+
+#: Set by :func:`propagate_context`: copy the context into pool workers even
+#: when no credential is scoped.
+_PROPAGATE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "kasal_propagate_context_to_thread_pools", default=False
 )
 
 
@@ -215,7 +224,7 @@ def _hook_thread_pool_submit() -> None:
         *args: _P.args,
         **kwargs: _P.kwargs,
     ) -> Future[_T]:
-        if _CREDENTIALS.get() is None:
+        if _CREDENTIALS.get() is None and not _PROPAGATE.get():
             return original(self, fn, *args, **kwargs)
         # A fresh copy per task: one Context cannot be entered by two threads.
         ctx = contextvars.copy_context()
@@ -245,6 +254,22 @@ def _scoped(host: Optional[str], token: str) -> Iterator[None]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+@contextmanager
+def propagate_context() -> Iterator[None]:
+    """Run thread-pool work submitted in this block in a copy of this context.
+
+    What a credential scope already does for its own work, without scoping a
+    credential: context variables set here (e.g. the built-in judge route)
+    reach ``ThreadPoolExecutor`` workers that ``mlflow.genai.evaluate`` starts.
+    """
+    install_hooks()
+    handle = _PROPAGATE.set(True)
+    try:
+        yield
+    finally:
+        _PROPAGATE.reset(handle)
 
 
 def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[str]:

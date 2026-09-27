@@ -1712,7 +1712,7 @@ requires-dist = [
     { name = "limits", specifier = ">=3.6" },
     { name = "litellm", extras = ["caching"], specifier = "==1.84.0" },
     { name = "mcp", specifier = ">=1.28.1,<1.29.0" },
-    { name = "mlflow", specifier = ">=3.11,<4" },
+    { name = "mlflow", specifier = ">=3.16,<3.17" },
     { name = "ollama", specifier = ">=0.6.2" },
     { name = "openpyxl", specifier = ">=3.1.0" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },

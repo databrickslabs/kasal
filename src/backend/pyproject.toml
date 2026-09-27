@@ -82,7 +82,11 @@ dependencies = [
     # context-window clamp and every LLM event stay identical across engines.
     "crewai==1.15.20",
     # Observability
-    "mlflow>=3.11,<4", # >=3.11 required for Unity Catalog trace storage (OTel tables)
+    # Pinned to the 3.16 line: the built-in judge bridge (services/prompt_optimization/
+    # builtin_judges/bridge.py) wraps mlflow internals (judges.adapters.utils.get_adapter),
+    # pinned by tests/.../builtin_judges/test_bridge_contract.py. Re-run that test before
+    # widening. (>=3.11 was already required for Unity Catalog trace storage.)
+    "mlflow>=3.16,<3.17",
     "dspy>=3.3,<4", # MemAlign judge alignment (mlflow.genai.judges.optimizers) is built on DSPy; mlflow does not pull it in
     "opentelemetry-sdk>=1.27.0,<2.0.0",
     "opentelemetry-api>=1.27.0,<2.0.0",

@@ -248,6 +248,28 @@ class TestWorkerPools:
         finally:
             pool.shutdown()
 
+    def test_propagate_context_copies_context_without_a_credential(self):
+        """``propagate_context`` carries context variables (the evaluation's
+        judge route) into pool workers with no credential scoped, and only
+        inside the block."""
+        import contextvars
+
+        marker: contextvars.ContextVar[str] = contextvars.ContextVar(
+            "marker", default="unset"
+        )
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            token = marker.set("route")
+            try:
+                with sp_auth.propagate_context():
+                    assert pool.submit(marker.get).result() == "route"
+                    assert pool.submit(sp_auth.current_credentials).result() is None
+                assert pool.submit(marker.get).result() == "unset"
+            finally:
+                marker.reset(token)
+        finally:
+            pool.shutdown()
+
 
 class TestSpSingleAuth:
     def test_scopes_the_derived_sp_bearer(self, app_env, monkeypatch):

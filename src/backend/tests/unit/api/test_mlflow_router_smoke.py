@@ -106,7 +106,7 @@ async def test_trigger_evaluation_requires_job():
 
 @pytest.mark.asyncio
 async def test_trigger_evaluation_success():
-    """Test trigger_evaluation delegates to MLflowService without OBO token injection."""
+    """trigger_evaluation delegates to MLflowService with the caller's group."""
     session = AsyncMock()
     group_ctx = Group("g1")
     with patch("src.api.mlflow_router.MLflowService") as svc_cls:
@@ -117,7 +117,8 @@ async def test_trigger_evaluation_success():
             MLflowEvaluateRequest(job_id="job1"), session=session, group_ctx=group_ctx
         )
         assert out.run_id == "1"
-        svc.trigger_evaluation.assert_called_once_with("job1")
+        # The caller's group context routes the judges' LLMManager calls.
+        svc.trigger_evaluation.assert_called_once_with("job1", group_context=group_ctx)
 
 
 @pytest.mark.asyncio

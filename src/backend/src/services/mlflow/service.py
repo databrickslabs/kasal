@@ -11,6 +11,7 @@ from src.services.execution.service import ExecutionService
 from src.services.prompt_optimization.gepa.reflection import DEFAULT_JUDGE_SAMPLES
 from src.services.settings.models import ModelConfigService
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+from src.utils.user_context import GroupContext
 
 # Register User-Agent for Databricks SDK / MLflow calls (module-level)
 with_product(
@@ -879,11 +880,14 @@ class MLflowService:
             )
             return fallback_model
 
-    async def trigger_evaluation(self, job_id: str) -> Dict[str, Any]:
+    async def trigger_evaluation(
+        self, job_id: str, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
         """
         MLflow 3.x-style evaluation for agent runs leveraging existing traces where possible.
         - Builds a minimal evaluation dataset from the recorded execution (and traces if available)
-        - Runs mlflow.genai.evaluate (or mlflow.evaluate fallback) with LLM-judge scorers when configured
+        - Runs mlflow.genai.evaluate with the built-in judges, called through
+          LLMManager under ``group_context`` (see ``evaluation_judges``)
         - Returns the evaluation run metadata for deep-linking in the UI
         """
         logger.info(
@@ -946,7 +950,16 @@ class MLflowService:
 
         # Run blocking MLflow 3.x evaluation code in a thread to keep API async/non-blocking
         # Resolve judge model using the model configuration system
-        judge_model_route = await self._resolve_judge_model()
+        configured_judge = await self.configured_judge_model()
+        judge_model_route = await self._resolve_judge_model(configured_judge)
+        from src.services.mlflow.evaluation_judges import (
+            current_judge_route,
+            resolve_judge_model,
+        )
+
+        judge_model = await resolve_judge_model(
+            configured_judge, self.model_config_service
+        )
         judge_model_defaulted = judge_model_route.endswith(
             "databricks-claude-sonnet-4-5"
         )
@@ -957,7 +970,7 @@ class MLflowService:
         auth_context = None
         if judge_model_route.startswith("databricks/"):
             from src.utils.databricks_auth import get_auth_context
-            from src.utils.user_context import GroupContext, UserContext
+            from src.utils.user_context import UserContext
 
             # CRITICAL: Set UserContext with group_id before calling get_auth_context()
             # UserContext is thread-local (contextvars), so we must set it explicitly
@@ -994,6 +1007,8 @@ class MLflowService:
             # configured name (Configuration.tsx), not a hardcoded default.
             experiment_name=await self.configured_crew_traces_experiment(),
             max_rows=(await self.advanced_settings())["evaluation_max_rows"],
+            judge_model=judge_model,
+            judge_route=current_judge_route(group_context, self.group_id),
         )
 
         # Create evaluation run in background thread

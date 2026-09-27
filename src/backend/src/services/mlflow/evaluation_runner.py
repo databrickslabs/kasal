@@ -10,9 +10,12 @@ This module contains:
 """
 
 import os
-from typing import Any, Dict, List, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from src.core.logger import LoggerManager
+
+if TYPE_CHECKING:
+    from src.services.prompt_optimization.builtin_judges.bridge import JudgeRoute
 
 logger = LoggerManager.get_instance().system
 
@@ -37,18 +40,6 @@ def _find_list_or_str(d: dict, keys: List[str]) -> Optional[List[str]]:
     return None
 
 
-def _to_scorer_model_uri(route: Optional[str]) -> Optional[str]:
-    """A ``provider/model`` judge route as the ``provider:/model`` URI scorers take."""
-    if not route:
-        return None
-    if ":/" in route:
-        return route
-    if "/" in route:
-        provider, model = route.split("/", 1)
-        return f"{provider}:/" + model
-    return route
-
-
 class MLflowEvaluationRunner:
     """
     Manages MLflow evaluation run creation and execution.
@@ -69,6 +60,8 @@ class MLflowEvaluationRunner:
         judge_model_defaulted: bool,
         experiment_name: Optional[str] = None,
         max_rows: int = 200,
+        judge_model: Optional[str] = None,
+        judge_route: Optional["JudgeRoute"] = None,
     ):
         """
         Initialize evaluation runner.
@@ -85,6 +78,9 @@ class MLflowEvaluationRunner:
                 async caller — the source of truth. Without one, the
                 per-teamspace fallback (``fallback_trace_experiment``).
             max_rows: Most trace rows to score (Configuration → MLflow → Advanced).
+            judge_model: The Kasal model key the built-in judges call through
+                LLMManager (``evaluation_judges``); None skips the judges.
+            judge_route: The event loop, group and user those calls run under.
         """
         self.exec_obj = exec_obj
         self.job_id = job_id
@@ -94,6 +90,8 @@ class MLflowEvaluationRunner:
         self.judge_model_defaulted = judge_model_defaulted
         self.experiment_name = experiment_name
         self.max_rows = max_rows
+        self.judge_model = judge_model
+        self.judge_route = judge_route
 
     def create_run(self, auth_ctx: Optional[Any]) -> Dict[str, Any]:
         """
@@ -841,13 +839,16 @@ class MLflowEvaluationRunner:
                         }
                     ]
 
-                # Built-in judges from the shared catalog (the one Optimize uses).
-                from src.services.prompt_optimization.builtin_judges.catalog import (
-                    evaluation_scorers,
+                # Built-in judges from the shared catalog (the one Optimize
+                # uses), called through LLMManager via the judge bridge.
+                from src.services.mlflow.evaluation_judges import (
+                    judge_scorers,
+                    judging,
                 )
 
-                scorers = evaluation_scorers(
-                    _to_scorer_model_uri(self.judge_model_route),
+                scorers = judge_scorers(
+                    self.judge_model,
+                    self.judge_route,
                     has_reference=has_ref_col,
                     has_context=has_ctx_col,
                 )
@@ -907,7 +908,8 @@ class MLflowEvaluationRunner:
                         except Exception:
                             pass
 
-                        eval_result = mlflow.genai.evaluate(**eval_kwargs)
+                        with judging(self.judge_route):
+                            eval_result = mlflow.genai.evaluate(**eval_kwargs)
                         logger.info(
                             "[MLflowEvaluationRunner] mlflow.genai.evaluate completed successfully"
                         )
@@ -929,13 +931,7 @@ class MLflowEvaluationRunner:
                                         [type(s).__name__ for s in (scorers or [])]
                                     )
                                     or "",
-                                    "genai_judge_model": str(
-                                        self.judge_model_route or ""
-                                    ),
-                                    "genai_judge_model_uri": str(
-                                        _to_scorer_model_uri(self.judge_model_route)
-                                        or ""
-                                    ),
+                                    "genai_judge_model": str(self.judge_model or ""),
                                 }
                             )
                         except Exception:
