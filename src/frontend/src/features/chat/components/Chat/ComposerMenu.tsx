@@ -28,7 +28,8 @@ import { useExecutionStore } from '../../store/executionStore';
 import EffortPicker from '../../../../shared/components/EffortPicker';
 import { effortLabel } from '../../../../types/workflow/effort';
 import { useChatEffortStore } from '../../../../store/chatEffort';
-import { useAppStore } from '../../store/appStore';
+import { useModelsStore } from '../../../../store/models';
+import { useRefreshModelsWhen } from '../../../../hooks/global/useEnabledModels';
 import { AUTO_MODEL, isAutoModel } from '../../utils/autoModel';
 
 export type MemoryModeId = 'workspace' | 'session';
@@ -152,11 +153,13 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
 }) => {
   const { t } = useTranslation();
   // Auto (the decision model picks per message) is listed only when available.
-  const autoAvailable = useAppStore((s) => s.autoModelAvailable);
+  const autoAvailable = useModelsStore((s) => s.autoModelAvailable);
   const autoLabel = t('chat.autoModel.label', { defaultValue: 'Auto' });
   const effort = useChatEffortStore(s => s.settings);
   const setEffort = useChatEffortStore(s => s.setSettings);
   const [open, setOpen] = useState(false);
+  // Opening the menu picks up model changes made elsewhere (throttled).
+  useRefreshModelsWhen(open);
   const [section, setSectionRaw] = useState<SectionId>('');
   const [modelFilter, setModelFilter] = useState('');
   // Entering/leaving a section always starts it fresh — a stale model search

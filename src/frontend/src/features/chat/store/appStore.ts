@@ -1,17 +1,14 @@
 import { create } from 'zustand';
 import { useThemeStore } from '../../../store/theme';
 import { AppConfig } from '../types/chat';
-import { ModelConfigResponse } from '../types/dispatcher';
 import { updateClient } from '../api/client';
-import { fetchEnabledModels } from '../api/models';
 import { fetchEnabledTools, ToolInfo } from '../api/tools';
 import { fetchWorkspaces, Workspace } from '../api/workspaces';
 import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 import { PublicationService } from '../../../api/workflow/PublicationService';
 import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
-import { getDefaultModel } from '../../../config/defaultModel';
-import { DecisionConfigService } from '../../../api/config/DecisionConfigService';
-import { MODEL_EXPLICIT_STORAGE_KEY, pickChatModel } from '../utils/autoModel';
+import { subscribeToModels, useModelsStore } from '../../../store/models';
+import { MODEL_EXPLICIT_STORAGE_KEY, resolveChatModel } from '../utils/autoModel';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -54,7 +51,9 @@ function saveConfig(config: AppConfig): void {
 interface AppState {
   config: AppConfig;
   theme: Theme;
-  models: ModelConfigResponse[];
+  // The enabled models and Auto's availability live in the shared models store
+  // (store/models.ts: `models`, `autoModelAvailable`), so the chat, the
+  // builders and Configuration → Models all read — and refresh — one list.
   tools: ToolInfo[];
   /** Map of tool ID (number or string) → tool title for quick lookup */
   toolNameMap: Record<string, string>;
@@ -72,9 +71,11 @@ interface AppState {
    */
   catalogLoaded: boolean;
   catalogError: string | null;
+  /**
+   * The composer's EFFECTIVE model: the user's stored choice (localStorage),
+   * reconciled with the live model list by `syncModelSelection`.
+   */
   selectedModel: string;
-  /** The decision model can pick the model (Auto) for this workspace. */
-  autoModelAvailable: boolean;
   sidebarOpen: boolean;
   settingsOpen: boolean;
   // The rail's Catalog card expansion — in the store (not component state) so
@@ -90,7 +91,10 @@ interface AppActions {
   setSchedulesOpen: (open: boolean) => void;
   loadSchedules: () => Promise<void>;
   init: () => void;
+  /** Reload the shared model list, then reconcile `selectedModel`. */
   loadModels: () => Promise<void>;
+  /** Re-derive `selectedModel` from the stored choice and the live list. */
+  syncModelSelection: () => void;
   loadTools: () => Promise<void>;
   loadWorkspaces: () => Promise<void>;
   loadCatalog: () => Promise<void>;
@@ -110,7 +114,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // --- State ---
   config: loadConfig(),
   theme: useThemeStore.getState().isDarkMode ? 'dark' : 'light',
-  models: [],
   tools: [],
   toolNameMap: {},
   workspaces: [],
@@ -125,7 +128,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return '';
     }
   })(),
-  autoModelAvailable: false,
   sidebarOpen: false,
   settingsOpen: false,
   catalogOpen: false,
@@ -140,39 +142,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   loadModels: async () => {
+    await useModelsStore.getState().refresh();
+    get().syncModelSelection();
+  },
+
+  syncModelSelection: () => {
+    const live = useModelsStore.getState();
+    // Nothing to reconcile against until a list has loaded.
+    if (live.loadedForGroup === null) return;
+    let stored = '';
+    let explicit: boolean | null = null;
     try {
-      // Auto is offered only when the decision model is available here; a
-      // failed availability read means "not available" (the old selector).
-      const [m, autoAvailable] = await Promise.all([
-        fetchEnabledModels(),
-        DecisionConfigService.getConfig()
-          .then((c) => !!c.available)
-          .catch(() => false),
-      ]);
-      let stored = '';
-      let explicit: boolean | null = null;
+      stored = localStorage.getItem(MODEL_STORAGE_KEY) || '';
+      const flag = localStorage.getItem(MODEL_EXPLICIT_STORAGE_KEY);
+      explicit = flag === null ? null : flag === '1';
+    } catch { /* */ }
+    const key = resolveChatModel({
+      stored,
+      explicit,
+      models: live.models,
+      autoAvailable: live.autoModelAvailable,
+      serverDefault: live.defaultModel,
+    });
+    if (key !== get().selectedModel) set({ selectedModel: key });
+    // Persist only a default the old selector would also have stored; Auto,
+    // a user's own pick and a fallback for a disabled pick are not stored.
+    if (key && !stored && !live.autoModelAvailable) {
       try {
-        stored = localStorage.getItem(MODEL_STORAGE_KEY) || '';
-        const flag = localStorage.getItem(MODEL_EXPLICIT_STORAGE_KEY);
-        explicit = flag === null ? null : flag === '1';
+        localStorage.setItem(MODEL_STORAGE_KEY, key);
       } catch { /* */ }
-      const key = pickChatModel({
-        stored,
-        explicit,
-        models: m,
-        autoAvailable,
-        serverDefault: getDefaultModel(),
-      });
-      set({ models: m, autoModelAvailable: autoAvailable, selectedModel: key });
-      // Persist only a default the old selector would also have stored; Auto
-      // and a user's own pick are already what is stored.
-      if (key && !stored && !autoAvailable) {
-        try {
-          localStorage.setItem(MODEL_STORAGE_KEY, key);
-        } catch { /* */ }
-      }
-    } catch {
-      // Models endpoint may not be available
     }
   },
 
@@ -280,3 +278,18 @@ useThemeStore.subscribe((state) => {
   applyTheme(theme);
   if (useAppStore.getState().theme !== theme) useAppStore.setState({ theme });
 });
+
+// The composer follows the live model list: when an admin disables the chosen
+// model, turns the decision model on or off, or the workspace changes, the
+// selection is reconciled without a reload (see resolveChatModel).
+const unsubscribeModels = subscribeToModels((live, previous) => {
+  if (
+    live.models !== previous.models
+    || live.autoModelAvailable !== previous.autoModelAvailable
+    || live.defaultModel !== previous.defaultModel
+    || live.loadedForGroup !== previous.loadedForGroup
+  ) {
+    useAppStore.getState().syncModelSelection();
+  }
+});
+if (import.meta.hot) import.meta.hot.dispose(unsubscribeModels);

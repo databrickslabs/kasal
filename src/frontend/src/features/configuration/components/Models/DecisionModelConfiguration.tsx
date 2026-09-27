@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, Button, FormControlLabel, Paper, Stack, Switch, Typography } from '@mui/material';
 import { useTranslation } from 'react-i18next';
 import { DecisionConfigService } from '../../../../api/config/DecisionConfigService';
+import { notifyModelsChanged } from '../../../../store/models';
 import { useGroupStore } from '../../../../store/groups';
 import DecisionModelRecommendation from './DecisionModelRecommendation';
 import { DECISION_MODEL_PROVIDER } from './decisionModelProvider';
@@ -74,6 +75,8 @@ const DecisionModelForm: React.FC = () => {
       setEnabled(config.enabled);
       setConfigured(config.api_key_configured);
       setSaved(true);
+      // Auto appears in (or leaves) open chats and other tabs without a reload.
+      void notifyModelsChanged();
     } catch (err) {
       setEnabled(previous);
       setFailure({ kind: 'save', detail: serverDetail(err) });

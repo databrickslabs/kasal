@@ -1,15 +1,10 @@
-import { getClient } from './client';
 import { ModelConfigResponse } from '../types/dispatcher';
-import { setServerDefaultModel } from '../../../config/defaultModel';
+import { fetchEnabledModelRows } from '../../../api/config/EnabledModelsService';
 
-interface ModelListResponse {
-  models: ModelConfigResponse[];
-  count: number;
-  default_model?: string;
-}
-
+/**
+ * The workspace's enabled models. Kept for callers of the chat API; model
+ * menus read the shared, live list in store/models.ts instead.
+ */
 export async function fetchEnabledModels(): Promise<ModelConfigResponse[]> {
-  const response = await getClient().get<ModelListResponse>('/models/enabled');
-  setServerDefaultModel(response.data.default_model);
-  return response.data.models;
+  return fetchEnabledModelRows();
 }

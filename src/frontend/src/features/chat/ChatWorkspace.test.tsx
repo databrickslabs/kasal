@@ -99,8 +99,8 @@ const h = vi.hoisted(() => {
       runStartedAt: null as number | null,
       runningJobBySession: {} as Record<string, string>,
     },
+    models: { models: [{ key: 'm1', name: 'Model 1' }], ensureFresh: vi.fn(async () => {}) },
     app: {
-      models: [{ key: 'm1', name: 'Model 1' }],
       selectedModel: 'm1',
       sidebarOpen: true,
       toolNameMap: {} as Record<string, string>,
@@ -108,7 +108,7 @@ const h = vi.hoisted(() => {
       savedFlows: [] as { id: string; name: string }[],
       init: vi.fn(),
       setTheme: vi.fn(),
-      loadModels: vi.fn(),
+      syncModelSelection: vi.fn(),
       loadTools: vi.fn(),
       loadCatalog: vi.fn(async () => {}),
       setSelectedModel: vi.fn(),
@@ -165,6 +165,7 @@ vi.mock('./store/executionStore', () => ({
   rememberTaskOutputMessage: vi.fn(),
 }));
 vi.mock('./store/appStore', () => ({ useAppStore: storeHook(h.app) }));
+vi.mock('../../store/models', () => ({ useModelsStore: storeHook(h.models) }));
 vi.mock('../../store/theme', () => ({ useThemeStore: storeHook(h.theme) }));
 
 vi.mock('./hooks/useDispatcher', () => ({
@@ -756,6 +757,8 @@ describe('ChatWorkspace component', () => {
     expect(document.getElementById('kasal-chat-root')).toBeInTheDocument();
     expect(screen.getByTestId('chat-container')).toBeInTheDocument();
     expect(h.app.init).toHaveBeenCalled();
+    expect(h.app.syncModelSelection).toHaveBeenCalled();
+    expect(h.models.ensureFresh).toHaveBeenCalled();
     expect(document.getElementById('kasal-chat-root')).toHaveAttribute('data-theme', 'light');
   });
 
@@ -1290,19 +1293,6 @@ describe('ChatWorkspace component', () => {
       expect.objectContaining({ resultType: 'crew_actions' }),
     );
   });
-
-  // --- sidebar interactions ---
-
-
-
-
-
-
-
-
-
-
-
 
   // --- preview panel controls ---
   it('preview panel close + toggle-chat buttons call the store', () => {

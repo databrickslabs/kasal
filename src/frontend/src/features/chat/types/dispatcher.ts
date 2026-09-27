@@ -2,6 +2,7 @@ import type { ModelSelection } from './execution';
 import type { EffortSettings } from '../../../types/workflow/effort';
 import type { ImageRef } from './chat';
 import type { PublicationInputSchema } from '../../../types/workflow/publication';
+import type { EnabledModelRow } from '../../../types/config/models';
 
 export type IntentType =
   | 'generate_agent'
@@ -332,26 +333,5 @@ export interface CatalogNoMatchResult {
   answer_here?: boolean;
 }
 
-export interface ModelConfigResponse {
-  id: number;
-  key: string;
-  name: string;
-  provider: string | null;
-  temperature: number | null;
-  context_window: number | null;
-  max_output_tokens: number | null;
-  extended_thinking: boolean;
-  enabled: boolean;
-  /**
-   * Whether this model accepts a native reasoning-effort budget. Derived
-   * server-side from the same allow-list the engine uses, so the UI cannot
-   * offer an answer mode whose reasoning the engine will silently drop.
-   * Optional because a cached/older response may not carry it — treat
-   * `undefined` as "unknown", not as "unsupported".
-   */
-  supports_reasoning_effort?: boolean;
-  allowed_efforts?: string[];
-  thinking_mode?: 'manual' | 'adaptive' | null;
-  created_at: string;
-  updated_at: string;
-}
+/** A row of the enabled-models list; shared with the builder via store/models. */
+export type ModelConfigResponse = EnabledModelRow;

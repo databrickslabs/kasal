@@ -45,6 +45,12 @@ Tool-calling and structured-output caveats, all observed in the codebase and rec
 - Some endpoints only support the OpenAI Responses API and cannot be used through Kasal's chat-completions path; these are also pruned.
 - The internal generation services (agent, task, and crew generation) use the model the request names (the UI sends the one you chose), else the installed default model inside Databricks Apps, else `databricks-gemini-3-8-flash` (`DEFAULT_ENGINE_MODEL` in `src/backend/src/utils/model_config.py`). The former `AGENT_MODEL`, `CREW_MODEL` and `TASK_MODEL` environment variables are no longer read.
 
+### Changes show up without a reload
+
+When an administrator enables, disables, adds, edits or deletes a model (Configuration → **Models**), turns the decision model on or off, or changes the Jev API URL, open chats and the Agent Builder and Flow Builder model menus update in place: there is no need to reload the page. Other open tabs of the same browser update too, and a model menu opened after a change made elsewhere (another administrator, another browser) refreshes its list, at most every 30 seconds. Switching workspace reloads the list for the new workspace.
+
+If the model you had selected is no longer enabled, the selector falls back: in the chat to **Auto** when it is available, otherwise to the server's default model when it is enabled, otherwise to the first enabled model; in the builders to the default, otherwise the first enabled model. A model you picked yourself that is still enabled is never changed, and in the chat it comes back if it is enabled again. Agents saved with a model keep that model: the list updates, the saved agent does not.
+
 ## Auto (model selection)
 
 In the chat, the **Model** row of the composer's **+** menu can be set to **Auto**. With Auto, the [decision model](./DECISION_MODEL.md) picks the model for each message from the models your workspace has enabled, based on what the message asks for and on each model's context window, output limit and reasoning support.

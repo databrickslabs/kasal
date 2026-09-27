@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import ComposerMenu from './ComposerMenu';
-import { useAppStore } from '../../store/appStore';
+import { currentModelsGroup, useModelsStore } from '../../../../store/models';
 
 const models = [
   { key: 'k1', name: 'Model One' },
@@ -28,10 +28,13 @@ function open(selectedModel: string, onModelChange = vi.fn()) {
 }
 
 describe('ComposerMenu model selector with Auto', () => {
-  beforeEach(() => useAppStore.setState({ autoModelAvailable: false }));
+  // A fresh, already-checked list: the menu must not fetch in these tests.
+  beforeEach(() => useModelsStore.setState({
+    autoModelAvailable: false, checkedGroup: currentModelsGroup(), checkedAt: Date.now(),
+  }));
 
   it('shows Auto first, checked, when it is available and selected', () => {
-    useAppStore.setState({ autoModelAvailable: true });
+    useModelsStore.setState({ autoModelAvailable: true });
     open('auto');
     // The collapsed row names the choice.
     expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('Auto');
@@ -51,7 +54,7 @@ describe('ComposerMenu model selector with Auto', () => {
   });
 
   it('an explicit model pick replaces Auto, and Auto can be picked back', () => {
-    useAppStore.setState({ autoModelAvailable: true });
+    useModelsStore.setState({ autoModelAvailable: true });
     const onModelChange = open('auto');
     fireEvent.click(screen.getByRole('button', { name: 'Model' }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Model Two/ }));
@@ -59,5 +62,25 @@ describe('ComposerMenu model selector with Auto', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Model' }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto/ }));
     expect(onModelChange).toHaveBeenLastCalledWith('auto');
+  });
+
+  it('shows Auto as soon as the decision model becomes available, without a remount', () => {
+    open('k1');
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(2);
+    act(() => useModelsStore.setState({ autoModelAvailable: true }));
+    expect(screen.getAllByRole('menuitemradio')[0]).toHaveTextContent('Auto');
+  });
+
+  it('asks the models store for a (throttled) refresh when the menu opens', () => {
+    const ensureFresh = vi.fn(async () => undefined);
+    const original = useModelsStore.getState().ensureFresh;
+    useModelsStore.setState({ ensureFresh });
+    try {
+      open('k1');
+      expect(ensureFresh).toHaveBeenCalled();
+    } finally {
+      useModelsStore.setState({ ensureFresh: original });
+    }
   });
 });

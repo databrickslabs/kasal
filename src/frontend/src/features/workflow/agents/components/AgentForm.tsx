@@ -1,6 +1,6 @@
 import { formatModelLabel } from '../../../../utils/modelDisplay';
 import { getDefaultModel } from '../../../../config/defaultModel';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   TextField,
   Button,
@@ -38,7 +38,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { AgentService } from '../../../../api/workflow/AgentService';
 import SkillSelector from '../../../tools/components/configuration/SkillSelector';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../../../types/workflow/agent';
-import { ModelService } from '../../../../api/config/ModelService';
+import { useEnabledModels } from '../../../../hooks/global/useEnabledModels';
 import { Models } from '../../../../types/config/models';
 import AgentModelSettings from './AgentModelSettings';
 import { PerplexityConfig, SerperConfig } from '../../../../types/workflow/config';
@@ -81,8 +81,11 @@ type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
 
 const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
   const updateAgent = useAgentStore(state => state.updateAgent);
-  const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
-  const [loadingModels, setLoadingModels] = useState(true);
+  // The shared live list of enabled models (store/models.ts): it updates in
+  // place when an admin changes models, without reopening the form.
+  const { models: enabledModels, loaded: modelsLoaded, loading: loadingModels } = useEnabledModels();
+  const models: Models = Object.keys(enabledModels).length > 0 ? enabledModels : DEFAULT_FALLBACK_MODEL;
+  const checkedInitialModel = useRef(false);
   const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
   const [expandedBackstory, setExpandedBackstory] = useState<boolean>(false);
   const [expandedSystemTemplate, setExpandedSystemTemplate] = useState<boolean>(false);
@@ -188,47 +191,17 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   }, [initialData?.tool_configs]);
 
 
-  // Load models from ModelService - moved after formData is defined
+  // Once, when the list first arrives: an agent whose model is not enabled
+  // starts on the first enabled one (the form's long-standing behaviour).
+  // Later list changes never rewrite the form — a saved agent's model is its
+  // own configuration.
   useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        setLoadingModels(true);
-        const modelService = ModelService.getInstance();
-        const fetchedModels = await modelService.getActiveModels();
-        
-        if (Object.keys(fetchedModels).length > 0) {
-          setModels(fetchedModels);
-          
-          // Check if the current model is valid in the fetched models
-          const currentModelKey = formData.llm;
-          if (currentModelKey && !fetchedModels[currentModelKey]) {
-            // If current model is invalid, select the first available one
-            const firstModelKey = Object.keys(fetchedModels)[0];
-            
-            // Update the form data with the new model
-            setFormData(prev => ({
-              ...prev,
-              llm: firstModelKey
-            }));
-          }
-        } else {
-          // No models were fetched - keep the default model but log a warning
-          console.warn('No models were fetched from the API, using default model as fallback');
-        }
-      } catch (error) {
-        console.error('Error fetching models:', error);
-        // In case of error, show a fallback message but don't change the form data
-        console.warn('Using default model due to error fetching models');
-      } finally {
-        setLoadingModels(false);
-      }
-    };
-    
-    fetchModels();
-  // We intentionally don't add formData.llm as a dependency to avoid infinite loops
-  // since we're updating it inside the effect
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (checkedInitialModel.current || !modelsLoaded) return;
+    const keys = Object.keys(enabledModels);
+    if (keys.length === 0) return;
+    checkedInitialModel.current = true;
+    setFormData(prev => (prev.llm && !enabledModels[prev.llm] ? { ...prev, llm: keys[0] } : prev));
+  }, [modelsLoaded, enabledModels]);
 
   const [isGeneratingTemplates, setIsGeneratingTemplates] = useState(false);
   const [showBestPractices, setShowBestPractices] = useState(false);

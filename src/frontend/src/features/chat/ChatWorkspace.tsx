@@ -7,6 +7,7 @@ import { useChatExecutionActions } from './hooks/useChatExecutionActions';
 import { useSessionStore } from '../../app/sessions/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { useAppStore } from './store/appStore';
+import { useModelsStore } from '../../store/models';
 import { useDispatcher } from './hooks/useDispatcher';
 import { startGenerationStream } from './utils/generationStreamManager';
 import { GenerationCompleteData } from './types/dispatcher';
@@ -116,7 +117,9 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   // routed to the pane.
   const previewPaneVisible = (previewPaneOpen && !!previewContent) || showPreviewSkeleton;
 
-  const models = useAppStore((s) => s.models);
+  // The shared, live model list (store/models.ts) — updates in place when an
+  // admin changes models, the decision model, or the workspace.
+  const models = useModelsStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
 
 
@@ -132,7 +135,10 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   // --- Initialize stores on mount ---
   useEffect(() => {
     useAppStore.getState().init();
-    useAppStore.getState().loadModels();
+    // Reconcile a stored choice with whatever list is already loaded; a stale
+    // or missing list reloads, and the models store re-syncs when it lands.
+    useAppStore.getState().syncModelSelection();
+    void useModelsStore.getState().ensureFresh();
     useAppStore.getState().loadTools();
     const refreshTools = () => { void useAppStore.getState().loadTools(); };
     window.addEventListener('tools-changed', refreshTools);
@@ -146,8 +152,8 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   useEffect(() => {
     const onGroupChange = () => {
       void refreshLibrary();
-      // Enabled models and Auto's availability are per workspace too.
-      void useAppStore.getState().loadModels();
+      // Enabled models and Auto's availability are per workspace too: the
+      // models store reloads them itself on 'group-changed'.
     };
     window.addEventListener('group-changed', onGroupChange);
     return () => window.removeEventListener('group-changed', onGroupChange);

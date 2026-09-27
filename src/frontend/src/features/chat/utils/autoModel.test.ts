@@ -6,6 +6,7 @@ import {
   isAutoModel,
   modelSelectionLabel,
   pickChatModel,
+  resolveChatModel,
 } from './autoModel';
 import { postModelSelection } from './modelSelectionStep';
 
@@ -39,6 +40,37 @@ describe('pickChatModel', () => {
 
   it('never keeps Auto when it is unavailable', () => {
     expect(pickChatModel({ ...base, stored: 'auto', explicit: true, autoAvailable: false })).toBe('server-default');
+  });
+});
+
+describe('resolveChatModel (the live list)', () => {
+  const live = { ...base, autoAvailable: false };
+
+  it('never overrides an explicit choice that is still enabled', () => {
+    expect(resolveChatModel({ ...live, stored: 'k1', explicit: true })).toBe('k1');
+    expect(resolveChatModel({ ...live, stored: 'k1', explicit: true, autoAvailable: true })).toBe('k1');
+  });
+
+  it('falls back from a disabled choice to Auto when available', () => {
+    expect(resolveChatModel({ ...live, stored: 'gone', explicit: true, autoAvailable: true })).toBe(AUTO_MODEL);
+  });
+
+  it('falls back from a disabled choice to the default, else the first enabled model', () => {
+    expect(resolveChatModel({ ...live, stored: 'gone', explicit: true })).toBe('server-default');
+    expect(resolveChatModel({ ...live, stored: 'gone', explicit: true, models: [{ key: 'k1' }] })).toBe('k1');
+  });
+
+  it('falls back to the default when Auto is lost while selected', () => {
+    expect(resolveChatModel({ ...live, stored: AUTO_MODEL, explicit: true })).toBe('server-default');
+  });
+
+  it('switches to Auto when it becomes available and the user never chose', () => {
+    expect(resolveChatModel({ ...live, stored: 'server-default', explicit: null, autoAvailable: true })).toBe(AUTO_MODEL);
+    expect(resolveChatModel({ ...live, stored: '', explicit: null, autoAvailable: true })).toBe(AUTO_MODEL);
+  });
+
+  it('leaves the pick alone while the list is empty (not known)', () => {
+    expect(resolveChatModel({ ...live, stored: 'k1', explicit: true, models: [] })).toBe('k1');
   });
 });
 

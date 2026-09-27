@@ -3,6 +3,7 @@ import { apiClient } from '../../shared/api/client';
 import axios, { AxiosError, AxiosResponse } from 'axios';
 import { models as defaultModels } from '../../config/models/models';
 import { getDefaultModel, setServerDefaultModel } from '../../config/defaultModel';
+import { logger } from '../../utils/logger';
 
 interface ApiModelResponse {
   id: number;
@@ -657,26 +658,26 @@ export class ModelService {
    * Delete a specific model by key
    */
   public async deleteModel(modelKey: string): Promise<Models> {
-    console.log(`[ModelService.deleteModel] START - Deleting model with key: ${modelKey}`);
+    logger.debug(`[ModelService.deleteModel] START - Deleting model with key: ${modelKey}`);
 
     try {
       // Make sure we have the model before trying to delete it
-      console.log(`[ModelService.deleteModel] Fetching current models to verify model exists`);
+      logger.debug(`[ModelService.deleteModel] Fetching current models to verify model exists`);
       const existingModels = await this.getModels(true);
 
-      console.log(`[ModelService.deleteModel] Checking if model ${modelKey} exists in:`, Object.keys(existingModels));
+      logger.debug(`[ModelService.deleteModel] Checking if model ${modelKey} exists in:`, Object.keys(existingModels));
       if (!existingModels[modelKey]) {
         console.warn(`[ModelService.deleteModel] Model ${modelKey} doesn't exist or already deleted`);
         return existingModels; // Return current models if model doesn't exist
       }
 
-      console.log(`[ModelService.deleteModel] Found model to delete:`, existingModels[modelKey]);
+      logger.debug(`[ModelService.deleteModel] Found model to delete:`, existingModels[modelKey]);
 
       // Call the delete endpoint
-      console.log(`[ModelService.deleteModel] Sending DELETE request to: /models/${modelKey}`);
+      logger.debug(`[ModelService.deleteModel] Sending DELETE request to: /models/${modelKey}`);
       const response = await apiClient.delete(`/models/${modelKey}`);
 
-      console.log(`[ModelService.deleteModel] DELETE response:`, {
+      logger.debug(`[ModelService.deleteModel] DELETE response:`, {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
@@ -684,13 +685,13 @@ export class ModelService {
       });
 
       // Clear caches to force refresh
-      console.log(`[ModelService.deleteModel] Clearing caches after deletion`);
+      logger.debug(`[ModelService.deleteModel] Clearing caches after deletion`);
       this.clearCaches();
 
       // OPTIMIZATION: If backend returns 204/200, we'll create an optimistic update
       // by removing the model from our local data even if it still appears in the backend response
       if (response.status === 204 || response.status === 200) {
-        console.log(`[ModelService.deleteModel] Using optimistic update to remove model ${modelKey}`);
+        logger.debug(`[ModelService.deleteModel] Using optimistic update to remove model ${modelKey}`);
         // Create optimistic update by manually removing the model from our copy
         const optimisticModels = { ...existingModels };
         delete optimisticModels[modelKey];
@@ -698,23 +699,23 @@ export class ModelService {
         // Update our cache with the optimistic data
         this.modelsCache = this.setCache(this.modelsCache, optimisticModels);
 
-        console.log(`[ModelService.deleteModel] SUCCESS: Optimistically removed model ${modelKey}`);
-        console.log(`[ModelService.deleteModel] END - Deletion complete for ${modelKey}`);
+        logger.debug(`[ModelService.deleteModel] SUCCESS: Optimistically removed model ${modelKey}`);
+        logger.debug(`[ModelService.deleteModel] END - Deletion complete for ${modelKey}`);
 
         return optimisticModels;
       } else {
         // If status is unexpected, use the regular approach
-        console.log(`[ModelService.deleteModel] Unexpected status ${response.status}, fetching updated models list`);
+        logger.debug(`[ModelService.deleteModel] Unexpected status ${response.status}, fetching updated models list`);
         const updatedModels = await this.getModels(true);
 
         // Verify the model was actually deleted
         if (updatedModels[modelKey]) {
           console.warn(`[ModelService.deleteModel] WARNING: Model ${modelKey} still exists after deletion!`, updatedModels[modelKey]);
         } else {
-          console.log(`[ModelService.deleteModel] SUCCESS: Model ${modelKey} confirmed deleted`);
+          logger.debug(`[ModelService.deleteModel] SUCCESS: Model ${modelKey} confirmed deleted`);
         }
 
-        console.log(`[ModelService.deleteModel] END - Deletion complete for ${modelKey}`);
+        logger.debug(`[ModelService.deleteModel] END - Deletion complete for ${modelKey}`);
         return updatedModels;
       }
     } catch (error: unknown) {

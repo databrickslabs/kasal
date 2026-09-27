@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fetchEnabledModels } from './models';
-import { getClient } from './client';
+import { apiClient } from '../../../shared/api/client';
 
-vi.mock('./client', () => ({
-  getClient: vi.fn(),
+vi.mock('../../../shared/api/client', () => ({
+  apiClient: { get: vi.fn() },
 }));
+
+const get = apiClient.get as unknown as ReturnType<typeof vi.fn>;
 
 describe('fetchEnabledModels', () => {
   beforeEach(() => {
@@ -13,22 +15,19 @@ describe('fetchEnabledModels', () => {
 
   it('returns response.data.models from /models/enabled', async () => {
     const models = [
-      { id: 'm1', name: 'Model One' },
-      { id: 'm2', name: 'Model Two' },
+      { id: 1, key: 'm1', name: 'Model One' },
+      { id: 2, key: 'm2', name: 'Model Two' },
     ];
-    const get = vi.fn().mockResolvedValue({ data: { models, count: models.length } });
-    (getClient as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ get });
+    get.mockResolvedValue({ data: { models, count: models.length } });
 
     const result = await fetchEnabledModels();
 
-    expect(getClient).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledWith('/models/enabled');
-    expect(result).toBe(models);
+    expect(result).toEqual(models);
   });
 
   it('returns an empty array when no models are present', async () => {
-    const get = vi.fn().mockResolvedValue({ data: { models: [], count: 0 } });
-    (getClient as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ get });
+    get.mockResolvedValue({ data: { models: [], count: 0 } });
 
     const result = await fetchEnabledModels();
 
@@ -36,9 +35,7 @@ describe('fetchEnabledModels', () => {
   });
 
   it('propagates errors from the client', async () => {
-    const error = new Error('network down');
-    const get = vi.fn().mockRejectedValue(error);
-    (getClient as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ get });
+    get.mockRejectedValue(new Error('network down'));
 
     await expect(fetchEnabledModels()).rejects.toThrow('network down');
   });
