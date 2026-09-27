@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.execution import (
+    CrewConfig,
     ExecutionNameGenerationRequest,
     ExecutionNameGenerationResponse,
 )
@@ -23,6 +24,34 @@ if TYPE_CHECKING:
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+async def run_name_model(
+    config: CrewConfig, session: Optional[AsyncSession], group_id: Optional[str]
+) -> Optional[str]:
+    """The model to name a run with: the run's, the first agent's, or the workspace's.
+
+    A published crew has no top-level model — each agent carries its own
+    ``llm`` — and naming with a made-up placeholder id failed with "Model
+    configuration not found". None is a valid answer: the naming call then
+    falls back to a timestamp name.
+    """
+    if config.model:
+        return config.model
+    agents = config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
+    for agent in agents.values():
+        llm = agent.get("llm") if isinstance(agent, dict) else None
+        if isinstance(llm, str) and llm:
+            return llm
+    if not group_id or session is None:
+        return None
+    try:
+        from src.services.decisions.model_selection import workspace_default
+
+        return await workspace_default(session, group_id)
+    except Exception as exc:  # noqa: BLE001 — naming is never worth failing a run
+        logger.debug("No workspace default model for run naming: %s", exc)
+        return None
 
 
 class ExecutionNameService:

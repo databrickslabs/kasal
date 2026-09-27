@@ -40,7 +40,7 @@ absence of one header.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from src.utils.user_context import GroupContext
@@ -162,3 +162,32 @@ async def resolve_caller(
         context.group_ids,
     )
     return ExternalCaller(group_context=context, protocol=protocol, identifier=email)
+
+
+async def narrow_to_group(
+    caller: ExternalCaller, group_id: Optional[str]
+) -> ExternalCaller:
+    """``caller`` scoped to exactly ``group_id``, with their role in it.
+
+    A run of a published capability belongs to the publication's teamspace. An
+    unpinned caller in several teamspaces resolves to the UNION of them, and a
+    run created under that context is saved to whichever group comes first —
+    so a crew published in one teamspace ran, and was recorded, in another.
+
+    Refuses a group the caller is not already scoped to: resolution authorised
+    the publication against ``caller.group_ids``, and this must not become a way
+    to widen that. The role is re-resolved for the one group (the union carries
+    the LEAST privileged role across all of them); the token is kept for OBO.
+    """
+    if not group_id or group_id not in caller.group_ids:
+        raise ExternalAuthError(
+            f"Caller {caller.identifier} is not a member of workspace {group_id}."
+        )
+    if caller.group_ids == [group_id]:
+        return caller
+    context = await GroupContext.from_email(
+        email=caller.group_context.group_email or caller.identifier,
+        access_token=caller.access_token,
+        group_id=group_id,
+    )
+    return replace(caller, group_context=context)
