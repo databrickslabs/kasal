@@ -3,8 +3,10 @@
 ``"auto"`` is a request, never a model. It is resolved here, before anything
 that calls a model sees it, into the key of one of the models the workspace has
 enabled, which is the same list the model selector offers. The decision model
-answers with an opaque index; the key comes from Kasal's own row. When it
-abstains (off, no key, slow, unsure, too many candidates), the workspace's
+answers with an opaque index; the key comes from Kasal's own row. Its top pick
+is taken whatever its confidence (the probability is recorded in the trace).
+When it answers "none" or cannot answer (off, no key, slow, too many
+candidates), the workspace's
 default model is used, which is what the selector would have preselected
 before Auto existed.
 
@@ -113,6 +115,7 @@ class DecisionTrace(TypedDict):
     reason: Optional[str]
     connection: Optional[str]
     picked: Optional[str]
+    confidence: Optional[float]
     candidates: int
     duration_ms: float
     summary: str
@@ -150,8 +153,9 @@ class ModelSelection:
 
     The rest describes the decision for the trace: which connection asked,
     how many enabled models were offered, what came back (``picked``: Jev's
-    raw option, or the key the guard refused), and the span ids the decision
-    row and the run's spans share.
+    raw option, or the key the guard refused), the probability Jev gave that
+    option (``confidence``), and the span ids the decision row and the run's
+    spans share.
     """
 
     model: Optional[str]
@@ -161,6 +165,7 @@ class ModelSelection:
     connection: Optional[str] = field(default=None, compare=False)
     candidates: int = field(default=0, compare=False)
     picked: Optional[str] = field(default=None, compare=False)
+    confidence: Optional[float] = field(default=None, compare=False)
     span_id: str = field(default_factory=_new_span_id, compare=False)
     trace_id: str = field(default_factory=_new_trace_id, compare=False)
 
@@ -174,11 +179,15 @@ class ModelSelection:
         }
 
     def summary(self) -> str:
-        """``Auto (Jev via OpenRouter) → m``, or ``Auto fell back to m (default: …)``."""
+        """``Auto (Jev via OpenRouter) → m (0.61)``, or ``Auto fell back to m (…)``.
+
+        The number is the probability Jev gave the chosen model.
+        """
         model = self.model or "the default model"
         if self.status == "selected":
             via = " via OpenRouter" if self.connection == OPENROUTER else ""
-            return f"Auto (Jev{via}) → {model}"
+            p = f" ({self.confidence:.2f})" if self.confidence is not None else ""
+            return f"Auto (Jev{via}) → {model}{p}"
         why = FALLBACK_REASONS.get(self.reason or "")
         if why and self.reason == ROUTER_PICKED_DISABLED and self.picked:
             why = f"{why}: {self.picked}"
@@ -194,6 +203,7 @@ class ModelSelection:
             "reason": self.reason,
             "connection": self.connection,
             "picked": self.picked,
+            "confidence": self.confidence,
             "candidates": self.candidates,
             "duration_ms": self.duration_ms,
             "summary": self.summary(),
@@ -287,21 +297,24 @@ def _request_budget(described: list[dict[str, object]]) -> int:
 
 async def _ask(
     models: Sequence[ModelConfig], prompt: Optional[str], group_id: Optional[str]
-) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """``(key, None, raw)`` when the decision model chose, else ``(None, reason, raw)``.
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
+    """``(key, None, raw, p)`` when the decision model chose, else ``(None, why, ...)``.
 
-    ``raw`` is the option the decision model answered, when it answered.
+    ``raw`` is the option the decision model answered, when it answered, and
+    ``p`` the probability it gave that option. The top pick is taken below the
+    runtime's confidence gate (``accept_uncertain``): any enabled model beats
+    the default Jev could not rank, and ``choose_model`` still checks it.
     """
     if not models:
-        return None, NO_MODELS, None
+        return None, NO_MODELS, None, None
     if len(models) > MAX_CANDIDATES:
-        return None, TOO_MANY_MODELS, None
+        return None, TOO_MANY_MODELS, None, None
     if not str(prompt or "").strip():
-        return None, EMPTY_PROMPT, None
+        return None, EMPTY_PROMPT, None, None
     described = [describe_model(m) for m in models]
     excerpt = request_excerpt(prompt, _request_budget(described))
     if not excerpt["text"]:
-        return None, runtime.TOO_LARGE, None
+        return None, runtime.TOO_LARGE, None, None
     answers, reason = await decide_with_reason(
         POLICY,
         {"request": excerpt, "models": described},
@@ -315,13 +328,16 @@ async def _ask(
             )
         },
         group_id=group_id,
+        accept_uncertain=True,
     )
     if answers is None:
-        return None, reason, None
-    choice = answers["model"].selected
+        return None, reason, None, None
+    answer = answers["model"]
+    choice = answer.selected
+    probability = answer.probabilities[choice]
     if choice == "none":
-        return None, runtime.ABSTAINED, choice
-    return str(models[int(choice)].key), None, choice
+        return None, runtime.ABSTAINED, choice, probability
+    return str(models[int(choice)].key), None, choice, probability
 
 
 async def choose_model(
@@ -336,7 +352,7 @@ async def choose_model(
     started = monotonic()
     candidates = [m for m in models if not is_router_model(m)]
     keys = {str(m.key) for m in candidates}
-    selected, reason, picked = await _ask(candidates, prompt, group_id)
+    selected, reason, picked, confidence = await _ask(candidates, prompt, group_id)
     if selected is not None and selected not in keys:
         logger.warning("Auto: refusing %s, which is not an enabled model", selected)
         selected, reason, picked = None, ROUTER_PICKED_DISABLED, selected
@@ -348,6 +364,7 @@ async def choose_model(
         connection=current_connection().kind,
         candidates=len(candidates),
         picked=picked,
+        confidence=confidence,
     )
 
 
@@ -447,6 +464,7 @@ def trace_row(
             "policy": POLICY,
             **selection.to_response(),
             "picked": selection.picked,
+            "confidence": selection.confidence,
             "candidates": selection.candidates,
         },
         "duration_ms": int(selection.duration_ms),

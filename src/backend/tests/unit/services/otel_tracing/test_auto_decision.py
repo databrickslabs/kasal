@@ -43,7 +43,13 @@ CHOSEN = "claude-opus-5-5"
 PROMPT = "summarise the secret plan"
 KEY = "sk-or-secret"
 PICK = ModelSelection(
-    CHOSEN, "selected", 42.0, connection="openrouter", candidates=3, picked="1"
+    CHOSEN,
+    "selected",
+    42.0,
+    connection="openrouter",
+    candidates=3,
+    picked="1",
+    confidence=0.61,
 )
 
 
@@ -102,6 +108,8 @@ class TestTheOTelTrace:
         assert attributes["kasal.decision.status"] == "selected"
         assert attributes["kasal.decision.candidates"] == 3
         assert attributes["kasal.decision.duration_ms"] == 42.0
+        assert attributes["kasal.decision.confidence"] == 0.61
+        assert attributes["kasal.output_content"].endswith(f"{CHOSEN} (0.61)")
         assert "kasal.decision.reason" not in attributes
         text = json.dumps(attributes)
         assert PROMPT not in text and KEY not in text

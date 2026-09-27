@@ -210,3 +210,19 @@ async def test_an_accepted_answer_has_no_reason(gateway):
         "t", {}, QUESTIONS, group_id="one"
     )
     assert answers["q"].selected == "yes" and reason is None
+
+
+@pytest.mark.asyncio
+async def test_uncertain_answers_abstain_unless_the_caller_accepts_them(gateway):
+    _, provider, record = gateway
+    provider.return_value = payload(0.5)
+    assert await runtime.decide_with_reason("t", {}, QUESTIONS, group_id="one") == (
+        None,
+        runtime.ABSTAINED,
+    )
+    answers, reason = await runtime.decide_with_reason(
+        "t", {}, QUESTIONS, group_id="one", accept_uncertain=True
+    )
+    assert reason is None and answers["q"].confidence == 0.5
+    # Telemetry stays honest: both calls were below the gate.
+    assert [c.args[2] for c in record.call_args_list] == ["uncertain", "uncertain"]

@@ -124,6 +124,7 @@ class AutoDecision:
             "reason": _text(trace.get("reason")),
             "connection": _text(trace.get("connection")),
             "picked": _text(trace.get("picked")),
+            "confidence": _probability(trace.get("confidence")),
             "candidates": _number(trace.get("candidates")),
             "duration_ms": _duration(trace.get("duration_ms")),
             "summary": str(trace.get("summary") or ""),
@@ -166,6 +167,8 @@ class AutoDecision:
             "kasal.decision.reason": trace["reason"],
         }
         attributes.update({k: v for k, v in optional.items() if v})
+        if trace["confidence"] is not None:
+            attributes["kasal.decision.confidence"] = trace["confidence"]
         return attributes
 
     def emit(self, tracer: Tracer) -> bool:
@@ -199,6 +202,12 @@ def _text(value: object) -> Optional[str]:
 
 def _number(value: object) -> int:
     return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _probability(value: object) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 def _duration(value: object) -> float:

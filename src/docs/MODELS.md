@@ -75,11 +75,11 @@ Auto is a default, not a lock. Open the **+** menu, select **Model**, and pick a
 
 ### Seeing which model Auto picked
 
-After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) starts with the decision, "Auto (Jev via OpenRouter) → claude-opus-5-5" (or "Auto (Jev) → …" under the Jev API), followed by "LLM Request — claude-opus-5-5", the tool calls and "LLM Response — claude-opus-5-5". The decision and the calls share one trace id, in the run's rows and in its OpenTelemetry/MLflow trace, and the run's details show the model it ran on.
+After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) starts with the decision, "Auto (Jev via OpenRouter) → claude-opus-5-5 (0.61)" (or "Auto (Jev) → …" under the Jev API), where the number is the probability Jev gave that model, followed by "LLM Request — claude-opus-5-5", the tool calls and "LLM Response — claude-opus-5-5". The decision and the calls share one trace id, in the run's rows and in its OpenTelemetry/MLflow trace, and the run's details show the model it ran on.
 
 ### When the decision model cannot decide
 
-If the decision model is unreachable, slow, unsure, or has too many models to choose from (more than 64), Auto uses your workspace's default model: the server's default model when it is enabled for your workspace, otherwise the first enabled model. The activity step then reads "Auto → `<model>` (default)". Your message still runs; Auto never blocks it.
+Auto takes the decision model's top pick even when it is not confident; the trace shows how sure it was. If the decision model answers that none of the models fits, is unreachable or slow, or has too many models to choose from (more than 64), Auto uses your workspace's default model: the server's default model when it is enabled for your workspace, otherwise the first enabled model. The activity step then reads "Auto → `<model>` (default)". Your message still runs; Auto never blocks it.
 
 A few chat actions that call a model directly, such as improving a prompt, drafting a skill, saving a crew from the conversation and editing one slide, do not use Auto. With Auto selected they run on the server's default model.
 

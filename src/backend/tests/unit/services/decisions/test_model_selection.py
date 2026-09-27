@@ -100,7 +100,51 @@ class TestFallback:
         assert fallback_model([]) is None
 
 
+def unsure(selected, options, probability):
+    rest = (1 - probability) / (len(options) - 1)
+    probabilities = {k: rest for k in options}
+    probabilities[selected] = probability
+    return {"model": Choice(selected, 0.58, probabilities)}
+
+
 class TestChooseModel:
+    @pytest.mark.asyncio
+    async def test_a_low_confidence_top_pick_is_taken(self):
+        models = [model("key-alpha"), model("key-beta")]
+        with patch.object(
+            model_selection,
+            "decide_with_reason",
+            new=AsyncMock(return_value=(unsure("1", ["0", "1", "none"], 0.61), None)),
+        ) as decide:
+            result = await choose_model(models, "logic puzzle", group_id="ws")
+        assert decide.await_args.kwargs["accept_uncertain"] is True
+        assert (result.model, result.status, result.reason) == (
+            "key-beta",
+            "selected",
+            None,
+        )
+        assert result.picked == "1" and result.confidence == 0.61
+        assert result.summary() == "Auto (Jev) → key-beta (0.61)"
+
+    @pytest.mark.asyncio
+    async def test_a_low_confidence_none_still_falls_back(self):
+        models = [model("a"), model(DEFAULT_ENGINE_MODEL)]
+        with patch.object(
+            model_selection,
+            "decide_with_reason",
+            new=AsyncMock(return_value=(unsure("none", ["0", "1", "none"], 0.5), None)),
+        ):
+            result = await choose_model(models, "hi", group_id="ws")
+        assert (result.model, result.status, result.reason) == (
+            DEFAULT_ENGINE_MODEL,
+            "fallback",
+            "abstained",
+        )
+        assert result.summary() == (
+            f"Auto fell back to {DEFAULT_ENGINE_MODEL} "
+            "(default: decision model abstained)"
+        )
+
     @pytest.mark.asyncio
     async def test_index_maps_back_to_the_workspace_row(self):
         models = [model("key-alpha"), model("key-beta")]
@@ -231,7 +275,7 @@ class TestThroughTheRuntime:
         assert record.call_args.args[2] == "accepted"
 
     @pytest.mark.asyncio
-    async def test_uncertain_answer_falls_back(self):
+    async def test_an_uncertain_top_pick_is_taken_but_recorded_uncertain(self):
         payload = {
             "answers": {
                 "model": {
@@ -245,7 +289,8 @@ class TestThroughTheRuntime:
         a, b, c, telemetry = self._patches(payload)
         with a, b, c, telemetry as record:
             result = await choose_model([model("a"), model("b")], "hi", group_id="ws")
-        assert (result.model, result.status) == ("a", "fallback")
+        assert (result.model, result.status) == ("b", "selected")
+        assert result.confidence == 0.6
         assert record.call_args.args[2] == "uncertain"
 
 
@@ -312,6 +357,7 @@ def test_trace_row_shape():
         "reason": "timeout",
         "connection": None,
         "picked": None,
+        "confidence": None,
         "candidates": 0,
     }
     assert row["duration_ms"] == 12
@@ -322,6 +368,12 @@ def test_trace_row_shape():
     assert trace_row(via_openrouter, "j", None)["output"] == (
         "Auto (Jev via OpenRouter) → m"
     )
+    sure = ModelSelection("m", "selected", connection="openrouter", confidence=0.614)
+    assert trace_row(sure, "j", None)["output"] == (
+        "Auto (Jev via OpenRouter) → m (0.61)"
+    )
+    assert trace_row(sure, "j", None)["trace_metadata"]["confidence"] == 0.614
+    assert sure.trace()["confidence"] == 0.614
     assert trace_row(ModelSelection("m", "fallback"), "j", None)["output"] == (
         "Auto fell back to m"
     )
@@ -342,7 +394,8 @@ class TestTheGuarantee:
         from src.services.decisions import model_selection as ms
 
         async def ask(models, prompt, group_id):
-            return "stealth/space-bunny-alpha", None, "stealth/space-bunny-alpha"
+            bunny = "stealth/space-bunny-alpha"
+            return bunny, None, bunny, 0.4
 
         with patch.object(ms, "_ask", new=ask):
             result = await choose_model([model("a"), model("b")], "hi", group_id="ws")
@@ -356,7 +409,7 @@ class TestTheGuarantee:
         auto = model("or-auto", name="openrouter/auto", provider="openrouter")
         seen = []
 
-        async def decide(policy, state, questions, group_id):
+        async def decide(policy, state, questions, group_id, accept_uncertain):
             seen.append([m["name"] for m in state["models"]])
             return answer("0", ["0", "none"]), None
 
