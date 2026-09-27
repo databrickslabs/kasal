@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from src.db.session import async_session_factory
 from src.models.template import PromptTemplate
+from src.seeds.errors import SeederIncomplete
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -697,6 +698,10 @@ async def seed_async() -> None:
     logger.info(
         f"Prompt templates seeding summary: Added {templates_added}, Updated {templates_updated}, Skipped {templates_skipped}, Errors {templates_error}"
     )
+    if templates_error:
+        raise SeederIncomplete(
+            "prompt_templates", templates_error, len(DEFAULT_TEMPLATES)
+        )
 
 
 async def seed() -> None:
@@ -710,7 +715,8 @@ async def seed() -> None:
         import traceback
 
         logger.error(f"Prompt templates seeding traceback: {traceback.format_exc()}")
-        # Don't re-raise - allow other seeds to run
+        # Re-raise: the runner still runs the other seeders, then reports this.
+        raise
 
 
 # For backwards compatibility or direct command-line usage

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from src.db.session import async_session_factory
 from src.models.group_tool import GroupTool
 from src.models.tool import Tool
+from src.seeds.errors import SeederIncomplete
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -743,6 +744,8 @@ async def seed_async() -> None:
         f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, "
         f"Removed {tools_removed}, Skipped {tools_skipped}, Errors {tools_error}"
     )
+    if tools_error:
+        raise SeederIncomplete("tools", tools_error, len(tools_data))
 
 
 async def seed() -> None:

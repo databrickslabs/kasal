@@ -123,16 +123,17 @@ For the other ways the launchers differ, see [Compare the launchers](#compare-th
 
 On a new database, start the app once. `./run.sh` (or any other launcher; see [compare the launchers](#compare-the-launchers)) runs `init_db()` at startup, which builds the whole schema, and then seeds it in the background while `AUTO_SEED_DATABASE` is on. Nothing else is needed.
 
-To build and seed a database without starting the server, for example a scratch file for a test, run `init_db()` and then the seeders:
+To build and seed a database without starting the server, for example a scratch file for a test, run the seeders script. It runs `init_db()` first (idempotent, so it is safe on an existing database), then every seeder:
 
 ```bash
 cd src/backend
 export DATABASE_TYPE=sqlite SQLITE_DB_PATH=/tmp/kasal-scratch.db
-uv run --frozen python -c "import asyncio; from src.db.session import init_db; asyncio.run(init_db())"
 uv run --frozen python run_seeders.py
 ```
 
-The order matters. `run_seeders.py` does not create tables: on an empty database every seeder fails with `no such table`, yet the script still prints "All seeders completed successfully!" and exits 0. Check that `init_db()` ran first.
+The script exits 0 only when every seeder succeeded. If any seeder fails it still runs the rest, then logs `SEEDING FAILED` with the name and error of each failed seeder and exits 1. No seeder is optional: each one writes rows the app or its bundled examples rely on. Best-effort cleanup inside a seeder, such as pruning retired model rows, logs a warning instead.
+
+At server startup, seeding runs in the background and a failure never stops the server: it is logged as an ERROR that names the failed seeders, and the app keeps serving. The exception is a fresh Lakebase installation (the attached database resource), which refuses to start when an essential seeder (`model_configs`, `prompt_templates` or `tools`) fails, because it has no earlier defaults to fall back on.
 
 ### Status of Alembic
 

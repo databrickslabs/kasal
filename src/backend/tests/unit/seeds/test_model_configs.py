@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.seeds.errors import SeederIncomplete
 from src.seeds.model_configs import (
     DEFAULT_MODELS,
     MODEL_CONFIGS,
@@ -404,14 +405,15 @@ class TestSeedEntryPoint:
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_seed_does_not_raise_on_error(self):
-        """Test that seed() suppresses exceptions and logs them."""
+    async def test_seed_reraises_on_error(self):
+        """seed() logs the failure and re-raises it."""
         with patch(
             "src.seeds.model_configs.seed_async", new_callable=AsyncMock
         ) as mock:
             mock.side_effect = Exception("Seed failure")
-            # Should not raise
-            await seed()
+            # Re-raised so the runner reports it (it still runs the others)
+            with pytest.raises(Exception, match="Seed failure"):
+                await seed()
             mock.assert_awaited_once()
 
 
@@ -444,7 +446,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
         mock_session.commit.assert_awaited_once()
@@ -471,7 +474,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
 
@@ -497,7 +501,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
 
@@ -523,7 +528,8 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
         mock_session.add.assert_not_called()
 
@@ -552,9 +558,10 @@ class TestSeedAsyncValidation:
             ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", single_model),
         ):
-            await seed_async()
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
-        # Should still commit (with error count incremented)
+        # The valid rows are still committed; the run then fails loudly.
         mock_session.commit.assert_awaited_once()
 
 

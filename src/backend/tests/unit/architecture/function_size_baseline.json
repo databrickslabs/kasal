@@ -1,7 +1,7 @@
 {
   "src/backend/src/core/llm/robust_json.py::robust_json_parser": 298,
   "src/backend/src/db/session.py::init_db": 245,
-  "src/backend/src/main.py::lifespan": 610,
+  "src/backend/src/main.py::lifespan": 583,
   "src/backend/src/repositories/database_backup_repository.py::DatabaseBackupRepository.restore_sqlite_backup": 257,
   "src/backend/src/seeds/tools.py::get_tool_configs": 416,
   "src/backend/src/services/a2ui/runner.py::compose_surface": 356,
