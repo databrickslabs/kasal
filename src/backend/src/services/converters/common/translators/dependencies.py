@@ -5,7 +5,7 @@ Resolves measure dependencies and builds DAX formulas with proper nesting
 
 import re
 from collections import defaultdict, deque
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from ...base.models import KPI, KPIDefinition
 
@@ -13,12 +13,12 @@ from ...base.models import KPI, KPIDefinition
 class DependencyResolver:
     """Resolves dependencies between measures and handles tree parsing for nested formulas"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.measure_registry: Dict[str, KPI] = {}
         self.dependency_graph: Dict[str, List[str]] = defaultdict(list)
         self.resolved_cache: Dict[str, str] = {}
 
-    def register_measures(self, definition: KPIDefinition):
+    def register_measures(self, definition: KPIDefinition) -> None:
         """Register all measures from a KPI definition for dependency resolution"""
         self.measure_registry.clear()
         self.dependency_graph.clear()
@@ -154,7 +154,7 @@ class DependencyResolver:
         rec_stack = set()
         cycles = []
 
-        def dfs(measure, path):
+        def dfs(measure: str, path: List[str]) -> None:
             if measure in rec_stack:
                 # Found a cycle
                 cycle_start = path.index(measure)
@@ -178,7 +178,9 @@ class DependencyResolver:
 
         return cycles
 
-    def resolve_formula_inline(self, measure_name: str, max_depth: int = 5) -> str:
+    def resolve_formula_inline(
+        self, measure_name: Optional[str], max_depth: int = 5
+    ) -> str:
         """
         Resolve a measure formula by inlining all dependencies
 
@@ -189,10 +191,10 @@ class DependencyResolver:
         Returns:
             Formula with all measure references replaced by their DAX expressions
         """
-        if measure_name in self.resolved_cache:
+        if measure_name is not None and measure_name in self.resolved_cache:
             return self.resolved_cache[measure_name]
 
-        if measure_name not in self.measure_registry:
+        if measure_name is None or measure_name not in self.measure_registry:
             raise ValueError(f"Measure '{measure_name}' not found in registry")
 
         return self._resolve_recursive(measure_name, set(), max_depth)

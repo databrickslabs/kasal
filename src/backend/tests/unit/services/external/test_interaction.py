@@ -116,6 +116,10 @@ class TestRespond:
         with patch("src.services.hitl.service.HITLService", return_value=service):
             await respond(_caller(), "run-1", word)
         service.reject.assert_awaited_once()
+        # reject() takes the refusal as `reason`; it has no comment/user_token.
+        kwargs = service.reject.await_args.kwargs
+        assert kwargs["reason"] == word
+        assert "comment" not in kwargs and "user_token" not in kwargs
 
     @pytest.mark.asyncio
     async def test_ambiguous_text_does_not_reject(self):

@@ -63,7 +63,7 @@ async def _ensure_mlflow_config_table(conn: AsyncConnection) -> None:
     await ensure_table(conn, "src.models.mlflow_config", "MLflowConfig")
 
 
-async def _ensure_a2a_push_configs_table(conn) -> None:
+async def _ensure_a2a_push_configs_table(conn: AsyncConnection) -> None:
     """A2A push-notification configs."""
     await ensure_table(conn, "src.models.a2a_push_config", "A2APushConfig")
 
@@ -73,7 +73,7 @@ async def _ensure_skills_tables(conn: AsyncConnection) -> None:
     await ensure_table(conn, "src.models.skill", "Skill", "SkillFile")
 
 
-async def _ensure_a2a_agents_table(conn) -> None:
+async def _ensure_a2a_agents_table(conn: AsyncConnection) -> None:
     """Registered A2A agents."""
     await ensure_table(conn, "src.models.a2a_agent", "A2AAgent")
 

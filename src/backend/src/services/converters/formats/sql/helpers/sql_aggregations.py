@@ -4,7 +4,7 @@ Provides comprehensive SQL aggregation support for various SQL dialects
 """
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..models import SQLAggregationType, SQLDialect
 
@@ -41,7 +41,7 @@ class SQLAggregationBuilder:
         agg_type: SQLAggregationType,
         column_name: str,
         table_name: str,
-        kbi_definition: Dict[str, Any] = None,
+        kbi_definition: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Build SQL aggregation expression
@@ -478,8 +478,8 @@ class SQLFilterProcessor:
     def process_filters(
         self,
         filters: List[str],
-        variables: Dict[str, Any] = None,
-        definition_filters: Dict[str, Any] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        definition_filters: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         """Process a list of filters for SQL"""
         if variables is None:
@@ -663,7 +663,7 @@ def detect_and_build_sql_aggregation(
 
 
 def _detect_sql_aggregation_type(
-    formula: str, aggregation_hint: str = None
+    formula: str, aggregation_hint: Optional[str] = None
 ) -> SQLAggregationType:
     """Detect SQL aggregation type from formula or hint"""
     if aggregation_hint:

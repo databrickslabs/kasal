@@ -9,7 +9,9 @@ import asyncio
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
@@ -23,6 +25,9 @@ from src.services.execution.engine_factory import EngineFactory
 from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext
+
+if TYPE_CHECKING:
+    from src.services.execution.engine_service import KasalEngineService
 
 #: Per-agent LLM overrides stored on the agent row. NULL = inherit the model.
 _AGENT_LLM_OVERRIDE_FIELDS = (
@@ -40,7 +45,7 @@ crew_logger = LoggerManager.get_instance().crew
 _active_tasks = set()
 
 # Global in-memory storage of executions
-executions = {}
+executions: Dict[str, Dict[str, Any]] = {}
 
 
 class JobStatus(Enum):
@@ -57,7 +62,7 @@ class JobStatus(Enum):
 class KasalExecutionService:
     """Service for managing CrewAI executions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the service.
         """
@@ -67,8 +72,8 @@ class KasalExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         Prepare and run a crew execution.
@@ -523,8 +528,8 @@ class KasalExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """Thin service-layer delegate for the "chat" (light) single-agent path.
 
@@ -571,7 +576,7 @@ class KasalExecutionService:
             session=session,
         )
 
-    async def _prepare_engine(self, config: CrewConfig) -> Any:
+    async def _prepare_engine(self, config: CrewConfig) -> "KasalEngineService":
         """
         Prepare the engine for execution.
 
@@ -595,8 +600,8 @@ class KasalExecutionService:
         self,
         execution_id: str,
         config: CrewConfig,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -655,7 +660,10 @@ class KasalExecutionService:
 
     @staticmethod
     def add_execution_to_memory(
-        execution_id: str, status: str, run_name: str, created_at: datetime = None
+        execution_id: str,
+        status: str,
+        run_name: str,
+        created_at: Optional[datetime] = None,
     ) -> None:
         """
         Add execution to in-memory storage.
@@ -745,7 +753,7 @@ class KasalExecutionService:
         # Cancel execution through engine
         return await engine.cancel_execution(execution_id)
 
-    async def get_execution_status(self, execution_id: str) -> Dict[str, Any]:
+    async def get_execution_status(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """
         Get the status of an execution.
 
@@ -788,7 +796,7 @@ class KasalExecutionService:
         edges: Optional[List[Dict[str, Any]]] = None,
         job_id: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """
         Run a flow execution with the provided configuration.

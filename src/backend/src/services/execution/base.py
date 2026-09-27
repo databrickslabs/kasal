@@ -5,14 +5,14 @@ This module defines the base interface for all AI execution engines.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 class BaseEngineService(ABC):
     """Abstract base class for all AI execution engines"""
 
     @abstractmethod
-    async def initialize(self, **kwargs) -> None:
+    async def initialize(self, **kwargs: Any) -> bool:
         """
         Initialize the engine with configuration
 
@@ -23,17 +23,23 @@ class BaseEngineService(ABC):
 
     @abstractmethod
     async def run_execution(
-        self, execution_id: str, config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self,
+        execution_id: str,
+        execution_config: Dict[str, Any],
+        group_context: Optional[Any] = None,
+        session: Optional[Any] = None,
+    ) -> str:
         """
         Run an execution with the engine
 
         Args:
             execution_id: ID of the execution
-            config: Configuration for the execution
+            execution_config: Configuration for the execution
+            group_context: Optional tenant context
+            session: Optional database session
 
         Returns:
-            Dictionary with execution results
+            The execution id
         """
         pass
 

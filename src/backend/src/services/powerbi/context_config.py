@@ -1,6 +1,8 @@
 import logging
 from typing import List
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import ConflictError, KasalError, NotFoundError
 from src.repositories.powerbi_context_config_repository import (
     PowerBIBusinessMappingRepository,
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 class PowerBIContextConfigService:
     """Service for managing PowerBI context configuration (business mappings and field synonyms)."""
 
-    def __init__(self, session, group_id: str):
+    def __init__(self, session: AsyncSession, group_id: str) -> None:
         """
         Initialize the service with session and group context.
 

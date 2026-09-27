@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.skill import Skill
 from src.schemas.skill import (
     SkillCreate,
     SkillDraftRequest,
@@ -31,6 +32,7 @@ from src.services.skills import draft_job, packaging, parser
 from src.services.skills.generation import SkillGenerationService
 from src.services.skills.service import SkillService
 from src.services.skills.uc_sync import SkillUcSyncService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(
     prefix="/skills",
@@ -56,12 +58,12 @@ def get_service(session: SessionDep) -> SkillService:
 ServiceDep = Annotated[SkillService, Depends(get_service)]
 
 
-def _require_author(group_context) -> None:
+def _require_author(group_context: GroupContext) -> None:
     if not check_role_in_context(group_context, AUTHOR_ROLES):
         raise ForbiddenError("Only workspace admins and editors can author skills.")
 
 
-async def _builtin_names_for(service: SkillService, skill) -> Set[str]:
+async def _builtin_names_for(service: SkillService, skill: Skill) -> Set[str]:
     """Whether THIS row shadows a builtin — one lookup, not a whole listing."""
     if skill.group_id is None:
         return set()
@@ -72,7 +74,9 @@ async def _builtin_names_for(service: SkillService, skill) -> Set[str]:
     )
 
 
-def _to_response(skill, builtin_names: Optional[Set[str]] = None) -> SkillResponse:
+def _to_response(
+    skill: Skill, builtin_names: Optional[Set[str]] = None
+) -> SkillResponse:
     """Row -> response.
 
     ``builtin_names`` lets the listing answer "does this override a builtin?"
@@ -104,7 +108,9 @@ def _to_response(skill, builtin_names: Optional[Set[str]] = None) -> SkillRespon
 
 
 @router.get("", response_model=SkillListResponse)
-async def list_skills(service: ServiceDep, group_context: GroupContextDep):
+async def list_skills(
+    service: ServiceDep, group_context: GroupContextDep
+) -> SkillListResponse:
     """Skills this workspace can use: Kasal's builtins plus its own."""
     skills = await service.list_skills(group_context)
     builtin_names = {s.name for s in skills if s.group_id is None}
@@ -114,7 +120,9 @@ async def list_skills(service: ServiceDep, group_context: GroupContextDep):
 
 
 @router.post("/validate", response_model=SkillValidationResult)
-async def validate_skill(body: SkillCreate, group_context: GroupContextDep):
+async def validate_skill(
+    body: SkillCreate, group_context: GroupContextDep
+) -> SkillValidationResult:
     """Check a skill without saving it.
 
     Answers 200 with ``valid: false`` — an invalid draft is what the editor
@@ -128,7 +136,7 @@ async def validate_skill(body: SkillCreate, group_context: GroupContextDep):
 @router.post("/draft", response_model=SkillDraftResponse)
 async def draft_skill(
     body: SkillDraftRequest, session: SessionDep, group_context: GroupContextDep
-):
+) -> Dict[str, Any]:
     """Draft a skill from a request or a captured conversation.
 
     One focused generation call (the ``generate_skill`` template), validated by
@@ -176,7 +184,7 @@ async def start_skill_draft(
 @router.post("", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
 async def create_skill(
     body: SkillCreate, service: ServiceDep, group_context: GroupContextDep
-):
+) -> SkillResponse:
     _require_author(group_context)
     try:
         skill = await service.create_skill(body, group_context)
@@ -193,7 +201,7 @@ async def update_skill(
     body: SkillUpdate,
     service: ServiceDep,
     group_context: GroupContextDep,
-):
+) -> SkillResponse:
     """Edit a skill, builtin or not.
 
     Editing a builtin saves the change as this workspace's own copy — invisible
@@ -216,7 +224,7 @@ async def update_skill(
 @router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_skill(
     skill_id: int, service: ServiceDep, group_context: GroupContextDep
-):
+) -> None:
     _require_author(group_context)
     if not await service.delete_skill(skill_id, group_context):
         raise NotFoundError(f"No editable skill {skill_id} in this workspace.")
@@ -228,7 +236,7 @@ async def set_enabled(
     service: ServiceDep,
     group_context: GroupContextDep,
     payload: Annotated[Dict[str, Any], Body()],
-):
+) -> SkillResponse:
     """Turn a skill on or off for this workspace.
 
     Disabling a builtin clones it disabled into the workspace rather than
@@ -248,7 +256,7 @@ async def set_enabled(
 @router.post("/{skill_id}/reset", response_model=SkillResponse)
 async def reset_skill(
     skill_id: int, service: ServiceDep, group_context: GroupContextDep
-):
+) -> SkillResponse:
     """Put a skill back to the version Kasal ships.
 
     Only meaningful for a skill that overrides a builtin — 404 otherwise, since
@@ -274,7 +282,7 @@ async def upload_skill(
     group_context: GroupContextDep,
     file: Annotated[UploadFile, File()],
     replace: Annotated[bool, Query()] = False,
-):
+) -> SkillResponse:
     """Import a skill folder as a zip.
 
     Accepts a wrapping directory or a bare ``SKILL.md`` at the root — both are
@@ -300,13 +308,13 @@ async def upload_skill(
     return _to_response(skill)
 
 
-@router.get("/{skill_id}/files")
+@router.get("/{skill_id}/files", response_model=None)
 async def read_skill_file(
     skill_id: int,
     service: ServiceDep,
     group_context: GroupContextDep,
     path: Annotated[str, Query(description="Path relative to the skill root.")],
-):
+) -> Dict[str, Any]:
     """The content of one bundled file.
 
     Separate from the skill listing on purpose: a workspace with twenty skills
@@ -338,13 +346,13 @@ async def read_skill_file(
     raise NotFoundError(f"'{skill.name}' has no file '{wanted}'.")
 
 
-@router.get("/uc")
+@router.get("/uc", response_model=None)
 async def list_uc_skills(
     session: SessionDep,
     group_context: GroupContextDep,
     catalog: str = Query(..., description="Unity Catalog catalog to list skills in"),
     schema: str = Query(..., description="Schema within the catalog"),
-):
+) -> Dict[str, Any]:
     """List the skills published in a Unity Catalog schema.
 
     Reads UC on behalf of the logged-in user (OBO), so it shows exactly the
@@ -357,13 +365,13 @@ async def list_uc_skills(
     return {"skills": await sync.list_uc_skills(catalog, schema)}
 
 
-@router.post("/{skill_id}/sync-to-uc")
+@router.post("/{skill_id}/sync-to-uc", response_model=None)
 async def sync_skill_to_uc(
     skill_id: int,
     body: UcSyncTarget,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Publish this workspace's skill into ``catalog.schema`` as a UC skill.
 
     Create securable → upload SKILL.md + bundle files → finalize, on behalf of
@@ -377,12 +385,12 @@ async def sync_skill_to_uc(
     return await sync.push_skill(skill_id, body.catalog, body.schema_name)
 
 
-@router.post("/sync-all-to-uc")
+@router.post("/sync-all-to-uc", response_model=None)
 async def sync_all_skills_to_uc(
     body: UcSyncTarget,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Publish every skill visible to this workspace into ``catalog.schema``.
 
     Returns a per-skill ``{name, status, error?}`` summary — one skill failing
@@ -395,12 +403,12 @@ async def sync_all_skills_to_uc(
     return {"results": await sync.push_all_skills(body.catalog, body.schema_name)}
 
 
-@router.post("/sync-all-from-uc")
+@router.post("/sync-all-from-uc", response_model=None)
 async def sync_all_skills_from_uc(
     body: UcSyncTarget,
     session: SessionDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Pull every skill published in ``catalog.schema`` into this workspace.
 
     Imported skills are ``source='uploaded'`` and upserted BY NAME — a re-pull
@@ -417,7 +425,7 @@ async def sync_all_skills_from_uc(
 @router.get("/{skill_id}/export")
 async def export_skill(
     skill_id: int, service: ServiceDep, group_context: GroupContextDep
-):
+) -> Response:
     """Download a skill as a folder-shaped zip.
 
     Portability is the reason to use this format at all: what comes out here

@@ -203,7 +203,7 @@ class HITLWebhookService:
             HITLWebhookNotFoundError: If webhook not found
         """
         # Build updates dict
-        updates = {}
+        updates: Dict[str, Any] = {}
         if webhook_data.name is not None:
             updates["name"] = webhook_data.name
         if webhook_data.url is not None:

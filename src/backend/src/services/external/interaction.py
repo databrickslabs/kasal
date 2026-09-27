@@ -153,8 +153,7 @@ async def respond(
             approval_id=approval_id,
             rejected_by=caller.identifier,
             group_id=group_id,
-            comment=response,
-            user_token=token,
+            reason=response,
         )
     else:
         await service.approve(

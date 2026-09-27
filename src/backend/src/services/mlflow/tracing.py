@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager, nullcontext
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _get_mlflow():
+def _get_mlflow() -> Any:
     """Get mlflow module if available."""
     try:
         import mlflow  # type: ignore
@@ -26,7 +26,9 @@ def _get_mlflow():
 
 
 @contextmanager
-def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
+def start_root_trace(
+    trace_name: str, inputs: Optional[Dict[str, Any]] = None
+) -> Iterator[Any]:
     """Start a root trace using fluent API if available; otherwise no-op context.
 
     In MLflow 3.x, mlflow.start_span() without a parent creates a root trace.
@@ -129,10 +131,12 @@ def get_last_active_trace_id() -> Optional[str]:
             getattr(mlflow, "tracing", None), "get_last_active_trace_id", None
         )
         if callable(get_last):
-            return get_last()
+            trace_id: Optional[str] = get_last()
+            return trace_id
         alt = getattr(mlflow, "get_last_active_trace_id", None)
         if callable(alt):
-            return alt()
+            alt_id: Optional[str] = alt()
+            return alt_id
     except Exception:
         return None
     return None

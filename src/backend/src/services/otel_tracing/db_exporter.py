@@ -276,7 +276,7 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     Merges kasal bridge attrs with CrewAI instrumentor attrs to produce
     a rich metadata dict for downstream consumption.
     """
-    attrs = dict(span.attributes) if span.attributes else {}
+    attrs: Dict[str, Any] = dict(span.attributes) if span.attributes else {}
     metadata: Dict[str, Any] = {}
 
     # Kasal bridge attributes — capture ALL kasal.extra.* dynamically
@@ -465,7 +465,7 @@ class KasalDBSpanExporter(SpanExporter):
 
         job_id = self._job_id
 
-        async def _write_async():
+        async def _write_async() -> None:
             written = 0
             batch: list = []
             try:
@@ -556,7 +556,7 @@ class KasalDBSpanExporter(SpanExporter):
 
         shutdown_done = threading.Event()
 
-        def _do_shutdown():
+        def _do_shutdown() -> None:
             self._executor.shutdown(wait=True, cancel_futures=False)
             shutdown_done.set()
 

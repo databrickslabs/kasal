@@ -14,7 +14,7 @@ HTML path.)
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.services.a2ui.compose import infer_deliverable
 from src.services.a2ui.stream import (
@@ -55,7 +55,7 @@ def wants_instant_shell(query: str) -> bool:
     return shell_kind(query) is not None
 
 
-async def _resolve(group_id, query):
+async def _resolve(group_id: Optional[str], query: str) -> Tuple[bool, str, bool]:
     """(enabled, guidance, early) from the workspace's UIConfig — never raises.
 
     ``early`` is the head-start switch: the workspace's Output design override,

@@ -5,8 +5,11 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import uuid4
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.base_service import BaseService
 from src.models.chat_history import ChatHistory
+from src.models.chat_session import ChatSession
 from src.repositories.chat_history_repository import ChatHistoryRepository
 from src.schemas.chat_history import ChatHistoryCreate, ChatHistoryResponse
 from src.services.settings.engine_settings import setting as engine_setting
@@ -101,7 +104,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
     Follows Kasal's service patterns for multi-group deployments.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession):
         """
         Initialize the service with session.
 
@@ -472,7 +475,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         title: str = "New Chat",
         session_id: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> ChatSession:
         """Create a named chat session owned by user_id in the current group."""
         data = {
             "id": session_id or str(uuid4()),
@@ -496,7 +499,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         page: int = 0,
         per_page: int = 50,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> List[ChatSession]:
         """List the user's named sessions in the current workspace, most recent first."""
         if not group_context or not group_context.group_ids:
             return []
@@ -512,7 +515,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         session_id: str,
         title: str,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> Optional[ChatSession]:
         """Rename a named session (group-checked). Returns None when not found."""
         if not group_context or not group_context.group_ids:
             return None

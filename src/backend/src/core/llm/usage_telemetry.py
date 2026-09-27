@@ -19,9 +19,9 @@ process that runs an LLM performs (API process and execution subprocesses alike)
 import asyncio
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Optional, TypeGuard, cast
 
-from src.core.events import LLMCallCompletedEvent
+from src.core.events import BaseEvent, LLMCallCompletedEvent
 from src.core.events.bus import event_bus
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def _resolve_user_token() -> Optional[str]:
     return UserContext.get_user_token() or get_subprocess_user_token()
 
 
-def _should_send(usage: Optional[dict]) -> bool:
+def _should_send(usage: Optional[dict]) -> TypeGuard[dict]:
     """Cheap, first-thing guard.
 
     Telemetry targets Databricks "logfood"; a purely local deployment has no
@@ -73,14 +73,17 @@ def _product_context(source: Any) -> str:
     return "llm"
 
 
-def _on_llm_call_completed(source: Any, event: LLMCallCompletedEvent) -> None:
+def _on_llm_call_completed(source: Any, event: BaseEvent) -> None:
     """Forward one call's usage. Never raises — the bus logs, but telemetry must
     not be able to disturb a run either way."""
     usage = getattr(event, "usage", None)
     if not _should_send(usage):
         return
 
-    model = getattr(event, "model", None) or getattr(source, "model", "unknown")
+    # An LLMCallCompletedEvent (registered below); read defensively all the same.
+    model = cast(
+        str, getattr(event, "model", None) or getattr(source, "model", "unknown")
+    )
     product_context = _product_context(source)
     logger.info(
         "[TokenTelemetry] model=%s context=%s tokens=%s",

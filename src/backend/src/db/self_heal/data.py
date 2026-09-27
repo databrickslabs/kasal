@@ -7,12 +7,14 @@ scoped tightly enough to run on every startup.
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from src.db.self_heal.dialect import _conn_is_sqlite
 
 logger = logging.getLogger(__name__)
 
 
-async def _disable_bi_specialist_crew_memory(conn) -> None:
+async def _disable_bi_specialist_crew_memory(conn: AsyncConnection) -> None:
     """Idempotently disable crew/agent memory for the pre-seeded 'bi-specialist'
     workspace. These are deterministic ETL crews (PBI config extraction → UCMV
     generation → validation → deploy) that pass all data via the flow handoff and
@@ -45,7 +47,7 @@ async def _disable_bi_specialist_crew_memory(conn) -> None:
         logger.warning(f"Could not disable bi-specialist crew memory: {e}")
 
 
-async def _heal_personal_group_names(conn) -> None:
+async def _heal_personal_group_names(conn: AsyncConnection) -> None:
     """One-time data heal for the workspace→teamspace rename: auto-created
     personal groups persisted the old display name ("Personal Workspace - …")
     in groups.name, which surfaces in the admin group list. The personal tenant
@@ -74,7 +76,7 @@ _LEGACY_ENGINE_CONFIG_KEYS = (
 )
 
 
-async def _heal_engine_config_names(conn) -> None:
+async def _heal_engine_config_names(conn: AsyncConnection) -> None:
     """One-time data heal for the crewai→kasal engine rename: engine_configs
     rows persisted engine_name='crewai' (the legacy name of what is now the
     kasal engine). Rewrite in place so lookups keyed on 'kasal' find them.
@@ -101,7 +103,7 @@ async def _heal_engine_config_names(conn) -> None:
         logger.warning(f"Could not heal engine_config engine names: {e}")
 
 
-async def _assign_personal_workspace_ids(conn) -> None:
+async def _assign_personal_workspace_ids(conn: AsyncConnection) -> None:
     """Preserve unambiguous IDs; stop granting ambiguous historical scopes.
 
     No application data is moved or deleted. A legacy scope derived by multiple

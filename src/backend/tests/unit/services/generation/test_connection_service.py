@@ -409,7 +409,7 @@ class TestGenerateConnections:
         request = _make_request()
 
         # Template static method -- no session means TemplateService.get_template_content is called as static
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -471,7 +471,9 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value=None)
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value=None
+        )
 
         with pytest.raises(ValueError, match="template.*not found"):
             await svc.generate_connections(request)
@@ -488,7 +490,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="")
+        MockTemplateService.get_effective_template_content = AsyncMock(return_value="")
 
         with pytest.raises(ValueError, match="template.*not found"):
             await svc.generate_connections(request)
@@ -505,7 +507,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request(instructions="Focus on performance")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -539,7 +541,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
         MockLLMManager.completion = AsyncMock(side_effect=RuntimeError("API down"))
@@ -559,7 +561,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
         MockLLMManager.completion = AsyncMock(return_value="not json at all")
@@ -581,7 +583,7 @@ class TestGenerateConnections:
         tasks = [_make_task(name="T1"), _make_task(name="T2")]
         request = _make_request(tasks=tasks)
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -613,7 +615,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -641,7 +643,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -668,7 +670,7 @@ class TestGenerateConnections:
         # Use empty string model to trigger default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -704,7 +706,7 @@ class TestGenerateConnections:
         # Empty string model triggers fallback to env var
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -742,7 +744,7 @@ class TestGenerateConnections:
         # Empty string model triggers default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -776,7 +778,7 @@ class TestGenerateConnections:
         # Empty string model triggers default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -810,7 +812,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request(model="claude-3-opus")
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -840,7 +842,7 @@ class TestGenerateConnections:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -1102,7 +1104,7 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request(instructions=None)
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="system prompt"
         )
 
@@ -1133,7 +1135,9 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request(model="my-model")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys")
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value="sys"
+        )
 
         response_data = _valid_response_data()
         MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
@@ -1155,7 +1159,9 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys")
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value="sys"
+        )
 
         response_data = _valid_response_data()
         captured = {}
@@ -1201,7 +1207,7 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(
+        MockTemplateService.get_effective_template_content = AsyncMock(
             return_value="sys prompt text"
         )
 
@@ -1237,7 +1243,9 @@ class TestEdgeCases:
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys")
+        MockTemplateService.get_effective_template_content = AsyncMock(
+            return_value="sys"
+        )
 
         response_data = _valid_response_data()
         captured = {}

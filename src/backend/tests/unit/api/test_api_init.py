@@ -40,7 +40,6 @@ class TestSubRouterImports:
             "healthcheck_router",
             "logs_router",
             "models_router",
-            "databricks_secrets_router",
             "api_keys_router",
             "tasks_router",
             "templates_router",

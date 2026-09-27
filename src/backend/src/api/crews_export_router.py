@@ -90,7 +90,7 @@ async def export_crew(
     request: CrewExportRequest,
     service: ExportServiceDep,
     group_context: GroupContextDep,
-):
+) -> CrewExportResponse:
     """
     Export crew as a deployable Databricks App.
     Only Editors and Admins can export crews.
@@ -180,7 +180,7 @@ async def download_export(
     runtime: str = Query(
         None, description="Agent runtime for the app: 'kasal' or 'crewai'"
     ),
-):
+) -> StreamingResponse:
     """
     Download exported crew as file.
     Only Editors and Admins can download exports.
@@ -268,7 +268,7 @@ async def deploy_crew_app(
     request: AppDeploymentRequest,
     service: AppDeploymentServiceDep,
     group_context: GroupContextDep,
-):
+) -> AppDeploymentResponse:
     """
     Deploy a crew as a Databricks App, directly from the UI.
 
@@ -308,7 +308,7 @@ async def get_app_deployment_status(
     service: AppDeploymentServiceDep,
     group_context: GroupContextDep,
     deployment_id: str = Query(..., description="Deployment id returned by deploy-app"),
-):
+) -> AppDeploymentStatusResponse:
     """Return the status of an in-flight or completed Databricks Apps deployment."""
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can check deployment status")
@@ -328,7 +328,7 @@ async def get_app_deployment_status(
 async def list_lakebase_instances(
     service: AppDeploymentServiceDep,
     group_context: GroupContextDep,
-):
+) -> LakebaseInstancesResponse:
     """List the workspace's Lakebase instances for the deploy screen.
 
     Lets the user pick an existing Lakebase instance to attach to the app (or
@@ -356,7 +356,7 @@ async def deploy_crew(
     request: DeploymentRequest,
     service: DeploymentServiceDep,
     group_context: GroupContextDep,
-):
+) -> DeploymentResponse:
     """
     Deploy crew to Databricks Model Serving endpoint.
     Only Admins can deploy crews.

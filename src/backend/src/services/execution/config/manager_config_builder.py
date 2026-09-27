@@ -20,10 +20,10 @@ class ManagerConfigBuilder:
     def __init__(
         self,
         config: Dict[str, Any],
-        tool_service=None,
-        tool_factory=None,
+        tool_service: Any = None,
+        tool_factory: Any = None,
         user_token: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the ManagerConfigBuilder
 
@@ -105,20 +105,16 @@ class ManagerConfigBuilder:
             manager_config = crew_config["manager_agent"]
             if isinstance(manager_config, dict):
                 logger.info("Creating custom manager agent from configuration")
-                agent_llm = None
-                if requested_model and group_id:
-                    try:
-                        agent_llm = await LLMManager.configure_kasal_llm(
-                            requested_model, group_id
-                        )
-                    except Exception:
-                        pass
+                spec = dict(manager_config)
+                if requested_model and not spec.get("llm"):
+                    # The run's model, built the way every other agent's is.
+                    spec["llm"] = requested_model
                 manager_agent = await create_agent(
-                    agent_config=manager_config,
-                    llm=agent_llm,
+                    agent_key="manager",
+                    agent_config=spec,
                     tool_service=self.tool_service,
                     tool_factory=self.tool_factory,
-                    user_token=self.user_token,
+                    config=self.config,  # carries group_id for the LLM build
                 )
                 crew_kwargs["manager_agent"] = manager_agent
                 logger.info("Set custom manager agent for hierarchical process")

@@ -9,6 +9,8 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.execution_status import ExecutionStatus
 from src.services.agent_builder.process_executor import process_crew_executor
 from src.services.execution.finalization import (
@@ -359,8 +361,8 @@ async def run_crew_in_process(
                     # wrong DB, find no RUNNING row, and silently skip the fix.
                     from src.utils.asyncio_utils import execute_db_operation_smart
 
-                    async def _recovery():
-                        async def _op(session):
+                    async def _recovery() -> None:
+                        async def _op(session: AsyncSession) -> None:
                             # Runs are ExecutionService's domain.
                             from src.services.execution.service import ExecutionService
 
@@ -376,7 +378,7 @@ async def run_crew_in_process(
 
                         await execute_db_operation_smart(_op)
 
-                    def _run_recovery():
+                    def _run_recovery() -> None:
                         asyncio.run(_recovery())
 
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:

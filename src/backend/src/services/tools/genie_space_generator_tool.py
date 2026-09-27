@@ -3,11 +3,14 @@
 import json
 import logging
 import urllib.parse
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +120,9 @@ class GenieSpaceGeneratorTool(BaseTool):
         super().__init__(**kwargs)
         self._default_config = default_config
 
-    def _authenticate(self, host_override: Optional[str] = None):
+    def _authenticate(
+        self, host_override: Optional[str] = None
+    ) -> Optional["AuthContext"]:
         """Obtain an AuthContext synchronously (OBO → PAT → SPN).
 
         ``host_override`` (the ``databricks_host`` input) may only re-spell the
@@ -129,7 +134,7 @@ class GenieSpaceGeneratorTool(BaseTool):
         return resolve_tool_auth(host_override)
 
     def _run(self, **kwargs: Any) -> str:
-        def _get(key):
+        def _get(key: str) -> Any:
             val = kwargs.get(key)
             if val is not None:
                 return val
@@ -290,7 +295,7 @@ class GenieSpaceGeneratorTool(BaseTool):
         # ── sample questions (config section) — IDs sorted alphabetically ─────────
         sample_question_list = sorted(
             [{"id": _new_id(), "question": [q]} for q in sample_questions],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
 
         # ── text instructions — max one block, ID sorted ───────────────────────────
@@ -298,7 +303,7 @@ class GenieSpaceGeneratorTool(BaseTool):
         if text_instructions.strip():
             text_instruction_list = sorted(
                 [{"id": _new_id(), "content": [text_instructions.strip()]}],
-                key=lambda x: x["id"],
+                key=lambda x: str(x["id"]),
             )
 
         # ── join specs — serialized_space format (left/right objects, sql list) ────
@@ -317,7 +322,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                     "sql": [cond, "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"],
                 }
             )
-        join_spec_entries = sorted(join_spec_entries, key=lambda x: x["id"])
+        join_spec_entries = sorted(join_spec_entries, key=lambda x: str(x["id"]))
 
         # ── SQL snippets — each list item has sql as a list, IDs sorted ───────────
         expressions_list = sorted(
@@ -329,7 +334,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for e in sql_expressions
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
         measures_list = sorted(
             [
@@ -341,7 +346,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for m in sql_measures
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
         filters_list = sorted(
             [
@@ -352,7 +357,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for f in sql_filters
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
 
         # ── example question SQLs ─────────────────────────────────────────────────
@@ -365,7 +370,7 @@ class GenieSpaceGeneratorTool(BaseTool):
                 }
                 for eq in example_sqls
             ],
-            key=lambda x: x["id"],
+            key=lambda x: str(x["id"]),
         )
 
         # ── assemble serialized_space dict and JSON-encode it ─────────────────────

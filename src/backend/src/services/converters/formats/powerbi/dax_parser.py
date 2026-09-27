@@ -87,7 +87,7 @@ class DAXExpressionParser:
         "MAXX",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize parser with transpilation engine."""
         self.logger = logging.getLogger(__name__)
         # Lazy import to avoid circular dependency
@@ -578,7 +578,9 @@ class DAXExpressionParser:
 
         # Build generic signature with placeholders
         generic_parts = []
-        type_counters = {}  # Track count of each type for numbering
+        type_counters: Dict[str, Dict[str, int]] = (
+            {}
+        )  # Track count of each type for numbering
 
         for token in tokens:
             if token.type in [
@@ -792,7 +794,7 @@ class DAXExpressionParser:
         Example:
             CALCULATE(SUM(Sales[Amount]), Region[Name] = "EMEA") -> ["Region[Name] = \"EMEA\""]
         """
-        filters = []
+        filters: List[str] = []
 
         # Check if this is a CALCULATE expression
         if "CALCULATE" not in expression.upper():

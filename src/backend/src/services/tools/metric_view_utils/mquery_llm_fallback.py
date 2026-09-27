@@ -92,7 +92,8 @@ def _parse_response(response_text: str) -> dict:
             text = text.split("```json")[1].split("```")[0].strip()
         elif text.startswith("```"):
             text = text.split("```")[1].split("```")[0].strip()
-        return json.loads(text)
+        parsed: dict = json.loads(text)
+        return parsed
     except (json.JSONDecodeError, IndexError):
         return {"success": False, "error": "Failed to parse LLM response"}
 
@@ -142,7 +143,7 @@ async def translate_mquery_to_sql(
     Returns a dict: {success, source_sql, source_table, confidence, explanation}.
     Fail-open — on any error returns {'success': False, ...}.
     """
-    _cache = cache if cache is not None else OrderedDict()
+    _cache: OrderedDict[str, dict] = cache if cache is not None else OrderedDict()
     cache_key = _content_hash(mquery)
     if cache_key in _cache:
         _cache.move_to_end(cache_key)

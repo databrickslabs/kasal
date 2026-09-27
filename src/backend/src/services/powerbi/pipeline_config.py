@@ -11,7 +11,7 @@ import json
 import re
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, cast
 
 __all__ = [
     "get_token",
@@ -54,11 +54,10 @@ import requests
 def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     """Acquire OAuth2 token via client_credentials grant (Service Principal).
 
-    Helper used by the generate_config CLI. The
-    Pipeline Config Generator *tool* does not call this — it resolves tokens
-    through the shared ``AadService`` (which additionally supports Service
-    Account and User-OAuth), then passes the resulting token into the
-    ``extract_*`` functions below.
+    Helper used by the generate_config CLI. The Pipeline Config Generator
+    *tool* does not call this — it resolves tokens through the shared
+    ``AadService`` (which also supports Service Account and User-OAuth), then
+    passes the resulting token into the ``extract_*`` functions below.
     """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     resp = requests.post(
@@ -72,7 +71,11 @@ def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
         timeout=30,
     )
     _check_response(resp, f"Auth (client_id={client_id[:8]}...)")
-    return resp.json()["access_token"]
+    return cast(str, resp.json()["access_token"])
+
+
+def _definition_parts(resp: Any) -> list[dict]:
+    return cast("list[dict]", resp.json().get("definition", {}).get("parts", []))
 
 
 def fetch_tmdl_parts(
@@ -80,9 +83,8 @@ def fetch_tmdl_parts(
 ) -> list[dict] | None:
     """Fetch the semantic model's TMDL definition parts via the Fabric REST API.
 
-    Returns the list of ``{path, payload}`` parts, or ``None`` if the workspace
-    is not Fabric-enabled / the model is unavailable. Handles the async 202
-    long-running-operation poll.
+    Returns the ``{path, payload}`` parts, or ``None`` when the workspace is not
+    Fabric-enabled or the model is unavailable; polls the async 202 operation.
     """
     url = (
         f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
@@ -95,7 +97,7 @@ def fetch_tmdl_parts(
     try:
         resp = requests.post(url, headers=headers, timeout=180)
         if resp.status_code == 200:
-            return resp.json().get("definition", {}).get("parts", [])
+            return _definition_parts(resp)
         if resp.status_code == 202:
             location = resp.headers.get("Location")
             if not location:
@@ -110,7 +112,7 @@ def fetch_tmdl_parts(
                         location + "/result", headers=headers, timeout=60
                     )
                     _check_response(result, "TMDL getDefinition result")
-                    return result.json().get("definition", {}).get("parts", [])
+                    return _definition_parts(result)
                 if status == "Failed":
                     return None
             return None
@@ -233,15 +235,14 @@ def parse_tmdl_expressions(tmdl_parts: list[dict] | None) -> dict[str, str]:
     """Fabric TMDL equivalent of ``parse_admin_expressions`` — best-effort.
 
     TMDL groups a model's shared/named expressions into a single
-    ``definition/expressions.tmdl`` (multiple ``expression <Name> = ...``
-    blocks), unlike tables, which each get their own
-    ``definition/tables/<name>.tmdl``. Not live-verified against a real
-    Fabric-enabled workspace: every run observed while building this reached
-    the model via the Admin Scanner (``parse_admin_expressions``), with TMDL
-    only ever attempted as its fallback and returning no data. Kept
-    defensive/best-effort rather than blocking on that verification — same
-    posture as ``fetch_tmdl_parts``/``parse_tmdl_to_admin_tables`` already
-    take with tables.
+    ``definition/expressions.tmdl`` (multiple ``expression <Name> = ...`` blocks),
+    unlike tables, which each get their own ``definition/tables/<name>.tmdl``.
+    Not live-verified against a real Fabric-enabled workspace: every run observed
+    while building this reached the model via the Admin Scanner
+    (``parse_admin_expressions``), with TMDL only ever attempted as its fallback
+    and returning no data. Kept defensive/best-effort rather than blocking on
+    that verification — the same posture ``fetch_tmdl_parts`` and
+    ``parse_tmdl_to_admin_tables`` take with tables.
     """
     import base64
 
@@ -285,9 +286,8 @@ def _row_get(row: dict, col: str, default: str = "") -> str:
 
     The API returns column keys either bracketed (``[Measure Name]``) or
     unbracketed (``Measure Name``) depending on the query/permission path.
-    Reading only the bracketed form silently yields empty strings when the API
-    returns the unbracketed form — which is exactly how measure DAX went missing
-    (471 measures, 0 with DAX). Try both.
+    Reading only the bracketed form silently yields empty strings for the
+    unbracketed one — how measure DAX went missing (471 measures, 0 with DAX).
     """
     bare = col.strip("[]")
     val = row.get(f"[{bare}]")
@@ -296,7 +296,7 @@ def _row_get(row: dict, col: str, default: str = "") -> str:
     return val if val is not None else default
 
 
-def _check_response(resp, context: str = "") -> None:
+def _check_response(resp: Any, context: str = "") -> None:
     """Check HTTP response, raise with PBI error body on failure."""
     if resp.status_code >= 400:
         try:
@@ -335,7 +335,7 @@ def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | 
                 "auto" in str(r.get("name", "")).lower(),
             )
         )
-        return matches[0].get("id")
+        return cast("str | None", matches[0].get("id"))
     except Exception:
         return None
 
@@ -1191,7 +1191,7 @@ def trigger_admin_scan(
     result_url = f"{base}/scanResult/{scan_id}"
     result_resp = requests.get(result_url, headers=_headers(admin_token), timeout=60)
     _check_response(result_resp, "API 3 (Admin Scan result)")
-    return result_resp.json()
+    return cast("dict[str, Any]", result_resp.json())
 
 
 def parse_admin_tables(
@@ -1528,7 +1528,7 @@ def get_fabric_token(
     scope = "https://api.fabric.microsoft.com/.default"
 
     if username and password:
-        data = {
+        data: dict[str, str | None] = {
             "grant_type": "password",
             "client_id": client_id,
             "username": username,
@@ -1549,7 +1549,7 @@ def get_fabric_token(
 
     resp = requests.post(url, data=data, timeout=30)
     _check_response(resp, context)
-    return resp.json()["access_token"]
+    return cast(str, resp.json()["access_token"])
 
 
 def extract_report_definition(
@@ -1628,7 +1628,7 @@ def extract_report_definition(
 
         if not parts:
             print(f"  Report definition: no parts found (keys: {list(data.keys())})")
-            return data
+            return cast("dict | None", data)
 
         # Decode base64 payloads into parsed JSON
         decoded_parts = []

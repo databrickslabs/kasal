@@ -3,7 +3,7 @@ DAX KBI Context Tracking
 Implements context-aware filter tracking for Power BI DAX measures
 """
 
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union
 
 from ....base.models import KPI
 
@@ -34,15 +34,15 @@ class DAXBaseKBIContext:
         self._kbi = kbi
         self._parent_kbis: List[KPI] = parent_kbis or []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         parent_names = (
-            " → ".join([p.technical_name for p in self._parent_kbis])
+            " → ".join([p.technical_name or "" for p in self._parent_kbis])
             if self._parent_kbis
             else "ROOT"
         )
         return f"DAXContext[{parent_names} → {self.kbi.technical_name}]"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, DAXBaseKBIContext):
             return (
                 self.kbi.technical_name == other.kbi.technical_name
@@ -50,7 +50,7 @@ class DAXBaseKBIContext:
             )
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         """Hash based on KBI name + parent chain for set membership"""
         hash_str = f"{self.kbi.technical_name}"
         for parent_kbi in self._parent_kbis:
@@ -67,20 +67,20 @@ class DAXBaseKBIContext:
             - Base KBI "revenue" with parent "ytd_revenue": "revenue_ytd_revenue"
         """
         context_path = "_".join(
-            [k.technical_name for k in self._parent_kbis if k is not self.kbi]
+            [k.technical_name or "" for k in self._parent_kbis if k is not self.kbi]
         )
         if context_path:
             return f"{self.kbi.technical_name}_{context_path}"
         else:
-            return self.kbi.technical_name
+            return self.kbi.technical_name or ""
 
     @property
     def parent_kbis_chain(self) -> str:
         """Returns string representation of parent KBI chain for comparison"""
-        return "_".join([k.technical_name for k in self._parent_kbis])
+        return "_".join([k.technical_name or "" for k in self._parent_kbis])
 
     @property
-    def combined_filters(self) -> List[str]:
+    def combined_filters(self) -> List[Union[str, Dict[str, Any]]]:
         """
         Returns combined filters from this KBI and all parent KBIs
 
@@ -91,7 +91,7 @@ class DAXBaseKBIContext:
 
         All filters are ANDed together in DAX CALCULATE statement.
         """
-        filters = []
+        filters: List[Union[str, Dict[str, Any]]] = []
 
         # Collect filters from KBI and all parents
         for context_kbi in [self.kbi, *self._parent_kbis]:
@@ -266,7 +266,7 @@ class DAXKBIContextCache:
     Similar to SQLKBIContextCache pattern.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._cache: Set[DAXBaseKBIContext] = set()
 
     def add_context(self, context: DAXBaseKBIContext) -> None:

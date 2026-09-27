@@ -5,10 +5,12 @@ This module provides functions for CRUD operations on execution traces.
 """
 
 import json
+import typing
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import Text, and_, case, cast, delete, func, or_
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -23,7 +25,7 @@ from src.models.execution_trace import ExecutionTrace
 logger = LoggerManager.get_instance().system
 
 
-def _span_age_seconds(created_at: Any) -> float:
+def _span_age_seconds(created_at: Optional[datetime]) -> float:
     """Age of a span; a span with no timestamp counts as old enough."""
     if created_at is None:
         return float("inf")
@@ -248,7 +250,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 stmt = stmt.limit(limit)
 
             result = await self.session.execute(stmt)
-            return result.scalars().all()
+            return list(result.scalars().all())
         except SQLAlchemyError as e:
             logger.error(
                 f"Database error retrieving traces for run_id {run_id}: {str(e)}"
@@ -288,7 +290,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             .where(ExecutionTrace.job_id == job_id)
             .order_by(ExecutionTrace.id.desc())
         )
-        return list(result.all())
+        return list(result.tuples().all())
 
     async def get_event_shape_by_job_id(
         self, job_id: str
@@ -316,7 +318,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 ExecutionTrace.span_name,
             ).where(ExecutionTrace.job_id == job_id)
         )
-        return list(result.all())
+        return list(result.tuples().all())
 
     async def _get_by_job_id(
         self,
@@ -370,7 +372,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 stmt = stmt.limit(limit)
 
             result = await self.session.execute(stmt)
-            return result.scalars().all()
+            return list(result.scalars().all())
         except SQLAlchemyError as e:
             logger.error(
                 f"Database error retrieving traces for job_id {job_id}: {str(e)}"
@@ -400,7 +402,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 stmt = stmt.limit(limit)
 
             result = await self.session.execute(stmt)
-            traces = result.scalars().all()
+            traces = list(result.scalars().all())
 
             # Get total count
             count_stmt = select(func.count()).select_from(ExecutionTrace)
@@ -426,7 +428,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             stmt = delete(ExecutionTrace).where(ExecutionTrace.id == trace_id)
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return result.rowcount
+            return typing.cast("CursorResult[Any]", result).rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
             logger.error(f"Database error deleting trace {trace_id}: {str(e)}")
@@ -446,7 +448,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             stmt = delete(ExecutionTrace).where(ExecutionTrace.run_id == run_id)
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return result.rowcount
+            return typing.cast("CursorResult[Any]", result).rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
             logger.error(
@@ -468,7 +470,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             stmt = delete(ExecutionTrace).where(ExecutionTrace.job_id == job_id)
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return result.rowcount
+            return typing.cast("CursorResult[Any]", result).rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
             logger.error(
@@ -487,7 +489,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             stmt = delete(ExecutionTrace)
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return result.rowcount
+            return typing.cast("CursorResult[Any]", result).rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
             logger.error(f"Database error deleting all traces: {str(e)}")
@@ -638,7 +640,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 .limit(limit)
             )
             result = await self.session.execute(stmt)
-            traces = result.scalars().all()
+            traces = list(result.scalars().all())
 
             count_stmt = (
                 select(func.count()).select_from(ExecutionTrace).where(group_filter)
@@ -697,7 +699,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 .limit(limit)
             )
             result = await self.session.execute(stmt)
-            return result.all()
+            return list(result.all())
         except SQLAlchemyError as e:
             logger.error(
                 f"Database error retrieving state events for job_id {job_id}: {str(e)}"
@@ -778,7 +780,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             stmt = delete(ExecutionTrace).where(ExecutionTrace.created_at < cutoff)
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return result.rowcount
+            return typing.cast("CursorResult[Any]", result).rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
             logger.error(

@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import traceback
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 # Use centralized logger - no need for basicConfig
 from src.core.logger import get_logger
@@ -26,11 +26,13 @@ if DEBUG:
     logger.debug("Seed runner debug mode enabled")
 
 
-def debug_log(message):
+def debug_log(message: str) -> None:
     """Helper function for debug logging"""
     if DEBUG:
         # Get the calling function's name
-        caller = inspect.currentframe().f_back.f_code.co_name
+        frame = inspect.currentframe()
+        caller_frame = frame.f_back if frame else None
+        caller = caller_frame.f_code.co_name if caller_frame else "?"
         logger.debug(f"[{caller}] {message}")
 
 
@@ -265,7 +267,9 @@ async def resync_postgres_sequences() -> None:
         logger.debug(f"Sequence resync skipped: {e}")
 
 
-async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) -> None:
+async def run_seeders_with_factory(
+    factory: Any, exclude: Optional[Set[str]] = None
+) -> None:
     """Run seeders using a custom session factory instead of the default.
 
     This temporarily patches async_session_factory in all seeder modules
@@ -287,7 +291,7 @@ async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) 
     # registered in SEEDERS: a hand-maintained list once omitted
     # src.seeds.skills, so on the Lakebase path every seeder wrote to Lakebase
     # except skills, which kept writing to the local database (issue #9).
-    seeder_modules = []
+    seeder_modules: List[Any] = []
     seed_module_names = sorted(
         {
             "src.seeds.tools",
@@ -308,7 +312,7 @@ async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) 
             seeder_modules.append(mod)
 
     # Save originals and patch each module's reference
-    originals = {}
+    originals: Dict[Any, Any] = {}
     for mod in seeder_modules:
         originals[mod] = mod.async_session_factory
         mod.async_session_factory = factory

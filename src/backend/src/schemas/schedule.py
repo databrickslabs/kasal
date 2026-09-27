@@ -51,7 +51,7 @@ class ScheduleBase(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_execution_type_requirements(self):
+    def validate_execution_type_requirements(self) -> "ScheduleBase":
         """Validate that required fields are present based on execution type"""
         if self.execution_type == "crew":
             if not self.agents_yaml or not self.tasks_yaml:

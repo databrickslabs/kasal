@@ -7,12 +7,13 @@ from src.core.exceptions import BadRequestError
 from src.schemas.crew import (
     CrewGenerationRequest,
 )
+from src.services.generation.crew.host import CrewGenerationBase
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
 
-class ConversationGenerationMixin:
+class ConversationGenerationMixin(CrewGenerationBase):
     """Crew synthesis from a chat transcript (``POST /crew/from-conversation``)."""
 
     async def synthesize_crew_from_conversation(

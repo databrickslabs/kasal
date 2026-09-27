@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from src.core.databricks_app import fallback_trace_experiment
 from src.services.prompt_optimization.gepa import reflection
@@ -335,7 +335,7 @@ class CrewRunnerMixin:
                 for judge in registered_scorers
             }
 
-            def _apply_fields(fields: Dict[str, str]):
+            def _apply_fields(fields: Dict[str, str]) -> Tuple[Any, Any]:
                 agents_over = copy.deepcopy(agents_yaml)
                 tasks_over = copy.deepcopy(tasks_yaml)
                 for cfg_map in (agents_over, tasks_over):
@@ -355,25 +355,23 @@ class CrewRunnerMixin:
                                 entity[field] = fields[key].strip()
                 return agents_over, tasks_over
 
-            # Result caches, keyed by content. GEPA re-evaluates the SAME
-            # candidate doc many times (upfront smoke test, baseline valset
-            # pass, and a fresh reflective-minibatch pass EVERY iteration).
-            # Uncached, those re-runs burned most of a small execution budget
-            # re-measuring the baseline — a 4-execution run bought exactly ONE
-            # distinct candidate (observed live: total_metric_calls=7,
-            # candidates=1). Worse, the stochastic judge re-grading identical
-            # prompts drew 0.0 and then 4/10 two minutes apart, so accept/
-            # reject was a coin flip. With caching, each DISTINCT candidate
-            # costs exactly one execution and one judgment, and comparisons
-            # against the baseline are stable within the run.
+            # Result caches, keyed by content. GEPA re-evaluates the SAME candidate doc
+            # many times (upfront smoke test, baseline valset pass, and a fresh
+            # reflective-minibatch pass EVERY iteration). Uncached, those re-runs burned
+            # most of a small execution budget re-measuring the baseline — a 4-execution
+            # run bought exactly ONE distinct candidate (observed live:
+            # total_metric_calls=7, candidates=1). Worse, the stochastic judge
+            # re-grading identical prompts drew 0.0 and then 4/10 two minutes apart, so
+            # accept/reject was a coin flip. With caching, each DISTINCT candidate
+            # costs exactly one execution and one judgment, and comparisons against the
+            # baseline are stable within the run.
             deliverable_cache: Dict[str, str] = {}
             judge_cache: Dict[str, Any] = {}
-            # Serializes check-then-execute: mlflow's eval harness runs batch
-            # records through a thread pool, and concurrent calls for the SAME
-            # candidate all missed the cache and each ran the crew (observed
-            # live: two executions of one candidate finishing in the same
-            # second). GEPA itself steps sequentially, so the lock costs
-            # nothing in wall-clock.
+            # Serializes check-then-execute: mlflow's eval harness runs batch records
+            # through a thread pool, and concurrent calls for the SAME candidate all
+            # missed the cache and each ran the crew (observed live: two executions of
+            # one candidate finishing in the same second). GEPA itself steps
+            # sequentially, so the lock costs nothing in wall-clock.
             execute_lock = threading.Lock()
 
             # ANSWER-FIRST JUDGING. A reference-free judge — one that only ever
@@ -453,7 +451,7 @@ class CrewRunnerMixin:
                     )
                 return reference
 
-            def predict_fn(**inputs) -> str:
+            def predict_fn(**inputs: Any) -> str:
                 run_entry = _RUNS.get(cancel_run_id, {}) if cancel_run_id else {}
                 # User-requested stop: abort BEFORE spending a crew execution.
                 if run_entry.get("cancel_requested"):
@@ -463,7 +461,9 @@ class CrewRunnerMixin:
                 with execute_lock:
                     return _predict_locked(doc_key, candidate, run_entry, inputs)
 
-            def _predict_locked(doc_key, candidate, run_entry, inputs) -> str:
+            def _predict_locked(
+                doc_key: str, candidate: Any, run_entry: Dict[str, Any], inputs: Any
+            ) -> str:
                 # Cache lookup BEFORE the cap check: re-evaluations of an
                 # already-executed candidate (usually the baseline) stay
                 # truthful even after the budget is spent.
@@ -471,10 +471,10 @@ class CrewRunnerMixin:
                     return deliverable_cache[doc_key]
                 # HARD execution cap: the user's budget is a promise about crew
                 # executions, but GEPA overshoots (parallel batches are only
-                # budget-checked between iterations, plus the upfront smoke
-                # test). Once the cap is spent, further NEW candidates get a
-                # free empty result — they score 0, never win, and GEPA wraps
-                # up returning the best already-evaluated candidate.
+                # budget-checked between iterations, plus the upfront smoke test). Once
+                # the cap is spent, further NEW candidates get a free empty result —
+                # they score 0, never win, and GEPA wraps up returning the best
+                # already-evaluated candidate.
                 if run_entry.get("executions_used", 0) >= max_metric_calls:
                     logger.info(
                         "Crew optimization execution cap reached "
@@ -524,12 +524,12 @@ class CrewRunnerMixin:
                 return deliverable
 
             @scorer
-            def output_format(outputs) -> float:
+            def output_format(outputs: Any) -> float:
                 text = str(outputs or "").strip()
                 return 1.0 if len(text) > 50 else 0.0
 
             @scorer
-            def output_correct(inputs, outputs):
+            def output_correct(inputs: Any, outputs: Any) -> Any:
                 # GRADED, not binary: a pass/fail judge saturates at 1.0 for any
                 # acceptable baseline, leaving GEPA no gradient to climb (observed
                 # live: 1.00 -> 1.00 with zero exploration payoff). A harsh 0-10
@@ -845,13 +845,13 @@ class CrewRunnerMixin:
             from src.services.mlflow.sp_auth import pat_auth_env
 
             @contextmanager
-            def _suppressed_trace_reads():
+            def _suppressed_trace_reads() -> Iterator[None]:
                 original = getattr(mlflow, "get_trace", None)
                 if original is None:
                     yield
                     return
 
-                def _noop_get_trace(*_a, **_k):
+                def _noop_get_trace(*_a: Any, **_k: Any) -> None:
                     return None
 
                 mlflow.get_trace = _noop_get_trace
@@ -955,7 +955,7 @@ class CrewRunnerMixin:
                     AUTOLOGGING_INTEGRATIONS[_flavor]["disable"] = old_flag
 
         optimized = result.optimized_prompts[0]
-        optimized_fields = _parse_crew_doc(optimized.template) or {}
+        optimized_fields = _parse_crew_doc(str(optimized.template)) or {}
         return {
             "optimized_template": optimized.template,
             "optimized_fields": optimized_fields,

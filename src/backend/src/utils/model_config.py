@@ -190,7 +190,9 @@ def model_rejects_temperature(model_name: Optional[str]) -> bool:
     return "gpt-5" in m or "gpt5" in m
 
 
-def get_model_config(model_key: str, db: Optional[Session] = None) -> Dict[str, Any]:
+def get_model_config(
+    model_key: str, db: Optional[Session] = None
+) -> Optional[Dict[str, Any]]:
     """
     Get model configuration based on model key.
 

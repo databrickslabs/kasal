@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -88,7 +89,7 @@ class ScheduleRepository:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_due_schedules(self, current_time) -> List[Schedule]:
+    async def find_due_schedules(self, current_time: datetime) -> List[Schedule]:
         """
         Find all schedules that are due to run.
 
@@ -188,7 +189,7 @@ class ScheduleRepository:
         return schedule
 
     async def update_after_execution(
-        self, schedule_id: int, execution_time
+        self, schedule_id: int, execution_time: datetime
     ) -> Optional[Schedule]:
         """
         Update schedule after execution.

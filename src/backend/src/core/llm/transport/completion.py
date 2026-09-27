@@ -77,6 +77,10 @@ from .tool_rounds import (
 
 logger = logging.getLogger(__name__)
 
+# A round's answer: text, or — with ``delegate_tool_calls`` and no local tool
+# table — the model's tool calls, handed back for the caller to execute.
+_RoundAnswer = str | list[dict[str, Any]]
+
 
 # OpenAI's GPT-5.6 line refuses `reasoning_effort` on /v1/chat/completions when
 # the request also carries function tools:
@@ -295,7 +299,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         from_task: Any = None,
         from_agent: Any = None,
         response_model: type[BaseModel] | None = None,
-    ) -> str:
+    ) -> str | Any:  # tool calls when delegated; a model with response_model
         import asyncio
 
         return await asyncio.to_thread(
@@ -321,7 +325,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         from_task: Any = None,
         from_agent: Any = None,
         response_model: type[BaseModel] | None = None,
-    ) -> str:
+    ) -> str | Any:  # tool calls when delegated; a model with response_model
         # Attribution for every delta this call streams — see BaseLLM._call_scope.
         with self._attributed(from_task, from_agent), call_deadline(from_agent):
             conversation = self._normalize_messages(messages)
@@ -445,7 +449,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         """
         model = str(self.model).lower()
         has_budget = (
-            bool(self.thinking_budget_tokens) and self.thinking_budget_tokens > 0
+            self.thinking_budget_tokens is not None and self.thinking_budget_tokens > 0
         )
         is_adaptive = any(name in model for name in _THINKING_ADAPTIVE_MODELS)
 
@@ -598,7 +602,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         check_deadline(deadline, rounds_done, self.model, conversation)
 
     def _executor(
-        self, available_functions: dict[str, Callable[..., Any]] | None
+        self, available_functions: dict[str, Callable[..., Any]]
     ) -> Callable[[str, Any], Any]:
         """A (name, arguments) -> result callable over this call's tool table."""
         return lambda name, arguments: self._handle_tool_execution(
@@ -684,7 +688,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         tools: list[dict[str, Any]] | None,
         available_functions: dict[str, Callable[..., Any]] | None,
         from_agent: Any = None,
-    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+    ) -> tuple[_RoundAnswer, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
         # Per-call, like _finish_reason: a previous call's thinking must not be
@@ -1118,7 +1122,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         tools: list[dict[str, Any]] | None,
         available_functions: dict[str, Callable[..., Any]] | None,
         from_agent: Any = None,
-    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+    ) -> tuple[_RoundAnswer, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
         # Per-call, like _finish_reason: a previous call's thinking must not be

@@ -55,7 +55,7 @@ class MemoryBackendBaseService:
                 )
 
             # Prepare data
-            data = {
+            data: Dict[str, Any] = {
                 "group_id": group_id,
                 "name": config.name,
                 "description": config.description,

@@ -2,7 +2,7 @@
 
 from logging import Logger
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 
 
 async def ingest_execution_log(
@@ -18,7 +18,7 @@ async def ingest_execution_log(
     from datetime import datetime
 
     # Resolve the configured file location
-    log_dir = os.environ.get("LOG_DIR")
+    log_dir: Optional[Union[str, Path]] = os.environ.get("LOG_DIR")
     if not log_dir:
         log_dir = default_log_dir
 
@@ -29,7 +29,7 @@ async def ingest_execution_log(
         return
 
     # Extract logs for our execution ID
-    logs_to_write = []
+    logs_to_write: List[Dict[str, Any]] = []
     exec_id_short = execution_id[:8]  # Use short ID for matching
 
     # First, add a header log entry to mark the start

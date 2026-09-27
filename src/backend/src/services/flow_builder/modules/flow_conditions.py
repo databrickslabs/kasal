@@ -31,7 +31,19 @@ import logging
 import re
 from collections import deque
 from collections.abc import Mapping
-from typing import Any, Dict, Final, Iterable, List, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Final,
+    ItemsView,
+    Iterable,
+    Iterator,
+    KeysView,
+    List,
+    Tuple,
+    ValuesView,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +219,7 @@ class MatchList(list):
 
     __hash__ = None  # type: ignore[assignment]
 
-    def _any(self, op, other: Any) -> bool:
+    def _any(self, op: Callable[[Any, Any], Any], other: Any) -> bool:
         for element in self:
             # A projection through two lists — orders[].lines[].sku — gathers a
             # list of lists. Recurse so "any" keeps meaning "any, at any level"
@@ -262,7 +274,7 @@ class MatchList(list):
     def endswith(self, suffix: Any) -> bool:
         return self._any(lambda a, b: isinstance(a, str) and a.endswith(b), suffix)
 
-    def _map(self, transform) -> "MatchList":
+    def _map(self, transform: Callable[[Any], Any]) -> "MatchList":
         return MatchList(
             (
                 MatchList(e)._map(transform)
@@ -343,7 +355,7 @@ def _walk(snapshot: Mapping) -> Iterable[Tuple[str, Any, int]]:
     Yields ``(path, value, depth)``. Cycle-safe by object identity, and bounded
     on both depth and node count.
     """
-    queue = deque([("", snapshot, 0)])
+    queue: deque[Tuple[str, Any, int]] = deque([("", snapshot, 0)])
     seen = {id(snapshot)}
     visited = 0
 
@@ -443,7 +455,8 @@ class ConditionState:
         if cached is None:
             cached = state_snapshot(object.__getattribute__(self, "_base"))
             object.__setattr__(self, "_snapshot", cached)
-        return cached
+        snapshot: Dict[str, Any] = cached
+        return snapshot
 
     def _invalidate(self) -> None:
         object.__setattr__(self, "_snapshot", None)
@@ -561,19 +574,19 @@ class ConditionState:
     def __contains__(self, key: Any) -> bool:
         return key in self._snap()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._snap())
 
     def __len__(self) -> int:
         return len(self._snap())
 
-    def keys(self):  # dict surface
+    def keys(self) -> KeysView[str]:  # dict surface
         return self._snap().keys()
 
-    def values(self):  # dict surface
+    def values(self) -> ValuesView[Any]:  # dict surface
         return self._snap().values()
 
-    def items(self):  # dict surface
+    def items(self) -> ItemsView[str, Any]:  # dict surface
         return self._snap().items()
 
     def __repr__(self) -> str:
@@ -613,7 +626,7 @@ def _term(name: str) -> Tuple[str, Any]:
     return name, _WHERE_OPS[""]
 
 
-def make_where(state: "ConditionState"):
+def make_where(state: "ConditionState") -> Callable[..., MatchList]:
     """Build the ``where`` a router condition may call.
 
     Answers the one question a projection cannot: "is there a SINGLE item that

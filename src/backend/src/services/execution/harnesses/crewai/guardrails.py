@@ -123,7 +123,7 @@ def degrade_on_exhausted(
     # construction fails with "If return type is annotated, it must be
     # Tuple[bool, Any]" — about an annotation that says exactly that.
     # No annotation means no validation, which is what we want.
-    def wrapped(output: Any):
+    def wrapped(output: Any):  # type: ignore[no-untyped-def]  # CrewAI validates any return annotation
         attempts["n"] += 1
         try:
             verdict = guardrail(output)

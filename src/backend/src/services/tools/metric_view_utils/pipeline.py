@@ -23,7 +23,7 @@ from .artifact_cascade import (
     cross_table_artifact_cascade,
     group_by_table,
 )
-from .data_classes import MetricViewSpec, TableInfo, TranslationResult
+from .data_classes import MetricViewSpec, ScanTableInfo, TableInfo, TranslationResult
 from .dax_translator import DaxTranslator
 from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
@@ -209,7 +209,7 @@ class MetricViewPipeline:
 
         from .mquery_parser import classify_mquery_source
 
-        def _skip_stat(tinfo) -> dict:
+        def _skip_stat(tinfo: TableInfo) -> dict:
             """Build a skip stat that classifies WHY a table produced no view and
             carries the original M-query so it can be emitted as a note (mirrors
             how untranslatable measures are surfaced)."""
@@ -493,7 +493,7 @@ class MetricViewPipeline:
         self._sanitize_spec_measures(spec)
         return spec
 
-    def _sanitize_spec_measures(self, spec) -> None:
+    def _sanitize_spec_measures(self, spec: MetricViewSpec) -> None:
         """P5 correctness batch + PROP-3a/4a silent-wrong guard.
 
         First applies the SQL sanitizer (no-op divisions, self-divisions, NULL-safe
@@ -554,7 +554,9 @@ class MetricViewPipeline:
 
     # ── Delegates to artifact_cascade module ─────────────────────────
 
-    def _cross_table_artifact_cascade(self, all_specs: dict[str, MetricViewSpec]):
+    def _cross_table_artifact_cascade(
+        self, all_specs: dict[str, MetricViewSpec]
+    ) -> None:
         cross_table_artifact_cascade(
             all_specs, self.mapping, self._PBI_ARTIFACT_PATTERNS
         )
@@ -572,7 +574,7 @@ class MetricViewPipeline:
             self.scan_data,
         )
 
-    def _collect_unassigned(self, measures: list[dict]):
+    def _collect_unassigned(self, measures: list[dict]) -> None:
         collect_unassigned(
             measures, self.translator, self.cross_table_measures, self.stats
         )
@@ -580,7 +582,7 @@ class MetricViewPipeline:
     # ── Helper methods (kept in pipeline.py — small, used locally) ───
 
     @staticmethod
-    def _rebuild_comment(spec: MetricViewSpec):
+    def _rebuild_comment(spec: MetricViewSpec) -> None:
         """Rebuild the YAML comment block from current spec state.
 
         Called after cross-table cascade to ensure skip_reasons in the comment
@@ -619,7 +621,9 @@ class MetricViewPipeline:
         spec.comment = "\n".join(lines)
 
     @staticmethod
-    def _extract_columns_from_scan(scan_info) -> tuple[list[dict], list[str]]:
+    def _extract_columns_from_scan(
+        scan_info: ScanTableInfo,
+    ) -> tuple[list[dict], list[str]]:
         """Extract aggregate and group-by columns from scan data SQL.
 
         Returns: (aggregate_columns, group_by_columns)
@@ -653,7 +657,7 @@ class MetricViewPipeline:
         return agg_cols, grp_cols
 
     @staticmethod
-    def _extract_source_table_from_scan(scan_info) -> str:
+    def _extract_source_table_from_scan(scan_info: ScanTableInfo) -> str:
         """Extract source table name from scan data SQL's FROM clause."""
         sql = scan_info.native_sql
         first_arm = re.split(r"\bunion\b", sql, maxsplit=1, flags=re.IGNORECASE)[0]
@@ -860,7 +864,7 @@ class MetricViewPipeline:
             _m2n_tables.add(_r.get("from_table", ""))
             _m2n_tables.add(_r.get("to_table", ""))
         _m2n_tables.discard("")
-        results = {
+        results: dict[str, Any] = {
             "specs": {},
             "stats": self.stats,
             "cross_table_count": len(self.cross_table_measures),
@@ -968,14 +972,16 @@ class MetricViewPipeline:
         return results
 
     @staticmethod
-    def _resolve_placeholders_in_spec(spec, catalog: str, schema: str) -> None:
+    def _resolve_placeholders_in_spec(
+        spec: MetricViewSpec, catalog: str, schema: str
+    ) -> None:
         """Substitute any surviving {catalog}/{schema} tokens in a spec's join
         sources + source table. Idempotent, mutates in place. Belt-and-suspenders
         net at the single emit choke point where catalog/schema are known —
         covers API/self-extract mode and externally-supplied configs, not just the
         config-gen path (which also resolves them at build_config time)."""
 
-        def _sub(val):
+        def _sub(val: Any) -> Any:
             if isinstance(val, str) and ("{catalog}" in val or "{schema}" in val):
                 return val.replace("{catalog}", catalog).replace("{schema}", schema)
             return val

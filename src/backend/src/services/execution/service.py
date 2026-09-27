@@ -30,7 +30,9 @@ import copy
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import BadRequestError, KasalError
 from src.core.logger import LoggerManager
@@ -48,7 +50,6 @@ from src.utils.asyncio_utils import create_and_run_loop, run_in_thread_with_loop
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
-# Configure logging
 logger = logging.getLogger(__name__)
 crew_logger = LoggerManager.get_instance().crew
 exec_logger = LoggerManager.get_instance().crew
@@ -73,13 +74,12 @@ class ExecutionService:
         enabling centralized execution tracking in a multi-threaded environment.
     """
 
-    # Initialize the executions dictionary as a class attribute
-    executions = {}
+    executions: Dict[str, Any] = {}
 
     # Initialize the thread pool executor
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
-    def __init__(self, session=None):
+    def __init__(self, session: Optional[AsyncSession] = None) -> None:
         """Initialize the ExecutionService with required dependencies.
 
         Args:
@@ -377,7 +377,7 @@ class ExecutionService:
         session = self._require_session("delete_run")
         await ExecutionHistoryRepository(session).remove(run, commit=commit)
 
-    def _require_session(self, method: str):
+    def _require_session(self, method: str) -> AsyncSession:
         """The session this service was constructed with, or a clear error."""
         if self.session is None:
             raise ValueError(
@@ -387,7 +387,7 @@ class ExecutionService:
 
     @staticmethod
     async def create_run_record(
-        session,
+        session: AsyncSession,
         *,
         job_id: str,
         run_name: str,
@@ -566,9 +566,9 @@ class ExecutionService:
     def add_execution_to_memory(
         execution_id: str,
         status: str,
-        run_name: str,
-        created_at: datetime = None,
-        group_id: Optional[int] = None,
+        run_name: Optional[str],
+        created_at: Optional[datetime] = None,
+        group_id: Optional[str] = None,
         group_email: Optional[str] = None,
     ) -> None:
         """
@@ -681,8 +681,8 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
@@ -896,8 +896,8 @@ class ExecutionService:
 
     async def list_executions(
         self,
-        group_ids: List[str] = None,
-        user_email: str = None,
+        group_ids: Optional[List[str]] = None,
+        user_email: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
         include_payload: bool = False,
@@ -1070,7 +1070,7 @@ class ExecutionService:
             from src.services.execution.status import ExecutionStatusService
 
             # Sanitize result for database storage if needed
-            update_data = {"status": status}
+            update_data: Dict[str, Any] = {"status": status}
             if result:
                 update_data["result"] = ExecutionService.sanitize_for_database(result)
 
@@ -1108,8 +1108,8 @@ class ExecutionService:
             exec_logger.error(f"Error updating execution status: {str(e)}")
 
     async def get_execution_status(
-        self, execution_id: str, group_ids: List[str] = None
-    ) -> Dict[str, Any]:
+        self, execution_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Get the current status of an execution from the database with group filtering.
 
@@ -1187,7 +1187,7 @@ class ExecutionService:
                 "STOPPING",
             }
             result_value = None
-            full_row = None
+            full_row: Any = None  # ExecutionHistory; getattr-guarded below
             if (execution.status or "").upper() not in in_flight:
                 full_row = await repository.get_execution_by_job_id(
                     execution_id, group_ids=group_ids
@@ -1245,7 +1245,7 @@ class ExecutionService:
             return None
 
     async def get_execution_status_detail(
-        self, execution_id: str, group_ids: List[str] = None
+        self, execution_id: str, group_ids: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get detailed execution status including task progress for the status endpoint.
@@ -1307,8 +1307,8 @@ class ExecutionService:
     async def create_execution(
         self,
         config: CrewConfig,
-        background_tasks=None,
-        group_context: GroupContext = None,
+        background_tasks: Optional[Any] = None,  # fastapi.BackgroundTasks
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
         """
         Create a new execution and start it in the background.
@@ -1457,14 +1457,13 @@ class ExecutionService:
                         and config.nodes is not None
                         and len(config.nodes) > 0
                     )
-                    hasattr(config, "edges") and config.edges is not None
 
                     if has_nodes:
                         # Ad-hoc flow execution with nodes from canvas (no database save required)
                         # Edges may be empty for single-crew flows - that's valid
                         edge_count = len(config.edges) if config.edges else 0
                         exec_logger.info(
-                            f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution"
+                            f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(cast(list, config.nodes))}) and edges ({edge_count}) present - allowing ad-hoc flow execution"
                         )
                     else:
                         raise BadRequestError(
@@ -1475,7 +1474,8 @@ class ExecutionService:
                     from src.services.flow_builder.flow_service import FlowService
 
                     # Resolve authorization before persisting inputs or queuing work.
-                    await FlowService(self.session).get_flow_for_execution(
+                    flow_session = cast(AsyncSession, self.session)  # router-injected
+                    await FlowService(flow_session).get_flow_for_execution(
                         flow_id, group_context, allow_unsaved=bool(config.nodes)
                     )
 
@@ -1545,7 +1545,7 @@ class ExecutionService:
             sanitized_inputs = ExecutionService.sanitize_for_database(masked_inputs)
 
             # Create execution data with RUNNING status for immediate visibility
-            execution_data = {
+            execution_data: Dict[str, Any] = {
                 "job_id": execution_id,
                 "status": ExecutionStatus.RUNNING.value,  # Start with RUNNING status for immediate visibility
                 "inputs": sanitized_inputs,
@@ -1591,9 +1591,9 @@ class ExecutionService:
                 import uuid as uuid_module
 
                 # Ensure flow_id is a UUID object for the database
-                if isinstance(flow_id, str):
-                    flow_id = uuid_module.UUID(flow_id)
-                execution_data["flow_id"] = flow_id
+                execution_data["flow_id"] = (
+                    uuid_module.UUID(flow_id) if isinstance(flow_id, str) else flow_id
+                )
                 logger.info(
                     f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
                 )
@@ -1700,7 +1700,7 @@ class ExecutionService:
 
             if background_tasks:
 
-                async def run_execution_task():
+                async def run_execution_task() -> None:
                     # Use context-aware logger based on execution type
                     task_logger = (
                         LoggerManager.get_instance().flow
@@ -1813,9 +1813,9 @@ class ExecutionService:
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
-        group_context: GroupContext = None,
-        session=None,
-    ):
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> None:
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
@@ -1862,7 +1862,7 @@ class ExecutionService:
     async def resume_execution(
         self,
         execution_id: str,
-        group_context: GroupContext = None,
+        group_context: Optional[GroupContext] = None,
         from_unit: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -1963,7 +1963,7 @@ class ExecutionService:
             f"(source status: {source.status}, restored units: {restored_units})"
         )
 
-        execution_data = {
+        execution_data: Dict[str, Any] = {
             "job_id": new_execution_id,
             "status": ExecutionStatus.RUNNING.value,
             # The definition that will actually RUN, which is the rebuilt one

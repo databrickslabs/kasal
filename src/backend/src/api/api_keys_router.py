@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, status
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.api_key import ApiKey
 from src.schemas.api_key import ApiKeyCreate, ApiKeyResponse, ApiKeyUpdate
 from src.services.settings.api_keys import ApiKeysService
 
@@ -50,7 +51,7 @@ ApiKeysServiceDep = Annotated[ApiKeysService, Depends(get_api_key_service)]
 @router.get("", response_model=List[ApiKeyResponse])
 async def get_api_keys_metadata(
     service: ApiKeysServiceDep,
-):
+) -> List[ApiKey]:
     """
     Get API keys metadata (names, descriptions) without actual values.
 
@@ -71,7 +72,7 @@ async def create_api_key(
     api_key_data: ApiKeyCreate,
     group_context: GroupContextDep,
     service: ApiKeysServiceDep,
-):
+) -> ApiKey:
     """
     Create a new API key.
     Only Admins and Editors can create API keys.
@@ -106,7 +107,7 @@ async def update_api_key(
     api_key_data: ApiKeyUpdate,
     group_context: GroupContextDep,
     service: ApiKeysServiceDep,
-):
+) -> ApiKey:
     """
     Update an existing API key.
     Only Admins and Editors can update API keys.
@@ -151,7 +152,7 @@ async def delete_api_key(
     api_key_name: str,
     group_context: GroupContextDep,
     service: ApiKeysServiceDep,
-):
+) -> None:
     """
     Delete an API key.
     Only Admins and Editors can delete API keys.

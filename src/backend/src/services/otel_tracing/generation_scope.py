@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager, contextmanager
+from typing import Any, AsyncIterator, Iterator
 from uuid import uuid4
 
 from opentelemetry.sdk.resources import Resource
@@ -15,7 +16,7 @@ from src.services.otel_tracing.event_bridge import OTelEventBridge
 
 
 @contextmanager
-def generation_step(label):
+def generation_step(label: str) -> Iterator[None]:
     """Attribute a real generation stage to its own task in the existing trace."""
     if not current_event_context().get("generation_job_id"):
         yield
@@ -34,7 +35,9 @@ def generation_step(label):
 
 
 @asynccontextmanager
-async def generation_trace(job_id, group_context, label, step_name="Generate plan"):
+async def generation_trace(
+    job_id: str, group_context: Any, label: str, step_name: str = "Generate plan"
+) -> AsyncIterator[None]:
     # An explicit provider is local to this generation, never the global provider.
     provider = TracerProvider(
         resource=Resource.create(

@@ -11,7 +11,8 @@ Date: 2025
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from types import TracebackType
+from typing import Any, Dict, List, Optional, Self
 
 from src.services.converters.base.connectors import (
     BaseInboundConnector,
@@ -155,7 +156,7 @@ class MQueryConnector(BaseInboundConnector):
         self._raw_scan_data = None
         logger.info("Disconnected from Power BI Admin API")
 
-    def extract_measures(self, **kwargs) -> List[KPI]:
+    def extract_measures(self, **kwargs: Any) -> List[KPI]:
         """
         Extract measures from the semantic model.
 
@@ -216,12 +217,17 @@ class MQueryConnector(BaseInboundConnector):
 
     # ========== Async Context Manager ==========
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         """Async context manager entry"""
         self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Async context manager exit"""
         self.disconnect()
 
@@ -248,6 +254,8 @@ class MQueryConnector(BaseInboundConnector):
 
         logger.info(f"Scanning workspace {ws_id}...")
 
+        if self._scanner is None:  # connect() above always sets it
+            raise RuntimeError("Connector not connected. Call connect() first.")
         self._semantic_models, self._raw_scan_data = await self._scanner.scan_workspace(
             workspace_id=ws_id, dataset_id=ds_id
         )
@@ -278,6 +286,8 @@ class MQueryConnector(BaseInboundConnector):
         )
         if not target_model:
             return []
+        if self._scanner is None:
+            raise RuntimeError("Connector not connected. Call connect() first.")
 
         return self._scanner.extract_tables_with_mquery(
             target_model,
@@ -467,8 +477,8 @@ class MQueryConnector(BaseInboundConnector):
         total_tables = 0
         total_measures = 0
         total_calculated_columns = 0
-        expression_types = {}
-        tables_by_type = {}
+        expression_types: Dict[str, int] = {}
+        tables_by_type: Dict[str, List[str]] = {}
         tables_with_calculated_columns = []
 
         for model in self._semantic_models:

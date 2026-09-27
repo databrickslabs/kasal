@@ -8,7 +8,7 @@ querying, and cross-platform compatibility.
 """
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     # Only import for type checking to avoid circular import
@@ -52,7 +52,7 @@ class DaxToSqlTranspiler:
         "REMOVEFILTERS",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize transpilation mappings."""
         self.dax_to_sql_mappings = {
             # Basic aggregations
@@ -164,7 +164,7 @@ class DaxToSqlTranspiler:
         sql_template = self.dax_to_sql_mappings[signature.lower()]
 
         # Build replacement map from tokens
-        type_counts = {}
+        type_counts: Dict[str, Dict[str, int]] = {}
         replacements = {}
 
         for token in tokens:

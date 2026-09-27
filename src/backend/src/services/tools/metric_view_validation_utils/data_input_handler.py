@@ -41,7 +41,8 @@ class DataInputHandler:
         self.mv_parser = UCMetricsViewParser(metrics_view_path)
         self.table_mapping_parser = MeasureTableMappingParser(table_mapping_path)
         self.dax_parser = DAXExpressionParser()
-        self._dax_measures_cache = None
+        self._yaml_measures_cache: Optional[List[Dict]] = None
+        self._dax_measures_cache: Optional[List[Dict]] = None
 
     def get_yaml_measure(self, measure_name: str) -> Optional[Dict]:
         """

@@ -132,7 +132,7 @@ async def get_group_context(
     cache_key = f"group_context:{user_email}:{x_group_id}"
     cache = getattr(request.state, "_group_context_cache", None)
     if isinstance(cache, dict):
-        cached = cache.get(cache_key)
+        cached: Optional[GroupContext] = cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -203,6 +203,19 @@ RequestEmailDep = Annotated[str, Depends(get_request_email)]
 GroupContextDep = Annotated[GroupContext, Depends(get_group_context)]
 
 
+def require_group_id(group_context: GroupContext) -> str:
+    """The caller's primary workspace id, for services that scope by one group.
+
+    ``get_group_context`` always resolves at least the personal workspace, so
+    this only refuses a context with no group at all — rather than letting a
+    ``group_id=None`` reach a tenant-scoped read or write.
+    """
+    group_id = group_context.primary_group_id
+    if group_id is None:
+        raise ForbiddenError("No workspace selected for this request")
+    return group_id
+
+
 def get_repository(
     repository_class: Type[BaseRepository], model_class: Type[Base]
 ) -> Callable[[SessionDep], BaseRepository]:
@@ -224,7 +237,9 @@ def get_repository(
 
 
 def get_service(
-    service_class: Type[BaseService],
+    # A factory rather than Type[BaseService]: the fallback below passes
+    # repository_class/model_class, which only some subclasses accept.
+    service_class: Callable[..., BaseService],
     repository_class: Type[BaseRepository],
     model_class: Type[Base],
 ) -> Callable[[SessionDep], BaseService]:

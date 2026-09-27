@@ -169,7 +169,9 @@ class PowerBIReportReferenceMixin:
             page_lookup = {p.get("id"): p for p in pages}
 
             # Find which measures are used in which visuals/pages
-            measure_locations = {}  # measure_name -> list of (page_id, visual_type)
+            measure_locations: Dict[str, List[Dict[str, Any]]] = (
+                {}
+            )  # measure_name -> list of (page_id, visual_type)
 
             for visual in visuals:
                 visual_measures = self._extract_measures_from_visual(visual)
@@ -482,7 +484,7 @@ class PowerBIReportReferenceMixin:
 
     def _extract_measures_from_visual(self, visual: Dict[str, Any]) -> List[str]:
         """Extract measure names referenced in a visual configuration."""
-        measures = set()
+        measures: set[str] = set()
         config = visual.get("config", {})
 
         # Handle config as JSON string

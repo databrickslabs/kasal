@@ -126,7 +126,7 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
         # Get dependencies
         formula = kpi.formula
         dependencies = self.dependency_resolver.dependency_graph.get(
-            kpi.technical_name, []
+            kpi.technical_name or "", []
         )
 
         # Replace measure technical names with their actual measure names
@@ -134,7 +134,8 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
         resolved_formula = formula
         for dep in dependencies:
             dep_kpi = self.dependency_resolver.measure_registry[dep]
-            dep_measure_name = dep_kpi.technical_name
+            # registry keys are technical names, so this is never None
+            dep_measure_name = dep_kpi.technical_name or dep
             # Replace with measure reference (UC Metrics uses column-style references)
             resolved_formula = re.sub(
                 r"\b" + re.escape(dep) + r"\b", dep_measure_name, resolved_formula

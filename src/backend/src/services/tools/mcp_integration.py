@@ -13,7 +13,7 @@ MCP servers are only loaded when explicitly configured on agents or tasks.
 No global/automatic loading occurs.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from src.core.exceptions import MCPConnectionError
@@ -24,6 +24,9 @@ from src.services.tools.mcp_handler import (
     create_kasal_tool_from_mcp,
     format_mcp_exception,
 )
+
+if TYPE_CHECKING:
+    from src.services.mcp.mcp_client.service import MCPService
 
 # Get logger from the centralized logging system
 # Use flow logger if running in flow subprocess mode, otherwise use crew logger
@@ -109,7 +112,7 @@ class MCPIntegration:
     @staticmethod
     async def resolve_effective_mcp_servers(
         explicit_servers: List[str],
-        mcp_service,
+        mcp_service: "MCPService",
         include_global: bool = True,
         group_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
@@ -200,7 +203,7 @@ class MCPIntegration:
             Dict mapping agent_id -> list of required MCP server names
         """
         try:
-            agent_requirements = {}
+            agent_requirements: Dict[str, List[Any]] = {}
 
             # Process each task to collect MCP requirements
             for task_config in config.get("tasks", []):
@@ -240,7 +243,7 @@ class MCPIntegration:
     async def create_mcp_tools_for_agent(
         agent_config: Dict[str, Any],
         agent_key: str,
-        mcp_service,
+        mcp_service: "MCPService",
         config: Optional[Dict[str, Any]] = None,
     ) -> List[Any]:
         """
@@ -318,7 +321,7 @@ class MCPIntegration:
     async def create_mcp_tools_for_task(
         task_config: Dict[str, Any],
         task_key: str,
-        mcp_service,
+        mcp_service: "MCPService",
         config: Optional[Dict[str, Any]] = None,
     ) -> List[Any]:
         """
@@ -440,9 +443,9 @@ class MCPIntegration:
         try:
             # Try to find agent by exact match on various fields
             for agent_config in config.get("agents", []):
-                agent_id = agent_config.get("id")
-                agent_name = agent_config.get("name")
-                agent_role = agent_config.get("role")
+                agent_id: Optional[str] = agent_config.get("id")
+                agent_name: Optional[str] = agent_config.get("name")
+                agent_role: Optional[str] = agent_config.get("role")
 
                 if agent_ref in [agent_id, agent_name, agent_role]:
                     return agent_id or agent_name or agent_role
@@ -458,7 +461,7 @@ class MCPIntegration:
     async def _create_tools_for_server(
         server: Dict[str, Any],
         context_key: str,
-        mcp_service,
+        mcp_service: Optional["MCPService"],  # unused here; callers may pass None
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
     ) -> List[Any]:
@@ -655,7 +658,7 @@ class MCPIntegration:
             return []
 
     @staticmethod
-    async def get_mcp_settings(mcp_service) -> Dict[str, bool]:
+    async def get_mcp_settings(mcp_service: "MCPService") -> Dict[str, bool]:
         """
         Get MCP global settings.
 

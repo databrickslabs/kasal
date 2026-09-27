@@ -603,6 +603,22 @@ class TestGetFlowExecution:
         assert result["execution"]["id"] == 1
 
     @pytest.mark.asyncio
+    async def test_get_flow_execution_reads_only_real_columns(self, service):
+        """The run is an ExecutionHistory row; it has no updated_at. Reading it
+        raised AttributeError and every details request came back failed."""
+        from src.models.execution_history import ExecutionHistory
+
+        row = MagicMock(spec=ExecutionHistory)
+        row.id = 1
+        row.group_id = None
+        service.flow_execution_service.get_execution = AsyncMock(return_value=row)
+        service.flow_execution_service.get_node_executions = AsyncMock(return_value=[])
+
+        result = await service.get_flow_execution(1)
+
+        assert result["success"] is True, result
+
+    @pytest.mark.asyncio
     async def test_get_flow_execution_not_found(self, service):
         """Test getting non-existent flow execution."""
         service.flow_execution_service.get_execution = AsyncMock(return_value=None)

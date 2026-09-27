@@ -9,7 +9,7 @@ Mirrors the token extraction pattern from reference KbiComponent.
 import logging
 import re
 from enum import Enum
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 from ...base.models import KPI
 
@@ -33,15 +33,15 @@ class FormulaToken:
         self.token_type = token_type
         self.position = position
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Token({self.token_type.value}={self.value})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, FormulaToken):
             return self.value == other.value and self.token_type == other.token_type
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.value, self.token_type))
 
 
@@ -65,7 +65,7 @@ class KbiFormulaParser:
     FUNCTION_PATTERN = r"([A-Z_]+)\s*\("
     IDENTIFIER_PATTERN = r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
     def parse_formula(self, formula: str) -> List[FormulaToken]:
@@ -210,7 +210,7 @@ class KbiFormulaParser:
         return tokens
 
     def _extract_identifiers(
-        self, formula: str, exclude: List[FormulaToken] = None
+        self, formula: str, exclude: Optional[List[FormulaToken]] = None
     ) -> List[FormulaToken]:
         """Extract identifier tokens (column names, etc.) excluding already found tokens"""
         tokens = []
@@ -332,7 +332,7 @@ class KBIDependencyResolver:
     Mirrors reference KbiComponent.load_tokens() pattern.
     """
 
-    def __init__(self, parser: KbiFormulaParser = None):
+    def __init__(self, parser: Optional[KbiFormulaParser] = None) -> None:
         self.parser = parser or KbiFormulaParser()
         self.logger = logging.getLogger(__name__)
         self._kbi_lookup: Dict[str, KPI] = {}
@@ -344,7 +344,9 @@ class KBIDependencyResolver:
         Args:
             kbis: List of all KBIs in definition
         """
-        self._kbi_lookup = {kpi.technical_name: kpi for kpi in kpis}
+        self._kbi_lookup = {
+            kpi.technical_name: kpi for kpi in kpis if kpi.technical_name is not None
+        }
 
         # Also index by description for fallback
         for kpi in kpis:
@@ -384,7 +386,9 @@ class KBIDependencyResolver:
 
         return resolved_kbis
 
-    def get_dependency_tree(self, kbi: KPI, visited: Set[str] = None) -> Dict[str, any]:
+    def get_dependency_tree(
+        self, kbi: KPI, visited: Optional[Set[Optional[str]]] = None
+    ) -> Dict[str, Any]:
         """
         Build complete dependency tree for a KBI
 

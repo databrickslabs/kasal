@@ -670,7 +670,8 @@ class AnalyticsExportService:
                 params={"include_serialized_space": "true"},
             )
             resp.raise_for_status()
-            return resp.json()
+            space: Dict[str, Any] = resp.json()
+            return space
 
     async def export_dashboard(self, dashboard_id: str) -> Dict[str, Any]:
         """

@@ -121,6 +121,12 @@ dev = [
     "ruff>=0.2.1",
     "import-linter>=2.0",
     "types-psutil>=7.2.2.20260906",
+    "types-requests>=2.33.0.20260906",
+    "types-pyyaml>=6.0.12.20260906",
+    "types-croniter>=6.2.4.20260711",
+    "types-aiofiles>=25.1.0.20260518",
+    "types-openpyxl>=3.1.5.20260827",
+    "pandas-stubs>=2.3,<2.4",
 ]
 
 [tool.uv]
@@ -179,11 +185,29 @@ extend_skip_glob = [
 
 [tool.mypy]
 python_version = "3.11"
+# Without the plugin mypy does not know a pydantic field with a default is
+# optional, and every model built without it reads as a missing argument.
+plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 exclude = ["src/services/export/templates/"]
+
+# Installed libraries that ship neither inline types nor a stub package. Each is
+# named explicitly: a blanket ignore_missing_imports would hide a typo'd import.
+[[tool.mypy.overrides]]
+module = [
+    "asyncpg",
+    "asyncpg.*",
+    "dspy",
+    "dspy.*",
+    "skills_ref",
+    "skills_ref.*",
+    # Optional instrumentation; imported inside a try/except ImportError.
+    "openinference.instrumentation.crewai",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 cache-dir = "tests/.artifacts/ruff"

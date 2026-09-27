@@ -6,7 +6,7 @@ of crews and flows, as well as utility operations like name generation.
 """
 
 import uuid
-from typing import Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import (
     APIRouter,
@@ -72,7 +72,7 @@ async def create_execution(
     background_tasks: BackgroundTasks,
     service: Annotated[ExecutionService, Depends(get_execution_service)],
     group_context: GroupContextDep,
-):
+) -> ExecutionCreateResponse:
     """
     Create a new execution.
 
@@ -115,12 +115,18 @@ async def create_execution(
 
             if not has_nodes_in_config:
                 # This is a saved flow being re-executed - verify it exists
+                if service.session is None:  # always injected by get_execution_service
+                    raise ValueError("ExecutionService has no session")
                 flow_service = FlowService(service.session)
                 try:
                     flow = await flow_service.get_flow_for_execution(
                         config.flow_id, group_context
                     )
-                    exec_logger.info(f"Found flow in database: {flow.name} ({flow.id})")
+                    # Never None here: without allow_unsaved a missing flow raises.
+                    if flow is not None:
+                        exec_logger.info(
+                            f"Found flow in database: {flow.name} ({flow.id})"
+                        )
                 except HTTPException as he:
                     if he.status_code == 404:
                         exec_logger.error(f"Flow with ID {config.flow_id} not found")
@@ -128,7 +134,7 @@ async def create_execution(
                     raise
             else:
                 exec_logger.info(
-                    f"Executing unsaved flow with {len(config.nodes)} nodes from canvas (flow_id={config.flow_id})"
+                    f"Executing unsaved flow with {len(config.nodes or [])} nodes from canvas (flow_id={config.flow_id})"
                 )
 
         # Log the incoming config to debug knowledge_sources
@@ -169,14 +175,14 @@ async def create_execution(
         raise
 
 
-@router.get("/health")
-async def health_check():
+@router.get("/health", response_model=None)
+async def health_check() -> Dict[str, Any]:
     """Health check endpoint."""
     return {"status": "healthy"}
 
 
-@router.get("/debug-context")
-async def debug_context(group_context: GroupContextDep):
+@router.get("/debug-context", response_model=None)
+async def debug_context(group_context: GroupContextDep) -> Dict[str, Any]:
     """Debug endpoint to check group context extraction."""
     if not settings.DEBUG_MODE:
         raise HTTPException(status_code=404)
@@ -191,7 +197,7 @@ async def debug_context(group_context: GroupContextDep):
 @router.get("/{execution_id}", response_model=ExecutionResponse)
 async def get_execution_status(
     execution_id: str, group_context: GroupContextDep, db: SessionDep
-):
+) -> ExecutionResponse:
     """
     Get the status of a specific execution with group filtering.
 
@@ -256,7 +262,7 @@ async def list_executions(
     # payload belongs to GET /executions/{execution_id}; this opt-in exists for
     # a caller that genuinely needs it in bulk.
     include_payload: Annotated[bool, Query()] = False,
-):
+) -> list[ExecutionResponse]:
     """
     List executions for the explicitly selected workspace only.
 
@@ -345,7 +351,7 @@ async def generate_execution_name(
     request: ExecutionNameGenerationRequest,
     service: Annotated[ExecutionService, Depends(get_execution_service)],
     group_context: GroupContextDep,
-):
+) -> Dict[str, str]:
     """
     Generate a descriptive name for an execution based on agents and tasks configuration.
 
@@ -362,7 +368,7 @@ async def stop_execution(
     service: Annotated[ExecutionService, Depends(get_execution_service)],
     group_context: GroupContextDep,
     db: SessionDep,
-):
+) -> StopExecutionResponse:
     """
     Stop a running execution.
     Only Admins and Editors can stop executions.
@@ -440,7 +446,7 @@ async def get_execution_checkpoint(
     execution_id: str,
     service: CheckpointServiceDep,
     group_context: GroupContextDep,
-):
+) -> ExecutionCheckpointResponse:
     """
     Get an execution's checkpoint: which units completed and what they produced.
 
@@ -474,7 +480,7 @@ async def get_execution_checkpoint_unit(
     unit_key: str,
     service: CheckpointServiceDep,
     group_context: GroupContextDep,
-):
+) -> CheckpointUnitDetail:
     """
     Get one checkpoint unit with its full stored output.
 
@@ -495,12 +501,12 @@ async def get_execution_checkpoint_unit(
     return CheckpointUnitDetail(**unit)
 
 
-@router.delete("/{execution_id}/checkpoints")
+@router.delete("/{execution_id}/checkpoints", response_model=None)
 async def expire_execution_checkpoint(
     execution_id: str,
     service: CheckpointServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Expire an execution's checkpoint so it stops offering itself as resumable.
 
@@ -531,7 +537,7 @@ async def resume_execution(
     service: Annotated[ExecutionService, Depends(get_execution_service)],
     group_context: GroupContextDep,
     request: Optional[ResumeExecutionRequest] = None,
-):
+) -> ExecutionCreateResponse:
     """
     Resume a crashed or stopped execution from its checkpoint.
 
@@ -582,7 +588,7 @@ async def resume_execution(
 @router.post("/{execution_id}/force-stop", response_model=StopExecutionResponse)
 async def force_stop_execution(
     execution_id: str, group_context: GroupContextDep, db: SessionDep
-):
+) -> StopExecutionResponse:
     """
     Force stop a running execution immediately.
 
@@ -620,7 +626,7 @@ async def force_stop_execution(
 @router.get("/{execution_id}/status", response_model=ExecutionStatusResponse)
 async def get_execution_status_simple(
     execution_id: str, group_context: GroupContextDep, db: SessionDep
-):
+) -> ExecutionStatusResponse:
     """
     Get the current status of an execution.
 

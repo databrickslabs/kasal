@@ -275,8 +275,7 @@ class TestPowerBIServiceTokenGeneration:
                 "POWERBI_USERNAME": "test@example.com",
                 "POWERBI_PASSWORD": "test-password",
             }
-            powerbi_service._secrets_service = MagicMock()
-            powerbi_service._secrets_service.get_api_key = AsyncMock(
+            powerbi_service._api_key = AsyncMock(
                 side_effect=lambda name: creds.get(name)
             )
             token = await powerbi_service._generate_token(mock_powerbi_config)
@@ -391,17 +390,16 @@ class TestPowerBIServiceUsernamePasswordSecretsService:
         self, powerbi_service
     ):
         """Test token generation retrieves credentials from secrets service."""
-        mock_secrets = AsyncMock()
-        mock_secrets.get_api_key = AsyncMock(
+        mock_key = AsyncMock(
             side_effect=lambda key: {
                 "POWERBI_USERNAME": "secret-user@example.com",
                 "POWERBI_PASSWORD": "secret-password",
                 "POWERBI_CLIENT_SECRET": "secret-client-secret",
             }.get(key)
         )
-
-        # Set _secrets_service to a truthy value so the code enters the if block
-        powerbi_service._secrets_service = mock_secrets
+        # No pre-seeded _secrets_service: the lookup must not depend on one
+        # (it used to be gated on it, so a fresh service never read the keys).
+        powerbi_service._api_key = mock_key
 
         config = MockPowerBIConfig()
 
@@ -418,7 +416,7 @@ class TestPowerBIServiceUsernamePasswordSecretsService:
 
             assert token == "secrets-service-token"
             # Verify secrets service was queried
-            assert mock_secrets.get_api_key.call_count == 3
+            assert mock_key.call_count == 3
             # Verify credential was created with secrets service values
             MockCred.assert_called_once_with(
                 client_id="test-client",
@@ -434,11 +432,9 @@ class TestPowerBIServiceUsernamePasswordSecretsService:
     ):
         """When the secrets service fails there is NO env fallback: the process
         environment is shared by every workspace."""
-        mock_secrets = AsyncMock()
-        mock_secrets.get_api_key = AsyncMock(
+        powerbi_service._api_key = AsyncMock(
             side_effect=Exception("Secrets service unavailable")
         )
-        powerbi_service._secrets_service = mock_secrets
         config = MockPowerBIConfig()
 
         with patch("azure.identity.UsernamePasswordCredential") as MockCred:
@@ -601,3 +597,30 @@ class TestPowerBIServiceMultiTenancy:
                     mock_repo.get_active_config.assert_called_with(
                         group_id="test-group"
                     )
+
+
+class TestPowerBIServiceApiKey:
+    """_api_key reads through the workspace-scoped ApiKeysService and decrypts."""
+
+    @pytest.mark.asyncio
+    async def test_decrypts_the_workspace_key(self, powerbi_service):
+        from types import SimpleNamespace
+
+        secrets = MagicMock()
+        secrets.find_by_name = AsyncMock(
+            return_value=SimpleNamespace(encrypted_value="enc")
+        )
+        powerbi_service._secrets_service = secrets
+        with patch(
+            "src.utils.encryption_utils.EncryptionUtils.decrypt_value",
+            return_value="plain",
+        ):
+            assert await powerbi_service._api_key("POWERBI_USERNAME") == "plain"
+        secrets.find_by_name.assert_awaited_once_with("POWERBI_USERNAME")
+
+    @pytest.mark.asyncio
+    async def test_missing_key_is_none(self, powerbi_service):
+        secrets = MagicMock()
+        secrets.find_by_name = AsyncMock(return_value=None)
+        powerbi_service._secrets_service = secrets
+        assert await powerbi_service._api_key("POWERBI_PASSWORD") is None

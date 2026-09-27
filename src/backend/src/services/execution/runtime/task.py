@@ -16,7 +16,7 @@ import logging
 import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from pydantic import BaseModel, Field
 
@@ -224,7 +224,9 @@ class Task(BaseModel):
             contextvars.copy_context().run, self.execute_sync, agent, context, tools
         )
 
-    def copy(self, agents: Sequence[Any], task_mapping: dict[str, "Task"]) -> "Task":
+    def copy(  # type: ignore[override]  # CrewAI API: shadows pydantic copy()
+        self, agents: Sequence[Any], task_mapping: dict[str, "Task"]
+    ) -> "Task":
         """Clone for a copied crew: fresh id/output, agent and context remapped."""
         data = self.model_dump(
             exclude={"id", "output", "agent", "context", "start_time", "end_time"},
@@ -269,8 +271,11 @@ class Task(BaseModel):
         from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 
         try:
-            return executing_agent.execute_task(
-                self, context, list(tools) if tools else None
+            return cast(
+                str,
+                executing_agent.execute_task(
+                    self, context, list(tools) if tools else None
+                ),
             )
         except ExecutionBudgetExceededError as exc:
             if self.on_budget_exceeded != "degrade":

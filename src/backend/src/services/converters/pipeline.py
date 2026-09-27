@@ -53,7 +53,7 @@ class ConversionPipeline:
         print(result["output"])  # DAX measures
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
     def create_inbound_connector(
@@ -113,7 +113,7 @@ class ConversionPipeline:
         extract_params = extract_params or {}
         definition_name = definition_name or "converted_measures"
 
-        errors = []
+        errors: List[str] = []
         definition = None
         output = None
 
@@ -168,7 +168,7 @@ class ConversionPipeline:
         definition: KPIDefinition,
         format: OutboundFormat,
         params: Dict[str, Any],
-        inbound_type: ConnectorType = None,
+        inbound_type: Optional[ConnectorType] = None,
     ) -> Union[str, Dict[str, Any], List[Any]]:
         """
         Convert KPIDefinition to target format.
@@ -216,7 +216,7 @@ class ConversionPipeline:
 
     def _convert_to_dax(
         self, definition: KPIDefinition, params: Dict[str, Any]
-    ) -> List[Dict[str, str]]:
+    ) -> List[Dict[str, Optional[str]]]:
         """
         Convert to DAX measures with automatic dependency resolution.
 
@@ -240,7 +240,13 @@ class ConversionPipeline:
                         "name": dax_measure.name,
                         "expression": dax_measure.dax_formula,
                         "description": dax_measure.description,
-                        "table": dax_measure.table,
+                        # DAXMeasure has no ``table`` field; the measure's home
+                        # table is the source table of the KPI it came from.
+                        "table": (
+                            dax_measure.original_kbi.source_table
+                            if dax_measure.original_kbi
+                            else None
+                        ),
                     }
                 )
 
@@ -404,8 +410,8 @@ class ConversionPipeline:
 
             # Return all SQL queries formatted
             if result.sql_queries:
-                # Use to_output_string() to get all queries with formatting
-                return result.to_output_string(formatted=True)
+                # All queries, formatted, with a header comment
+                return result.get_formatted_sql_output()
             return ""
 
     def _convert_to_uc_metrics(
@@ -473,7 +479,7 @@ class ConversionPipeline:
 
 
 def convert_powerbi_to_dax(
-    semantic_model_id: str, group_id: str, access_token: str, **kwargs
+    semantic_model_id: str, group_id: str, access_token: str, **kwargs: Any
 ) -> Dict[str, Any]:
     """
     Convert Power BI measures to DAX.
@@ -505,7 +511,7 @@ def convert_powerbi_to_sql(
     group_id: str,
     access_token: str,
     dialect: str = "databricks",
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Convert Power BI measures to SQL."""
     pipeline = ConversionPipeline()
@@ -528,7 +534,7 @@ def convert_powerbi_to_uc_metrics(
     access_token: str,
     catalog: str = "main",
     schema: str = "default",
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Convert Power BI measures to UC Metrics."""
     pipeline = ConversionPipeline()

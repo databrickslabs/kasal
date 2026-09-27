@@ -226,6 +226,8 @@ async def route_and_dispatch(
             decision.capability,
         )
         return no_match("repeat", answer_here=True)
+    # is_confident / continue_decision guarantee a named capability here.
+    assert decision.capability is not None
     publication = await publications.resolve_capability_for_group(
         group_ids, CHAT_PROTOCOL, decision.capability
     )
@@ -323,7 +325,7 @@ async def build_dispatch_result(
     capability: Optional[PublishedCapability],
     catalog_service: Any,
     flow_service: Any,
-    group_context: GroupContext,
+    group_context: Optional[GroupContext],
     message: str = "",
     referenced_answer: Optional[str] = None,
     continued: bool = False,
@@ -412,7 +414,7 @@ async def _build_flow_result(
     publication: Publication,
     capability: Optional[PublishedCapability],
     flow_service: Any,
-    group_context: GroupContext,
+    group_context: Optional[GroupContext],
     message: str = "",
     referenced_answer: Optional[str] = None,
     continued: bool = False,

@@ -50,7 +50,7 @@ class ExecutionBroadcastService:
         self._last_statuses: Dict[str, str] = {}
         self._last_completed_at: Dict[str, Optional[str]] = {}
 
-    def start(self):
+    def start(self) -> None:
         """Start the background polling task."""
         if self._running:
             logger.warning("[ExecutionBroadcastService] Already running")
@@ -60,7 +60,7 @@ class ExecutionBroadcastService:
         self._task = asyncio.create_task(self._poll_loop())
         logger.info("[ExecutionBroadcastService] Started execution broadcast polling")
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the background polling task."""
         self._running = False
         if self._task:
@@ -85,7 +85,7 @@ class ExecutionBroadcastService:
 
         return active_jobs
 
-    async def _poll_loop(self):
+    async def _poll_loop(self) -> None:
         """Main polling loop that checks for status changes."""
         logger.info("[ExecutionBroadcastService] Poll loop started")
 
@@ -102,7 +102,7 @@ class ExecutionBroadcastService:
 
         logger.info("[ExecutionBroadcastService] Poll loop ended")
 
-    async def _poll_for_status_changes(self):
+    async def _poll_for_status_changes(self) -> None:
         """Poll database for execution status changes and broadcast them."""
         # Get jobs with active SSE connections
         active_jobs = self._get_active_job_ids()
@@ -146,7 +146,9 @@ class ExecutionBroadcastService:
                     # Fetch large result JSON only when there is something to send.
                     await self._check_and_broadcast_status(session, job_id)
 
-    async def _check_and_broadcast_status(self, session: AsyncSession, job_id: str):
+    async def _check_and_broadcast_status(
+        self, session: AsyncSession, job_id: str
+    ) -> None:
         """
         Check for status changes for a specific job and broadcast them.
 

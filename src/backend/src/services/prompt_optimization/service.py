@@ -37,7 +37,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.repositories.prompt_optimization_run_repository import (
     PromptOptimizationRunRepository,
@@ -304,14 +304,15 @@ class PromptOptimizationService(
         group_context: Optional[GroupContext],
         lookback_days: int,
         max_examples: int,
-        extract=None,
+        extract: Optional[Callable[[str], Optional[str]]] = None,
     ) -> List[str]:
         """Pull distinct, successful inputs for `endpoint` from the LLM log."""
         group_ids = group_context.group_ids if group_context else []
         if not group_ids:
             return []
         cutoff = datetime.utcnow() - timedelta(days=lookback_days)
-        seen, examples = set(), []
+        seen: set[str] = set()
+        examples: List[str] = []
         page = 0
         # Over-fetch pages (dedup shrinks them) but bound total scanned rows.
         while len(examples) < max_examples and page < 20:
@@ -413,7 +414,7 @@ class PromptOptimizationService(
 
     async def _resolve_registry(
         self, template_name: str, group_context: Optional[GroupContext]
-    ) -> tuple:
+    ) -> Tuple[str, str]:
         """Resolve the MLflow prompt-registry destination and prompt name.
 
         Policy: managed MLflow (Databricks Unity Catalog prompt registry) is
@@ -513,7 +514,12 @@ class PromptOptimizationService(
 
     # ------------------------------------------------------------ background
 
-    async def _run_optimization(self, run_id: str, sync_fn=None, **kwargs) -> None:
+    async def _run_optimization(
+        self,
+        run_id: str,
+        sync_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> None:
         run = _RUNS.get(run_id)
         if run is None:
             return
@@ -521,8 +527,11 @@ class PromptOptimizationService(
         await run_state._persist_run_changes(run_id, {"status": "running"})
         heartbeat = asyncio.create_task(self._heartbeat(run_id))
         try:
+            worker: Callable[..., Dict[str, Any]] = (
+                sync_fn or self._execute_optimization_sync
+            )
             result = await asyncio.to_thread(
-                sync_fn or self._execute_optimization_sync,
+                worker,
                 loop=asyncio.get_running_loop(),
                 **kwargs,
             )

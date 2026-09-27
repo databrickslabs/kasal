@@ -12,12 +12,15 @@ Read-only and best-effort: any failure yields ``""`` and the turn still answers.
 """
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional, Tuple
 
 from src.services.settings.engine_settings import setting as engine_setting
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
+
+#: One rendered turn: (role, "Label: text", pinned).
+_Entry = Tuple[str, str, bool]
 
 
 async def build_conversation_preamble(
@@ -183,10 +186,10 @@ async def build_conversation_preamble(
     # Enforce the character budget by dropping the OLDEST assistant turns
     # first; user turns are never dropped (they carry the facts to recall).
     # The pinned last answer sits outside the budget and is never dropped.
-    def _total(items) -> int:
+    def _total(items: List[_Entry]) -> int:
         return sum(len(line) + 1 for _, line, pinned in items if not pinned)
 
-    def _first(items, want_assistant: bool) -> Optional[int]:
+    def _first(items: List[_Entry], want_assistant: bool) -> Optional[int]:
         for i, (role, _, pinned) in enumerate(items):
             if not pinned and (role == "assistant" or not want_assistant):
                 return i

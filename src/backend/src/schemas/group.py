@@ -5,7 +5,7 @@ These schemas define the request and response models for group-related endpoints
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import (
     BaseModel,
@@ -176,7 +176,7 @@ class GroupUserResponse(GroupUserBase):
 
     @field_validator("role", mode="before")
     @classmethod
-    def migrate_legacy_roles(cls, v):
+    def migrate_legacy_roles(cls, v: Any) -> Any:
         """Automatically migrate legacy role values to new 3-tier system."""
         if isinstance(v, str):
             # Map old roles to new roles

@@ -1,18 +1,28 @@
-from typing import Generic, List, Optional, TypeVar
+from typing import Any, Callable, Generic, List, Optional, Type, TypeVar
 
-from src.core.base_repository import ModelType
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.base_repository import BaseRepository, ModelType
 
 # Define type for schema input
-SchemaType = TypeVar("SchemaType")
+SchemaType = TypeVar("SchemaType", bound=BaseModel)
 
 
 class BaseService(Generic[ModelType, SchemaType]):
     """
     Base service class implementing common business logic operations.
     Services orchestrate operations using repositories and handle business rules.
+
+    The CRUD methods below build ``repository_class(model_class, session)``, so a
+    subclass relying on them must set both, with a repository taking
+    ``(model, session)`` like ``BaseRepository`` itself.
     """
 
-    def __init__(self, session):
+    repository_class: Callable[..., BaseRepository[ModelType, Any]]
+    model_class: Type[ModelType]
+
+    def __init__(self, session: AsyncSession) -> None:
         """
         Initialize the service with a session.
 
@@ -21,7 +31,7 @@ class BaseService(Generic[ModelType, SchemaType]):
         """
         self.session = session
 
-    async def get(self, id: int) -> Optional[ModelType]:
+    async def get(self, id: Any) -> Optional[ModelType]:
         """
         Get a single record by ID.
 
@@ -61,7 +71,7 @@ class BaseService(Generic[ModelType, SchemaType]):
         repository = self.repository_class(self.model_class, self.session)
         return await repository.create(obj_in.model_dump())
 
-    async def update(self, id: int, obj_in: SchemaType) -> Optional[ModelType]:
+    async def update(self, id: Any, obj_in: SchemaType) -> Optional[ModelType]:
         """
         Update an existing record.
 
@@ -75,7 +85,7 @@ class BaseService(Generic[ModelType, SchemaType]):
         repository = self.repository_class(self.model_class, self.session)
         return await repository.update(id, obj_in.model_dump(exclude_unset=True))
 
-    async def delete(self, id: int) -> bool:
+    async def delete(self, id: Any) -> bool:
         """
         Delete a record by ID.
 

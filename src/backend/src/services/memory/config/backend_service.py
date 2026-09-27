@@ -4,10 +4,10 @@ Memory backend service - facade for all memory backend operations.
 This module acts as a facade that delegates to specialized services for different operations.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.models.memory_backend import MemoryBackend
+from src.models.memory_backend import MemoryBackend, MemoryBackendTypeEnum
 from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendCreate,
@@ -17,6 +17,9 @@ from src.schemas.memory_backend import (
 # Import specialized services
 from src.services.memory.config.backend_base_service import MemoryBackendBaseService
 from src.services.memory.config.config_service import MemoryConfigService
+
+if TYPE_CHECKING:
+    from src.services.memory.config.lakebase_service import LakebaseMemoryService
 
 logger = LoggerManager.get_instance().system
 
@@ -86,7 +89,9 @@ class MemoryBackendService:
         repository = MemoryBackendRepository(self.session)
         return await repository.get_all()
 
-    async def get_by_type(self, group_id: str, backend_type) -> List[MemoryBackend]:
+    async def get_by_type(
+        self, group_id: str, backend_type: MemoryBackendTypeEnum
+    ) -> List[MemoryBackend]:
         """Memory backends of one type for a group.
 
         Backends are this service's domain; crew generation used to build
@@ -147,7 +152,9 @@ class MemoryBackendService:
         """Get the active memory backend configuration."""
         return await self._config_service.get_active_config(group_id)
 
-    def _get_lakebase_service(self, instance_name: Optional[str] = None):
+    def _get_lakebase_service(
+        self, instance_name: Optional[str] = None
+    ) -> "LakebaseMemoryService":
         """Create a LakebaseMemoryService for the given instance."""
         from src.services.memory.config.lakebase_service import LakebaseMemoryService
 

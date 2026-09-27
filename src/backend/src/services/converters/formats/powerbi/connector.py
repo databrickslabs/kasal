@@ -4,7 +4,7 @@ Extracts measures from Power BI datasets via REST API
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import requests
 
@@ -75,8 +75,8 @@ class PowerBIConnector(BaseInboundConnector):
         use_database: bool = False,
         use_system_schema: bool = True,
         info_table_name: str = "Info Measures",
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize Power BI connector.
 
@@ -216,7 +216,7 @@ class PowerBIConnector(BaseInboundConnector):
             results = response.json().get("results", [])
 
             if results and results[0].get("tables"):
-                rows = results[0]["tables"][0].get("rows", [])
+                rows: List[Dict[str, Any]] = results[0]["tables"][0].get("rows", [])
                 self.logger.info(f"Query returned {len(rows)} rows")
                 return rows
             else:
@@ -296,6 +296,7 @@ class PowerBIConnector(BaseInboundConnector):
         self,
         include_hidden: bool = False,
         filter_pattern: Optional[str] = None,
+        **kwargs: Any,
     ) -> List[KPI]:
         """
         Extract measures from Power BI dataset.
@@ -378,7 +379,7 @@ class PowerBIConnector(BaseInboundConnector):
 
             # PowerBI measures don't have separate filters - they're embedded in the DAX expression
             # Filters would only come from YAML-based definitions
-            filters = []
+            filters: List[Union[str, Dict[str, Any]]] = []
 
             # Determine source table
             source_table = parsed["source_table"] or get_value(

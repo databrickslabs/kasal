@@ -7,6 +7,7 @@ completed proposal as a group-scoped template override.
 """
 
 import logging
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
 
@@ -23,6 +24,7 @@ from src.schemas.prompt_optimization import (
     PromptOptimizationStartResponse,
 )
 from src.services.prompt_optimization.service import PromptOptimizationService
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ router = APIRouter(
 )
 
 
-def _require_author(group_context) -> None:
+def _require_author(group_context: GroupContext) -> None:
     """Optimization rewrites the prompts a crew runs with, so it is an authoring
     action, not an operational one — editors and admins only.
 
@@ -45,7 +47,7 @@ def _require_author(group_context) -> None:
         raise ForbiddenError("Only editors and admins can optimize prompts")
 
 
-def _publish_user_context(group_context) -> None:
+def _publish_user_context(group_context: Optional[GroupContext]) -> None:
     # CRITICAL: publish the request's group + user token to UserContext so
     # LLMManager resolves auth the same way the dispatcher does (OBO for
     # OpenAI-protocol models). The background task inherits this context via
@@ -63,7 +65,7 @@ async def start_optimization(
     request: PromptOptimizationRequest,
     group_context: GroupContextDep,
     session: SessionDep,
-):
+) -> PromptOptimizationStartResponse:
     """
     Start a prompt optimization run in the background.
 
@@ -87,7 +89,7 @@ async def start_crew_optimization(
     request: CrewOptimizationRequest,
     group_context: GroupContextDep,
     session: SessionDep,
-):
+) -> PromptOptimizationStartResponse:
     """
     Start GEPA optimization of a saved crew's prompt fields in the background.
 
@@ -105,20 +107,20 @@ async def start_crew_optimization(
     return PromptOptimizationStartResponse(**result)
 
 
-@router.get("/crew-evals/{crew_id}")
+@router.get("/crew-evals/{crew_id}", response_model=None)
 async def list_crew_evals(
     crew_id: str, group_context: GroupContextDep, session: SessionDep
-):
+) -> Dict[str, Any]:
     """List a crew's optimization-evaluation answers (local MLflow traces) so
     they can be graded in-app. Empty when local MLflow mode is not enabled."""
     service = PromptOptimizationService(session)
     return {"evals": await service.list_crew_evals(crew_id, group_context)}
 
 
-@router.post("/crew-evals/{trace_id}/feedback")
+@router.post("/crew-evals/{trace_id}/feedback", response_model=None)
 async def add_eval_feedback(
     trace_id: str, body: dict, group_context: GroupContextDep, session: SessionDep
-):
+) -> Dict[str, Any]:
     """Attach a human grade (0-10, Feedback) and/or an expectation (ground
     truth of what the answer SHOULD contain) to an evaluation answer.
 
@@ -146,8 +148,10 @@ async def add_eval_feedback(
     return {"ok": ok}
 
 
-@router.get("/judges")
-async def list_judges(group_context: GroupContextDep, session: SessionDep):
+@router.get("/judges", response_model=None)
+async def list_judges(
+    group_context: GroupContextDep, session: SessionDep
+) -> Dict[str, Any]:
     """List the judges in the MLflow prompt registry."""
     service = PromptOptimizationService(session)
     try:
@@ -156,16 +160,20 @@ async def list_judges(group_context: GroupContextDep, session: SessionDep):
         raise BadRequestError(str(e))
 
 
-@router.get("/judges/registry")
-async def judge_registry_info(group_context: GroupContextDep, session: SessionDep):
+@router.get("/judges/registry", response_model=None)
+async def judge_registry_info(
+    group_context: GroupContextDep, session: SessionDep
+) -> Dict[str, Any]:
     """Where this workspace's judges live (kind, location, UI url) — or why
     no registry resolves. Lets the Optimize dialog show the reason instead of
     an empty judge list."""
     return await PromptOptimizationService(session).judge_registry_info(group_context)
 
 
-@router.post("/judges")
-async def create_judge(body: dict, group_context: GroupContextDep, session: SessionDep):
+@router.post("/judges", response_model=None)
+async def create_judge(
+    body: dict, group_context: GroupContextDep, session: SessionDep
+) -> Dict[str, Any]:
     """Create + register an LLM judge from Kasal: {name, instructions, model?}.
 
     Registered judges automatically participate in crew-optimization scoring.
@@ -185,10 +193,10 @@ async def create_judge(body: dict, group_context: GroupContextDep, session: Sess
     return result
 
 
-@router.post("/judges/{name}/assign")
+@router.post("/judges/{name}/assign", response_model=None)
 async def assign_judge(
     name: str, body: dict, group_context: GroupContextDep, session: SessionDep
-):
+) -> Dict[str, Any]:
     """Assign a shared library judge to a crew: {crew_id}. The crew's runs use
     only its assigned judges."""
     service = PromptOptimizationService(session)
@@ -201,10 +209,10 @@ async def assign_judge(
         raise BadRequestError(str(e))
 
 
-@router.post("/judges/{name}/align")
+@router.post("/judges/{name}/align", response_model=None)
 async def align_judge(
     name: str, body: dict, group_context: GroupContextDep, session: SessionDep
-):
+) -> Dict[str, Any]:
     """MemAlign: align a crew's judge to the human grades on its evaluation
     answers: {crew_id}. Distils with the judge's own model, and registers the
     aligned judge as the next version under the same name, so the crew's next
@@ -219,10 +227,10 @@ async def align_judge(
         raise BadRequestError(str(e))
 
 
-@router.put("/judges/{name}")
+@router.put("/judges/{name}", response_model=None)
 async def update_judge(
     name: str, body: dict, group_context: GroupContextDep, session: SessionDep
-):
+) -> Dict[str, Any]:
     """Update a judge's instructions and/or model: {instructions?, model?}.
 
     `name` is the full registry name; editing a crew-scoped copy changes what
@@ -241,8 +249,10 @@ async def update_judge(
         raise BadRequestError(str(e))
 
 
-@router.delete("/judges/{name}")
-async def delete_judge(name: str, group_context: GroupContextDep, session: SessionDep):
+@router.delete("/judges/{name}", response_model=None)
+async def delete_judge(
+    name: str, group_context: GroupContextDep, session: SessionDep
+) -> Dict[str, Any]:
     """Delete a registered LLM judge by name."""
     service = PromptOptimizationService(session)
     try:
@@ -253,7 +263,9 @@ async def delete_judge(name: str, group_context: GroupContextDep, session: Sessi
 
 
 @router.get("/runs", response_model=PromptOptimizationRunList)
-async def list_runs(group_context: GroupContextDep, session: SessionDep):
+async def list_runs(
+    group_context: GroupContextDep, session: SessionDep
+) -> PromptOptimizationRunList:
     """List recent optimization runs for the caller's group.
 
     Runs are read from the durable `prompt_optimization_runs` table, so they
@@ -270,7 +282,9 @@ async def list_runs(group_context: GroupContextDep, session: SessionDep):
 
 
 @router.get("/runs/{run_id}", response_model=PromptOptimizationRunStatus)
-async def get_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+async def get_run(
+    run_id: str, group_context: GroupContextDep, session: SessionDep
+) -> PromptOptimizationRunStatus:
     """Get the status/result of an optimization run, including the proposed template."""
     service = PromptOptimizationService(session)
     run = await service.get_run(run_id, group_context)
@@ -279,8 +293,10 @@ async def get_run(run_id: str, group_context: GroupContextDep, session: SessionD
     return PromptOptimizationRunStatus(**run)
 
 
-@router.post("/runs/{run_id}/cancel")
-async def cancel_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+@router.post("/runs/{run_id}/cancel", response_model=None)
+async def cancel_run(
+    run_id: str, group_context: GroupContextDep, session: SessionDep
+) -> Dict[str, Any]:
     """Request a running optimization to stop (honored before the next crew
     execution; an in-flight execution finishes first)."""
     service = PromptOptimizationService(session)
@@ -290,8 +306,10 @@ async def cancel_run(run_id: str, group_context: GroupContextDep, session: Sessi
         raise NotFoundError(str(e))
 
 
-@router.delete("/runs/{run_id}")
-async def delete_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+@router.delete("/runs/{run_id}", response_model=None)
+async def delete_run(
+    run_id: str, group_context: GroupContextDep, session: SessionDep
+) -> Dict[str, Any]:
     """Delete a run's record so it stops blocking new runs (e.g. a pending run
     orphaned by a restart). Cancels an in-process task first if still active."""
     service = PromptOptimizationService(session)
@@ -299,7 +317,9 @@ async def delete_run(run_id: str, group_context: GroupContextDep, session: Sessi
 
 
 @router.post("/runs/{run_id}/apply", response_model=PromptOptimizationApplyResponse)
-async def apply_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+async def apply_run(
+    run_id: str, group_context: GroupContextDep, session: SessionDep
+) -> PromptOptimizationApplyResponse:
     """
     Apply a completed run's proposal.
 
@@ -321,7 +341,9 @@ async def apply_run(run_id: str, group_context: GroupContextDep, session: Sessio
 
 
 @router.post("/runs/{run_id}/revert", response_model=PromptOptimizationRevertResponse)
-async def revert_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+async def revert_run(
+    run_id: str, group_context: GroupContextDep, session: SessionDep
+) -> PromptOptimizationRevertResponse:
     """
     Undo an applied run by restoring the before-image taken at apply time.
 

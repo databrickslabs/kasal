@@ -27,16 +27,31 @@ import logging
 import os
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    overload,
+)
 
 import litellm
 from litellm import CustomLogger
+from litellm.types.caching import LiteLLMCacheType
 
-from src.core.llm.transport import LLM
+from src.core.llm.transport import LLM, OpenAICompletion
 from src.core.llm.transport.completion import NO_API_KEY
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
 from src.services.llm.endpoints import require_api_base
+
+if TYPE_CHECKING:
+    from src.services.llm.handlers.model_fallback import ModelCandidate
 
 #: Concurrent blocking LLM calls per server process (was the
 #: KASAL_LLM_MAX_CONCURRENCY env var). A pool sized at import, so a constant.
@@ -54,7 +69,9 @@ _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 
-async def _run_llm_blocking(func, /, *args, **kwargs):
+async def _run_llm_blocking(
+    func: Callable[..., Any], /, *args: Any, **kwargs: Any
+) -> Any:
     """Run a blocking LLM call on the dedicated executor.
 
     Mirrors ``asyncio.to_thread`` semantics (contextvars propagate, so ambient
@@ -281,7 +298,8 @@ try:
 
     registered_count = 0
     for model_name, config in MODEL_CONFIGS.items():
-        provider = config.get("provider")
+        # Seed rows are heterogeneous dicts (values typed ``object``).
+        provider: Any = config.get("provider")
         context_window = config.get("context_window", 128000)
         # EVERY seeded model is registered, not just the Databricks/self-hosted
         # ones. An unregistered model falls back to DEFAULT_CONTEXT_WINDOW_SIZE
@@ -347,7 +365,9 @@ logger.info(f"LLM operations log file: {log_file_path}")
 class LiteLLMFileLogger(CustomLogger):
     """Logs LiteLLM calls to the llm.log file using the module logger."""
 
-    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+    def log_success_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         model = kwargs.get("model", "unknown")
         duration = (
             (end_time - start_time).total_seconds()
@@ -367,15 +387,21 @@ class LiteLLMFileLogger(CustomLogger):
             f"LLM success: model={model}, duration={duration:.2f}s, usage={usage}"
         )
 
-    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+    def log_failure_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         model = kwargs.get("model", "unknown")
         exception = kwargs.get("exception", "unknown error")
         logger.error(f"LLM failure: model={model}, error={exception}")
 
-    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+    async def async_log_success_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         self.log_success_event(kwargs, response_obj, start_time, end_time)
 
-    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+    async def async_log_failure_event(
+        self, kwargs: Dict[str, Any], response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
         self.log_failure_event(kwargs, response_obj, start_time, end_time)
 
 
@@ -416,7 +442,7 @@ def _configure_litellm_caching() -> None:
     deserializes pickle from writable cache files.
     """
     try:
-        litellm.enable_cache(type="local", ttl=3600)
+        litellm.enable_cache(type=LiteLLMCacheType.LOCAL, ttl=3600)
         logger.info("LiteLLM cache enabled (type=local, ttl=3600s)")
     except Exception as e:  # noqa: BLE001 — a cache must never stop startup
         logger.warning(f"Failed to configure LiteLLM caching: {e}")
@@ -491,6 +517,14 @@ class LLMManager:
     the code to ``src/core/llm/embeddings.py``.
     """
 
+    @overload
+    @staticmethod
+    def _get_group_id_from_context(required: Literal[True] = ...) -> str: ...
+
+    @overload
+    @staticmethod
+    def _get_group_id_from_context(required: bool) -> Optional[str]: ...
+
     @staticmethod
     def _get_group_id_from_context(required: bool = True) -> Optional[str]:
         """
@@ -528,6 +562,33 @@ class LLMManager:
 
         # Otherwise return None
         return None
+
+    @overload
+    @staticmethod
+    async def completion(
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float = ...,
+        max_tokens: Optional[int] = ...,
+        extra_headers: Optional[Dict[str, str]] = ...,
+        fallback_drop_system_on_400: bool = ...,
+        with_served_model: Literal[False] = ...,
+        response_format: Optional[Any] = ...,
+    ) -> str: ...
+
+    @overload
+    @staticmethod
+    async def completion(
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float = ...,
+        max_tokens: Optional[int] = ...,
+        extra_headers: Optional[Dict[str, str]] = ...,
+        fallback_drop_system_on_400: bool = ...,
+        *,
+        with_served_model: Literal[True],
+        response_format: Optional[Any] = ...,
+    ) -> Tuple[str, str]: ...
 
     @staticmethod
     async def completion(
@@ -602,8 +663,12 @@ class LLMManager:
         ):
             llm.max_tokens = 4000
         if extra_headers:
-            # Pass extra_headers to the underlying litellm call via LLM extra_headers param
-            llm.extra_headers = extra_headers
+            # Request options live in additional_params: an attribute set after
+            # construction is stored on the object and never sent.
+            llm.additional_params["extra_headers"] = {
+                **(llm.additional_params.get("extra_headers") or {}),
+                **extra_headers,
+            }
 
         # Emit an MLflow LLM span for this call so the model + messages +
         # response show up in the active trace (generation/dispatcher root, or a
@@ -778,8 +843,8 @@ class LLMManager:
 
     @staticmethod
     async def configure_kasal_llm(
-        model_name: str, group_id: str, temperature: Optional[float] = None
-    ) -> LLM:
+        model_name: str, group_id: Optional[str], temperature: Optional[float] = None
+    ) -> OpenAICompletion:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.
 
@@ -979,7 +1044,7 @@ class LLMManager:
             # Ensure the model string explicitly includes the provider for CrewAI compatibility
             # GPT-5 reasoning models need longer timeout (300s) — they can take 2-4 min on complex prompts
             # Standard Databricks models: 240s (server-side limit is 297s)
-            llm_params = {
+            llm_params: Dict[str, Any] = {
                 "model": prefixed_model,
                 "timeout": 300 if is_openai_reasoning else 297,
             }
@@ -1305,7 +1370,9 @@ class LLMManager:
         return LLM(**llm_params)
 
     @staticmethod
-    async def get_llm(model_name: str, temperature: Optional[float] = None):
+    async def get_llm(
+        model_name: str, temperature: Optional[float] = None
+    ) -> OpenAICompletion:
         """
         Create a CrewAI LLM instance for the specified model.
 
@@ -1327,7 +1394,9 @@ class LLMManager:
         return await LLMManager.configure_kasal_llm(model_name, group_id, temperature)
 
     @staticmethod
-    async def load_fallback_candidates(current_model_key: str, group_id: Optional[str]):
+    async def load_fallback_candidates(
+        current_model_key: str, group_id: Optional[str]
+    ) -> List["ModelCandidate"]:
         """Enabled models usable as fallback targets for ``DatabricksRetryLLM``.
 
         Returns ModelCandidate(name, context_window) for every enabled model

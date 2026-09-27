@@ -51,7 +51,7 @@ how to ask a human mid-task.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from src.services.external import artifacts, authoring, interaction
 from src.services.external.identity import ExternalCaller
@@ -346,7 +346,7 @@ async def create_crew(
 
 #: Dispatch table. A tool that is not here is not callable, which keeps the
 #: advertised list and the executable set from drifting apart.
-TOOL_HANDLERS = {
+TOOL_HANDLERS: Dict[str, Callable[..., Awaitable[Dict[str, Any]]]] = {
     "ask_kasal": ask_kasal,
     "create_crew": create_crew,
     "get_run_status": get_run_status,

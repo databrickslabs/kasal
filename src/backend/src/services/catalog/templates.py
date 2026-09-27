@@ -193,7 +193,7 @@ class TemplateService:
         return await self.repository.find_by_name(name)
 
     async def find_by_name_with_group_check(
-        self, name: str, group_context: GroupContext
+        self, name: str, group_context: Optional[GroupContext]
     ) -> Optional[PromptTemplate]:
         """
         Find a template by name with group semantics:
@@ -310,7 +310,10 @@ class TemplateService:
         return result
 
     async def update_with_group_check(
-        self, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext
+        self,
+        id: int,
+        template_data: PromptTemplateUpdate,
+        group_context: Optional[GroupContext],
     ) -> Optional[PromptTemplate]:
         """
         Update semantics aligned with flat list and same-name overrides:
@@ -507,7 +510,7 @@ class TemplateService:
         return count
 
     async def _get_template_content_instance(
-        self, name: str, default_template: str = None
+        self, name: str, default_template: Optional[str] = None
     ) -> str:
         """
         Get the content of a template by name (instance method).
@@ -535,7 +538,7 @@ class TemplateService:
             return ""
 
     async def get_template_content(
-        self, name: str, default_template: str = None
+        self, name: str, default_template: Optional[str] = None
     ) -> str:
         """
         Get the content of a template by name.
@@ -550,7 +553,7 @@ class TemplateService:
         return await self._get_template_content_instance(name, default_template)
 
     async def _get_effective_template_content_instance(
-        self, name: str, group_context: GroupContext
+        self, name: str, group_context: Optional[GroupContext]
     ) -> str:
         """
         Get effective template content for current group: prefer the group's
@@ -564,7 +567,7 @@ class TemplateService:
 
         gid = group_context.primary_group_id if group_context else None
         cache_group = gid or "__base__"
-        cached = await template_cache.get(cache_group, f"tpl:{name}")
+        cached: Optional[str] = await template_cache.get(cache_group, f"tpl:{name}")
         if cached is not None:
             return cached
         try:
@@ -584,7 +587,7 @@ class TemplateService:
 
     @staticmethod
     async def get_effective_template_content(
-        name: str, group_context: GroupContext
+        name: str, group_context: Optional[GroupContext]
     ) -> str:
         """
         Static helper to retrieve composed template content for the current group/user.
@@ -596,7 +599,9 @@ class TemplateService:
         from src.core.cache import template_cache
 
         gid = group_context.primary_group_id if group_context else None
-        cached = await template_cache.get(gid or "__base__", f"tpl:{name}")
+        cached: Optional[str] = await template_cache.get(
+            gid or "__base__", f"tpl:{name}"
+        )
         if cached is not None:
             return cached
 
@@ -607,6 +612,7 @@ class TemplateService:
             return await service._get_effective_template_content_instance(
                 name, group_context
             )
+        return ""  # the session generator always yields; this keeps the type honest
 
     @staticmethod
     async def invalidate_template_cache() -> None:

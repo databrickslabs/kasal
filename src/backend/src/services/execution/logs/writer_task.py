@@ -30,7 +30,7 @@ class LogWriterTask:
     _thread_lock = threading.Lock()
 
     @classmethod
-    async def ensure_writer_started(cls):
+    async def ensure_writer_started(cls) -> None:
         """Starts the logs writer task if it hasn't been started yet."""
         logger.debug("[LogWriterTask] ensure_writer_started called")
 
@@ -65,7 +65,7 @@ class LogWriterTask:
                 cls._writer_started = True
 
     @classmethod
-    async def stop_writer(cls):
+    async def stop_writer(cls) -> None:
         """Signals the writer task to stop."""
         try:
             current_loop = asyncio.get_running_loop()

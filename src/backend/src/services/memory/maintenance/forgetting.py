@@ -124,7 +124,7 @@ def forget_expired_memories(memory: Any, scope: str | None = None) -> dict[str, 
         return stats
     stats["scanned"] = len(records)
 
-    storage = getattr(memory, "storage", None)
+    storage: Any = getattr(memory, "storage", None)
     if not callable(getattr(storage, "delete", None)):
         return stats
 

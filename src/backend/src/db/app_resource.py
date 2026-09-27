@@ -184,7 +184,9 @@ async def initialize_resource_database() -> None:
 
         async with engine.begin() as connection:
             await initialize_app_keys(connection)
-        async_session_factory.activate_lakebase(factory._session_factory)
+        session_factory = factory._session_factory
+        assert session_factory is not None  # create_engine() sets it or raises
+        async_session_factory.activate_lakebase(session_factory)
         mark_lakebase_activated()
         # Keep the engine and refresh task in the factory used by normal reads.
         from src.db import lakebase_session

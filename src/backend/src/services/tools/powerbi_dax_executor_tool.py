@@ -10,7 +10,7 @@ Date: 2026
 """
 
 import logging
-from typing import Any, Dict, Optional, Type
+from typing import Any, Coroutine, Dict, Optional, Type, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -19,18 +19,16 @@ from src.services.tools.base import BaseTool
 from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
-def _run_async_in_sync_context(coro):
-    """Run ``coro`` from this tool's synchronous code.
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
 
-    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
-    copies the caller's ContextVars (group, OBO token, execution id) into the
-    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
-    coroutine's own exceptions through. The copy that lived here caught
-    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
-    the coroutine was mistaken for "no running loop" and the spent coroutine
-    was run a second time, and it waited forever.
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
     from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
@@ -80,7 +78,7 @@ class PowerBIDaxExecutorTool(BaseTool):
 
     _default_config: Dict[str, Any] = PrivateAttr(default_factory=dict)
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         config_keys = [
             "workspace_id",
             "dataset_id",
@@ -101,7 +99,7 @@ class PowerBIDaxExecutorTool(BaseTool):
             k: v for k, v in default_config.items() if v is not None
         }
 
-    def _run(self, **kwargs) -> str:
+    def _run(self, **kwargs: Any) -> str:
         """Synchronous entry point — delegates to async _execute."""
         return _run_async_in_sync_context(self._execute(kwargs))
 

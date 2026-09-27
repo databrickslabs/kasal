@@ -451,7 +451,7 @@ class QuestionPreprocessor:
         """Refine intent extraction using LLM. Synchronous (called from sync context)."""
         import asyncio
 
-        async def _call():
+        async def _call() -> QuestionIntent:
             from src.services.llm.manager import LLMManager
             from src.utils.telemetry import KasalProduct, get_user_agent_header
 

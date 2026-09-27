@@ -33,7 +33,7 @@ class KPIConversionService:
     - Format discovery and capability queries
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the KPI conversion service."""
         self.factory = ConverterFactory()
 
@@ -207,8 +207,9 @@ class KPIConversionService:
             results = []
             for request in requests:
                 result = await self.convert(
-                    source_format=request.source_format,
-                    target_format=request.target_format,
+                    # The request schema declares its own (same-valued) str enum.
+                    source_format=ConversionFormat(request.source_format),
+                    target_format=ConversionFormat(request.target_format),
                     input_data=request.input_data,
                     config=request.config,
                 )

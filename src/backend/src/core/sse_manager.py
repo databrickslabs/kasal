@@ -20,6 +20,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Tuple,
 )
 from uuid import UUID
 
@@ -102,7 +103,7 @@ class SSEConnectionManager:
     and broadcast to all connected clients.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Map job_id to set of event queues
         self.job_queues: Dict[str, Set[asyncio.Queue]] = {}
 
@@ -116,9 +117,11 @@ class SSEConnectionManager:
         self._event_id: int = 0
         self._event_id_lock = threading.Lock()
         # Per-job buffer: job_id → deque of (event_id, SSEEvent)
-        self._replay_buffer: Dict[str, deque] = {}
+        self._replay_buffer: Dict[str, deque[Tuple[int, SSEEvent]]] = {}
         # Global buffer for "stream-all" replay: (event_id, event, owner group)
-        self._global_replay: deque = deque(maxlen=500)
+        self._global_replay: deque[Tuple[int, SSEEvent, Optional[str]]] = deque(
+            maxlen=500
+        )
         self._replay_max_per_job = 200
         # Ownership (audit F04). A job's events reach the "stream-all"
         # subscribers of the workspace that owns the job and nobody else's;
@@ -299,7 +302,9 @@ class SSEConnectionManager:
 
         # Also broadcast to the "stream-all" subscribers of the workspace that
         # owns the job — cross-browser sync within a tenant, never across.
-        all_stream_keys = self._streams_by_group.get(owner, ())
+        all_stream_keys: Iterable[str] = (
+            self._streams_by_group.get(owner, ()) if owner is not None else ()
+        )
         if owner is None and self._streams_by_group:
             logger.debug(
                 f"[SSE_STREAM] job {job_id} has no registered owner; "

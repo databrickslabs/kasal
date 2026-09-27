@@ -23,7 +23,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -219,7 +219,7 @@ class Crew(BaseModel):
             self.kickoff, inputs, input_files, from_checkpoint
         )
 
-    def copy(self) -> "Crew":
+    def copy(self) -> "Crew":  # type: ignore[override]  # CrewAI API: shadows pydantic copy()
         cloned_agents = [
             agent.model_copy(update={"id": uuid.uuid4()}) for agent in self.agents
         ]
@@ -573,7 +573,9 @@ class Crew(BaseModel):
     def _aggregate_token_usage(self) -> UsageMetrics:
         total = UsageMetrics()
         seen: set[int] = set()
-        candidates = [agent.llm for agent in self.agents if getattr(agent, "llm", None)]
+        candidates = [
+            cast(Any, agent).llm for agent in self.agents if getattr(agent, "llm", None)
+        ]
         if self.manager_agent is not None and self.manager_agent is not None:
             candidates.append(getattr(self.manager_agent, "llm", None))
         for llm in candidates:

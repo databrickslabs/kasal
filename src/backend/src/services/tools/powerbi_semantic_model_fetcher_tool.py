@@ -21,7 +21,7 @@ import base64
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Coroutine, Dict, List, Optional, Type, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -30,19 +30,17 @@ from src.services.tools.base import BaseTool
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 logger.setLevel(logging.DEBUG)
 
 
-def _run_async_in_sync_context(coro):
-    """Run ``coro`` from this tool's synchronous code.
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
 
-    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
-    copies the caller's ContextVars (group, OBO token, execution id) into the
-    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
-    coroutine's own exceptions through. The copy that lived here caught
-    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
-    the coroutine was mistaken for "no running loop" and the spent coroutine
-    was run a second time, and it waited forever.
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
     from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
@@ -276,7 +274,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             .get("primary_group_id")
             or "default"
         )
-        model_context = {
+        model_context: Dict[str, Any] = {
             "measures": [],
             "relationships": [],
             "tables": [],
@@ -284,7 +282,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             "sample_data": {},
             "slicers": [],
         }
-        default_filters = {}
+        default_filters: Dict[str, Any] = {}
         slicers: List[Dict[str, Any]] = []
         cache_hit = False
         cache_saved = False  # Tracks whether full metadata is available in cache
@@ -1177,11 +1175,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                 result_url, headers=headers
                             )
                             result_response.raise_for_status()
-                            return (
+                            tmdl_parts: List[Dict[str, Any]] = (
                                 result_response.json()
                                 .get("definition", {})
                                 .get("parts", [])
                             )
+                            return tmdl_parts
                         elif poll_data.get("status") == "Failed":
                             logger.error(f"[TMDL] Fabric operation failed: {poll_data}")
                             return None
@@ -1189,7 +1188,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     return None
 
                 elif response.status_code == 200:
-                    return response.json().get("definition", {}).get("parts", [])
+                    tmdl_parts = response.json().get("definition", {}).get("parts", [])
+                    return tmdl_parts
                 else:
                     logger.warning(
                         f"[TMDL] Fabric API returned HTTP {response.status_code}"
@@ -2173,7 +2173,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                 result_url, headers=headers
                             )
                             result_response.raise_for_status()
-                            parts = (
+                            parts: List[Dict[str, Any]] = (
                                 result_response.json()
                                 .get("definition", {})
                                 .get("parts", [])

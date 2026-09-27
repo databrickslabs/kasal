@@ -6,7 +6,7 @@ combined measures with names like: kbi_name + "_" + structure_name
 """
 
 import re
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 from ...base.models import KPI, KPIDefinition, Structure
 
@@ -14,7 +14,7 @@ from ...base.models import KPI, KPIDefinition, Structure
 class StructureExpander:
     """Expands KBIs with applied structures to create combined measures"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.processed_definitions: List[KPIDefinition] = []
 
     def process_definition(self, definition: KPIDefinition) -> KPIDefinition:
@@ -98,9 +98,11 @@ class StructureExpander:
             # Determine aggregation type and filters based on structure formula
             if structure.formula:
                 # Structure has formula - this should be a CALCULATED measure
-                aggregation_type = "CALCULATED"
+                aggregation_type: Optional[str] = "CALCULATED"
                 # For calculated measures, only use structure filters (no base KBI data filters)
-                combined_filters = list(structure.filters)
+                combined_filters: List[Union[str, Dict[str, Any]]] = list(
+                    structure.filters
+                )
                 # No source table for calculated measures
                 source_table = None
             else:
@@ -110,7 +112,7 @@ class StructureExpander:
                 )
 
                 # Resolve structure filter variables before combining
-                resolved_structure_filters = []
+                resolved_structure_filters: List[str] = []
                 if structure.filters:
                     from ..translators.filters import FilterResolver
 
@@ -126,10 +128,10 @@ class StructureExpander:
 
                     # Resolve structure filters using the definition's variables
                     resolved_structure_filters = filter_resolver.resolve_filters(
-                        definition, temp_kpi
+                        temp_kpi, definition
                     )
 
-                combined_filters = list(base_kbi.filters) + resolved_structure_filters
+                combined_filters = [*base_kbi.filters, *resolved_structure_filters]
                 source_table = base_kbi.source_table
 
             # Determine display sign (structure overrides KBI if specified)
@@ -202,7 +204,7 @@ class StructureExpander:
         # Find structure references in parentheses
         pattern = r"\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)"
 
-        def replace_reference(match):
+        def replace_reference(match: re.Match[str]) -> str:
             struct_ref = match.group(1).strip()
             if struct_ref in all_structures:
                 # Convert to combined measure technical name (no brackets - let tree-parsing handle that)

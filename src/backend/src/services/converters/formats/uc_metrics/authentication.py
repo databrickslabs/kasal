@@ -119,7 +119,7 @@ class DatabricksAuthService:
         # Priority 4: Database credentials (future implementation)
         if self.use_database:
             self.logger.info("Fetching credentials from database")
-            credentials = self._get_credentials_from_database()
+            credentials = self._get_credentials_from_database() or {}
             if credentials.get("api_key"):
                 return credentials["api_key"]
             elif credentials.get("client_id") and credentials.get("client_secret"):
@@ -160,7 +160,7 @@ class DatabricksAuthService:
         client_id = client_id or self.client_id
         client_secret = client_secret or self.client_secret
 
-        if not all([client_id, client_secret]):
+        if not client_id or not client_secret:
             raise ValueError(
                 "Incomplete Service Principal credentials. Required: client_id, client_secret"
             )
@@ -187,7 +187,8 @@ class DatabricksAuthService:
 
             if "access_token" in result:
                 self.logger.info("Access token acquired successfully")
-                return result["access_token"]
+                token: str = result["access_token"]
+                return token
             else:
                 raise Exception(f"Failed to acquire access token. Response: {result}")
 

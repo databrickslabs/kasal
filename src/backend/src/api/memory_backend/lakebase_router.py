@@ -11,7 +11,7 @@ from fastapi import APIRouter, Query
 
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import is_workspace_admin
-from src.dependencies.providers import GroupContextDep
+from src.dependencies.providers import GroupContextDep, require_group_id
 from src.schemas.memory_backend import (
     MemoryBackendCreate,
     MemoryBackendType,
@@ -188,7 +188,7 @@ async def save_lakebase_config(
     if not is_workspace_admin(group_context):
         raise ForbiddenError("Only workspace admins can configure memory backends")
 
-    group_id = group_context.primary_group_id
+    group_id = require_group_id(group_context)
     lakebase_config = request.get("lakebase_config", {})
     # Memory tuning knobs (recall weights, memory LLM) are
     # optional; persist them on the same config so crew execution picks them up

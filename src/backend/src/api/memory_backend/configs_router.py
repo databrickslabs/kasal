@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request
 
 from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.core.permissions import is_workspace_admin
-from src.dependencies.providers import GroupContextDep
+from src.dependencies.providers import GroupContextDep, require_group_id
 from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendCreate,
@@ -48,7 +48,7 @@ async def save_default_config(
     if not is_workspace_admin(group_context):
         raise ForbiddenError("Only workspace admins can configure memory backends")
 
-    group_id = group_context.primary_group_id
+    group_id = require_group_id(group_context)
     cognitive_config = request.get("cognitive_config")
 
     from src.schemas.memory_backend import MemoryTuningConfig
@@ -135,7 +135,7 @@ async def create_memory_config(
 
     # Service is injected via dependency
     backend = await service.create_memory_backend(
-        group_context.primary_group_id, config
+        require_group_id(group_context), config
     )
     return MemoryBackendResponse.model_validate(backend)
 
@@ -167,7 +167,7 @@ async def get_memory_configs(
     """
     # Only log group context at debug level for frequently called endpoint
     logger.debug(f"Getting memory backends for group: {group_context.primary_group_id}")
-    backends = await service.get_memory_backends(group_context.primary_group_id)
+    backends = await service.get_memory_backends(require_group_id(group_context))
     logger.debug(f"Found {len(backends)} backends for group")
 
     return [MemoryBackendResponse.model_validate(backend) for backend in backends]
@@ -194,7 +194,7 @@ async def get_default_memory_config(
     logger.debug(
         f"Getting default memory backend for group: {group_context.primary_group_id}"
     )
-    backend = await service.get_default_memory_backend(group_context.primary_group_id)
+    backend = await service.get_default_memory_backend(require_group_id(group_context))
 
     if backend:
         logger.debug(f"Found default backend: {backend.name}")
@@ -225,7 +225,7 @@ async def get_memory_config_by_id(
     """
     # Service is injected via dependency
     backend = await service.get_memory_backend(
-        group_context.primary_group_id, backend_id
+        require_group_id(group_context), backend_id
     )
 
     if not backend:
@@ -260,7 +260,7 @@ async def update_memory_config(
 
     # Service is injected via dependency
     backend = await service.update_memory_backend(
-        group_context.primary_group_id, backend_id, update_data
+        require_group_id(group_context), backend_id, update_data
     )
 
     if not backend:
@@ -293,7 +293,7 @@ async def delete_memory_config(
 
     # Service is injected via dependency
     success = await service.delete_memory_backend(
-        group_context.primary_group_id, backend_id
+        require_group_id(group_context), backend_id
     )
 
     if not success:
@@ -326,7 +326,7 @@ async def set_default_memory_config(
         )
     # Service is injected via dependency
     success = await service.set_default_backend(
-        group_context.primary_group_id, backend_id
+        require_group_id(group_context), backend_id
     )
 
     if not success:
@@ -355,7 +355,7 @@ async def delete_all_databricks_configs(
     if not is_workspace_admin(group_context):
         raise ForbiddenError("Only workspace admins can delete memory configurations")
     # Get all memory backends for the group
-    backends = await service.get_memory_backends(group_context.primary_group_id)
+    backends = await service.get_memory_backends(require_group_id(group_context))
 
     deleted_count = 0
     for backend in backends:
@@ -400,7 +400,7 @@ async def switch_to_disabled_mode(
 
     # Delete all configurations and create disabled one
     result = await service.delete_all_and_create_disabled(
-        group_context.primary_group_id
+        require_group_id(group_context)
     )
 
     if not result["success"]:
@@ -434,7 +434,7 @@ async def cleanup_disabled_configs(
         raise ForbiddenError("Only workspace admins can clean up memory configurations")
     # Delete all disabled configurations
     deleted_count = await service.delete_disabled_configurations(
-        group_context.primary_group_id
+        require_group_id(group_context)
     )
 
     logger.info(

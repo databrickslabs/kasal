@@ -417,6 +417,7 @@ class TestMaterialForAnswering:
                 answer_from_state(
                     "which frameworks did you find?",
                     {"agentic ai frameworks": "LangChain, LlamaIndex, AutoGen"},
+                    "test-model",
                 )
             )
 

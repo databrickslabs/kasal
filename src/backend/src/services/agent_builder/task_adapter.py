@@ -5,7 +5,7 @@ This module provides utility functions for working with CrewAI tasks.
 """
 
 import traceback
-from typing import Any, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from pydantic import BaseModel
 
@@ -107,7 +107,7 @@ def create_callback_from_string(
     execution_name: Optional[str] = None,
     *,
     group_id: Optional[str] = None,
-):
+) -> Optional[Callable[[Any], Any]]:
     """
     Create a callable callback from a string name.
 
@@ -167,12 +167,12 @@ def create_callback_from_string(
             )
 
             # Create a synchronous wrapper for the async callback
-            def databricks_callback_wrapper(output):
+            def databricks_callback_wrapper(output: Any) -> Any:
                 """Synchronous wrapper for DatabricksVolumeCallback"""
                 import asyncio
                 from concurrent.futures import ThreadPoolExecutor
 
-                def run_async_callback():
+                def run_async_callback() -> Any:
                     """Run the async callback in a separate thread with its own event loop"""
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -223,10 +223,10 @@ async def create_task(
     # answer, so naming one engine's class would be a type that is wrong half
     # the time.
     agent: Any,
-    tools: List[Any] = None,
-    config: dict = None,
-    tool_service=None,
-    tool_factory=None,
+    tools: Optional[List[Any]] = None,
+    config: Optional[dict] = None,
+    tool_service: Any = None,
+    tool_factory: Any = None,
     execution_name: Optional[str] = None,
 ) -> Any:
     """
@@ -311,7 +311,7 @@ async def create_task(
             if not tool_name or tool_name == "MCP_SERVERS":
                 continue
             try:
-                tool_config = {}
+                tool_config: Dict[str, Any] = {}
                 if tool_service and hasattr(tool_service, "get_tool_config_by_name"):
                     tool_config = (
                         await tool_service.get_tool_config_by_name(tool_name) or {}

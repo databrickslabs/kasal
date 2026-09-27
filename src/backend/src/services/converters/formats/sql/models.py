@@ -7,7 +7,7 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from ...base.models import KPI
 
@@ -65,6 +65,9 @@ class SQLQuery(BaseModel):
     # Metadata
     description: str = ""
     original_kbi: Optional[KPI] = None
+
+    # Pre-built SQL that overrides the clause fields (multi-table queries)
+    _custom_sql: Optional[str] = PrivateAttr(default=None)
 
     def to_sql(self, formatted: bool = True) -> str:
         """Generate the complete SQL query string with proper formatting"""

@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SchemaBase(BaseModel):
@@ -89,7 +89,7 @@ class SchemaResponse(SchemaBase):
         ..., description="Timestamp when the schema was last updated"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SchemaListResponse(BaseModel):

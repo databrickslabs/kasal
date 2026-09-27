@@ -203,8 +203,8 @@ class KnowledgeSearchService:
 
                         cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
 
-                        def _fresh(r) -> bool:
-                            created = getattr(r, "created_at", None)
+                        def _fresh(r: Any) -> bool:
+                            created: Optional[datetime] = getattr(r, "created_at", None)
                             if not created:
                                 return True
                             if created.tzinfo is None:

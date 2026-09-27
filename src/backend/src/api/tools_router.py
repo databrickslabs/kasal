@@ -58,7 +58,7 @@ ToolServiceDep = Annotated[ToolService, Depends(get_tool_service)]
 @router.get("", response_model=List[ToolResponse])
 async def get_tools(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> List[ToolResponse]:
     """
     Get all tools for the current group.
@@ -79,7 +79,7 @@ async def get_tools(
 @router.get("/enabled", response_model=ToolListResponse)
 async def get_enabled_tools(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolListResponse:
     """
     Get all enabled tools for the current group.
@@ -100,7 +100,7 @@ async def get_enabled_tools(
 @require_admin()
 async def list_global_tools(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolListResponse:
     """List globally cataloged tools (base tools with no group_id)."""
     from src.services.tools.tool_service import _filter_personal_workspace_tools
@@ -116,7 +116,7 @@ async def list_global_tools(
 async def get_tool_by_id(
     tool_id: int,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """
     Get a tool by ID with group isolation.
@@ -138,7 +138,7 @@ async def get_tool_by_id(
 async def create_tool(
     tool_data: ToolCreate,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """
     Create a new tool with group isolation.
@@ -166,7 +166,7 @@ async def update_tool(
     tool_id: int,
     tool_data: ToolUpdate,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """
     Update an existing tool with group isolation.
@@ -194,7 +194,7 @@ async def update_tool(
 async def delete_tool(
     tool_id: int,
     session: SessionDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> None:
     """
     Delete a tool with group isolation.
@@ -219,7 +219,7 @@ async def delete_tool(
 async def toggle_tool_enabled(
     tool_id: int,
     session: SessionDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToggleResponse:
     """
     Toggle the enabled status of a tool with group isolation.
@@ -251,7 +251,7 @@ async def toggle_tool_enabled(
 @router.get("/configurations/all", response_model=Dict[str, Dict[str, Any]])
 async def get_all_tool_configurations(
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Get configurations for all tools for the current group using group-first override.
@@ -266,7 +266,7 @@ async def get_all_tool_configurations(
 async def get_tool_configuration(
     tool_name: str,
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> Dict[str, Any]:
     """
     Get configuration for a specific tool with group-first fallback to base.
@@ -283,7 +283,7 @@ async def update_tool_configuration(
     tool_name: str,
     config: Dict[str, Any],
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> Dict[str, Any]:
     """
     Update configuration for a specific tool, scoped to the caller's group.
@@ -306,7 +306,7 @@ async def set_global_availability(
     tool_id: int,
     payload: Dict[str, Any],
     service: ToolServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> ToolResponse:
     """System admin: set global availability (enabled) for a base tool.
 

@@ -16,11 +16,9 @@ class Position(BaseModel):
 class Style(BaseModel):
     """Visual styling for a node."""
 
-    # CRITICAL: Allow extra fields AND exclude None values from JSON output
-    model_config = ConfigDict(
-        extra="allow",
-        exclude_none=True,  # Don't include fields with None values in JSON
-    )
+    # CRITICAL: Allow extra fields. ("exclude_none" is not a pydantic v2 config key
+    # and never had any effect; pass exclude_none=True to model_dump instead.)
+    model_config = ConfigDict(extra="allow")
 
     background: Optional[str] = None
     border: Optional[str] = None
@@ -35,11 +33,9 @@ class Style(BaseModel):
 class NodeData(BaseModel):
     """Data associated with a node in the flow diagram."""
 
-    # CRITICAL: Allow extra fields AND exclude None values from JSON output
-    model_config = ConfigDict(
-        extra="allow",
-        exclude_none=True,  # Don't include fields with None values in JSON
-    )
+    # CRITICAL: Allow extra fields. ("exclude_none" is not a pydantic v2 config key
+    # and never had any effect; pass exclude_none=True to model_dump instead.)
+    model_config = ConfigDict(extra="allow")
 
     label: str
     crewName: Optional[str] = None
@@ -61,11 +57,9 @@ class NodeData(BaseModel):
 class Node(BaseModel):
     """A node in the flow diagram."""
 
-    # CRITICAL: Allow extra fields AND exclude None values from JSON output
-    model_config = ConfigDict(
-        extra="allow",
-        exclude_none=True,  # Don't include fields with None values in JSON
-    )
+    # CRITICAL: Allow extra fields. ("exclude_none" is not a pydantic v2 config key
+    # and never had any effect; pass exclude_none=True to model_dump instead.)
+    model_config = ConfigDict(extra="allow")
 
     id: str
     type: str
@@ -110,11 +104,9 @@ class StateConfig(BaseModel):
 class Edge(BaseModel):
     """An edge in the flow diagram representing a connection between nodes."""
 
-    # CRITICAL: Allow extra fields AND exclude None values from JSON output
-    model_config = ConfigDict(
-        extra="allow",
-        exclude_none=True,  # Don't include fields with None values in JSON
-    )
+    # CRITICAL: Allow extra fields. ("exclude_none" is not a pydantic v2 config key
+    # and never had any effect; pass exclude_none=True to model_dump instead.)
+    model_config = ConfigDict(extra="allow")
 
     source: str
     target: str

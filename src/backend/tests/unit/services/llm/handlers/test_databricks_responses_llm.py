@@ -293,7 +293,7 @@ class TestStreamingResponses:
         _fake_event_bus.emit.reset_mock()
 
         with patch.object(handler, "_cached_responses_create") as cached_create:
-            result = handler._handle_responses(
+            result = handler._run_responses(
                 {"model": "test", "input": []},
                 from_task=task,
                 from_agent=agent,
@@ -627,7 +627,7 @@ class TestCaptureOutputItems:
 
 
 class TestHandleResponses:
-    """Test _handle_responses method."""
+    """Test _run_responses method."""
 
     def test_text_response(self, handler, make_response):
         """Should return text content from response."""
@@ -640,7 +640,7 @@ class TestHandleResponses:
         handler.client.responses.create.return_value = response
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(params)
+        result = handler._run_responses(params)
         assert result == "Hello world!"
 
     def test_function_call_response_without_available_functions(
@@ -670,7 +670,7 @@ class TestHandleResponses:
         handler.client.responses.create.return_value = response
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(params)
+        result = handler._run_responses(params)
 
         assert isinstance(result, list)
         assert len(result) == 1
@@ -704,7 +704,7 @@ class TestHandleResponses:
         handler.client.responses.create.side_effect = [tool_call, final]
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(
+        result = handler._run_responses(
             params,
             available_functions={"my_tool": lambda **kw: "executed"},
         )
@@ -733,7 +733,7 @@ class TestHandleResponses:
 
         params = {"model": "test", "input": []}
         # Should not crash
-        result = handler._handle_responses(
+        result = handler._run_responses(
             params,
             available_functions={"my_tool": lambda: "ok"},
         )
@@ -765,7 +765,7 @@ class TestHandleResponses:
         handler.client.responses.create.side_effect = [plan, search, final]
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(
+        result = handler._run_responses(
             params,
             available_functions={
                 "todo": lambda **kw: "planned",
@@ -808,7 +808,7 @@ class TestHandleResponses:
         handler.client.responses.create.side_effect = [parallel, final]
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(
+        result = handler._run_responses(
             params,
             available_functions={
                 "todo": lambda **kw: "a",
@@ -845,7 +845,7 @@ class TestHandleResponses:
         handler.client.responses.create.return_value = resp
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(
+        result = handler._run_responses(
             params, available_functions={"answer_tool": answer_tool}
         )
 
@@ -867,7 +867,7 @@ class TestHandleResponses:
         handler.client.responses.create.return_value = forever
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(
+        result = handler._run_responses(
             params, available_functions={"t": lambda **kw: "again"}
         )
 
@@ -880,7 +880,7 @@ class TestHandleResponses:
 
         params = {"model": "test", "input": []}
         with pytest.raises(RuntimeError, match="API down"):
-            handler._handle_responses(params)
+            handler._run_responses(params)
 
     def test_empty_output_text(self, handler, make_response):
         """Response with empty output_text should return empty string."""
@@ -888,7 +888,7 @@ class TestHandleResponses:
         handler.client.responses.create.return_value = response
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(params)
+        result = handler._run_responses(params)
         assert result == ""
 
     def test_structured_output_with_response_model(self, handler, make_response):
@@ -897,7 +897,7 @@ class TestHandleResponses:
         handler.client.responses.create.return_value = response
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(params, response_model=MagicMock())
+        result = handler._run_responses(params, response_model=MagicMock())
         # _validate_structured_output returns content as-is in our mock
         assert result is not None
 
@@ -912,7 +912,7 @@ class TestHandleResponses:
         handler._validate_structured_output = MagicMock(side_effect=ValueError("bad"))
 
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(params, response_model=MagicMock())
+        result = handler._run_responses(params, response_model=MagicMock())
         assert result == "plain text"
 
     def test_parse_tool_outputs_mode(self, handler, make_response):
@@ -921,10 +921,17 @@ class TestHandleResponses:
         response = make_response(output_items=[], output_text="parsed output")
         handler.client.responses.create.return_value = response
 
+        handler._extract_builtin_tool_outputs = MagicMock(
+            return_value=[
+                {"id": "ws1", "status": "completed", "type": "web_search_call"}
+            ]
+        )
+
         params = {"model": "test", "input": []}
-        result = handler._handle_responses(params)
-        # Returns the mock object from _extract_builtin_tool_outputs
-        assert hasattr(result, "text")
+        result = handler._run_responses(params)
+        # It used to set .text on the list of tool outputs: AttributeError.
+        assert result.text == "parsed output"
+        assert result.builtin_tool_outputs[0]["type"] == "web_search_call"
 
 
 # ---------------------------------------------------------------------------
@@ -1082,10 +1089,10 @@ class TestMultiTurnPhasePreservation:
             output_text="",
         )
         handler.client.responses.create.return_value = response
-        handler._handle_responses({"model": "test", "input": []})
+        handler._run_responses({"model": "test", "input": []})
 
         first = handler._prepare_responses_params(messages, tools=tools)
-        handler._handle_responses({"model": "test", "input": []})
+        handler._run_responses({"model": "test", "input": []})
         second = handler._prepare_responses_params(messages, tools=tools)
 
         assert "tool_choice" not in first
@@ -1231,7 +1238,7 @@ class TestParallelFunctionCalls:
         )
         handler.client.responses.create.return_value = response
 
-        result = handler._handle_responses({"model": "test", "input": []})
+        result = handler._run_responses({"model": "test", "input": []})
 
         # Flat {id, name, arguments} shape (see
         # test_function_call_response_without_available_functions).
@@ -1427,7 +1434,7 @@ class TestCacheHitTokenAccounting:
             patch.object(handler, "_log_response"),
         ):
             handler._last_response_from_cache = True
-            handler._handle_responses({"model": "m", "input": []})
+            handler._run_responses({"model": "m", "input": []})
 
         mock_track.assert_not_called()
 
@@ -1447,7 +1454,7 @@ class TestCacheHitTokenAccounting:
             patch.object(handler, "_log_response"),
         ):
             handler._last_response_from_cache = False
-            handler._handle_responses({"model": "m", "input": []})
+            handler._run_responses({"model": "m", "input": []})
 
         mock_track.assert_called_once_with({"total_tokens": 123})
 
@@ -1477,7 +1484,7 @@ class TestUsageEmission:
             patch.object(handler, "_log_response"),
         ):
             handler._last_response_from_cache = from_cache
-            handler._handle_responses({"model": "m", "input": []})
+            handler._run_responses({"model": "m", "input": []})
         return mock_emit
 
     def test_live_response_emits_usage(self, handler, make_response):

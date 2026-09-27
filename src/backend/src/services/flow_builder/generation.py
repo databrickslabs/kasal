@@ -2,6 +2,9 @@
 
 import json
 from collections import defaultdict
+from typing import Any, Dict, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.llm.robust_json import robust_json_parser
 from src.repositories.crew_repository import CrewRepository
@@ -31,6 +34,7 @@ from src.services.generation.mcp_assignment import (
     describe_selected_tools,
 )
 from src.services.llm.manager import LLMManager
+from src.utils.user_context import GroupContext
 
 SYSTEM_PROMPT = """Design a flow using ONLY the saved crews in the supplied catalog.
 Return JSON: {name, explanation, crew_ids, links, missing_capabilities, detail_crew_ids, stage_assignments, output_contracts}.
@@ -176,7 +180,8 @@ def build_flow(plan: CrewFlowPlan, catalog: dict) -> FlowGenerationResponse:
             )
     # Independent roots share a layer; only genuine dependencies move a crew right.
     pending = {cid: len(incoming[cid]) for cid in ids}
-    levels, ready = {}, [cid for cid in ids if not pending[cid]]
+    levels: Dict[str, int] = {}
+    ready = [cid for cid in ids if not pending[cid]]
     while ready:
         cid = ready.pop(0)
         levels[cid] = max(
@@ -228,7 +233,7 @@ def build_flow(plan: CrewFlowPlan, catalog: dict) -> FlowGenerationResponse:
         listen_ids = [
             task["id"] for parent in parents for task in catalog[parent.source]["tasks"]
         ]
-        data = {
+        data: Dict[str, Any] = {
             "configured": True,
             "logicType": (
                 "ROUTER"
@@ -297,19 +302,19 @@ def build_flow(plan: CrewFlowPlan, catalog: dict) -> FlowGenerationResponse:
 
 
 class FlowGenerationService:
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         self.crews = CrewRepository(session)
         self.tasks = TaskRepository(session)
 
     async def generate(
-        self, request: FlowGenerationRequest, group_context
+        self, request: FlowGenerationRequest, group_context: Optional[GroupContext]
     ) -> FlowGenerationResponse:
-        group_ids = group_context.group_ids[:1] if group_context else []
+        group_ids = (group_context.group_ids or [])[:1] if group_context else []
         crews = await self.crews.find_by_group(group_ids)
         tasks = {
             str(task.id): task for task in await self.tasks.find_by_group_ids(group_ids)
         }
-        catalog = {}
+        catalog: Dict[str, Dict[str, Any]] = {}
         for crew in crews:
             task_ids = [str(tid) for tid in (crew.task_ids or [])]
             if not task_ids or any(tid not in tasks for tid in task_ids):
@@ -340,7 +345,7 @@ class FlowGenerationService:
         )
         selected_tools = await describe_selected_tools(request.tools, group_context)
         capabilities = mcp_capabilities + selected_tools
-        context = {
+        context: Dict[str, Any] = {
             "selected_mcp_capabilities": capabilities,
             "prompt": request.prompt,
             "current_crew_ids": [

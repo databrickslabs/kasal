@@ -30,7 +30,7 @@ logger = LoggerManager.get_instance().flow
 CREW_KICKOFF_TIMEOUT_SECONDS = 1200.0
 
 
-def extract_final_answer(results) -> str:
+def extract_final_answer(results: Any) -> str:
     """
     Extract only the final answer from flow results, excluding the thinking process.
 
@@ -60,7 +60,7 @@ def extract_final_answer(results) -> str:
         contents = []
         for item in first_result:
             if isinstance(item, dict) and "content" in item:
-                content = item["content"]
+                content: str = item["content"]
                 # Extract only the Final Answer portion if present
                 if "Final Answer:" in content:
                     # Get everything after "Final Answer:"
@@ -101,7 +101,7 @@ def extract_final_answer(results) -> str:
     return content
 
 
-async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
+async def get_model_context_limits(agent: Any, group_context: Any) -> tuple[int, int]:
     """
     Get the context window and max output tokens for the agent's model using ModelConfigService.
 
@@ -600,7 +600,7 @@ class FlowMethodFactory:
         crew_data: Optional[Any] = None,
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create a starting point method that executes multiple tasks as a crew.
 
@@ -622,7 +622,7 @@ class FlowMethodFactory:
         task_list = tasks_for_review(task_list, method_name, callbacks)
 
         @start()
-        async def starting_point_crew_method(self):
+        async def starting_point_crew_method(self: Any) -> Any:
             """Starting point method - executes crew with multiple sequential tasks."""
             # Already answered on an earlier turn? A conversational flow
             # restores its state before every turn, so the crews upstream of the
@@ -1071,7 +1071,7 @@ class FlowMethodFactory:
         crew_data: Optional[Any] = None,
         user_token: Optional[str] = None,
         group_id: Optional[str] = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create a listener method for the flow.
 
@@ -1096,7 +1096,7 @@ class FlowMethodFactory:
         listener_tasks = tasks_for_review(listener_tasks, method_name, callbacks)
 
         @decorator
-        async def listener_method(self, *results):
+        async def listener_method(self: Any, *results: Any) -> Any:
             """Listener method - executes when listening to a specific event."""
             # Already answered on an earlier turn? A conversational flow
             # restores its state before every turn, so the crews upstream of the
@@ -1479,7 +1479,7 @@ class FlowMethodFactory:
                 # not just from the immediately preceding crew B.
                 import json as _json
 
-                def _extract_json(raw: str) -> dict | None:
+                def _extract_json(raw: str) -> Any:
                     """Try to extract a JSON dict from a string (handles agent narrative wrapping)."""
                     if not raw or not isinstance(raw, str):
                         return None
@@ -1808,7 +1808,7 @@ class FlowMethodFactory:
         method_condition: Any = None,
         condition_type: str = "NONE",
         checkpoint_output: Any = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create a stub method for a crew that should be skipped during checkpoint resume.
 
@@ -1837,7 +1837,9 @@ class FlowMethodFactory:
                 f"  📦 Checkpoint output provided: {str(checkpoint_output)[:200]}..."
             )
 
-        def get_cached_output(flow_instance, method_nm, crew_nm, prev_output=None):
+        def get_cached_output(
+            flow_instance: Any, method_nm: str, crew_nm: str, prev_output: Any = None
+        ) -> Any:
             """
             Retrieve cached output from persistence layer.
 
@@ -1959,7 +1961,7 @@ class FlowMethodFactory:
         if is_starting_point:
             # Create a starting point stub method that returns checkpoint output
             @start()
-            async def skipped_starting_method(self):
+            async def skipped_starting_method(self: Any) -> Any:
                 logger.info("=" * 80)
                 logger.info(
                     f"⏭️  CHECKPOINT RESUME: Skipping crew '{crew_name}' (sequence: {crew_sequence})"
@@ -2015,7 +2017,9 @@ class FlowMethodFactory:
         else:
             # Create a listener stub method that returns checkpoint output
             @listen(method_condition)
-            async def skipped_listener_method(self, previous_output=None):
+            async def skipped_listener_method(
+                self: Any, previous_output: Any = None
+            ) -> Any:
                 logger.info("=" * 80)
                 logger.info(
                     f"⏭️  CHECKPOINT RESUME: Skipping listener crew '{crew_name}' (sequence: {crew_sequence})"
@@ -2039,7 +2043,6 @@ class FlowMethodFactory:
                     result_output = get_cached_output(
                         self, method_name, crew_name, previous_output
                     )
-
                     if result_output is not None:
                         logger.info(
                             f"  ✅ Using cached/fallback output: {str(result_output)[:200]}..."
@@ -2054,7 +2057,6 @@ class FlowMethodFactory:
                             "crew_name": crew_name,
                             "message": f"Crew '{crew_name}' was skipped during checkpoint resume",
                         }
-
                 # Store in state to propagate to downstream crews
                 if hasattr(self, "state"):
                     self.state[method_name] = result_output
@@ -2063,9 +2065,7 @@ class FlowMethodFactory:
                     logger.info(
                         f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']"
                     )
-
                 _emit_checkpoint_restored(crew_name, result_output)
-
                 logger.info("=" * 80)
                 return result_output
 
@@ -2085,7 +2085,7 @@ class FlowMethodFactory:
         crew_sequence: int,
         callbacks: Optional[Dict[str, Any]] = None,
         group_context: Optional[Any] = None,
-    ) -> Callable:
+    ) -> Any:  # a runtime-tagged flow method (see runtime.flow.start/listen)
         """
         Create an HITL gate method that pauses flow for human approval.
 
@@ -2114,7 +2114,7 @@ class FlowMethodFactory:
         """
 
         @listen(previous_method_name)
-        async def hitl_gate_method(self, previous_output=None):
+        async def hitl_gate_method(self: Any, previous_output: Any = None) -> Any:
             """HITL gate method - pauses flow for human approval."""
             # get_isolated_db_session, NOT routed_scoped_session: the gate runs
             # inside kickoff_async's concurrent asyncio.gather fan-out, and

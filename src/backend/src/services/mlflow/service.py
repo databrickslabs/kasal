@@ -30,7 +30,7 @@ class MLflowService:
     Service layer for MLflow enable/disable and status queries, plus evaluation triggers.
     """
 
-    def __init__(self, session: AsyncSession, group_id: str):
+    def __init__(self, session: AsyncSession, group_id: Optional[str]) -> None:
         """
         Initialize MLflow service.
 
@@ -711,7 +711,7 @@ class MLflowService:
                 else await self.configured_crew_traces_experiment()
             )
 
-            def _get_experiment_id(auth_context, experiment_name: str) -> str:
+            def _get_experiment_id(auth_context: Any, experiment_name: str) -> str:
                 import mlflow
 
                 from src.services.mlflow.sp_auth import single_auth_env

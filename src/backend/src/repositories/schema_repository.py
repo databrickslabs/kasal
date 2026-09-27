@@ -8,7 +8,7 @@ from src.core.base_repository import BaseRepository
 from src.models.schema import Schema
 
 
-class SchemaRepository(BaseRepository[Schema]):
+class SchemaRepository(BaseRepository[Schema, int]):
     """
     Repository for Schema model with custom query methods.
     Inherits base CRUD operations from BaseRepository.

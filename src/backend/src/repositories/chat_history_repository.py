@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
-from sqlalchemy import and_, delete, desc, func, not_, select
+from sqlalchemy import ColumnElement, and_, delete, desc, func, not_, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -158,7 +159,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
 
         try:
             # Build base query conditions
-            conditions = [self.model.group_id.in_(group_ids)]
+            conditions: List[ColumnElement[bool]] = [self.model.group_id.in_(group_ids)]
             if user_id:
                 conditions.append(self.model.user_id == user_id)
 
@@ -294,7 +295,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             )
             result = await self.session.execute(stmt)
             await self.session.flush()
-            return (result.rowcount or 0) > 0
+            return (cast("CursorResult[Any]", result).rowcount or 0) > 0
         except Exception:
             await self.session.rollback()
             raise

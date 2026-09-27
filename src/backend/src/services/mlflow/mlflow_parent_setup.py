@@ -36,7 +36,7 @@ try:  # mirror dispatcher's guarded import
 
     _HAS_MLFLOW = True
 except Exception:  # pragma: no cover - mlflow always present in prod
-    _mlflow = None
+    _mlflow = None  # type: ignore[assignment]  # optional-import sentinel
     _HAS_MLFLOW = False
 
 
@@ -249,7 +249,8 @@ def _setup_sync(
             from mlflow.tracing.destination import Databricks as _Dest
 
             mlflow.tracing.set_destination(
-                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))
+                # mlflow's stub types the legacy Databricks destination out.
+                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))  # type: ignore[arg-type]  # stub gap
             )
         mlflow.tracing.enable()
     except Exception as te:

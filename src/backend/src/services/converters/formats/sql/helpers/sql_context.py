@@ -3,7 +3,7 @@ SQL KBI Context Tracking
 Implements context-aware filter tracking similar to reference KbiProvider pattern
 """
 
-from typing import List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union, cast
 
 from ....base.models import KPI
 
@@ -34,15 +34,15 @@ class SQLBaseKBIContext:
         self._kbi = kbi
         self._parent_kbis: List[KPI] = parent_kbis or []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         parent_names = (
-            " → ".join([p.technical_name for p in self._parent_kbis])
+            " → ".join([p.technical_name or "" for p in self._parent_kbis])
             if self._parent_kbis
             else "ROOT"
         )
         return f"SQLContext[{parent_names} → {self.kbi.technical_name}]"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, SQLBaseKBIContext):
             return (
                 self.kbi.technical_name == other.kbi.technical_name
@@ -50,7 +50,7 @@ class SQLBaseKBIContext:
             )
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         """Hash based on KBI name + parent chain for set membership"""
         hash_str = f"{self.kbi.technical_name}"
         for parent_kbi in self._parent_kbis:
@@ -68,20 +68,20 @@ class SQLBaseKBIContext:
             - Base KBI "revenue" with parents ["ytd_revenue", "gross_profit"]: "revenue_ytd_revenue_gross_profit"
         """
         context_path = "_".join(
-            [k.technical_name for k in self._parent_kbis if k is not self.kbi]
+            [k.technical_name or "" for k in self._parent_kbis if k is not self.kbi]
         )
         if context_path:
             return f"{self.kbi.technical_name}_{context_path}"
         else:
-            return self.kbi.technical_name
+            return self.kbi.technical_name or ""
 
     @property
     def parent_kbis_chain(self) -> str:
         """Returns string representation of parent KBI chain for comparison"""
-        return "_".join([k.technical_name for k in self._parent_kbis])
+        return "_".join([k.technical_name or "" for k in self._parent_kbis])
 
     @property
-    def combined_filters(self) -> List[str]:
+    def combined_filters(self) -> List[Union[str, Dict[str, Any]]]:
         """
         Returns combined filters from this KBI and all parent KBIs
 
@@ -92,7 +92,7 @@ class SQLBaseKBIContext:
 
         All filters are ANDed together in SQL WHERE clause.
         """
-        filters = []
+        filters: List[Union[str, Dict[str, Any]]] = []
 
         # Collect filters from KBI and all parents
         for context_kbi in [self.kbi, *self._parent_kbis]:
@@ -246,7 +246,7 @@ class SQLKBIContextCache:
     Similar to BaseKbiCache in reference implementation.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._cache: Set[SQLBaseKBIContext] = set()
 
     def add_context(self, context: SQLBaseKBIContext) -> None:
@@ -267,7 +267,7 @@ class SQLKBIContextCache:
         """Get unique filter combinations across all contexts"""
         filter_combinations = set()
         for ctx in self._cache:
-            filter_str = " AND ".join(ctx.combined_filters)
+            filter_str = " AND ".join(cast(List[str], ctx.combined_filters))
             if filter_str:
                 filter_combinations.add(filter_str)
         return list(filter_combinations)

@@ -20,7 +20,7 @@ pipe) from ``kernel.tool_approval``.
 
 import logging
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,9 @@ class HumanReviewGuardrail:
         while time.monotonic() < deadline:
             try:
                 status, reason = run_async_with_context(
-                    self._decision(approval_id), timeout=15
+                    # create_approval_request always returns a row, so never None.
+                    self._decision(cast(str, approval_id)),
+                    timeout=15,
                 )
             except Exception as poll_err:  # noqa: BLE001
                 logger.warning(f"[task_review] poll failed (retrying): {poll_err}")

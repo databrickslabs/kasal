@@ -8,14 +8,16 @@ carries per-type enable flags — memory is either on (``is_active=True``) or of
 
 import enum
 from datetime import datetime
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, String
+from sqlalchemy import JSON, Boolean, DateTime, Enum, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -37,40 +39,44 @@ class MemoryBackend(Base):
 
     __tablename__ = "memory_backends"
 
-    id = Column(String, primary_key=True, default=generate_uuid)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
 
     # Group isolation (consistent with other models)
-    group_id = Column(String(100), index=True, nullable=False)
+    group_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
 
     # Basic configuration
-    name = Column(String(255), nullable=False)
-    description = Column(String(1000), nullable=True)
-    backend_type = Column(
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    backend_type: Mapped[MemoryBackendTypeEnum] = mapped_column(
         Enum(MemoryBackendTypeEnum),
         nullable=False,
         default=MemoryBackendTypeEnum.DEFAULT,
     )
 
     # Backend-specific configuration (stored as JSON).
-    databricks_config = Column(JSON, nullable=True)
-    lakebase_config = Column(JSON, nullable=True)
+    databricks_config: Mapped[Any] = mapped_column(JSON, nullable=True)
+    lakebase_config: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # CrewAI 1.10+ memory tuning (weights, consolidation,
     # recall depth). Stored as JSON so the shape can evolve without requiring
     # a migration per field.
-    cognitive_config = Column(JSON, nullable=True)
+    cognitive_config: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # Escape hatch for backend-specific options that haven't graduated to a
     # first-class schema field yet.
-    custom_config = Column(JSON, nullable=True)
+    custom_config: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # Metadata
-    is_active = Column(Boolean, default=True)
-    is_default = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary."""
         return {
             "id": self.id,
@@ -88,7 +94,7 @@ class MemoryBackend(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
-    def to_config_dict(self):
+    def to_config_dict(self) -> Dict[str, Any]:
         """Convert to runtime configuration for the memory factory."""
         config = {
             "backend_type": self.backend_type.value if self.backend_type else "default",

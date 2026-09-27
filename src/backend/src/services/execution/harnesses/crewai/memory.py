@@ -71,13 +71,15 @@ def kasal_memory_crew_class() -> type:
         def context_providers(self) -> List[Any]:
             if not hasattr(self, "_context_providers"):
                 object.__setattr__(self, "_context_providers", [])
-            return self._context_providers  # type: ignore[attr-defined]
+            providers: List[Any] = self._context_providers  # type: ignore[attr-defined]  # set via object.__setattr__ above
+            return providers
 
         @property
         def output_sinks(self) -> List[Any]:
             if not hasattr(self, "_output_sinks"):
                 object.__setattr__(self, "_output_sinks", [])
-            return self._output_sinks  # type: ignore[attr-defined]
+            sinks: List[Any] = self._output_sinks  # type: ignore[attr-defined]  # set via object.__setattr__ above
+            return sinks
 
         def _get_context(self, task: Any, task_outputs: List[Any]) -> str:
             """CrewAI's context, plus whatever the providers recall.
@@ -86,7 +88,7 @@ def kasal_memory_crew_class() -> type:
             always called as ``self._get_context(...)``, so overriding it as an
             instance method is a supported extension point rather than a trick.
             """
-            base = crew_base._get_context(task, task_outputs)
+            base: str = crew_base._get_context(task, task_outputs)
             providers = self.context_providers
             if not providers:
                 return base
@@ -125,7 +127,9 @@ def kasal_memory_crew_class() -> type:
         # ---------------------------------------------------------------
 
         @run_with_deadline
-        def kickoff(self, *args: Any, from_checkpoint: Any = None, **kwargs: Any):
+        def kickoff(
+            self, *args: Any, from_checkpoint: Any = None, **kwargs: Any
+        ) -> Any:
             self._stamp_run_deadline()
             self._seed_from_checkpoint(from_checkpoint)
             return crew_base.kickoff(self, *args, **kwargs)
@@ -133,7 +137,7 @@ def kasal_memory_crew_class() -> type:
         @async_run_with_deadline
         async def kickoff_async(
             self, *args: Any, from_checkpoint: Any = None, **kwargs: Any
-        ):
+        ) -> Any:
             self._stamp_run_deadline()
             self._seed_from_checkpoint(from_checkpoint)
             return await crew_base.kickoff_async(self, *args, **kwargs)

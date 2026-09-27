@@ -7,6 +7,7 @@ in execution-related API requests and responses.
 
 import json
 import time
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -117,7 +118,8 @@ class CrewConfig(BaseModel):
             "verification the mode implies. Absent for canvas crews."
         ),
     )
-    flow_id: Optional[str] = Field(
+    # A string on the wire; the executions router normalises it to a UUID.
+    flow_id: Optional[Union[str, uuid.UUID]] = Field(
         None, description="ID of the saved flow (for checkpoint tracking)"
     )
     crew_id: Optional[str] = Field(
@@ -219,8 +221,9 @@ class CrewConfig(BaseModel):
         return agents
 
     @model_validator(mode="after")
-    def _resolve_execution_effort(self):
-        return apply_effort_to_config(self)
+    def _resolve_execution_effort(self) -> "CrewConfig":
+        resolved: "CrewConfig" = apply_effort_to_config(self)
+        return resolved
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
@@ -570,7 +573,7 @@ class StopExecutionResponse(BaseModel):
 
     @field_validator("partial_results", mode="before")
     @classmethod
-    def _wrap_non_dict_results(cls, value):
+    def _wrap_non_dict_results(cls, value: Any) -> Any:
         """Accept whatever the run actually produced.
 
         ``partial_results`` is filled from ``ExecutionHistory.result``, a JSON

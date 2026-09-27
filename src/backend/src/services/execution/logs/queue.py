@@ -1,7 +1,7 @@
 import queue
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import Optional, cast
 
 from src.core.logger import LoggerManager
 from src.utils.user_context import GroupContext
@@ -18,10 +18,10 @@ _dropped_total = 0
 class JobOutputQueue:
     """Singleton holder for the job output queue."""
 
-    _instance = None
-    _queue = None
+    _instance: Optional["JobOutputQueue"] = None
+    _queue: Optional[queue.Queue] = None
 
-    def __new__(cls):
+    def __new__(cls) -> "JobOutputQueue":
         if cls._instance is None:
             cls._instance = super(JobOutputQueue, cls).__new__(cls)
             cls._instance._queue = queue.Queue(maxsize=10000)
@@ -29,7 +29,7 @@ class JobOutputQueue:
 
     def get_queue(self) -> queue.Queue:
         """Get the singleton queue instance."""
-        return self._queue
+        return cast(queue.Queue, self._queue)  # always set by __new__
 
 
 # Function to get the singleton queue instance easily
@@ -54,7 +54,7 @@ def enqueue_log(
     execution_id: str,
     content: str,
     timestamp: Optional[datetime] = None,
-    group_context: GroupContext = None,
+    group_context: Optional[GroupContext] = None,
 ) -> bool:
     """
     Enqueue a log message to be processed by the logs writer.

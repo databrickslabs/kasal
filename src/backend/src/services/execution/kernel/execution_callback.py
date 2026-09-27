@@ -15,7 +15,7 @@ previously lived here.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from src.services.execution.logs.queue import enqueue_log
 from src.utils.user_context import GroupContext
@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 
 def create_execution_callbacks(
     job_id: str,
-    config: Dict[str, Any] = None,
-    group_context: GroupContext = None,
+    config: Optional[Dict[str, Any]] = None,
+    group_context: Optional[GroupContext] = None,
     crew: Any = None,
-):
+) -> Tuple[Callable[[Any], None], Callable[[Any], None]]:
     """Create execution-scoped callback functions for a specific CrewAI execution.
 
     These callbacks handle execution log streaming only. Trace creation is
@@ -46,7 +46,7 @@ def create_execution_callbacks(
     log_prefix = f"[ExecutionCallback][{job_id}]"
     logger.info(f"{log_prefix} Creating execution-scoped callbacks")
 
-    def step_callback(step_output):
+    def step_callback(step_output: Any) -> None:
         """Called after each agent step.  Enqueues execution logs for live streaming."""
         try:
             timestamp = datetime.now(timezone.utc)
@@ -92,7 +92,7 @@ def create_execution_callbacks(
         except Exception as e:
             logger.error(f"{log_prefix} Error in step_callback: {e}", exc_info=True)
 
-    def task_callback(task_output):
+    def task_callback(task_output: Any) -> None:
         """Called after each task completion.  Enqueues execution logs for live streaming."""
         try:
             timestamp = datetime.now(timezone.utc)

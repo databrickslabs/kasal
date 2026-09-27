@@ -83,10 +83,10 @@ class CrewPreparation:
     def __init__(
         self,
         config: Dict[str, Any],
-        tool_service=None,
-        tool_factory=None,
+        tool_service: Any = None,
+        tool_factory: Any = None,
         user_token: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the CrewPreparation class
 
@@ -1282,7 +1282,7 @@ class CrewPreparation:
             logger.error(f"[CrewPreparation] Error looking up Kasal agent UUID: {e}")
             return None
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Cleanup method to restore original environment settings.
         This should be called when done with the crew to restore the original storage directory.

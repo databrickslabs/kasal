@@ -11,7 +11,7 @@ import logging
 import re
 import traceback
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, ContextManager, Dict, List, Optional, cast
 
 from src.core.databricks_app import lakebase_instance_from_config
 from src.core.exceptions import BadRequestError, KasalError
@@ -28,6 +28,7 @@ from src.schemas.task_generation import TaskGenerationRequest
 from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.generation.agents import AgentGenerationService
+from src.services.generation.crew.host import CrewGenerationBase
 from src.services.generation.mcp_assignment import (
     assign_mcps_to_tasks,
     describe_selected_mcps,
@@ -42,7 +43,7 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
-class ProgressiveGenerationMixin:
+class ProgressiveGenerationMixin(CrewGenerationBase):
     """Streaming crew generation (``POST /crew/create-crew-streaming``).
 
     Plan first, then agents, then tasks, broadcasting SSE as each entity lands.
@@ -91,7 +92,7 @@ class ProgressiveGenerationMixin:
             try:
                 from src.services.mlflow.tracing import start_root_trace
 
-                trace_ctx = start_root_trace(
+                trace_ctx: ContextManager[Any] = start_root_trace(
                     "crew_generation",
                     inputs={
                         "prompt": request.prompt,
@@ -927,7 +928,7 @@ class ProgressiveGenerationMixin:
                 clean_tasks = [
                     {k: v for k, v in t.items() if k != "_plan"} for t in task_results
                 ]
-                gen_complete_data = {
+                gen_complete_data: Dict[str, Any] = {
                     "type": "generation_complete",
                     "status": "completed",
                     "agents": agent_results,
@@ -1242,7 +1243,7 @@ class ProgressiveGenerationMixin:
         except Exception as e:
             logger.error(f"Failed to log crew plan LLM interaction: {e}")
 
-        plan = robust_json_parser(content)
+        plan: Dict[str, Any] = robust_json_parser(content)
 
         # Malformed output (missing/typed-wrong lists) is still an error, but a
         # VALID plan with zero agents is an answer — "there is nothing to
@@ -1475,10 +1476,9 @@ class ProgressiveGenerationMixin:
 
         for agent in agent_results:
             if agent.get("name", "").lower() == assigned.lower():
-                return agent["id"]
+                return cast(Optional[str], agent["id"])
 
-        # Fallback: first agent
-        return agent_results[0]["id"] if agent_results else None
+        return agent_results[0]["id"] if agent_results else None  # first agent
 
     async def _resolve_progressive_dependencies(
         self,

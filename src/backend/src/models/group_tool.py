@@ -1,9 +1,9 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
-    Column,
     DateTime,
     ForeignKey,
     Index,
@@ -11,7 +11,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
 
@@ -28,28 +28,32 @@ class GroupTool(Base):
 
     __tablename__ = "group_tools"
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Parent tool from global catalog (tools.id)
-    tool_id = Column(
+    tool_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tools.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Group (workspace) this mapping applies to
-    group_id = Column(String(100), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
     # Whether this tool is enabled for this group
-    enabled = Column(Boolean, default=False, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Group-scoped configuration/credentials (subset of global config, where allowed)
-    config = Column(JSON, default=dict)
+    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
 
     # Optional operational status for credentials/connection checks
-    credentials_status = Column(String(50), default="unknown", nullable=False)
+    credentials_status: Mapped[str] = mapped_column(
+        String(50), default="unknown", nullable=False
+    )
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 

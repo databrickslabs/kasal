@@ -1,5 +1,5 @@
 import logging
-from typing import Annotated, Dict, List
+from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -96,7 +96,7 @@ async def set_powerbi_config(
     request: PowerBIConfigCreate,
     group_context: GroupContextDep,
     service: PowerBIServiceDep,
-):
+) -> Dict:
     """
     Set Power BI configuration.
     Only workspace admins can set Power BI configuration for their workspace.
@@ -153,7 +153,7 @@ async def set_powerbi_config(
 async def get_powerbi_config(
     group_context: GroupContextDep,
     service: PowerBIServiceDep,
-):
+) -> PowerBIConfigResponse:
     """
     Get current Power BI configuration.
 
@@ -197,7 +197,7 @@ async def execute_dax_query(
     request: DAXQueryRequest,
     group_context: GroupContextDep,
     service: PowerBIServiceDep,
-):
+) -> DAXQueryResponse:
     """
     Execute a DAX query against a Power BI semantic model.
 
@@ -223,7 +223,7 @@ async def execute_dax_query(
 async def check_powerbi_status(
     group_context: GroupContextDep,
     service: PowerBIServiceDep,
-):
+) -> Dict:
     """
     Check Power BI integration status.
 
@@ -273,7 +273,7 @@ async def create_business_mapping(
     semantic_model_id: str,
     mapping_data: PowerBIBusinessMappingCreate,
     service: PowerBIContextConfigServiceDep,
-):
+) -> PowerBIBusinessMappingResponse:
     """
     Create a new business terminology mapping for a semantic model.
     Maps natural language terms to DAX expressions for context-aware queries.
@@ -296,7 +296,7 @@ async def create_business_mapping(
 async def get_business_mappings(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
-):
+) -> List[PowerBIBusinessMappingResponse]:
     """
     Get all business terminology mappings for a semantic model.
 
@@ -317,7 +317,7 @@ async def update_business_mapping(
     mapping_id: int,
     mapping_data: PowerBIBusinessMappingUpdate,
     service: PowerBIContextConfigServiceDep,
-):
+) -> PowerBIBusinessMappingResponse:
     """
     Update an existing business terminology mapping.
 
@@ -332,11 +332,11 @@ async def update_business_mapping(
     return await service.update_business_mapping(mapping_id, mapping_data)
 
 
-@router.delete("/business-mappings/{mapping_id}")
+@router.delete("/business-mappings/{mapping_id}", response_model=None)
 async def delete_business_mapping(
     mapping_id: int,
     service: PowerBIContextConfigServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Delete a business terminology mapping.
 
@@ -359,7 +359,7 @@ async def create_field_synonym(
     semantic_model_id: str,
     synonym_data: PowerBIFieldSynonymCreate,
     service: PowerBIContextConfigServiceDep,
-):
+) -> PowerBIFieldSynonymResponse:
     """
     Create a new field synonym for a semantic model.
     Maps alternative field names to canonical field names.
@@ -382,7 +382,7 @@ async def create_field_synonym(
 async def get_field_synonyms(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
-):
+) -> List[PowerBIFieldSynonymResponse]:
     """
     Get all field synonyms for a semantic model.
 
@@ -401,7 +401,7 @@ async def update_field_synonym(
     synonym_id: int,
     synonym_data: PowerBIFieldSynonymUpdate,
     service: PowerBIContextConfigServiceDep,
-):
+) -> PowerBIFieldSynonymResponse:
     """
     Update an existing field synonym.
 
@@ -416,11 +416,11 @@ async def update_field_synonym(
     return await service.update_field_synonym(synonym_id, synonym_data)
 
 
-@router.delete("/field-synonyms/{synonym_id}")
+@router.delete("/field-synonyms/{synonym_id}", response_model=None)
 async def delete_field_synonym(
     synonym_id: int,
     service: PowerBIContextConfigServiceDep,
-):
+) -> Dict[str, Any]:
     """
     Delete a field synonym.
 
@@ -442,7 +442,7 @@ async def delete_field_synonym(
 async def get_all_context_config(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
-):
+) -> PowerBIContextConfigBulkResponse:
     """
     Get all context configuration (business mappings and field synonyms) for a semantic model.
 
@@ -463,7 +463,7 @@ async def get_all_context_config(
 async def get_context_config_dict(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
-):
+) -> PowerBIContextConfigDict:
     """
     Get context configuration in dictionary format (for tool integration).
     Returns mappings and synonyms in the format expected by powerbi_analysis_tool.

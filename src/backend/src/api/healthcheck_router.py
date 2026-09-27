@@ -1,4 +1,5 @@
 import logging
+from typing import Any, Dict
 
 from fastapi import APIRouter
 from sqlalchemy import text
@@ -13,8 +14,8 @@ router = APIRouter(
 )
 
 
-@router.get("")
-async def health_check():
+@router.get("", response_model=None)
+async def health_check() -> Dict[str, Any]:
     """
     Health check endpoint to verify API is running.
 
@@ -27,8 +28,8 @@ async def health_check():
     }
 
 
-@router.get("/db")
-async def db_health():
+@router.get("/db", response_model=None)
+async def db_health() -> Dict[str, Any]:
     """
     Database health check — reports Lakebase reachability when enabled.
 
@@ -42,7 +43,7 @@ async def db_health():
     )
 
     lakebase_enabled = await is_lakebase_enabled()
-    result = {
+    result: Dict[str, Any] = {
         "status": "ok",
         "lakebase_enabled": lakebase_enabled,
         "lakebase_activated": is_lakebase_activated(),
@@ -80,8 +81,8 @@ async def db_health():
     return result
 
 
-@router.get("/cache")
-async def cache_stats():
+@router.get("/cache", response_model=None)
+async def cache_stats() -> Dict[str, Any]:
     """
     Get cache statistics for monitoring performance.
 

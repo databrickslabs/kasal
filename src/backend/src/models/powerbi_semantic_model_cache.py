@@ -13,8 +13,10 @@ Cached data includes:
 """
 
 from datetime import date, datetime, timedelta, timezone
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Column, Date, DateTime, Index, Integer, String
+from sqlalchemy import JSON, Date, DateTime, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import UniqueConstraint
 
 from src.db.base import Base
@@ -34,24 +36,26 @@ class PowerBISemanticModelCache(Base):
 
     __tablename__ = "powerbi_semantic_model_cache"
 
-    id = Column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
     # Multi-tenant isolation
-    group_id = Column(String(255), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
     # Power BI resource identification
-    dataset_id = Column(String(255), nullable=False)
-    workspace_id = Column(String(255), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Optional report identification (if default filters are report-specific)
-    report_id = Column(String(255), nullable=True)
+    report_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Cache validity
-    cached_date = Column(Date, nullable=False)  # Date the cache was written
+    cached_date: Mapped[date] = mapped_column(
+        Date, nullable=False
+    )  # Date the cache was written
 
     # Cached metadata (stored as JSON)
     # Note: Named 'cache_data' instead of 'metadata' to avoid SQLAlchemy reserved name
-    cache_data = Column(JSON, nullable=False)
+    cache_data: Mapped[Any] = mapped_column(JSON, nullable=False)
     """
     Cache data structure:
     {
@@ -67,11 +71,16 @@ class PowerBISemanticModelCache(Base):
     """
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
     )
 
     # Unique constraint: one cache per dataset per day per group (optional report_id)

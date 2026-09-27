@@ -1,12 +1,14 @@
 from datetime import datetime
+from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -18,45 +20,59 @@ class Task(Base):
 
     __tablename__ = "tasks"
 
-    id = Column(String, primary_key=True, default=generate_uuid)
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=False)
-    agent_id = Column(String, ForeignKey("agents.id"), nullable=True)
-    expected_output = Column(String, nullable=False)
-    tools = Column(JSON, default=list, nullable=False)
-    tool_configs = Column(
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    agent_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("agents.id"), nullable=True
+    )
+    expected_output: Mapped[str] = mapped_column(String, nullable=False)
+    tools: Mapped[Any] = mapped_column(JSON, default=list, nullable=False)
+    tool_configs: Mapped[Any] = mapped_column(
         JSON, default=dict, nullable=True
     )  # User-specific tool configuration overrides
-    async_execution = Column(Boolean, default=False)
-    context = Column(JSON, default=list)
-    config = Column(JSON, default=dict)
+    async_execution: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    context: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
+    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     # Output configuration
-    output_json = Column(String)
-    output_pydantic = Column(String)
-    output_file = Column(String)
-    output = Column(JSON)
-    markdown = Column(Boolean, default=False)
+    output_json: Mapped[Optional[str]] = mapped_column(String)
+    output_pydantic: Mapped[Optional[str]] = mapped_column(String)
+    output_file: Mapped[Optional[str]] = mapped_column(String)
+    output: Mapped[Any] = mapped_column(JSON, nullable=True)
+    markdown: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
 
     # Advanced configuration
-    callback = Column(String)
-    callback_config = Column(
+    callback: Mapped[Optional[str]] = mapped_column(String)
+    callback_config: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # Configuration for callbacks like DatabricksVolume
-    human_input = Column(Boolean, default=False)
-    converter_cls = Column(String)
-    guardrail = Column(String, nullable=True)  # Code-based guardrail (function name)
-    llm_guardrail = Column(JSON, nullable=True)  # LLM-based guardrail configuration
+    human_input: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    converter_cls: Mapped[Optional[str]] = mapped_column(String)
+    guardrail: Mapped[Optional[str]] = mapped_column(
+        String, nullable=True
+    )  # Code-based guardrail (function name)
+    llm_guardrail: Mapped[Any] = mapped_column(
+        JSON, nullable=True
+    )  # LLM-based guardrail configuration
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         # Store the explicitly provided kwargs before calling super
         explicit_kwargs = set(kwargs.keys())
 

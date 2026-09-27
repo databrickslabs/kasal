@@ -13,6 +13,7 @@ from typing import (
     List,
     Optional,
     Union,
+    cast,
 )
 
 from src.core.logger import (
@@ -59,7 +60,7 @@ logger = LoggerManager.get_instance().flow
 RUN_METADATA_INPUTS = frozenset({"flow_id", "run_name", "execution_id", "job_id"})
 
 
-def _extract_flow_uuid(engine_flow) -> Optional[str]:
+def _extract_flow_uuid(engine_flow: Any) -> Optional[str]:
     """Extract CrewAI's flow state id — used as the checkpoint/resume ``flow_uuid``.
 
     CrewAI wraps flow state in a ``StateProxy`` whose ``id`` is NOT exposed as an
@@ -130,31 +131,31 @@ class BackendFlow:
                 logger.error(f"Invalid flow_id format: {flow_id}")
                 raise ValueError(f"Invalid flow_id format: {flow_id}")
 
-        self._flow_data = None
+        self._flow_data: Optional[Dict[str, Any]] = None
         # Set when a turn was answered from state and no crew ran.
         self._state_answer: Optional[str] = None
         #: The outcome this turn selected, if narrowing chose one.
         self._turn_outcome: Optional[str] = None
         # Don't store API keys directly, just other configuration
-        self._config = {}
+        self._config: Dict[str, Any] = {}
         # Repository container
-        self._repositories = {}
+        self._repositories: Dict[str, Any] = {}
         logger.info(f"Initializing BackendFlow{' for job ' + job_id if job_id else ''}")
 
     @property
-    def config(self):
+    def config(self) -> Dict[str, Any]:
         return self._config
 
     @config.setter
-    def config(self, value):
+    def config(self, value: Dict[str, Any]) -> None:
         self._config = value
 
     @property
-    def repositories(self):
+    def repositories(self) -> Dict[str, Any]:
         return self._repositories
 
     @repositories.setter
-    def repositories(self, value):
+    def repositories(self, value: Dict[str, Any]) -> None:
         self._repositories = value
 
     async def load_flow(self, repository: Optional[FlowRepository] = None) -> Dict:
@@ -274,7 +275,7 @@ class BackendFlow:
                     )
 
             # Build the flow using the FlowBuilder module
-            dynamic_flow = await FlowBuilder.build_flow(
+            dynamic_flow: CrewAIFlow = await FlowBuilder.build_flow(
                 flow_data=self._flow_data,
                 repositories=self._repositories,
                 callbacks=self._config.get("callbacks", {}),
@@ -293,7 +294,7 @@ class BackendFlow:
             logger.error(f"Error creating flow: {e}", exc_info=True)
             raise ValueError(f"Failed to create flow: {str(e)}")
 
-    def _init_callbacks(self):
+    def _init_callbacks(self) -> None:
         """
         Initialize callbacks for flow execution.
 
@@ -367,7 +368,7 @@ class BackendFlow:
         instead of starting over. No session means no thread, which is how every
         flow runs today.
         """
-        explicit = self._config.get("resume_from_flow_uuid")
+        explicit: Optional[str] = self._config.get("resume_from_flow_uuid")
         if explicit:
             return explicit
         return thread_state_uuid(
@@ -637,16 +638,16 @@ class BackendFlow:
                         }
 
             # Merge config data into flow_data (frontend config takes precedence)
-            # This ensures frontend-provided flow_config, nodes, and edges are used
+            flow_data = cast(Dict[str, Any], self._flow_data)  # set above, or raised
             if "flow_config" in self._config:
                 logger.info(
                     "[kickoff_async] Using flow_config from self._config (has latest updates)"
                 )
-                self._flow_data["flow_config"] = self._config["flow_config"]
+                flow_data["flow_config"] = self._config["flow_config"]
             if "nodes" in self._config:
-                self._flow_data["nodes"] = self._config["nodes"]
+                flow_data["nodes"] = self._config["nodes"]
             if "edges" in self._config:
-                self._flow_data["edges"] = self._config["edges"]
+                flow_data["edges"] = self._config["edges"]
                 logger.info(
                     f"[kickoff_async] Merged {len(self._config['edges'])} edges from config"
                 )
@@ -938,18 +939,18 @@ class BackendFlow:
                         }
 
             # CRITICAL: If config has an updated flow_config (with startingPoints), use it
-            # This ensures frontend-provided flow_config takes precedence over database version
             if "flow_config" in self._config:
                 logger.info(
                     "[kickoff] Using flow_config from self._config (has latest updates)"
                 )
-                self._flow_data["flow_config"] = self._config["flow_config"]
+                # Set above: load_flow either fills _flow_data or raises.
+                flow_data = cast(Dict[str, Any], self._flow_data)
+                flow_data["flow_config"] = self._config["flow_config"]
 
-                # Also update nodes/edges if they're in config
                 if "nodes" in self._config:
-                    self._flow_data["nodes"] = self._config["nodes"]
+                    flow_data["nodes"] = self._config["nodes"]
                 if "edges" in self._config:
-                    self._flow_data["edges"] = self._config["edges"]
+                    flow_data["edges"] = self._config["edges"]
 
                 logger.info("[kickoff] Updated flow_data with flow_config from config")
                 if "startingPoints" in self._config.get("flow_config", {}):

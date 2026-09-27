@@ -793,7 +793,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".yaml", delete=False
                 ) as f:
-                    f.write(yaml_content)
+                    f.write(yaml_content or "")
                     temp_path = f.name
                 print(f"[YAML DEBUG] Wrote YAML to temp file: {temp_path}")
                 definition = parser.parse_file(temp_path)
@@ -818,7 +818,7 @@ class MeasureConversionPipelineTool(BaseTool):
                             "description": dax_measure.description,
                         }
                     )
-                output = measures
+                output: Any = measures
 
             elif outbound_format == "sql":
                 # Use the same pattern as DAX - process each KPI individually
@@ -826,7 +826,7 @@ class MeasureConversionPipelineTool(BaseTool):
 
                 dialect = kwargs.get("sql_dialect", "databricks")
                 sql_dialect = SQLDialect[dialect.upper()]
-                generator = SQLGenerator(dialect=sql_dialect)
+                sql_generator = SQLGenerator(dialect=sql_dialect)
 
                 print(
                     f"[SQL DEBUG] Starting SQL generation for {len(definition.kpis)} KPIs with dialect {dialect}"
@@ -841,7 +841,7 @@ class MeasureConversionPipelineTool(BaseTool):
                         target_dialect=sql_dialect, separate_measures=True
                     )
 
-                    result = generator.generate_sql_from_kbi_definition(
+                    result = sql_generator.generate_sql_from_kbi_definition(
                         definition, options
                     )
                     print(
@@ -894,19 +894,23 @@ class MeasureConversionPipelineTool(BaseTool):
                     output = []
 
             elif outbound_format == "uc_metrics":
-                generator = UCMetricsGenerator()
+                uc_generator = UCMetricsGenerator()
                 metadata = {
                     "name": definition_name or "yaml_measures",
                     "catalog": kwargs.get("uc_catalog", "main"),
                     "schema": kwargs.get("uc_schema", "default"),
                 }
-                uc_metrics = generator.generate_consolidated_uc_metrics(
+                uc_metrics = uc_generator.generate_consolidated_uc_metrics(
                     definition.kpis, metadata
                 )
-                output = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
+                output = uc_generator.format_consolidated_uc_metrics_yaml(uc_metrics)
 
             elif outbound_format == "yaml":
-                output = parser.export_to_yaml(definition)
+                # YAMLKPIParser has no export_to_yaml (YAML export was removed from
+                # the converters); this branch used to fail with an AttributeError.
+                return (
+                    "Error: YAML -> YAML is not supported; use dax, sql or uc_metrics"
+                )
 
             return self._format_output(
                 output=output,

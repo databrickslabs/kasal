@@ -208,7 +208,7 @@ def install_tool_replay_hook(
 
 
 def _load_cassette(
-    execution_id: str, group_context: GroupContext, group_ids: List[str]
+    execution_id: str, group_context: Optional[GroupContext], group_ids: List[str]
 ) -> List[Any]:
     """Read the source run's recordings for every replayable tool.
 
@@ -218,11 +218,12 @@ def _load_cassette(
     try:
         from src.services.tools.tool_policies import DEFAULT_REPLAY_TTL_SECONDS
 
-        return _run_async(
+        rows: List[Any] = _run_async(
             _load_cassette_async(
                 execution_id, group_context, group_ids, DEFAULT_REPLAY_TTL_SECONDS
             )
         )
+        return rows
     except Exception:  # noqa: BLE001
         # A cassette that cannot be read means the calls go out for real, which
         # is what would have happened anyway. Never fail a run over it.
@@ -232,7 +233,7 @@ def _load_cassette(
 
 async def _load_cassette_async(
     execution_id: str,
-    group_context: GroupContext,
+    group_context: Optional[GroupContext],
     group_ids: List[str],
     max_age_seconds: int,
 ) -> List[Any]:
@@ -253,7 +254,7 @@ async def _load_cassette_async(
 
 
 async def _workspace_has_a_replayable_tool(
-    tool_service: Any, group_context: GroupContext
+    tool_service: Any, group_context: Optional[GroupContext]
 ) -> bool:
     """Is anything in this workspace marked replayable?
 

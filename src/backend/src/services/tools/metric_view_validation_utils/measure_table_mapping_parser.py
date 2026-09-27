@@ -12,7 +12,7 @@ class MeasureTableMappingParser:
 
     def __init__(self, json_path: str):
         self.json_path = json_path
-        self.mappings = []
+        self.mappings: List[Dict] = []
         self._mappings_index: Dict[str, Dict] = (
             {}
         )  # lower(name) → mapping for O(1) lookup

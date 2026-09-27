@@ -283,7 +283,7 @@ class MetricViewValidatorTool(BaseTool):
             if table and table != "__unassigned__":
                 table_mapping[table] = "source"
 
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
         total_evaluated = 0
         total_valid = 0
         total_equivalent = 0
@@ -515,7 +515,7 @@ class MetricViewValidatorTool(BaseTool):
 
         group_ids = ToolSessionProvider.run_group_ids()
 
-        async def _query():
+        async def _query() -> list:
             async with ToolSessionProvider.session() as session:
                 # The UCMV tool output contains the full result with yaml/sql/stats
                 # The stats section has per-table measure info, but we need the raw
@@ -536,14 +536,15 @@ class MetricViewValidatorTool(BaseTool):
                     return []
                 # PREFERRED: resolved_measures_by_table (fact-table-keyed, with DAX)
                 if inner.get("resolved_measures_by_table"):
-                    flat = []
+                    flat: list = []
                     for _rows in inner["resolved_measures_by_table"].values():
                         flat.extend(_rows)
                     if flat:
                         return flat
                 # Fallback: measures_with_dax (raw, holder-table-keyed)
                 if "measures_with_dax" in inner and inner["measures_with_dax"]:
-                    return inner["measures_with_dax"]
+                    with_dax: list = inner["measures_with_dax"]
+                    return with_dax
                 return []
 
         import time
@@ -551,12 +552,12 @@ class MetricViewValidatorTool(BaseTool):
         from src.services.tools.async_bridge import run_sync_with_context
         from src.utils.asyncio_utils import create_and_run_loop
 
-        def _run_with_retry():
+        def _run_with_retry() -> list:
             """Retry up to 5x to handle the race condition where the UCMV
             Generator's DB write hasn't committed yet when the validator starts."""
             for attempt in range(5):
                 try:
-                    result = create_and_run_loop(_query())
+                    result: list = create_and_run_loop(_query())
                     if result:  # _query returns a (possibly empty) list of measures
                         return result
                     if attempt < 4:
@@ -590,7 +591,7 @@ class MetricViewValidatorTool(BaseTool):
 
         group_ids = ToolSessionProvider.run_group_ids()
 
-        async def _query():
+        async def _query() -> dict:
             # Look for the dedicated UCMV yaml edits key written by the save button
             # in the UI (separate from Config Generator's edited_config to avoid
             # collisions in a multi-step flow).
@@ -614,9 +615,10 @@ class MetricViewValidatorTool(BaseTool):
         from src.utils.asyncio_utils import create_and_run_loop
 
         try:
-            return run_sync_with_context(
+            saved: dict = run_sync_with_context(
                 lambda: create_and_run_loop(_query()), timeout=15
             )
+            return saved
         except Exception:
             return {}
 
@@ -630,7 +632,7 @@ class MetricViewValidatorTool(BaseTool):
 
         group_ids = ToolSessionProvider.run_group_ids()
 
-        async def _query():
+        async def _query() -> dict:
             async with ToolSessionProvider.session() as session:
                 from src.services.trace.service import ExecutionTraceService
 
@@ -683,7 +685,7 @@ class MetricViewValidatorTool(BaseTool):
 
         for attempt in range(5):
             try:
-                result = create_and_run_loop(_query())
+                result: Optional[dict] = create_and_run_loop(_query())
                 if result and isinstance(result, dict) and "yaml" in result:
                     logger.info(
                         f"[Validator] Found UCMV YAML in DB (attempt {attempt + 1})"

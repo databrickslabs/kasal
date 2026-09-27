@@ -50,7 +50,7 @@ class DatabricksConfigCreate(DatabricksConfigBase):
         return []
 
     @model_validator(mode="after")
-    def validate_required_fields(self):
+    def validate_required_fields(self) -> "DatabricksConfigCreate":
         """Validate required fields based on configuration."""
         # Only validate if Databricks is enabled
         if not self.enabled or is_databricks_app():

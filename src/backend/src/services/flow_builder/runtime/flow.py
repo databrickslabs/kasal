@@ -15,7 +15,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -61,7 +61,7 @@ def or_(*conditions: Any) -> dict[str, Any]:
 
 
 def start(condition: Any = None) -> Callable:
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Any) -> Any:  # tags attributes onto the function
         func.__is_start_method__ = True
         if condition is not None:
             func.__trigger__ = _normalize(condition)
@@ -72,7 +72,7 @@ def start(condition: Any = None) -> Callable:
 
 
 def listen(condition: Any) -> Callable:
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Any) -> Any:  # tags attributes onto the function
         func.__trigger__ = _normalize(condition)
         func._meth = func
         return func
@@ -81,7 +81,7 @@ def listen(condition: Any) -> Callable:
 
 
 def router(condition: Any) -> Callable:
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Any) -> Any:  # tags attributes onto the function
         func.__trigger__ = _normalize(condition)
         func.__is_router__ = True
         func._meth = func
@@ -142,7 +142,7 @@ class Flow(Generic[T]):
         if initial is None:
             return {"id": str(uuid.uuid4())}
         if isinstance(initial, type) and issubclass(initial, BaseModel):
-            state = initial()
+            state: Any = initial()
         elif isinstance(initial, BaseModel):
             state = initial.model_copy(deep=True)
         elif isinstance(initial, dict):
@@ -351,7 +351,8 @@ class Flow(Generic[T]):
             setattr(self._state, key, value)
 
     def _restore_state(self, restore_id: str) -> None:
-        stored = self._persistence.load_state(restore_id)
+        # Only called when a persistence backend is configured (see kickoff).
+        stored = cast(Any, self._persistence).load_state(restore_id)
         if not stored:
             logger.warning("no persisted state found for flow id %s", restore_id)
             return
@@ -477,7 +478,7 @@ class Flow(Generic[T]):
                     changed = True
 
     async def _fire_listeners(self, signal: str, output: Any) -> None:
-        ready: list[str] = []
+        ready: list[tuple[str, list[Any]]] = []
         for listener, trigger in self._listeners.items():
             if listener in self._completed or listener in self._scheduled:
                 continue

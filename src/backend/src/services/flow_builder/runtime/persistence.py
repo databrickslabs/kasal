@@ -128,7 +128,8 @@ class SQLiteFlowPersistence(FlowPersistence):
             ).fetchone()
         if row is None:
             return None
-        return json.loads(row[0])
+        state: dict[str, Any] = json.loads(row[0])
+        return state
 
 
 def persist(persistence: FlowPersistence | None = None) -> Any:
@@ -142,7 +143,7 @@ def persist(persistence: FlowPersistence | None = None) -> Any:
     def decorator(target: Any) -> Any:
         backend = persistence or SQLiteFlowPersistence()
         if isinstance(target, type):
-            target._persistence_instance = backend
+            target._persistence_instance = backend  # type: ignore[attr-defined]  # class tag
             return target
         target.__persist_backend__ = backend
         return target

@@ -8,7 +8,7 @@ from src.models.agent import Agent
 from src.models.task import Task
 
 
-class AgentRepository(BaseRepository[Agent]):
+class AgentRepository(BaseRepository[Agent, str]):
     """
     Repository for Agent model with custom query methods.
     Inherits base CRUD operations from BaseRepository.

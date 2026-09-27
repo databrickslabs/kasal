@@ -1,6 +1,8 @@
 import logging
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.ui_config import UIConfig
 from src.repositories.ui_config_repository import UIConfigRepository
 from src.schemas.ui_config import UIConfigResponse, UIConfigUpdate
@@ -29,7 +31,7 @@ class UIConfigService:
     a restricted catalog once an admin saves a choice).
     """
 
-    def __init__(self, session, group_id: Optional[str] = None):
+    def __init__(self, session: AsyncSession, group_id: Optional[str] = None) -> None:
         self.session = session
         self.repository = UIConfigRepository(session)
         self.group_id = group_id

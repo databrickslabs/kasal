@@ -4,9 +4,10 @@ Repository pattern implementations for converter models
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, desc, func, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -193,14 +194,14 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
             Dictionary with statistics
         """
         since = datetime.utcnow() - timedelta(days=days)
-        conditions = [self.model.created_at >= since]
+        conditions: List[ColumnElement[bool]] = [self.model.created_at >= since]
         if group_id:
             conditions.append(self.model.group_id == group_id)
 
         # Total conversions
         total_query = select(func.count(self.model.id)).where(and_(*conditions))
         total_result = await self.session.execute(total_query)
-        total = total_result.scalar()
+        total = total_result.scalar() or 0
 
         # Success count
         success_conditions = conditions + [self.model.status == "success"]
@@ -208,13 +209,13 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
             and_(*success_conditions)
         )
         success_result = await self.session.execute(success_query)
-        success_count = success_result.scalar()
+        success_count = success_result.scalar() or 0
 
         # Failed count
         failed_conditions = conditions + [self.model.status == "failed"]
         failed_query = select(func.count(self.model.id)).where(and_(*failed_conditions))
         failed_result = await self.session.execute(failed_query)
-        failed_count = failed_result.scalar()
+        failed_count = failed_result.scalar() or 0
 
         # Average execution time
         avg_time_query = select(func.avg(self.model.execution_time_ms)).where(
@@ -322,7 +323,9 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         Returns:
             List of active conversion jobs
         """
-        conditions = [self.model.status.in_(["pending", "running"])]
+        conditions: List[ColumnElement[bool]] = [
+            self.model.status.in_(["pending", "running"])
+        ]
         if group_id:
             conditions.append(self.model.group_id == group_id)
 
@@ -420,7 +423,7 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
             )
         )
         result = await self.session.execute(query)
-        if result.rowcount > 0:
+        if cast("CursorResult[Any]", result).rowcount > 0:
             return await self.get(job_id)
         return None
 
@@ -602,7 +605,9 @@ class SavedConverterConfigurationRepository(
         Returns:
             List of matching configurations
         """
-        conditions = [self.model.name.ilike(f"%{search_term}%")]
+        conditions: List[ColumnElement[bool]] = [
+            self.model.name.ilike(f"%{search_term}%")
+        ]
         if group_id:
             conditions.append(self.model.group_id == group_id)
         if user_email:

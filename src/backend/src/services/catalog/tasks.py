@@ -46,7 +46,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         return await self.repository.get(id)
 
     async def get_with_group_check(
-        self, id: str, group_context: GroupContext
+        self, id: str, group_context: Optional[GroupContext]
     ) -> Optional[Task]:
         """
         Get a task by ID with group verification.
@@ -172,7 +172,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         self,
         id: str,
         fields: Dict[str, str],
-        group_context: GroupContext,
+        group_context: Optional[GroupContext],
     ) -> bool:
         """Rewrite a task's prompt TEXT, verifying it belongs to the caller's group.
 

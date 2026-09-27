@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +128,7 @@ class CrewService:
                 raise
         return data
 
-    async def get(self, id: UUID) -> Optional[Crew]:
+    async def get(self, id: Union[UUID, str]) -> Optional[Crew]:
         """
         Get a crew by ID with decrypted tool_configs.
 
@@ -405,7 +405,7 @@ class CrewService:
             logger.error(f"Error creating crew with group: {str(e)}")
             raise
 
-    async def find_by_group(self, group_context: GroupContext) -> List[Crew]:
+    async def find_by_group(self, group_context: Optional[GroupContext]) -> List[Crew]:
         """
         Find all crews for the CURRENT workspace (primary group only).
         Returns crews with decrypted tool_configs.
@@ -435,7 +435,7 @@ class CrewService:
         return await self.repository.find_by_ids(crew_ids)
 
     async def get_by_group(
-        self, id: UUID, group_context: GroupContext
+        self, id: UUID, group_context: Optional[GroupContext]
     ) -> Optional[Crew]:
         """
         Get a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
@@ -504,7 +504,9 @@ class CrewService:
         crew = await self.repository.update(id, update_data)
         return self._decrypt_crew_tool_configs(crew)
 
-    async def delete_by_group(self, id: UUID, group_context: GroupContext) -> bool:
+    async def delete_by_group(
+        self, id: UUID, group_context: Optional[GroupContext]
+    ) -> bool:
         """
         Delete a crew by ID, ensuring it belongs to the CURRENT workspace (primary group).
 

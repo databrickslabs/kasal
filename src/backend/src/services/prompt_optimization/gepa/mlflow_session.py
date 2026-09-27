@@ -166,6 +166,8 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
         # in the env; without it search_traces/get_trace raise "Could not resolve
         # a SQL warehouse ID" (list_crew_evals 500s every poll). Set it for the
         # window and restore after.
+        # Every databricks backend is built with its auth (see above).
+        assert backend.auth is not None
         prev_wh = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID")
         if backend.warehouse_id:
             os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(backend.warehouse_id)
@@ -186,6 +188,8 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
                 elif "MLFLOW_TRACING_SQL_WAREHOUSE_ID" in os.environ:
                     del os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"]
     else:
+        # Every local backend is built with its server URL.
+        assert backend.uri is not None
         try:
             mlflow.set_tracking_uri(backend.uri)
             try:

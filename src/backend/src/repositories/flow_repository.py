@@ -1,10 +1,11 @@
 import logging
 import uuid
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union, cast
 from uuid import UUID
 
-from sqlalchemy import bindparam, func, select, text
+from sqlalchemy import BindParameter, bindparam, func, select, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -179,7 +180,9 @@ class FlowRepository(BaseRepository[Flow]):
                     ),
                     {"ids": execution_ids},
                 )
-                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+                logger.info(
+                    f"Deleted {cast('CursorResult[Any]', result).rowcount} {table} records (by {col})"
+                )
 
         if job_ids:
             for table, col in (
@@ -193,7 +196,9 @@ class FlowRepository(BaseRepository[Flow]):
                     ),
                     {"jids": job_ids},
                 )
-                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+                logger.info(
+                    f"Deleted {cast('CursorResult[Any]', result).rowcount} {table} records (by {col})"
+                )
 
     async def delete_executions_of(self, flow_id: uuid.UUID) -> int:
         """Delete this flow's runs, returning how many."""
@@ -204,7 +209,7 @@ class FlowRepository(BaseRepository[Flow]):
             ).bindparams(self._flow_id_bindparam()),
             {"flow_id": self._uuid_param(flow_id)},
         )
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def delete_row(self, flow_id: uuid.UUID) -> int:
         """Delete the flow row itself, returning how many rows went."""
@@ -214,10 +219,10 @@ class FlowRepository(BaseRepository[Flow]):
             ),
             {"flow_id": self._uuid_param(flow_id)},
         )
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     @staticmethod
-    def _uuid_param(flow_id) -> uuid.UUID:
+    def _uuid_param(flow_id: Union[str, uuid.UUID]) -> uuid.UUID:
         """Coerce to a real ``UUID``.
 
         Required, not cosmetic: a raw ``str``/``UUID`` passed into ``text()`` fails
@@ -227,7 +232,7 @@ class FlowRepository(BaseRepository[Flow]):
         return flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
 
     @staticmethod
-    def _flow_id_bindparam():
+    def _flow_id_bindparam() -> BindParameter[uuid.UUID]:
         """Bind ``flow_id`` with the column's UUID type.
 
         Lets SQLAlchemy apply the per-dialect conversion — native UUID on

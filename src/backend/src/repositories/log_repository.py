@@ -100,7 +100,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         page: int = 0,
         per_page: int = 10,
         endpoint: Optional[str] = None,
-        group_ids: List[str] = None,
+        group_ids: Optional[List[str]] = None,
     ) -> List[LLMLog]:
         """
         Get paginated logs with optional endpoint filtering for specific groups.
@@ -136,7 +136,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         return list(result.scalars().all())
 
     async def count_logs_by_group(
-        self, endpoint: Optional[str] = None, group_ids: List[str] = None
+        self, endpoint: Optional[str] = None, group_ids: Optional[List[str]] = None
     ) -> int:
         """
         Count logs with optional endpoint filtering for specific groups.
@@ -163,7 +163,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         return len(list(result.scalars().all()))
 
     async def get_unique_endpoints_by_group(
-        self, group_ids: List[str] = None
+        self, group_ids: Optional[List[str]] = None
     ) -> List[str]:
         """
         Get list of unique endpoints in the logs for specific groups.

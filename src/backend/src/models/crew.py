@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
+from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, String
+from sqlalchemy import JSON, Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
 
@@ -15,43 +17,61 @@ class Crew(Base):
 
     __tablename__ = "crews"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4)
-    name = Column(String, index=True)
-    agent_ids = Column(JSON, default=lambda: [])
-    task_ids = Column(JSON, default=lambda: [])
-    nodes = Column(JSON, nullable=True)
-    edges = Column(JSON, nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, index=True, default=uuid.uuid4
+    )
+    name: Mapped[Optional[str]] = mapped_column(String, index=True)
+    agent_ids: Mapped[Any] = mapped_column(JSON, default=lambda: [], nullable=True)
+    task_ids: Mapped[Any] = mapped_column(JSON, default=lambda: [], nullable=True)
+    nodes: Mapped[Any] = mapped_column(JSON, nullable=True)
+    edges: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # Crew execution configuration
-    process = Column(
-        String(50), default="sequential"
+    process: Mapped[str] = mapped_column(
+        String(50), default="sequential", nullable=True
     )  # sequential | hierarchical | parallel
-    reasoning = Column(
-        Boolean, default=False
+    reasoning: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=True
     )  # Enable the model's native reasoning budget
-    reasoning_llm = Column(String(255), nullable=True)  # LLM for reasoning
-    reasoning_config = Column(
+    reasoning_llm: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # LLM for reasoning
+    reasoning_config: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # {"reasoning_effort": "low"|"medium"|"high"}
-    manager_llm = Column(String(255), nullable=True)  # LLM for hierarchical manager
-    tool_configs = Column(
+    manager_llm: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # LLM for hierarchical manager
+    tool_configs: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # Crew-level tool configurations (MCP servers, etc.)
-    memory = Column(Boolean, default=True)  # Enable memory
-    verbose = Column(Boolean, default=True)  # Verbose output
-    max_rpm = Column(
+    memory: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=True
+    )  # Enable memory
+    verbose: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=True
+    )  # Verbose output
+    max_rpm: Mapped[Any] = mapped_column(
         JSON, nullable=True
     )  # Max requests per minute (can be int or None)
 
     # Multi-group fields
-    group_id = Column(String(100), index=True, nullable=True)  # Group isolation
-    created_by_email = Column(String(255), nullable=True)  # Creator email for audit
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )  # Group isolation
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Creator email for audit
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True
+    )
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super(Crew, self).__init__(**kwargs)
         if self.agent_ids is None:
             self.agent_ids = []

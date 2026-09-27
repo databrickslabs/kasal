@@ -2,6 +2,7 @@
 
 import logging
 import traceback
+from typing import Any, Dict
 
 from src.schemas.execution import CrewConfig
 
@@ -22,8 +23,8 @@ def extract_flow_name_inputs(config: CrewConfig) -> tuple:
     Returns:
         Tuple of (agents_yaml, tasks_yaml) dictionaries for name generation
     """
-    agents_yaml = {}
-    tasks_yaml = {}
+    agents_yaml: Dict[str, Any] = {}
+    tasks_yaml: Dict[str, Any] = {}
 
     try:
         # Get nodes and flow_config from the config

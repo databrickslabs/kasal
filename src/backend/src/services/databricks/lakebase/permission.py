@@ -45,7 +45,7 @@ def _quote_pg_role(identifier: str) -> str:
 class LakebasePermissionService(BaseService):
     """Service for managing Lakebase database permissions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize Lakebase permission service.
 

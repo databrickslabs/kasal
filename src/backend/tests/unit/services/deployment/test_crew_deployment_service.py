@@ -399,6 +399,38 @@ class TestDeployToEndpoint:
         mock_ws.serving_endpoints.create.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_builds_a_valid_sdk_config(self, service):
+        """With the REAL serving dataclasses: EndpointCoreConfigInput requires
+        ``name``, and building it without one raised TypeError before any
+        endpoint was created."""
+        config = ModelServingConfig(
+            model_name="model",
+            endpoint_name="new-endpoint",
+            workload_size="Small",
+            scale_to_zero_enabled=True,
+        )
+        mock_ws = MagicMock()
+        mock_ws.serving_endpoints.get.side_effect = [
+            Exception("not found"),
+            MagicMock(),
+        ]
+        mock_ws.config.host = "my-workspace.azuredatabricks.net"
+        mock_wc_module = MagicMock()
+        mock_wc_module.WorkspaceClient.return_value = mock_ws
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "databricks.sdk": mock_wc_module,
+                "databricks.sdk.useragent": MagicMock(),
+            },
+        ):
+            await service._deploy_to_endpoint("model", "1", config)
+
+        sent = mock_ws.serving_endpoints.create.call_args.kwargs["config"]
+        assert sent.name == "new-endpoint"
+
+    @pytest.mark.asyncio
     async def test_updates_existing_endpoint(self, service):
         config = ModelServingConfig(
             model_name="model",

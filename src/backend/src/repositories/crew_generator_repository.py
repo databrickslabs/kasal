@@ -9,7 +9,7 @@ import json
 import logging
 import traceback
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,11 @@ from src.core.exceptions import KasalError
 from src.models.agent import Agent
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
+
+if TYPE_CHECKING:
+    from src.utils.user_context import GroupContext
+
+_EntityT = TypeVar("_EntityT", Agent, Task)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -35,7 +40,7 @@ class CrewGeneratorRepository:
         self.session = session
 
     @classmethod
-    def create_instance(cls, session: AsyncSession):
+    def create_instance(cls, session: AsyncSession) -> "CrewGeneratorRepository":
         """
         Factory method to create a properly configured instance of the repository.
 
@@ -46,7 +51,7 @@ class CrewGeneratorRepository:
         """
         return cls(session)
 
-    def _safe_get_attr(self, obj, attr, default=None):
+    def _safe_get_attr(self, obj: Any, attr: str, default: Any = None) -> Any:
         """
         Safely get an attribute from an object, whether it's a dictionary or an object.
 
@@ -70,7 +75,7 @@ class CrewGeneratorRepository:
         else:
             return default
 
-    async def create(self, entity):
+    async def create(self, entity: _EntityT) -> _EntityT:
         """
         Create an entity in the database.
 
@@ -91,7 +96,9 @@ class CrewGeneratorRepository:
             logger.error(traceback.format_exc())
             raise
 
-    async def update(self, entity_id, update_data):
+    async def update(
+        self, entity_id: str, update_data: Dict[str, Any]
+    ) -> Optional[Task]:
         """
         Update an entity in the database.
 
@@ -128,7 +135,11 @@ class CrewGeneratorRepository:
             logger.error(traceback.format_exc())
             raise
 
-    async def create_crew_entities(self, crew_dict, group_context=None):
+    async def create_crew_entities(
+        self,
+        crew_dict: Dict[str, Any],
+        group_context: Optional["GroupContext"] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Create agents and tasks for a crew.
 
@@ -231,7 +242,9 @@ class CrewGeneratorRepository:
         # Return both created agents and tasks in a dictionary format with serializable objects
         return {"agents": serialized_agents, "tasks": serialized_tasks}
 
-    async def _create_agents(self, agents_data, group_context=None):
+    async def _create_agents(
+        self, agents_data: List[Any], group_context: Optional["GroupContext"] = None
+    ) -> List[Agent]:
         """
         Create agents in the database.
 
@@ -301,7 +314,12 @@ class CrewGeneratorRepository:
 
         return created_agents
 
-    async def _create_tasks(self, tasks_data, agent_name_to_id, group_context=None):
+    async def _create_tasks(
+        self,
+        tasks_data: List[Any],
+        agent_name_to_id: Dict[str, str],
+        group_context: Optional["GroupContext"] = None,
+    ) -> List[Task]:
         """
         Create tasks in the database.
 
@@ -462,7 +480,9 @@ class CrewGeneratorRepository:
 
         return created_tasks
 
-    async def _create_task_dependencies(self, created_tasks, tasks_data):
+    async def _create_task_dependencies(
+        self, created_tasks: List[Task], tasks_data: List[Any]
+    ) -> None:
         """
         Create task dependencies in the database using the _context_refs field.
 
@@ -590,7 +610,7 @@ class CrewGeneratorRepository:
         logger.info("Finished processing task dependencies")
 
     async def create_single_agent(
-        self, agent_data: Dict[str, Any], group_context=None
+        self, agent_data: Dict[str, Any], group_context: Optional["GroupContext"] = None
     ) -> Dict[str, Any]:
         """
         Create a single agent in the database and return a serializable dict.
@@ -672,7 +692,10 @@ class CrewGeneratorRepository:
             raise KasalError(f"Failed to persist agent: {e}")
 
     async def create_single_task(
-        self, task_data: Dict[str, Any], agent_id: Optional[str], group_context=None
+        self,
+        task_data: Dict[str, Any],
+        agent_id: Optional[str],
+        group_context: Optional["GroupContext"] = None,
     ) -> Dict[str, Any]:
         """
         Create a single task in the database and return a serializable dict.

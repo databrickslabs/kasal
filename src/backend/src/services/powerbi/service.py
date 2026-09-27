@@ -1,8 +1,9 @@
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import (
     BadRequestError,
@@ -13,6 +14,9 @@ from src.core.exceptions import (
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
 
+if TYPE_CHECKING:
+    from src.services.settings.api_keys import ApiKeysService
+
 # Set up logger
 logger = logging.getLogger(__name__)
 
@@ -20,20 +24,27 @@ logger = logging.getLogger(__name__)
 class PowerBIService:
     """Service for Power BI DAX operations."""
 
-    def __init__(self, session, group_id: Optional[str] = None):
+    def __init__(self, session: AsyncSession, group_id: Optional[str] = None) -> None:
         self.session = session
         self.repository = PowerBIConfigRepository(session)
         self.group_id = group_id
-        self._secrets_service = None  # Lazy load to avoid circular deps
+        self._secrets_service: Optional["ApiKeysService"] = None  # lazy: circular deps
 
     @property
-    def secrets_service(self):
+    def secrets_service(self) -> "ApiKeysService":
         """Lazy load secrets_service to avoid circular dependency."""
         if self._secrets_service is None:
             from src.services.settings.api_keys import ApiKeysService
 
-            self._secrets_service = ApiKeysService(self.session)
+            self._secrets_service = ApiKeysService(self.session, group_id=self.group_id)
         return self._secrets_service
+
+    async def _api_key(self, name: str) -> Optional[str]:
+        """A decrypted key from this workspace's API Keys Service, or None."""
+        from src.utils.encryption_utils import EncryptionUtils
+
+        key = await self.secrets_service.find_by_name(name)
+        return EncryptionUtils.decrypt_value(key.encrypted_value) if key else None
 
     async def execute_dax_query(
         self, query_request: DAXQueryRequest
@@ -108,7 +119,7 @@ class PowerBIService:
                 execution_time_ms=execution_time_ms,
             )
 
-    async def _generate_token(self, config) -> str:
+    async def _generate_token(self, config: Any) -> str:
         """
         Generate authentication token for Power BI API.
 
@@ -182,7 +193,7 @@ class PowerBIService:
             raise
 
     async def _generate_token_username_password(
-        self, tenant_id: str, client_id: str, config
+        self, tenant_id: str, client_id: str, config: Any
     ) -> str:
         """
         Generate token using username/password flow.
@@ -202,22 +213,18 @@ class PowerBIService:
             password: Optional[str] = None
             client_secret: Optional[str] = None
 
-            # Try to get from API Keys Service
-            if self._secrets_service:
-                try:
-                    username = await self.secrets_service.get_api_key(
-                        "POWERBI_USERNAME"
-                    )
-                    password = await self.secrets_service.get_api_key(
-                        "POWERBI_PASSWORD"
-                    )
-                    client_secret = await self.secrets_service.get_api_key(
-                        "POWERBI_CLIENT_SECRET"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Could not get Power BI credentials from API Keys Service: {e}"
-                    )
+            # From this workspace's API Keys Service. (This used to be gated on
+            # the lazily-created ``_secrets_service`` — always None on a fresh
+            # service — and called a ``get_api_key`` method ApiKeysService does
+            # not have, so stored credentials were never read.)
+            try:
+                username = await self._api_key("POWERBI_USERNAME")
+                password = await self._api_key("POWERBI_PASSWORD")
+                client_secret = await self._api_key("POWERBI_CLIENT_SECRET")
+            except Exception as e:
+                logger.warning(
+                    f"Could not get Power BI credentials from API Keys Service: {e}"
+                )
 
             # No environment fallback: the process env is shared by every
             # workspace, so credentials found there are not this caller's.
@@ -297,7 +304,8 @@ class PowerBIService:
             )
 
             results = response.json().get("results", [])
-            return results
+            result: list[Any] = results
+            return result
 
         except httpx.RequestError as e:
             logger.error(f"Request error when calling Power BI API: {e}", exc_info=True)
@@ -327,4 +335,5 @@ class PowerBIService:
             logger.info("No rows found in the response.")
             return []
 
-        return rows
+        result: list[dict[Any, Any]] = rows
+        return result

@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 _listeners: List[Callable[[Optional[List[str]]], Any]] = []
 
 
-def on_catalogue_changed(listener: Callable[[Optional[List[str]]], Any]):
+def on_catalogue_changed(
+    listener: Callable[[Optional[List[str]]], Any],
+) -> Callable[[Optional[List[str]]], Any]:
     """Register a listener. Usable as a decorator."""
     if listener not in _listeners:
         _listeners.append(listener)

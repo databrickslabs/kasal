@@ -30,7 +30,7 @@ class PowerBIConfigCreate(PowerBIConfigBase):
         return []
 
     @model_validator(mode="after")
-    def validate_required_fields(self):
+    def validate_required_fields(self) -> "PowerBIConfigCreate":
         """Validate required fields based on configuration."""
         # Only validate if Power BI is enabled
         if not self.enabled:

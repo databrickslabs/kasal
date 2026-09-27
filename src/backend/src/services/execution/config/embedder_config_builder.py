@@ -223,15 +223,15 @@ class EmbedderConfigBuilder:
             class DatabricksEmbeddingFunction(EmbeddingFunction):
                 def __init__(
                     self,
-                    api_key: str = None,
-                    api_base: str = None,
-                    model: str = None,
+                    api_key: Optional[str] = None,
+                    api_base: Optional[str] = None,
+                    model: Optional[str] = None,
                     auth_headers: Optional[dict] = None,
-                    user_token: str = None,
+                    user_token: Optional[str] = None,
                 ):
                     self.api_key = api_key
-                    self.api_base = api_base
-                    self.model = model
+                    self.api_base = cast(str, api_base)  # always passed below
+                    self.model = cast(str, model)  # always passed below
                     self.auth_headers = auth_headers
                     self.user_token = user_token
 
@@ -374,7 +374,7 @@ class EmbedderConfigBuilder:
         """Get Databricks endpoint from unified auth, database, or environment"""
         import os
 
-        databricks_endpoint = ""
+        databricks_endpoint: Optional[str] = ""
 
         # Try unified auth first (pass user_token for OBO auth)
         try:

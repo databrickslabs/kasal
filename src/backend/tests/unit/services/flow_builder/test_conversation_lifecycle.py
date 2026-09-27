@@ -84,7 +84,7 @@ class TestFold:
                 }
             ),
         ):
-            folded = await fold_thread_history(state, keep=20)
+            folded = await fold_thread_history(state, "test-model", keep=20)
 
         assert folded is True
         assert state.summary == "they discussed news"

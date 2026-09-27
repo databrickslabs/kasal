@@ -162,7 +162,7 @@ class GroupService:
         """
         return await self.group_repo.get(group_id)
 
-    async def update_group(self, group_id: str, **updates) -> Group:
+    async def update_group(self, group_id: str, **updates: Any) -> Group:
         """
         Update a group.
 
@@ -184,7 +184,9 @@ class GroupService:
                 setattr(group, field, value)
 
         group.updated_at = datetime.utcnow()
-        return await self.group_repo.update(group)
+        # The row is already loaded and modified in this session: flush it.
+        # (`update(id, values)` takes a key and a dict, not the object.)
+        return await self.group_repo.add(group)
 
     async def get_group_user_count(self, group_id: str) -> int:
         """
@@ -248,7 +250,7 @@ class GroupService:
         group_id: str,
         user_email: str,
         role: GroupUserRole = GroupUserRole.OPERATOR,
-        assigned_by_email: str = None,
+        assigned_by_email: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Assign a user to a group manually.
@@ -323,6 +325,8 @@ class GroupService:
                 updated_at=datetime.utcnow(),
             )
             group_user = await self.group_user_repo.add(group_user)
+        if group_user is None:  # the row vanished between the read and the update
+            raise ValueError(f"User {actual_user_id} not found in group {group_id}")
 
         logger.info(f"Assigned user {user_email} to group {group_id} with role {role}")
 
@@ -346,7 +350,7 @@ class GroupService:
         }
 
     async def update_group_user(
-        self, group_id: str, user_id: str, **updates
+        self, group_id: str, user_id: str, **updates: Any
     ) -> GroupUser:
         """
         Update a group user.
@@ -372,6 +376,8 @@ class GroupService:
 
         update_data["updated_at"] = datetime.utcnow()
         updated = await self.group_user_repo.update(group_user.id, update_data)
+        if updated is None:  # the row vanished between the read and the update
+            raise ValueError(f"User {user_id} not found in group {group_id}")
 
         # Role/status changed — invalidate cached memberships. We only have
         # user_id here, not email, so clear the whole (small, short-TTL) cache.
@@ -381,7 +387,7 @@ class GroupService:
 
         return updated
 
-    async def remove_user_from_group(self, group_id: str, user_id: str):
+    async def remove_user_from_group(self, group_id: str, user_id: str) -> None:
         """
         Remove a user from a group.
 

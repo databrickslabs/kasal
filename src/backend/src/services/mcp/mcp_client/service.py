@@ -3,6 +3,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import (
     BadRequestError,
     ConflictError,
@@ -11,6 +13,7 @@ from src.core.exceptions import (
     NotFoundError,
 )
 from src.core.permissions import is_system_admin
+from src.models.mcp_server import MCPServer
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.schemas.mcp import (
     MCPServerCreate,
@@ -62,7 +65,7 @@ class MCPService:
     Acts as an intermediary between the API routers and the repository.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """
         Initialize service with database session.
 
@@ -213,7 +216,7 @@ class MCPService:
         return responses
 
     @staticmethod
-    def _decrypt_server_api_key(server) -> Optional[str]:
+    def _decrypt_server_api_key(server: MCPServer) -> Optional[str]:
         """Decrypt a server's stored API key — only when its auth mode uses one.
 
         OBO/SPN servers authenticate with tokens, not the stored key. A row can
@@ -246,17 +249,20 @@ class MCPService:
         return decrypted
 
     @staticmethod
-    def _masked_response(server) -> MCPServerResponse:
+    def _masked_response(server: Optional[MCPServer]) -> MCPServerResponse:
         """A response that says a key is stored without saying what it is.
         Keys are write-only at the API; the run that connects decrypts its own
-        (``get_servers_by_names*``)."""
+        (``get_servers_by_names*``). ``None`` — a row that vanished between a
+        read and its update — is a 404, not a validation crash."""
+        if server is None:
+            raise NotFoundError(detail="MCP server not found")
         resp = MCPServerResponse.model_validate(server)
         resp.api_key = ""
         resp.has_api_key = bool(getattr(server, "encrypted_api_key", None))
         return resp
 
     def _group_override_payload(
-        self, base, group_id: str, enabled: bool
+        self, base: MCPServer, group_id: str, enabled: bool
     ) -> Dict[str, Any]:
         """Clone a base server's config into a workspace-scoped override row."""
         return {
@@ -381,7 +387,7 @@ class MCPService:
             getattr(group_context, "primary_group_id", None) if group_context else None
         )
 
-    async def _visible_row(self, server_id: int, group_context: Any):
+    async def _visible_row(self, server_id: int, group_context: Any) -> MCPServer:
         """The row when the caller may SEE it: a base row, or the caller's own
         workspace's row. Another workspace's row reads as not found — that it
         exists is the other workspace's business."""
@@ -394,7 +400,7 @@ class MCPService:
             raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
         return server
 
-    async def _mutable_row(self, server_id: int, group_context: Any):
+    async def _mutable_row(self, server_id: int, group_context: Any) -> MCPServer:
         """The row when the caller may CHANGE it. A base row changes for a
         system admin only — it is every workspace's server. A workspace row
         changes for its own workspace (the route has already required the

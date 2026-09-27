@@ -50,7 +50,7 @@ class TraceBroadcastService:
         # Track last broadcasted trace ID per job
         self._last_trace_ids: Dict[str, int] = {}
 
-    def start(self):
+    def start(self) -> None:
         """Start the background polling task."""
         if self._running:
             logger.warning("[TraceBroadcastService] Already running")
@@ -60,7 +60,7 @@ class TraceBroadcastService:
         self._task = asyncio.create_task(self._poll_loop())
         logger.info("[TraceBroadcastService] Started trace broadcast polling")
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the background polling task."""
         self._running = False
         if self._task:
@@ -119,7 +119,7 @@ class TraceBroadcastService:
             logger.error(f"[TraceBroadcastService] Error querying running jobs: {e}")
             return set()
 
-    async def _poll_loop(self):
+    async def _poll_loop(self) -> None:
         """Main polling loop that checks for new traces."""
         logger.info("[TraceBroadcastService] Poll loop started")
 
@@ -136,7 +136,7 @@ class TraceBroadcastService:
 
         logger.info("[TraceBroadcastService] Poll loop ended")
 
-    async def _poll_for_traces(self):
+    async def _poll_for_traces(self) -> None:
         """Poll database for new traces and broadcast them."""
         # Get jobs with active per-job SSE connections
         active_jobs = self._get_active_job_ids()
@@ -189,7 +189,9 @@ class TraceBroadcastService:
             for job_id in active_jobs:
                 await self._broadcast_new_traces_for_job(session, job_id)
 
-    async def _broadcast_new_traces_for_job(self, session: AsyncSession, job_id: str):
+    async def _broadcast_new_traces_for_job(
+        self, session: AsyncSession, job_id: str
+    ) -> None:
         """
         Check for new traces for a specific job and broadcast them.
 

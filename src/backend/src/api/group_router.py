@@ -302,7 +302,7 @@ async def delete_group(
     service: Annotated[GroupService, Depends(get_group_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete a group and all associated data.
 
@@ -473,7 +473,7 @@ async def remove_user_from_group(
     service: Annotated[GroupService, Depends(get_group_service)],
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """Remove a user from a group. Requires admin privileges on the target group."""
     # SECURITY: must be a system admin or an admin of THIS group (not just any group)
     await _verify_group_admin(service, admin_user, group_id)

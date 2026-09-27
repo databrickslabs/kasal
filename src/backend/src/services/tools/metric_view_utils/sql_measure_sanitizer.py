@@ -33,7 +33,7 @@ def strip_nullif_one(sql: str) -> str:
     return _NULLIF_ONE.sub("", sql)
 
 
-def _split_top_level_divide(sql: str):
+def _split_top_level_divide(sql: str) -> tuple[str, str] | None:
     """Split ``num / NULLIF(den, 0)`` at the top level. Returns (num, den) with
     surrounding parens stripped, or None when the shape isn't a single ratio."""
     m = re.search(r"^\s*(.*?)\s*/\s*NULLIF\(\s*(.*)\s*,\s*0\s*\)\s*$", sql, re.DOTALL)
@@ -87,7 +87,7 @@ def coalesce_wrap_base(sql: str) -> str:
     if not sql or "SUM(" not in sql.upper():
         return sql
 
-    def _repl(m: re.Match) -> str:
+    def _repl(m: re.Match[str]) -> str:
         col = m.group(1)
         return f"SUM(COALESCE({col}, 0))"
 
@@ -141,7 +141,7 @@ _SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
 ]
 
 
-def detect_lost_dax_component(dax: str, sql: str) -> str | None:
+def detect_lost_dax_component(dax: str, sql: str | None) -> str | None:
     """Compare the ORIGINAL DAX against the GENERATED SQL and return a reason when
     the SQL silently DROPPED a component the DAX clearly had — producing valid
     SQL that returns a WRONG number.
@@ -261,7 +261,7 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
     return None
 
 
-def detect_silent_wrong(sql: str) -> str | None:
+def detect_silent_wrong(sql: str | None) -> str | None:
     """Return a short reason string when ``sql`` would silently produce a wrong or
     invalid result (see ``_SILENT_WRONG_CHECKS``), else None. Used to demote a
     measure to untranslatable-with-TODO instead of emitting bad SQL."""

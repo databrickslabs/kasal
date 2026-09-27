@@ -4,7 +4,7 @@ Service for managing PowerBI Semantic Model Cache.
 Handles cache retrieval, storage, and validation for semantic model metadata.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,7 +59,7 @@ class PowerBISemanticModelCacheService:
         )
 
         if cache and cache.is_valid_for_today(cache_ttl_days):
-            return cache.cache_data
+            return cast(Optional[Dict[str, Any]], cache.cache_data)
 
         return None
 

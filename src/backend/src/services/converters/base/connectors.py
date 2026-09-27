@@ -7,7 +7,8 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from types import TracebackType
+from typing import Any, Dict, List, Optional, Self
 
 from .models import KPI, KPIDefinition
 
@@ -84,7 +85,7 @@ class BaseInboundConnector(ABC):
         pass
 
     @abstractmethod
-    def extract_measures(self, **kwargs) -> List[KPI]:
+    def extract_measures(self, **kwargs: Any) -> List[KPI]:
         """
         Extract measures from source system.
 
@@ -115,7 +116,7 @@ class BaseInboundConnector(ABC):
         self,
         definition_name: str,
         definition_description: Optional[str] = None,
-        **extract_kwargs,
+        **extract_kwargs: Any,
     ) -> KPIDefinition:
         """
         Extract measures and wrap in KPIDefinition.
@@ -160,11 +161,16 @@ class BaseInboundConnector(ABC):
         """Check if connector is currently connected"""
         return self._connected
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Context manager entry"""
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit"""
         self.disconnect()

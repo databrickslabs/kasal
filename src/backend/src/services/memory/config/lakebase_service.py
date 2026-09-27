@@ -115,7 +115,7 @@ class LakebaseMemoryService:
         Uses HNSW indexes (work on empty tables, no periodic rebuilds needed).
         """
         tables = {"memory": memory_table}
-        results = {}
+        results: Dict[str, Any] = {}
 
         try:
             async with get_lakebase_session(

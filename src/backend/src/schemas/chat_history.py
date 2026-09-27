@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-def _require_content_or_payload(content: Optional[str], generation_result) -> None:
+def _require_content_or_payload(content: Optional[str], generation_result: Any) -> None:
     """A chat message must carry SOMETHING — text, or a structured payload.
 
     Replaces the old ``content`` ``min_length=1``. assistant/result/trace/execution
@@ -61,7 +61,7 @@ class ChatHistoryCreate(ChatHistoryBase):
 
     # Timestamp will be auto-generated in the service.
     @model_validator(mode="after")
-    def _check_content_or_payload(self):
+    def _check_content_or_payload(self) -> "ChatHistoryCreate":
         _require_content_or_payload(self.content, self.generation_result)
         return self
 
@@ -152,7 +152,7 @@ class SaveMessageRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _check_content_or_payload(self):
+    def _check_content_or_payload(self) -> "SaveMessageRequest":
         _require_content_or_payload(self.content, self.generation_result)
         return self
 

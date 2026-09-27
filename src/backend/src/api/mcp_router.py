@@ -5,7 +5,7 @@ This module provides endpoints for managing MCP (Model Context Protocol) servers
 """
 
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,7 +80,7 @@ def _require_enabled_flag(payload: Dict[str, Any]) -> bool:
 
 @router.get("/servers", response_model=MCPServerListResponse)
 async def get_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
     Get MCP servers effective for the current workspace (group).
@@ -181,7 +181,10 @@ async def _list_external_mcp_options(
             for parent in dict.fromkeys(service_parents or []):
                 page_token: Optional[str] = None
                 while True:
-                    params = {"parent": parent, "max_results": 100}
+                    params: Dict[str, Union[str, int]] = {
+                        "parent": parent,
+                        "max_results": 100,
+                    }
                     if page_token:
                         params["page_token"] = page_token
                     async with http.get(
@@ -322,7 +325,7 @@ async def _discover_external_options(
 
 @router.get("/databricks/available")
 async def get_databricks_mcp_options(
-    request: Request, session: SessionDep, group_context: GroupContextDep = None
+    request: Request, session: SessionDep, group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     The Databricks MCP catalog for this workspace, grouped for the chat's
@@ -474,9 +477,9 @@ async def migrate_external_mcp_urls(
 @router.get("/databricks/genie-spaces")
 async def list_genie_mcp_spaces(
     request: Request,
+    group_context: GroupContextDep,
     search: Optional[str] = None,
     page_token: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     Second step of the Genie managed-MCP picker: the caller's Genie spaces as
@@ -553,9 +556,9 @@ def _functions_mcp_option(
 async def list_function_mcp_schemas(
     request: Request,
     session: SessionDep,
+    group_context: GroupContextDep,
     catalog: Optional[str] = None,
     search: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     Second step of the Unity Catalog Functions managed-MCP picker: the
@@ -659,8 +662,8 @@ async def list_schema_functions(
     session: SessionDep,
     catalog: str,
     schema: str,
+    group_context: GroupContextDep,
     search: Optional[str] = None,
-    group_context: GroupContextDep = None,
 ) -> Dict[str, Any]:
     """
     The individual Unity Catalog functions in a ``catalog.schema`` — a preview
@@ -718,7 +721,7 @@ async def list_schema_functions(
 
 @router.get("/databricks/ai-search-indexes")
 async def list_ai_search_mcp_indexes(
-    request: Request, group_context: GroupContextDep = None
+    request: Request, group_context: GroupContextDep
 ) -> Dict[str, Any]:
     """
     Second step of the AI Search managed-MCP picker: the workspace's vector
@@ -750,7 +753,7 @@ async def list_ai_search_mcp_indexes(
 
     auth = await get_auth_context(user_token=user_token)
     workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
-    if not workspace_url:
+    if auth is None or not workspace_url:
         return {"options": []}
 
     headers = auth.get_headers()
@@ -807,7 +810,7 @@ async def list_ai_search_mcp_indexes(
 
 @router.get("/servers/enabled", response_model=MCPServerListResponse)
 async def get_enabled_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
     Get all enabled MCP servers.
@@ -820,7 +823,7 @@ async def get_enabled_mcp_servers(
 
 @router.get("/servers/global", response_model=MCPServerListResponse)
 async def get_global_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
     Get all globally enabled MCP servers.
@@ -833,7 +836,7 @@ async def get_global_mcp_servers(
 
 @router.get("/servers/base", response_model=MCPServerListResponse)
 async def get_base_mcp_servers(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
     Get the base/global MCP servers (group_id IS NULL) — the system-admin
@@ -853,7 +856,7 @@ async def get_base_mcp_servers(
 async def create_global_mcp_server(
     server_data: MCPServerCreate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Create a base/global MCP server (group_id IS NULL), available to all
@@ -869,7 +872,7 @@ async def create_global_mcp_server(
 
 @router.get("/servers/{server_id}", response_model=MCPServerResponse)
 async def get_mcp_server(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerResponse:
     """
     Get an MCP server by ID.
@@ -886,7 +889,7 @@ async def get_mcp_server(
 async def create_mcp_server(
     server_data: MCPServerCreate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Create a new MCP server.
@@ -919,7 +922,7 @@ async def update_mcp_server(
     server_id: int,
     server_data: MCPServerUpdate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Update an existing MCP server.
@@ -940,7 +943,7 @@ async def update_mcp_server(
 
 @router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_mcp_server(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> None:
     """
     Delete an MCP server.
@@ -960,7 +963,7 @@ async def delete_mcp_server(
 
 @router.patch("/servers/{server_id}/toggle-enabled", response_model=MCPToggleResponse)
 async def toggle_mcp_server_enabled(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPToggleResponse:
     """
     Toggle the enabled status of an MCP server.
@@ -981,7 +984,7 @@ async def toggle_mcp_server_enabled(
     "/servers/{server_id}/toggle-global-enabled", response_model=MCPToggleResponse
 )
 async def toggle_mcp_server_global_enabled(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPToggleResponse:
     """
     Toggle the global enabled status of an MCP server.
@@ -1002,7 +1005,7 @@ async def toggle_mcp_server_global_enabled(
     "/servers/{server_id}/enable-for-workspace", response_model=MCPServerResponse
 )
 async def enable_mcp_server_for_workspace(
-    server_id: int, service: MCPServiceDep, group_context: GroupContextDep = None
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerResponse:
     """
     Create or update a workspace-scoped override for this server and enable it.
@@ -1023,7 +1026,7 @@ async def set_mcp_server_global_availability(
     server_id: int,
     payload: Dict[str, Any],
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     System admin: set whether a base/global MCP server is available to all
@@ -1043,7 +1046,7 @@ async def set_mcp_server_workspace_enabled(
     server_id: int,
     payload: Dict[str, Any],
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPServerResponse:
     """
     Workspace admin: enable/disable a server FOR THIS WORKSPACE only.
@@ -1069,7 +1072,7 @@ async def set_mcp_server_workspace_enabled(
 async def test_mcp_connection(
     test_data: MCPTestConnectionRequest,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPTestConnectionResponse:
     """
     Test connection to an MCP server.
@@ -1094,7 +1097,7 @@ async def test_mcp_connection(
 
 @router.get("/settings", response_model=MCPSettingsResponse)
 async def get_mcp_settings(
-    service: MCPServiceDep, group_context: GroupContextDep = None
+    service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPSettingsResponse:
     """
     Get global MCP settings.
@@ -1109,7 +1112,7 @@ async def get_mcp_settings(
 async def update_mcp_settings(
     settings_data: MCPSettingsUpdate,
     service: MCPServiceDep,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> MCPSettingsResponse:
     """
     Update global MCP settings.

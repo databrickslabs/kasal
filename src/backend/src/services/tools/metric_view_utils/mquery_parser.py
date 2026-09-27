@@ -460,7 +460,7 @@ def resolve_mquery_with_context(
 class MQueryParser:
     """Parse MQuery conversion report (JSON or Excel) and extract table structure per table."""
 
-    def parse_json(self, json_path) -> dict[str, TableInfo]:
+    def parse_json(self, json_path: str | list | dict) -> dict[str, TableInfo]:
         """Parse mquery_transpilation JSON — accepts file path, raw list, or JSON string."""
         if isinstance(json_path, (list, dict)):
             entries = json_path
@@ -530,13 +530,14 @@ class MQueryParser:
         col_idx = {h: i + 1 for i, h in enumerate(headers)}
         tables: dict[str, TableInfo] = {}
         for r in range(2, ws.max_row + 1):
-            table_name = ws.cell(row=r, column=col_idx["Table Name"]).value
+            raw_table_name = ws.cell(row=r, column=col_idx["Table Name"]).value
             status = str(
                 ws.cell(row=r, column=col_idx["Validation Passed"]).value or ""
             )
             sql = str(ws.cell(row=r, column=col_idx["Transpiled SQL"]).value or "")
-            if not table_name or not sql:
+            if not raw_table_name or not sql:
                 continue
+            table_name = str(raw_table_name)
             if not isinstance(status, str) or not status.startswith("Yes"):
                 if not ("SUM(" in sql.upper() and "GROUP BY" in sql.upper()):
                     continue
@@ -698,10 +699,10 @@ class MQueryParser:
                 in_calc_section = True
                 continue
             if in_calc_section:
-                m = RE_CALC_COL.match(line)
-                if m:
-                    expr = m.group(1).strip().rstrip(",")
-                    name = m.group(2)
+                cm = RE_CALC_COL.match(line)
+                if cm:
+                    expr = cm.group(1).strip().rstrip(",")
+                    name = cm.group(2)
                     calc_cols.append({"name": name, "expr": expr})
                 elif line.strip().startswith("FROM") or line.strip().startswith(
                     "WHERE"
@@ -758,7 +759,7 @@ class MQueryParser:
         union_match = re.search(r"\bUNION\s+(?:ALL\s+)?SELECT\b", sql, re.IGNORECASE)
         if union_match:
             sql = sql[: union_match.start()]
-        cols = []
+        cols: list[str] = []
         select_match = re.search(r"SELECT\s+([\s\S]+?)\s+FROM\s+", sql, re.IGNORECASE)
         if not select_match:
             return cols

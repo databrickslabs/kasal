@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -313,7 +313,7 @@ async def debug_permissions(
         except Exception:
             pass
 
-        if not all([app_name, databricks_host]):
+        if not app_name or not databricks_host:
             return {
                 "error": "Missing configuration",
                 "app_name": app_name,
@@ -632,10 +632,14 @@ async def create_lakebase_instance(
     )
 
 
-@router.get("/lakebase/instance/{instance_name}", dependencies=_SYSTEM_ADMIN_ONLY)
+@router.get(
+    "/lakebase/instance/{instance_name}",
+    response_model=Dict[str, Any],
+    dependencies=_SYSTEM_ADMIN_ONLY,
+)
 async def get_lakebase_instance(
     instance_name: str, service: LakebaseServiceDep
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """
     Get Lakebase instance details.
     Only works when Lakebase is configured and enabled.
@@ -649,8 +653,8 @@ async def get_lakebase_instance(
     return await service.get_instance(instance_name)
 
 
-@router.get("/lakebase/tables", dependencies=_SYSTEM_ADMIN_ONLY)
-async def check_lakebase_tables(service: LakebaseServiceDep):
+@router.get("/lakebase/tables", response_model=None, dependencies=_SYSTEM_ADMIN_ONLY)
+async def check_lakebase_tables(service: LakebaseServiceDep) -> Dict[str, Any]:
     """
     Check what tables exist in the configured Lakebase instance.
     Returns detailed information about tables and their status.
@@ -688,7 +692,7 @@ async def migrate_to_lakebase(
 @router.post("/lakebase/migrate/stream", dependencies=_SYSTEM_ADMIN_ONLY)
 async def migrate_to_lakebase_stream(
     request: Dict[str, Any], raw_request: Request, group_context: GroupContextDep
-):
+) -> StreamingResponse:
     """
     Stream migration progress to Lakebase using Server-Sent Events.
 
@@ -699,7 +703,7 @@ async def migrate_to_lakebase_stream(
         StreamingResponse with SSE events
     """
 
-    async def event_generator():
+    async def event_generator() -> AsyncIterator[str]:
         migration_succeeded = False
         try:
             # Extract user token for authentication

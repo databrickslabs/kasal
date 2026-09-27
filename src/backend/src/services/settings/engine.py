@@ -7,6 +7,8 @@ including retrieving and managing engine configurations.
 
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.core.exceptions import BadRequestError
 from src.core.logger import LoggerManager
 from src.models.engine_config import EngineConfig
@@ -18,7 +20,7 @@ logger = LoggerManager.get_instance().crew
 class EngineConfigService:
     """Service for engine configuration operations."""
 
-    def __init__(self, session):
+    def __init__(self, session: AsyncSession) -> None:
         """
         Initialize the service with session.
 
@@ -122,7 +124,7 @@ class EngineConfigService:
         """
         return await self.repository.find_by_engine_type(engine_type)
 
-    async def create_engine_config(self, config_data):
+    async def create_engine_config(self, config_data: Any) -> EngineConfig:
         """
         Create a new engine configuration.
 
@@ -157,7 +159,9 @@ class EngineConfigService:
         self._run_limit_changed(created)
         return created
 
-    async def update_engine_config(self, engine_name: str, config_data):
+    async def update_engine_config(
+        self, engine_name: str, config_data: Any
+    ) -> Optional[EngineConfig]:
         """
         Update an existing engine configuration.
 

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class DAXGenerator:
     """Generate DAX measures from YAML KPI definitions"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.filter_resolver = FilterResolver()
         self.formula_translator = FormulaTranslator()
         self.formula_parser = DaxSyntaxConverter()
@@ -142,7 +142,7 @@ class DAXGenerator:
         # Step 1: Fix NOT IN patterns
         not_in_pattern = r"(\w+)\s+NOT\s+IN\s*\(([^)]+)\)"
 
-        def fix_not_in(match):
+        def fix_not_in(match: re.Match[str]) -> str:
             column = match.group(1)
             values = match.group(2).replace("'", '"')
             return f"NOT {table_name}[{column}] IN {{{values}}}"
@@ -152,7 +152,7 @@ class DAXGenerator:
         # Step 2: Fix regular IN patterns
         in_pattern = r"(\w+)\s+IN\s*\(([^)]+)\)"
 
-        def fix_in(match):
+        def fix_in(match: re.Match[str]) -> str:
             column = match.group(1)
             values = match.group(2).replace("'", '"')
             return f"{table_name}[{column}] IN {{{values}}}"
@@ -162,7 +162,7 @@ class DAXGenerator:
         # Step 3: Fix BETWEEN patterns
         between_pattern = r"(\w+)\s+BETWEEN\s+'?([^'\s]+)'?\s+AND\s+'?([^'\s]+)'?"
 
-        def fix_between(match):
+        def fix_between(match: re.Match[str]) -> str:
             column = match.group(1)
             val1 = match.group(2)
             val2 = match.group(3)
@@ -173,7 +173,7 @@ class DAXGenerator:
         # Step 4: Fix simple equality patterns
         equality_pattern = r"(\w+)\s*=\s*'([^']+)'"
 
-        def fix_equality(match):
+        def fix_equality(match: re.Match[str]) -> str:
             column = match.group(1)
             value = match.group(2)
             return f'{table_name}[{column}] = "{value}"'
@@ -183,7 +183,7 @@ class DAXGenerator:
         # Step 5: Fix simple equality patterns with double quotes
         equality_pattern_double = r"(\w+)\s*=\s*\"([^\"]+)\""
 
-        def fix_equality_double(match):
+        def fix_equality_double(match: re.Match[str]) -> str:
             column = match.group(1)
             value = match.group(2)
             return f'{table_name}[{column}] = "{value}"'
@@ -193,7 +193,7 @@ class DAXGenerator:
         # Step 6: Fix simple equality patterns without quotes (numbers)
         equality_pattern_number = r"(\w+)\s*=\s*([0-9]+(?:\.[0-9]+)?)"
 
-        def fix_equality_number(match):
+        def fix_equality_number(match: re.Match[str]) -> str:
             column = match.group(1)
             value = match.group(2)
             return f"{table_name}[{column}] = {value}"
@@ -211,7 +211,11 @@ class DAXGenerator:
         return result
 
     def _add_filters_to_dax(
-        self, base_dax_formula: str, filters: List[str], table_name: str, kpi=None
+        self,
+        base_dax_formula: str,
+        filters: List[str],
+        table_name: str,
+        kpi: Optional[KPI] = None,
     ) -> str:
         """Add filters and constant selection to a DAX formula using CALCULATE and FILTER functions."""
         filter_functions = []
@@ -318,14 +322,6 @@ class DAXGenerator:
         if not kbi.formula:
             return []
 
-        # Extract KBI reference names
-        kbi_names = self._formula_parser.extract_kbi_references(kbi.formula)
-
-        # Resolve names to KBI objects
-        kbis = []
-        for name in kbi_names:
-            resolved_kbi = self._dependency_resolver.resolve_kbi(name)
-            if resolved_kbi:
-                kbis.append(resolved_kbi)
-
-        return kbis
+        # Extract KBI references and resolve them against the lookup built
+        # by build_kbi_lookup() (KBIDependencyResolver has no resolve_kbi)
+        return self._dependency_resolver.resolve_formula_kbis(kbi)

@@ -19,7 +19,7 @@ import base64
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Coroutine, Dict, List, Optional, Set, Type
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -38,10 +38,8 @@ class PowerBIReportReferencesSchema(BaseModel):
         description="[Power BI] Single Report ID (GUID) to extract references from. Leave empty to analyze all reports using the pre-configured dataset.",
     )
 
-    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
-    # schema. Those values are injected at tool-construction time from
-    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
-    # bloated every LLM call and invited the model to echo credentials.
+    # NOTE: connection/auth/LLM plumbing is injected from tool_configs (__init__),
+    # not exposed here: as LLM-fillable params it bloated calls, echoed credentials.
 
     # ===== OUTPUT OPTIONS =====
     output_format: str = Field(
@@ -59,8 +57,7 @@ class PowerBIReportReferencesSchema(BaseModel):
 
 
 class PowerBIReportReferencesTool(BaseTool):
-    """
-    Power BI Report References Extraction Tool.
+    """Power BI Report References Extraction Tool.
 
     Extracts visual-to-measure/table references from Fabric reports
     using the Fabric Report Definition API (PBIR format). Generates:
@@ -95,7 +92,6 @@ class PowerBIReportReferencesTool(BaseTool):
     )
     args_schema: Type[BaseModel] = PowerBIReportReferencesSchema
 
-    # Private attributes
     _instance_id: str = PrivateAttr()
     _default_config: Dict[str, Any] = PrivateAttr()
 
@@ -400,7 +396,7 @@ class PowerBIReportReferencesTool(BaseTool):
             )
             return f"Error: {str(e)}"
 
-    def _run_sync(self, coro):
+    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
 
@@ -608,7 +604,8 @@ class PowerBIReportReferencesTool(BaseTool):
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                return data.get("value", [])
+                reports: List[Dict[str, Any]] = data.get("value", [])
+                return reports
             except Exception as e:
                 logger.error(f"Error listing workspace reports: {e}")
                 return []
@@ -656,7 +653,9 @@ class PowerBIReportReferencesTool(BaseTool):
                             )
                             result_response.raise_for_status()
                             definition = result_response.json()
-                            parts = definition.get("definition", {}).get("parts", [])
+                            parts: List[Dict[str, Any]] = definition.get(
+                                "definition", {}
+                            ).get("parts", [])
                             # Log the paths found for debugging
                             if parts:
                                 paths = [p.get("path", "") for p in parts[:20]]
@@ -710,7 +709,8 @@ class PowerBIReportReferencesTool(BaseTool):
                 try:
                     payload = part.get("payload", "")
                     content = base64.b64decode(payload).decode("utf-8")
-                    return json.loads(content)
+                    report_info: Dict[str, Any] = json.loads(content)
+                    return report_info
                 except Exception as e:
                     logger.warning(f"Error parsing report.json: {e}")
         return {}

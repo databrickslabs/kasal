@@ -155,7 +155,7 @@ class GmailTool(BaseTool):
         result_as_answer: bool = False,
         personal_group_id: Optional[str] = None,
     ):
-        super().__init__(result_as_answer=result_as_answer)
+        super().__init__(result_as_answer=result_as_answer)  # type: ignore[call-arg]  # pydantic plugin: defaults live on the subclass
         tool_config = tool_config or {}
         if tool_id is not None:
             self._tool_id = tool_id
@@ -278,7 +278,8 @@ class GmailTool(BaseTool):
                 raise RuntimeError(
                     f"Gmail proxy returned HTTP {resp.status} for {path}: {text[:300]}"
                 )
-            return json.loads(text)
+            payload: Dict[str, Any] = json.loads(text)
+            return payload
 
     # ------------------------------------------------------------------
     # Actions

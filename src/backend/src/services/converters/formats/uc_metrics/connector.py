@@ -11,7 +11,8 @@ This connector can be used to:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from types import TracebackType
+from typing import Any, Dict, Optional, Self
 
 import requests
 
@@ -65,8 +66,8 @@ class DatabricksConnector:
         client_secret: Optional[str] = None,
         project_id: Optional[str] = None,
         use_database: bool = False,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize Databricks connector.
 
@@ -171,7 +172,7 @@ class DatabricksConnector:
             "This will be added in a future release."
         )
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Context manager entry - validate connection."""
         if not self.validate_connection():
             raise ConnectionError(
@@ -179,7 +180,12 @@ class DatabricksConnector:
             )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit - cleanup if needed."""
         # No cleanup needed for REST API connections
         pass

@@ -4,6 +4,7 @@ Flow processors module for CrewAI flow execution.
 This module handles processing of starting points, listeners, and routers in flow configuration.
 """
 
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from src.core.logger import LoggerManager
@@ -14,8 +15,10 @@ from src.services.flow_builder.mcp_assignments import (
 )
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
+_Cfg = Dict[str, Any]
 
-def _to_uuid(value) -> UUID:
+
+def _to_uuid(value: Any) -> UUID:
     """Convert a string or UUID to UUID object."""
     if isinstance(value, UUID):
         return value
@@ -25,8 +28,11 @@ def _to_uuid(value) -> UUID:
 
 
 def recover_mcp_from_current_tasks(
-    effective_tool_configs, flow_task_id, flow_task_name, current_tasks
-):
+    effective_tool_configs: Any,
+    flow_task_id: Any,
+    flow_task_name: Optional[str],
+    current_tasks: List[Tuple[Any, Any, Any]],
+) -> Dict[str, Any]:
     """Recover a missing MCP_SERVERS config from the crew's CURRENT task(s).
 
     A flow's startingPoint/listener task IDs are captured at save time, but crew
@@ -72,8 +78,12 @@ class FlowProcessorManager:
 
     @staticmethod
     async def process_starting_points(
-        flow_config, all_tasks, repositories, group_context=None, callbacks=None
-    ):
+        flow_config: _Cfg,
+        all_tasks: _Cfg,
+        repositories: Optional[_Cfg],
+        group_context: Any = None,
+        callbacks: Any = None,
+    ) -> List[Tuple[Any, ...]]:
         """
         Process starting points from flow configuration.
 
@@ -91,7 +101,7 @@ class FlowProcessorManager:
             List of starting point method names
         """
         logger.info("Processing starting points")
-        starting_point_methods = []
+        starting_point_methods: List[Tuple[Any, ...]] = []
 
         task_repo = repositories.get("task") if repositories else None
         crew_repo = repositories.get("crew") if repositories else None
@@ -101,7 +111,7 @@ class FlowProcessorManager:
             return starting_point_methods
 
         # Group starting points by crew_id
-        crews_map = {}  # crew_id -> list of task_ids
+        crews_map: Dict[Any, Any] = {}  # crew_id -> list of task_ids
 
         for idx, start_point in enumerate(flow_config.get("startingPoints", [])):
             task_id = start_point.get("taskId")
@@ -140,7 +150,7 @@ class FlowProcessorManager:
                     continue
 
                 # Build Task objects for all tasks in this crew
-                crew_task_objects = []
+                crew_task_objects: List[Any] = []
 
                 for task_idx, task_id in enumerate(task_ids):
                     task_data = await task_repo.get(task_id) if task_repo else None
@@ -307,7 +317,7 @@ class FlowProcessorManager:
                         from types import SimpleNamespace
 
                         # Helper to handle None values with defaults
-                        def _get_val(d, key, default):
+                        def _get_val(d: Any, key: str, default: Any) -> Any:
                             val = d.get(key)
                             return default if val is None else val
 
@@ -526,7 +536,6 @@ class FlowProcessorManager:
                         # Generate a unique ID for the auto-created task
                         auto_task_id = f"auto_completion_{crew_id[:8]}"
                         task_ids.append(auto_task_id)
-
                         logger.info(
                             f"Auto-created completion task for crew {crew_id} to enable parallel execution"
                         )
@@ -536,7 +545,6 @@ class FlowProcessorManager:
                         logger.info(
                             f"  Parallel tasks: {[t.description[:50] + '...' if len(t.description) > 50 else t.description for t in async_tasks]}"
                         )
-
                 # If we successfully built tasks for this crew, add it as a starting point
                 if crew_task_objects:
                     # Store metadata about this starting point crew
@@ -557,18 +565,20 @@ class FlowProcessorManager:
                     logger.info(
                         f"Added starting point {method_name} for crew {crew_id} with {len(crew_task_objects)} tasks (including {len(async_tasks)} parallel)"
                     )
-
             except Exception as e:
                 logger.error(f"Error processing crew {crew_id}: {e}", exc_info=True)
                 continue
-
         logger.info(f"Processed {len(starting_point_methods)} starting points")
         return starting_point_methods
 
     @staticmethod
     async def process_listeners(
-        flow_config, all_tasks, repositories, group_context=None, callbacks=None
-    ):
+        flow_config: _Cfg,
+        all_tasks: _Cfg,
+        repositories: Optional[_Cfg],
+        group_context: Any = None,
+        callbacks: Any = None,
+    ) -> List[Tuple[Any, ...]]:
         """
         Process listeners from flow configuration.
 
@@ -588,7 +598,7 @@ class FlowProcessorManager:
             This rich structure allows flow_builder to create proper crew-level listeners.
         """
         logger.info("Processing listeners with crew grouping")
-        listener_methods = []
+        listener_methods: List[Tuple[Any, ...]] = []
 
         task_repo = repositories.get("task") if repositories else None
         crew_repo = repositories.get("crew") if repositories else None
@@ -688,7 +698,7 @@ class FlowProcessorManager:
                 )
 
                 # Build Task objects for all tasks in this crew
-                crew_task_objects = []
+                crew_task_objects: List[Any] = []
 
                 for task_idx, task_id in enumerate(task_ids):
                     task_data = await task_repo.get(task_id)
@@ -841,7 +851,7 @@ class FlowProcessorManager:
                         from types import SimpleNamespace
 
                         # Helper to handle None values with defaults
-                        def _get_val(d, key, default):
+                        def _get_val(d: Any, key: str, default: Any) -> Any:
                             val = d.get(key)
                             return default if val is None else val
 
@@ -971,7 +981,6 @@ class FlowProcessorManager:
                             logger.info(
                                 f"  Task {task_id} will wait for previous task (sequential via task.context)"
                             )
-
                         # Store the task object
                         all_tasks[str(task_id)] = task_obj
                         crew_task_objects.append(task_obj)
@@ -982,7 +991,6 @@ class FlowProcessorManager:
                         logger.warning(
                             f"Agent {agent_id} not found in database or crew nodes for listener task {task_id}"
                         )
-
                 # If we successfully built tasks for this listener crew, add it
                 if crew_task_objects:
                     # Return rich structure for flow_builder to create proper crew-level listeners
@@ -1003,20 +1011,22 @@ class FlowProcessorManager:
                     )
                 else:
                     logger.warning(f"No valid tasks found for listener crew {crew_id}")
-
             except Exception as e:
                 logger.error(
                     f"Error processing listener crew {crew_id}: {e}", exc_info=True
                 )
                 continue
-
         logger.info(f"Processed {len(listener_methods)} listener crews")
         return listener_methods
 
     @staticmethod
     async def process_routers(
-        flow_config, all_tasks, repositories, group_context=None, callbacks=None
-    ):
+        flow_config: _Cfg,
+        all_tasks: _Cfg,
+        repositories: Optional[_Cfg],
+        group_context: Any = None,
+        callbacks: Any = None,
+    ) -> List[Tuple[Any, ...]]:
         """
         Process routers from flow configuration.
 
@@ -1031,7 +1041,7 @@ class FlowProcessorManager:
             List of tuples (router_method_name, routes_config)
         """
         logger.info("Processing routers")
-        router_configs = []
+        router_configs: List[Tuple[Any, ...]] = []
 
         task_repo = repositories.get("task") if repositories else None
         crew_repo = repositories.get("crew") if repositories else None
@@ -1256,7 +1266,7 @@ class FlowProcessorManager:
                             from types import SimpleNamespace
 
                             # Helper to handle None values with defaults
-                            def _get_val(d, key, default):
+                            def _get_val(d: Any, key: str, default: Any) -> Any:
                                 val = d.get(key)
                                 return default if val is None else val
 
@@ -1391,7 +1401,6 @@ class FlowProcessorManager:
                             logger.warning(
                                 f"Agent {agent_id} not found in database or crew nodes for router task {task_id}"
                             )
-
                     if route_tasks:
                         processed_routes.append(
                             {
@@ -1406,7 +1415,6 @@ class FlowProcessorManager:
                         )
                     else:
                         logger.warning(f"No valid tasks found for route {route_name}")
-
                 if processed_routes:
                     router_configs.append((router_method_name, processed_routes))
                     logger.info(
@@ -1414,10 +1422,8 @@ class FlowProcessorManager:
                     )
                 else:
                     logger.warning(f"No valid routes found for router {idx}")
-
             except Exception as e:
                 logger.error(f"Error processing router {idx}: {e}", exc_info=True)
                 continue
-
         logger.info(f"Processed {len(router_configs)} routers")
         return router_configs

@@ -51,7 +51,7 @@ except Exception:
 try:
     import builtins as _kasal_builtins_mod
 
-    def _kasal_noinput_global(prompt=None):
+    def _kasal_noinput_global(prompt: object = None) -> str:
         try:
             if prompt:
                 print(
@@ -70,7 +70,7 @@ try:
     import click as _kasal_click
 
     _kasal_click.confirm = lambda *a, **k: False
-    _kasal_click.prompt = lambda *a, **k: ""
+    _kasal_click.prompt = lambda *a, **k: ""  # type: ignore[assignment]  # monkeypatch
 except Exception:
     pass
 
@@ -229,7 +229,7 @@ def run_flow_in_process(
     original_stdout, original_stderr, captured_output = suppress_stdout_stderr()
 
     # Set up signal handlers for graceful shutdown with child process cleanup
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: Any) -> None:
         # Kill all child processes spawned by this subprocess (including crew processes)
         try:
             import psutil
@@ -340,7 +340,7 @@ def run_flow_in_process(
                 )
 
         # Run the flow execution asynchronously (with initialization in same loop)
-        async def run_async_flow():
+        async def run_async_flow() -> Any:
             """Execute the flow in an async context with LogWriterTask in same event loop"""
 
             # Activate Lakebase on async_session_factory so ALL callers
@@ -1329,7 +1329,7 @@ class ProcessFlowExecutor:
         group_context: Any,
         result_queue: mp.Queue,
         log_queue: mp.Queue,
-    ):
+    ) -> None:
         """
         Wrapper to run flow in subprocess and put result in queue.
 
@@ -1614,7 +1614,7 @@ class ProcessFlowExecutor:
             self._close_queue(log_queue)
 
     @staticmethod
-    def _close_queue(queue) -> None:
+    def _close_queue(queue: Any) -> None:
         """Safely close a multiprocessing.Queue and release its semaphores.
 
         A spawn-context ``mp.Queue`` is backed by three SemLock primitives
@@ -1724,8 +1724,8 @@ class ProcessFlowExecutor:
         return terminated
 
     async def _process_log_queue(
-        self, log_queue, execution_id: str, group_context=None
-    ):
+        self, log_queue: Any, execution_id: str, group_context: Any = None
+    ) -> None:
         """
         Process logs from flow.log file and write them to the execution_logs table.
 

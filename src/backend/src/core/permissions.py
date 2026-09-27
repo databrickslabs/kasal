@@ -8,14 +8,16 @@ This module provides decorators for enforcing the three-tier authorization model
 """
 
 from functools import wraps
-from typing import Callable, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from fastapi import HTTPException, status
 
 from src.utils.user_context import GroupContext
 
+_Endpoint = Callable[..., Awaitable[Any]]
 
-def require_roles(allowed_roles: List[str]):
+
+def require_roles(allowed_roles: List[str]) -> Callable[[_Endpoint], _Endpoint]:
     """
     Decorator to enforce role-based access control on API endpoints.
 
@@ -31,9 +33,9 @@ def require_roles(allowed_roles: List[str]):
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: _Endpoint) -> _Endpoint:
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Get group_context from kwargs (injected by FastAPI dependency)
             group_context = None
             for key, value in kwargs.items():
@@ -71,7 +73,7 @@ def require_roles(allowed_roles: List[str]):
     return decorator
 
 
-def require_admin():
+def require_admin() -> Callable[[_Endpoint], _Endpoint]:
     """
     Decorator to require admin role for accessing an endpoint.
 
@@ -84,7 +86,7 @@ def require_admin():
     return require_roles(["admin"])
 
 
-def require_editor_or_admin():
+def require_editor_or_admin() -> Callable[[_Endpoint], _Endpoint]:
     """
     Decorator to require editor or admin role for accessing an endpoint.
 
@@ -97,7 +99,7 @@ def require_editor_or_admin():
     return require_roles(["admin", "editor"])
 
 
-def require_operator_or_above():
+def require_operator_or_above() -> Callable[[_Endpoint], _Endpoint]:
     """
     Decorator to require operator, editor, or admin role for accessing an endpoint.
     This is for endpoints that all authenticated users can access.
@@ -114,7 +116,7 @@ def require_operator_or_above():
 # Role hierarchy helper functions
 def is_admin(role: Optional[str]) -> bool:
     """Check if the role is admin."""
-    return role and role.lower() == "admin"
+    return role is not None and role.lower() == "admin"
 
 
 def check_role_in_context(
@@ -196,7 +198,10 @@ def is_workspace_admin(group_context: GroupContext) -> bool:
             )
 
     # Team workspace - check if user has admin role in their current group
-    return group_context.user_role and group_context.user_role.lower() == "admin"
+    return (
+        group_context.user_role is not None
+        and group_context.user_role.lower() == "admin"
+    )
 
 
 def get_effective_role(group_context: GroupContext) -> Optional[str]:

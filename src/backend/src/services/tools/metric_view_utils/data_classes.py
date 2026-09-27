@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
+
+# A DaxTranslator pattern handler: (match, dax, table_key) -> (sql | None, skip_reason)
+TranslateFn = Callable[..., tuple["str | None", str]]
 
 
 @dataclass

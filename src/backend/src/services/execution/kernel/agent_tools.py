@@ -26,7 +26,9 @@ from src.services.execution.kernel.agent_builder import (  # noqa: E402 - import
 logger = LoggerManager.get_instance().crew
 
 
-def resolve_tool_override(tool_factory, tool_id, tool_configs):
+def resolve_tool_override(
+    tool_factory: Any, tool_id: Any, tool_configs: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
     """Resolve the per-tool config override for ``tool_id`` from ``tool_configs``.
 
     Tries a direct lookup by id (string form) first, then resolves a numeric id
@@ -35,7 +37,7 @@ def resolve_tool_override(tool_factory, tool_id, tool_configs):
     """
     if not tool_configs:
         return None
-    override = tool_configs.get(str(tool_id))
+    override: Optional[Dict[str, Any]] = tool_configs.get(str(tool_id))
     if override:
         return override
     try:
@@ -153,7 +155,7 @@ async def add_mcp_tools(
 
 async def resolve_agent_tools(
     tool_ids: List[Any],
-    tool_factory,
+    tool_factory: Any,
     *,
     tool_configs: Optional[Dict[str, Any]] = None,
     tool_service: Any = None,

@@ -21,7 +21,6 @@ from src.api.crews_router import router as crews_router
 from src.api.database_management_router import router as database_management_router
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.databricks_router import router as databricks_router
-from src.api.databricks_secrets_router import router as databricks_secrets_router
 from src.api.decision_config_router import router as decision_config_router
 from src.api.decks_router import router as decks_router
 from src.api.dispatcher_router import router as dispatcher_router
@@ -101,7 +100,6 @@ api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
 api_router.include_router(billing_router)
 api_router.include_router(models_router)
-api_router.include_router(databricks_secrets_router)
 api_router.include_router(api_keys_router)
 api_router.include_router(tasks_router)
 api_router.include_router(templates_router)
@@ -158,7 +156,6 @@ __all__ = [
     "healthcheck_router",
     "logs_router",
     "models_router",
-    "databricks_secrets_router",
     "api_keys_router",
     "tasks_router",
     "templates_router",

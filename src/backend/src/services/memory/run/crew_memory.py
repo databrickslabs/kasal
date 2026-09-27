@@ -28,7 +28,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
@@ -65,7 +65,7 @@ class CrewMemoryService:
         """
         self.config = config
         self.user_token = user_token
-        self._original_storage_dir = None
+        self._original_storage_dir: Optional[str] = None
         # Why memory ended up disabled, for the caller to surface. None = fine.
         self.last_memory_error: Optional[str] = None
 
@@ -145,7 +145,7 @@ class CrewMemoryService:
 
         # Use provided crew_id if available (but always prefix with group_id for isolation)
         if self.config.get("crew_id"):
-            provided_crew_id = self.config.get("crew_id")
+            provided_crew_id = cast(str, self.config.get("crew_id"))
             # SECURITY: Ensure group_id prefix for tenant isolation
             if not provided_crew_id.startswith(f"{group_id}_"):
                 crew_id = f"{group_id}_{provided_crew_id}"
@@ -795,7 +795,7 @@ class CrewMemoryService:
                 "execution_id": exec_id,
             }
 
-            def set_trace_ctx(mem_obj):
+            def set_trace_ctx(mem_obj: Any) -> None:
                 try:
                     if not mem_obj:
                         return

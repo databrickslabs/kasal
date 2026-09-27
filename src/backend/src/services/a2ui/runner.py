@@ -16,7 +16,7 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 
 from src.services.a2ui import settings as a2ui_settings
 from src.services.a2ui.compose import (
@@ -285,7 +285,7 @@ def _has_data_component(surface: Dict[str, Any]) -> bool:
 
 #: Ships one A2UI message to the reader. Awaited on the event loop; the bridge
 #: hops threads for you, so an implementation only has to broadcast.
-DeltaSink = Callable[[Dict[str, Any]], Awaitable[None]]
+DeltaSink = Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 class _ComposeStreamBridge(ComposeStream):
@@ -306,7 +306,14 @@ class _ComposeStreamBridge(ComposeStream):
     before. Nothing in this class may raise into the composer.
     """
 
-    def __init__(self, surface_id, on_delta, loop, llm, settings=None) -> None:
+    def __init__(
+        self,
+        surface_id: str,
+        on_delta: DeltaSink,
+        loop: asyncio.AbstractEventLoop,
+        llm: Any,
+        settings: Optional[Dict[str, Any]] = None,
+    ) -> None:
         #: Delta delivery cadence (the effective a2ui_stream_interval_ms);
         #: parsing consumes each character once.
         interval_ms = (settings or {}).get("a2ui_stream_interval_ms", 120)
@@ -317,7 +324,7 @@ class _ComposeStreamBridge(ComposeStream):
         self._llm = llm
         self._lock = threading.Lock()
         self._buf: List[str] = []
-        self._streamer = None
+        self._streamer: Optional[SurfaceStreamer] = None
         self._revision = 0
         self._active = False
         self._last_feed = 0.0
@@ -823,7 +830,8 @@ def _result_text(result: Any) -> str:
     dump = getattr(result, "model_dump_json", None)
     if callable(dump):
         try:
-            return dump()
+            dumped: str = dump()
+            return dumped
         except Exception as exc:  # noqa: BLE001 — formatting must not break a run
             logger.debug(f"[a2ui] could not serialize structured result: {exc}")
 

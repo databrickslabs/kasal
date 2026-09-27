@@ -350,7 +350,7 @@ class FuzzyScorer:
         Safety: if reduction would remove >80% of columns, keep all.
         Returns the filtered column list (same type as input: dicts or strings).
         """
-        columns = table.get("columns", [])
+        columns: List = table.get("columns", [])
         if not columns or not question_tokens:
             return columns
 
@@ -443,7 +443,7 @@ class FuzzyScorer:
             intent_measure_names = {m.lower() for m in (question_intent.measures or [])}
             intent_dim_names = {d.lower() for d in (question_intent.dimensions or [])}
 
-        results = []
+        results: List[Dict[str, Any]] = []
         for table in tables:
             score = self.score_table(table, tokens, sample_data=sample_data)
 
@@ -493,7 +493,7 @@ class FuzzyScorer:
         if question_intent:
             intent_measure_names = {m.lower() for m in (question_intent.measures or [])}
 
-        results = []
+        results: List[Dict[str, Any]] = []
         for measure in measures:
             score = self.score_measure(measure, tokens)
 

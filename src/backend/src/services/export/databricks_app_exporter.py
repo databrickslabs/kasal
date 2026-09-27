@@ -182,7 +182,7 @@ _EXT_TYPE = {
 class DatabricksAppExporter(BaseExporter):
     """Export a crew as a Databricks App project (template-driven)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.yaml_generator = YAMLGenerator()
 

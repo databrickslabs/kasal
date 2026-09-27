@@ -13,6 +13,10 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any, Callable, Optional, Union, cast
+
+#: A log directory given as a string or a path.
+StrPath = Union[str, "os.PathLike[str]"]
 
 # Standard Python LogRecord attributes that may legitimately be None
 # (e.g. exc_info, exc_text, stack_info) and should never be stripped.
@@ -68,15 +72,30 @@ class _NoneAttributeFilter(logging.Filter):
 class LoggerManager:
     """Manages domain-specific loggers with file and console output."""
 
-    _instance = None
+    _instance: Optional["LoggerManager"] = None
     _initialized = False
 
-    def __new__(cls):
+    _crew_logger: Optional[logging.Logger]
+    _flow_logger: Optional[logging.Logger]
+    _system_logger: Optional[logging.Logger]
+    _llm_logger: Optional[logging.Logger]
+    _scheduler_logger: Optional[logging.Logger]
+    _api_logger: Optional[logging.Logger]
+    _access_logger: Optional[logging.Logger]
+    _guardrails_logger: Optional[logging.Logger]
+    _documentation_embedding_logger: Optional[logging.Logger]
+    _knowledge_source_logger: Optional[logging.Logger]
+    _database_logger: Optional[logging.Logger]
+    _log_dir: Optional[Path]
+    _otel_logger_provider: Optional[Any]
+    _otel_handler: Optional[logging.Handler]
+
+    def __new__(cls) -> "LoggerManager":
         if cls._instance is None:
             cls._instance = super(LoggerManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if not self._initialized:
             self._crew_logger = None
             self._flow_logger = None
@@ -95,14 +114,14 @@ class LoggerManager:
             self._initialized = True
 
     @classmethod
-    def get_instance(cls, log_dir: str = None):
+    def get_instance(cls, log_dir: Optional[StrPath] = None) -> "LoggerManager":
         """Get or create a LoggerManager instance and initialize it with the given log directory."""
         instance = cls()
         if log_dir:
             instance.initialize(log_dir)
         return instance
 
-    def initialize(self, log_dir: str = None):
+    def initialize(self, log_dir: Optional[StrPath] = None) -> None:
         """Initialize all domain-specific loggers with both file and console handlers."""
         # Set up log directory - always prefer the environment variable if set
         if log_dir:
@@ -245,7 +264,7 @@ class LoggerManager:
             )
         return self._log_dir
 
-    def _get_all_domain_loggers(self) -> list:
+    def _get_all_domain_loggers(self) -> list[logging.Logger]:
         """Return all initialized domain loggers."""
         loggers = []
         for attr in [
@@ -321,7 +340,7 @@ class LoggerManager:
                     OTLPLogExporter,
                 )
             else:
-                from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import (  # type: ignore[assignment]  # HTTP/gRPC exporters: same interface, distinct classes
                     OTLPLogExporter,
                 )
 
@@ -421,7 +440,7 @@ class LoggerManager:
                 self._otel_logger_provider = None
                 self._otel_handler = None
 
-    def _get_logger_level(self, name: str) -> int:
+    def _get_logger_level(self, name: str) -> Optional[int]:
         """Get the log level for a logger based on environment variables.
 
         Priority:
@@ -449,7 +468,7 @@ class LoggerManager:
 
         return None
 
-    def _parse_log_level(self, level_str: str) -> int:
+    def _parse_log_level(self, level_str: Optional[str]) -> Optional[int]:
         """Parse a log level string to a logging level constant."""
         if not level_str:
             return None
@@ -471,7 +490,7 @@ class LoggerManager:
         else:
             return None
 
-    def _configure_uvicorn_logging(self):
+    def _configure_uvicorn_logging(self) -> None:
         """Configure Uvicorn logging to redirect to our loggers."""
         # Set up Uvicorn access logging
         uvicorn_access_logger = logging.getLogger("uvicorn.access")
@@ -480,11 +499,15 @@ class LoggerManager:
 
         # Create a special filter to determine where to log
         class APIRequestFilter:
-            def __init__(self, api_logger, access_logger):
+            def __init__(
+                self,
+                api_logger: logging.Logger,
+                access_logger: logging.Logger,
+            ) -> None:
                 self.api_logger = api_logger
                 self.access_logger = access_logger
 
-            def filter_and_log(self, record):
+            def filter_and_log(self, record: logging.LogRecord) -> bool:
                 try:
                     client_addr = getattr(record, "client_addr", "-")
                     status_code = getattr(record, "status_code", "-")
@@ -509,14 +532,18 @@ class LoggerManager:
                     return False
 
         # Create and attach the filter
-        api_request_filter = APIRequestFilter(self._api_logger, self._access_logger)
+        # Both are set: initialize() calls this after setting up every logger.
+        api_request_filter = APIRequestFilter(
+            cast(logging.Logger, self._api_logger),
+            cast(logging.Logger, self._access_logger),
+        )
 
         class UvicornAccessHandler(logging.Handler):
-            def __init__(self, filter_func):
+            def __init__(self, filter_func: Callable[[logging.LogRecord], Any]) -> None:
                 super().__init__()
                 self.filter_func = filter_func
 
-            def emit(self, record):
+            def emit(self, record: logging.LogRecord) -> None:
                 # Process the record with our filter/router
                 self.filter_func(record)
 
@@ -535,8 +562,8 @@ class LoggerManager:
         self,
         name: str,
         formatter: logging.Formatter,
-        suppress_stdout=False,
-        debug_level=False,
+        suppress_stdout: bool = False,
+        debug_level: bool = False,
     ) -> logging.Logger:
         """Set up a specific logger with both file and console handlers."""
         logger = logging.getLogger(name)
@@ -558,7 +585,7 @@ class LoggerManager:
 
         # Create file handler
         file_handler = RotatingFileHandler(
-            self._log_dir / f"{name}.log",
+            self.log_dir / f"{name}.log",
             maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
             encoding="utf-8",
@@ -586,14 +613,15 @@ class LoggerManager:
             litellm_logger.handlers = []
             litellm_logger.propagate = True
             litellm_logger.addHandler(
-                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)
+                # A Logger has handle(), the only thing MemoryHandler calls on it.
+                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)  # type: ignore[arg-type]  # a Logger flushes like a Handler (.handle)
             )
 
             llm_config_logger = logging.getLogger("backendcrew.llm_config")
             llm_config_logger.handlers = []
             llm_config_logger.propagate = True
             llm_config_logger.addHandler(
-                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)
+                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)  # type: ignore[arg-type]  # a Logger flushes like a Handler (.handle)
             )
 
         # Special handling for scheduler logger
@@ -650,12 +678,16 @@ class LoggerManager:
             )
 
             class AccessLogHandler(logging.Handler):
-                def __init__(self, target_logger, api_logger=None):
+                def __init__(
+                    self,
+                    target_logger: logging.Logger,
+                    api_logger: Optional[logging.Logger] = None,
+                ) -> None:
                     super().__init__()
                     self.target_logger = target_logger
                     self.api_logger = api_logger
 
-                def emit(self, record):
+                def emit(self, record: logging.LogRecord) -> None:
                     try:
                         client_addr = getattr(record, "client_addr", "-")
                         status_code = getattr(record, "status_code", "-")
@@ -685,70 +717,72 @@ class LoggerManager:
         """Get the crew-specific logger."""
         if not self._crew_logger:
             self.initialize()
-        return self._crew_logger
+        return cast(logging.Logger, self._crew_logger)  # set by initialize()
 
     @property
     def flow(self) -> logging.Logger:
         """Get the flow-specific logger."""
         if not self._flow_logger:
             self.initialize()
-        return self._flow_logger
+        return cast(logging.Logger, self._flow_logger)  # set by initialize()
 
     @property
     def system(self) -> logging.Logger:
         """Get the system-specific logger."""
         if not self._system_logger:
             self.initialize()
-        return self._system_logger
+        return cast(logging.Logger, self._system_logger)  # set by initialize()
 
     @property
     def llm(self) -> logging.Logger:
         """Get the LLM-specific logger."""
         if not self._llm_logger:
             self.initialize()
-        return self._llm_logger
+        return cast(logging.Logger, self._llm_logger)  # set by initialize()
 
     @property
     def scheduler(self) -> logging.Logger:
         """Get the scheduler-specific logger."""
         if not self._scheduler_logger:
             self.initialize()
-        return self._scheduler_logger
+        return cast(logging.Logger, self._scheduler_logger)  # set by initialize()
 
     @property
     def api(self) -> logging.Logger:
         """Get the API-specific logger."""
         if not self._api_logger:
             self.initialize()
-        return self._api_logger
+        return cast(logging.Logger, self._api_logger)  # set by initialize()
 
     @property
     def access(self) -> logging.Logger:
         """Get the access logger."""
         if not self._access_logger:
             self.initialize()
-        return self._access_logger
+        return cast(logging.Logger, self._access_logger)  # set by initialize()
 
     @property
     def guardrails(self) -> logging.Logger:
         """Get the guardrails logger."""
         if not self._guardrails_logger:
             self.initialize()
-        return self._guardrails_logger
+        return cast(logging.Logger, self._guardrails_logger)  # set by initialize()
 
     @property
     def documentation_embedding(self) -> logging.Logger:
         """Get the documentation embedding service logger."""
         if not self._documentation_embedding_logger:
             self.initialize()
-        return self._documentation_embedding_logger
+        return cast(
+            logging.Logger, self._documentation_embedding_logger
+        )  # set by initialize()
 
     @property
     def database(self) -> logging.Logger:
         """Get the database logger for SQL and transaction debugging."""
         if not self._database_logger:
             self.initialize()
-        return self._database_logger
+        return cast(logging.Logger, self._database_logger)  # set by initialize()
 
     def get_logger(self, name: str) -> logging.Logger:
         """

@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -225,7 +226,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             stmt = sql_delete(self.model).where(self.model.key == key)
             result = await self.session.execute(stmt)
             logger.debug(
-                f"Executed SQL DELETE for model key={key}, rows affected: {result.rowcount}"
+                f"Executed SQL DELETE for model key={key}, rows affected: {cast('CursorResult[Any]', result).rowcount}"
             )
 
             # Flush to ensure the delete is sent to the database
@@ -233,7 +234,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
             logger.debug("Flushed session after SQL DELETE")
 
             logger.info(f"Successfully deleted model with key {key} (ID: {model_id})")
-            return result.rowcount > 0
+            return cast("CursorResult[Any]", result).rowcount > 0
 
         except Exception as e:
             logger.error(f"Error deleting model with key {key}: {str(e)}")

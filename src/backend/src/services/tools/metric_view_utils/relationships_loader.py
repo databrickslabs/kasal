@@ -17,7 +17,7 @@ class RelationshipsLoader:
 
     _SYSTEM_TABLE_PREFIXES = ("LocalDateTable", "DateTableTemplate")
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._inactive_rels: list[dict] = []
         self._skipped_m2n: list[dict] = []
 

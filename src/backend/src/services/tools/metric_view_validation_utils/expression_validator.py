@@ -64,7 +64,7 @@ class ExpressionValidator:
         self.db_parser = UCMetricsViewParser.create_headless()
         self.dax_parser = DAXExpressionParser(table_mappings, column_mappings)
 
-    def validate_ucmv(self):
+    def validate_ucmv(self) -> Dict[str, Any]:
         """
         Validate all measures in the Unity Catalog Metrics View.
 
@@ -240,7 +240,7 @@ class ExpressionValidator:
         # Validate using the existing validate method
         databricks_expr = yaml_measure.get("expr")
         try:
-            result = self.validate(databricks_expr, dax_expr, strict=False)
+            result = self.validate(databricks_expr or "", dax_expr, strict=False)
             result["measure_name"] = measure_name
             if result["is_valid"]:
                 result["status"] = STATUS_VALID
@@ -420,7 +420,7 @@ class ExpressionValidator:
                 return False  # Truly unknown difference type
         return True
 
-    def _is_expected_agg_mapping(self, diff) -> bool:
+    def _is_expected_agg_mapping(self, diff: Any) -> bool:
         """Check if aggregation difference is a known DAX-to-SQL mapping."""
         diff_str = str(diff)
         # Check if the mismatch mentions a DAX agg type that maps to a valid DB type
@@ -490,7 +490,7 @@ class ExpressionValidator:
             return attributes
 
         # Create a signature for each aggregation (type + attributes)
-        def create_agg_signature(agg: Dict, type_map: Dict = None) -> tuple:
+        def create_agg_signature(agg: Dict, type_map: Optional[Dict] = None) -> tuple:
             """Create a signature for an aggregation based on type and attributes."""
             agg_type = agg["type"]
             if type_map:

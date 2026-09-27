@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,7 @@ from src.core.base_repository import BaseRepository
 from src.models.api_key import ApiKey
 
 
-class ApiKeyRepository(BaseRepository[ApiKey]):
+class ApiKeyRepository(BaseRepository[ApiKey, int]):
     """
     Repository for ApiKey model with custom query methods.
     Inherits base CRUD operations from BaseRepository.
@@ -106,7 +107,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
             await self.session.flush()
 
             # Check if any rows were deleted
-            if result.rowcount > 0:
+            if cast("CursorResult[Any]", result).rowcount > 0:
                 logger.debug(f"Successfully deleted ApiKey with ID {id}")
                 return True
             else:

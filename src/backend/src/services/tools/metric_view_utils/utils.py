@@ -7,9 +7,12 @@ import concurrent.futures
 import contextvars
 import json
 import re
+from typing import Any, Coroutine, TypeVar
+
+_T = TypeVar("_T")
 
 
-def run_async(coro):
+def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
     """Safely run async code from sync context, handling existing event loops.
 
     Used by pipeline.py and uc_metric_view_generator_tool.py to bridge
@@ -22,7 +25,7 @@ def run_async(coro):
     except RuntimeError:
         loop = None
 
-    async def _run_and_dispose():
+    async def _run_and_dispose() -> _T:
         # Dispose any Lakebase engine bound to THIS throwaway loop before it
         # closes. get_lakebase_session binds a thread-local asyncpg engine (and a
         # token-refresh task) to the loop that first opens it; asyncio.run closes
@@ -112,7 +115,7 @@ def spark_sql_compat(
     # Rewrite 2-part table names to 3-part (only when explicitly enabled)
     if rewrite_2part_tables and catalog and schema:
 
-        def _rewrite_2part(m: re.Match) -> str:
+        def _rewrite_2part(m: re.Match[str]) -> str:
             prefix = m.group(1)
             tbl_schema = m.group(2)
             tbl_name = m.group(3)
@@ -127,7 +130,7 @@ def spark_sql_compat(
     return expr
 
 
-def load_mapping(mapping_source) -> list | dict:
+def load_mapping(mapping_source: Any) -> list | dict:
     """Load measure mapping from JSON path, raw list, or raw dict."""
     if isinstance(mapping_source, (list, dict)):
         return mapping_source
@@ -135,10 +138,12 @@ def load_mapping(mapping_source) -> list | dict:
         # Could be a JSON string or a file path
         stripped = mapping_source.strip()
         if stripped.startswith(("{", "[")):
-            return json.loads(stripped)
+            loaded: list | dict = json.loads(stripped)
+            return loaded
         # Treat as a file path
         with open(mapping_source) as f:
-            return json.load(f)
+            from_file: list | dict = json.load(f)
+            return from_file
     raise TypeError(f"load_mapping: unsupported type {type(mapping_source)}")
 
 

@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from src.core.llm.transport.response_parsing import (
     merge_tool_call_metadata,
@@ -264,7 +264,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
                         break
                 if isinstance(value, int) and value > 0:
                     return value
-            return super().get_context_window_size()
+            return cast(int, super().get_context_window_size())
 
         def supports_function_calling(self) -> bool:
             """Whether the model takes native tool calls. THE important one.

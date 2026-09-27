@@ -4,9 +4,10 @@ Repository for Group and GroupUser models.
 Handles database operations for group management and user membership.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import and_, delete, func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -136,7 +137,7 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         )
 
         result = await self.session.execute(query)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     async def get_groups_by_user(self, user_id: str) -> List[GroupUser]:
         """Get all groups a user belongs to"""
@@ -147,7 +148,7 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         )
 
         result = await self.session.execute(query)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     async def remove_user_from_group(self, group_id: str, user_id: str) -> bool:
         """Remove a user from a group"""
@@ -157,7 +158,7 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         result = await self.session.execute(query)
         # Don't commit here - let the session dependency handle it
         await self.session.flush()
-        return result.rowcount > 0
+        return cast("CursorResult[Any]", result).rowcount > 0
 
     async def get_user_groups_with_roles(self, user_id: str) -> List[Dict[str, Any]]:
         """Get user's group memberships with roles"""

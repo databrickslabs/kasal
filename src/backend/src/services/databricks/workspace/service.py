@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
 from src.core.exceptions import ForbiddenError, KasalError
@@ -26,8 +27,11 @@ class DatabricksService:
     """
 
     def __init__(
-        self, session, group_id: Optional[str] = None, user_token: Optional[str] = None
-    ):
+        self,
+        session: AsyncSession,
+        group_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
         """
         Initialize the service with session.
 
@@ -44,18 +48,6 @@ class DatabricksService:
         self.repository = DatabricksConfigRepository(session)
         self.group_id = group_id
         self._user_token = user_token
-        # Don't create secrets_service here to avoid circular dependency
-        self._secrets_service = None
-
-    @property
-    def secrets_service(self):
-        """Lazy load secrets_service to avoid circular dependency."""
-        if self._secrets_service is None:
-            # Import here to avoid circular imports at module level
-            from src.services.databricks.secrets.service import DatabricksSecretsService
-
-            self._secrets_service = DatabricksSecretsService(self.session)
-        return self._secrets_service
 
     @staticmethod
     def _apply_ai_gateway_env(enabled: bool) -> None:
@@ -155,7 +147,9 @@ class DatabricksService:
             # Propagate the AI Gateway toggle to the runtime so subsequent LLM /
             # embedding calls route correctly without a restart, and invalidate the
             # cached Databricks auth config so the new flag/workspace reload.
-            self._apply_ai_gateway_env(config_data.get("ai_gateway_enabled", False))
+            self._apply_ai_gateway_env(
+                bool(config_data.get("ai_gateway_enabled", False))
+            )
 
             # New catalog/schema/warehouse/experiment must reach parent-process
             # MLflow tracing on the next dispatch, not after the memo TTL.
@@ -460,61 +454,6 @@ class DatabricksService:
             raise KasalError(
                 detail=f"Error checking personal token requirement: {str(e)}"
             )
-
-    # Methods for Databricks token management
-
-    async def check_apps_configuration(self) -> Tuple[bool, str]:
-        """
-        Check if 'Databricks Apps Integration' is disabled but 'Databricks Settings' is enabled
-        and determine if a personal access token should be used.
-
-        Returns:
-            Tuple[bool, str]: (should_use_personal_token, personal_access_token)
-        """
-        try:
-            config = await self.repository.get_active_config(group_id=self.group_id)
-            if not config:
-                return False, ""
-
-            # Check if Databricks is enabled
-            if hasattr(config, "is_enabled") and config.is_enabled:
-                logger.info("Databricks is enabled, checking for personal access token")
-                token = await self.secrets_service.get_personal_access_token()
-                if token:
-                    return True, token
-
-            return False, ""
-        except Exception as e:
-            logger.error(f"Error checking Databricks apps configuration: {str(e)}")
-            return False, ""
-
-    @classmethod
-    def from_session(cls, session, api_keys_service=None):
-        """
-        Create a service instance from a database session.
-
-        Args:
-            session: Database session
-            api_keys_service: Optional ApiKeysService instance
-
-        Returns:
-            DatabricksService: Service instance with all dependencies
-        """
-        from src.repositories.databricks_config_repository import (
-            DatabricksConfigRepository,
-        )
-
-        # Create repository
-        DatabricksConfigRepository(session)
-
-        # Create service
-        service = cls(session)
-
-        # Set the API keys service if provided
-        if api_keys_service:
-            service.secrets_service.set_api_keys_service(api_keys_service)
-
-        return service
 
     async def get_workspace_auth(
         self, host: str | None = None

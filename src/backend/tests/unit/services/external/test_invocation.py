@@ -243,3 +243,33 @@ class TestResultNormalisation:
             run_id="r", state=ExternalTaskState.WORKING
         ).as_dict()
         assert payload == {"run_id": "r", "state": "working"}
+
+
+class TestStartFlow:
+    """A published flow starts through KasalFlowService, imported from the
+    module that defines it (it once pointed at execution_service, which has no
+    such class, so every external flow start raised ImportError)."""
+
+    @pytest.mark.asyncio
+    async def test_starts_the_flow_through_kasal_flow_service(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from src.services.external.invocation import _start_flow
+
+        service = MagicMock()
+        service.run_flow = AsyncMock(
+            return_value={"job_id": "run-9", "status": "running"}
+        )
+        publication = SimpleNamespace(external_name="weekly_report")
+        with patch(
+            "src.services.flow_builder.kasal_flow_service.KasalFlowService",
+            return_value=service,
+        ):
+            result = await _start_flow(
+                _caller(), publication, "flow-1", {"x": 1}, session=None
+            )
+        assert result.run_id == "run-9"
+        kwargs = service.run_flow.await_args.kwargs
+        assert kwargs["flow_id"] == "flow-1"
+        assert kwargs["config"]["x"] == 1

@@ -184,7 +184,8 @@ class SkillUcSyncService:
         )
         if final.status_code != 200:
             self._raise("finalize skill", final)
-        return final.json()
+        result: dict[str, Any] = final.json()
+        return result
 
     async def _put_file(
         self,
