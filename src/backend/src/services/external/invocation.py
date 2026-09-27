@@ -191,9 +191,14 @@ async def ask(
     )
 
     try:
+        from src.services.execution.config import run_freeze
+
+        config = _build_ask_config(question, model, capabilities)
+        auto = await run_freeze.resolve(config, session, group_context)
+        run_freeze.record(auto, execution_id, group_context)
         result = await ExecutionService.run_crew_execution(
             execution_id=execution_id,
-            config=_build_ask_config(question, model, capabilities),
+            config=config,
             execution_type="agent",
             group_context=group_context,
             session=session,

@@ -1,17 +1,19 @@
 """Resolve "auto" in a run config before the run is persisted or launched.
 
-Called from ``ExecutionService.create_execution`` (through ``run_freeze``),
-which every run passes through: the Runs API, chat answers, scheduled and
-external runs. After it, the config holds only concrete model keys, so the
-execution history, the crew and flow subprocesses and anything exported from
-the run never see "auto", and it never reaches LiteLLM.
+Called through ``run_freeze`` by every path that starts a run:
+``ExecutionService.create_execution`` (the Runs API, chat answers, A2A, deck
+refinement), the scheduler, queue triggers, the MCP ``ask`` tool and
+``/flow-execution``. After it, the config holds only concrete model keys, so the
+crew and flow subprocesses and anything exported from the run never see "auto".
+Should one slip through anyway, ``LLMManager.configure_kasal_llm`` turns it into
+the workspace default and logs the path (``model_selection.resolve_leaked_auto``).
 
 One decision per run: every "auto" in the config gets the same model.
 """
 
 import asyncio
 import logging
-from typing import Iterator, Optional, Set, Tuple
+from typing import Iterable, Iterator, Optional, Set, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,46 +32,63 @@ logger = logging.getLogger(__name__)
 #: Trace writes in flight; held so the event loop does not drop them.
 _pending: Set["asyncio.Task[None]"] = set()
 
-#: Agent fields that name a model.
-_AGENT_MODEL_FIELDS = ("llm", "function_calling_llm")
+#: Fields that name a model, wherever they sit in a config: an agent's ``llm``
+#: (a key or a ``{"model": ...}`` dict) and ``function_calling_llm``, a flow
+#: node's ``data.llm``, ``inputs.manager_llm`` / ``reasoning_llm``, a task's
+#: ``llm_guardrail.llm_model``, and agents nested in a flow's ``flow_config``.
+_MODEL_FIELDS = frozenset(
+    {
+        "model",
+        "llm",
+        "function_calling_llm",
+        "manager_llm",
+        "planning_llm",
+        "reasoning_llm",
+        "llm_model",
+    }
+)
 
 
-def _slots(config: CrewConfig) -> Iterator[Tuple[dict, str]]:
-    """Every (container, field) in the config whose model asks for Auto.
+def _slots(roots: Iterable[object]) -> Iterator[Tuple[dict, str]]:
+    """Every (container, field) under ``roots`` whose model asks for Auto."""
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                if key in _MODEL_FIELDS and is_auto(value):
+                    yield node, key
+                elif isinstance(value, (dict, list)):
+                    stack.append(value)
 
-    An agent's ``llm`` may be a key or a ``{"model": ...}`` dict; both count.
-    """
-    agents = config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
-    for spec in agents.values():
-        if not isinstance(spec, dict):
-            continue
-        for field in _AGENT_MODEL_FIELDS:
-            value = spec.get(field)
-            if is_auto(value) or (
-                isinstance(value, dict) and is_auto(value.get("model"))
-            ):
-                yield spec, field
-    for node in config.nodes if isinstance(config.nodes, list) else []:
-        data = node.get("data") if isinstance(node, dict) else None
-        if isinstance(data, dict) and is_auto(data.get("llm")):
-            yield data, "llm"
+
+def _roots(config: CrewConfig) -> Tuple[object, ...]:
+    return (
+        config.agents_yaml,
+        config.tasks_yaml,
+        config.inputs,
+        config.nodes,
+        config.flow_config,
+    )
 
 
 def wants_auto(config: CrewConfig) -> bool:
-    return is_auto(config.model) or next(_slots(config), None) is not None
+    return is_auto(config.model) or next(_slots(_roots(config)), None) is not None
 
 
-def run_prompt(config: CrewConfig) -> str:
+def _prompt(user_message: object, inputs: object, tasks: object) -> str:
     """What the run is asked to do, as the decision model should read it."""
-    inputs = config.inputs if isinstance(config.inputs, dict) else {}
+    inputs = inputs if isinstance(inputs, dict) else {}
     for candidate in (
-        config.user_message,
+        user_message,
         inputs.get("user_request"),
         inputs.get("instruction"),
     ):
         if isinstance(candidate, str) and candidate.strip():
             return candidate
-    tasks = config.tasks_yaml if isinstance(config.tasks_yaml, dict) else {}
+    tasks = tasks if isinstance(tasks, dict) else {}
     return "\n\n".join(
         str(t.get("description") or "")
         for t in list(tasks.values())[:3]
@@ -77,18 +96,39 @@ def run_prompt(config: CrewConfig) -> str:
     )
 
 
+def run_prompt(config: CrewConfig) -> str:
+    return _prompt(config.user_message, config.inputs, config.tasks_yaml)
+
+
+def _fill(slots: Iterable[Tuple[dict, str]], model: Optional[str]) -> None:
+    """Write ``model`` into each slot; None removes them (the run default)."""
+    for container, field in list(slots):
+        if model is None:
+            container.pop(field, None)
+        else:
+            container[field] = model
+
+
 def apply_selection(config: CrewConfig, model: Optional[str]) -> None:
     """Write ``model`` into every Auto slot; None removes them (the run default)."""
     if is_auto(config.model):
         config.model = model
-    for container, field in list(_slots(config)):
-        value = container[field]
-        if model is None:
-            container.pop(field, None)
-        elif isinstance(value, dict):
-            container[field] = {**value, "model": model}
-        else:
-            container[field] = model
+    _fill(_slots(_roots(config)), model)
+
+
+async def _select(
+    prompt: str,
+    session: Optional[AsyncSession],
+    group_context: Optional[GroupContext],
+) -> ModelSelection:
+    if session is not None:
+        return await select_for_workspace(session, group_context, prompt)
+    # Internal callers (the chat fast path, deck refinement) have no request
+    # session; resolve on a routed one like any other code outside a request.
+    from src.db.session import routed_scoped_session
+
+    async with routed_scoped_session() as scoped:
+        return await select_for_workspace(scoped, group_context, prompt)
 
 
 async def resolve_run_models(
@@ -99,17 +139,24 @@ async def resolve_run_models(
     """Replace every "auto" in ``config``; None when the run did not ask for Auto."""
     if not wants_auto(config):
         return None
-    prompt = run_prompt(config)
-    if session is not None:
-        selection = await select_for_workspace(session, group_context, prompt)
-    else:
-        # Internal callers (the chat fast path, deck refinement) have no request
-        # session; resolve on a routed one like any other code outside a request.
-        from src.db.session import routed_scoped_session
-
-        async with routed_scoped_session() as scoped:
-            selection = await select_for_workspace(scoped, group_context, prompt)
+    selection = await _select(run_prompt(config), session, group_context)
     apply_selection(config, selection.model)
+    return selection
+
+
+async def resolve_mapping_models(
+    config: dict,
+    session: Optional[AsyncSession],
+    group_context: Optional[GroupContext],
+) -> Optional[ModelSelection]:
+    """``resolve_run_models`` for a plain-dict config (``/flow-execution``)."""
+    slots = list(_slots([config]))
+    if not slots:
+        return None
+    inputs = config.get("inputs")
+    prompt = _prompt(config.get("user_message"), inputs, config.get("tasks_yaml"))
+    selection = await _select(prompt, session, group_context)
+    _fill(slots, selection.model)
     return selection
 
 
@@ -135,10 +182,15 @@ async def _write_trace(
     selection: ModelSelection, job_id: str, group_id: Optional[str]
 ) -> None:
     try:
-        from src.db.session import routed_scoped_session
+        from src.db.session import get_isolated_db_session
         from src.services.trace.service import ExecutionTraceService
 
-        async with routed_scoped_session() as session:
+        # A PRIVATE connection, like every other out-of-band trace writer. On
+        # SQLite all routed sessions share one StaticPool connection: the
+        # request's session returning it (rollback on return) discarded this
+        # row's uncommitted INSERT, the refresh then failed, and validating the
+        # expired row raised "15 validation errors ... MissingGreenlet".
+        async with get_isolated_db_session() as session:
             await ExecutionTraceService(session).create_trace(
                 trace_row(selection, job_id, group_id)
             )
@@ -154,8 +206,8 @@ def record_selection(
 ) -> None:
     """Write the run's Auto trace row off the request path (fire and forget).
 
-    A task of its own gets its own routed session (see ``routed_scoped_session``),
-    so a failed insert can never poison the request's transaction.
+    The task writes on its own connection, so a failed insert can never poison
+    the request's transaction, and the request's cannot discard this one.
     """
     if selection is None:
         return

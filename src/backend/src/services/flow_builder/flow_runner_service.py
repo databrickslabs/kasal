@@ -149,20 +149,14 @@ class FlowRunnerService:
         Returns:
             Execution result
         """
-        logger.info("=" * 100)
-        logger.info("FLOW RUNNER SERVICE - run_flow() CALLED")
-        logger.info(f"  flow_id: {flow_id}")
-        logger.info(f"  job_id: {job_id}")
-        logger.info(f"  run_name: {run_name}")
         if config:
-            logger.info(f"  config type: {type(config)}")
-            logger.info(f"  config keys: {list(config.keys())}")
-            logger.info(f"  nodes: {len(config.get('nodes', []))}")
-            logger.info(f"  edges: {len(config.get('edges', []))}")
-            logger.info(f"  flow_config present: {'flow_config' in config}")
-        logger.info("=" * 100)
+            logger.info(
+                f"run_flow: config keys {list(config.keys())}, "
+                f"{len(config.get('nodes', []))} nodes, "
+                f"{len(config.get('edges', []))} edges, "
+                f"flow_config present: {'flow_config' in config}"
+            )
         try:
-            # Add detailed logging about inputs
             logger.info(
                 f"run_flow called with flow_id={flow_id}, job_id={job_id}, run_name={run_name}"
             )
@@ -233,6 +227,11 @@ class FlowRunnerService:
 
             # Extract group_id from config for multi-tenant isolation
             group_id = config.get("group_id") if config else None
+            # "auto" anywhere in the flow becomes one enabled model for the run.
+            from src.services.execution.config import run_freeze
+
+            group_context = config.get("group_context")
+            auto = await run_freeze.resolve_mapping(config, self.db, group_context)
 
             # Create a sanitized config for database storage (remove non-serializable objects)
             sanitized_config = {k: v for k, v in config.items() if k != "group_context"}
@@ -328,6 +327,7 @@ class FlowRunnerService:
                 logger.info(
                     f"Created flow execution record with ID {execution.id} for group {group_id}"
                 )
+                run_freeze.record(auto, job_id, group_context)
 
             # Start the appropriate execution method based on flow_id
             # IMPORTANT: Use await instead of create_task to ensure subprocess waits for completion

@@ -38,6 +38,10 @@ def _wrap_llms(kwargs: Dict[str, Any]) -> None:
     base_llm = crewai_symbols()["BaseLLM"]
     for key in _LLM_KWARGS:
         value = kwargs.get(key)
+        if isinstance(value, str) and value.strip().lower() == "auto":
+            # CrewAI would turn the string into its own OpenAI client, outside
+            # Kasal's transport. "auto" is resolved long before this point.
+            raise ValueError(f"'auto' reached the CrewAI harness as {key}")
         if value is None or isinstance(value, (str, base_llm)):
             continue
         kwargs[key] = build_kasal_backed_llm(value)

@@ -80,4 +80,49 @@ async def test_router_reports_the_pick_and_the_service_never_sees_auto():
         "requested": "auto",
         "model": PICK.model,
         "status": "selected",
+        "reason": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_detect_intent_resolves_auto_before_its_model_call():
+    """/detect-intent used to hand "auto" straight to intent detection."""
+    import importlib
+
+    dispatcher_router = importlib.import_module("src.api.dispatcher_router")
+    seen = {}
+
+    async def detect(service, request, group_context, tools, default_model):
+        seen["model"] = request.model
+        return {
+            "intent": "generate_agent",
+            "confidence": 0.9,
+            "extracted_info": {},
+            "suggested_prompt": "p",
+        }
+
+    with (
+        patch.object(
+            dispatcher_router,
+            "resolve_dispatch_model",
+            new=AsyncMock(
+                side_effect=lambda r, s, g: setattr(r, "model", PICK.model) or PICK
+            ),
+        ) as resolve,
+        patch.object(dispatcher_router.DispatcherService, "create"),
+        patch.object(
+            dispatcher_router, "_fetch_available_tools", new=AsyncMock(return_value=[])
+        ),
+        patch.object(
+            dispatcher_router,
+            "detect_request_intent",
+            new=AsyncMock(side_effect=detect),
+        ),
+    ):
+        await dispatcher_router.detect_intent_only(
+            DispatcherRequest(message="hi", model="auto"),
+            MagicMock(access_token=None),
+            MagicMock(),
+        )
+    resolve.assert_awaited_once()
+    assert seen["model"] == PICK.model

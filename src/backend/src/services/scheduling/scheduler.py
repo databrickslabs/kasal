@@ -545,6 +545,17 @@ class SchedulerService:
                     # generator before it commits and closes.
                     break
 
+                from src.services.execution.config import run_freeze
+
+                group_context = GroupContext(
+                    group_ids=[schedule.group_id] if schedule.group_id else [],
+                    group_email=schedule.created_by_email,
+                )
+                # A schedule may ask for "auto": it is resolved per run, here,
+                # before the run is named, recorded or started.
+                auto = await run_freeze.resolve(config, session, group_context)
+                model = config.model or DEFAULT_ENGINE_MODEL
+
                 # Generate run name based on execution type
                 execution_service = ExecutionService()
                 if execution_type == "flow":
@@ -631,18 +642,11 @@ class SchedulerService:
                     trigger_type="scheduled",
                     created_at=execution_time_naive,
                 )
+                run_freeze.record(auto, job_id, group_context)
 
                 # No Databricks credentials are exported into os.environ here:
                 # the process env is shared by every workspace, and the run
                 # resolves its own auth (get_auth_context) for its group.
-
-                # Create group context from schedule information
-                from src.utils.user_context import GroupContext
-
-                group_context = GroupContext(
-                    group_ids=[schedule.group_id] if schedule.group_id else [],
-                    group_email=schedule.created_by_email,
-                )
 
                 # Add execution to memory
                 KasalExecutionService.add_execution_to_memory(
@@ -773,8 +777,13 @@ class SchedulerService:
                         logger_manager.scheduler.info(
                             f"Starting task for schedule {schedule.id} - {schedule.name} (type: {execution_type})"
                         )
+                        # Keys only: the specs can carry decrypted tool_configs.
                         logger_manager.scheduler.info(
-                            f"Schedule configuration: execution_type={execution_type}, agents_yaml={schedule.agents_yaml}, tasks_yaml={schedule.tasks_yaml}, inputs={schedule.inputs}, model={schedule.model}"
+                            f"Schedule configuration: execution_type={execution_type}, "
+                            f"agents={sorted(schedule.agents_yaml or {})}, "
+                            f"tasks={sorted(schedule.tasks_yaml or {})}, "
+                            f"input keys={sorted(schedule.inputs or {})}, "
+                            f"model={schedule.model}"
                         )
 
                         # Build CrewConfig with proper defaults for None values (important for flow schedules)

@@ -332,6 +332,8 @@ class ModelSelectionInfo(BaseModel):
     requested: str = "auto"
     model: Optional[str] = None
     status: str
+    #: Why it fell back (``model_selection.FALLBACK_REASONS``); None when selected.
+    reason: Optional[str] = None
 
 
 class ExecutionCreateResponse(BaseModel):

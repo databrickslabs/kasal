@@ -18,6 +18,7 @@ from src.services.execution.config import auto_model
 from src.services.execution.config.auto_model import (
     apply_selection,
     record_selection,
+    resolve_mapping_models,
     resolve_run_models,
     run_prompt,
     selection_for,
@@ -70,8 +71,27 @@ class TestWalk:
         apply_selection(config, None)
         assert config.model is None
         assert "llm" not in config.agents_yaml["writer"]
-        assert "llm" not in config.agents_yaml["checker"]
+        # The dict keeps its other settings; only the model goes.
+        assert config.agents_yaml["checker"]["llm"] == {"temperature": 0}
         assert config.agents_yaml["fixed"]["llm"] == "explicit-model"
+
+    def test_manager_reasoning_guardrail_and_nested_flow_models(self):
+        config = CrewConfig(
+            model="m",
+            agents_yaml={"a": {"role": "a", "function_calling_llm": "auto"}},
+            tasks_yaml={"t": {"llm_guardrail": {"llm_model": "auto"}}},
+            inputs={"manager_llm": "auto", "reasoning_llm": "Auto", "q": "auto"},
+            flow_config={"crews": [{"agents": [{"llm": {"model": "auto"}}]}]},
+        )
+        assert wants_auto(config)
+        apply_selection(config, "picked")
+        assert config.agents_yaml["a"]["function_calling_llm"] == "picked"
+        assert config.tasks_yaml["t"]["llm_guardrail"]["llm_model"] == "picked"
+        assert config.inputs["manager_llm"] == config.inputs["reasoning_llm"]
+        assert config.inputs["reasoning_llm"] == "picked"
+        # Only model fields: an input that happens to say "auto" is the user's.
+        assert config.inputs["q"] == "auto"
+        assert config.flow_config["crews"][0]["agents"][0]["llm"]["model"] == "picked"
 
     def test_run_prompt_prefers_the_users_words(self):
         assert run_prompt(auto_config()) == "write a report on churn"
@@ -123,6 +143,35 @@ class TestResolve:
         assert select.await_args.args[0] is routed
 
 
+class TestResolveMapping:
+    """``/flow-execution`` hands over a plain dict."""
+
+    @pytest.mark.asyncio
+    async def test_a_dict_config_is_resolved_in_place(self):
+        config = {
+            "model": "auto",
+            "nodes": [{"data": {"llm": "auto"}}],
+            "inputs": {"user_request": "plan the launch"},
+            "group_context": MagicMock(),
+        }
+        session, context = MagicMock(), MagicMock(primary_group_id="ws")
+        with patch.object(
+            auto_model, "select_for_workspace", new=AsyncMock(return_value=PICK)
+        ) as select:
+            result = await resolve_mapping_models(config, session, context)
+        select.assert_awaited_once_with(session, context, "plan the launch")
+        assert result is PICK
+        assert config["model"] == config["nodes"][0]["data"]["llm"] == PICK.model
+
+    @pytest.mark.asyncio
+    async def test_a_concrete_dict_asks_nothing(self):
+        with patch.object(auto_model, "select_for_workspace") as select:
+            assert (
+                await resolve_mapping_models({"model": "m"}, MagicMock(), None) is None
+            )
+        select.assert_not_called()
+
+
 class TestAttribution:
     def test_a_selection_made_here_wins(self):
         assert selection_for(CrewConfig(model="x"), PICK) is PICK
@@ -152,12 +201,12 @@ class TestTraceRecord:
         session = MagicMock(commit=AsyncMock())
 
         @asynccontextmanager
-        async def fake_routed():
+        async def fake_isolated():
             yield session
 
         trace_service = MagicMock(create_trace=AsyncMock())
         with (
-            patch("src.db.session.routed_scoped_session", fake_routed),
+            patch("src.db.session.get_isolated_db_session", fake_isolated),
             patch(
                 "src.services.trace.service.ExecutionTraceService",
                 return_value=trace_service,
@@ -177,7 +226,7 @@ class TestTraceRecord:
             raise RuntimeError("db down")
             yield  # pragma: no cover
 
-        with patch("src.db.session.routed_scoped_session", broken):
+        with patch("src.db.session.get_isolated_db_session", broken):
             record_selection(PICK, "job", None)
             await asyncio.gather(*auto_model._pending)
 
@@ -219,6 +268,7 @@ class TestCreateExecution:
             "requested": "auto",
             "model": PICK.model,
             "status": "selected",
+            "reason": None,
         }
         assert write.await_args.args[1] == result["execution_id"]
 
@@ -244,3 +294,80 @@ class TestCreateExecution:
             )
         select.assert_not_called()
         assert result["model_selection"] is None
+
+
+class TestTraceRowOnARealDatabase:
+    """The row is committed and readable, on real SQLite, through the real
+    trace service and repository.
+
+    The app's SQLite engine is a StaticPool: every routed session shares ONE
+    connection. The row used to be written on such a session while the request
+    that started the run finished on another. Returning the request's session
+    resets the shared connection (a rollback), which discarded the trace
+    INSERT before its commit; the refresh then failed, and validating the
+    expired row raised "15 validation errors ... MissingGreenlet". No row was
+    ever saved. ``shared`` reproduces exactly that; the fix writes on a
+    private connection.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("writer,rows", [("private", 1), ("shared", 0)])
+    async def test_request_ending_mid_write(self, tmp_path, writer, rows):
+        from sqlalchemy import select, text
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from sqlalchemy.pool import NullPool, StaticPool
+
+        from src.models.execution_history import ExecutionHistory
+        from src.models.execution_trace import ExecutionTrace
+        from src.utils.user_context import GroupContext
+
+        url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+        engines = {
+            "shared": create_async_engine(url, poolclass=StaticPool),
+            "private": create_async_engine(url, poolclass=NullPool),
+        }
+        makers = {
+            name: async_sessionmaker(engine, expire_on_commit=False)
+            for name, engine in engines.items()
+        }
+        async with engines["shared"].begin() as conn:
+            for table in (ExecutionHistory.__table__, ExecutionTrace.__table__):
+                await conn.run_sync(table.create)
+        async with makers["shared"]() as setup:
+            setup.add(ExecutionHistory(job_id="job-1", status="running", group_id="ws"))
+            await setup.commit()
+
+        request = makers["shared"]()
+        await request.execute(text("select 1"))
+
+        @asynccontextmanager
+        async def trace_session():
+            async with makers[writer]() as session:
+                flush = session.flush
+
+                async def flush_then_end_the_request(*args, **kwargs):
+                    await flush(*args, **kwargs)
+                    await request.close()
+
+                session.flush = flush_then_end_the_request
+                yield session
+
+        pick = ModelSelection("m", "fallback", 2.0, "timeout")
+        try:
+            with patch("src.db.session.get_isolated_db_session", trace_session):
+                record_selection(pick, "job-1", GroupContext(group_ids=["ws"]))
+                await asyncio.gather(*auto_model._pending)
+            async with makers["private"]() as reader:
+                found = (await reader.execute(select(ExecutionTrace))).scalars().all()
+        finally:
+            for engine in engines.values():
+                await engine.dispose()
+        assert len(found) == rows
+        if rows:
+            row = found[0]
+            assert row.job_id == "job-1" and row.group_id == "ws"
+            assert row.event_type == "decision_evaluated"
+            assert (
+                row.output == "Auto fell back to m (default: decision model timed out)"
+            )
+            assert row.trace_metadata["reason"] == "timeout"

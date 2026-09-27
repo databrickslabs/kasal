@@ -116,6 +116,7 @@ async def test_foreign_or_unowned_saved_flow_rejected_even_with_inline_nodes(
 @pytest.mark.asyncio
 async def test_unsaved_canvas_uuid_still_executes(caller):
     runner = FlowRunnerService.__new__(FlowRunnerService)
+    runner.db = None  # the constructor sets it; run_flow resolves "auto" on it
     runner.flow_repo = NS(get=AsyncMock(return_value=None))
     runner.flow_execution_service = NS(
         create_execution=AsyncMock(return_value=NS(id=1))
@@ -381,6 +382,7 @@ async def test_owned_saved_flow_preserves_workspace_through_api_and_runner(calle
         yield session
 
     runner = FlowRunnerService.__new__(FlowRunnerService)
+    runner.db = session
     runner.flow_repo = NS(get=AsyncMock(return_value=flow))
     runner.flow_execution_service = FlowExecutionService(session)
     runner._run_flow_execution = AsyncMock(return_value={"success": True})
