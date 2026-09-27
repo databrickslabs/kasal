@@ -287,7 +287,7 @@ markers = [
 ]
 
 # ─── Coverage (pytest-cov) ───────────────────────────────────────────────────
-# Run: uv run python run_tests.py --coverage   (CI uploads coverage.xml)
+# Run: uv run python run_tests.py --coverage   (reports land in tests/.artifacts/; CI uploads coverage.xml)
 [tool.coverage.run]
 source = ["src"]
 branch = true

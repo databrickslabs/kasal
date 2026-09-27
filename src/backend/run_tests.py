@@ -13,6 +13,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Relative to src/backend (main() chdirs there). See run_tests() for why.
+COVERAGE_DIR = "tests/.artifacts"
+
 
 def run_command(command, description):
     """Run a command and handle errors."""
@@ -61,19 +64,25 @@ def run_tests(args, backend_dir):
 
     # Add coverage options. Scope, branch mode and the fail_under floor (the
     # run fails below it) live in [tool.coverage.*] in pyproject.toml.
-    # coverage.xml is what CI uploads as an artifact.
+    # Reports go under tests/.artifacts/, the one place the test-run pollution
+    # guard (tests/conftest.py) allows new files; anywhere else fails the run.
+    # tests/.artifacts/coverage.xml is what CI uploads as an artifact.
     if args.coverage or args.html_coverage:
         pytest_cmd.extend(
-            ["--cov=src", "--cov-report=term-missing", "--cov-report=xml:coverage.xml"]
+            [
+                "--cov=src",
+                "--cov-report=term-missing",
+                f"--cov-report=xml:{COVERAGE_DIR}/coverage.xml",
+            ]
         )
 
         if args.html_coverage:
-            pytest_cmd.append("--cov-report=html:tests/coverage_html")
+            pytest_cmd.append(f"--cov-report=html:{COVERAGE_DIR}/coverage_html")
 
     success = run_command(pytest_cmd, f"Running {args.type} tests")
 
     if args.html_coverage and success:
-        coverage_path = backend_dir / "tests" / "coverage_html" / "index.html"
+        coverage_path = backend_dir / COVERAGE_DIR / "coverage_html" / "index.html"
         if coverage_path.exists():
             print(f"\n📊 HTML coverage report available at: {coverage_path}")
     return success

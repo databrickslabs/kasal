@@ -34,7 +34,7 @@ The jobs are:
 | Job | What it runs | Gates |
 |---|---|---|
 | `backend-tests` | `uv sync --frozen`, then `run_tests.py --parallel 4 --skip-lint` on Python 3.11, without coverage (40-minute timeout) | Yes |
-| `backend-coverage` | The same suite under branch coverage: `run_tests.py --parallel 4 --skip-lint --coverage` (75-minute timeout). Uploads `coverage.xml` | Yes: fails below `fail_under = 80` in `[tool.coverage.report]` in `src/backend/pyproject.toml` (85% measured on 2026-09-27) |
+| `backend-coverage` | The same suite under branch coverage: `run_tests.py --parallel 4 --skip-lint --coverage` (75-minute timeout). Uploads `src/backend/tests/.artifacts/coverage.xml` | Yes: fails below `fail_under = 80` in `[tool.coverage.report]` in `src/backend/pyproject.toml` (85% measured on 2026-09-27) |
 | `backend-lint` | Step 1, `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync --frozen` installs them. Step 2, `pytest tests/unit/architecture`: the architecture tests and the shrink-only [ratchets](#ratchets) (file and function size, ruff rule counts, env reads, HTTP exception text). The size ratchet also covers `src/frontend/src`, so a frontend-only change can fail this backend check | Yes |
 | `migrations` | On a `pgvector/pgvector:pg16` service: exactly one Alembic head; `init_db()` builds the app schema on an empty PostgreSQL; `alembic upgrade head` from empty | The first two gate. The upgrade step is report-only (`continue-on-error`) |
 | `frontend` | Node 22: `npm ci`, `npm run test:run -- --testTimeout=30000` (Vitest), `npm run lint -- --max-warnings <N>` (ESLint), `npm run build` (`tsc -b` and `vite build`) | Yes. ESLint errors fail the job, and so do warnings above the ceiling in `quality.yml`; lower the ceiling when you fix warnings, never raise it (see [ratchets](#ratchets)) |
@@ -79,6 +79,8 @@ uv run python run_tests.py --skip-lint   # tests only, parallel by default
 uv run python run_tests.py --skip-lint --coverage --html-coverage
 uv run python run_tests.py               # tests, then every lint step
 ```
+
+Coverage reports go to `src/backend/tests/.artifacts/` (`coverage.xml`, and `coverage_html/` with `--html-coverage`). That is the only directory where the test run's pollution guard in `tests/conftest.py` allows new files, so a report written anywhere else fails the run even when every test passes.
 
 `run_tests.py` runs every lint step even when an earlier one fails, so you see all failures at once. `--lint-only` and `--skip-lint` cannot be combined. To fix formatting rather than check it, run `uv run black src tests` and `uv run isort src tests`.
 
