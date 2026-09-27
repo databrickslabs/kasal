@@ -121,6 +121,10 @@
         "urlSaved": "{{label}} saved.",
         "urlSaveError": "Could not save the {{label}}.",
         "save": "Save"
+      },
+      "tabs": {
+        "models": "Models",
+        "decisionModel": "Decision model"
       }
     }
   },
