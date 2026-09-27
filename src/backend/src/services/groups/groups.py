@@ -90,24 +90,6 @@ class GroupService:
             and gu.group.status == GroupStatus.ACTIVE
         ]
 
-    async def get_user_group_memberships(self, email: str) -> List[Group]:
-        """
-        Get all groups a user belongs to by email address.
-
-        Args:
-            email: User email address to look up
-
-        Returns:
-            List[Group]: List of groups the user belongs to
-        """
-        # First get the user
-        user = await self.user_repo.get_by_email(email)
-
-        if not user:
-            return []
-
-        return await self.get_user_groups(user.id)
-
     async def create_group(
         self,
         name: str,

@@ -14,7 +14,6 @@ from src.models.group import (
     GroupUserRole,
     GroupUserStatus,
     generate_uuid,
-    get_role_hierarchy,
 )
 
 # Import all required models to ensure relationships are loaded
@@ -376,28 +375,6 @@ class TestGroupEnums:
         assert GroupUserStatus.ACTIVE == "active"
         assert GroupUserStatus.INACTIVE == "inactive"
         assert GroupUserStatus.SUSPENDED == "suspended"
-
-
-class TestGroupRolePermissions:
-    """Test cases for role hierarchy and permission functions."""
-
-    def test_role_hierarchy_levels(self):
-        """Test that get_role_hierarchy returns correct hierarchy levels."""
-        # Act & Assert
-        assert get_role_hierarchy(GroupUserRole.ADMIN) == 3
-        assert get_role_hierarchy(GroupUserRole.EDITOR) == 2
-        assert get_role_hierarchy(GroupUserRole.OPERATOR) == 1
-
-    def test_role_hierarchy_ordering(self):
-        """Test that role hierarchy maintains proper ordering."""
-        # Act
-        admin_level = get_role_hierarchy(GroupUserRole.ADMIN)
-        editor_level = get_role_hierarchy(GroupUserRole.EDITOR)
-        operator_level = get_role_hierarchy(GroupUserRole.OPERATOR)
-
-        # Assert
-        assert admin_level > editor_level
-        assert editor_level > operator_level
 
 
 class TestGenerateUuidFunction:

@@ -243,16 +243,6 @@ _TOOL_API_KEY_NAMES: Dict[str, str] = {
     "Image Generation Tool": "OPENAI_API_KEY",
 }
 
-# Import request-scoped session helper
-from src.db.session import (  # noqa: E402 - import follows module initialization
-    routed_scoped_session,
-)
-from src.schemas.tool import (  # noqa: E402 - import follows module initialization
-    ToolUpdate,
-)
-from src.services.tools.tool_service import (  # noqa: E402 - import follows module initialization
-    ToolService,
-)
 from src.utils.encryption_utils import (  # noqa: E402 - import follows module initialization
     EncryptionUtils,
 )
@@ -756,53 +746,6 @@ class ToolFactory:
             return loop.run_until_complete(async_func(*args, **kwargs))
         finally:
             loop.close()
-
-    async def _update_tool_config_async(
-        self, tool_identifier, tool_info, config_update
-    ):
-        """Async implementation of tool config update"""
-        # Get services using session factory
-
-        async with routed_scoped_session() as session:
-            # Create tool service with session
-            tool_service = ToolService(session)
-
-            # If we found by ID, use ID for update, otherwise use title
-            if (
-                isinstance(tool_identifier, (int, str))
-                and str(tool_identifier).isdigit()
-            ):
-                # Update by ID
-                tool_id = int(tool_identifier)
-
-                # Prepare update data
-                if hasattr(tool_info, "config") and isinstance(tool_info.config, dict):
-                    # Merge existing config with updates
-                    updated_config = {**tool_info.config, **config_update}
-                else:
-                    updated_config = config_update
-
-                update_data = ToolUpdate(config=updated_config)
-
-                # Update the tool using the service instance
-                await tool_service.update_tool(tool_id, update_data)
-                logger.info(f"Updated tool {tool_id} configuration via ToolService")
-
-                # Refresh available tools
-                await self._load_available_tools_async()
-                return True
-            else:
-                # Update by title
-                title = tool_info.title
-                # Update the tool using the service instance
-                await tool_service.update_tool_configuration_by_title(
-                    title, config_update
-                )
-                logger.info(f"Updated tool '{title}' configuration via ToolService")
-
-                # Refresh available tools
-                await self._load_available_tools_async()
-                return True
 
     def create_tool(
         self,

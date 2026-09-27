@@ -351,61 +351,6 @@ def test_process_definition_kpi_without_technical_name(expander):
 # ── get_structure_dependencies ────────────────────────────────────────────────
 
 
-def test_get_structure_dependencies_no_formula_structures(expander):
-    """Structures without formulas have empty dependency lists."""
-    structures = {
-        "YTD": Structure(description="Year to Date", display_sign=1),
-        "PY": Structure(description="Prior Year", display_sign=1),
-    }
-    deps = expander.get_structure_dependencies(structures)
-    assert deps == {"YTD": [], "PY": []}
-
-
-def test_get_structure_dependencies_with_formula_references(expander):
-    """Structures with formulas extract references as dependencies."""
-    structures = {
-        "act_ytd": Structure(description="Actuals YTD", display_sign=1),
-        "re_ytg": Structure(description="Reforecast YTG", display_sign=1),
-        "total": Structure(
-            description="Total",
-            formula="( act_ytd ) + ( re_ytg )",
-            display_sign=1,
-        ),
-    }
-    deps = expander.get_structure_dependencies(structures)
-    assert "act_ytd" in deps["total"]
-    assert "re_ytg" in deps["total"]
-    assert deps["act_ytd"] == []
-    assert deps["re_ytg"] == []
-
-
-def test_get_structure_dependencies_self_reference_excluded(expander):
-    """Self-references are excluded from dependency lists."""
-    structures = {
-        "self_ref": Structure(
-            description="Self",
-            formula="( self_ref ) + 1",
-            display_sign=1,
-        ),
-    }
-    deps = expander.get_structure_dependencies(structures)
-    assert "self_ref" not in deps["self_ref"]
-
-
-def test_get_structure_dependencies_unknown_reference_not_included(expander):
-    """References to non-existent structures are not included as deps."""
-    structures = {
-        "total": Structure(
-            description="Total",
-            formula="( unknown_struct ) + 1",
-            display_sign=1,
-        ),
-    }
-    deps = expander.get_structure_dependencies(structures)
-    # unknown_struct is not in structures dict, so not included
-    assert deps["total"] == []
-
-
 # ── validate_structures ───────────────────────────────────────────────────────
 
 

@@ -68,9 +68,8 @@ class TestInit:
         with pytest.raises(ValueError):
             DataInputHandler("", "")
 
-    def test_initialises_caches_to_none(self, tmp_path):
+    def test_initialises_cache_to_none(self, tmp_path):
         h = _make_handler(tmp_path)
-        assert h._yaml_measures_cache is None
         assert h._dax_measures_cache is None
 
     def test_table_mappings_default_empty(self, tmp_path):

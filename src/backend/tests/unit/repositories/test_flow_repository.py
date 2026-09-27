@@ -152,63 +152,6 @@ class TestFlowRepositoryFindByName:
             await flow_repository.find_by_name("test_flow")
 
 
-class TestFlowRepositoryFindByCrewId:
-    """Test cases for find_by_crew_id method."""
-
-    @pytest.mark.asyncio
-    async def test_find_by_crew_id_success(
-        self, flow_repository, mock_async_session, sample_flows
-    ):
-        """Test successful flow search by crew ID."""
-        crew_id = sample_flows[0].crew_id
-        crew_flows = [flow for flow in sample_flows if flow.crew_id == crew_id]
-
-        mock_result = MockResult(crew_flows)
-        mock_async_session.execute.return_value = mock_result
-
-        result = await flow_repository.find_by_crew_id(crew_id)
-
-        assert len(result) == len(crew_flows)
-        assert all(flow.crew_id == crew_id for flow in result)
-        mock_async_session.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_find_by_crew_id_string_uuid(
-        self, flow_repository, mock_async_session
-    ):
-        """Test find by crew ID with string UUID."""
-        crew_id = uuid.uuid4()
-        flow = MockFlow(crew_id=crew_id)
-        mock_result = MockResult([flow])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await flow_repository.find_by_crew_id(str(crew_id))
-
-        assert len(result) == 1
-        assert result[0].crew_id == crew_id
-
-    @pytest.mark.asyncio
-    async def test_find_by_crew_id_invalid_uuid_string(
-        self, flow_repository, mock_async_session
-    ):
-        """Test find by crew ID with invalid UUID string."""
-        result = await flow_repository.find_by_crew_id("invalid-uuid")
-
-        assert result == []
-        mock_async_session.execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_find_by_crew_id_not_found(self, flow_repository, mock_async_session):
-        """Test find by crew ID when no flows found."""
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await flow_repository.find_by_crew_id(uuid.uuid4())
-
-        assert result == []
-        mock_async_session.execute.assert_called_once()
-
-
 class TestFlowRepositoryFindAll:
     """Test cases for find_all method."""
 
@@ -322,46 +265,12 @@ class TestFlowRepositoryErrorHandling:
             await flow_repository.find_by_name("test_flow")
 
     @pytest.mark.asyncio
-    async def test_find_by_crew_id_database_error(
-        self, flow_repository, mock_async_session
-    ):
-        """Test find by crew ID with database error."""
-        mock_async_session.execute.side_effect = Exception("Query timeout")
-
-        with pytest.raises(Exception, match="Query timeout"):
-            await flow_repository.find_by_crew_id(uuid.uuid4())
-
-    @pytest.mark.asyncio
     async def test_find_all_database_error(self, flow_repository, mock_async_session):
         """Test find all with database error."""
         mock_async_session.execute.side_effect = Exception("Database offline")
 
         with pytest.raises(Exception, match="Database offline"):
             await flow_repository.find_all()
-
-
-class TestFlowRepositoryUUIDHandling:
-    """Test cases specifically for UUID handling."""
-
-    @pytest.mark.asyncio
-    async def test_uuid_conversion_edge_cases(
-        self, flow_repository, mock_async_session
-    ):
-        """Test various UUID conversion scenarios."""
-        # Test empty string
-        result = await flow_repository.find_by_crew_id("")
-        assert result == []
-
-        # Test None (should raise TypeError in real scenario)
-        try:
-            result = await flow_repository.find_by_crew_id(None)
-            assert result == []  # Should handle gracefully
-        except (TypeError, AttributeError):
-            pass  # Expected behavior
-
-        # Test malformed UUID
-        result = await flow_repository.find_by_crew_id("not-a-uuid-at-all")
-        assert result == []
 
 
 class TestFlowRepositoryQueryConstruction:

@@ -5,7 +5,6 @@ Tests the functionality of Pydantic schemas for flow execution operations
 including validation, serialization, and field constraints.
 """
 
-from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -13,10 +12,8 @@ from pydantic import ValidationError
 
 from src.schemas.flow_execution import (
     FlowExecutionBase,
-    FlowExecutionResponse,
     FlowExecutionStatus,
     FlowNodeExecutionBase,
-    FlowNodeExecutionResponse,
 )
 
 
@@ -162,110 +159,6 @@ class TestFlowExecutionBase:
         assert execution.config["monitoring"]["tracing"]["sampling_rate"] == 0.1
 
 
-class TestFlowExecutionResponse:
-    """Test cases for FlowExecutionResponse schema."""
-
-    def test_valid_flow_execution_response_minimal(self):
-        """Test FlowExecutionResponse with minimal required fields."""
-        flow_id = uuid4()
-        now = datetime.now()
-        response_data = {
-            "flow_id": flow_id,
-            "job_id": "response_job_123",
-            "id": 456,
-            "created_at": now,
-        }
-        response = FlowExecutionResponse(**response_data)
-        assert response.flow_id == flow_id
-        assert response.job_id == "response_job_123"
-        assert response.id == 456
-        assert response.created_at == now
-        assert response.status == FlowExecutionStatus.PENDING  # Default
-        assert response.config == {}  # Default
-        assert response.result is None
-        assert response.error is None
-        assert response.updated_at is None
-        assert response.completed_at is None
-
-    def test_valid_flow_execution_response_complete(self):
-        """Test FlowExecutionResponse with all fields."""
-        flow_id = uuid4()
-        now = datetime.now()
-        config_data = {"timeout": 1800}
-        result_data = {"output": "success", "nodes_executed": 5}
-
-        response_data = {
-            "flow_id": flow_id,
-            "job_id": "complete_job_789",
-            "status": FlowExecutionStatus.COMPLETED,
-            "config": config_data,
-            "id": 789,
-            "result": result_data,
-            "error": None,
-            "created_at": now,
-            "updated_at": now,
-            "completed_at": now,
-        }
-        response = FlowExecutionResponse(**response_data)
-        assert response.flow_id == flow_id
-        assert response.job_id == "complete_job_789"
-        assert response.status == FlowExecutionStatus.COMPLETED
-        assert response.config == config_data
-        assert response.id == 789
-        assert response.result == result_data
-        assert response.error is None
-        assert response.created_at == now
-        assert response.updated_at == now
-        assert response.completed_at == now
-
-    def test_flow_execution_response_missing_response_fields(self):
-        """Test FlowExecutionResponse validation with missing response fields."""
-        base_data = {"flow_id": uuid4(), "job_id": "test_job"}
-
-        # Missing id
-        with pytest.raises(ValidationError) as exc_info:
-            FlowExecutionResponse(**base_data, created_at=datetime.now())
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "id" in missing_fields
-
-        # Missing created_at
-        with pytest.raises(ValidationError) as exc_info:
-            FlowExecutionResponse(**base_data, id=1)
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "created_at" in missing_fields
-
-    def test_flow_execution_response_model_config(self):
-        """Test FlowExecutionResponse model configuration."""
-        assert hasattr(FlowExecutionResponse, "model_config")
-        assert FlowExecutionResponse.model_config.get("from_attributes") is True
-
-    def test_flow_execution_response_error_scenarios(self):
-        """Test FlowExecutionResponse with error scenarios."""
-        flow_id = uuid4()
-        now = datetime.now()
-
-        # Execution with error
-        error_response = FlowExecutionResponse(
-            flow_id=flow_id,
-            job_id="error_job",
-            status=FlowExecutionStatus.FAILED,
-            id=999,
-            error="Node 'data_processor' failed: connection timeout",
-            created_at=now,
-            updated_at=now,
-            completed_at=now,
-        )
-        assert error_response.status == FlowExecutionStatus.FAILED
-        assert "connection timeout" in error_response.error
-        assert error_response.result is None
-
-
 class TestFlowNodeExecutionBase:
     """Test cases for FlowNodeExecutionBase schema."""
 
@@ -322,87 +215,3 @@ class TestFlowNodeExecutionBase:
                 flow_execution_id=1, node_id=f"node_{status.value}", status=status
             )
             assert node_execution.status == status
-
-
-class TestFlowNodeExecutionResponse:
-    """Test cases for FlowNodeExecutionResponse schema."""
-
-    def test_valid_flow_node_execution_response_minimal(self):
-        """Test FlowNodeExecutionResponse with minimal required fields."""
-        now = datetime.now()
-        response_data = {
-            "flow_execution_id": 123,
-            "node_id": "response_node",
-            "id": 456,
-            "created_at": now,
-        }
-        response = FlowNodeExecutionResponse(**response_data)
-        assert response.flow_execution_id == 123
-        assert response.node_id == "response_node"
-        assert response.id == 456
-        assert response.created_at == now
-        assert response.status == FlowExecutionStatus.PENDING  # Default
-        assert response.agent_id is None
-        assert response.task_id is None
-        assert response.result is None
-        assert response.error is None
-        assert response.updated_at is None
-        assert response.completed_at is None
-
-    def test_valid_flow_node_execution_response_complete(self):
-        """Test FlowNodeExecutionResponse with all fields."""
-        now = datetime.now()
-        result_data = {"node_result": "success", "output_data": {"count": 100}}
-
-        response_data = {
-            "flow_execution_id": 789,
-            "node_id": "complete_node",
-            "status": FlowExecutionStatus.COMPLETED,
-            "agent_id": 555,
-            "task_id": 777,
-            "id": 999,
-            "result": result_data,
-            "error": None,
-            "created_at": now,
-            "updated_at": now,
-            "completed_at": now,
-        }
-        response = FlowNodeExecutionResponse(**response_data)
-        assert response.flow_execution_id == 789
-        assert response.node_id == "complete_node"
-        assert response.status == FlowExecutionStatus.COMPLETED
-        assert response.agent_id == 555
-        assert response.task_id == 777
-        assert response.id == 999
-        assert response.result == result_data
-        assert response.error is None
-        assert response.created_at == now
-        assert response.updated_at == now
-        assert response.completed_at == now
-
-    def test_flow_node_execution_response_missing_response_fields(self):
-        """Test FlowNodeExecutionResponse validation with missing response fields."""
-        base_data = {"flow_execution_id": 1, "node_id": "test_node"}
-
-        # Missing id
-        with pytest.raises(ValidationError) as exc_info:
-            FlowNodeExecutionResponse(**base_data, created_at=datetime.now())
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "id" in missing_fields
-
-        # Missing created_at
-        with pytest.raises(ValidationError) as exc_info:
-            FlowNodeExecutionResponse(**base_data, id=1)
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "created_at" in missing_fields
-
-    def test_flow_node_execution_response_model_config(self):
-        """Test FlowNodeExecutionResponse model configuration."""
-        assert hasattr(FlowNodeExecutionResponse, "model_config")
-        assert FlowNodeExecutionResponse.model_config.get("from_attributes") is True

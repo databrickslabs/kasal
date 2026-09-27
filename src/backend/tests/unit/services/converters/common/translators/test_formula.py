@@ -100,86 +100,7 @@ class TestFormulaTranslator:
 
     # ========== _determine_aggregation Tests ==========
 
-    def test_determine_aggregation_volume(self, translator):
-        """Test aggregation determination for volume keyword"""
-        result = translator._determine_aggregation("bic_kvolume_c")
-        assert result == "SUM"
-
-    def test_determine_aggregation_amount(self, translator):
-        """Test aggregation determination for amount keyword"""
-        result = translator._determine_aggregation("bic_kamount_c")
-        assert result == "SUM"
-
-    def test_determine_aggregation_count(self, translator):
-        """Test aggregation determination for count keyword"""
-        result = translator._determine_aggregation("bic_order_count")
-        assert result == "COUNT"
-
-    def test_determine_aggregation_avg(self, translator):
-        """Test aggregation determination for average keyword"""
-        result = translator._determine_aggregation("avg_price")
-        assert result == "AVERAGE"
-
-    def test_determine_aggregation_max(self, translator):
-        """Test aggregation determination for max keyword"""
-        result = translator._determine_aggregation("max_temperature")
-        assert result == "MAX"
-
-    def test_determine_aggregation_min(self, translator):
-        """Test aggregation determination for min keyword"""
-        result = translator._determine_aggregation("min_value")
-        assert result == "MIN"
-
-    def test_determine_aggregation_default(self, translator):
-        """Test aggregation determination defaults to SUM"""
-        result = translator._determine_aggregation("bic_some_field")
-        assert result == "SUM"
-
-    def test_determine_aggregation_case_insensitive(self, translator):
-        """Test aggregation determination is case insensitive"""
-        result = translator._determine_aggregation("BIC_KVOLUME_C")
-        assert result == "SUM"
-
-    def test_determine_aggregation_quantity(self, translator):
-        """Test aggregation determination for quantity keyword"""
-        result = translator._determine_aggregation("bic_quantity")
-        assert result == "SUM"
-
     # ========== _generate_table_name Tests ==========
-
-    def test_generate_table_name_with_prefix(self, translator):
-        """Test table name generation from bic_ prefixed field"""
-        result = translator._generate_table_name("bic_kvolume_c")
-        assert "volume" in result.lower()
-        assert result.endswith("Data")
-
-    def test_generate_table_name_without_prefix(self, translator):
-        """Test table name generation from field without prefix"""
-        result = translator._generate_table_name("quantity")
-        assert result.endswith("Data")
-
-    def test_generate_table_name_removes_k_prefix(self, translator):
-        """Test table name generation removes SAP BW 'k' prefix"""
-        result = translator._generate_table_name("bic_kamount_c")
-        # Should remove 'k' prefix from SAP key figures
-        assert "amount" in result.lower()
-
-    def test_generate_table_name_capitalizes(self, translator):
-        """Test table name generation capitalizes result"""
-        result = translator._generate_table_name("bic_revenue")
-        assert result[0].isupper()
-
-    def test_generate_table_name_underscores(self, translator):
-        """Test table name generation with underscores"""
-        result = translator._generate_table_name("bic_customer_sales_c")
-        # Should use first meaningful part
-        assert result.endswith("Data")
-
-    def test_generate_table_name_default(self, translator):
-        """Test table name generation with minimal input"""
-        result = translator._generate_table_name("_")
-        # Empty parts default to 'Data' suffix
-        assert result.endswith("Data") or result == "FactTable"
 
     # ========== create_measure_name Tests ==========
 
@@ -262,21 +183,6 @@ class TestFormulaTranslator:
     # ========== get_field_metadata Tests ==========
 
     # ========== Integration Tests ==========
-
-    def test_aggregation_keyword_priority(self, translator):
-        """Test aggregation determination with multiple keywords"""
-        # 'count' keyword appears first but 'amount' also matches
-        # The implementation checks keywords in order, so first match wins
-        result = translator._determine_aggregation("count_of_amounts")
-        # Both 'count' and 'amount' are in the string, first one found wins
-        assert result in ["COUNT", "SUM"]  # Accept either as both are valid
-
-    def test_table_name_generation_consistency(self, translator):
-        """Test table name generation is consistent"""
-        result1 = translator._generate_table_name("bic_sales")
-        result2 = translator._generate_table_name("bic_sales")
-
-        assert result1 == result2
 
     def test_measure_name_with_empty_description(self, translator, simple_definition):
         """Test measure name creation when description is empty"""

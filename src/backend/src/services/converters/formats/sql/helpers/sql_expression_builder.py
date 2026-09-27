@@ -243,46 +243,6 @@ class SQLExpressionEngine:
         else:
             return str(value)
 
-    def _is_valid_sql_filter(self, expr: str) -> bool:
-        """Check if expression is already a valid SQL filter."""
-        # Simple heuristic: if it contains SQL operators, assume it's valid
-        sql_operators = [
-            "=",
-            "!=",
-            "<>",
-            ">",
-            "<",
-            ">=",
-            "<=",
-            "AND",
-            "OR",
-            "IN",
-            "LIKE",
-            "BETWEEN",
-        ]
-        expr_upper = expr.upper()
-        return any(op in expr_upper for op in sql_operators)
-
-    def _build_filter_expression(
-        self, filter_expr: str, table_name: str, context: Dict[str, Any]
-    ) -> str:
-        """Build filter expression from filter string."""
-        # Parse and build filter
-        # This is a simplified version - can be extended based on needs
-        quoted_table = self._quote_identifier(table_name)
-
-        # Handle simple column = value patterns
-        if "=" in filter_expr:
-            parts = filter_expr.split("=")
-            if len(parts) == 2:
-                col = parts[0].strip()
-                val = parts[1].strip()
-                quoted_col = self._quote_identifier(col)
-                return f"{quoted_table}.{quoted_col} = {self._format_value(val)}"
-
-        # Return as-is if we can't parse it
-        return filter_expr
-
     # ========================================================================
     # Aggregation Builders - Core SQL Functions
     # ========================================================================

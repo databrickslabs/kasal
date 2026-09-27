@@ -2,7 +2,7 @@
 Coverage tests for services/lakebase_permission_service.py
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,40 +49,6 @@ def test_init():
 # ---- grant_schema_permissions_async ----
 
 
-@pytest.mark.asyncio
-async def test_grant_schema_permissions_async_success():
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_conn = AsyncMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-
-    await svc.grant_schema_permissions_async(mock_engine, "admin@example.com")
-    assert mock_conn.execute.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_grant_schema_permissions_async_error_not_raised():
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(side_effect=Exception("denied"))
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-    # Should not raise
-    await svc.grant_schema_permissions_async(mock_engine, "admin@example.com")
-
-
-@pytest.mark.asyncio
-async def test_grant_schema_permissions_async_invalid_email():
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    # ValueError from _quote_pg_role is caught internally
-    await svc.grant_schema_permissions_async(mock_engine, "invalid!!!")
-
-
 # ---- grant_schema_permissions_sync ----
 
 
@@ -109,32 +75,6 @@ def test_grant_schema_permissions_sync_invalid_email():
 
 
 # ---- grant_default_privileges_async ----
-
-
-@pytest.mark.asyncio
-async def test_grant_default_privileges_async_success():
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_conn = AsyncMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-
-    await svc.grant_default_privileges_async(mock_engine, "admin@example.com")
-    assert mock_conn.execute.call_count == 2
-
-
-@pytest.mark.asyncio
-async def test_grant_default_privileges_async_error_not_raised():
-    svc = LakebasePermissionService()
-    mock_engine = MagicMock()
-    mock_begin = MagicMock()
-    mock_begin.__aenter__ = AsyncMock(side_effect=Exception("denied"))
-    mock_begin.__aexit__ = AsyncMock(return_value=False)
-    mock_engine.begin.return_value = mock_begin
-    # Should not raise
-    await svc.grant_default_privileges_async(mock_engine, "admin@example.com")
 
 
 # ---- grant_default_privileges_sync ----

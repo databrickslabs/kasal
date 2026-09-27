@@ -187,92 +187,9 @@ measures:
 
     # ========== Transpile to Single Query Tests ==========
 
-    def test_transpile_to_single_query_simple(self, transpiler, simple_uc_metrics):
-        """Test generating single query with one measure"""
-        result = transpiler.transpile_to_single_query(simple_uc_metrics)
-
-        assert isinstance(result, str)
-        assert "SELECT" in result
-        assert "SUM(amount) as total_revenue" in result
-        assert "FROM main.sales.transactions" in result
-
-    def test_transpile_to_single_query_multiple_measures(
-        self, transpiler, uc_metrics_multiple_measures
-    ):
-        """Test generating single query with multiple measures"""
-        result = transpiler.transpile_to_single_query(uc_metrics_multiple_measures)
-
-        assert "total_revenue" in result
-        assert "transaction_count" in result
-        assert "avg_transaction" in result
-        assert result.count("SELECT") == 1  # Only one SELECT
-        assert "," in result  # Measures separated by commas
-
-    def test_transpile_to_single_query_with_filter(
-        self, transpiler, uc_metrics_with_filter
-    ):
-        """Test generating single query with filter"""
-        result = transpiler.transpile_to_single_query(uc_metrics_with_filter)
-
-        assert "WHERE year = 2024" in result
-
-    def test_transpile_to_single_query_with_table_override(
-        self, transpiler, simple_uc_metrics
-    ):
-        """Test generating single query with table override"""
-        result = transpiler.transpile_to_single_query(
-            simple_uc_metrics, table_reference="custom.table.name"
-        )
-
-        assert "custom.table.name" in result
-
     # ========== Extract Table References Tests ==========
 
-    def test_extract_table_references_simple(self, transpiler, simple_uc_metrics):
-        """Test extracting table references"""
-        result = transpiler.extract_table_references(simple_uc_metrics)
-
-        assert isinstance(result, list)
-        assert len(result) >= 1
-        assert "main.sales.transactions" in result
-
-    def test_extract_table_references_multiple(self, transpiler):
-        """Test extracting multiple table references"""
-        uc_metrics = {
-            "version": "0.1",
-            "source": "main.sales.transactions",
-            "measures": [{"name": "total", "expr": "SUM(catalog.schema.table.value)"}],
-        }
-        result = transpiler.extract_table_references(uc_metrics)
-
-        assert len(result) >= 1
-        assert "main.sales.transactions" in result
-
-    def test_extract_table_references_no_source(self, transpiler):
-        """Test extracting table references without source"""
-        uc_metrics = {
-            "version": "0.1",
-            "measures": [{"name": "total", "expr": "SUM(value)"}],
-        }
-        result = transpiler.extract_table_references(uc_metrics)
-
-        assert isinstance(result, list)
-        # May be empty or contain extracted references from expressions
-
-    def test_extract_table_references_no_duplicates(self, transpiler):
-        """Test extracting table references removes duplicates"""
-        uc_metrics = {
-            "version": "0.1",
-            "source": "main.sales.table",
-            "measures": [
-                {"name": "m1", "expr": "SUM(main.sales.table.value)"},
-                {"name": "m2", "expr": "COUNT(main.sales.table.id)"},
-            ],
-        }
-        result = transpiler.extract_table_references(uc_metrics)
-
-        # Should have unique references only
-        assert len(result) == len(set(result))
+    # May be empty or contain extracted references from expressions
 
     # ========== Generate SQL Documentation Tests ==========
 

@@ -109,17 +109,6 @@ class TestKbiFormulaParser:
         assert len(var_tokens) == 1
         assert var_tokens[0].value == "tax_rate"
 
-    def test_extract_column_references(self):
-        """Test extraction of column references"""
-        parser = KbiFormulaParser()
-
-        formula = "sales_amount * quantity + overhead"
-        columns = parser._extract_column_references(formula)
-
-        assert "sales_amount" in columns
-        assert "quantity" in columns
-        assert "overhead" in columns
-
     def test_sql_keyword_detection(self):
         """Test SQL keyword detection"""
         parser = KbiFormulaParser()

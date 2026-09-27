@@ -2,12 +2,11 @@
 Schemas for Flow execution models and responses.
 """
 
-from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class FlowExecutionStatus(str, Enum):
@@ -32,19 +31,6 @@ class FlowExecutionBase(BaseModel):
     group_id: Optional[str] = None  # Multi-tenant isolation
 
 
-class FlowExecutionResponse(FlowExecutionBase):
-    """Response model for flow execution data"""
-
-    id: int
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class FlowNodeExecutionBase(BaseModel):
     """Base model for flow node execution data"""
 
@@ -54,19 +40,6 @@ class FlowNodeExecutionBase(BaseModel):
     agent_id: Optional[int] = None
     task_id: Optional[int] = None
     group_id: Optional[str] = None  # Multi-tenant isolation
-
-
-class FlowNodeExecutionResponse(FlowNodeExecutionBase):
-    """Response model for flow node execution data"""
-
-    id: int
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class FlowExecutionRequest(BaseModel):

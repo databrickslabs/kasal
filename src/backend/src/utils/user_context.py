@@ -365,14 +365,6 @@ class GroupContext:
         return f"{GroupContext.generate_individual_group_id(email)}_{digest}"
 
     @staticmethod
-    def personal_workspace_candidates(email: str) -> tuple:
-        """The two ids a user's personal workspace can carry."""
-        return (
-            GroupContext.generate_individual_group_id(email),
-            GroupContext.disambiguated_individual_group_id(email),
-        )
-
-    @staticmethod
     def personal_workspace_id_of(user: Any, email: str) -> str:
         """Return the allocated identity; an unresolved allocation grants no scope."""
 

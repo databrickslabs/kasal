@@ -290,33 +290,6 @@ class TestSQLExpressionEngineWindowFunctions:
 
     # ========== _is_valid_sql_filter Tests ==========
 
-    def test_is_valid_sql_filter_with_equals(self, databricks_engine):
-        """Test filter validity with equals"""
-        assert databricks_engine._is_valid_sql_filter("status = 'active'") is True
-
-    def test_is_valid_sql_filter_with_in(self, databricks_engine):
-        """Test filter validity with IN"""
-        assert (
-            databricks_engine._is_valid_sql_filter("region IN ('EMEA', 'APAC')") is True
-        )
-
-    def test_is_valid_sql_filter_with_like(self, databricks_engine):
-        """Test filter validity with LIKE"""
-        assert databricks_engine._is_valid_sql_filter("name LIKE '%test%'") is True
-
-    def test_is_valid_sql_filter_with_between(self, databricks_engine):
-        """Test filter validity with BETWEEN"""
-        assert (
-            databricks_engine._is_valid_sql_filter(
-                "date BETWEEN '2024-01-01' AND '2024-12-31'"
-            )
-            is True
-        )
-
-    def test_is_valid_sql_filter_greater_than(self, databricks_engine):
-        """Test filter validity with >"""
-        assert databricks_engine._is_valid_sql_filter("amount > 100") is True
-
     # ========== Unknown aggregation type fallback ==========
 
     def test_unknown_agg_type_falls_back_to_sum(self, databricks_engine):

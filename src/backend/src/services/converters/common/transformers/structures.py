@@ -220,27 +220,3 @@ class StructureExpander:
         name = re.sub(r"[^a-zA-Z0-9\s]", "", description.lower())
         name = re.sub(r"\s+", "_", name.strip())
         return name
-
-    def get_structure_dependencies(
-        self, structures: Dict[str, Structure]
-    ) -> Dict[str, List[str]]:
-        """
-        Analyze structure dependencies to ensure proper processing order
-
-        Returns:
-            Dictionary mapping structure names to their dependencies
-        """
-        dependencies = {}
-
-        for struct_name, structure in structures.items():
-            deps = []
-            if structure.formula:
-                # Find structure references in the formula
-                pattern = r"\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)"
-                matches = re.findall(pattern, structure.formula)
-                for match in matches:
-                    if match in structures and match != struct_name:
-                        deps.append(match)
-            dependencies[struct_name] = deps
-
-        return dependencies

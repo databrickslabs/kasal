@@ -561,63 +561,6 @@ class TestInitializeWithApiKeysService:
 # ─── _update_tool_config_async ───────────────────────────────────────────────
 
 
-class TestUpdateToolConfigAsync:
-
-    @pytest.mark.asyncio
-    async def test_update_by_integer_id(self):
-        """_update_tool_config_async with numeric id calls tool_service.update_tool."""
-        f = _make_factory()
-        info = _tool_info("SomeTool", 42, {"old": "val"})
-        f._available_tools["SomeTool"] = info
-
-        mock_session = AsyncMock()
-        mock_svc = MagicMock()
-        mock_svc.update_tool = AsyncMock(return_value=MagicMock())
-
-        with (
-            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch("src.services.tools.tool_factory.ToolService", return_value=mock_svc),
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-        ):
-            mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await f._update_tool_config_async(
-                tool_identifier="42", tool_info=info, config_update={"new": "val"}
-            )
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_update_by_title(self):
-        """_update_tool_config_async with title calls update_tool_configuration_by_title."""
-        f = _make_factory()
-        info = _tool_info("MyTitleTool", 99, {"x": "y"})
-        f._available_tools["MyTitleTool"] = info
-
-        mock_session = AsyncMock()
-        mock_svc = MagicMock()
-        mock_svc.update_tool_configuration_by_title = AsyncMock(
-            return_value=MagicMock()
-        )
-
-        with (
-            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch("src.services.tools.tool_factory.ToolService", return_value=mock_svc),
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-        ):
-            mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await f._update_tool_config_async(
-                tool_identifier="MyTitleTool",
-                tool_info=info,
-                config_update={"updated": "val"},
-            )
-
-        assert result is True
-
-
 # ─── DallETool ────────────────────────────────────────────────────────────────
 
 
@@ -999,41 +942,6 @@ class TestSerperDevToolWithApiKeysService:
 
 
 # ─── _update_tool_config_async: non-dict config path ─────────────────────────
-
-
-class TestUpdateToolConfigAsyncNonDictConfig:
-
-    @pytest.mark.asyncio
-    async def test_update_by_id_with_non_dict_config(self):
-        """_update_tool_config_async handles non-dict tool_info.config."""
-        f = _make_factory()
-        info = _tool_info("TestTool", 42, {})
-        info.config = "not-a-dict"  # Non-dict config
-
-        mock_session = AsyncMock()
-        mock_svc_instance = MagicMock()
-        mock_svc_instance.update_tool = AsyncMock(return_value=MagicMock())
-
-        with (
-            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch(
-                "src.services.tools.tool_factory.ToolService",
-                return_value=mock_svc_instance,
-            ),
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-        ):
-            mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await f._update_tool_config_async(
-                tool_identifier="42", tool_info=info, config_update={"new": "val"}
-            )
-
-        assert result is True
-        # Should use config_update directly (line 690)
-        call_args = mock_svc_instance.update_tool.call_args
-        update_data = call_args[0][1]  # Second positional arg is ToolUpdate
-        assert update_data.config == {"new": "val"}
 
 
 # ─── _sync_load_available_tools no longer preloads api keys ─────────────────

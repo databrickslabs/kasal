@@ -167,20 +167,4 @@ class GroupUser(Base):
 # Role hierarchy: admin > editor > operator
 
 
-def get_role_hierarchy(role: GroupUserRole) -> int:
-    """
-    Get the hierarchy level for a role.
-    Higher numbers = more permissions.
-
-    Returns:
-        int: Hierarchy level (3=admin, 2=editor, 1=operator)
-    """
-    hierarchy = {
-        GroupUserRole.ADMIN: 3,  # Full access including user/group management
-        GroupUserRole.EDITOR: 2,  # Can create/edit workflows, execute
-        GroupUserRole.OPERATOR: 1,  # Can execute and monitor only
-    }
-    return hierarchy.get(role, 0)
-
-
 # Legacy compatibility aliases removed - migration complete

@@ -142,40 +142,6 @@ async def test_get_user_groups_with_roles():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_user_group_memberships_user_not_found():
-    session = make_session()
-    svc = make_service(session=session)
-
-    mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(return_value=mock_result)
-
-    result = await svc.get_user_group_memberships("notexist@example.com")
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_get_user_group_memberships_found():
-    session = make_session()
-    svc = make_service(session=session)
-
-    user = MagicMock()
-    user.id = "u1"
-    user.email = "user@example.com"
-
-    mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = user
-    session.execute = AsyncMock(return_value=mock_result)
-
-    group = make_group()
-    gu = make_group_user(group=group, status=GroupUserStatus.ACTIVE)
-    svc.group_user_repo.get_groups_by_user = AsyncMock(return_value=[gu])
-
-    result = await svc.get_user_group_memberships("user@example.com")
-    assert len(result) == 1
-
-
 # ---------------------------------------------------------------------------
 # create_group
 # ---------------------------------------------------------------------------
