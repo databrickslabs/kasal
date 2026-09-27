@@ -1,41 +1,5 @@
 {
   "source_commit": "985ecf22",
   "description": "Strict mypy debt measured before the upstream readiness lint cleanup. Allowances may shrink; new errors must be fixed.",
-  "diagnostics": [
-    {
-      "file": "src/services/execution/config/manager_config_builder.py",
-      "message": "Unexpected keyword argument \"llm\" for \"create_agent\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/execution/config/manager_config_builder.py",
-      "message": "Unexpected keyword argument \"user_token\" for \"create_agent\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/flow_runner_service.py",
-      "message": "\"ExecutionHistory\" has no attribute \"updated_at\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/kasal_flow_service.py",
-      "message": "Argument 1 to \"FlowRunnerService\" has incompatible type \"None\"; expected \"AsyncSession\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/flow_builder/modules/flow_methods.py",
-      "message": "Module \"src.services.flow_builder.conversation.reuse\" has no attribute \"output_slug\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/llm/handlers/databricks_responses_llm.py",
-      "message": "\"list[dict[str, Any]]\" has no attribute \"text\"  [attr-defined]",
-      "count": 2
-    },
-    {
-      "file": "src/services/llm/handlers/databricks_responses_llm.py",
-      "message": "Signature of \"_handle_responses\" incompatible with supertype \"src.core.llm.transport.completion.OpenAICompletion\"  [override]",
-      "count": 1
-    }
-  ]
+  "diagnostics": []
 }
