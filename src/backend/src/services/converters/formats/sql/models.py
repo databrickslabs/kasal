@@ -49,16 +49,6 @@ class SQLAggregationType(Enum):
     EXCEPTION_AGGREGATION = "EXCEPTION_AGGREGATION"
 
 
-class SQLJoinType(Enum):
-    """SQL join types"""
-
-    INNER = "INNER JOIN"
-    LEFT = "LEFT JOIN"
-    RIGHT = "RIGHT JOIN"
-    FULL = "FULL OUTER JOIN"
-    CROSS = "CROSS JOIN"
-
-
 class SQLQuery(BaseModel):
     """Represents a complete SQL query"""
 

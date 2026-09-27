@@ -4,17 +4,13 @@ Unit tests for databricks_config Pydantic schemas.
 Tests validation, defaults, required fields, and schema interactions.
 """
 
-from datetime import datetime
-
 import pytest
 from pydantic import ValidationError
 
 from src.schemas.databricks_config import (
     DatabricksConfigBase,
     DatabricksConfigCreate,
-    DatabricksConfigInDB,
     DatabricksConfigResponse,
-    DatabricksConfigUpdate,
     DatabricksTokenStatus,
 )
 
@@ -162,118 +158,6 @@ class TestDatabricksConfigCreate:
         assert set(config.required_fields) == {"warehouse_id", "catalog", "db_schema"}
 
 
-class TestDatabricksConfigUpdate:
-    """Test cases for DatabricksConfigUpdate schema."""
-
-    def test_all_fields_optional(self):
-        """Test that all update fields default to None."""
-        update = DatabricksConfigUpdate()
-        assert update.workspace_url is None
-        assert update.warehouse_id is None
-        assert update.catalog is None
-        assert update.db_schema is None
-        assert update.enabled is None
-        assert update.mlflow_enabled is None
-        assert update.mlflow_experiment_name is None
-        assert update.evaluation_enabled is None
-        assert update.evaluation_judge_model is None
-        assert update.volume_enabled is None
-        assert update.volume_path is None
-        assert update.volume_file_format is None
-        assert update.volume_create_date_dirs is None
-        assert update.knowledge_volume_enabled is None
-        assert update.knowledge_volume_path is None
-        assert update.knowledge_chunk_size is None
-        assert update.knowledge_chunk_overlap is None
-
-    def test_partial_update(self):
-        """Test DatabricksConfigUpdate with partial fields."""
-        update = DatabricksConfigUpdate(
-            warehouse_id="new-wh",
-            enabled=False,
-        )
-        assert update.warehouse_id == "new-wh"
-        assert update.enabled is False
-        assert update.workspace_url is None
-        assert update.catalog is None
-
-    def test_full_update(self):
-        """Test DatabricksConfigUpdate with all fields."""
-        update = DatabricksConfigUpdate(
-            workspace_url="https://example.com",
-            warehouse_id="new-wh",
-            catalog="new_catalog",
-            schema="new_schema",
-            enabled=False,
-        )
-        assert update.workspace_url == "https://example.com"
-        assert update.warehouse_id == "new-wh"
-        assert update.catalog == "new_catalog"
-        assert update.db_schema == "new_schema"
-        assert update.enabled is False
-
-    def test_schema_alias(self):
-        """Test schema alias in update schema."""
-        update = DatabricksConfigUpdate(schema="updated_schema")
-        assert update.db_schema == "updated_schema"
-
-
-class TestDatabricksConfigInDB:
-    """Test cases for DatabricksConfigInDB schema."""
-
-    def test_valid_in_db(self):
-        """Test DatabricksConfigInDB with all required fields."""
-        now = datetime.now()
-        config = DatabricksConfigInDB(
-            id=1,
-            workspace_url="https://example.com",
-            warehouse_id="wh123",
-            catalog="main",
-            schema="default",
-            enabled=True,
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        assert config.id == 1
-        assert config.workspace_url == "https://example.com"
-        assert config.is_active is True
-        assert config.created_at == now
-        assert config.updated_at == now
-
-    def test_model_config_attributes(self):
-        """Test DatabricksConfigInDB model_config settings."""
-        assert DatabricksConfigInDB.model_config["from_attributes"] is True
-        assert DatabricksConfigInDB.model_config["populate_by_name"] is True
-
-    def test_missing_required_db_fields(self):
-        """Test validation with missing required DB fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            DatabricksConfigInDB(
-                workspace_url="https://example.com",
-                warehouse_id="wh123",
-            )
-
-        errors = exc_info.value.errors()
-        missing_field_locs = [e["loc"][0] for e in errors if e["type"] == "missing"]
-        assert "id" in missing_field_locs
-        assert "is_active" in missing_field_locs
-        assert "created_at" in missing_field_locs
-        assert "updated_at" in missing_field_locs
-
-    def test_datetime_string_parsing(self):
-        """Test DatabricksConfigInDB with datetime string values."""
-        config = DatabricksConfigInDB(
-            id=2,
-            is_active=True,
-            created_at="2024-01-01T12:00:00",
-            updated_at="2024-01-01T12:30:00",
-        )
-        assert config.id == 2
-        assert isinstance(config.created_at, datetime)
-        assert isinstance(config.updated_at, datetime)
-
-
 class TestDatabricksConfigResponse:
     """Test cases for DatabricksConfigResponse schema."""
 
@@ -355,49 +239,3 @@ class TestDatabricksTokenStatus:
             message="Test",
         )
         assert status_false.personal_token_required is False
-
-
-class TestSchemaLifecycleIntegration:
-    """Integration tests for the schema lifecycle."""
-
-    def test_create_update_response_workflow(self):
-        """Test the full create -> update -> response workflow."""
-        # Create disabled first
-        create = DatabricksConfigCreate(enabled=False)
-        assert create.enabled is False
-
-        # Update to enabled
-        update = DatabricksConfigUpdate(
-            workspace_url="https://example.com",
-            warehouse_id="abc123",
-            catalog="production",
-            schema="main",
-            enabled=True,
-        )
-        assert update.enabled is True
-
-        # Simulate DB record
-        now = datetime.now()
-        db_config = DatabricksConfigInDB(
-            id=1,
-            workspace_url=update.workspace_url,
-            warehouse_id=update.warehouse_id,
-            catalog=update.catalog,
-            schema=update.db_schema,
-            enabled=update.enabled,
-            is_active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        assert db_config.id == 1
-
-        # Build response
-        response = DatabricksConfigResponse(
-            workspace_url=db_config.workspace_url,
-            warehouse_id=db_config.warehouse_id,
-            catalog=db_config.catalog,
-            schema=db_config.db_schema,
-            enabled=db_config.enabled,
-        )
-        assert response.workspace_url == "https://example.com"
-        assert response.enabled is True

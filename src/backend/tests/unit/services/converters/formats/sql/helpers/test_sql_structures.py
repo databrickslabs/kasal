@@ -10,11 +10,9 @@ import pytest
 from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.formats.sql.helpers.sql_structures import (
     SQLStructureExpander,
-    SQLTimeIntelligenceHelper,
 )
 from src.services.converters.formats.sql.models import (
     SQLDialect,
-    SQLStructure,
     SQLTranslationOptions,
 )
 
@@ -245,131 +243,6 @@ class TestSQLStructureExpander:
 
         assert result is not None
         assert len(result.sql_measures) == 0
-
-
-class TestSQLTimeIntelligenceHelper:
-    """Tests for SQLTimeIntelligenceHelper class"""
-
-    @pytest.fixture
-    def standard_helper(self):
-        """Create helper with STANDARD dialect"""
-        return SQLTimeIntelligenceHelper(dialect=SQLDialect.STANDARD)
-
-    @pytest.fixture
-    def databricks_helper(self):
-        """Create helper with DATABRICKS dialect"""
-        return SQLTimeIntelligenceHelper(dialect=SQLDialect.DATABRICKS)
-
-    # ========== Initialization Tests ==========
-
-    def test_helper_initialization_standard(self, standard_helper):
-        """Test helper initializes with STANDARD dialect"""
-        assert standard_helper.dialect == SQLDialect.STANDARD
-
-    def test_helper_initialization_databricks(self, databricks_helper):
-        """Test helper initializes with DATABRICKS dialect"""
-        assert databricks_helper.dialect == SQLDialect.DATABRICKS
-
-    # ========== YTD Structure Tests ==========
-
-    def test_create_ytd_sql_structure(self, standard_helper):
-        """Test creating YTD SQL structure"""
-        result = standard_helper.create_ytd_sql_structure()
-
-        assert isinstance(result, SQLStructure)
-        assert result.description is not None
-        assert (
-            "ytd" in result.description.lower() or "year" in result.description.lower()
-        )
-
-    def test_create_ytd_sql_structure_custom_date_column(self, standard_helper):
-        """Test creating YTD structure with custom date column"""
-        result = standard_helper.create_ytd_sql_structure(
-            date_column="transaction_date"
-        )
-
-        assert isinstance(result, SQLStructure)
-        # Check that custom date column is used
-        if result.sql_template:
-            assert (
-                "transaction_date" in result.sql_template
-                or result.date_column == "transaction_date"
-            )
-
-    # ========== YTG Structure Tests ==========
-
-    def test_create_ytg_sql_structure(self, standard_helper):
-        """Test creating YTG (Year to Go) SQL structure"""
-        result = standard_helper.create_ytg_sql_structure()
-
-        assert isinstance(result, SQLStructure)
-        assert result.description is not None
-
-    def test_create_ytg_sql_structure_custom_date_column(self, standard_helper):
-        """Test creating YTG structure with custom date column"""
-        result = standard_helper.create_ytg_sql_structure(date_column="order_date")
-
-        assert isinstance(result, SQLStructure)
-
-    # ========== Prior Year Structure Tests ==========
-
-    def test_create_prior_year_sql_structure(self, standard_helper):
-        """Test creating prior year SQL structure"""
-        result = standard_helper.create_prior_year_sql_structure()
-
-        assert isinstance(result, SQLStructure)
-        assert result.description is not None
-        assert (
-            "prior" in result.description.lower()
-            or "previous" in result.description.lower()
-            or "year" in result.description.lower()
-        )
-
-    def test_create_prior_year_custom_date_column(self, standard_helper):
-        """Test creating prior year structure with custom date column"""
-        result = standard_helper.create_prior_year_sql_structure(
-            date_column="fiscal_date"
-        )
-
-        assert isinstance(result, SQLStructure)
-
-    # ========== Variance Structure Tests ==========
-
-    def test_create_variance_sql_structure(self, standard_helper):
-        """Test creating variance SQL structure"""
-        base_measures = ["actual", "budget"]
-        result = standard_helper.create_variance_sql_structure(base_measures)
-
-        assert isinstance(result, SQLStructure)
-        assert result.description is not None
-        assert (
-            "variance" in result.description.lower()
-            or "difference" in result.description.lower()
-        )
-
-    def test_create_variance_empty_measures(self, standard_helper):
-        """Test creating variance structure with empty measures list"""
-        result = standard_helper.create_variance_sql_structure([])
-
-        assert isinstance(result, SQLStructure)
-
-    # ========== Databricks Dialect Tests ==========
-
-    def test_ytd_structure_databricks(self, databricks_helper):
-        """Test YTD structure with Databricks dialect"""
-        result = databricks_helper.create_ytd_sql_structure()
-
-        assert isinstance(result, SQLStructure)
-        # Databricks-specific checks if template is generated
-        if result.sql_template:
-            # Databricks uses backticks for identifiers
-            assert "`" in result.sql_template or result.sql_template != ""
-
-    def test_prior_year_structure_databricks(self, databricks_helper):
-        """Test prior year structure with Databricks dialect"""
-        result = databricks_helper.create_prior_year_sql_structure()
-
-        assert isinstance(result, SQLStructure)
 
 
 class TestIntegration:

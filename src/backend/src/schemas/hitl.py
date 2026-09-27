@@ -115,24 +115,6 @@ class HITLApprovalBase(BaseModel):
     )
 
 
-class HITLApprovalCreate(HITLApprovalBase):
-    """Schema for creating an HITL approval request."""
-
-    gate_config: HITLGateConfig = Field(
-        default_factory=HITLGateConfig, description="Gate configuration"
-    )
-    previous_crew_name: Optional[str] = Field(
-        default=None, description="Name of the crew that completed before this gate"
-    )
-    previous_crew_output: Optional[str] = Field(
-        default=None, description="Output from the previous crew for review"
-    )
-    flow_state_snapshot: Optional[Dict[str, Any]] = Field(
-        default=None, description="State of the flow at the gate point"
-    )
-    group_id: str = Field(..., description="Group ID for multi-tenant isolation")
-
-
 class HITLApprovalResponse(HITLApprovalBase):
     """Schema for HITL approval response."""
 
@@ -373,15 +355,3 @@ class HITLWebhookPayload(BaseModel):
 # =============================================================================
 # Flow Node Configuration Schema (for frontend)
 # =============================================================================
-
-
-class HITLGateNodeData(BaseModel):
-    """Schema for HITL gate node data in flow editor."""
-
-    label: str = Field(default="HITL Gate", description="Node label")
-    nodetype: str = Field(default="hitlGateNode", description="Node type identifier")
-    gate_config: HITLGateConfig = Field(
-        default_factory=HITLGateConfig, description="Gate configuration"
-    )
-
-    model_config = ConfigDict(extra="allow")

@@ -150,10 +150,6 @@ class EnvVar(BaseModel):
     default: str | None = None
 
 
-class ToolUsageLimitExceededError(Exception):
-    """Raised when a tool has reached its maximum usage limit."""
-
-
 def _format_tool_output_for_agent(tool: Any, raw_result: Any) -> str:
     original_tool = getattr(tool, "_original_tool", None)
     if original_tool is not None:

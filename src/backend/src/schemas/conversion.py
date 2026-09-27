@@ -320,13 +320,6 @@ class ConversionHistoryFilter(BaseModel):
     offset: int = Field(default=0, ge=0, description="Offset for pagination")
 
 
-class ConversionJobFilter(BaseModel):
-    """Schema for filtering conversion jobs"""
-
-    status: Optional[str] = Field(None, description="Filter by status")
-    limit: int = Field(default=50, ge=1, le=500, description="Number of results")
-
-
 class SavedConfigurationFilter(BaseModel):
     """Schema for filtering saved configurations"""
 

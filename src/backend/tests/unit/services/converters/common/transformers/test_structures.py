@@ -9,7 +9,6 @@ import pytest
 from src.services.converters.base.models import KPI, KPIDefinition, Structure
 from src.services.converters.common.transformers.structures import (
     StructureExpander,
-    TimeIntelligenceHelper,
 )
 
 
@@ -308,133 +307,8 @@ class TestStructureExpander:
         # Note: actual filter combination behavior depends on structure type
         assert isinstance(combined_kpi.filters, list)
 
-
-class TestTimeIntelligenceHelper:
-    """Tests for TimeIntelligenceHelper class"""
-
-    # ========== YTD Structure Tests ==========
-
-    def test_create_ytd_structure(self):
-        """Test creating Year-to-Date structure"""
-        ytd = TimeIntelligenceHelper.create_ytd_structure()
-
-        assert isinstance(ytd, Structure)
-        assert ytd.description == "Year to Date"
-        assert ytd.display_sign == 1
-
-        # NOTE: Due to alias='filter' in Structure model, filters parameter is ignored
-        # This is a known issue in the source code
-        assert ytd.filters == []
-
-    def test_ytd_structure_basic_properties(self):
-        """Test YTD structure basic properties"""
-        ytd = TimeIntelligenceHelper.create_ytd_structure()
-
-        # Should be properly structured even without filters
-        assert ytd.description is not None
-        assert isinstance(ytd.filters, list)
-
-    # ========== YTG Structure Tests ==========
-
-    def test_create_ytg_structure(self):
-        """Test creating Year-to-Go structure"""
-        ytg = TimeIntelligenceHelper.create_ytg_structure()
-
-        assert isinstance(ytg, Structure)
-        assert ytg.description == "Year to Go"
-        assert ytg.display_sign == 1
-        # NOTE: Filters empty due to alias issue
-        assert ytg.filters == []
-
-    # ========== PY Structure Tests ==========
-
-    def test_create_py_structure(self):
-        """Test creating Prior Year structure"""
-        py = TimeIntelligenceHelper.create_py_structure()
-
-        assert isinstance(py, Structure)
-        assert py.description == "Prior Year"
-        assert py.display_sign == 1
-        # NOTE: Filters empty due to alias issue
-        assert py.filters == []
-
-    # ========== Combined Structure Tests ==========
-
-    def test_create_act_plus_forecast_structure(self):
-        """Test creating combined Actuals + Forecast structure"""
-        act_fcst = TimeIntelligenceHelper.create_act_plus_forecast_structure()
-
-        assert isinstance(act_fcst, Structure)
-        assert act_fcst.description == "Actuals + Forecast"
-        assert act_fcst.display_sign == 1
-        assert act_fcst.formula is not None
-
-    def test_act_plus_forecast_has_formula(self):
-        """Test combined structure contains formula reference"""
-        act_fcst = TimeIntelligenceHelper.create_act_plus_forecast_structure()
-
-        # Should have formula combining two components
-        assert act_fcst.formula is not None
-        assert "ytd" in act_fcst.formula.lower() or "ytg" in act_fcst.formula.lower()
-
-    def test_act_plus_forecast_no_filters(self):
-        """Test combined structure relies on formula, not direct filters"""
-        act_fcst = TimeIntelligenceHelper.create_act_plus_forecast_structure()
-
-        # Combined structure uses formula, not direct filters
-        assert len(act_fcst.filters) == 0
-
-    # ========== Integration Tests ==========
-
-    def test_time_intelligence_structures_compatible_with_expander(self):
-        """Test that TimeIntelligenceHelper structures work with StructureExpander"""
-        expander = StructureExpander()
-
-        structures = {
-            "YTD": TimeIntelligenceHelper.create_ytd_structure(),
-            "PY": TimeIntelligenceHelper.create_py_structure(),
-        }
-
-        kpis = [
-            KPI(
-                description="Revenue",
-                technical_name="revenue",
-                formula="SUM(revenue.amount)",
-                apply_structures=["YTD", "PY"],
-            )
-        ]
-
-        definition = KPIDefinition(
-            description="Revenue Analysis",
-            technical_name="revenue_analysis",
-            structures=structures,
-            kpis=kpis,
-        )
-
-        result = expander.process_definition(definition)
-
-        # Should successfully expand with time intelligence structures
-        assert len(result.kpis) == 2
-        assert "revenue_YTD" in {kpi.technical_name for kpi in result.kpis}
-        assert "revenue_PY" in {kpi.technical_name for kpi in result.kpis}
-
-    def test_all_time_intelligence_structures_are_valid(self):
-        """Test all time intelligence structures are properly formed"""
-        structures = [
-            TimeIntelligenceHelper.create_ytd_structure(),
-            TimeIntelligenceHelper.create_ytg_structure(),
-            TimeIntelligenceHelper.create_py_structure(),
-            TimeIntelligenceHelper.create_act_plus_forecast_structure(),
-        ]
-
-        for struct in structures:
-            # All should be valid Structure objects
-            assert isinstance(struct, Structure)
-            assert struct.description is not None
-            assert struct.display_sign in [1, -1]
-
-            # NOTE: Due to alias issue, only act_plus_forecast has formula
-            # Others have empty filters (bug in source code)
+        # NOTE: Due to alias issue, only act_plus_forecast has formula
+        # Others have empty filters (bug in source code)
 
 
 # ── Additional coverage: get_structure_dependencies, validate_structures ──────

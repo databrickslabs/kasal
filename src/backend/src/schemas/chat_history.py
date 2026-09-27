@@ -66,20 +66,6 @@ class ChatHistoryCreate(ChatHistoryBase):
         return self
 
 
-# Properties to receive on chat message update
-class ChatHistoryUpdate(BaseModel):
-    """Schema for updating a chat message."""
-
-    content: Optional[str] = Field(
-        None, description="Updated message content (may be empty)"
-    )
-    intent: Optional[str] = Field(None, description="Updated intent")
-    confidence: Optional[str] = Field(None, description="Updated confidence score")
-    generation_result: Optional[Dict[str, Any]] = Field(
-        None, description="Updated generation result"
-    )
-
-
 # Properties shared by models stored in DB
 class ChatHistoryInDBBase(ChatHistoryBase):
     """Base schema for ChatHistory models in database."""
@@ -97,13 +83,6 @@ class ChatHistoryInDBBase(ChatHistoryBase):
 # Properties to return to client
 class ChatHistoryResponse(ChatHistoryInDBBase):
     """Schema for ChatHistory API responses."""
-
-    pass
-
-
-# Properties stored in DB
-class ChatHistoryInDB(ChatHistoryInDBBase):
-    """Schema for ChatHistory stored in database."""
 
     pass
 
@@ -176,20 +155,6 @@ class SaveMessageRequest(BaseModel):
     def _check_content_or_payload(self):
         _require_content_or_payload(self.content, self.generation_result)
         return self
-
-
-class GetSessionRequest(BaseModel):
-    """Schema for getting chat session messages."""
-
-    page: int = Field(0, ge=0, description="Page number (0-based)")
-    per_page: int = Field(50, ge=1, le=100, description="Messages per page")
-
-
-class GetUserSessionsRequest(BaseModel):
-    """Schema for getting user chat sessions."""
-
-    page: int = Field(0, ge=0, description="Page number (0-based)")
-    per_page: int = Field(20, ge=1, le=50, description="Sessions per page")
 
 
 class UpdateMessageRequest(BaseModel):

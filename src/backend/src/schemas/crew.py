@@ -387,13 +387,6 @@ class Task(BaseModel):
     )
 
 
-class CrewGenerationResponse(BaseModel):
-    """Response schema for crew generation."""
-
-    agents: List[Agent] = Field(..., description="List of agents in the crew")
-    tasks: List[Task] = Field(..., description="List of tasks for the crew")
-
-
 class CrewCreationResponse(BaseModel):
     """Response schema for crew creation with database entities."""
 

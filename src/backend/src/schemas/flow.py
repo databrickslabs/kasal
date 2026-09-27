@@ -107,15 +107,6 @@ class StateConfig(BaseModel):
     initialValues: Optional[Dict[str, Any]] = None
 
 
-class PersistenceConfig(BaseModel):
-    """Configuration for flow persistence."""
-
-    enabled: bool = False
-    level: Literal["class", "method", "none"] = "none"
-    backend: Literal["sqlite", "custom"] = "sqlite"
-    path: Optional[str] = None
-
-
 class Edge(BaseModel):
     """An edge in the flow diagram representing a connection between nodes."""
 

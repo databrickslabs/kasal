@@ -11,7 +11,6 @@ from src.services.converters.formats.sql.models import (
     SQLAggregationType,
     SQLDefinition,
     SQLDialect,
-    SQLJoinType,
     SQLMeasure,
     SQLQuery,
     SQLTranslationOptions,
@@ -41,17 +40,6 @@ class TestSQLAggregationType:
     def test_all_values_are_strings(self):
         for agg in SQLAggregationType:
             assert isinstance(agg.value, str)
-
-
-class TestSQLJoinType:
-    def test_inner_join(self):
-        assert SQLJoinType.INNER.value == "INNER JOIN"
-
-    def test_left_join(self):
-        assert SQLJoinType.LEFT.value == "LEFT JOIN"
-
-    def test_full_outer_join(self):
-        assert SQLJoinType.FULL.value == "FULL OUTER JOIN"
 
 
 class TestSQLQuery:

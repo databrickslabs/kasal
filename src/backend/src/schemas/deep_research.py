@@ -24,7 +24,7 @@ parse gate, which can only say the JSON did not validate. Specific feedback is
 the whole reason a retry does better than the first attempt.
 """
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -115,15 +115,3 @@ class GateRequirement(BaseModel):
     matches: Optional[str] = Field(
         default=None, description="Regex the value must match."
     )
-
-
-class GateRule(BaseModel):
-    """A task's acceptance rule.
-
-    ``on_fail`` is per task on purpose: ``retry`` for investigation work,
-    ``degrade`` for anything the run can survive without, ``halt`` for a task
-    whose failure makes everything downstream meaningless.
-    """
-
-    require: List[GateRequirement] = Field(default_factory=list)
-    on_fail: Literal["retry", "degrade", "halt"] = "retry"

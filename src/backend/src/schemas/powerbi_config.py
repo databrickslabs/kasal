@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -54,27 +53,6 @@ class PowerBIConfigCreate(PowerBIConfigBase):
         return self
 
 
-class PowerBIConfigUpdate(PowerBIConfigBase):
-    """Schema for updating Power BI configuration."""
-
-    tenant_id: Optional[str] = None
-    client_id: Optional[str] = None
-    workspace_id: Optional[str] = None
-    semantic_model_id: Optional[str] = None
-    enabled: Optional[bool] = None
-
-
-class PowerBIConfigInDB(PowerBIConfigBase):
-    """Base schema for Power BI configuration in the database."""
-
-    id: int
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True, "populate_by_name": True}
-
-
 class PowerBIConfigResponse(PowerBIConfigBase):
     """Schema for Power BI configuration response."""
 
@@ -110,24 +88,3 @@ class DAXQueryResponse(BaseModel):
     execution_time_ms: Optional[int] = Field(
         None, description="Query execution time in milliseconds"
     )
-
-
-class DAXAnalysisRequest(BaseModel):
-    """Schema for DAX analysis request with questions."""
-
-    dashboard_id: str = Field(..., description="Power BI dashboard/semantic model ID")
-    questions: List[str] = Field(..., description="Business questions to analyze")
-    workspace_id: Optional[str] = Field(
-        None, description="Workspace ID (uses default if not provided)"
-    )
-
-
-class DAXAnalysisResponse(BaseModel):
-    """Schema for DAX analysis response."""
-
-    status: str = Field(..., description="Analysis status: 'success' or 'error'")
-    dashboard_id: str = Field(..., description="Dashboard/semantic model analyzed")
-    questions: List[str] = Field(..., description="Questions that were analyzed")
-    dax_statement: Optional[str] = Field(None, description="Generated DAX statement")
-    results: Optional[dict] = Field(None, description="Analysis results and insights")
-    error: Optional[str] = Field(None, description="Error message if analysis failed")

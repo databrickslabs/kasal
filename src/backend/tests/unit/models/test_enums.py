@@ -14,9 +14,6 @@ from src.models.enums import (
     GroupUserRole,
     GroupUserStatus,
     IdentityProviderType,
-    TenantStatus,
-    TenantUserRole,
-    TenantUserStatus,
     UserRole,
     UserStatus,
 )
@@ -147,72 +144,6 @@ class TestGroupUserStatus:
         expected_values = {"active", "inactive", "suspended"}
         actual_values = {status.value for status in GroupUserStatus}
         assert actual_values == expected_values
-
-
-class TestTenantStatus:
-    """Test cases for TenantStatus enum (legacy)."""
-
-    def test_tenant_status_values(self):
-        """Test TenantStatus enum values."""
-        assert TenantStatus.ACTIVE == "active"
-        assert TenantStatus.SUSPENDED == "suspended"
-        assert TenantStatus.ARCHIVED == "archived"
-
-    def test_tenant_status_backward_compatibility(self):
-        """Test TenantStatus backward compatibility with GroupStatus."""
-        # Should have same values as GroupStatus
-        assert TenantStatus.ACTIVE == GroupStatus.ACTIVE
-        assert TenantStatus.SUSPENDED == GroupStatus.SUSPENDED
-        assert TenantStatus.ARCHIVED == GroupStatus.ARCHIVED
-
-    def test_tenant_status_is_string_enum(self):
-        """Test that TenantStatus inherits from str and Enum."""
-        assert issubclass(TenantStatus, str)
-        assert issubclass(TenantStatus, Enum)
-
-
-class TestTenantUserRole:
-    """Test cases for TenantUserRole enum (legacy)."""
-
-    def test_tenant_user_role_values(self):
-        """Test TenantUserRole enum values."""
-        assert TenantUserRole.ADMIN == "admin"
-        assert TenantUserRole.EDITOR == "editor"
-        assert TenantUserRole.OPERATOR == "operator"
-
-    def test_tenant_user_role_backward_compatibility(self):
-        """Test TenantUserRole backward compatibility with GroupUserRole."""
-        # Should have same values as GroupUserRole
-        assert TenantUserRole.ADMIN == GroupUserRole.ADMIN
-        assert TenantUserRole.EDITOR == GroupUserRole.EDITOR
-        assert TenantUserRole.OPERATOR == GroupUserRole.OPERATOR
-
-    def test_tenant_user_role_is_string_enum(self):
-        """Test that TenantUserRole inherits from str and Enum."""
-        assert issubclass(TenantUserRole, str)
-        assert issubclass(TenantUserRole, Enum)
-
-
-class TestTenantUserStatus:
-    """Test cases for TenantUserStatus enum (legacy)."""
-
-    def test_tenant_user_status_values(self):
-        """Test TenantUserStatus enum values."""
-        assert TenantUserStatus.ACTIVE == "active"
-        assert TenantUserStatus.INACTIVE == "inactive"
-        assert TenantUserStatus.SUSPENDED == "suspended"
-
-    def test_tenant_user_status_backward_compatibility(self):
-        """Test TenantUserStatus backward compatibility with GroupUserStatus."""
-        # Should have same values as GroupUserStatus
-        assert TenantUserStatus.ACTIVE == GroupUserStatus.ACTIVE
-        assert TenantUserStatus.INACTIVE == GroupUserStatus.INACTIVE
-        assert TenantUserStatus.SUSPENDED == GroupUserStatus.SUSPENDED
-
-    def test_tenant_user_status_is_string_enum(self):
-        """Test that TenantUserStatus inherits from str and Enum."""
-        assert issubclass(TenantUserStatus, str)
-        assert issubclass(TenantUserStatus, Enum)
 
 
 class TestIdentityProviderType:
@@ -347,41 +278,3 @@ class TestEnumUsagePatterns:
         # Repr should include enum information
         assert "UserRole" in repr(role)
         assert "admin" in repr(role)
-
-
-class TestBackwardCompatibility:
-    """Test cases for backward compatibility between old and new enums."""
-
-    def test_group_tenant_status_compatibility(self):
-        """Test that Group and Tenant status enums are compatible."""
-        # All values should be identical
-        for group_status in GroupStatus:
-            tenant_status = TenantStatus(group_status.value)
-            assert group_status.value == tenant_status.value
-
-    def test_group_tenant_user_role_compatibility(self):
-        """Test that Group and Tenant user role enums are compatible."""
-        # All values should be identical
-        for group_role in GroupUserRole:
-            tenant_role = TenantUserRole(group_role.value)
-            assert group_role.value == tenant_role.value
-
-    def test_group_tenant_user_status_compatibility(self):
-        """Test that Group and Tenant user status enums are compatible."""
-        # All values should be identical
-        for group_status in GroupUserStatus:
-            tenant_status = TenantUserStatus(group_status.value)
-            assert group_status.value == tenant_status.value
-
-    def test_migration_safety(self):
-        """Test that migration from tenant to group enums is safe."""
-        # Code using tenant enums should work with group enum values
-        tenant_active = TenantStatus.ACTIVE
-        group_active = GroupStatus.ACTIVE
-
-        # Should be able to compare across enum types via string values
-        assert tenant_active.value == group_active.value
-        # Compare just the values, not the full string representation which includes class name
-        assert tenant_active.value == group_active.value
-        assert tenant_active == "active"
-        assert group_active == "active"
