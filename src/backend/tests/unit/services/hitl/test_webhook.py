@@ -559,32 +559,6 @@ class TestNotificationPublicMethods:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_send_gate_approved_notification(self, service):
-        approval = _make_approval()
-        with patch.object(
-            service, "_send_notification", new_callable=AsyncMock, return_value=True
-        ) as mock_notify:
-            await service.send_gate_approved_notification(approval)
-
-        mock_notify.assert_called_once_with(
-            approval=approval,
-            event=HITLWebhookEventEnum.GATE_APPROVED,
-        )
-
-    @pytest.mark.asyncio
-    async def test_send_gate_rejected_notification(self, service):
-        approval = _make_approval()
-        with patch.object(
-            service, "_send_notification", new_callable=AsyncMock, return_value=False
-        ) as mock_notify:
-            await service.send_gate_rejected_notification(approval)
-
-        mock_notify.assert_called_once_with(
-            approval=approval,
-            event=HITLWebhookEventEnum.GATE_REJECTED,
-        )
-
-    @pytest.mark.asyncio
     async def test_send_gate_timeout_notification(self, service):
         approval = _make_approval()
         with patch.object(

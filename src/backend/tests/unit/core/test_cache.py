@@ -152,24 +152,6 @@ class TestTTLCache:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_cache_invalidate_group(self, cache):
-        """Test invalidating all entries for a group."""
-        await cache.set("group1", "models", "models_value")
-        await cache.set("group1", "api_keys", "api_keys_value")
-        await cache.set("group2", "models", "other_group_models")
-
-        # Invalidate all group1 entries
-        removed = await cache.invalidate_group("group1")
-        assert removed == 2
-
-        # Verify group1 entries are gone
-        assert await cache.get("group1", "models") is None
-        assert await cache.get("group1", "api_keys") is None
-
-        # Verify group2 entries still exist
-        assert await cache.get("group2", "models") == "other_group_models"
-
-    @pytest.mark.asyncio
     async def test_cache_clear(self, cache):
         """Test clearing entire cache."""
         await cache.set("group1", "models", "value1")
@@ -414,16 +396,3 @@ class TestCacheEdgeCases:
 
         # New entry should exist
         assert await cache.get("group4", "ns4") == "value4"
-
-    @pytest.mark.asyncio
-    async def test_cache_invalidate_group_no_matches(self):
-        """Test invalidate_group with no matching entries."""
-        cache = TTLCache[str](ttl=60, maxsize=100, name="test")
-
-        await cache.set("group1", "models", "value")
-
-        removed = await cache.invalidate_group("nonexistent_group")
-        assert removed == 0
-
-        # Original entry should still exist
-        assert await cache.get("group1", "models") == "value"

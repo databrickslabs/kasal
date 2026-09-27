@@ -253,33 +253,6 @@ class FlowExecutionService:
 
         return execution
 
-    async def update_execution_config(
-        self, execution_id: int, config: Dict[str, Any]
-    ) -> ExecutionHistory:
-        """
-        Update the configuration/state of a flow execution.
-
-        This method is used to persist flow state during execution.
-
-        Args:
-            execution_id: ID of the execution
-            config: Updated configuration/state data
-
-        Returns:
-            Updated ExecutionHistory instance
-        """
-        logger.debug(f"Updating execution {execution_id} config")
-
-        execution = await self.get_execution(execution_id)
-        if not execution:
-            raise ValueError(f"Execution {execution_id} not found")
-
-        execution.inputs = config
-        await self.session.commit()
-        await self.execution_service.reload_run(execution)
-
-        return execution
-
     async def delete_execution(self, execution_id: int) -> bool:
         """
         Delete a flow execution.

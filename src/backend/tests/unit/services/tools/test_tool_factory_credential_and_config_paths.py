@@ -484,29 +484,6 @@ class TestPowerBIJSONFieldParsing:
 # ─── cleanup_after_crew_execution ────────────────────────────────────────────
 
 
-class TestCleanupAfterCrewExecution:
-
-    @pytest.mark.asyncio
-    async def test_runs_in_running_event_loop(self):
-        """cleanup_after_crew_execution called when event loop is running."""
-        f = _make_factory()
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock):
-            await f.cleanup_after_crew_execution()
-
-    @pytest.mark.asyncio
-    async def test_handles_exception_gracefully(self):
-        """cleanup_after_crew_execution handles exceptions without raising."""
-        f = _make_factory()
-        with patch.object(
-            f,
-            "_load_available_tools_async",
-            new_callable=AsyncMock,
-            side_effect=Exception("Load fail"),
-        ):
-            # Should not propagate
-            await f.cleanup_after_crew_execution()
-
-
 # ─── _sync_load_available_tools ───────────────────────────────────────────────
 
 
@@ -637,27 +614,6 @@ class TestUpdateToolConfigAsync:
                 tool_info=info,
                 config_update={"updated": "val"},
             )
-
-        assert result is True
-
-    def test_update_tool_config_with_found_tool_via_new_loop(self):
-        """update_tool_config finds tool, creates new loop and calls async update."""
-        f = _make_factory()
-        info = _tool_info("SomeTool", 77, {})
-        f._available_tools["SomeTool"] = info
-
-        # Patch asyncio.get_running_loop to raise RuntimeError (no running loop)
-        # so it falls into the "create new loop" branch
-        with (
-            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
-            patch.object(
-                f,
-                "_update_tool_config_async",
-                new_callable=AsyncMock,
-                return_value=True,
-            ),
-        ):
-            result = f.update_tool_config("SomeTool", {"k": "v"})
 
         assert result is True
 
@@ -1040,35 +996,6 @@ class TestSerperDevToolWithApiKeysService:
 
 
 # ─── update_tool_config in running event loop ────────────────────────────────
-
-
-class TestUpdateToolConfigRunningLoop:
-
-    def test_update_tool_config_in_running_loop(self):
-        """update_tool_config uses thread pool when already in event loop."""
-        f = _make_factory()
-        info = _tool_info("TestTool", 10, {})
-        f._available_tools["TestTool"] = info
-
-        with (
-            patch("asyncio.get_running_loop", return_value=MagicMock()),
-            patch.object(f, "_run_in_new_loop", return_value=True) as mock_run,
-        ):
-            result = f.update_tool_config("TestTool", {"key": "val"})
-
-        assert result is True
-        mock_run.assert_called()
-
-    def test_update_tool_config_exception_returns_false(self):
-        """update_tool_config returns False on exception."""
-        f = _make_factory()
-        info = _tool_info("TestTool", 10, {})
-        f._available_tools["TestTool"] = info
-
-        with patch("asyncio.get_running_loop", side_effect=Exception("loop error")):
-            result = f.update_tool_config("TestTool", {"key": "val"})
-
-        assert result is False
 
 
 # ─── _update_tool_config_async: non-dict config path ─────────────────────────

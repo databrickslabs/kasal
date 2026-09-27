@@ -342,46 +342,6 @@ class TestAgentServiceUpdateWithPartialData:
         mock_repository.update.assert_called_once()
 
 
-class TestAgentServiceUpdateLimitedFields:
-    """Test cases for update_limited_fields method."""
-
-    @pytest.mark.asyncio
-    async def test_update_limited_fields_success(
-        self, agent_service, mock_repository, sample_agent_limited_update
-    ):
-        """Test successful limited fields update."""
-        updated_agent = MockAgent(
-            name=sample_agent_limited_update.name, goal=sample_agent_limited_update.goal
-        )
-        mock_repository.update.return_value = updated_agent
-
-        result = await agent_service.update_limited_fields(
-            "agent-123", sample_agent_limited_update
-        )
-
-        assert result == updated_agent
-        mock_repository.update.assert_called_once()
-        call_args = mock_repository.update.call_args[0]
-        assert call_args[0] == "agent-123"
-        assert call_args[1]["name"] == "Limited Update Agent"
-        assert call_args[1]["goal"] == "Updated goal only"
-
-    @pytest.mark.asyncio
-    async def test_update_limited_fields_no_fields(
-        self, agent_service, mock_repository
-    ):
-        """Test limited update with no fields set."""
-        empty_update = AgentLimitedUpdate()
-        existing_agent = MockAgent()
-        mock_repository.get.return_value = existing_agent
-
-        result = await agent_service.update_limited_fields("agent-123", empty_update)
-
-        assert result == existing_agent
-        mock_repository.update.assert_not_called()
-        mock_repository.get.assert_called_once_with("agent-123")
-
-
 class TestAgentServiceDelete:
     """Test cases for delete method."""
 
@@ -765,27 +725,6 @@ async def test_update_with_group_check_with_tool_configs():
 
 
 # ---- update_limited_fields ----
-
-
-@pytest.mark.asyncio
-async def test_update_limited_fields_with_tool_configs():
-    svc = make_service()
-    agent = make_agent()
-    svc.repository.update = AsyncMock(return_value=agent)
-
-    obj_in = MagicMock()
-    obj_in.model_dump.return_value = {"tool_configs": {"key": "plain"}}
-
-    with patch(
-        "src.services.catalog.agents.encrypt_sensitive_fields",
-        return_value={"key": "enc"},
-    ):
-        with patch(
-            "src.services.catalog.agents.safe_log_tool_configs", return_value="safe"
-        ):
-            with patch.object(svc, "_decrypt_agent_tool_configs", return_value=agent):
-                result = await svc.update_limited_fields("a1", obj_in)
-    assert result is agent
 
 
 # ---- update_limited_with_group_check ----

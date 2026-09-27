@@ -213,27 +213,6 @@ class ApiKeysService(BaseService):
             self._invalidate_pat_cache()
         return deleted
 
-    async def get_all_api_keys(self) -> List[ApiKey]:
-        """
-        Get all API keys with decrypted values for the current group.
-
-        Returns:
-            List of all API keys with decrypted values
-        """
-        api_keys = await self.repository.find_all(group_id=self.group_id)
-
-        # Decrypt values for the response
-        for key in api_keys:
-            try:
-                # Set a plain attribute for the value
-                key.value = EncryptionUtils.decrypt_value(key.encrypted_value)
-            except Exception as e:
-                logger.error(f"Error decrypting API key '{key.name}': {str(e)}")
-                # If decryption fails, set empty value
-                key.value = ""
-
-        return api_keys
-
     async def get_api_keys_metadata(self) -> List[ApiKey]:
         """
         Get all API keys metadata without values for frontend display.

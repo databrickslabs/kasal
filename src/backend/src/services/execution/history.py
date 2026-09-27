@@ -876,34 +876,6 @@ class ExecutionHistoryService:
             )
             raise
 
-    async def mark_checkpoint_resumed(
-        self, execution_id: int, new_execution_id: int
-    ) -> bool:
-        """
-        Mark a checkpoint as resumed when a new execution resumes from it.
-
-        Args:
-            execution_id: ID of the original execution being resumed from
-            new_execution_id: ID of the new execution that's resuming
-
-        Returns:
-            True if successfully updated
-        """
-        try:
-            return await self.history_repo.update_checkpoint_status(
-                execution_id=execution_id, status="resumed"
-            )
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Database error marking checkpoint {execution_id} as resumed: {str(e)}"
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                f"Error marking checkpoint {execution_id} as resumed: {str(e)}"
-            )
-            raise
-
     async def latest_checkpoint_containing(
         self, key: str, *, group_ids: Sequence[str]
     ) -> Optional[dict]:

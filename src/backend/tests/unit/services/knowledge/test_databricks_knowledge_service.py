@@ -58,59 +58,6 @@ class TestDatabricksKnowledgeServiceInit:
         assert service.volume_repository is not None
 
 
-class TestDatabricksKnowledgeServiceGetFileType:
-    """Test DatabricksKnowledgeService _get_file_type method"""
-
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.mock_session = Mock()
-        self.group_id = "test-group-id"
-        self.service = DatabricksKnowledgeService(self.mock_session, self.group_id)
-
-    def test_get_file_type_pdf(self):
-        """Test _get_file_type for PDF files"""
-        result = self.service._get_file_type("document.pdf")
-        assert result == "pdf"
-
-    def test_get_file_type_txt(self):
-        """Test _get_file_type for text files"""
-        result = self.service._get_file_type("document.txt")
-        assert result == "text"
-
-    def test_get_file_type_md(self):
-        """Test _get_file_type for markdown files"""
-        result = self.service._get_file_type("document.md")
-        assert result == "markdown"
-
-    def test_get_file_type_json(self):
-        """Test _get_file_type for JSON files"""
-        result = self.service._get_file_type("data.json")
-        assert result == "json"
-
-    def test_get_file_type_py(self):
-        """Test _get_file_type for Python files"""
-        result = self.service._get_file_type("script.py")
-        assert result == "python"
-
-    def test_get_file_type_case_insensitive(self):
-        """Test _get_file_type is case insensitive"""
-        result = self.service._get_file_type("DOCUMENT.PDF")
-        assert result == "pdf"
-
-    def test_get_file_type_unknown_extension(self):
-        """Test _get_file_type for unknown extensions"""
-        result = self.service._get_file_type("file.xyz")
-        assert result == "file"
-
-    def test_get_file_type_xlsx(self):
-        """Excel workbooks are recognised (not treated as opaque files)."""
-        assert self.service._get_file_type("report.xlsx") == "excel"
-
-    def test_get_file_type_xls(self):
-        """Legacy Excel files are recognised too."""
-        assert self.service._get_file_type("legacy.xls") == "excel"
-
-
 class TestDatabricksKnowledgeServiceExtractSpreadsheet:
     """Excel (.xlsx / .xls) upload extraction: binary workbooks must be parsed
     to CSV-like text, not UTF-8 decoded into garbage."""

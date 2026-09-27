@@ -602,17 +602,6 @@ class WorkflowRecipeService:
             "request takes precedence wherever they differ.\n\n" + "\n\n".join(blocks)
         )
 
-    async def exemplars_for_prompt(
-        self,
-        prompt: str,
-        group_ids: List[str],
-        limit: int = 2,
-    ) -> str:
-        """Just the few-shot text. Thin wrapper over :meth:`prepare_exemplars`
-        for callers that do not record a trial."""
-        decision = await self.prepare_exemplars(prompt, group_ids, limit=limit)
-        return decision.text
-
     # ---------------------------------------------------------------- curation
 
     async def curate(

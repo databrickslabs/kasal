@@ -182,18 +182,6 @@ class UserService:
 
     # Password update removed - using OAuth proxy authentication only
 
-    async def assign_role(self, user_id: str, role: str) -> Optional[User]:
-        """Assign a role to a user"""
-        user = await self.user_repo.get(user_id)
-        if not user:
-            return None
-
-        # Update user's role
-        await self.user_repo.update(user_id, {"role": role})
-
-        # Return updated user
-        return await self.user_repo.get(user_id)
-
     async def ensure_personal_workspace_id(self, user: User) -> str:
         """Allocate the user's personal-workspace id once (audit F06 / R2-06).
 

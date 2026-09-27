@@ -88,36 +88,6 @@ class GenieService:
             # Return empty response on error
             return GenieSpacesResponse(spaces=[])
 
-    async def search_spaces(
-        self,
-        query: Optional[str] = None,
-        page_size: Optional[int] = None,
-        page_token: Optional[str] = None,
-    ) -> GenieSpacesResponse:
-        """
-        Search for Genie spaces by query.
-
-        Args:
-            query: Search query string
-            page_size: Number of items per page
-            page_token: Token for fetching next page
-
-        Returns:
-            GenieSpacesResponse with matching spaces
-        """
-        try:
-            logger.info(f"Searching spaces with query: {query}")
-            request = GenieSpacesRequest(
-                search_query=query,
-                **({"page_size": page_size} if page_size else {}),
-                **({"page_token": page_token} if page_token else {}),
-            )
-            return await self.get_spaces(request)
-
-        except Exception as e:
-            logger.error(f"Error searching spaces: {e}")
-            return GenieSpacesResponse(spaces=[])
-
     async def get_space_details(self, space_id: str) -> Optional[GenieSpace]:
         """
         Get details for a specific Genie space.
@@ -324,28 +294,3 @@ class GenieService:
                 status="FAILED",
                 error=str(e),
             )
-
-    async def validate_space_access(
-        self, space_id: str, auth_config: Optional[GenieAuthConfig] = None
-    ) -> bool:
-        """
-        Validate that the current authentication has access to a space.
-
-        Args:
-            space_id: The space ID to validate
-            auth_config: Optional auth config to use
-
-        Returns:
-            True if access is valid, False otherwise
-        """
-        try:
-            # Try to get space details as a validation check
-            if auth_config:
-                self.repository.auth_config = auth_config
-
-            space = await self.repository.get_space_details(space_id)
-            return space is not None
-
-        except Exception as e:
-            logger.error(f"Error validating space access: {e}")
-            return False

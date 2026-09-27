@@ -370,52 +370,6 @@ class TestTaskServiceUpdateWithPartialData:
         mock_repository.update.assert_called_once()
 
 
-class TestTaskServiceUpdateFull:
-    """Test cases for update_full method."""
-
-    @pytest.mark.asyncio
-    async def test_update_full_success(self, task_service, mock_repository):
-        """Test successful full update."""
-        update_data = {
-            "name": "Fully Updated Task",
-            "description": "Fully updated description",
-            "expected_output": "Fully updated output",
-            "agent_id": "agent-789",
-        }
-        updated_task = MockTask(name="Fully Updated Task")
-        mock_repository.update.return_value = updated_task
-
-        result = await task_service.update_full("task-123", update_data)
-
-        assert result == updated_task
-        mock_repository.update.assert_called_once_with("task-123", update_data)
-
-    @pytest.mark.asyncio
-    async def test_update_full_empty_agent_id(self, task_service, mock_repository):
-        """Test full update with empty agent_id converts to None."""
-        update_data = {"name": "Task", "agent_id": ""}
-        updated_task = MockTask(agent_id=None)
-        mock_repository.update.return_value = updated_task
-
-        result = await task_service.update_full("task-123", update_data)
-
-        assert result == updated_task
-        # Verify the update_data was modified in place
-        assert update_data["agent_id"] is None
-        mock_repository.update.assert_called_once_with("task-123", update_data)
-
-    @pytest.mark.asyncio
-    async def test_update_full_not_found(self, task_service, mock_repository):
-        """Test full update when task is not found."""
-        update_data = {"name": "Updated"}
-        mock_repository.update.return_value = None
-
-        result = await task_service.update_full("non-existent", update_data)
-
-        assert result is None
-        mock_repository.update.assert_called_once()
-
-
 class TestTaskServiceDelete:
     """Test cases for delete method."""
 

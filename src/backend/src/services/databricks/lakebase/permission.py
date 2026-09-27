@@ -206,22 +206,6 @@ class LakebasePermissionService(BaseService):
                 f"Default privilege warning for {user_email} (may be ok): {privilege_error}"
             )
 
-    async def grant_all_permissions_async(
-        self, engine: AsyncEngine, user_email: str
-    ) -> None:
-        """
-        Grant all permissions (schema + default privileges) asynchronously.
-
-        This is a convenience method that combines schema permissions and
-        default privileges in a single call.
-
-        Args:
-            engine: AsyncEngine connected to the Lakebase instance
-            user_email: Email/username of the user to grant permissions to
-        """
-        await self.grant_schema_permissions_async(engine, user_email)
-        await self.grant_default_privileges_async(engine, user_email)
-
     def grant_all_permissions_sync(
         self, connection: Connection, user_email: str
     ) -> None:

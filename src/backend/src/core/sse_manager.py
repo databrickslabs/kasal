@@ -326,20 +326,6 @@ class SSEConnectionManager:
 
         return sent_count
 
-    def get_connection_count(self, job_id: Optional[str] = None) -> int:
-        """
-        Get the number of active SSE connections.
-
-        Args:
-            job_id: Optional job ID to count connections for specific job
-
-        Returns:
-            Number of active connections
-        """
-        if job_id:
-            return len(self.job_queues.get(job_id, set()))
-        return self.connection_count
-
     def get_statistics(self) -> Dict[str, Any]:
         """
         Get statistics about current SSE connections.

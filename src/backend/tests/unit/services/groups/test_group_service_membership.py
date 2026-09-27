@@ -85,118 +85,9 @@ def make_service(session=None):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_ensure_group_exists_no_primary_id():
-    svc = make_service()
-    ctx = SimpleNamespace(
-        primary_group_id=None,
-        primary_tenant_id=None,
-        group_email=None,
-        tenant_email=None,
-    )
-    result = await svc.ensure_group_exists(ctx)
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_exists_already_exists():
-    svc = make_service()
-    existing_group = make_group(id="g1")
-    svc.group_repo.get = AsyncMock(return_value=existing_group)
-
-    ctx = make_context(primary_group_id="g1")
-    result = await svc.ensure_group_exists(ctx)
-    assert result.id == "g1"
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_exists_user_prefix_with_email():
-    svc = make_service()
-    svc.group_repo.get = AsyncMock(return_value=None)
-    created = make_group(id="user_alice")
-    svc.group_repo.add = AsyncMock(return_value=created)
-
-    ctx = make_context(primary_group_id="user_alice", group_email="alice@example.com")
-    result = await svc.ensure_group_exists(ctx)
-    assert result.id == "user_alice"
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_exists_user_prefix_no_email():
-    svc = make_service()
-    svc.group_repo.get = AsyncMock(return_value=None)
-    created = make_group(id="user_bob")
-    svc.group_repo.add = AsyncMock(return_value=created)
-
-    ctx = make_context(primary_group_id="user_bob", group_email=None)
-    result = await svc.ensure_group_exists(ctx)
-    assert result is not None
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_exists_regular_group():
-    svc = make_service()
-    svc.group_repo.get = AsyncMock(return_value=None)
-    created = make_group(id="my_team")
-    svc.group_repo.add = AsyncMock(return_value=created)
-
-    ctx = make_context(primary_group_id="my_team", group_email="team@example.com")
-    result = await svc.ensure_group_exists(ctx)
-    assert result is not None
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_exists_legacy_tenant_context():
-    """Support primary_tenant_id from legacy TenantContext."""
-    svc = make_service()
-    svc.group_repo.get = AsyncMock(return_value=None)
-    created = make_group(id="t1")
-    svc.group_repo.add = AsyncMock(return_value=created)
-
-    ctx = SimpleNamespace(
-        primary_group_id=None,
-        primary_tenant_id="t1",
-        group_email=None,
-        tenant_email="t@example.com",
-    )
-    result = await svc.ensure_group_exists(ctx)
-    assert result is not None
-
-
 # ---------------------------------------------------------------------------
 # ensure_group_user_exists
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_user_exists_no_primary_id():
-    svc = make_service()
-    ctx = SimpleNamespace(primary_group_id=None, primary_tenant_id=None)
-    result = await svc.ensure_group_user_exists(ctx, "user1")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_user_exists_already_exists():
-    svc = make_service()
-    existing_gu = make_group_user()
-    svc.group_user_repo.get_by_group_and_user = AsyncMock(return_value=existing_gu)
-
-    ctx = make_context(primary_group_id="g1")
-    result = await svc.ensure_group_user_exists(ctx, "u1")
-    assert result.id == "gu1"
-
-
-@pytest.mark.asyncio
-async def test_ensure_group_user_exists_creates_new():
-    svc = make_service()
-    svc.group_user_repo.get_by_group_and_user = AsyncMock(return_value=None)
-    new_gu = make_group_user(id="g1_u2")
-    svc.group_user_repo.add = AsyncMock(return_value=new_gu)
-
-    ctx = make_context(primary_group_id="g1")
-    result = await svc.ensure_group_user_exists(ctx, "u2")
-    assert result is not None
 
 
 # ---------------------------------------------------------------------------
@@ -601,63 +492,9 @@ async def test_get_group_stats():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_total_group_count():
-    svc = make_service()
-    svc.group_repo.get_stats = AsyncMock(return_value={"total_groups": 10})
-
-    result = await svc.get_total_group_count()
-    assert result == 10
-
-
-@pytest.mark.asyncio
-async def test_get_total_group_count_missing_key():
-    svc = make_service()
-    svc.group_repo.get_stats = AsyncMock(return_value={})
-
-    result = await svc.get_total_group_count()
-    assert result == 0
-
-
 # ---------------------------------------------------------------------------
 # create_first_admin_group_for_user
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_create_first_admin_group_for_user():
-    svc = make_service()
-
-    user = MagicMock()
-    user.id = "u1"
-    user.email = "admin@example.com"
-
-    created_group = make_group(id="admin_group_admin")
-    created_group.id = "admin_group_admin"
-    svc.group_repo.add = AsyncMock(return_value=created_group)
-
-    new_gu = make_group_user(id="admin_group_admin_u1", role=GroupUserRole.ADMIN)
-    svc.group_user_repo.add = AsyncMock(return_value=new_gu)
-
-    group, group_user = await svc.create_first_admin_group_for_user(user)
-    assert group is not None
-    assert group_user is not None
-
-
-@pytest.mark.asyncio
-async def test_create_first_admin_group_no_at_sign():
-    svc = make_service()
-
-    user = MagicMock()
-    user.id = "u2"
-    user.email = "adminuser"  # no @
-
-    created_group = make_group(id="admin_group_admin")
-    svc.group_repo.add = AsyncMock(return_value=created_group)
-    svc.group_user_repo.add = AsyncMock(return_value=make_group_user())
-
-    group, group_user = await svc.create_first_admin_group_for_user(user)
-    assert group is not None
 
 
 # ---------------------------------------------------------------------------

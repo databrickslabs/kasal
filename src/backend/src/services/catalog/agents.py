@@ -250,34 +250,6 @@ class AgentService(BaseService[Agent, AgentCreate]):
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
 
-    async def update_limited_fields(
-        self, id: str, obj_in: AgentLimitedUpdate
-    ) -> Optional[Agent]:
-        """
-        Update only limited fields of an agent.
-        Encrypts sensitive fields in tool_configs before storage.
-
-        Args:
-            id: ID of the agent to update
-            obj_in: Schema with limited fields to update
-
-        Returns:
-            Updated agent if found, else None (with decrypted tool_configs)
-        """
-        # Exclude unset fields (None) from update
-        update_data = obj_in.model_dump(exclude_none=True)
-        if not update_data:
-            # No fields to update
-            return await self.get(id)
-
-        # Encrypt sensitive fields in tool_configs before storage
-        if "tool_configs" in update_data:
-            logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
-            update_data = self._encrypt_tool_configs_in_data(update_data)
-
-        agent = await self.repository.update(id, update_data)
-        return self._decrypt_agent_tool_configs(agent)
-
     #: The only fields a prompt optimiser may rewrite. An allowlist rather than an
     #: arbitrary dict: this path exists for GEPA, and a typo'd or hostile key must
     #: not be able to reach `enabled`, `tool_configs` or `group_id`.

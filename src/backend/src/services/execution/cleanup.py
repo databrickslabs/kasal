@@ -20,7 +20,7 @@ completion traces and leave every such run stuck at RUNNING forever.
 
 import json
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from src.db.database_router import get_smart_db_session
 from src.models.execution_status import ExecutionStatus
@@ -172,40 +172,3 @@ class ExecutionCleanupService:
             logger.error(f"[ZombieCleanup] Error: {e}", exc_info=True)
 
         return recovered
-
-    @staticmethod
-    async def get_stale_jobs() -> List[str]:
-        """
-        Get list of job IDs that are in active states.
-        Useful for debugging and monitoring.
-
-        Returns:
-            List of job IDs in active states
-        """
-        try:
-            active_statuses = [
-                ExecutionStatus.PENDING.value,
-                ExecutionStatus.PREPARING.value,
-                ExecutionStatus.RUNNING.value,
-            ]
-
-            stale_job_ids = []
-
-            async for db in get_smart_db_session():
-                repo = ExecutionRepository(db)
-
-                stale_jobs, _ = await repo.get_execution_history(
-                    limit=1000,
-                    offset=0,
-                    status_filter=active_statuses,
-                    system_level=True,  # System-level cleanup needs access to all executions
-                )
-
-                # Extract job IDs before closing the session
-                stale_job_ids = [job.job_id for job in stale_jobs]
-
-            return stale_job_ids
-
-        except Exception as e:
-            logger.error(f"Error getting stale jobs: {e}", exc_info=True)
-            return []

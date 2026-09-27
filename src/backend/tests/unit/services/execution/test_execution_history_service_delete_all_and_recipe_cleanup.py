@@ -904,18 +904,6 @@ class TestCheckpointMethods:
         assert result is True
         mock_session.commit.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_mark_checkpoint_resumed(self, service, mock_history_repo):
-        """Test marking a checkpoint as resumed."""
-        mock_history_repo.update_checkpoint_status = AsyncMock(return_value=True)
-
-        result = await service.mark_checkpoint_resumed(1, 2)
-
-        assert result is True
-        mock_history_repo.update_checkpoint_status.assert_called_once_with(
-            execution_id=1, status="resumed"
-        )
-
 
 class TestGetExecutionByJobId:
     """Tests for get_execution_by_job_id method."""

@@ -757,66 +757,6 @@ class ToolFactory:
         finally:
             loop.close()
 
-    def update_tool_config(
-        self, tool_identifier: Union[str, int], config_update: Dict[str, any]
-    ) -> bool:
-        """
-        Update a tool's configuration through the service layer
-
-        Args:
-            tool_identifier: Either the tool's ID (int or str) or title (str)
-            config_update: Dictionary with configuration updates
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Get tool info
-            tool_info = self.get_tool_info(tool_identifier)
-            if not tool_info:
-                logger.error(
-                    f"Tool '{tool_identifier}' not found. Cannot update config."
-                )
-                return False
-
-            # Check if we're already in an event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're here, we're already in an event loop
-                logger.warning(
-                    "Already in event loop, using a workaround to update tool config"
-                )
-                # Create a new thread to run a new event loop
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        self._run_in_new_loop,
-                        self._update_tool_config_async,
-                        tool_identifier,
-                        tool_info,
-                        config_update,
-                    )
-                    return future.result()
-            except RuntimeError:
-                # No running event loop, safe to create a new one
-                loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(loop)
-                    return loop.run_until_complete(
-                        self._update_tool_config_async(
-                            tool_identifier, tool_info, config_update
-                        )
-                    )
-                finally:
-                    loop.close()
-        except Exception as e:
-            logger.error(f"Error updating tool configuration: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return False
-
     async def _update_tool_config_async(
         self, tool_identifier, tool_info, config_update
     ):
@@ -2418,16 +2358,6 @@ class ToolFactory:
             logger.error(traceback.format_exc())
             return None
 
-    def register_tool_implementation(self, tool_name: str, tool_class):
-        """Register a tool implementation class for a given tool name"""
-        self._tool_implementations[tool_name] = tool_class
-        logger.info(f"Registered tool implementation for {tool_name}")
-
-    def register_tool_implementations(self, implementations_dict: Dict[str, object]):
-        """Register multiple tool implementations at once"""
-        self._tool_implementations.update(implementations_dict)
-        logger.info(f"Registered {len(implementations_dict)} tool implementations")
-
     def cleanup(self):
         """
         Clean up resources used by the factory
@@ -2437,50 +2367,3 @@ class ToolFactory:
     def __del__(self):
         """Cleanup resources when the object is garbage collected"""
         self.cleanup()
-
-    async def cleanup_after_crew_execution(self):
-        """
-        Clean up resources after a crew execution.
-        This is intended to be called after a crew has finished its work.
-        """
-        logger.info("Cleaning up resources after crew execution")
-
-        # Make sure we run the cleanup safely with respect to event loops
-        try:
-            # Check if we're already in an event loop
-            try:
-                # We're in an event loop, need to run cleanup carefully
-                asyncio.get_running_loop()
-                logger.info("Running cleanup in existing event loop")
-
-                # Run cleanup in a way that won't block the current event loop
-                from concurrent.futures import ThreadPoolExecutor
-
-                with ThreadPoolExecutor() as pool:
-
-                    def run_cleanup():
-                        try:
-                            self.cleanup()
-                            logger.info("Cleanup completed in background thread")
-                        except Exception as e:
-                            logger.error(
-                                f"Error during cleanup in background thread: {str(e)}"
-                            )
-
-                    # Submit the cleanup task to run in a separate thread
-                    pool.submit(run_cleanup)
-
-            except RuntimeError:
-                # No running event loop, can clean up directly
-                logger.info("Running cleanup directly (no event loop)")
-                self.cleanup()
-
-            # Refresh available tools
-            await self._load_available_tools_async()
-
-            logger.info("Cleanup after crew execution completed")
-        except Exception as e:
-            logger.error(f"Error during cleanup after crew execution: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())

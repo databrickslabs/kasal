@@ -120,24 +120,6 @@ class CrewPreparation:
                 f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}"
             )
 
-    def _should_disable_memory_for_agent(self, agent_config: Dict[str, Any]) -> bool:
-        """
-        Check if memory is explicitly disabled for an agent.
-
-        Args:
-            agent_config: Agent configuration dictionary
-
-        Returns:
-            True if memory is explicitly set to False in the agent config
-        """
-        # Only check if memory is explicitly disabled in agent config
-        if "memory" in agent_config and agent_config["memory"] is False:
-            logger.info(
-                f"Memory explicitly disabled for agent {agent_config.get('name', agent_config.get('role', 'Unknown'))}"
-            )
-            return True
-        return False
-
     async def prepare(self) -> bool:
         """
         Prepare the crew by creating agents and tasks

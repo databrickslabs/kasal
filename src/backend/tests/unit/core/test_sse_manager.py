@@ -281,26 +281,6 @@ class TestSSEConnectionManager:
         assert job_queue.get_nowait() == event
         assert global_queue.get_nowait() == event
 
-    def test_get_connection_count_total(self):
-        """Test getting total connection count."""
-        manager = SSEConnectionManager()
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-2")
-
-        assert manager.get_connection_count() == 3
-
-    def test_get_connection_count_specific_job(self):
-        """Test getting connection count for specific job."""
-        manager = SSEConnectionManager()
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-1")
-        manager.create_event_queue("job-2")
-
-        assert manager.get_connection_count("job-1") == 2
-        assert manager.get_connection_count("job-2") == 1
-        assert manager.get_connection_count("nonexistent") == 0
-
     def test_get_statistics(self):
         """Test getting SSE statistics."""
         manager = SSEConnectionManager()
@@ -714,11 +694,9 @@ class TestGlobalSSEManager:
         assert hasattr(sse_manager, "create_event_queue")
         assert hasattr(sse_manager, "remove_event_queue")
         assert hasattr(sse_manager, "broadcast_to_job")
-        assert hasattr(sse_manager, "get_connection_count")
         assert hasattr(sse_manager, "get_statistics")
 
         assert callable(sse_manager.create_event_queue)
         assert callable(sse_manager.remove_event_queue)
         assert callable(sse_manager.broadcast_to_job)
-        assert callable(sse_manager.get_connection_count)
         assert callable(sse_manager.get_statistics)

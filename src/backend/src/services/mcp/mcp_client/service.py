@@ -72,24 +72,6 @@ class MCPService:
         self.server_repository = MCPServerRepository(session)
         self.settings_repository = MCPSettingsRepository(session)
 
-    async def get_all_servers(self) -> MCPServerListResponse:
-        """
-        Get all MCP servers.
-
-        Returns:
-            MCPServerListResponse with list of all servers and count
-        """
-        servers = await self.server_repository.list()
-        server_responses = []
-
-        for server in servers:
-            server_response = MCPServerResponse.model_validate(server)
-            # Don't include API key in list response
-            server_response.api_key = ""
-            server_responses.append(server_response)
-
-        return MCPServerListResponse(servers=server_responses, count=len(servers))
-
     async def get_all_servers_effective(
         self, group_id: Optional[str], enabled_only: bool = False
     ) -> MCPServerListResponse:
@@ -385,28 +367,6 @@ class MCPService:
             raise BadRequestError(detail="Not a global MCP server")
         updated = await self.server_repository.update(server_id, {"enabled": enabled})
         return self._masked_response(updated)
-
-    async def get_effective_servers(
-        self, explicit_servers: List[str]
-    ) -> List[MCPServerResponse]:
-        """
-        Get effective MCP servers combining global and explicit selections.
-
-        Args:
-            explicit_servers: List of explicitly selected server names
-
-        Returns:
-            List of effective MCPServerResponse objects (global + explicit, deduplicated)
-        """
-        # Get global servers
-        global_response = await self.get_global_servers()
-        global_names = {server.name for server in global_response.servers}
-
-        # Combine global and explicit server names (deduplicated)
-        all_server_names = list(global_names.union(set(explicit_servers)))
-
-        # Get all servers by names
-        return await self.get_servers_by_names(all_server_names)
 
     # ── Ownership ──────────────────────────────────────────────────────────
     # Rows are workspace-owned (``group_id`` set) or base/global (``None``,

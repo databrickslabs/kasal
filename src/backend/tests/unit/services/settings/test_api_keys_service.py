@@ -362,46 +362,6 @@ class TestDeleteApiKey:
 # ===========================================================================
 
 
-class TestGetAllApiKeys:
-    """Tests for get_all_api_keys."""
-
-    @pytest.mark.asyncio
-    async def test_returns_decrypted_keys(self):
-        service, repo = _build_service(group_id="grp_1")
-        key1 = _make_api_key(id=1, name="K1", encrypted_value="enc1")
-        key2 = _make_api_key(id=2, name="K2", encrypted_value="enc2")
-        repo.find_all = AsyncMock(return_value=[key1, key2])
-
-        with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
-            EU.decrypt_value.side_effect = lambda v: f"decrypted_{v}"
-            result = await service.get_all_api_keys()
-
-        repo.find_all.assert_awaited_once_with(group_id="grp_1")
-        assert len(result) == 2
-        assert result[0].value == "decrypted_enc1"
-        assert result[1].value == "decrypted_enc2"
-
-    @pytest.mark.asyncio
-    async def test_returns_empty_list_when_no_keys(self):
-        service, repo = _build_service(group_id="grp_1")
-        repo.find_all = AsyncMock(return_value=[])
-
-        result = await service.get_all_api_keys()
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_sets_empty_value_on_decryption_failure(self):
-        service, repo = _build_service(group_id="grp_1")
-        key = _make_api_key(encrypted_value="bad_enc")
-        repo.find_all = AsyncMock(return_value=[key])
-
-        with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
-            EU.decrypt_value.side_effect = Exception("decrypt fail")
-            result = await service.get_all_api_keys()
-
-        assert result[0].value == ""
-
-
 # ===========================================================================
 # get_api_keys_metadata
 # ===========================================================================
@@ -695,48 +655,6 @@ class TestEdgeCases:
 
             await service.update_api_key("K", ApiKeyUpdate(value="v2"))
             repo.find_by_name.assert_awaited_with("K", group_id="tenant_A")
-
-    @pytest.mark.asyncio
-    async def test_multiple_keys_in_get_all(self):
-        """get_all_api_keys handles many keys without issue."""
-        service, repo = _build_service(group_id="grp_1")
-        keys = [
-            _make_api_key(id=i, name=f"K{i}", encrypted_value=f"e{i}")
-            for i in range(50)
-        ]
-        repo.find_all = AsyncMock(return_value=keys)
-
-        with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
-            EU.decrypt_value.side_effect = lambda v: f"d_{v}"
-            result = await service.get_all_api_keys()
-
-        assert len(result) == 50
-        assert result[0].value == "d_e0"
-        assert result[49].value == "d_e49"
-
-    @pytest.mark.asyncio
-    async def test_mixed_decryption_failures_in_get_all(self):
-        """Some keys decrypt fine, some fail -- service continues."""
-        service, repo = _build_service(group_id="grp_1")
-        keys = [
-            _make_api_key(id=1, name="OK", encrypted_value="good"),
-            _make_api_key(id=2, name="BAD", encrypted_value="bad"),
-            _make_api_key(id=3, name="OK2", encrypted_value="good2"),
-        ]
-        repo.find_all = AsyncMock(return_value=keys)
-
-        def _decrypt(val):
-            if val == "bad":
-                raise Exception("corrupt")
-            return f"plain_{val}"
-
-        with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
-            EU.decrypt_value.side_effect = _decrypt
-            result = await service.get_all_api_keys()
-
-        assert result[0].value == "plain_good"
-        assert result[1].value == ""  # failed decryption
-        assert result[2].value == "plain_good2"
 
     @pytest.mark.asyncio
     async def test_metadata_with_mixed_values(self):

@@ -256,23 +256,6 @@ class TaskService(BaseService[Task, TaskCreate]):
 
         return await self.repository.update(id, update_data)
 
-    async def update_full(self, id: str, obj_in: Dict[str, Any]) -> Optional[Task]:
-        """
-        Update all fields of a task.
-
-        Args:
-            id: ID of the task to update
-            obj_in: Dictionary with all fields to update
-
-        Returns:
-            Updated task if found, else None
-        """
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in obj_in and obj_in["agent_id"] == "":
-            obj_in["agent_id"] = None
-
-        return await self.repository.update(id, obj_in)
-
     async def update_full_with_group_check(
         self, id: str, obj_in: Dict[str, Any], group_context: GroupContext
     ) -> Optional[Task]:

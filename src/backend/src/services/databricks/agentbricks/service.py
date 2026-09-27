@@ -76,30 +76,6 @@ class AgentBricksService:
             # Return empty response on error
             return AgentBricksEndpointsResponse(endpoints=[])
 
-    async def search_endpoints(
-        self, query: Optional[str] = None, ready_only: bool = True
-    ) -> AgentBricksEndpointsResponse:
-        """
-        Search for AgentBricks endpoints by query.
-
-        Args:
-            query: Search query string
-            ready_only: Only return ready endpoints
-
-        Returns:
-            AgentBricksEndpointsResponse with matching endpoints
-        """
-        try:
-            logger.info(f"Searching AgentBricks endpoints with query: {query}")
-            request = AgentBricksEndpointsRequest(
-                search_query=query, ready_only=ready_only
-            )
-            return await self.get_endpoints(request)
-
-        except Exception as e:
-            logger.error(f"Error searching endpoints: {e}")
-            return AgentBricksEndpointsResponse(endpoints=[])
-
     async def get_endpoint_by_name(
         self, endpoint_name: str
     ) -> Optional[AgentBricksEndpoint]:
@@ -227,44 +203,3 @@ class AgentBricksService:
                 status=AgentBricksQueryStatus.FAILED,
                 error=str(e),
             )
-
-    async def validate_endpoint_access(
-        self, endpoint_name: str, auth_config: Optional[AgentBricksAuthConfig] = None
-    ) -> bool:
-        """
-        Validate that the current authentication has access to an endpoint.
-
-        Args:
-            endpoint_name: The endpoint name to validate
-            auth_config: Optional auth config to use
-
-        Returns:
-            True if access is valid, False otherwise
-        """
-        try:
-            # Try to get endpoint details as a validation check
-            if auth_config:
-                self.repository.auth_config = auth_config
-
-            endpoint = await self.get_endpoint_by_name(endpoint_name)
-            return endpoint is not None
-
-        except Exception as e:
-            logger.error(f"Error validating endpoint access: {e}")
-            return False
-
-    async def list_ready_endpoints(self) -> List[AgentBricksEndpoint]:
-        """
-        Get a simple list of all ready AgentBricks endpoints.
-
-        Returns:
-            List of ready AgentBricksEndpoint objects
-        """
-        try:
-            request = AgentBricksEndpointsRequest(ready_only=True)
-            response = await self.repository.get_endpoints(request)
-            return response.endpoints
-
-        except Exception as e:
-            logger.error(f"Error listing ready endpoints: {e}")
-            return []

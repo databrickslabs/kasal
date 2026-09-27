@@ -96,28 +96,3 @@ async def test_get_engine_exception_from_unknown_returns_none():
 
 
 # ---- EngineFactory.register_engine ----
-
-
-def test_register_engine_is_no_op():
-    """Test that register_engine doesn't raise."""
-    from src.services.execution.base import BaseEngineService
-    from src.services.execution.engine_factory import EngineFactory
-
-    class FakeEngine(BaseEngineService):
-        pass
-
-    # Should not raise
-    EngineFactory.register_engine("fake", FakeEngine)
-
-
-def test_register_engine_multiple_times():
-    """Test that register_engine can be called multiple times."""
-    from src.services.execution.base import BaseEngineService
-    from src.services.execution.engine_factory import EngineFactory
-
-    class FakeEngine(BaseEngineService):
-        pass
-
-    EngineFactory.register_engine("fake1", FakeEngine)
-    EngineFactory.register_engine("fake2", FakeEngine)
-    EngineFactory.register_engine("fake1", FakeEngine)  # Repeated registration

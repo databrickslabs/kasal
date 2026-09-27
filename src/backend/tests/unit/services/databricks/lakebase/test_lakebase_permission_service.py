@@ -200,24 +200,6 @@ def test_grant_default_privileges_sync_exception_logged():
 # ---- grant_all_permissions_async ----
 
 
-@pytest.mark.asyncio
-async def test_grant_all_permissions_async():
-    """Test grant_all_permissions_async calls both sub-methods."""
-    svc = LakebasePermissionService()
-    svc.grant_schema_permissions_async = AsyncMock()
-    svc.grant_default_privileges_async = AsyncMock()
-
-    mock_engine = MagicMock()
-    await svc.grant_all_permissions_async(mock_engine, "admin@example.com")
-
-    svc.grant_schema_permissions_async.assert_awaited_once_with(
-        mock_engine, "admin@example.com"
-    )
-    svc.grant_default_privileges_async.assert_awaited_once_with(
-        mock_engine, "admin@example.com"
-    )
-
-
 # ---- grant_all_permissions_sync ----
 
 

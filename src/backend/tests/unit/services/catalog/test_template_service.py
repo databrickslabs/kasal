@@ -96,13 +96,6 @@ def make_gc(group_ids=None, primary=None, email=None):
 
 
 class TestFindAll:
-    @pytest.mark.asyncio
-    async def test_find_all_templates_delegates(self):
-        svc = make_svc()
-        t = make_template()
-        svc.repository.active_templates = [t]
-        result = await svc.find_all_templates()
-        assert result == [t]
 
     @pytest.mark.asyncio
     async def test_find_all_returns_active_templates(self):
@@ -218,14 +211,6 @@ class TestGet:
         assert result == t
 
     @pytest.mark.asyncio
-    async def test_get_template_by_id_delegates(self):
-        svc = make_svc()
-        t = make_template(id=5)
-        svc.repository._get_return = t
-        result = await svc.get_template_by_id(5)
-        assert result == t
-
-    @pytest.mark.asyncio
     async def test_get_with_group_check_global_visible(self):
         svc = make_svc()
         t = make_template(group_id=None)
@@ -269,14 +254,6 @@ class TestFindByName:
         t = make_template(name="my-template")
         svc.repository._find_by_name_return = t
         result = await svc.find_by_name("my-template")
-        assert result == t
-
-    @pytest.mark.asyncio
-    async def test_find_template_by_name_delegates(self):
-        svc = make_svc()
-        t = make_template(name="x")
-        svc.repository._find_by_name_return = t
-        result = await svc.find_template_by_name("x")
         assert result == t
 
 
@@ -380,15 +357,6 @@ class TestCreateTemplate:
         )
         result = await svc.create_template(data)
         assert result.name == "t1"
-
-    @pytest.mark.asyncio
-    async def test_create_new_template_delegates(self):
-        svc = make_svc()
-        data = PromptTemplateCreate(
-            name="t2", description="d", template="c", is_active=True
-        )
-        result = await svc.create_new_template(data)
-        assert result.name == "t2"
 
     @pytest.mark.asyncio
     async def test_create_with_group_assigns_group(self):

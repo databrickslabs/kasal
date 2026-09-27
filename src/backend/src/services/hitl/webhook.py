@@ -270,34 +270,6 @@ class HITLWebhookService:
             approval_url=approval_url,
         )
 
-    async def send_gate_approved_notification(self, approval: HITLApproval) -> bool:
-        """
-        Send webhook notification when a gate is approved.
-
-        Args:
-            approval: The approved HITL approval
-
-        Returns:
-            True if at least one webhook was sent successfully
-        """
-        return await self._send_notification(
-            approval=approval, event=HITLWebhookEventEnum.GATE_APPROVED
-        )
-
-    async def send_gate_rejected_notification(self, approval: HITLApproval) -> bool:
-        """
-        Send webhook notification when a gate is rejected.
-
-        Args:
-            approval: The rejected HITL approval
-
-        Returns:
-            True if at least one webhook was sent successfully
-        """
-        return await self._send_notification(
-            approval=approval, event=HITLWebhookEventEnum.GATE_REJECTED
-        )
-
     async def send_gate_timeout_notification(self, approval: HITLApproval) -> bool:
         """
         Send webhook notification when a gate times out.

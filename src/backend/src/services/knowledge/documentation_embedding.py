@@ -1,7 +1,7 @@
 import traceback
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,19 +105,6 @@ class DocumentationEmbeddingService:
 
         repository = DocumentationEmbeddingRepository(self.session)
         return await repository.get_all(skip, limit)
-
-    async def update_documentation_embedding(
-        self, embedding_id: int, update_data: Dict[str, Any]
-    ) -> Optional[DocumentationEmbedding]:
-        """Update a documentation embedding by ID."""
-        if not self.session:
-            raise ValueError("Session is required for database operations")
-        from src.repositories.documentation_embedding_repository import (
-            DocumentationEmbeddingRepository,
-        )
-
-        repository = DocumentationEmbeddingRepository(self.session)
-        return await repository.update(embedding_id, update_data)
 
     async def delete_documentation_embedding(self, embedding_id: int) -> bool:
         """Delete a documentation embedding by ID."""
