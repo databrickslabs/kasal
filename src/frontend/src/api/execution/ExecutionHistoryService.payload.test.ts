@@ -85,6 +85,23 @@ describe('run list summaries', () => {
     expect(mockGet).not.toHaveBeenCalled();
   });
 
+  it('treats the null payload the real list endpoint serializes as absent', async () => {
+    // GET /executions is a pydantic list: absent fields arrive as null, not
+    // missing. A crew run started over MCP stores its answer as {text, a2ui}.
+    const stored = { text: '# NVIDIA RTX 3090 Ti\n\n## Hardware', a2ui: { surfaceKind: 'document', root: 'root', components: [] } };
+    mockGet.mockImplementation(async (url: string) => {
+      if (url.startsWith('/executions?')) return { data: [{ ...listRow, result: null, inputs: null, error: null }] };
+      if (url === '/executions/job-1') return { data: { ...detail, result: stored } };
+      throw new Error(`unexpected GET ${url}`);
+    });
+    const { runs } = await runService.getRuns(50, 0);
+    expect(runs[0].result).toBeUndefined();
+    expect(runs[0].inputs).toBeUndefined();
+    expect((await runService.withPayload(runs[0])).result).toEqual(stored);
+    // A row that reached the store with an explicit null is not "loaded" either.
+    expect((await runService.withPayload({ ...runs[0], result: null } as never)).result).toEqual(stored);
+  });
+
   it('withPayload falls back to the row when the detail cannot be read', async () => {
     const { runs } = await runService.getRuns(50, 0);
     mockGet.mockImplementation(async (url: string) => {
