@@ -9,7 +9,9 @@ Two steps, in this order, both in place on the config:
 the run's history row exists, so the run's trace shows what Auto picked.
 """
 
-from typing import Any, Optional
+from typing import Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.execution import CrewConfig
 from src.services.decisions.model_selection import ModelSelection
@@ -25,7 +27,9 @@ from src.utils.user_context import GroupContext
 
 
 async def freeze(
-    config: CrewConfig, session: Any, group_context: Optional[GroupContext]
+    config: CrewConfig,
+    session: Optional[AsyncSession],
+    group_context: Optional[GroupContext],
 ) -> Optional[ModelSelection]:
     """Resolve Auto, then snapshot agent settings. Returns the run's Auto pick."""
     resolved = await resolve_run_models(config, session, group_context)

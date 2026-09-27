@@ -68,7 +68,7 @@ class _TaskHandle:
             pass
 
 
-def _settle(future: "Future[Any]", fn: Callable[[], Any]) -> None:
+def _settle(future: "Future[_T]", fn: Callable[[], _T]) -> None:
     """Run ``fn`` and put its outcome on ``future``."""
     try:
         result = fn()

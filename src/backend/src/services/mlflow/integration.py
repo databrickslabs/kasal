@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def _get_mlflow() -> Any:
     """Get mlflow module if available."""
     try:
-        import mlflow  # type: ignore
+        import mlflow
 
         return mlflow
     except Exception as e:
@@ -63,7 +63,7 @@ def enable_autologs(
     if litellm_spans_only:
         try:
             if hasattr(mlflow, "litellm"):
-                mlflow.litellm.autolog(log_traces=False, disable=False, silent=False)  # type: ignore[attr-defined]
+                mlflow.litellm.autolog(log_traces=False, disable=False, silent=False)
                 logger.info("[crewai_mlflow] LiteLLM autolog enabled (spans only)")
         except Exception as e:
             logger.info(f"[crewai_mlflow] LiteLLM autolog not available: {e}")
@@ -72,7 +72,7 @@ def enable_autologs(
     if crewai_autolog:
         try:
             if hasattr(mlflow, "crewai"):
-                mlflow.crewai.autolog()  # type: ignore[attr-defined]
+                mlflow.crewai.autolog()
                 logger.info("[crewai_mlflow] CrewAI autolog enabled")
         except Exception as e:
             logger.info(f"[crewai_mlflow] CrewAI autolog not available: {e}")
