@@ -9,11 +9,17 @@ Should one slip through anyway, ``LLMManager.configure_kasal_llm`` turns it into
 the workspace default and logs the path (``model_selection.resolve_leaked_auto``).
 
 One decision per run: every "auto" in the config gets the same model.
+
+The run's trace starts with that decision. ``record_selection`` writes its row
+and keeps the pick by run id; ``stamp_decision`` hands it to a crew/flow
+subprocess inside its payload, and ``decision_for_run`` gives it to the
+in-process chat path (see ``otel_tracing/auto_decision.py``).
 """
 
 import asyncio
 import logging
-from typing import Iterable, Iterator, Optional, Set, Tuple
+from collections import OrderedDict
+from typing import Dict, Iterable, Iterator, Optional, Set, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,12 +31,22 @@ from src.services.decisions.model_selection import (
     select_for_workspace,
     trace_row,
 )
+from src.services.otel_tracing.auto_decision import (
+    PAYLOAD_KEY,
+    AutoDecision,
+    link_row,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
 #: Trace writes in flight; held so the event loop does not drop them.
 _pending: Set["asyncio.Task[None]"] = set()
+
+#: Each run's Auto pick, by run id, until the run's trace picks it up. Bounded:
+#: a run that never starts does not hold its pick forever.
+_by_run: "OrderedDict[str, ModelSelection]" = OrderedDict()
+_MAX_RUNS = 512
 
 #: Fields that name a model, wherever they sit in a config: an agent's ``llm``
 #: (a key or a ``{"model": ...}`` dict) and ``function_calling_llm``, a flow
@@ -211,7 +227,29 @@ def record_selection(
     """
     if selection is None:
         return
+    _by_run[job_id] = selection
+    _by_run.move_to_end(job_id)
+    while len(_by_run) > _MAX_RUNS:
+        _by_run.popitem(last=False)
     group_id = getattr(group_context, "primary_group_id", None)
     task = asyncio.create_task(_write_trace(selection, job_id, group_id))
     _pending.add(task)
     task.add_done_callback(_pending.discard)
+
+
+def decision_for_run(job_id: str) -> Optional[AutoDecision]:
+    """The run's recorded Auto decision, for its own trace; None without Auto."""
+    selection = _by_run.get(job_id)
+    return AutoDecision.from_trace(selection.trace()) if selection else None
+
+
+def link_run_row(row: Dict[str, object], job_id: str) -> None:
+    """Put an in-process run's hand-built trace row under its Auto decision."""
+    link_row(row, decision_for_run(job_id))
+
+
+def stamp_decision(payload: Dict[str, object], job_id: str) -> None:
+    """Put the run's Auto decision into the payload its subprocess receives."""
+    selection = _by_run.get(job_id)
+    if selection is not None:
+        payload[PAYLOAD_KEY] = selection.trace()

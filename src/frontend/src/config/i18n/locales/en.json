@@ -106,7 +106,7 @@
         "connection": "Connection: {{name}}",
         "connectionLabel": "Connection",
         "connectionJevHelp": "Jev chooses among your enabled models.",
-        "connectionOpenRouterHelp": "Requests go to Jev Router, which picks from OpenRouter's models; answers and prompts go through OpenRouter.",
+        "connectionOpenRouterHelp": "Jev, through OpenRouter, chooses among your enabled models; the chosen model then answers through its own provider. Only enabled models ever answer.",
         "disclosure": "Off by default. Enable a decision model for supported decisions in this workspace. When off, Kasal uses its existing approach. Unavailable or uncertain decision model answers also fall back to that approach. Relevant prompts and candidate content are sent to the decision model provider when enabled.",
         "toggle": "Use a decision model",
         "keyConfigured": "Uses {{key}} from Configuration → API Keys.",
@@ -430,7 +430,8 @@
         "abstained": "decision model abstained",
         "no_models": "no enabled models",
         "too_many_models": "too many enabled models",
-        "empty_prompt": "empty request"
+        "empty_prompt": "empty request",
+        "router_picked_disabled_model": "decision model picked a model that is not enabled"
       },
       "defaultModel": "the default model",
       "pickedDetail": "The decision model chose this model for the message.",

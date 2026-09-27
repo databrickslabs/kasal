@@ -95,7 +95,7 @@ async def test_enabled_calls_jev_and_records_only_safe_metadata(gateway):
         "test", {"text": "private"}, QUESTIONS, group_id="one"
     )
     assert result["q"].selected == "yes"
-    provider.assert_awaited_once_with("secret", {"text": "private"}, QUESTIONS)
+    provider.assert_awaited_once_with("secret", {"text": "private"}, QUESTIONS, "test")
     assert trace.call_args.args[:3] == ("test", "jev-1.13.0", "accepted")
     assert "private" not in str(trace.call_args) and "secret" not in str(
         trace.call_args

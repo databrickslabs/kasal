@@ -116,8 +116,8 @@ const DecisionModelSystemSettings: React.FC = () => {
   const explanation = {
     jev: t(`${K}.connectionJevHelp`, { defaultValue: 'Jev chooses among your enabled models.' }),
     openrouter: t(`${K}.connectionOpenRouterHelp`, {
-      defaultValue: "Requests go to Jev Router, which picks from OpenRouter's models; "
-        + 'answers and prompts go through OpenRouter.',
+      defaultValue: 'Jev, through OpenRouter, chooses among your enabled models; the chosen model '
+        + 'then answers through its own provider. Only enabled models ever answer.',
     }),
   };
 

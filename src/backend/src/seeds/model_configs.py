@@ -332,13 +332,13 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
     },
     # --- OpenRouter (OpenAI-compatible; key = OPENROUTER_API_KEY) ---
     "jev-router": {
-        # TypeSafe's Jev Router: picks the model and reasoning effort per request
-        # and answers itself. Auto resolves to it under the Decision model's
-        # OpenRouter connection (services/decisions/jev_router.py), with no need
-        # to enable it here. OpenRouter lists a 1M context, router pricing and
-        # `supported_parameters: []`, so model_capabilities marks every sampling
-        # knob refused. The output cap is conservative: the model the router
-        # picks decides the real one.
+        # TypeSafe's Jev Router: picks a model from OpenRouter's whole catalogue
+        # per request and answers with it. Only by hand: Auto never offers a
+        # router (model_selection.is_router_model), since its pick could be a
+        # model the workspace never enabled. OpenRouter lists a 1M context,
+        # router pricing and `supported_parameters: []`, so model_capabilities
+        # marks every sampling knob refused. The output cap is conservative: the
+        # model the router picks decides the real one.
         "name": "typesafe/jev-router",
         "temperature": 1,
         "provider": "openrouter",

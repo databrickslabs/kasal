@@ -266,7 +266,7 @@
   "src/services/chat/intent_dispatch.py::Any": 1,
   "src/services/chat/memory_trace_handlers.py::Any": 13,
   "src/services/chat/run_trace_writer.py::Any": 4,
-  "src/services/chat/service.py::Any": 63,
+  "src/services/chat/service.py::Any": 62,
   "src/services/chat/slash_commands.py::Any": 1,
   "src/services/chat/streaming_request.py::Any": 1,
   "src/services/chat/turn_kickoff.py::Any": 17,

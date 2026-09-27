@@ -22,7 +22,9 @@ from typing import Any, Callable, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
+from src.services.chat.llm_trace_text import messages_text
 from src.services.chat.run_trace_writer import RunTraceWriter as _RunTraceWriter
+from src.services.execution.config.auto_model import link_run_row
 from src.services.execution.finalization import (
     ExecutionOutcome,
     persist_execution_outcome,
@@ -351,6 +353,7 @@ class LightAgentService:
                     td["group_id"] = group_id
                 if group_email:
                     td["group_email"] = group_email
+                link_run_row(td, execution_id)  # under the run's Auto decision
                 return td
 
             # ── Build the ToolFactory (DB-backed API keys), then the agent, then
@@ -653,33 +656,12 @@ class LightAgentService:
                 # tool-calling turn) fires LLMCall{Started,Completed,Failed}. The
                 # crew/flow OTel bridge maps these to ``llm_call`` / ``llm_response``;
                 # mirror that here so the chat trace shows the model calls too.
-                def _msgs_str(event: Any) -> str:
-                    """Flatten the request messages to readable text for the trace
-                    detail (so 'LLM Request' → View shows the actual prompt)."""
-                    msgs = getattr(event, "messages", None)
-                    if msgs is None:
-                        return ""
-                    if isinstance(msgs, str):
-                        return msgs
-                    try:
-                        parts = []
-                        for m in msgs:
-                            if isinstance(m, dict):
-                                parts.append(
-                                    f"{m.get('role', '?')}: {m.get('content', '')}"
-                                )
-                            else:
-                                parts.append(str(m))
-                        return "\n\n".join(parts)
-                    except Exception:  # noqa: BLE001
-                        return str(msgs)
-
                 def _on_llm_started(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
                         model_name = str(getattr(event, "model", "") or "llm")
-                        prompt_text = _msgs_str(event)
+                        prompt_text = messages_text(event)
                         max_len = 20000
                         if len(prompt_text) > max_len:
                             prompt_text = prompt_text[:max_len] + "…[truncated]"

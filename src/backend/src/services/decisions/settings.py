@@ -110,10 +110,10 @@ class DecisionSettingsService:
         return self._response(connection, update.enabled, keyed)
 
     async def credential(self) -> str | None:
-        """The decrypted JEV_API_KEY when this workspace opted in, read on OUR session.
+        """The connection's decrypted key when this workspace opted in, on OUR session.
 
-        Only the native Jev connection spends it: under OpenRouter the runtime
-        abstains before asking (``provider.is_configured()`` is False).
+        ``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter
+        (where only Auto asks; see ``provider.OPENROUTER_POLICIES``).
 
         None when the workspace has not opted in or has no key. A key that
         exists but will not decrypt raises ``DecisionCredentialUnreadable``
@@ -127,7 +127,8 @@ class DecisionSettingsService:
         row = await self.repository.get(self.group_id)
         if not row or row.enabled is not True:
             return None
-        key = await self.api_keys.find_by_name(JEV_KEY_NAME)
+        key_name = current_connection().key_name
+        key = await self.api_keys.find_by_name(key_name)
         if not key or not key.encrypted_value:
             return None
         try:
@@ -137,7 +138,7 @@ class DecisionSettingsService:
             logger.error(  # noqa: TRY400 — a traceback could carry the ciphertext
                 "Could not decrypt %s for workspace %s (%s); decisions are off "
                 "for it until the key is re-entered",
-                JEV_KEY_NAME,
+                key_name,
                 self.group_id,
                 type(exc).__name__,
             )

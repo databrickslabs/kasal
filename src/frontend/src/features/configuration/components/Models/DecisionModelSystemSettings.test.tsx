@@ -44,7 +44,7 @@ describe('DecisionModelSystemSettings', () => {
     render(<DecisionModelSystemSettings />);
     expect(await screen.findByText('Decision model')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Jev API: Jev chooses among your enabled models/ })).toBeChecked();
-    expect(screen.getByRole('radio', { name: /OpenRouter: Requests go to Jev Router/ })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /OpenRouter: Jev, through OpenRouter, chooses among your enabled models/ })).not.toBeChecked();
     expect(screen.getByText(/workspace's own JEV_API_KEY/)).toBeInTheDocument();
   });
 

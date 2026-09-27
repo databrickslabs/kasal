@@ -11,6 +11,8 @@ from typing import Optional
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 
+from src.services.otel_tracing.auto_decision import SeedableIdGenerator
+
 logger = logging.getLogger(__name__)
 
 # Module-level reference to the active provider for shutdown
@@ -43,7 +45,8 @@ def create_kasal_tracer_provider(
         }
     )
 
-    provider = TracerProvider(resource=resource)
+    # Seedable so the run's Auto decision span keeps the ids its row already has.
+    provider = TracerProvider(resource=resource, id_generator=SeedableIdGenerator())
     _active_provider = provider
 
     logger.info(
