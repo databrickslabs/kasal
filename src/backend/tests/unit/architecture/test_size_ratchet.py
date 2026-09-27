@@ -1,7 +1,9 @@
 """File- and function-size ratchets (root CLAUDE.md, "File Size Limits").
 
-Files — ``.py`` under ``src/backend/src``, ``.ts``/``.tsx`` under
-``src/frontend/src`` (tests included; same limits for source and tests):
+Files — ``.py`` under ``src/backend/src`` and ``src/backend/tests``,
+``.ts``/``.tsx`` under ``src/frontend/src`` (frontend tests included; same limits
+for source and tests). The backend test tree joined on 2026-09-27 with its
+offenders baselined as they stood (123 over the target, 35 over the ceiling):
 
 * a file NOT in the baseline may not exceed the 800-line target;
 * a baselined file at or under the 1500-line ceiling may grow up to 1500;
@@ -43,6 +45,7 @@ FUNCTION_LIMIT = 200
 
 _ROOTS = (
     (REPO / "src" / "backend" / "src", (".py",)),
+    (REPO / "src" / "backend" / "tests", (".py",)),
     (REPO / "src" / "frontend" / "src", (".ts", ".tsx")),
 )
 

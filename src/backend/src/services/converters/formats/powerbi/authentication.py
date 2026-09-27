@@ -22,8 +22,8 @@ try:
 
     AZURE_IDENTITY_AVAILABLE = True
 except ImportError:
-    ClientSecretCredential = None  # type: ignore
-    UsernamePasswordCredential = None  # type: ignore
+    ClientSecretCredential = None  # type: ignore[assignment, misc]
+    UsernamePasswordCredential = None  # type: ignore[assignment, misc]
     AZURE_IDENTITY_AVAILABLE = False
     logging.warning(
         "azure-identity not available. Install with: pip install azure-identity"

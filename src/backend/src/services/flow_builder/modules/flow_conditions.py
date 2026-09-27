@@ -120,7 +120,7 @@ def state_snapshot(state: Any) -> Dict[str, Any]:
         return out
 
     try:
-        dumped = type(state).model_dump(state)  # type: ignore[attr-defined]
+        dumped = type(state).model_dump(state)
         if isinstance(dumped, dict):
             out.update(dumped)
     except Exception:  # noqa: BLE001 - not a pydantic model, or a bad field
@@ -217,7 +217,7 @@ class MatchList(list):
     compared are skipped instead.
     """
 
-    __hash__ = None  # type: ignore[assignment]
+    __hash__ = None
 
     def _any(self, op: Callable[[Any, Any], Any], other: Any) -> bool:
         for element in self:
@@ -235,26 +235,26 @@ class MatchList(list):
                 continue
         return False
 
-    def __eq__(self, other: Any) -> bool:  # type: ignore[override]
+    def __eq__(self, other: Any) -> bool:
         return self._any(lambda a, b: a == b, other)
 
-    def __ne__(self, other: Any) -> bool:  # type: ignore[override]
+    def __ne__(self, other: Any) -> bool:
         # MUST be explicit. A list subclass inherits list.__ne__, which compares
         # the list itself against the operand and is therefore always True for a
         # scalar — an always-firing route. "not equals" on a projection means
         # NO element matches.
         return not self.__eq__(other)
 
-    def __gt__(self, other: Any) -> bool:  # type: ignore[override]
+    def __gt__(self, other: Any) -> bool:
         return self._any(lambda a, b: a > b, other)
 
-    def __ge__(self, other: Any) -> bool:  # type: ignore[override]
+    def __ge__(self, other: Any) -> bool:
         return self._any(lambda a, b: a >= b, other)
 
-    def __lt__(self, other: Any) -> bool:  # type: ignore[override]
+    def __lt__(self, other: Any) -> bool:
         return self._any(lambda a, b: a < b, other)
 
-    def __le__(self, other: Any) -> bool:  # type: ignore[override]
+    def __le__(self, other: Any) -> bool:
         return self._any(lambda a, b: a <= b, other)
 
     def __contains__(self, needle: Any) -> bool:

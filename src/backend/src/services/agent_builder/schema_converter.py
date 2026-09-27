@@ -100,7 +100,7 @@ class _Builder:
         # A closed value set is stronger than its base type — prefer it.
         enum = schema.get("enum")
         if isinstance(enum, list) and enum and all(_is_literal(v) for v in enum):
-            return Literal[tuple(enum)]  # type: ignore[valid-type]
+            return Literal[tuple(enum)]
 
         # anyOf/oneOf: the common "nullable" spelling plus genuine unions.
         for key in ("anyOf", "oneOf"):
@@ -129,7 +129,7 @@ class _Builder:
         for member in members:
             if member not in unique:
                 unique.append(member)
-        return unique[0] if len(unique) == 1 else Union[tuple(unique)]  # type: ignore[return-value]
+        return unique[0] if len(unique) == 1 else Union[tuple(unique)]
 
     # -------------------------------------------------------------- models
 

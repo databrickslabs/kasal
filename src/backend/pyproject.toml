@@ -192,6 +192,12 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+# A suppression must earn its keep: a `type: ignore` that no longer silences
+# anything is an error, and every one must name the error code it silences, so
+# it cannot quietly swallow a different error later. Their count (and `cast(`)
+# is ratcheted by tests/unit/architecture/test_typing_escape_ratchet.py.
+warn_unused_ignores = true
+enable_error_code = ["ignore-without-code"]
 exclude = ["src/services/export/templates/"]
 
 # Installed libraries that ship neither inline types nor a stub package. Each is

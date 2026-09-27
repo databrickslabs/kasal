@@ -359,7 +359,7 @@ class LoggerManager:
             )
             is_http_scheme = bool(logs_endpoint and logs_endpoint.startswith("http://"))
             use_insecure = is_localhost or is_http_scheme
-            exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)  # type: ignore[call-arg]
+            exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)
             provider = LoggerProvider(resource=resource)
             provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
 
