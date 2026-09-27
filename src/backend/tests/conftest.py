@@ -44,9 +44,14 @@ os.environ.pop("SYNC_DATABASE_URI", None)
 # services/llm/manager.py resolves its log file at module import, so a fixture
 # would be too late. Without this the suite writes 35 log files into
 # backend/logs/, the same directory the dev server uses.
+# Hard-set: with setdefault, an exported LOG_DIR sent test lines into the real
+# logs/llm.log, which the guard misses (it only notices NEW files).
 _ARTIFACTS = os.path.join(os.path.dirname(__file__), ".artifacts")
-os.environ.setdefault("LOG_DIR", os.path.join(_ARTIFACTS, "logs"))
-os.environ.setdefault("KASAL_MEMORY_DIR", os.path.join(_ARTIFACTS, "memory"))
+os.environ["LOG_DIR"] = os.path.join(_ARTIFACTS, "logs")
+os.environ["KASAL_MEMORY_DIR"] = os.path.join(_ARTIFACTS, "memory")
+# Real spans (the chat dispatcher's) otherwise create ./mlflow.db + ./mlruns in
+# the CWD. file:, not sqlite:, which still puts trace artifacts in ./mlruns.
+os.environ["MLFLOW_TRACKING_URI"] = "file://" + os.path.join(_ARTIFACTS, "mlruns")
 # Do not load a developer's CLI credentials during a unit test. Tests requiring
 # SDK authentication supply credentials or patch the SDK explicitly.
 os.environ["DATABRICKS_CONFIG_FILE"] = os.devnull
@@ -62,6 +67,11 @@ try:
     import numpy.exceptions  # noqa: F401
 except Exception:
     pass
+
+# Register every ORM model up front. A `patch.dict("sys.modules", ...)` drops
+# modules first imported inside it; if that was a model, the re-import fails
+# with "Table '...' is already defined" unless an earlier file imported it.
+import src.db.all_models  # noqa: E402
 
 # Build the LLM handler classes from the REAL transport LLM before any test can
 # patch it. `class VLLMFunctionCallingLLM(LLM)` evaluated while a test has
@@ -608,6 +618,21 @@ def _isolate_logging_config():
                 logger.setLevel(logging.NOTSET)
                 logger.propagate = True
                 logger.handlers[:] = []
+
+
+@pytest.fixture(autouse=True)
+def _isolate_logger_manager():
+    """Restore the LoggerManager singleton. Tests that reset it, or point it at
+    a since-deleted TemporaryDirectory, broke later tests in the worker."""
+    from src.core.logger import LoggerManager as cls
+
+    instance, initialized = cls._instance, cls._initialized
+    state = dict(vars(instance)) if instance is not None else None
+    yield
+    cls._instance, cls._initialized = instance, initialized
+    if instance is not None and state is not None:
+        vars(instance).clear()
+        vars(instance).update(state)
 
 
 @pytest.fixture(autouse=True)

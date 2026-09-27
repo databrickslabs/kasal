@@ -188,7 +188,7 @@ def test_something(mock_logger, sample_execution_data, fixed_datetime):
 python run_tests.py --html-coverage
 
 # Open coverage report
-open tests/coverage_html/index.html
+open tests/.artifacts/coverage_html/index.html
 ```
 
 ## Best Practices

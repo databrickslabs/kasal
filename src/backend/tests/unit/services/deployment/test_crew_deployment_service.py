@@ -415,15 +415,13 @@ class TestDeployToEndpoint:
             MagicMock(),
         ]
         mock_ws.config.host = "my-workspace.azuredatabricks.net"
-        mock_wc_module = MagicMock()
-        mock_wc_module.WorkspaceClient.return_value = mock_ws
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "databricks.sdk": mock_wc_module,
-                "databricks.sdk.useragent": MagicMock(),
-            },
+        # Patch the attributes, not sys.modules: a MagicMock "databricks.sdk"
+        # is not a package, so importing the real databricks.sdk.service.serving
+        # under it failed whenever no earlier test had already imported it.
+        with (
+            patch("databricks.sdk.WorkspaceClient", return_value=mock_ws),
+            patch("databricks.sdk.useragent.with_product"),
         ):
             await service._deploy_to_endpoint("model", "1", config)
 

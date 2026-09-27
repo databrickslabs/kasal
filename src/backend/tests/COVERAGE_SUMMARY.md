@@ -120,7 +120,7 @@ python run_tests.py --markers "not slow"
 
 ### Coverage Reports
 - Terminal coverage summary
-- HTML coverage reports in `tests/coverage_html/`
+- HTML coverage reports in `tests/.artifacts/coverage_html/`
 - XML coverage reports for CI/CD integration
 
 ## Test Quality Metrics
