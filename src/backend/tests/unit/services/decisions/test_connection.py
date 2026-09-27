@@ -251,7 +251,9 @@ class TestAutoUnderOpenRouter:
                 "src.services.settings.models.ModelConfigService",
                 return_value=catalogue,
             ),
-            patch.object(model_selection, "decide", new=AsyncMock()) as decide,
+            patch.object(
+                model_selection, "decide_with_reason", new=AsyncMock()
+            ) as decide,
             patch(
                 "src.services.decisions.provider.evaluate", new_callable=AsyncMock
             ) as evaluate,
@@ -335,7 +337,9 @@ class TestAutoUnderJev:
                 "src.services.settings.models.ModelConfigService", return_value=service
             ),
             patch.object(
-                model_selection, "decide", new=AsyncMock(return_value=answers)
+                model_selection,
+                "decide_with_reason",
+                new=AsyncMock(return_value=(answers, None)),
             ) as decide,
             patch(
                 "src.services.decisions.settings.DecisionSettingsService.get",
