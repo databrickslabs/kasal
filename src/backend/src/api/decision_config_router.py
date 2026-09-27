@@ -43,6 +43,11 @@ async def recommend_settings(
     session: SessionDep,
     group_context: GroupContextDep,
 ) -> DecisionRecommendationResponse:
+    # Same bar as PUT: it spends the workspace's JEV_API_KEY and sends the
+    # prompt and model list to the provider, and its only UI is the admin-only
+    # Models section. The opt-in itself is enforced downstream by decide().
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can request model recommendations")
     from src.services.decisions.recommendations import recommend
 
     result: DecisionRecommendationResponse = await recommend(

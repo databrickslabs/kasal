@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 from datetime import datetime
@@ -668,7 +667,7 @@ class FlowService:
 
             if data_dict.get("flow_config"):
                 logger.info(
-                    f"Flow config details: {json.dumps(data_dict['flow_config'], indent=2)}"
+                    f"Flow config keys: {sorted(data_dict['flow_config'] or {})}"
                 )
 
             return {

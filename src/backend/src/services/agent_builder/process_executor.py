@@ -349,9 +349,9 @@ def run_crew_in_process(
                 subprocess_logger.info(
                     f"[JOB_CONFIGURATION] Tasks: {len(crew_config.get('tasks', []))}"
                 )
-                # Log full config for debugging
+                # Keys only: the config carries decrypted tool_configs (V5-1)
                 subprocess_logger.info(
-                    f"[JOB_CONFIGURATION] Full Config: {json.dumps(crew_config, indent=2)}"
+                    f"[JOB_CONFIGURATION] Config keys: {sorted(crew_config)}"
                 )
             except AttributeError as e:
                 subprocess_logger.error(
@@ -361,7 +361,7 @@ def run_crew_in_process(
                     f"[JOB_CONFIGURATION] crew_config type: {type(crew_config)}"
                 )
                 subprocess_logger.error(
-                    f"[JOB_CONFIGURATION] crew_config value: {repr(crew_config)}"
+                    f"[JOB_CONFIGURATION] crew_config keys: {sorted(crew_config)}"
                 )
                 # Re-raise to see the full error
                 raise
@@ -956,9 +956,9 @@ def run_crew_in_process(
                         else:
                             async_logger.info("[JOB_CONFIGURATION] No inputs provided")
 
-                        # Log complete configuration as JSON for debugging
+                        # Keys only: the config carries decrypted tool_configs
                         async_logger.info(
-                            f"[JOB_CONFIGURATION] Full Config JSON: {json.dumps(crew_config, indent=2)}"
+                            f"[JOB_CONFIGURATION] Config keys: {sorted(crew_config)}"
                         )
                     except AttributeError as e:
                         async_logger.error(
@@ -968,7 +968,7 @@ def run_crew_in_process(
                             f"[JOB_CONFIGURATION ASYNC] crew_config type: {type(crew_config)}"
                         )
                         async_logger.error(
-                            f"[JOB_CONFIGURATION ASYNC] crew_config value: {repr(crew_config)[:500]}"
+                            f"[JOB_CONFIGURATION ASYNC] crew_config keys: {sorted(crew_config)}"
                         )
                         raise
                 else:

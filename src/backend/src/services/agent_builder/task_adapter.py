@@ -250,7 +250,7 @@ async def create_task(
         f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}"
     )
     logger.info(
-        f"Task tool_configs: {task_config.get('tool_configs', {}) if isinstance(task_config, dict) else 'N/A'}"
+        f"Task tool_configs: {sorted(task_config.get('tool_configs') or {}) if isinstance(task_config, dict) else 'N/A'}"
     )
 
     # Log agent information

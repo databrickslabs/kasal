@@ -256,7 +256,7 @@ class TaskRepository(BaseRepository[Task, str]):
 
                     logger = logging.getLogger(__name__)
                     logger.info(
-                        f"Updating task {id} with tool_configs: {obj_in.get('tool_configs')}"
+                        f"Updating task {id} with tool_configs: {sorted(obj_in.get('tool_configs') or {})}"
                     )
 
                 for key, value in obj_in.items():

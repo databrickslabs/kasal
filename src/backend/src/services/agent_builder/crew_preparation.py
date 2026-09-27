@@ -117,7 +117,7 @@ class CrewPreparation:
         logger.info(f"[CrewPreparation.__init__] Config keys: {list(config.keys())}")
         if "memory_backend_config" in config:
             logger.info(
-                f"[CrewPreparation.__init__] Memory backend config found: {config['memory_backend_config']}"
+                f"[CrewPreparation.__init__] Memory backend config found, keys: {sorted(config['memory_backend_config'] or {})}"
             )
 
     async def prepare(self) -> bool:

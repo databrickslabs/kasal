@@ -236,11 +236,11 @@ class KasalExecutionService:
                                                 db_agent.tool_configs or {}
                                             )
                                             crew_logger.info(
-                                                f"Using tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}"
+                                                f"Using tool_configs from database for agent {agent_id}: {sorted(agent_config['tool_configs'] or {})}"
                                             )
                                         else:
                                             crew_logger.info(
-                                                f"Keeping tool_configs from YAML for agent {agent_id}: {agent_config['tool_configs']}"
+                                                f"Keeping tool_configs from YAML for agent {agent_id}: {sorted(agent_config['tool_configs'] or {})}"
                                             )
                                     else:
                                         crew_logger.warning(
@@ -356,11 +356,11 @@ class KasalExecutionService:
                                                 db_task.tool_configs or {}
                                             )
                                             crew_logger.info(
-                                                f"Using tool_configs from database for task {task_id}: {task_config['tool_configs']}"
+                                                f"Using tool_configs from database for task {task_id}: {sorted(task_config['tool_configs'] or {})}"
                                             )
                                         else:
                                             crew_logger.info(
-                                                f"Keeping tool_configs from YAML for task {task_id}: {task_config['tool_configs']}"
+                                                f"Keeping tool_configs from YAML for task {task_id}: {sorted(task_config['tool_configs'] or {})}"
                                             )
                                     else:
                                         crew_logger.warning(

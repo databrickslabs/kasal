@@ -152,7 +152,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         # Log if tool_configs is in update_data
         if "tool_configs" in update_data:
             logger.info(
-                f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}"
+                f"TaskService: update_data contains tool_configs: {sorted(update_data.get('tool_configs') or {})}"
             )
 
         if not update_data:
@@ -244,7 +244,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         # Log if tool_configs is in update_data
         if "tool_configs" in update_data:
             logger.info(
-                f"TaskService: update_data contains tool_configs: {update_data.get('tool_configs')}"
+                f"TaskService: update_data contains tool_configs: {sorted(update_data.get('tool_configs') or {})}"
             )
 
         if not update_data:
