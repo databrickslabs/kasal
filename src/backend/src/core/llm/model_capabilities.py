@@ -196,6 +196,28 @@ _ADAPTIVE = ModelCapability(
     ),
 )
 
+#: Claude Opus 5.5 — the same request shape as _ADAPTIVE, kept as its own record
+#: because its evidence is documentation, not a live probe, and because it is
+#: stricter than Opus 5: thinking cannot be disabled at any effort, and a forced
+#: `tool_choice` ("any"/"tool") is a 400. Kasal sends neither (adaptive requests
+#: never carry `disabled`; only the Responses handler forces tool_choice).
+_ADAPTIVE_OPUS_5_5 = ModelCapability(
+    style=ReasoningStyle.ADAPTIVE_EFFORT,
+    efforts=_ANTHROPIC_ADAPTIVE_EFFORTS,
+    returns_text=True,
+    text_requires='display: "summarized"',
+    refuses=("temperature", "top_p", "frequency_penalty", "presence_penalty"),
+    evidence="documented",
+    source=(
+        "https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/"
+        f"supported-models + {ANTHROPIC_EFFORT_DOC}"
+    ),
+    note=(
+        "Databricks: accepts low/medium/high/xhigh/max, defaults to medium, "
+        "reasoning cannot be disabled. Anthropic: temperature/top_p/top_k removed."
+    ),
+)
+
 # ── OpenAI GPT-5 line ───────────────────────────────────────────────────────
 # FOUR different enums, all measured from the endpoints' own error messages
 # ("Supported values are: ..."). Docs give a single superset list; the served
@@ -334,6 +356,19 @@ _GPT6_SOL_LUNA = replace(
     note="Direct GPT-6 Sol/Luna: use Responses for tool calls with reasoning.",
 )
 
+#: Databricks-served Sol/Luna. Databricks documents its own scale for these
+#: endpoints; it happens to equal the direct API's today, but it is sourced
+#: separately so a divergence on either side is a one-record change.
+_DATABRICKS_GPT6_SOL_LUNA = replace(
+    _GPT6_ASTRA,
+    efforts=("none", "low", "medium", "high", "xhigh", "max"),
+    source=DATABRICKS_REASON_DOC,
+    note=(
+        "Databricks GPT-6 Sol/Luna: reasoning_effort none..max, defaults to "
+        "medium when omitted. Served through the Responses API."
+    ),
+)
+
 # ── Gemini 3.x on Databricks ────────────────────────────────────────────────
 
 #: Gemini 3.7 rejects "none", "minimal", "xhigh" and "max".
@@ -451,6 +486,8 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     # would otherwise never be reached).
     ("claude-opus-4-7", _ADAPTIVE),
     ("claude-opus-4-8", _ADAPTIVE),
+    # Before "claude-opus-5", which is a substring of it.
+    ("claude-opus-5-5", _ADAPTIVE_OPUS_5_5),
     ("claude-opus-5", _ADAPTIVE),
     ("claude-sonnet-5", _ADAPTIVE),
     ("claude-fable-5", _ADAPTIVE),
@@ -463,6 +500,10 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("claude-sonnet-4-6", _MANUAL),
     ("claude-haiku-4-5", _MANUAL),
     # OpenAI reasoning models, longest fragment first.
+    # Databricks keys before the bare names they contain ("gpt-6-sol" is a
+    # substring of "databricks-gpt-6-sol").
+    ("databricks-gpt-6-sol", _DATABRICKS_GPT6_SOL_LUNA),
+    ("databricks-gpt-6-luna", _DATABRICKS_GPT6_SOL_LUNA),
     ("gpt-6-astra", _GPT6_ASTRA),
     ("gpt-6-sol", _GPT6_SOL_LUNA),
     ("gpt-6-luna", _GPT6_SOL_LUNA),

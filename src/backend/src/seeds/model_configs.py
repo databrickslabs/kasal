@@ -400,6 +400,17 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
         "context_window": 1000000,
         "max_output_tokens": 64000,
     },
+    "databricks-claude-opus-5-5": {
+        # Pay-per-token since 2026-09-22 (Databricks release notes). Databricks
+        # states Anthropic models keep the provider's limits: 1M context, 128K
+        # output. Reasoning cannot be disabled and `temperature` is refused; the
+        # capability registry (core/llm/model_capabilities) keeps it off the wire.
+        "name": "databricks-claude-opus-5-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
     "databricks-claude-sonnet-4-5": {
         "name": "databricks-claude-sonnet-4-5",
         "temperature": 0.7,
@@ -616,8 +627,26 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
         "context_window": 128000,
         "max_output_tokens": 32000,
     },
+    # GPT-6 family. Endpoint names from Databricks' supported-models page (Sol
+    # and Luna pay-per-token since 2026-09-22). Databricks publishes no limits
+    # for them, so context/output mirror the direct-OpenAI gpt-6-* seeds above.
+    # All three are Responses API models (services/llm/manager.py).
     "databricks-gpt-6-astra": {
         "name": "databricks-gpt-6-astra",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-6-luna": {
+        "name": "databricks-gpt-6-luna",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-6-sol": {
+        "name": "databricks-gpt-6-sol",
         "temperature": 0.7,
         "provider": "databricks",
         "context_window": 1050000,

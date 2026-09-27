@@ -163,6 +163,8 @@ logger.setLevel(logging.DEBUG)
 # https://docs.databricks.com/aws/en/machine-learning/model-serving/query-openai-responses#supported-models
 _DATABRICKS_OPENAI_RESPONSES_MODELS = frozenset(
     {
+        "databricks-gpt-6-sol",
+        "databricks-gpt-6-luna",
         "databricks-gpt-6-astra",
         "databricks-gpt-5-6-sol",
         "databricks-gpt-5-6-terra",
