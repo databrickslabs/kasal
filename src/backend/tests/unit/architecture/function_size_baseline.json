@@ -33,7 +33,6 @@
   "src/backend/src/services/execution/status.py::ExecutionStatusService.update_status._update_operation": 315,
   "src/backend/src/services/execution/subprocess_bootstrap.py::configure_subprocess_logging": 237,
   "src/backend/src/services/export/databricks_app_exporter.py::DatabricksAppExporter.export": 242,
-  "src/backend/src/services/export/templates/databricks_app/agent_server/databricks_responses_llm.py::DatabricksResponsesLLM._handle_responses": 218,
   "src/backend/src/services/export/templates/databricks_app/scripts/quickstart.py::_replace_lakebase_resource": 222,
   "src/backend/src/services/export/templates/databricks_app/scripts/quickstart.py::main": 329,
   "src/backend/src/services/flow_builder/backend_flow.py::BackendFlow.kickoff": 295,
