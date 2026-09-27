@@ -73,7 +73,6 @@
   "src/backend/src/services/knowledge/embedding_service.py::KnowledgeEmbeddingService.embed_file": 214,
   "src/backend/src/services/knowledge/search_service.py::KnowledgeSearchService.search": 269,
   "src/backend/src/services/llm/embeddings.py::get_embedding": 422,
-  "src/backend/src/services/llm/handlers/databricks_responses_llm.py::DatabricksResponsesLLM._handle_responses": 218,
   "src/backend/src/services/llm/handlers/databricks_retry_llm.py::DatabricksRetryLLM.call": 235,
   "src/backend/src/services/llm/manager.py::LLMManager.configure_kasal_llm": 526,
   "src/backend/src/services/memory/config/lakebase_service.py::LakebaseMemoryService.initialize_tables": 205,
