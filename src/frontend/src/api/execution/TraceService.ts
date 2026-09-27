@@ -200,17 +200,6 @@ export const TraceService = {
     }
   },
 
-  async getTaskName(taskId: string): Promise<{ name: string }> {
-    try {
-      // Use taskId as is, without conversion
-      const response = await apiClient.get<{ name: string }>(`/tasks/${taskId}/name`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching task name for ID ${taskId}:`, error);
-      throw error;
-    }
-  },
-
   async getTraces(runId: string): Promise<Trace[]> {
     try {
       // Check if this is a UUID (contains dashes)

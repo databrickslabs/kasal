@@ -45,7 +45,6 @@ interface MemoryBackendState {
   
   // API actions
   validateConfig: () => Promise<boolean>;
-  saveConfig: () => Promise<boolean>;
   loadConfig: () => Promise<void>;
   
   // Utility actions
@@ -132,31 +131,6 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
   // Test Databricks connection
 
   // Load available indexes
-
-  // Save configuration
-  saveConfig: async () => {
-    const { config, validateConfig } = get();
-    
-    // Validate before saving
-    const isValid = await validateConfig();
-    if (!isValid) {
-      return false;
-    }
-    
-    set({ isLoading: true, error: null });
-    
-    try {
-      const result = await MemoryBackendService.saveConfig(config);
-      set({ isLoading: false });
-      return result.success;
-    } catch (error: unknown) {
-      set({ 
-        error: (error instanceof Error ? error.message : String(error)) || 'Failed to save configuration',
-        isLoading: false,
-      });
-      return false;
-    }
-  },
 
   // Load configuration
   loadConfig: async () => {
