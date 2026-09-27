@@ -114,5 +114,3 @@ export class ScheduleService {
     return response.data;
   }
 }
-
-export const scheduleService = new ScheduleService();

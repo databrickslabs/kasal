@@ -34,9 +34,6 @@ let databaseManagementPermissionCache: {
   checked: false
 };
 
-// Export getter for the cache
-export const getDatabaseManagementPermission = () => databaseManagementPermissionCache;
-
 function App() {
   // Load and maintain user permissions throughout the app
   usePermissionLoader();

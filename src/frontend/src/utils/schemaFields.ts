@@ -131,11 +131,3 @@ export function schemaToRoutableFields(schemaDefinition: unknown): RoutableField
   collect(schemaToFields(schemaDefinition), '', '', false, 0, out);
   return out;
 }
-
-/** Look up a field by the path stored in a saved condition. */
-export function findFieldByPath(
-  fields: RoutableField[],
-  path: string
-): RoutableField | undefined {
-  return fields.find((f) => f.path === path);
-}

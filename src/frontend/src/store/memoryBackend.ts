@@ -195,6 +195,5 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
 export const useMemoryBackendConfig = () => useMemoryBackendStore((state) => state.config);
 export const useMemoryBackendType = () => useMemoryBackendStore((state) => state.config.backend_type);
 export const useDatabricksConfig = () => useMemoryBackendStore((state) => state.config.databricks_config);
-export const useLakebaseConfig = () => useMemoryBackendStore((state) => state.config.lakebase_config);
 export const useMemoryTuningConfig = () =>
   useMemoryBackendStore((state) => state.config.cognitive_config);
