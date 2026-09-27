@@ -238,8 +238,10 @@ async def get_group(
     admin_user: AdminUserDep,
     group_context: GroupContextDep,
 ) -> GroupResponse:
-    """Get a specific group by ID. Requires admin privileges."""
-    # Use injected service
+    """Get a specific group by ID. Requires admin privileges on the target group."""
+    # SECURITY (audit L1): being an admin of the current workspace does not
+    # make you an admin of the group you are reading.
+    await _verify_group_admin(service, admin_user, group_id)
 
     group = await service.get_group_by_id(group_id)
     if not group:

@@ -15,6 +15,7 @@ from src.services.agent_builder.schema_converter import build_model_from_schema
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.task_builder import build_task_args
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 # Get loggers from the centralized logging system
 logger = LoggerManager.get_instance().crew
@@ -473,12 +474,9 @@ async def create_task(
                                 )
                         else:
                             logger.error(
-                                f"Could not create tool instance for {tool_name}"
+                                f"Could not create tool instance for {tool_name}: the tool factory returned None (see its logs). "
+                                f"Tool config: {mask_sensitive_fields(tool_config)}"
                             )
-                            logger.error(
-                                "Tool factory returned None - check tool factory logs for details"
-                            )
-                            logger.error(f"Tool config: {tool_config}")
                     except Exception as e:
                         logger.error(f"Error creating tool {tool_name}: {str(e)}")
             else:

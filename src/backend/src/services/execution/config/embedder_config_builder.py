@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.core.databricks_app import DatabricksAppInstallation
 from src.core.logger import LoggerManager
 from src.utils.databricks_url_utils import DatabricksURLUtils
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = LoggerManager.get_instance().crew
 
@@ -50,7 +51,7 @@ class EmbedderConfigBuilder:
                 if isinstance(ec, dict) and "provider" in ec:
                     embedder_config = ec
                     logger.info(
-                        f"Found valid embedder configuration: {embedder_config}"
+                        f"Found valid embedder configuration: {mask_sensitive_fields(embedder_config)}"
                     )
                     break
                 else:

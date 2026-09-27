@@ -1709,7 +1709,7 @@ class DatabricksJobsTool(BaseTool):
     async def _create_job(self, job_config: Dict[str, Any]) -> str:
         """Create a new job."""
         start_time = time.time()
-        logger.info(f"[create_job] Creating job with config: {job_config}")
+        logger.info(f"[create_job] Creating job with config keys: {sorted(job_config)}")
 
         try:
             # Validate required fields

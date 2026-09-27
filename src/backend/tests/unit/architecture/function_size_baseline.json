@@ -11,7 +11,7 @@
   "src/backend/src/services/agent_builder/process_executor.py::ProcessCrewExecutor._run_admitted": 294,
   "src/backend/src/services/agent_builder/process_executor.py::run_crew_in_process": 1690,
   "src/backend/src/services/agent_builder/process_executor.py::run_crew_in_process.prepare_and_run": 1098,
-  "src/backend/src/services/agent_builder/task_adapter.py::create_task": 473,
+  "src/backend/src/services/agent_builder/task_adapter.py::create_task": 470,
   "src/backend/src/services/chat/conversation_preamble.py::build_conversation_preamble": 208,
   "src/backend/src/services/chat/dispatcher.py::DispatcherService.detect_intent": 225,
   "src/backend/src/services/chat/dispatcher.py::DispatcherService.dispatch": 695,

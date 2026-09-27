@@ -1827,7 +1827,7 @@ class ToolFactory:
             elif tool_name == "PowerBIConnectorTool":
                 # PowerBIConnectorTool accepts configuration directly
                 tool_config["result_as_answer"] = result_as_answer
-                logger.info(f"Creating PowerBIConnectorTool with config: {tool_config}")
+                logger.info(f"PowerBIConnectorTool config keys: {sorted(tool_config)}")
                 return tool_class(**tool_config)
 
             # Universal Measure Conversion Pipeline
