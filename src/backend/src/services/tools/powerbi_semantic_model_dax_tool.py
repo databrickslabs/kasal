@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Coroutine, Dict, List, Optional, Type, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -27,6 +27,7 @@ from src.services.tools.base import BaseTool
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 def _dax_quote_table(name: str) -> str:
@@ -39,16 +40,13 @@ def _dax_quote_table(name: str) -> str:
 logger.setLevel(logging.DEBUG)
 
 
-def _run_async_in_sync_context(coro):
-    """Run ``coro`` from this tool's synchronous code.
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
 
-    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
-    copies the caller's ContextVars (group, OBO token, execution id) into the
-    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
-    coroutine's own exceptions through. The copy that lived here caught
-    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
-    the coroutine was mistaken for "no running loop" and the spent coroutine
-    was run a second time, and it waited forever.
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
     from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
@@ -244,7 +242,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     filtered_kwargs[k] = v
 
             # Merge configs
-            merged_config = {}
+            merged_config: Dict[str, Any] = {}
 
             # Connection/auth — default config takes precedence
             config_params = [
@@ -470,11 +468,8 @@ class PowerBISemanticModelDaxTool(BaseTool):
         results["model_context"] = model_context
 
         # Merge default filters from context into active_filters
-        default_filters = (
-            model_context.get("default_filters")
-            if isinstance(model_context.get("default_filters"), dict)
-            else {}
-        )
+        _df = model_context.get("default_filters")
+        default_filters: Dict[str, Any] = _df if isinstance(_df, dict) else {}
 
         # Normalize active_filters: UI may send list format
         # [{"table": "T", "column": "C", "value": "V"}] → {"T[C]": "V"} or {"T[C]": ["V1", "V2"]}
@@ -552,7 +547,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         dax_attempts: List[Dict[str, Any]] = []
 
         # Initialize prompt tracker — will be set by _generate_dax_with_llm / _generate_dax_with_self_correction
-        self._last_llm_prompt = None
+        self._last_llm_prompt: Optional[str] = None
 
         # Retrieve RAG few-shot examples (fail-open — returns [] if not configured)
         _rag_retriever = DaxRagRetriever()
@@ -638,7 +633,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                             logger.warning(
                                 f"[DaxTool] Step 3/4: ✗ DAX VALIDATION FAILED attempt {attempt + 1} — {validation_error}"
                             )
-                            execution_result = {
+                            execution_result: Dict[str, Any] = {
                                 "success": False,
                                 "error": validation_error,
                                 "row_count": 0,

@@ -155,7 +155,7 @@ def consolidate_memory(memory: Any, scope: str | None = None) -> dict[str, int]:
         else:
             seen[key] = record
 
-    storage = getattr(memory, "storage", None)
+    storage: Any = getattr(memory, "storage", None)
     if not callable(getattr(storage, "delete", None)):
         return stats
     for record in duplicates:
@@ -230,7 +230,7 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
         logger.warning("Memory merge LLM call failed: %s", exc)
         return stats
 
-    storage = getattr(memory, "storage", None)
+    storage: Any = getattr(memory, "storage", None)
     if not callable(getattr(storage, "delete", None)):
         return stats
 

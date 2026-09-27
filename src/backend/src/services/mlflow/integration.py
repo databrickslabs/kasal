@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _get_mlflow():
+def _get_mlflow() -> Any:
     """Get mlflow module if available."""
     try:
         import mlflow  # type: ignore

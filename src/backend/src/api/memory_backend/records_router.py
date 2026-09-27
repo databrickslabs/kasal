@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request
 
 from src.core.exceptions import BadRequestError
-from src.dependencies.providers import GroupContextDep
+from src.dependencies.providers import GroupContextDep, require_group_id
 from src.utils.databricks_auth import extract_user_token_from_request
 
 from .dependencies import MemoryBackendServiceDep, logger
@@ -42,7 +42,7 @@ async def get_memory_stats(
         Memory usage statistics
     """
     # Service is injected via dependency
-    stats = await service.get_memory_stats(group_context.primary_group_id, crew_id)
+    stats = await service.get_memory_stats(require_group_id(group_context), crew_id)
     return stats
 
 
@@ -112,15 +112,12 @@ async def list_memory_records(
     or Lakebase pgvector based on the user's active ``MemoryBackend``
     configuration. Records are filtered by the caller's group (tenant).
     """
-    group_id = group_context.primary_group_id
+    group_id = require_group_id(group_context)
     extract_user_token_from_request(request) if request else None
 
     active = await service.get_active_config(group_id)
-    backend_type = (
-        getattr(active, "backend_type", None).value
-        if active and getattr(active, "backend_type", None)
-        else "default"
-    )
+    active_type = getattr(active, "backend_type", None) if active else None
+    backend_type = active_type.value if active_type else "default"
 
     logger.info(
         "[memory/records] group=%s backend=%s scope=%s limit=%s offset=%s",
@@ -190,15 +187,12 @@ async def delete_memory_records(
     local (LanceDB) path only touches the group's store directory
     ``kasal_default_<group_id>``.
     """
-    group_id = group_context.primary_group_id
+    group_id = require_group_id(group_context)
     extract_user_token_from_request(request) if request else None
 
     active = await service.get_active_config(group_id)
-    backend_type = (
-        getattr(active, "backend_type", None).value
-        if active and getattr(active, "backend_type", None)
-        else "default"
-    )
+    active_type = getattr(active, "backend_type", None) if active else None
+    backend_type = active_type.value if active_type else "default"
 
     logger.info(
         "[memory/records][DELETE] group=%s backend=%s scope=%s",

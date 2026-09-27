@@ -17,14 +17,18 @@ import asyncio
 import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Tuple
+from typing import Any, Callable, Coroutine, Optional, Tuple, TypeVar
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 300
 
+_T = TypeVar("_T")
 
-def run_async_with_context(coro, timeout: float = DEFAULT_TIMEOUT):
+
+def run_async_with_context(
+    coro: Coroutine[Any, Any, _T], timeout: float = DEFAULT_TIMEOUT
+) -> _T:
     """Run a coroutine from sync code, preserving the caller's ContextVars.
 
     Handles both cases:
@@ -50,7 +54,7 @@ def run_async_with_context(coro, timeout: float = DEFAULT_TIMEOUT):
         return executor.submit(ctx.run, asyncio.run, coro).result(timeout=timeout)
 
 
-def run_sync_with_context(fn, timeout: float = DEFAULT_TIMEOUT):
+def run_sync_with_context(fn: Callable[[], _T], timeout: float = DEFAULT_TIMEOUT) -> _T:
     """Run a blocking callable, offloading to a worker thread if needed.
 
     If the current thread has a running event loop, the callable (which may

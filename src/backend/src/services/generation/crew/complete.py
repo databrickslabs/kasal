@@ -6,12 +6,13 @@ input take the progressive path instead."""
 
 import logging
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, ContextManager, Dict, List, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.schemas.crew import (
     CrewGenerationRequest,
 )
+from src.services.generation.crew.host import CrewGenerationBase
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
@@ -20,7 +21,7 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
-class CompleteGenerationMixin:
+class CompleteGenerationMixin(CrewGenerationBase):
     """One-shot crew generation (``POST /crew/create-crew``).
 
     A single LLM call returns the whole crew, which is then validated and
@@ -53,7 +54,7 @@ class CompleteGenerationMixin:
         if mlflow_on:
             from src.services.mlflow.tracing import start_root_trace
 
-            trace_ctx = start_root_trace(
+            trace_ctx: ContextManager[Any] = start_root_trace(
                 "crew_generation",
                 inputs={
                     "prompt": getattr(request, "prompt", None),
@@ -317,7 +318,7 @@ class CompleteGenerationMixin:
         setup: Dict[str, Any],
         allowed_tools: List[Dict[str, Any]],
         tool_name_to_id_map: Dict[str, str],
-        model: str = None,
+        model: Optional[str] = None,
         disable_memory: bool = False,
     ) -> Dict[str, Any]:
         """

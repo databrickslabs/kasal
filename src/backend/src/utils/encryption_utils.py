@@ -8,7 +8,7 @@ import base64
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
@@ -164,8 +164,12 @@ class EncryptionUtils:
         """Encrypt a value using RSA public key encryption"""
         try:
             _, public_key_bytes = EncryptionUtils.get_or_create_ssh_keys()
-            public_key = serialization.load_pem_public_key(
-                public_key_bytes, backend=default_backend()
+            # get_or_create_ssh_keys only ever generates RSA keys.
+            public_key = cast(
+                rsa.RSAPublicKey,
+                serialization.load_pem_public_key(
+                    public_key_bytes, backend=default_backend()
+                ),
             )
 
             # RSA can only encrypt limited data size, so we'll use a hybrid approach
@@ -198,8 +202,12 @@ class EncryptionUtils:
         """Decrypt a value using RSA private key encryption"""
         try:
             private_key_bytes, _ = EncryptionUtils.get_or_create_ssh_keys()
-            private_key = serialization.load_pem_private_key(
-                private_key_bytes, password=None, backend=default_backend()
+            # get_or_create_ssh_keys only ever generates RSA keys.
+            private_key = cast(
+                rsa.RSAPrivateKey,
+                serialization.load_pem_private_key(
+                    private_key_bytes, password=None, backend=default_backend()
+                ),
             )
 
             # Decode the combined value

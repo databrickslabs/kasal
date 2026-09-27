@@ -30,8 +30,10 @@ All tool logic and agent configurations are ready to run.
 
 import logging
 import uuid
+from typing import Any, Dict, List
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import async_session_factory
 from src.models.agent import Agent
@@ -1033,7 +1035,7 @@ UCMV_REEVAL_CREW = {
 # All crews (ordered for seeding)
 # ─────────────────────────────────────────────────────────────────────────────
 
-ALL_CREWS = [
+ALL_CREWS: List[Dict[str, Dict[str, Any]]] = [
     {
         "crew": PIPELINE_CONFIG_CREW,
         "agent": PIPELINE_CONFIG_AGENT,
@@ -1056,7 +1058,7 @@ ALL_CREWS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def _seed_group(session) -> None:
+async def _seed_group(session: AsyncSession) -> None:
     result = await session.execute(select(Group).where(Group.id == BI_GROUP_ID))
     if result.scalars().first():
         logger.info(f"Group '{BI_GROUP_ID}' already exists — skipping")
@@ -1073,7 +1075,7 @@ async def _seed_group(session) -> None:
     logger.info(f"Created group: {BI_GROUP_ID}")
 
 
-async def _seed_agent(session, data: dict) -> None:
+async def _seed_agent(session: AsyncSession, data: dict) -> None:
     result = await session.execute(select(Agent).where(Agent.id == data["id"]))
     if result.scalars().first():
         return
@@ -1104,7 +1106,7 @@ async def _seed_agent(session, data: dict) -> None:
     session.add(agent)
 
 
-async def _seed_task(session, data: dict) -> None:
+async def _seed_task(session: AsyncSession, data: dict) -> None:
     result = await session.execute(select(Task).where(Task.id == data["id"]))
     if result.scalars().first():
         return
@@ -1126,7 +1128,7 @@ async def _seed_task(session, data: dict) -> None:
     session.add(task)
 
 
-async def _seed_crew(session, data: dict) -> None:
+async def _seed_crew(session: AsyncSession, data: dict) -> None:
     crew_id = uuid.uuid5(uuid.NAMESPACE_DNS, data["id"])
     result = await session.execute(select(Crew).where(Crew.id == crew_id))
     if result.scalars().first():

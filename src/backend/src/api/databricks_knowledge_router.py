@@ -137,7 +137,7 @@ async def browse_volume_files(
         DatabricksKnowledgeService, Depends(get_databricks_knowledge_service)
     ],
     group_context: GroupContextDep,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Browse files in a Databricks Volume directory.
 

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from src.schemas.template import PromptTemplateUpdate
 from src.services.catalog.templates import TemplateService
 from src.services.prompt_optimization import run_state
+from src.services.prompt_optimization.host import PromptOptimizationHost
 from src.services.prompt_optimization.run_state import (
     _LIVE_COUNTERS,
     _MAX_KEPT_RUNS,
@@ -26,7 +27,7 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
-class RunRegistryMixin:
+class RunRegistryMixin(PromptOptimizationHost):
     async def get_run(
         self, run_id: str, group_context: Optional[GroupContext] = None
     ) -> Optional[Dict[str, Any]]:

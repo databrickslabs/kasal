@@ -28,7 +28,7 @@ def _parse_task_guardrail(task: Dict[str, Any]) -> Optional[tuple]:
         ('llm', description, llm_model) | ('code', name) | None
     """
 
-    def _coerce(value):
+    def _coerce(value: Any) -> Any:
         if isinstance(value, str):
             try:
                 return json.loads(value)

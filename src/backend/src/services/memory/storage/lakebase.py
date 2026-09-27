@@ -24,7 +24,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, Coroutine, TypeVar, cast
 
 from sqlalchemy import text
 
@@ -79,6 +79,8 @@ if not os.environ.get("USE_NULLPOOL"):
 
 
 logger = LoggerManager.get_instance().crew
+
+_T = TypeVar("_T")
 
 
 class LakebaseStorageBackend:
@@ -252,7 +254,11 @@ class LakebaseStorageBackend:
                 params["limit"] = limit
                 params["offset"] = offset
                 result = await session.execute(sql, params)
-                return [self._row_to_record(row) for row in result.fetchall()]
+                # fetchall() never yields None rows, so no record is None here.
+                return [
+                    cast(MemoryRecord, self._row_to_record(row))
+                    for row in result.fetchall()
+                ]
 
         return self._run_sync(_list())
 
@@ -742,7 +748,7 @@ class LakebaseStorageBackend:
             return list(vector.tolist())
         return list(vector)
 
-    def _run_sync(self, coro: Any) -> Any:
+    def _run_sync(self, coro: Coroutine[Any, Any, _T]) -> _T:
         """Run a coroutine on the shared long-lived bridge loop (PERF-013).
 
         A fresh loop per call made _is_engine_loop_stale() trip on EVERY
@@ -751,4 +757,4 @@ class LakebaseStorageBackend:
         each <10ms pgvector query. A stable loop keeps the engine cached;
         token freshness is handled lazily by get_session.
         """
-        return run_on_bridge_loop(coro)
+        return cast(_T, run_on_bridge_loop(coro))

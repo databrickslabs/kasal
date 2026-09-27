@@ -246,6 +246,25 @@ class TestSQLStructureExpander:
         assert result is not None
         assert len(result.sql_measures) == 0
 
+    def test_process_and_deduplicate_filters_keeps_input_filters(
+        self, standard_expander
+    ):
+        """Definition filter groups must not replace the input filters
+        (regression: the group loop variable shadowed the ``filters`` param)"""
+        from src.services.converters.formats.sql.models import SQLDefinition
+
+        sql_definition = SQLDefinition(
+            description="Test",
+            technical_name="test",
+            filters={"query_filter": {"year_filter": "fiscyear = 2024"}},
+        )
+
+        result = standard_expander._process_and_deduplicate_filters(
+            ["region = 'EU'", "region = 'EU'"], sql_definition
+        )
+
+        assert result == ["region = 'EU'"]
+
 
 class TestSQLTimeIntelligenceHelper:
     """Tests for SQLTimeIntelligenceHelper class"""

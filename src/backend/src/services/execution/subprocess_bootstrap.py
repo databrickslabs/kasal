@@ -6,9 +6,11 @@ calls before it runs anything, plus the stdout/stderr muzzle that keeps engine
 chatter off the terminal. Its only callers are the crew and flow runners.
 """
 
+import io
 import logging
 import os
 import sys
+from typing import TextIO, Tuple, Union
 
 from src.services.execution.logs.context import (
     ExecutionContextFormatter,
@@ -67,7 +69,9 @@ async def open_child_database() -> bool:
     return lakebase_active
 
 
-def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
+def configure_subprocess_logging(
+    execution_id: str, process_type: str = "crew"
+) -> logging.Logger:
     """
     Configure logging for a subprocess running a crew or flow execution.
 
@@ -80,8 +84,6 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         execution_id: The execution ID to include in logs
         process_type: Type of process ("crew" or "flow") - defaults to "crew" for backward compatibility
     """
-
-    # Set execution context
     set_execution_context(execution_id)
 
     # Suppress CrewAI verbose output
@@ -121,7 +123,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     from src.core.logger import LoggerManager
 
     # Get the log directory from environment or determine dynamically
-    log_dir = os.environ.get("LOG_DIR")
+    log_dir: Union[str, os.PathLike, None] = os.environ.get("LOG_DIR")
     if not log_dir:
         # Determine log directory relative to backend root
         import pathlib
@@ -306,7 +308,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     return exec_logger
 
 
-def suppress_stdout_stderr():
+def suppress_stdout_stderr() -> Tuple[TextIO, TextIO, io.StringIO]:
     """
     Completely suppress stdout and stderr output.
 
@@ -326,7 +328,7 @@ def suppress_stdout_stderr():
     return original_stdout, original_stderr, captured_output
 
 
-def restore_stdout_stderr(original_stdout, original_stderr):
+def restore_stdout_stderr(original_stdout: TextIO, original_stderr: TextIO) -> None:
     """
     Restore original stdout and stderr.
 

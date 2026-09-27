@@ -29,9 +29,13 @@ this check never drifts from what the app actually queries.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+if TYPE_CHECKING:
+    from src.services.databricks.lakebase.service import LakebaseService
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +59,7 @@ def _expected_schema() -> Dict[str, Set[str]]:
     }
 
 
-async def run_lakebase_preflight(conn) -> Dict[str, Any]:
+async def run_lakebase_preflight(conn: AsyncConnection) -> Dict[str, Any]:
     """Run the preflight against an ACTIVE Lakebase connection.
 
     ``conn`` is an async SQLAlchemy connection already pointed at the Lakebase
@@ -221,7 +225,7 @@ async def run_lakebase_preflight(conn) -> Dict[str, Any]:
 
 
 async def preflight_via_service(
-    service, instance_name: Optional[str] = None
+    service: LakebaseService, instance_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """Build a Lakebase connection the way ``check_lakebase_tables`` does, then
     run the preflight against it. Never raises — returns ``status=error`` on any

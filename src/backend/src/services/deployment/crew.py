@@ -82,7 +82,7 @@ class CrewDeploymentService:
 
         # Check group authorization
         if group_context and group_context.is_valid():
-            if crew.group_id not in group_context.group_ids:
+            if crew.group_id not in (group_context.group_ids or []):
                 raise ValueError(f"Crew {crew_id} not found")
 
         # Get agents and tasks
@@ -340,6 +340,8 @@ class CrewDeploymentService:
             w.serving_endpoints.create(
                 name=endpoint_name,
                 config=EndpointCoreConfigInput(
+                    # Required by the SDK dataclass; omitting it was a TypeError.
+                    name=endpoint_name,
                     served_entities=[served_entity],
                     auto_capture_config=(
                         AutoCaptureConfigInput(
@@ -401,7 +403,7 @@ class CrewDeploymentService:
 
         return tool_names
 
-    async def _agent_to_dict(self, agent) -> Dict[str, Any]:
+    async def _agent_to_dict(self, agent: Any) -> Dict[str, Any]:
         """Convert agent model to dictionary"""
         # Convert tool IDs to tool names
         tool_names = await self._convert_tool_ids_to_names(agent.tools or [])
@@ -419,7 +421,7 @@ class CrewDeploymentService:
             "allow_delegation": agent.allow_delegation,
         }
 
-    async def _task_to_dict(self, task) -> Dict[str, Any]:
+    async def _task_to_dict(self, task: Any) -> Dict[str, Any]:
         """Convert task model to dictionary"""
         # Convert tool IDs to tool names
         tool_names = await self._convert_tool_ids_to_names(task.tools or [])
@@ -508,10 +510,11 @@ print("Result:", response)
 """
 
 
-class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
+# mlflow.pyfunc binds PythonModel lazily; its stubs do not declare it.
+class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):  # type: ignore[name-defined]
     """MLflow PyFunc wrapper for CrewAI crews"""
 
-    def __init__(self, crew_config: Dict[str, Any]):
+    def __init__(self, crew_config: Dict[str, Any]) -> None:
         """
         Initialize wrapper with crew configuration
 
@@ -520,7 +523,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         """
         self.crew_config = crew_config
 
-    def load_context(self, context):
+    def load_context(self, context: Any) -> None:
         """
         Load model context
 
@@ -535,7 +538,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
             with open(crew_config_path, "r") as f:
                 self.crew_config = json.load(f)
 
-    def predict(self, context, model_input):
+    def predict(self, context: Any, model_input: Any) -> Any:
         """
         Predict method for MLflow model
 
@@ -622,16 +625,16 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         for task_config in self.crew_config.get("tasks", []):
             # Find agent by ID
             agent_id = task_config.get("agent_id")
-            agent = None
+            task_agent: Optional[Agent] = None
             for idx, a_config in enumerate(self.crew_config.get("agents", [])):
                 if a_config.get("id") == agent_id:
-                    agent = agents[idx]
+                    task_agent = agents[idx]
                     break
 
             task = Task(
                 description=task_config["description"],
                 expected_output=task_config["expected_output"],
-                agent=agent,
+                agent=task_agent,
                 async_execution=task_config.get("async_execution", False),
             )
             tasks.append(task)

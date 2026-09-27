@@ -26,7 +26,7 @@ whole ToolFactory — which imports the concrete tools, which import ``base``.
 Importing a leaf module must not execute the package.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # import-time only for type checkers, never at runtime
     from .mcp_handler import (
@@ -46,7 +46,7 @@ _LAZY = {
 }
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     if name in _LAZY:
         import importlib
 

@@ -198,7 +198,8 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             elif response_text.startswith("```"):
                 response_text = response_text.split("```")[1].split("```")[0].strip()
 
-            return json.loads(response_text)
+            parsed: Dict[str, Any] = json.loads(response_text)
+            return parsed
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse LLM response as JSON: {e}")
             return {

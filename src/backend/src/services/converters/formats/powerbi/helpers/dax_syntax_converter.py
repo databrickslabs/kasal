@@ -10,7 +10,7 @@ import re
 class DaxSyntaxConverter:
     """Converts SQL-style formula expressions to DAX syntax"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.dax_functions = [
             "IF",
             "CASE",
@@ -72,7 +72,7 @@ class DaxSyntaxConverter:
             r"CASE\s+WHEN\s*\(\s*([^)]+)\s*\)\s*THEN\s+([^\s]+)\s+ELSE\s+([^\s]+)\s+END"
         )
 
-        def convert_case(match):
+        def convert_case(match: re.Match[str]) -> str:
             condition = match.group(1).strip()
             then_value = match.group(2).strip()
             else_value = match.group(3).strip()
@@ -89,7 +89,7 @@ class DaxSyntaxConverter:
             r"CASE\s+WHEN\s+([^T]+?)\s+THEN\s+([^\s]+)\s+ELSE\s+([^\s]+)\s+END"
         )
 
-        def convert_simple_case(match):
+        def convert_simple_case(match: re.Match[str]) -> str:
             condition = match.group(1).strip()
             then_value = match.group(2).strip()
             else_value = match.group(3).strip()
@@ -112,7 +112,7 @@ class DaxSyntaxConverter:
             r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(<>|!=|=|>|<|>=|<=)\s*(\w+|\d+)"
         )
 
-        def convert_comparison(match):
+        def convert_comparison(match: re.Match[str]) -> str:
             column = match.group(1)
             operator = match.group(2)
             value = match.group(3)

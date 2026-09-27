@@ -23,9 +23,9 @@ none of them owns policy.
 
 import json
 import logging
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.dependencies.providers import SessionDep
@@ -229,7 +229,7 @@ async def mcp_endpoint(
     x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
     accept: Annotated[Optional[str], Header()] = None,
     mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
-):
+) -> Response:
     """The MCP Streamable HTTP endpoint.
 
     Accepts a single JSON-RPC message or a batch. Answers with JSON, or with SSE
@@ -303,7 +303,7 @@ async def mcp_endpoint(
         # The client asked ONLY for SSE, so give it SSE. When it accepts both —
         # which Claude Code does — plain JSON is the cheaper answer and every
         # client handles it.
-        async def _sse():
+        async def _sse() -> AsyncIterator[bytes]:
             yield f"data: {json.dumps(payload, default=str)}\n\n".encode("utf-8")
 
         return StreamingResponse(
@@ -336,7 +336,7 @@ async def mcp_endpoint_get(
     x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
     accept: Annotated[Optional[str], Header()] = None,
     mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
-):
+) -> Response:
     """The server-initiated SSE stream.
 
     Kasal has exactly one thing to say on it — ``tools/list_changed`` — and that
@@ -390,7 +390,7 @@ async def mcp_endpoint_get(
 @router.delete("/mcp")
 async def mcp_endpoint_delete(
     mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
-):
+) -> JSONResponse:
     """Session termination, as the transport defines it.
 
     Nothing is authorised by a session id — the caller is resolved from headers

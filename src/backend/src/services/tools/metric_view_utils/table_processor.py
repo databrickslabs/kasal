@@ -77,7 +77,7 @@ def _detect_common_exclusions(dax_measures: list[dict], source_cols: set) -> lis
     return [predicate_sql[k] for k, c in counts.items() if c >= threshold]
 
 
-def _is_real_switch_decomp(entry) -> bool:
+def _is_real_switch_decomp(entry: Any) -> bool:
     """True when a config switch_decomposition entry carries REAL SQL.
 
     `derive_switch_decompositions` emits skeleton entries whose ``raw_expr`` is a
@@ -195,11 +195,9 @@ def process_table(
 
     # ── Step 1: Auto-generate base measures from MQuery SUM columns ───
     # Build a DAX-column → source-output-column map so BOTH base and derived
-    # measures reference the column the emitted `source:` SELECT actually exposes.
-    # A pre-aggregating source (SELECT ..., SUM(kbi_value) AS value ...) outputs
-    # the column under its ALIAS (`name`='value'), not the inner physical name
-    # (`source_col`='kbi_value'). Referencing source_col then fails (column not
-    # found). We normalize measures to the alias the source emits.
+    # measures reference the column the emitted `source:` SELECT exposes: a
+    # pre-aggregating source (SUM(kbi_value) AS value) outputs its ALIAS (`name`),
+    # not the physical `source_col` (which would fail: column not found).
     _src_alias_map: dict[str, str] = {}
     for _c in table_info.aggregate_columns:
         _sc = _c.get("source_col")
@@ -210,10 +208,10 @@ def process_table(
 
     base_measures: list[TranslationResult] = []
     base_names: set[str] = set()
-    for col in table_info.aggregate_columns:
-        name = col["name"]
-        if "expr" in col:
-            expr = col["expr"]
+    for agg_col in table_info.aggregate_columns:
+        name = agg_col["name"]
+        if "expr" in agg_col:
+            expr = agg_col["expr"]
         else:
             # Reference the source's OUTPUT column (`name`), which is what the
             # emitted source SELECT exposes — not the inner `source_col`.
@@ -306,8 +304,8 @@ def process_table(
         re.IGNORECASE,
     )
     inactive_rels = ctx.inactive_rels
-    for m in dax_measures:
-        dax = m.get("dax_expression", "")
+    for dm in dax_measures:
+        dax = dm.get("dax_expression", "")
         for match in userel_pattern.finditer(dax):
             fact_col = match.group(2)  # e.g. ShipDate
             dim_table = match.group(3)  # e.g. Calendar
@@ -365,8 +363,8 @@ def process_table(
     _llm_enabled = bool(ctx.llm_config and ctx.llm_config.get("use_llm_fallback"))
     _trivial_only = _llm_enabled and _mode == "llm_first"
 
-    for m in dax_measures:
-        result = ctx.translator.translate(m, table_key, trivial_only=_trivial_only)
+    for dm in dax_measures:
+        result = ctx.translator.translate(dm, table_key, trivial_only=_trivial_only)
         if result.is_translatable:
             result.sql_expr = clean_unresolved_vars_fn(result.sql_expr)
             if result.measure_name not in base_names:
@@ -379,8 +377,7 @@ def process_table(
             if result.category == "cross_table":
                 ctx.cross_table_measures.append(result)
 
-    # 5a-fix. Resolve window.order: replace hardcoded 'date_key' with actual
-    # period dimension from the table's GROUP BY columns.
+    # 5a-fix. window.order: hardcoded 'date_key' -> the table's GROUP BY period dim.
     _PERIOD_DIM_PRIORITY = ctx.config.get(
         "period_dim_priority", ["fiscper", "fiscal_year_period", "date_key"]
     )
@@ -564,7 +561,7 @@ def process_table(
                 )
 
                 # Convert CALCULATE(SUM(Table[col]))*N -> SUM(source.col) * N
-                def _repl_calc_sum(cm):
+                def _repl_calc_sum(cm: re.Match[str]) -> str:
                     s = f"SUM(source.{cm.group(1)})"
                     if cm.group(2):
                         s += f" * {cm.group(2)}"
@@ -654,11 +651,11 @@ def process_table(
         # measures) so the LLM emits real source columns / join aliases instead
         # of guessing. Goes in the per-measure user prompt (not the cached prefix).
         _ctx_lines = [f"- source table: {source_table or '(unknown)'}"]
-        _agg_cols = [
+        _agg_cols_raw = [
             c.get("source_col") or c.get("name")
             for c in (table_info.aggregate_columns or [])
         ]
-        _agg_cols = [c for c in _agg_cols if c]
+        _agg_cols: list[str] = [c for c in _agg_cols_raw if c]
         if _agg_cols:
             _ctx_lines.append(
                 f"- fact source columns (use as source.<col>): {', '.join(sorted(set(_agg_cols))[:60])}"
@@ -977,7 +974,10 @@ def process_table(
         )
 
         def _rewrite(
-            expr: str | None, _fs=_filter_start, _alias=alias, _pkm=pivot_kbi_map
+            expr: str | None,
+            _fs: re.Pattern[str] = _filter_start,
+            _alias: str = alias,
+            _pkm: Any = pivot_kbi_map,
         ) -> str | None:
             if not expr:
                 return expr
@@ -1222,7 +1222,7 @@ def process_table(
         final_sql = post_processor.process(final_sql)
 
         # Normalize mixed-case column aliases to lowercase
-        def _lc_alias(m_alias):
+        def _lc_alias(m_alias: re.Match[str]) -> str:
             a = m_alias.group(1)
             return (
                 f"AS {a.lower()}"

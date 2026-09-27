@@ -30,7 +30,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from uuid import UUID
 
 from src.models.execution_status import ExecutionStatus
@@ -319,6 +319,7 @@ async def start_run(
     # entity_id is persisted as a string on the publication (it is an external
     # identifier there), but Crew.id is a UUID column — asyncpg rejects a str
     # with "'str' object has no attribute 'hex'".
+    crew_key: Union[UUID, str]
     try:
         crew_key = UUID(entity_id)
     except (ValueError, AttributeError, TypeError):
@@ -444,7 +445,7 @@ async def _start_flow(
     must be indistinguishable from a UI-started one everywhere except its origin
     tag, or the traces, logs and history stop lining up.
     """
-    from src.services.flow_builder.execution_service import KasalFlowService
+    from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
     run_id = str(uuid.uuid4())
     result = await KasalFlowService(session).run_flow(

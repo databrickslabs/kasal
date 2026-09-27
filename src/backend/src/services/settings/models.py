@@ -161,7 +161,9 @@ class ModelConfigService:
         """
         return await self.repository.find_by_key(key)
 
-    async def create_model_config(self, model_data, group_id: Optional[str] = None):
+    async def create_model_config(
+        self, model_data: Any, group_id: Optional[str] = None
+    ) -> ModelConfig:
         """
         Create a new model configuration.
 
@@ -203,8 +205,8 @@ class ModelConfigService:
         return result
 
     async def update_model_config(
-        self, key: str, model_data, group_id: Optional[str] = None
-    ):
+        self, key: str, model_data: Any, group_id: Optional[str] = None
+    ) -> Optional[ModelConfig]:
         """
         Update an existing model configuration.
 
@@ -448,7 +450,7 @@ class ModelConfigService:
                     }
                 else:
                     # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
-                    config = get_model_config(normalized_key)
+                    config = get_model_config(normalized_key) or {}
                     if not config:
                         raise ValueError(
                             f"Model configuration not found for model: {model}"
@@ -527,7 +529,7 @@ class ModelConfigService:
             raise KasalError(detail=f"Failed to get model configuration: {str(e)}")
 
     @staticmethod
-    def _as_config(m) -> Dict[str, Any]:
+    def _as_config(m: Any) -> Dict[str, Any]:
         """Model row -> the config dict shape get_model_config returns."""
         return {
             "key": m.key,
@@ -656,7 +658,7 @@ class ModelConfigService:
         """
         # Determine cache key based on group context
         cache_group_id = (
-            group_context.primary_group_id
+            (group_context.primary_group_id or "__default__")
             if group_context and group_context.group_ids
             else "__default__"
         )
@@ -664,7 +666,9 @@ class ModelConfigService:
         # =========================================================================
         # TTL CACHE: Check cache first
         # =========================================================================
-        cached_models = await model_config_cache.get(cache_group_id, "models")
+        cached_models: Optional[List[ModelConfig]] = await model_config_cache.get(
+            cache_group_id, "models"
+        )
         if cached_models is not None:
             logger.info(
                 f"[CACHE HIT] Returning {len(cached_models)} cached models for group {cache_group_id}"
@@ -787,7 +791,11 @@ class ModelConfigService:
                 if model.key == key:
                     if model.group_id is None:
                         default_model = model
-                    elif group_context and model.group_id in group_context.group_ids:
+                    elif (
+                        group_context
+                        and group_context.group_ids
+                        and model.group_id in group_context.group_ids
+                    ):
                         target_model = model
                         break
 
@@ -805,9 +813,11 @@ class ModelConfigService:
                 raise ForbiddenError(detail="Group context required to toggle models")
 
             primary_group_id = group_context.primary_group_id
+            if primary_group_id is None:
+                raise ForbiddenError(detail="Group context required to toggle models")
 
             # Helper to invalidate cache after mutation
-            async def _invalidate_cache():
+            async def _invalidate_cache() -> None:
                 await model_config_cache.invalidate(primary_group_id, "models")
                 await model_config_cache.invalidate("__default__", "models")
                 logger.info(

@@ -337,11 +337,10 @@ class TestSeedAsyncUpdateExistingNames:
         template_name = test_templates[0]["name"]
 
         # Session for initial query: returns the template name as existing
-        # Note: code does {row[0] for row in result.scalars().all()}
-        # so we return tuples so row[0] gives the full name
+        # scalars() of select(PromptTemplate.name) yields the name strings
         mock_initial_session = AsyncMock()
         initial_result = MagicMock()
-        initial_result.scalars.return_value.all.return_value = [(template_name,)]
+        initial_result.scalars.return_value.all.return_value = [template_name]
         mock_initial_session.execute = AsyncMock(return_value=initial_result)
 
         # Session for per-template work

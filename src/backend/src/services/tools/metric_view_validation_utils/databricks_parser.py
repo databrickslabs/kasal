@@ -39,9 +39,9 @@ class UCMetricsViewParser:
         """
         if not yaml_path:
             raise ValueError("yaml_path cannot be None or empty")
-        self.yaml_path = yaml_path
-        self.data = None
-        self.measures = []
+        self.yaml_path: Optional[str] = yaml_path
+        self.data: Optional[Dict] = None
+        self.measures: List[Dict] = []
         self._measures_index: Dict[str, Dict] = (
             {}
         )  # name → measure dict for O(1) lookup
@@ -61,8 +61,10 @@ class UCMetricsViewParser:
         instance._measures_index = {}
         return instance
 
-    def load(self) -> Dict:
-        """Load and parse the YAML file."""
+    def load(self) -> Optional[Dict]:
+        """Load and parse the YAML file (None when the file is empty)."""
+        if self.yaml_path is None:
+            raise ValueError("Headless parser has no YAML file to load")
         with open(self.yaml_path, "r", encoding="utf-8") as f:
             self.data = yaml.safe_load(f)
         return self.data

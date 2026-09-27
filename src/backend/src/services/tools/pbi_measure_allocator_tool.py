@@ -96,11 +96,11 @@ class PbiMeasureAllocatorTool(BaseTool):
                 confidence = "high"
             elif len(matched_facts) > 1:
                 # Multiple facts → pick the one with most references
-                ref_counts = {}
+                ref_counts: dict[str, int] = {}
                 for tbl, col in refs:
                     if tbl in fact_tables:
                         ref_counts[tbl] = ref_counts.get(tbl, 0) + 1
-                allocation = max(ref_counts, key=ref_counts.get)
+                allocation = max(ref_counts, key=lambda t: ref_counts[t])
                 confidence = "medium"
             elif table_refs:
                 # References non-fact tables only → check if any dim maps to a fact
@@ -123,7 +123,7 @@ class PbiMeasureAllocatorTool(BaseTool):
             )
 
         # Summary
-        by_table = {}
+        by_table: dict[str, list] = {}
         for a in allocations:
             tbl = a["proposed_allocation"]
             by_table.setdefault(tbl, []).append(a["measure_name"])

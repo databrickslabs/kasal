@@ -5,23 +5,17 @@ Lakebase Service for managing Databricks Lakebase instances and configuration.
 import asyncio
 import logging
 import os
-import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, cast
 
 # Migration timeout constants
 TABLE_MIGRATION_TIMEOUT_SECONDS = 1800
 STATEMENT_TIMEOUT_MS = 1_800_000
 
-from databricks.sdk import (  # noqa: E402 - import follows module initialization
-    WorkspaceClient,
-)
-from sqlalchemy import (  # noqa: E402 - import follows module initialization
-    create_engine,
-    text,
-)
+from databricks.sdk import WorkspaceClient  # noqa: E402
+from sqlalchemy import create_engine, text  # noqa: E402
 
 # Try to import DatabaseInstance, but make it optional
 try:
@@ -38,63 +32,36 @@ except ImportError:
     print(
         "Warning: DatabaseInstance not available in databricks-sdk. Lakebase features will be disabled."
     )
-    DatabaseInstance = None
-    DatabaseInstanceRole = None
-    DatabaseInstanceRoleAttributes = None
-    DatabaseInstanceRoleMembershipRole = None
-    DatabaseInstanceRoleIdentityType = None
+    DatabaseInstance = None  # type: ignore[misc,assignment]  # optional SDK feature
+    DatabaseInstanceRole = None  # type: ignore[misc,assignment]  # optional SDK feature
+    DatabaseInstanceRoleAttributes = None  # type: ignore[misc,assignment]  # optional SDK feature
+    DatabaseInstanceRoleMembershipRole = None  # type: ignore[misc,assignment]  # optional SDK feature
+    DatabaseInstanceRoleIdentityType = None  # type: ignore[misc,assignment]  # optional SDK feature
     LAKEBASE_AVAILABLE = False
-from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
-    AsyncSession,
-)
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
-from src.config.settings import (  # noqa: E402 - import follows module initialization
-    settings,
-)
-from src.core.base_service import (  # noqa: E402 - import follows module initialization
-    BaseService,
-)
+from src.config.settings import settings  # noqa: E402
+from src.core.base_service import BaseService  # noqa: E402
 from src.core.databricks_app import lakebase_instance_from_config  # noqa: E402
-from src.core.logger import (  # noqa: E402 - import follows module initialization
-    LoggerManager,
-)
-from src.models.database_config import (  # noqa: E402 - import follows module initialization
-    LakebaseConfig,
-)
-from src.repositories.database_config_repository import (  # noqa: E402 - import follows module initialization
+from src.core.logger import LoggerManager  # noqa: E402
+from src.models.database_config import LakebaseConfig  # noqa: E402
+from src.repositories.database_config_repository import (  # noqa: E402
     DatabaseConfigRepository,
 )
-from src.services.databricks.lakebase.connection import (  # noqa: E402 - import follows module initialization
+from src.services.databricks.lakebase.connection import (  # noqa: E402
     LakebaseConnectionService,
 )
-from src.services.databricks.lakebase.migration import (  # noqa: E402 - import follows module initialization
+from src.services.databricks.lakebase.migration import (  # noqa: E402
     LakebaseMigrationService,
+    _validate_identifier,
 )
-from src.services.databricks.lakebase.permission import (  # noqa: E402 - import follows module initialization
+from src.services.databricks.lakebase.permission import (  # noqa: E402
     LakebasePermissionService,
 )
-from src.services.databricks.lakebase.schema import (  # noqa: E402 - import follows module initialization
-    LakebaseSchemaService,
-)
+from src.services.databricks.lakebase.schema import LakebaseSchemaService  # noqa: E402
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
-
-# --- SQL injection prevention helpers ---
-_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _validate_identifier(name: str, kind: str = "identifier") -> str:
-    """Validate a SQL identifier (schema name, table name) to prevent injection.
-
-    Only allows simple identifiers matching ``^[A-Za-z_][A-Za-z0-9_]*$``.
-
-    Raises:
-        ValueError: If the name does not match the safe pattern.
-    """
-    if not name or not _SAFE_IDENTIFIER_RE.match(name):
-        raise ValueError(f"Invalid SQL {kind}: {name!r}")
-    return name
 
 
 def _make_async_lakebase_engine(endpoint: str, pg_user: str, token: str) -> Any:
@@ -136,10 +103,13 @@ class LakebaseService(BaseService):
         if session:
             super().__init__(session)
             self.session = session
-            self.config_repository = DatabaseConfigRepository(LakebaseConfig, session)
+            self.config_repository: Optional[DatabaseConfigRepository] = (
+                DatabaseConfigRepository(LakebaseConfig, session)
+            )
         else:
             # For operations that don't need database session (like migration with own engines)
-            self.session = None
+            # Session-less mode only runs engine-based migration paths.
+            self.session = cast(AsyncSession, None)  # no session in this mode
             self.config_repository = None
         self.user_token = user_token
         self.user_email = user_email
@@ -148,7 +118,8 @@ class LakebaseService(BaseService):
         self.connection_service = LakebaseConnectionService(user_token, user_email)
         self.schema_service = LakebaseSchemaService()
         self.permission_service = LakebasePermissionService()
-        self.migration_service = None  # Will be created when needed with engines
+        # Created when needed with engines
+        self.migration_service: Optional[LakebaseMigrationService] = None
 
     async def get_workspace_client(self) -> WorkspaceClient:
         """
@@ -204,11 +175,14 @@ class LakebaseService(BaseService):
 
             # --- 1. Provisioned instances (one page from REST API) ---
             try:
-                resp = w.api_client.do(
-                    "GET",
-                    "/api/2.0/database/instances",
-                    query={"page_size": 100},
-                    headers=headers,
+                resp = cast(
+                    Dict[str, Any],
+                    w.api_client.do(
+                        "GET",
+                        "/api/2.0/database/instances",
+                        query={"page_size": 100},
+                        headers=headers,
+                    ),
                 )
                 for inst_data in resp.get("database_instances", []):
                     name = inst_data.get("name", "")
@@ -241,11 +215,14 @@ class LakebaseService(BaseService):
                     if pg_token:
                         query["page_token"] = pg_token
 
-                    resp = w.api_client.do(
-                        "GET",
-                        "/api/2.0/postgres/projects",
-                        query=query,
-                        headers=headers,
+                    resp = cast(
+                        Dict[str, Any],
+                        w.api_client.do(
+                            "GET",
+                            "/api/2.0/postgres/projects",
+                            query=query,
+                            headers=headers,
+                        ),
                     )
 
                     for proj in resp.get("projects", []):
@@ -293,11 +270,14 @@ class LakebaseService(BaseService):
             for item in page_items:
                 if item["type"] == "autoscaling" and not item.get("read_write_dns"):
                     try:
-                        ep_resp = w.api_client.do(
-                            "GET",
-                            f"/api/2.0/postgres/projects/{item['name']}/branches/production/endpoints",
-                            query={"page_size": 1},
-                            headers=headers,
+                        ep_resp = cast(
+                            Dict[str, Any],
+                            w.api_client.do(
+                                "GET",
+                                f"/api/2.0/postgres/projects/{item['name']}/branches/production/endpoints",
+                                query={"page_size": 1},
+                                headers=headers,
+                            ),
                         )
                         for ep in ep_resp.get("endpoints", []):
                             host = (ep.get("status", {}).get("hosts", {}) or {}).get(
@@ -321,10 +301,15 @@ class LakebaseService(BaseService):
             logger.error(f"Error listing Lakebase instances: {e}")
             raise
 
+    def _config_repo(self) -> DatabaseConfigRepository:
+        if self.config_repository is None:
+            raise RuntimeError("LakebaseService was created without a session")
+        return self.config_repository
+
     async def get_config(self) -> Dict[str, Any]:
         from .configuration import get_config
 
-        return await get_config(self.config_repository)
+        return await get_config(self._config_repo())
 
     async def save_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -347,7 +332,7 @@ class LakebaseService(BaseService):
             # If Lakebase is being disabled, delete the configuration
             if not config.get("enabled", False):
                 logger.info("Lakebase disabled - deleting configuration from database")
-                await self.config_repository.delete_by_key("lakebase")
+                await self._config_repo().delete_by_key("lakebase")
 
                 # Deleting the row only switches ROUTED sessions — they re-read
                 # is_lakebase_enabled() per call. The globally hot-swapped
@@ -376,7 +361,7 @@ class LakebaseService(BaseService):
                 config["updated_at"] = datetime.utcnow().isoformat()
 
             # Save to database using repository
-            await self.config_repository.upsert("lakebase", config)
+            await self._config_repo().upsert("lakebase", config)
 
             logger.info(
                 f"Lakebase configuration saved: enabled={config.get('enabled')}"
@@ -498,7 +483,7 @@ class LakebaseService(BaseService):
             raise
 
     async def _get_autoscaling_project(
-        self, w, instance_name: str
+        self, w: WorkspaceClient, instance_name: str
     ) -> Optional[Dict[str, Any]]:
         """Look up an autoscaling project by name via PostgresAPI.
 
@@ -627,7 +612,11 @@ class LakebaseService(BaseService):
 
             # Get workspace client and start the instance
             w = await self.get_workspace_client()
-            w.database.start_database_instance(name=instance_name)
+            w.database.update_database_instance(
+                name=instance_name,
+                database_instance=DatabaseInstance(name=instance_name, stopped=False),
+                update_mask="stopped",
+            )
 
             # Wait for instance to be ready
             max_wait_seconds = 120  # 2 minutes
@@ -795,7 +784,7 @@ class LakebaseService(BaseService):
             sorted_tables = self.migration_service.get_sorted_tables(tables_async)
 
             # Migrate data table by table
-            migrated_tables = []
+            migrated_tables: List[Dict[str, Any]] = []
             failed_tables_list = []
             total_rows = 0
             start_time = datetime.utcnow()
@@ -898,7 +887,7 @@ class LakebaseService(BaseService):
         endpoint: str,
         recreate_schema: bool = False,
         migrate_data: bool = True,
-    ):
+    ) -> AsyncIterator[Dict[str, Any]]:
         """
         Migrate data from existing database to Lakebase with streaming progress updates.
 
@@ -1201,7 +1190,7 @@ class LakebaseService(BaseService):
                 "step": "migrate_data",
             }
 
-            migrated_tables = []
+            migrated_tables: List[Dict[str, Any]] = []
             failed_tables_list = []
             total_rows = 0
             start_time = datetime.utcnow()
@@ -1577,7 +1566,9 @@ class LakebaseService(BaseService):
                 return
 
     @asynccontextmanager
-    async def get_lakebase_session(self, instance_name: str):
+    async def get_lakebase_session(
+        self, instance_name: str
+    ) -> AsyncIterator[AsyncSession]:
         """
         Get an async session for Lakebase instance.
 
@@ -1792,10 +1783,8 @@ class LakebaseService(BaseService):
 
             # Get instance details (handles both provisioned and autoscaling)
             instance_info = await self.get_instance(instance_name)
-            raw_state = instance_info.get("state") if instance_info else None
-            state = str(
-                raw_state.value if hasattr(raw_state, "value") else raw_state or ""
-            ).upper()
+            raw_state: Any = instance_info.get("state") if instance_info else None
+            state = str(getattr(raw_state, "value", raw_state) or "").upper()
             ready_states = {"READY", "AVAILABLE", "RUNNING"}
             if not instance_info or state not in ready_states:
                 raise ValueError(

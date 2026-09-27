@@ -5,7 +5,7 @@ This module handles the configuration of tasks for CrewAI flows.
 """
 
 import json
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
@@ -29,13 +29,13 @@ class TaskConfig:
 
     @staticmethod
     async def configure_task(
-        task_data,
-        agent=None,
-        task_output_callback=None,
-        flow_data=None,
-        repositories=None,
+        task_data: Any,
+        agent: Any = None,
+        task_output_callback: Any = None,
+        flow_data: Any = None,
+        repositories: Optional[Dict[str, Any]] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> Any:
         """
         Configure a task with its associated agent and callbacks.
 
@@ -123,7 +123,7 @@ class TaskConfig:
             return None
 
     @staticmethod
-    def _task_data_to_spec(task_data):
+    def _task_data_to_spec(task_data: Any) -> Dict[str, Any]:
         """Map a flow task ORM object to the crew-style spec dict the shared
         ``build_task_args`` consumes, so flow tasks get the SAME assembly,
         guardrails and output_pydantic handling as crew tasks."""
@@ -166,8 +166,11 @@ class TaskConfig:
 
     @staticmethod
     async def _resolve_agent_for_task(
-        task_data, flow_data, repositories, group_context: Optional[GroupContext] = None
-    ):
+        task_data: Any,
+        flow_data: Any,
+        repositories: Optional[Dict[str, Any]],
+        group_context: Optional[GroupContext] = None,
+    ) -> Any:
         """
         Resolve the agent for a task from either the task data or flow connections.
 
@@ -288,8 +291,11 @@ class TaskConfig:
 
     @staticmethod
     async def _configure_task_tools(
-        task_data, agent, flow_data, group_context: Optional[GroupContext] = None
-    ):
+        task_data: Any,
+        agent: Any,
+        flow_data: Any,
+        group_context: Optional[GroupContext] = None,
+    ) -> None:
         """
         Configure tools for a task and add them to the agent.
         Only assign tools if explicitly defined in the task configuration.

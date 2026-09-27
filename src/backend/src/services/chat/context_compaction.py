@@ -21,6 +21,7 @@ drops, at the cost of forgetting instead of summarizing).
 """
 
 import logging
+from datetime import datetime
 from typing import Any, List, Optional, Sequence, Tuple
 
 from src.services.settings.engine_settings import setting as engine_setting
@@ -83,7 +84,7 @@ def transcript_of(rows: Sequence[Any], per_turn_cap: int = 700) -> str:
 
 def split_for_compaction(
     rows: Sequence[Any],
-    summary_upto,
+    summary_upto: Optional[datetime],
     keep_rows: int,
 ) -> Tuple[List[Any], List[Any]]:
     """(to_fold, verbatim): rows newer than the fold marker, split so the

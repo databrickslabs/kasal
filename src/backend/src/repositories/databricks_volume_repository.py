@@ -131,8 +131,10 @@ class DatabricksVolumeRepository:
         """
 
         # Helper to perform the actual volume creation
-        async def _try_create_with_client(client, retry_token):
-            def _create_volume():
+        async def _try_create_with_client(
+            client: "WorkspaceClient", retry_token: Optional[str]
+        ) -> Dict[str, Any]:
+            def _create_volume() -> Dict[str, Any]:
                 try:
                     full_name = f"{catalog}.{schema}.{volume_name}"
 
@@ -464,15 +466,21 @@ class DatabricksVolumeRepository:
         """
 
         # Helper to perform the actual file upload
-        async def _try_upload_with_client(client, retry_token, use_rest_api=False):
+        async def _try_upload_with_client(
+            client: Optional["WorkspaceClient"],
+            retry_token: Optional[str],
+            use_rest_api: bool = False,
+        ) -> Dict[str, Any]:
             # Construct the volume path
             volume_path = f"/Volumes/{catalog}/{schema}/{volume_name}/{file_name}"
 
             # If use_rest_api flag is set, use REST API instead of SDK
             if use_rest_api:
                 return await self._upload_via_rest_api(volume_path, file_content)
+            if client is None:  # only the REST path is ever called without one
+                return {"success": False, "error": "No Databricks client available"}
 
-            def _upload_file():
+            def _upload_file() -> Dict[str, Any]:
                 try:
                     logger.info(
                         f"Uploading file {file_name}: size={len(file_content)} bytes"
@@ -486,7 +494,7 @@ class DatabricksVolumeRepository:
                         else file_content
                     )
                     client.files.upload(
-                        file_path=volume_path, content=content_stream, overwrite=True
+                        file_path=volume_path, contents=content_stream, overwrite=True
                     )
 
                     logger.info(f"Successfully uploaded file to {volume_path}")
@@ -619,8 +627,10 @@ class DatabricksVolumeRepository:
         """
 
         # Helper to perform the actual file download
-        async def _try_download_with_client(client, retry_token):
-            def _download_file():
+        async def _try_download_with_client(
+            client: "WorkspaceClient", retry_token: Optional[str]
+        ) -> Dict[str, Any]:
+            def _download_file() -> Dict[str, Any]:
                 try:
                     # Construct the volume path
                     volume_path = (
@@ -631,7 +641,7 @@ class DatabricksVolumeRepository:
                     # a streaming response, raw bytes, or a file-like object. Normalize to bytes.
                     resp = client.files.download(volume_path)
 
-                    def _to_bytes(obj):
+                    def _to_bytes(obj: Any) -> Optional[bytes]:
                         if obj is None:
                             return None
                         if isinstance(obj, (bytes, bytearray)):
@@ -789,8 +799,10 @@ class DatabricksVolumeRepository:
         """
 
         # Helper to perform the actual list operation
-        async def _try_list_with_client(client, retry_token):
-            def _list_files():
+        async def _try_list_with_client(
+            client: "WorkspaceClient", retry_token: Optional[str]
+        ) -> Dict[str, Any]:
+            def _list_files() -> Dict[str, Any]:
                 try:
                     # Construct the volume path
                     base_path = f"/Volumes/{catalog}/{schema}/{volume_name}"
@@ -806,7 +818,7 @@ class DatabricksVolumeRepository:
                             "name": (
                                 item.name
                                 if hasattr(item, "name")
-                                else item.path.split("/")[-1]
+                                else (item.path or "").split("/")[-1]
                             ),
                             "is_directory": (
                                 item.is_directory
@@ -913,8 +925,10 @@ class DatabricksVolumeRepository:
         """
 
         # Helper to perform the actual directory creation
-        async def _try_create_with_client(client, retry_token):
-            def _create_directory():
+        async def _try_create_with_client(
+            client: "WorkspaceClient", retry_token: Optional[str]
+        ) -> Dict[str, Any]:
+            def _create_directory() -> Dict[str, Any]:
                 try:
                     # Construct the volume path
                     base_path = f"/Volumes/{catalog}/{schema}/{volume_name}"
@@ -1017,8 +1031,10 @@ class DatabricksVolumeRepository:
         """
 
         # Helper to perform the actual file deletion
-        async def _try_delete_with_client(client, retry_token):
-            def _delete_file():
+        async def _try_delete_with_client(
+            client: "WorkspaceClient", retry_token: Optional[str]
+        ) -> Dict[str, Any]:
+            def _delete_file() -> Dict[str, Any]:
                 try:
                     # Construct the volume path
                     volume_path = (

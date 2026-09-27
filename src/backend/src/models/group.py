@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.db.base import Base
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     return str(uuid4())
 
 
@@ -70,12 +70,12 @@ class Group(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -110,7 +110,6 @@ class GroupUser(Base):
     """
 
     __tablename__ = "group_users"
-    __table_args__ = {"extend_existing": True}
 
     id: Mapped[str] = mapped_column(
         String(100), primary_key=True, default=generate_uuid
@@ -136,7 +135,7 @@ class GroupUser(Base):
 
     # Membership tracking
     joined_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     auto_created: Mapped[bool] = mapped_column(
         Boolean, default=False
@@ -144,12 +143,12 @@ class GroupUser(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.now(timezone.utc),
-        onupdate=datetime.now(timezone.utc),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -159,7 +158,7 @@ class GroupUser(Base):
     # Unique constraint: one user can only have one membership per group
     __table_args__ = ({"mysql_engine": "InnoDB", "extend_existing": True},)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<GroupUser(group_id='{self.group_id}', user_id='{self.user_id}', role='{self.role}')>"
 
 

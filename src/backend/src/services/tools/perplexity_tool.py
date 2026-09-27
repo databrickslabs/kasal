@@ -124,7 +124,7 @@ class PerplexitySearchTool(BaseTool):
         timeout: Optional[Any] = None,
         result_as_answer: bool = False,
     ):
-        super().__init__()
+        super().__init__(result_as_answer=result_as_answer)  # type: ignore[call-arg]  # pydantic plugin: defaults live on the subclass
 
         # Log all relevant info about key source
         logger.info("Initializing PerplexitySearchTool")
@@ -244,7 +244,7 @@ class PerplexitySearchTool(BaseTool):
             result = response.json()
             logger.debug(f"Full API response: {json.dumps(result, indent=2)}")
 
-            answer = (
+            answer: str = (
                 result.get("choices", [{}])[0].get("message", {}).get("content", "")
             )
 

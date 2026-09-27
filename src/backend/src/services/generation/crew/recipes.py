@@ -6,14 +6,17 @@ after the entities exist. Both are best-effort — generation predates this
 feature and must keep working without it."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncContextManager, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.services.generation.crew.host import CrewGenerationBase
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
 
-class RecipeHooksMixin:
+class RecipeHooksMixin(CrewGenerationBase):
     """Workflow-recipe hooks shared by every generation strategy.
 
     Kept apart from the strategies because this is the seam where reuse enters
@@ -70,7 +73,7 @@ class RecipeHooksMixin:
         except Exception as trial_err:  # noqa: BLE001
             logger.warning(f"CREATE CREW: recipe trial not recorded: {trial_err}")
 
-    async def _isolated_session_ctx(self):
+    async def _isolated_session_ctx(self) -> AsyncContextManager[AsyncSession]:
         """A PRIVATE-connection session context, matching the generation flow.
 
         Never the shared StaticPool ``async_session_factory``: on SQLite that is

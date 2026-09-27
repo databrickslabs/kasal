@@ -11,7 +11,6 @@ from src.schemas.databricks_config import (
     DatabricksConfigResponse,
 )
 from src.services.databricks.workspace.service import DatabricksService
-from src.services.settings.api_keys import ApiKeysService
 
 router = APIRouter(
     prefix="/databricks",
@@ -20,20 +19,10 @@ router = APIRouter(
 )
 
 
-# Dependency to get ApiKeysService
-def get_api_keys_service(
-    session: SessionDep, group_context: GroupContextDep
-) -> ApiKeysService:
-    """Get ApiKeysService instance with group context."""
-    group_id = group_context.primary_group_id if group_context else None
-    return ApiKeysService(session, group_id=group_id)
-
-
 # Dependency to get DatabricksService
 def get_databricks_service(
     session: SessionDep,
     group_context: GroupContextDep,
-    api_keys_service: Annotated[ApiKeysService, Depends(get_api_keys_service)],
 ) -> DatabricksService:
     """
     Get a properly initialized DatabricksService instance with group context.
@@ -41,7 +30,6 @@ def get_databricks_service(
     Args:
         session: Database session from dependency injection
         group_context: Group context for multi-tenant filtering
-        api_keys_service: ApiKeysService instance
 
     Returns:
         Initialized DatabricksService with all dependencies
@@ -54,15 +42,11 @@ def get_databricks_service(
     # warehouse/catalog/schema listing authenticates on-behalf-of the user.
     service = DatabricksService(session, group_id=group_id, user_token=user_token)
 
-    # Set the API keys service
-    service.secrets_service.set_api_keys_service(api_keys_service)
-
     return service
 
 
 # Type alias for cleaner function signatures
 DatabricksServiceDep = Annotated[DatabricksService, Depends(get_databricks_service)]
-ApiKeysServiceDep = Annotated[ApiKeysService, Depends(get_api_keys_service)]
 
 
 @router.post("/config", response_model=Dict)

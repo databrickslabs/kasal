@@ -223,7 +223,7 @@ class MeasureResolver:
         # Second pass: detect composites (measures whose components are all filtered)
         self._detect_composites(results, resolved_cache)
 
-        resolved_types = {}
+        resolved_types: Dict[str, int] = {}
         for r in results:
             rt = r.get("_resolution", {}).get("resolution_type", "unresolved")
             resolved_types[rt] = resolved_types.get(rt, 0) + 1

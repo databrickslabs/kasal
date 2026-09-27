@@ -23,7 +23,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,8 @@ def load_catalog(path: Optional[str] = None) -> Dict[str, Any]:
     so callers degrade to markdown surfaces instead of crashing."""
     try:
         p = Path(path) if path else _DEFAULT_CATALOG_PATH
-        return json.loads(p.read_text(encoding="utf-8"))
+        result: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
+        return result
     except Exception as exc:  # noqa: BLE001
         print(f"A2UI catalog unavailable ({exc}); markdown surfaces only.")
         return {}
@@ -96,7 +97,7 @@ MINIMAL_COMPONENTS = (
 )
 
 
-def subset_catalog(catalog: Dict[str, Any], names) -> Dict[str, Any]:
+def subset_catalog(catalog: Dict[str, Any], names: Iterable[str]) -> Dict[str, Any]:
     """Return a shallow copy of ``catalog`` whose ``components`` are limited to the
     intersection of ``names`` and what the catalog defines. surfaceKinds are kept
     verbatim. Used to realize the admin's 'minimal' catalog choice from the full
@@ -232,7 +233,8 @@ def guidance_for(directives: Dict[str, Any], query: str) -> str:
         and isinstance(directives.get(deliverable), str)
         and directives[deliverable].strip()
     ):
-        return directives[deliverable].strip()
+        result: str = directives[deliverable].strip()
+        return result
     default = directives.get("default")
     return default.strip() if isinstance(default, str) and default.strip() else ""
 
@@ -298,7 +300,8 @@ def resolve_catalog(
                 if isinstance(components, dict) and components:
                     if not parsed.get("surfaceKinds"):
                         parsed["surfaceKinds"] = default_catalog.get("surfaceKinds", [])
-                    return parsed
+                    result: dict[str, Any] = parsed
+                    return result
             except (ValueError, TypeError):
                 pass
         return default_catalog
@@ -494,7 +497,7 @@ def quiz_needs_work(payload: Any) -> bool:
         # need >= 3 non-empty, DISTINCT options (4 is the asked-for norm)
         if len(texts) < 3 or len(set(texts)) != len(texts):
             return False
-        ans = q.get("answer")
+        ans: Any = q.get("answer")
         if isinstance(ans, bool):
             return False
         try:

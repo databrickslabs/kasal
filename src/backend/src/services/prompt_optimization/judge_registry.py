@@ -222,7 +222,7 @@ class JudgeRegistry:
         numbers = []
         for item in items:
             try:
-                numbers.append(int(getattr(item, "version", None)))
+                numbers.append(int(getattr(item, "version", "")))
             except (TypeError, ValueError):
                 continue
         return max(numbers) if numbers else None

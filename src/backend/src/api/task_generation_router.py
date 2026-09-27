@@ -34,7 +34,7 @@ router = APIRouter(
 @router.post("/generate-task", response_model=TaskGenerationResponse)
 async def generate_task(
     request: TaskGenerationRequest, group_context: GroupContextDep, session: SessionDep
-):
+) -> TaskGenerationResponse:
     """
     Generate a task based on the provided prompt and context.
 
@@ -66,7 +66,7 @@ async def suggest_guardrail(
     request: GuardrailSuggestionRequest,
     group_context: GroupContextDep,
     session: SessionDep,
-):
+) -> GuardrailSuggestionResponse:
     """
     Generate a suggested LLM-guardrail validation criteria for a task.
 

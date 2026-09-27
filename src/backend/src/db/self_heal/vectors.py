@@ -7,6 +7,8 @@ success when every statement applied (see the tests).
 
 import logging
 
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from src.db.base import Base
 from src.db.self_heal.dialect import _conn_is_sqlite
 
@@ -42,7 +44,7 @@ def _vector_embedding_tables() -> tuple[str, ...]:
     )
 
 
-async def _ensure_pgvector_embedding_columns(conn) -> None:
+async def _ensure_pgvector_embedding_columns(conn: AsyncConnection) -> None:
     """Add back the ``embedding`` column on PostgreSQL when pgvector is present.
 
     Vector tables are created WITHOUT their vector column, because a deployed app

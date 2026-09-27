@@ -1,6 +1,7 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.group_tool import GroupTool
@@ -99,4 +100,4 @@ class GroupToolRepository:
             )
         )
         await self.session.flush()
-        return result.rowcount or 0
+        return cast("CursorResult[Any]", result).rowcount or 0

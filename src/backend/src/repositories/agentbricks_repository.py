@@ -46,11 +46,11 @@ class AgentBricksRepository:
             auth_config: Optional authentication configuration
         """
         self.auth_config = auth_config if auth_config is not None else None
-        self._host = None
-        self._client: Optional[httpx.AsyncClient] = None
+        self._host: Optional[str] = None
+        self._client: httpx.AsyncClient
         self._setup_client()
 
-    def _setup_client(self):
+    def _setup_client(self) -> None:
         """Setup async HTTP client with retry logic."""
         transport = httpx.AsyncHTTPTransport(retries=3)
         self._client = httpx.AsyncClient(transport=transport, timeout=30.0)
@@ -392,7 +392,7 @@ class AgentBricksRepository:
             ]
 
             # Build request payload
-            payload = {"input": input_messages}
+            payload: Dict[str, Any] = {"input": input_messages}
 
             # Add custom inputs if provided
             if request.custom_inputs:
@@ -518,15 +518,16 @@ class AgentBricksRepository:
                 error=str(e),
             )
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         """Close the async HTTP client."""
         if self._client:
             await self._client.aclose()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup client on deletion."""
-        if self._client and not self._client.is_closed:
+        client = getattr(self, "_client", None)
+        if client and not client.is_closed:
             try:
-                asyncio.get_running_loop().create_task(self._client.aclose())
+                asyncio.get_running_loop().create_task(client.aclose())
             except RuntimeError:
                 pass

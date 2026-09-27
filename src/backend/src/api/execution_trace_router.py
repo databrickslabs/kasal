@@ -5,7 +5,7 @@ This module provides API endpoints for retrieving, creating, and managing
 execution traces.
 """
 
-from typing import Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -57,7 +57,7 @@ async def get_all_traces(
     group_context: GroupContextDep,
     limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
-):
+) -> ExecutionTraceList:
     """
     Get a paginated list of all execution traces for the current group.
 
@@ -79,7 +79,7 @@ async def get_traces_by_run_id(
     group_context: GroupContextDep,
     limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
-):
+) -> ExecutionTraceResponseByRunId:
     """
     Get traces for an execution by run_id.
 
@@ -111,7 +111,7 @@ async def get_traces_by_job_id(
     since_id: int = Query(0, ge=0),
     preview_chars: int = Query(0, ge=0, le=100000),
     event_type_prefix: Optional[str] = Query(None, min_length=1, max_length=64),
-):
+) -> ExecutionTraceResponseByJobId:
     """
     Get traces for an execution by job_id.
 
@@ -150,10 +150,10 @@ async def get_traces_by_job_id(
     return result
 
 
-@router.get("/job/{job_id}/crew-node-states")
+@router.get("/job/{job_id}/crew-node-states", response_model=None)
 async def get_current_crew_node_states(
     job_id: str, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> Dict[str, Dict[str, Any]]:
     """
     Get current crew node execution states from traces for flow execution.
     Returns which crew nodes are running, completed, or failed.
@@ -178,7 +178,7 @@ async def get_current_crew_node_states(
             f"Execution with job_id {job_id} not found or access denied"
         )
 
-    crew_states = {}
+    crew_states: Dict[str, Dict[str, Any]] = {}
 
     # Process traces to determine current crew node states
     # Track crew execution based on task events grouped by crew
@@ -272,10 +272,10 @@ async def get_current_crew_node_states(
     return crew_states
 
 
-@router.get("/job/{job_id}/task-states")
+@router.get("/job/{job_id}/task-states", response_model=None)
 async def get_current_task_states(
     job_id: str, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> Dict[str, Dict[str, Any]]:
     """
     Get current task execution states from traces.
     Returns which tasks are running, completed, or failed.
@@ -300,8 +300,8 @@ async def get_current_task_states(
             f"Execution with job_id {job_id} not found or access denied"
         )
 
-    task_states = {}
-    task_name_to_id = {}  # Track the proper task ID for each task name
+    task_states: Dict[str, Dict[str, Any]] = {}
+    task_name_to_id: Dict[str, str] = {}  # Track the proper task ID for each task name
 
     # First pass: collect all task IDs with proper UUIDs (those that have task_id in metadata)
     for trace in state_traces:
@@ -394,7 +394,7 @@ async def get_current_task_states(
 @router.get("/{trace_id}", response_model=ExecutionTraceItem)
 async def get_trace_by_id(
     trace_id: int, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> ExecutionTraceItem:
     """
     Get a specific trace by ID with group authorization.
 
@@ -416,7 +416,7 @@ async def get_trace_by_id(
 )
 async def create_trace(
     trace_data: dict, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> ExecutionTraceItem:
     """
     Create a new execution trace with group assignment.
 
@@ -433,7 +433,7 @@ async def create_trace(
 @router.delete("/execution/{run_id}", response_model=DeleteTraceResponse)
 async def delete_traces_by_run_id(
     run_id: int, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> DeleteTraceResponse:
     """
     Delete all traces for a specific execution with group authorization.
 
@@ -450,7 +450,7 @@ async def delete_traces_by_run_id(
 @router.delete("/job/{job_id}", response_model=DeleteTraceResponse)
 async def delete_traces_by_job_id(
     job_id: str, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> DeleteTraceResponse:
     """
     Delete all traces for a specific job with group authorization.
 
@@ -467,7 +467,7 @@ async def delete_traces_by_job_id(
 @router.delete("/{trace_id}", response_model=DeleteTraceResponse)
 async def delete_trace(
     trace_id: int, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> DeleteTraceResponse:
     """
     Delete a specific trace by ID with group authorization.
 
@@ -487,7 +487,7 @@ async def delete_trace(
 @router.delete("/", response_model=DeleteTraceResponse)
 async def delete_all_traces(
     service: ExecutionTraceServiceDep, group_context: GroupContextDep
-):
+) -> DeleteTraceResponse:
     """
     Delete all execution traces for the current group.
 

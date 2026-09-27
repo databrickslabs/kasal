@@ -4,6 +4,7 @@ Seed the model_configs table with default model configuration definitions.
 
 import logging
 from datetime import datetime
+from typing import Any, Dict
 
 from sqlalchemy import select
 
@@ -14,7 +15,7 @@ from src.models.model_config import ModelConfig
 logger = logging.getLogger(__name__)
 
 # Define default model configurations
-DEFAULT_MODELS = {
+DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
     # --- OpenAI ---
     # Verified 2026-07-25 against developers.openai.com/api/docs/models and
     # .../deprecations. The GPT-5.6 family is the current flagship line; every
@@ -777,7 +778,7 @@ REMOVED_MODEL_KEYS = [
 ]
 
 
-async def seed_async():
+async def seed_async() -> None:
     """Seed model configurations into the database using async session."""
     logger.info("Seeding model_configs table (async)...")
 
@@ -952,7 +953,7 @@ async def seed_async():
             raise
 
 
-async def seed():
+async def seed() -> None:
     """Main entry point for seeding model configurations."""
     logger.info("Starting model configs seeding process...")
     try:

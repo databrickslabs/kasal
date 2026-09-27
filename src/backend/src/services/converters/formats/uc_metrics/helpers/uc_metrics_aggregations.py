@@ -285,7 +285,7 @@ class UCMetricsAggregationBuilder:
 
         # Build window configuration for constant selection fields
         window_config = []
-        for field in kpi.fields_for_constant_selection:
+        for field in kpi.fields_for_constant_selection or []:
             window_entry = {"order": field, "semiadditive": "last", "range": "current"}
             window_config.append(window_entry)
 

@@ -18,7 +18,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
@@ -43,8 +43,8 @@ class LightAgentService:
         self,
         execution_id: str,
         config: Any,
-        group_context: GroupContext = None,
-        session=None,
+        group_context: Optional[GroupContext] = None,
+        session: Any = None,
     ) -> Dict[str, Any]:
         """Run a SINGLE agent via CrewAI ``Agent.kickoff_async`` — the "chat"
         (light) answer mode. No crew, no tasks/process, no planning/reasoning.
@@ -106,8 +106,8 @@ class LightAgentService:
         if group_context:
             try:
                 UserContext.set_group_context(group_context)
-                if getattr(group_context, "access_token", None):
-                    UserContext.set_user_token(group_context.access_token)
+                if _obo_token := getattr(group_context, "access_token", None):
+                    UserContext.set_user_token(_obo_token)
             except Exception as ctx_err:  # noqa: BLE001
                 logger.warning(f"[light_agent] Could not set user context: {ctx_err}")
 
@@ -511,7 +511,7 @@ class LightAgentService:
 
                 _role_lower = str(role or "").strip().lower()
 
-                def _matches(event, source=None) -> bool:
+                def _matches(event: Any, source: Any = None) -> bool:
                     if self._event_matches_run(
                         event,
                         source,
@@ -533,7 +533,7 @@ class LightAgentService:
                     )
                     return False
 
-                def _args_str(event) -> str:
+                def _args_str(event: Any) -> str:
                     ta = getattr(event, "tool_args", None)
                     if ta is None:
                         return ""
@@ -544,7 +544,7 @@ class LightAgentService:
                     except Exception:  # noqa: BLE001
                         return str(ta)
 
-                def _on_tool_started(source, event) -> None:
+                def _on_tool_started(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -567,7 +567,7 @@ class LightAgentService:
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] tool-start trace skipped: {h_err}")
 
-                def _on_tool_finished(source, event) -> None:
+                def _on_tool_finished(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -621,7 +621,7 @@ class LightAgentService:
                             f"[light_agent] tool-finish trace skipped: {h_err}"
                         )
 
-                def _on_tool_error(source, event) -> None:
+                def _on_tool_error(source: Any, event: Any) -> None:
                     # Without this a tool that ERRORS (e.g. an MCP server timeout or
                     # 4xx) fires ToolUsageErrorEvent — NOT Finished — so the chat
                     # showed "using tool" then nothing. Surface the failure as a
@@ -653,7 +653,7 @@ class LightAgentService:
                 # tool-calling turn) fires LLMCall{Started,Completed,Failed}. The
                 # crew/flow OTel bridge maps these to ``llm_call`` / ``llm_response``;
                 # mirror that here so the chat trace shows the model calls too.
-                def _msgs_str(event) -> str:
+                def _msgs_str(event: Any) -> str:
                     """Flatten the request messages to readable text for the trace
                     detail (so 'LLM Request' → View shows the actual prompt)."""
                     msgs = getattr(event, "messages", None)
@@ -674,7 +674,7 @@ class LightAgentService:
                     except Exception:  # noqa: BLE001
                         return str(msgs)
 
-                def _on_llm_started(source, event) -> None:
+                def _on_llm_started(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -705,7 +705,7 @@ class LightAgentService:
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] llm-start trace skipped: {h_err}")
 
-                def _on_llm_completed(source, event) -> None:
+                def _on_llm_completed(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -759,7 +759,7 @@ class LightAgentService:
                             f"[light_agent] llm-complete trace skipped: {h_err}"
                         )
 
-                def _on_llm_failed(source, event) -> None:
+                def _on_llm_failed(source: Any, event: Any) -> None:
                     try:
                         if not _matches(event, source):
                             return
@@ -808,7 +808,7 @@ class LightAgentService:
                 # still shows a "Response" step instead of an empty trace pane.
                 # NB: chat mode does NOT reason or plan (that's the 'research'/'deep'
                 # crew modes) — this is just the agent's single answer generation.
-                def _on_agent_started(source, event) -> None:
+                def _on_agent_started(source: Any, event: Any) -> None:
                     try:
                         if source is not agent:
                             return
@@ -818,7 +818,7 @@ class LightAgentService:
                             f"[light_agent] agent-start trace skipped: {h_err}"
                         )
 
-                def _on_agent_completed(source, event) -> None:
+                def _on_agent_completed(source: Any, event: Any) -> None:
                     try:
                         if source is not agent:
                             return
@@ -848,7 +848,7 @@ class LightAgentService:
                             f"[light_agent] agent-complete trace skipped: {h_err}"
                         )
 
-                def _on_agent_error(source, event) -> None:
+                def _on_agent_error(source: Any, event: Any) -> None:
                     try:
                         if source is not agent:
                             return
@@ -994,7 +994,7 @@ class LightAgentService:
                             f"[light_agent] llm_chunk broadcast skipped: {sse_err}"
                         )
 
-                def _on_llm_chunk(source, event) -> None:
+                def _on_llm_chunk(source: Any, event: Any) -> None:
                     try:
                         if _agent_llm is None or source is not _agent_llm:
                             return
@@ -1497,12 +1497,12 @@ class LightAgentService:
         ``"default"`` (find_by_names_group_scope matches group_id exactly), so
         chat "answer mode" silently dropped MCP tools while crew/research kept them.
         """
-        resolved = (
+        resolved: Optional[str] = (
             getattr(config, "group_id", None)
             or getattr(group_context, "primary_group_id", None)
             or (
-                group_context.group_ids[0]
-                if group_context and getattr(group_context, "group_ids", None)
+                (getattr(group_context, "group_ids", None) or [None])[0]
+                if group_context
                 else None
             )
         )
@@ -1736,7 +1736,7 @@ class LightAgentService:
         config: Any,
         group_context: Optional[GroupContext],
         group_id: str,
-        log,
+        log: Callable[[str], None],
     ) -> str:
         """Recent turns of THIS chat session as a transcript, prepended to the
         kickoff prompt. The scoring — which turns survive a long session and
@@ -1757,7 +1757,7 @@ class LightAgentService:
         group_id: str,
         prompt: str,
         execution_id: str,
-        log,
+        log: Callable[[str], None],
     ) -> Optional[Any]:
         """Build this run's unified ``Memory`` and return it. The
         engine Agent does not consult memory itself — recall/persist are done
@@ -1901,7 +1901,7 @@ async def run_light_agent(
     execution_id: str,
     config: Any,
     group_context: Optional[GroupContext] = None,
-    session=None,
+    session: Any = None,
 ) -> Dict[str, Any]:
     """Module-level entry point for the single-agent ("chat"/light) run.
 

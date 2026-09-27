@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.task import Task as TaskModel
 from src.schemas.task import Task as TaskSchema
 from src.schemas.task import TaskCreate, TaskUpdate
 from src.services.catalog.tasks import TaskService
@@ -45,7 +46,7 @@ async def create_task(
     task_in: TaskCreate,
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> TaskModel:
     """
     Create a new task with group isolation.
     Only Editors and Admins can create tasks.
@@ -76,7 +77,7 @@ async def create_task(
 async def list_tasks(
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> List[TaskModel]:
     """
     Retrieve all tasks for the current group.
 
@@ -99,7 +100,7 @@ async def get_task(
     task_id: Annotated[str, Path(title="The ID of the task to get")],
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> TaskModel:
     """
     Get a specific task by ID with group isolation.
 
@@ -144,7 +145,7 @@ async def update_task_full(
     task_in: dict,
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> TaskModel:
     """
     Update all fields of an existing task with group isolation.
     Only Editors and Admins can update tasks.
@@ -192,7 +193,7 @@ async def update_task(
     task_in: TaskUpdate,
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> TaskModel:
     """
     Update an existing task with partial data and group isolation.
     Only Editors and Admins can update tasks.
@@ -237,7 +238,7 @@ async def delete_task(
     task_id: Annotated[str, Path(title="The ID of the task to delete")],
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete a task with group isolation.
     Only Editors and Admins can delete tasks.
@@ -276,7 +277,7 @@ async def delete_task(
 async def delete_all_tasks(
     service: TaskServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete all tasks for the current group.
     Only Admins can delete all tasks.

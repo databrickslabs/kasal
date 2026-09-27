@@ -11,7 +11,7 @@ executionhistory table with execution_type='flow'.
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,16 +48,20 @@ class FlowExecutionService:
 
         self.execution_service = ExecutionService(session)
 
-    async def get_owned_existing_execution(self, job_id: str, group_id: Optional[str]):
+    async def get_owned_existing_execution(
+        self, job_id: str, group_id: Optional[str]
+    ) -> Optional[ExecutionHistory]:
         """Allow precreated jobs to be reused only by their existing workspace."""
-        execution = await self.execution_service.get_run_by_job_id(job_id)
+        execution: Optional[ExecutionHistory] = (
+            await self.execution_service.get_run_by_job_id(job_id)
+        )
         if execution and (not group_id or execution.group_id != group_id):
             raise ForbiddenError(detail="Access denied to this execution")
         return execution
 
     async def create_execution(
         self,
-        flow_id: Union[uuid.UUID, str],
+        flow_id: Optional[Union[uuid.UUID, str]],
         job_id: str,
         run_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
@@ -168,7 +172,7 @@ class FlowExecutionService:
             )
             # Detached on context exit; only scalar attributes (.id) are read by
             # callers, which SQLAlchemy keeps available after refresh+commit.
-            return execution
+            return cast(ExecutionHistory, execution)
 
     async def get_execution(self, execution_id: int) -> Optional[ExecutionHistory]:
         """

@@ -1,11 +1,12 @@
 import logging
-from typing import Annotated
+from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, status
 
 from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.core.permissions import check_role_in_context, is_system_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
     EngineConfigCreate,
     EngineConfigListResponse,
@@ -61,7 +62,7 @@ EngineConfigServiceDep = Annotated[
 async def get_engine_configs(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfigListResponse:
     """
     Get all engine configurations.
 
@@ -83,7 +84,7 @@ async def get_engine_configs(
 async def get_enabled_engine_configs(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfigListResponse:
     """
     Get only enabled engine configurations.
 
@@ -106,7 +107,7 @@ async def get_engine_config(
     engine_name: str,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfig:
     """
     Get a specific engine configuration by engine name.
 
@@ -138,7 +139,7 @@ async def get_engine_config_by_key(
     config_key: str,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfig:
     """
     Get a specific engine configuration by engine name and config key.
 
@@ -172,7 +173,7 @@ async def get_engine_configs_by_type(
     engine_type: str,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfigListResponse:
     """
     Get all engine configurations by engine type.
 
@@ -198,7 +199,7 @@ async def create_engine_config(
     config: EngineConfigCreate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfig:
     """
     Create a new engine configuration.
     Only Admins can create engine configurations.
@@ -237,7 +238,7 @@ async def update_engine_config(
     config: EngineConfigUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfig:
     """
     Update an existing engine configuration.
     Only Admins can update engine configurations.
@@ -280,7 +281,7 @@ async def toggle_engine_config(
     toggle_data: EngineConfigToggleUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfig:
     """
     Toggle the enabled status of an engine configuration.
     Only Admins can toggle engine configurations.
@@ -331,7 +332,7 @@ async def update_config_value(
     value_data: EngineConfigValueUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> EngineConfig:
     """
     Update the configuration value for a specific engine and key.
     Only Admins can update engine configuration values.
@@ -377,11 +378,11 @@ async def update_config_value(
     return updated_config
 
 
-@router.get("/kasal/flow-enabled")
+@router.get("/kasal/flow-enabled", response_model=None)
 async def get_kasal_flow_enabled(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Get the CrewAI flow enabled status.
     Only system administrators can access engine configuration.
@@ -406,12 +407,12 @@ async def get_kasal_flow_enabled(
     return {"flow_enabled": enabled}
 
 
-@router.patch("/kasal/flow-enabled")
+@router.patch("/kasal/flow-enabled", response_model=None)
 async def set_kasal_flow_enabled(
     config_data: KasalFlowConfigUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """
     Set the CrewAI flow enabled status.
     Only system administrators can manage engine configuration.
@@ -441,11 +442,11 @@ async def set_kasal_flow_enabled(
     return {"success": True, "flow_enabled": config_data.flow_enabled}
 
 
-@router.get("/kasal/event-triggers")
+@router.get("/kasal/event-triggers", response_model=None)
 async def get_event_triggers_enabled(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Get the event-trigger feature enabled status (system-level).
 
     Only system administrators can access engine configuration.
@@ -459,12 +460,12 @@ async def get_event_triggers_enabled(
     return {"event_triggers_enabled": enabled}
 
 
-@router.patch("/kasal/event-triggers")
+@router.patch("/kasal/event-triggers", response_model=None)
 async def set_event_triggers_enabled(
     config_data: EventTriggersConfigUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Enable/disable the event-trigger feature (system-level, Preview).
 
     Only system administrators can manage this. When enabled, the background
@@ -484,11 +485,11 @@ async def set_event_triggers_enabled(
     return {"success": True, "event_triggers_enabled": config_data.enabled}
 
 
-@router.get("/kasal/otel-app-telemetry")
+@router.get("/kasal/otel-app-telemetry", response_model=None)
 async def get_otel_app_telemetry_enabled(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Get the OTel App Telemetry configuration (system-level, Preview).
 
     Only system administrators can access this configuration.
@@ -506,12 +507,12 @@ async def get_otel_app_telemetry_enabled(
     }
 
 
-@router.patch("/kasal/otel-app-telemetry")
+@router.patch("/kasal/otel-app-telemetry", response_model=None)
 async def set_otel_app_telemetry_enabled(
     config_data: OtelAppTelemetryConfigUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Update the OTel App Telemetry configuration (system-level, Preview).
 
     Only system administrators can manage this configuration.
@@ -551,7 +552,7 @@ async def delete_engine_config(
     engine_name: str,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> None:
     """
     Delete an engine configuration.
     Only Admins can delete engine configurations.
@@ -583,7 +584,7 @@ async def delete_engine_config(
 async def get_harness(
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Which agent runtime new executions start on, and what each can do.
 
     Readable by anyone who can see the configuration page — the answer changes
@@ -600,7 +601,7 @@ async def set_harness(
     config_data: HarnessUpdate,
     service: EngineConfigServiceDep,
     group_context: GroupContextDep,
-):
+) -> Dict[str, Any]:
     """Switch the engine. Takes effect on the NEXT execution, never a running one.
 
     A run resolves its engine once, at creation, and carries it in its own row

@@ -1,9 +1,7 @@
-"""Turning a question into DAX: the LLM call, its trace, response extraction,
-the self-correction loop, and executing the result.
+"""Question -> DAX: LLM call, trace, extraction, self-correction, execution.
 
-Mixed into ``PowerBIAnalysisTool`` rather than composed, so this is pure
-movement: every method still reads ``self`` exactly as it did in the single
-3,506-line file, and every ``tool._method(...)`` call site is unchanged.
+Mixed into ``PowerBIAnalysisTool`` (not composed): methods read ``self`` as in
+the original single file, so every ``tool._method(...)`` call site is unchanged.
 """
 
 import logging
@@ -12,10 +10,12 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from ._mixin_deps import DaxGenerationDeps
+
 logger = logging.getLogger(__name__)
 
 
-class PowerBIDaxGenerationMixin:
+class PowerBIDaxGenerationMixin(DaxGenerationDeps):
     async def _generate_dax_with_llm(
         self, user_question: str, model_context: Dict[str, Any], config: Dict[str, Any]
     ) -> Optional[str]:
@@ -505,7 +505,7 @@ CALCULATETABLE(...)
 
         # Remove lines starting with markdown formatting (**, ##, -, etc.) after the query
         lines = dax_query.split("\n")
-        clean_lines = []
+        clean_lines: List[str] = []
         paren_depth = 0
 
         for line in lines:

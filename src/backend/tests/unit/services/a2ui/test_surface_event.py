@@ -418,22 +418,16 @@ class TestItFilesUnderTheRunsOwnAgentAndTask:
 
         from src.services.trace import writer
 
+        rows = [
+            # Newest first; crew/System rows are not the agent.
+            ("crew", "crew", {}),
+            ("Quantitative Analyst", "Solve this problem", {"task_id": "T1"}),
+        ]
+        result = MagicMock()
+        result.all.return_value = rows
+        result.tuples.return_value.all.return_value = rows  # typed Result.tuples()
         session = MagicMock()
-        session.execute = AsyncMock(
-            return_value=MagicMock(
-                all=MagicMock(
-                    return_value=[
-                        # Newest first; crew/System rows are not the agent.
-                        ("crew", "crew", {}),
-                        (
-                            "Quantitative Analyst",
-                            "Solve this problem",
-                            {"task_id": "T1"},
-                        ),
-                    ]
-                )
-            )
-        )
+        session.execute = AsyncMock(return_value=result)
 
         attribution = await writer.resolve_attribution(session, "job-42")
 

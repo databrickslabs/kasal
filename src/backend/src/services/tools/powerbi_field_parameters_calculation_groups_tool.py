@@ -19,7 +19,7 @@ import base64
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Coroutine, Dict, List, Optional, Type
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -52,10 +52,8 @@ def _sql_int(value: Any, default: int = 0) -> int:
 class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
     """Input schema for PowerBIFieldParametersCalculationGroupsTool."""
 
-    # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
-    # schema. Those values are injected at tool-construction time from
-    # tool_configs (see __init__) — exposing them as LLM-fillable parameters
-    # bloated every LLM call and invited the model to echo credentials.
+    # NOTE: connection/auth/LLM plumbing is injected from tool_configs (__init__),
+    # not exposed here: as LLM-fillable params it bloated calls, echoed credentials.
 
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
@@ -88,8 +86,7 @@ class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
 
 
 class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
-    """
-    Power BI Field Parameters & Calculation Groups Extraction Tool.
+    """Power BI Field Parameters & Calculation Groups Extraction Tool.
 
     Extracts field parameters and calculation groups from Fabric semantic models
     using the Fabric API getDefinition endpoint (TMDL format). Generates:
@@ -125,7 +122,6 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
     )
     args_schema: Type[BaseModel] = PowerBIFieldParametersCalculationGroupsSchema
 
-    # Private attributes
     _instance_id: str = PrivateAttr()
     _default_config: Dict[str, Any] = PrivateAttr()
 
@@ -476,7 +472,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             )
             return f"Error: {str(e)}"
 
-    def _run_sync(self, coro):
+    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
 
@@ -604,7 +600,10 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                             )
                             result_response.raise_for_status()
                             definition = result_response.json()
-                            return definition.get("definition", {}).get("parts", [])
+                            parts: List[Dict[str, Any]] = definition.get(
+                                "definition", {}
+                            ).get("parts", [])
+                            return parts
                         elif status == "Failed":
                             error = poll_data.get("error", {})
                             logger.error(f"Definition fetch failed: {error}")
@@ -615,7 +614,8 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
                 elif response.status_code == 200:
                     definition = response.json()
-                    return definition.get("definition", {}).get("parts", [])
+                    parts = definition.get("definition", {}).get("parts", [])
+                    return parts
                 else:
                     logger.error(f"Unexpected status code: {response.status_code}")
                     response.raise_for_status()
@@ -1343,13 +1343,13 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             )
             sql_lines.append("VALUES")
             inserts = []
-            for measure in referenced_measures:
-                dax_expr = (measure.get("expression") or "").replace("\n", "\\n")
+            for ref_m in referenced_measures:
+                dax_expr = (ref_m.get("expression") or "").replace("\n", "\\n")
                 sql_expr = self._translate_dax_to_sql_simple(
-                    measure.get("expression"), measure.get("table")
+                    ref_m.get("expression"), ref_m.get("table")
                 )
                 inserts.append(
-                    f"({_sql_lit(measure['name'])}, {_sql_lit(measure.get('table', ''))}, "
+                    f"({_sql_lit(ref_m['name'])}, {_sql_lit(ref_m.get('table', ''))}, "
                     f"{_sql_lit(dax_expr)}, {_sql_lit(sql_expr)})"
                 )
             sql_lines.append(",\n".join(inserts) + ";")

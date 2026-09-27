@@ -340,6 +340,19 @@ async def test_toggle_group_tool_toggles_existing_group_copy():
 
 
 @pytest.mark.asyncio
+async def test_toggle_group_tool_vanished_during_toggle_is_not_found():
+    """toggle_enabled returning None is a 404, not an AttributeError on None."""
+    svc = make_service()
+    svc.repository.get = AsyncMock(return_value=make_tool(group_id=None))
+    svc.repository.find_by_title_and_group = AsyncMock(
+        return_value=make_tool(id=2, group_id="g1")
+    )
+    svc.repository.toggle_enabled = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundError):
+        await svc.toggle_tool_enabled_with_group_check(1, make_group_context())
+
+
+@pytest.mark.asyncio
 async def test_toggle_group_specific_tool_unauthorized():
     svc = make_service()
     tool = make_tool(id=1, group_id="other-group")

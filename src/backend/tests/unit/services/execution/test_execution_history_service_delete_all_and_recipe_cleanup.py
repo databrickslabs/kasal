@@ -285,7 +285,7 @@ class TestGetExecutionById:
         await service.get_execution_by_id(1, tenant_ids=tenant_ids)
 
         mock_history_repo.get_execution_by_id.assert_called_once_with(
-            1, tenant_ids=tenant_ids
+            1, group_ids=tenant_ids
         )
 
     @pytest.mark.asyncio

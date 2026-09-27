@@ -8,7 +8,7 @@ Uses the Power BI Admin API for extraction and LLM-powered conversion for comple
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Coroutine, Dict, List, Optional, Tuple, Type, TypeVar
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -16,6 +16,7 @@ from src.services.tools.base import BaseTool
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 # SECURITY: PowerBI table/column names are attacker-controllable (defined by
 # whoever authored the scanned semantic model) and get interpolated into DDL/DML
@@ -85,19 +86,11 @@ def _safe_sql_type(sql_type: str) -> str:
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
 
-def run_sync(coro):
-    """
-    Run an async coroutine from a synchronous context.
+def run_sync(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from sync code and return its result.
 
-    Handles both cases:
-    1. When called from an async context (e.g., FastAPI) - uses ThreadPoolExecutor
-    2. When called from a sync context - creates new event loop
-
-    Args:
-        coro: The coroutine to run
-
-    Returns:
-        The result of the coroutine
+    Inside a running loop (e.g. FastAPI) it runs on ``_EXECUTOR`` with the
+    caller's ContextVars; otherwise in a fresh event loop.
     """
     try:
         # Try to get the current running loop
@@ -893,7 +886,7 @@ class MqueryConversionPipelineTool(BaseTool):
         for model_name, model_data in (result.get("models") or {}).items():
             for table_name, conversions in (model_data.get("tables") or {}).items():
                 for conv in conversions or []:
-                    expr_type = getattr(conv, "expression_type", None)
+                    expr_type: Any = getattr(conv, "expression_type", None)
                     extract.append(
                         {
                             "model": model_name,

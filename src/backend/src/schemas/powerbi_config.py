@@ -31,7 +31,7 @@ class PowerBIConfigCreate(PowerBIConfigBase):
         return []
 
     @model_validator(mode="after")
-    def validate_required_fields(self):
+    def validate_required_fields(self) -> "PowerBIConfigCreate":
         """Validate required fields based on configuration."""
         # Only validate if Power BI is enabled
         if not self.enabled:
@@ -54,14 +54,19 @@ class PowerBIConfigCreate(PowerBIConfigBase):
         return self
 
 
-class PowerBIConfigUpdate(PowerBIConfigBase):
-    """Schema for updating Power BI configuration."""
+class PowerBIConfigUpdate(BaseModel):
+    """Schema for updating Power BI configuration.
+
+    The PowerBIConfigBase fields with the credentials optional (a partial update).
+    Declared on BaseModel rather than narrowing the base's non-optional fields.
+    """
 
     tenant_id: Optional[str] = None
     client_id: Optional[str] = None
     workspace_id: Optional[str] = None
     semantic_model_id: Optional[str] = None
     enabled: Optional[bool] = None
+    auth_method: str = "service_principal"
 
 
 class PowerBIConfigInDB(PowerBIConfigBase):

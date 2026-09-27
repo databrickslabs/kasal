@@ -7,7 +7,7 @@ using LLM models and prompt templates.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, ContextManager, Optional
 
 from src.core.llm.robust_json import robust_json_parser
 from src.repositories.log_repository import LLMLogRepository
@@ -48,7 +48,7 @@ class TaskGenerationService:
         status: str = "success",
         error_message: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> None:
         """
         Log LLM interaction using the log service.
 
@@ -163,7 +163,7 @@ class TaskGenerationService:
         if mlflow_on:
             from src.services.mlflow.tracing import start_root_trace
 
-            trace_ctx = start_root_trace(
+            trace_ctx: ContextManager[Any] = start_root_trace(
                 "task_generation",
                 inputs={
                     "prompt": getattr(request, "text", None)
@@ -463,7 +463,7 @@ class TaskGenerationService:
     async def generate_and_save_task(
         self,
         request: TaskGenerationRequest,
-        group_context: GroupContext,
+        group_context: Optional[GroupContext],
         fast_planning: bool = False,
     ) -> dict:
         """

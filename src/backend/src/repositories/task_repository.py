@@ -12,7 +12,7 @@ from src.models.task import Task
 # repositories/ with no allowlist. See src/repositories/CLAUDE.md.
 
 
-class TaskRepository(BaseRepository[Task]):
+class TaskRepository(BaseRepository[Task, str]):
     """
     Repository for Task model with custom query methods.
     Inherits base CRUD operations from BaseRepository.

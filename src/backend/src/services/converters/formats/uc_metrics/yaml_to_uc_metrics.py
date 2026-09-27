@@ -4,7 +4,7 @@ Converts KPI definitions to Unity Catalog metrics store format
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, cast
 
 from ...base.models import KPI, KPIDefinition
 from ...common.transformers.formula import KBIDependencyResolver, KbiFormulaParser
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class UCMetricsGenerator:
     """Generator for creating Unity Catalog metrics store definitions"""
 
-    def __init__(self, dialect: str = "spark"):
+    def __init__(self, dialect: str = "spark") -> None:
         self.dialect = dialect
 
         # Context tracking - mirrors SQL pattern
@@ -79,7 +79,7 @@ class UCMetricsGenerator:
 
     def _build_exception_aggregation_with_window(
         self, kpi: KPI, specific_filters: Optional[str]
-    ) -> tuple[str, dict]:
+    ) -> tuple[str, List[Dict[str, str]]]:
         """Build exception aggregation with window configuration"""
         return self.aggregation_builder.build_exception_aggregation_with_window(
             kpi, specific_filters
@@ -108,14 +108,11 @@ class UCMetricsGenerator:
 
         # If ALL KBIs are constant selection, use constant selection format
         if constant_selection_kbis and len(regular_kbis) == 0:
-            if len(constant_selection_kbis) == 1:
-                return self._build_constant_selection_uc_metrics(
-                    constant_selection_kbis[0], yaml_metadata
-                )
-            else:
-                return self._build_consolidated_constant_selection_uc_metrics(
-                    constant_selection_kbis, yaml_metadata
-                )
+            # One or many: the consolidated builder handles both (there is no
+            # single-KBI variant; the call to one raised AttributeError)
+            return self._build_consolidated_constant_selection_uc_metrics(
+                constant_selection_kbis, yaml_metadata
+            )
 
         # If we have mixed types or only regular KBIs, use consolidated format
         # This will handle constant selection KBIs within the regular consolidated processing
@@ -127,7 +124,7 @@ class UCMetricsGenerator:
         common_filters = self._extract_common_filters(kbi_list, yaml_metadata)
 
         # Build consolidated measures
-        measures = []
+        measures: List[Dict[str, Any]] = []
         for kpi in kbi_list:
             measure_name = kpi.technical_name or "unnamed_measure"
 
@@ -152,7 +149,7 @@ class UCMetricsGenerator:
                 measure_expr, window_config = (
                     self._build_exception_aggregation_with_window(kpi, specific_filters)
                 )
-                measure = {"name": measure_name, "expr": measure_expr}
+                measure: Dict[str, Any] = {"name": measure_name, "expr": measure_expr}
                 # Add window configuration if it exists
                 if window_config:
                     measure["window"] = window_config
@@ -164,7 +161,7 @@ class UCMetricsGenerator:
 
                 # Build window configuration for constant selection fields
                 window_config = []
-                for field in kpi.fields_for_constant_selection:
+                for field in kpi.fields_for_constant_selection or []:
                     window_entry = {
                         "order": field,
                         "semiadditive": "last",
@@ -186,7 +183,7 @@ class UCMetricsGenerator:
             measures.append(measure)
 
         # Construct consolidated UC metrics format
-        uc_metrics = {
+        uc_metrics: Dict[str, Any] = {
             "version": "0.1",
             "description": f'UC metrics store definition for "{description}"',
             "measures": measures,
@@ -208,7 +205,7 @@ class UCMetricsGenerator:
         query_filters = yaml_metadata.get("filters", {}).get("query_filter", {})
 
         # Always include query filters as common filters if they exist in the YAML
-        common_filters = []
+        common_filters: List[str] = []
 
         if query_filters:
             for filter_expr in query_filters.values():
@@ -217,14 +214,14 @@ class UCMetricsGenerator:
                     common_filters.append(expanded)
 
         # Find other filters that appear in ALL KBIs (excluding query filters)
-        all_filters = []
+        all_filters: List[Set[str]] = []
 
         for kpi in kbi_list:
             if not kpi.filters:
                 continue
 
             kbi_specific_filters = []
-            for filter_condition in kpi.filters:
+            for filter_condition in cast(List[str], kpi.filters):  # str filters only
                 # Skip literal $query_filter references
                 if filter_condition == "$query_filter":
                     continue
@@ -273,7 +270,7 @@ class UCMetricsGenerator:
 
         # Get all KBI filters
         kbi_specific = []
-        for filter_condition in kpi.filters:
+        for filter_condition in cast(List[str], kpi.filters):  # str filters only
             if filter_condition == "$query_filter":
                 # Skip query filters as they're likely common
                 continue
@@ -417,8 +414,8 @@ class UCMetricsGenerator:
                     global_filters.append(expanded)
 
         # Collect all dimensions and measures
-        all_dimensions = []
-        all_measures = []
+        all_dimensions: List[Dict[str, str]] = []
+        all_measures: List[Dict[str, Any]] = []
         dimension_names_seen = set()
 
         # Use the first KBI's source table (or find most common one)
@@ -431,7 +428,7 @@ class UCMetricsGenerator:
         for kpi in constant_selection_kbis:
             # Build KBI-specific filters for FILTER clause
             kbi_specific_filters = []
-            for filter_condition in kpi.filters:
+            for filter_condition in cast(List[str], kpi.filters):  # str filters only
                 if filter_condition == "$query_filter":
                     continue  # Skip query filters as they go in global filter
                 else:
@@ -440,7 +437,7 @@ class UCMetricsGenerator:
                         kbi_specific_filters.append(expanded)
 
             # Add constant selection fields as dimensions
-            for field in kpi.fields_for_constant_selection:
+            for field in kpi.fields_for_constant_selection or []:
                 if field not in dimension_names_seen:
                     all_dimensions.append({"name": field, "expr": field})
                     dimension_names_seen.add(field)
@@ -489,7 +486,7 @@ class UCMetricsGenerator:
 
             # Build window configuration for constant selection fields
             window_config = []
-            for field in kpi.fields_for_constant_selection:
+            for field in kpi.fields_for_constant_selection or []:
                 window_entry = {
                     "order": field,
                     "semiadditive": "last",
@@ -498,7 +495,7 @@ class UCMetricsGenerator:
                 window_config.append(window_entry)
 
             # Build the measure object
-            measure = {"name": measure_name, "expr": measure_expr}
+            measure: Dict[str, Any] = {"name": measure_name, "expr": measure_expr}
 
             # Add window configuration if we have constant selection fields
             if window_config:
@@ -507,7 +504,7 @@ class UCMetricsGenerator:
             all_measures.append(measure)
 
         # Construct consolidated constant selection UC metrics format
-        uc_metrics = {
+        uc_metrics: Dict[str, Any] = {
             "version": "1.0",
             "source": source_table,
             "description": f'UC metrics store definition for "{description}"',

@@ -30,7 +30,7 @@ async def improve_prompt(
     request: PromptImprovementRequest,
     group_context: GroupContextDep,
     session: SessionDep,
-):
+) -> PromptImprovementResponse:
     """
     Improve prompt fields of an agent, task, or template as one coherent set.
 

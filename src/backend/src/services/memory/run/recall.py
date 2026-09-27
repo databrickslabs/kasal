@@ -281,7 +281,7 @@ def inject_task_memory(memory: Any, tasks: list[Any]) -> int:
     return injected
 
 
-def _task_event_context(task: Any):
+def _task_event_context(task: Any) -> Any:
     """Scoped ambient event attribution for ``task`` (no-op fallback)."""
     try:
         from src.core.events import event_context

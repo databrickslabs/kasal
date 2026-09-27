@@ -6,9 +6,10 @@ This module provides database operations for HITL approval and webhook models.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import delete, desc, func
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -55,7 +56,7 @@ class HITLApprovalRepository:
         stmt = delete(HITLApproval).where(HITLApproval.execution_id.in_(old_job_ids))
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
     async def create(self, approval: HITLApproval) -> HITLApproval:
         """
@@ -313,7 +314,7 @@ class HITLApprovalRepository:
         stmt = delete(HITLApproval).where(HITLApproval.execution_id == execution_id)
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        return cast("CursorResult[Any]", result).rowcount
 
 
 class HITLWebhookRepository:

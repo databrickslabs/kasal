@@ -7,7 +7,7 @@ It uses the BackendFlow class (from backend_flow.py) to interact with the CrewAI
 
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,14 +27,14 @@ logger = LoggerManager.get_instance().flow
 
 
 @asynccontextmanager
-async def _smart_db_session():
+async def _smart_db_session() -> AsyncIterator[AsyncSession]:
     """Wrap get_smart_db_session as an async context manager for 'async with' usage.
 
     get_smart_db_session is an async generator (for FastAPI DI). This wrapper
     lets flow_runner_service use it with 'async with' while preserving proper
     commit-on-success / rollback-on-error semantics.
     """
-    gen = get_smart_db_session().__aiter__()
+    gen: Any = get_smart_db_session().__aiter__()  # an async generator
     session = await gen.__anext__()
     try:
         yield session
@@ -65,7 +65,7 @@ class FlowRunnerService:
         error_msg: str,
         group_id: Optional[str] = None,
         group_email: Optional[str] = None,
-    ):
+    ) -> None:
         """Emit an error span via OTel so it appears in the trace timeline.
 
         Routes through the same OTel pipeline (TracerProvider → KasalDBSpanExporter)
@@ -119,7 +119,7 @@ class FlowRunnerService:
 
     @staticmethod
     @asynccontextmanager
-    async def _safe_session():
+    async def _safe_session() -> AsyncIterator[AsyncSession]:
         """Create a smart-routed session with safe cleanup.
 
         Routes through get_smart_db_session (Lakebase when enabled, local DB otherwise).
@@ -1162,7 +1162,8 @@ class FlowRunnerService:
                     "result": execution.result,
                     "error": execution.error,
                     "created_at": execution.created_at,
-                    "updated_at": execution.updated_at,
+                    # ExecutionHistory has no updated_at (reading it raised, so
+                    # every details request failed); the list view omits it too.
                     "completed_at": execution.completed_at,
                     "nodes": [
                         {

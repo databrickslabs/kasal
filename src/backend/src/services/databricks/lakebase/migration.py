@@ -10,11 +10,11 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from src.core.base_service import BaseService
 from src.db.base import Base
@@ -43,8 +43,8 @@ class LakebaseMigrationService(BaseService):
 
     def __init__(
         self,
-        source_engine: Optional[Engine] = None,
-        lakebase_engine: Optional[Engine] = None,
+        source_engine: Optional[Union[Engine, Connection]] = None,
+        lakebase_engine: Optional[Union[Engine, AsyncEngine]] = None,
         source_session: Optional[AsyncSession] = None,
     ):
         """
@@ -395,7 +395,7 @@ class LakebaseMigrationService(BaseService):
         bool_cols = self.boolean_columns_by_table.get(table_name, [])
         dt_cols = self.datetime_columns_by_table.get(table_name, [])
 
-        converted_dict = {}
+        converted_dict: Dict[str, Any] = {}
 
         for col in columns:
             value = row_dict.get(col)
@@ -648,12 +648,12 @@ class LakebaseMigrationService(BaseService):
                     with source_engine.connect() as conn:
                         result = conn.execute(text(select_sql))
                         rows = result.fetchall()
-                        columns = result.keys()
+                        columns = list(result.keys())
                 else:
                     with source_engine.begin() as conn:
                         result = conn.execute(text(select_sql))
                         rows = result.fetchall()
-                        columns = result.keys()
+                        columns = list(result.keys())
 
             if not rows:
                 elapsed = time.monotonic() - t0

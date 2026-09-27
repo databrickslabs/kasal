@@ -1,8 +1,22 @@
 """Apply generated MCP choices to one flow task without mutating a saved crew."""
 
-from typing import Any, Optional
+from typing import Any, Optional, overload
 
 
+@overload
+def apply_flow_mcp_assignments(
+    configs: dict[str, Any],
+    task_id: object,
+    crew_id: object,
+    flow_data: Optional[dict[str, Any]],
+) -> dict[str, Any]: ...
+@overload
+def apply_flow_mcp_assignments(
+    configs: Optional[dict[str, Any]],
+    task_id: object,
+    crew_id: object,
+    flow_data: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]: ...
 def apply_flow_mcp_assignments(
     configs: Optional[dict[str, Any]],
     task_id: object,

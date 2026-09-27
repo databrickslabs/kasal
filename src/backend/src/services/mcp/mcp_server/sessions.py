@@ -35,7 +35,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Dict, List, Optional, Sequence
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def active_sessions() -> List[str]:
 
 
 def _notification(method: str, params: Optional[dict] = None) -> str:
-    message = {"jsonrpc": "2.0", "method": method}
+    message: Dict[str, Any] = {"jsonrpc": "2.0", "method": method}
     if params:
         message["params"] = params
     return json.dumps(message)

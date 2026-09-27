@@ -17,7 +17,7 @@ from src.core.exceptions import (
     KasalError,
     NotFoundError,
 )
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep, require_group_id
 from src.schemas.hitl import (
     ExecutionHITLStatus,
     HITLActionResponse,
@@ -141,7 +141,7 @@ async def get_pending_approvals(
     """
     try:
         return await service.get_pending_approvals(
-            group_id=group_context.primary_group_id, limit=limit, offset=offset
+            group_id=require_group_id(group_context), limit=limit, offset=offset
         )
     except HITLServiceError as e:
         logger.error(f"Error getting pending approvals: {str(e)}")
@@ -234,7 +234,7 @@ async def approve_gate(
         result = await service.approve(
             approval_id=approval_id,
             approved_by=group_context.group_email or "unknown",
-            group_id=group_context.primary_group_id,
+            group_id=require_group_id(group_context),
             comment=request.comment,
             user_token=group_context.access_token,  # Pass user's token for OBO auth on resume
         )
@@ -273,7 +273,7 @@ async def reject_gate(
         result = await service.reject(
             approval_id=approval_id,
             rejected_by=group_context.group_email or "unknown",
-            group_id=group_context.primary_group_id,
+            group_id=require_group_id(group_context),
             reason=request.reason,
             action=request.action,
         )
@@ -306,7 +306,7 @@ async def get_execution_hitl_status(
     """
     try:
         return await service.get_execution_hitl_status(
-            execution_id=execution_id, group_id=group_context.primary_group_id
+            execution_id=execution_id, group_id=require_group_id(group_context)
         )
     except HITLServiceError as e:
         logger.error(f"Error getting execution HITL status: {str(e)}")
@@ -327,7 +327,7 @@ async def list_webhooks(
     List all HITL webhooks for the current user's group.
     """
     try:
-        return await service.list_webhooks(group_id=group_context.primary_group_id)
+        return await service.list_webhooks(group_id=require_group_id(group_context))
     except HITLWebhookServiceError as e:
         logger.error(f"Error listing webhooks: {str(e)}")
         raise KasalError(str(e))
@@ -350,7 +350,7 @@ async def create_webhook(
     """
     try:
         return await service.create_webhook(
-            webhook_data=webhook_data, group_id=group_context.primary_group_id
+            webhook_data=webhook_data, group_id=require_group_id(group_context)
         )
 
     except HITLWebhookServiceError as e:
@@ -369,7 +369,7 @@ async def get_webhook(
     """
     try:
         return await service.get_webhook(
-            webhook_id=webhook_id, group_id=group_context.primary_group_id
+            webhook_id=webhook_id, group_id=require_group_id(group_context)
         )
     except HITLWebhookNotFoundError as e:
         raise NotFoundError(str(e))
@@ -392,7 +392,7 @@ async def update_webhook(
         return await service.update_webhook(
             webhook_id=webhook_id,
             webhook_data=webhook_data,
-            group_id=group_context.primary_group_id,
+            group_id=require_group_id(group_context),
         )
 
     except HITLWebhookNotFoundError as e:
@@ -413,7 +413,7 @@ async def delete_webhook(
     """
     try:
         await service.delete_webhook(
-            webhook_id=webhook_id, group_id=group_context.primary_group_id
+            webhook_id=webhook_id, group_id=require_group_id(group_context)
         )
 
     except HITLWebhookNotFoundError as e:

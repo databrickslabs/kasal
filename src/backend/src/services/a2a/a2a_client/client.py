@@ -94,7 +94,8 @@ def interface_url_of(card: Dict[str, Any], fallback: str) -> str:
     for interface in card.get("interfaces") or []:
         url = (interface or {}).get("url")
         if url:
-            return url.rstrip("/")
+            result: str = url.rstrip("/")
+            return result
 
     parsed = urlparse(fallback)
     base = f"{parsed.scheme}://{parsed.netloc}"

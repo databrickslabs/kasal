@@ -1,14 +1,14 @@
 """Pipeline Config Generator Tool — calls PBI APIs directly, no LLM intermediation.
 
-Wraps the Power BI pipeline configuration library as a CrewAI tool so it can be used in the Kasal UI
-with its own config form (including both SP credential sets).
+Wraps the Power BI pipeline configuration library as a CrewAI tool with its own Kasal UI config form (both SP credential sets).
 """
 
 import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Optional, Type
+from types import ModuleType
+from typing import Any, Optional, Type, cast
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -207,7 +207,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         # A credential set is valid as a Service Principal (client_id +
         # client_secret), a Service Account (client_id + username + password),
         # or a pre-obtained OAuth access_token (non-admin only).
-        def _creds_ok(cid, secret, user, pw) -> bool:
+        def _creds_ok(cid: Any, secret: Any, user: Any, pw: Any) -> bool:
             has_sp = bool(cid and secret)
             has_sa = bool(cid and user and pw)
             return has_sp or has_sa
@@ -291,7 +291,7 @@ class PipelineConfigGeneratorTool(BaseTool):
             # that happens we lazily mint a Service-Principal token from the
             # non-admin client_secret (if provided) and retry — this is what
             # recovers the measure DAX needed for switch_decompositions etc.
-            _sp_data_token_cache: dict = {}
+            _sp_data_token_cache: dict[str, Optional[str]] = {}
 
             def _sp_data_token() -> Optional[str]:
                 if not client_secret:
@@ -955,8 +955,8 @@ class PipelineConfigGeneratorTool(BaseTool):
     @staticmethod
     def _build_ucmv_measures(
         measures: list[dict],
-        admin_tables: dict = None,
-        config: dict = None,
+        admin_tables: Optional[dict] = None,
+        config: Optional[dict] = None,
     ) -> list[dict]:
         """Convert config-gen measures into the UCMV `measures_json` shape.
 
@@ -1131,12 +1131,12 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     async def _save_to_conversion_history(
         self,
-        measures,
-        config,
-        relationships,
-        admin_tables,
-        workspace_id,
-        dataset_id,
+        measures: list,
+        config: dict,
+        relationships: list,
+        admin_tables: dict,
+        workspace_id: str,
+        dataset_id: str,
     ) -> None:
         """Persist the config-gen result to conversion_history (fail-open).
 
@@ -1216,16 +1216,16 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     async def _save_powerbi_extraction(
         self,
-        relationships,
-        measures,
-        admin_tables,
-        report_def,
-        config,
-        warnings,
-        workspace_id,
-        dataset_id,
-        report_id,
-        expressions=None,
+        relationships: list,
+        measures: list,
+        admin_tables: dict,
+        report_def: Any,
+        config: dict,
+        warnings: list,
+        workspace_id: str,
+        dataset_id: str,
+        report_id: Optional[str],
+        expressions: Optional[dict] = None,
     ) -> None:
         """Persist the FULL raw extraction to the powerbi_extraction table (fail-open).
 
@@ -1697,7 +1697,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         if not m:
             return {}
         try:
-            return _json.loads(m.group(0))
+            return cast(dict, _json.loads(m.group(0)))
         except Exception:  # noqa: BLE001
             return {}
 
@@ -1746,11 +1746,11 @@ class PipelineConfigGeneratorTool(BaseTool):
                         changed = True
 
         # Promote column value sets into named filter sets when they have 3+ values
-        for col, vals in col_values.items():
-            if len(vals) >= 3:
+        for col, col_vals in col_values.items():
+            if len(col_vals) >= 3:
                 fs_key = f"{col.upper()}_FILTER"
                 if fs_key not in filter_sets:
-                    filter_sets[fs_key] = sorted(vals)
+                    filter_sets[fs_key] = sorted(col_vals)
                     changed = True
 
         # ── 2. Detect SWITCH(TRUE(), ...) decompositions ──
@@ -1886,7 +1886,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         return service.get_access_token()
 
     @staticmethod
-    def _import_generate_config():
+    def _import_generate_config() -> ModuleType:
         """Load the shared Power BI library through its canonical package."""
         from src.services.powerbi import pipeline_config
 

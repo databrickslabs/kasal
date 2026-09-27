@@ -3,6 +3,7 @@
 import asyncio
 import time
 from types import SimpleNamespace
+from typing import Any, Callable, Dict, List, Optional
 
 from src.core.llm.effort import resolve_effort
 from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
@@ -10,20 +11,20 @@ from src.core.llm.transport.request_deadline import run_deadline
 
 
 async def kickoff_chat_turn(
-    service,
-    agent,
-    config,
-    execution_id,
-    trace_context,
-    group_context,
-    group_id,
-    prompt,
-    agent_spec,
-    conversation_preamble,
-    _agent_memory,
-    _log,
-    output_evidence=None,
-):
+    service: Any,
+    agent: Any,
+    config: Any,
+    execution_id: str,
+    trace_context: Any,
+    group_context: Any,
+    group_id: Optional[str],
+    prompt: str,
+    agent_spec: Dict[str, Any],
+    conversation_preamble: Optional[str],
+    _agent_memory: Any,
+    _log: Callable[[str], None],
+    output_evidence: Optional[List[Any]] = None,
+) -> Any:
     raw = (getattr(config, "inputs", None) or {}).get(
         "execution_effort"
     ) or agent_spec.get("execution_effort")
@@ -82,19 +83,19 @@ async def kickoff_chat_turn(
 
 
 async def _kickoff(
-    service,
-    agent,
-    config,
-    execution_id,
-    trace_context,
-    group_context,
-    group_id,
-    prompt,
-    agent_spec,
-    conversation_preamble,
-    _agent_memory,
-    _log,
-):
+    service: Any,
+    agent: Any,
+    config: Any,
+    execution_id: str,
+    trace_context: Any,
+    group_context: Any,
+    group_id: Optional[str],
+    prompt: str,
+    agent_spec: Dict[str, Any],
+    conversation_preamble: Optional[str],
+    _agent_memory: Any,
+    _log: Callable[[str], None],
+) -> Any:
     # ── Memory recall — Kasal's engine Agent does not consult
     # memory itself, so recall here and prepend a capped context
     # block. One embedding + one search (no LLM calls);

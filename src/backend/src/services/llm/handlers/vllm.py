@@ -6,6 +6,8 @@ what one serving setup needs — and it was only in the facade for historical
 reasons.
 """
 
+from typing import Any, Dict, List, Optional
+
 from src.core.llm.transport import LLM
 
 
@@ -67,8 +69,11 @@ class VLLMFunctionCallingLLM(LLM):
     tool_choice: str = "auto"
 
     def _prepare_completion_params(
-        self, messages, tools=None, skip_file_processing=False
-    ):
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        skip_file_processing: bool = False,
+    ) -> Dict[str, Any]:
         """Declare the tool policy explicitly rather than inheriting a default.
 
         ``auto`` is what an OpenAI-compatible server already applies when tools

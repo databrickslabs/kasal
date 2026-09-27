@@ -32,9 +32,9 @@ router = APIRouter(prefix="/api/genie", tags=["genie"])
 @router.get("/spaces", response_model=GenieSpacesResponse)
 async def get_genie_spaces(
     request: Request,
+    group_context: GroupContextDep,
     page_token: Optional[str] = None,
     page_size: int = 50,
-    group_context: GroupContextDep = None,
 ) -> GenieSpacesResponse:
     """
     Fetch available Genie spaces from Databricks with pagination.
@@ -79,7 +79,7 @@ async def get_genie_spaces(
 async def search_genie_spaces(
     request: Request,
     spaces_request: GenieSpacesRequest,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> GenieSpacesResponse:
     """
     Search and filter Genie spaces from Databricks with pagination.
@@ -116,7 +116,7 @@ async def search_genie_spaces(
 
 @router.get("/spaces/{space_id}", response_model=GenieSpace)
 async def get_genie_space_details(
-    space_id: str, request: Request, group_context: GroupContextDep = None
+    space_id: str, request: Request, group_context: GroupContextDep
 ) -> GenieSpace:
     """
     Get details for a specific Genie space.
@@ -150,7 +150,7 @@ async def get_genie_space_details(
 async def execute_genie_query(
     request: Request,
     execution_request: GenieExecutionRequest,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> GenieExecutionResponse:
     """
     Execute a Genie query in a specific space.
@@ -186,7 +186,7 @@ async def execute_genie_query(
 async def send_genie_message(
     request: Request,
     message_request: GenieSendMessageRequest,
-    group_context: GroupContextDep = None,
+    group_context: GroupContextDep,
 ) -> GenieSendMessageResponse:
     """
     Send a message to Genie.

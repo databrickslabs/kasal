@@ -86,7 +86,10 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
             )
             row = cursor.fetchone()
             if row and row[0]:
-                return json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                loaded: Dict[str, Any] = (
+                    json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                )
+                return loaded
             return None
         finally:
             conn.close()
@@ -110,7 +113,7 @@ async def is_lakebase_enabled() -> bool:
             logger.debug("🔴 Lakebase DISABLED - No configuration found in database")
             return False
 
-        is_enabled = (
+        is_enabled = bool(
             config.get("enabled", False)
             and config.get("endpoint")
             and (
@@ -164,7 +167,9 @@ async def activate_lakebase_in_subprocess() -> bool:
 
         lb_factory = LakebaseSessionFactory(instance_name)
         await lb_factory.create_engine()
-        async_session_factory.activate_lakebase(lb_factory._session_factory)
+        lb_session_factory = lb_factory._session_factory
+        assert lb_session_factory is not None  # create_engine() sets it or raises
+        async_session_factory.activate_lakebase(lb_session_factory)
 
         from src.db.lakebase_state import mark_lakebase_activated
 

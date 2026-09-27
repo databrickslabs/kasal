@@ -66,7 +66,7 @@ class AgentBricksInput(BaseModel):
 
     @field_validator("question", mode="before")
     @classmethod
-    def parse_question(cls, value):
+    def parse_question(cls, value: Any) -> Any:
         """
         Handle complex input formats for question, especially dictionaries
         that might come from LLM tools format.
@@ -101,15 +101,17 @@ class AgentBricksTool(BaseTool):
     # Add alternative names for the tool
     aliases: List[str] = ["AgentBricks", "DatabricksAgent", "MosaicAgent"]
     args_schema: Type[BaseModel] = AgentBricksInput
-    _endpoint_name: str = PrivateAttr(default=None)
+    _endpoint_name: Optional[str] = PrivateAttr(default=None)
     _timeout: int = PrivateAttr(default=120)  # Timeout in seconds
-    _tool_id: int = PrivateAttr(default=None)
-    _user_token: str = PrivateAttr(default=None)  # For OBO authentication
-    _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
+    _tool_id: Optional[int] = PrivateAttr(default=None)
+    _user_token: Optional[str] = PrivateAttr(default=None)  # For OBO authentication
+    _group_id: Optional[str] = PrivateAttr(
+        default=None
+    )  # For PAT authentication fallback
     _return_trace: bool = PrivateAttr(
         default=False
     )  # Whether to return execution trace
-    _custom_inputs: Dict[str, Any] = PrivateAttr(
+    _custom_inputs: Optional[Dict[str, Any]] = PrivateAttr(
         default=None
     )  # Custom inputs for the agent
 
@@ -118,11 +120,11 @@ class AgentBricksTool(BaseTool):
         tool_config: Optional[dict] = None,
         tool_id: Optional[int] = None,
         token_required: bool = True,
-        user_token: str = None,
-        group_id: str = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
         result_as_answer: bool = False,
     ):
-        super().__init__(result_as_answer=result_as_answer)
+        super().__init__(result_as_answer=result_as_answer)  # type: ignore[call-arg]  # pydantic plugin: defaults live on the subclass
         if tool_config is None:
             tool_config = {}
 
@@ -206,7 +208,7 @@ class AgentBricksTool(BaseTool):
             "Host and authentication will be obtained from databricks_auth module at runtime"
         )
 
-    def set_user_token(self, user_token: str):
+    def set_user_token(self, user_token: str) -> None:
         """Set user access token for OBO authentication."""
         self._user_token = user_token
         logger.info("User token set for centralized authentication")
@@ -241,7 +243,7 @@ class AgentBricksTool(BaseTool):
 
         return f"{workspace_url}{path}"
 
-    async def _get_auth_headers(self) -> dict:
+    async def _get_auth_headers(self) -> Optional[dict]:
         """Get authentication headers using unified authentication."""
         try:
             from src.utils.databricks_auth import get_auth_context
@@ -444,7 +446,7 @@ class AgentBricksTool(BaseTool):
         """
         import concurrent.futures
 
-        def run_async_in_new_loop():
+        def run_async_in_new_loop() -> str:
             """Helper to run async code in a new event loop in a separate thread."""
             return asyncio.run(self._run_async(question))
 

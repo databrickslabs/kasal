@@ -13,7 +13,7 @@ class CrewFeedbackCreateRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _down_requires_comment(self):
+    def _down_requires_comment(self) -> "CrewFeedbackCreateRequest":
         if self.rating == "down" and not (self.comment or "").strip():
             raise ValueError(
                 "a comment explaining what went wrong is required for thumbs-down"

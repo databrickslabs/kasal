@@ -20,7 +20,7 @@ session (via ``store``) rather than borrowing a request's.
 """
 
 import logging
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Self, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class CheckpointRecorder:
         """(event class, handler) pairs this recorder listens on."""
         raise NotImplementedError
 
-    def register(self, bus=None) -> "CheckpointRecorder":
+    def register(self, bus: Any = None) -> Self:
         """Subscribe on the run's event bus.
 
         Args:

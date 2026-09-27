@@ -183,7 +183,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         )
         from src.services.tools.metric_view_utils.scan_data_parser import ScanDataParser
 
-        def _get(key):
+        def _get(key: str) -> Any:
             return kwargs.get(key) or self._default_config.get(key)
 
         # JSON inputs (measures/mquery/config/relationships/scan) are injected into
@@ -201,11 +201,11 @@ class UCMetricViewGeneratorTool(BaseTool):
             "scan_data_json",
         )
 
-        def _get_json(key):
+        def _get_json(key: str) -> Any:
             kw_val = kwargs.get(key)
             default_val = self._default_config.get(key)
 
-            def _looks_like_json(v):
+            def _looks_like_json(v: Any) -> bool:
                 if not isinstance(v, (str, list, dict)):
                     return False
                 if isinstance(v, (list, dict)):
@@ -443,7 +443,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 "translation_mode": _get("translation_mode") or "llm_first",
             }
 
-        def _parse_json_input(raw, default):
+        def _parse_json_input(raw: Any, default: Any) -> Any:
             """Parse a JSON input; treat empty/blank as the default (never error)."""
             if not isinstance(raw, str):
                 return raw if raw is not None else default
@@ -615,7 +615,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                         )
                         evaluated = vr.get("evaluated", [])
                         if evaluated:
-                            valid = sum(
+                            n_valid = sum(
                                 1
                                 for m in evaluated
                                 if m.get("measure_eval_result", {}).get("status")
@@ -623,7 +623,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                             )
                             validation_results[table_key] = {
                                 "evaluated": len(evaluated),
-                                "valid": valid,
+                                "valid": n_valid,
                             }
                     finally:
                         os.unlink(yf_path)
@@ -835,7 +835,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         the complete raw source DAX is retained verbatim so it can be persisted
         and retrieved later, rather than only living in the transient result.
         """
-        extract = []
+        extract: list = []
         if not isinstance(measures, list):
             return extract
         for m in measures:
@@ -1380,13 +1380,13 @@ class UCMetricViewGeneratorTool(BaseTool):
 
     def _extract_mquery_fallback(
         self,
-        workspace_id,
-        dataset_id,
-        tenant_id,
-        client_id,
-        client_secret,
-        username,
-        password,
+        workspace_id: str,
+        dataset_id: str,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        username: str,
+        password: str,
         admin_client_id: str = "",
         admin_client_secret: str = "",
     ) -> list:
@@ -1477,13 +1477,13 @@ class UCMetricViewGeneratorTool(BaseTool):
 
     def _extract_measures_fallback(
         self,
-        workspace_id,
-        dataset_id,
-        tenant_id,
-        client_id,
-        client_secret,
-        username,
-        password,
+        workspace_id: str,
+        dataset_id: str,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        username: str,
+        password: str,
     ) -> list:
         """Recover measure DAX when Execute Queries/XMLA fails for a Service Account.
 

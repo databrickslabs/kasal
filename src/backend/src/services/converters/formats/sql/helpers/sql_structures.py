@@ -5,7 +5,7 @@ Handles SQL equivalent of SAP BW structures and time intelligence in SQL
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union, cast
 
 from ....base.models import KPI, KPIDefinition, Structure
 from ....common.transformers.formula import KBIDependencyResolver, KbiFormulaParser
@@ -40,7 +40,7 @@ class SQLStructureExpander:
         )
 
     def process_definition(
-        self, definition: KPIDefinition, options: SQLTranslationOptions = None
+        self, definition: KPIDefinition, options: Optional[SQLTranslationOptions] = None
     ) -> SQLDefinition:
         with open("/tmp/sql_debug.log", "a") as f:
             f.write("=== SQL STRUCTURE PROCESSOR CALLED ===\n")
@@ -288,7 +288,7 @@ class SQLStructureExpander:
 
         # Try to find date column from filters
         date_column = None
-        for filter_condition in structure.filters:
+        for filter_condition in cast(List[str], structure.filters):  # str filters
             for date_col in potential_date_columns:
                 if date_col in filter_condition.lower():
                     date_column = date_col
@@ -310,7 +310,7 @@ class SQLStructureExpander:
 
         return sql_structure
 
-    def _create_ytd_sql_template(self, date_column: str = None) -> str:
+    def _create_ytd_sql_template(self, date_column: Optional[str] = None) -> str:
         """Create SQL template for Year-to-Date calculations"""
         date_col = date_column or "fiscal_date"
 
@@ -325,7 +325,7 @@ class SQLStructureExpander:
             AND {date_col} <= CURRENT_DATE
             """
 
-    def _create_ytg_sql_template(self, date_column: str = None) -> str:
+    def _create_ytg_sql_template(self, date_column: Optional[str] = None) -> str:
         """Create SQL template for Year-to-Go calculations"""
         date_col = date_column or "fiscal_date"
 
@@ -340,7 +340,9 @@ class SQLStructureExpander:
             AND {date_col} <= DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year' - INTERVAL '1 day'
             """
 
-    def _create_prior_period_sql_template(self, date_column: str = None) -> str:
+    def _create_prior_period_sql_template(
+        self, date_column: Optional[str] = None
+    ) -> str:
         """Create SQL template for Prior Period calculations"""
         date_col = date_column or "fiscal_date"
 
@@ -356,7 +358,7 @@ class SQLStructureExpander:
             """
 
     def _convert_filters_to_sql(
-        self, filters: List[str], definition: KPIDefinition
+        self, filters: List[Union[str, Dict[str, Any]]], definition: KPIDefinition
     ) -> List[str]:
         """Convert SAP BW style filters to SQL WHERE conditions"""
         from .sql_aggregations import SQLFilterProcessor
@@ -368,7 +370,9 @@ class SQLStructureExpander:
 
         processor = SQLFilterProcessor(self.dialect)
         return processor.process_filters(
-            filters, definition.default_variables, definition.filters
+            cast(List[str], filters),  # SQL filters are strings only
+            definition.default_variables,
+            definition.filters,
         )
 
     def _convert_kbis_to_sql_measures(
@@ -520,7 +524,7 @@ class SQLStructureExpander:
         # Determine aggregation type and formula
         if sql_structure.formula:
             # Structure has its own formula - this should be CALCULATED
-            aggregation_type = "CALCULATED"
+            aggregation_type: Optional[str] = "CALCULATED"
             formula = sql_structure.formula
             source_table = None
         else:
@@ -576,7 +580,7 @@ class SQLStructureExpander:
         # Find structure references in parentheses (same as DAX processor)
         pattern = r"\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)"
 
-        def replace_reference(match):
+        def replace_reference(match: re.Match[str]) -> str:
             struct_ref = match.group(1).strip()
             if struct_ref in all_sql_structures:
                 # In SQL context, we'll create subquery references or CTEs
@@ -597,7 +601,9 @@ class SQLStructureExpander:
 
         return sql_measure
 
-    def _map_to_sql_aggregation_type(self, dax_agg_type: str) -> SQLAggregationType:
+    def _map_to_sql_aggregation_type(
+        self, dax_agg_type: Optional[str]
+    ) -> SQLAggregationType:
         """Map DAX aggregation type to SQL aggregation type"""
         if not dax_agg_type:
             return SQLAggregationType.SUM
@@ -634,7 +640,9 @@ class SQLStructureExpander:
         return name or "unnamed_measure"
 
     def generate_sql_queries_from_definition(
-        self, sql_definition: SQLDefinition, options: SQLTranslationOptions = None
+        self,
+        sql_definition: SQLDefinition,
+        options: Optional[SQLTranslationOptions] = None,
     ) -> List[SQLQuery]:
         """Generate SQL queries from processed SQL definition"""
         if options is None:
@@ -847,7 +855,7 @@ class SQLStructureExpander:
         """Create combined SQL query for multiple measures with proper table handling"""
 
         # Group measures by source table
-        table_measures = {}
+        table_measures: Dict[str, List[SQLMeasure]] = {}
         for sql_measure in sql_measures:
             table = sql_measure.source_table or "fact_table"
             if table not in table_measures:
@@ -875,7 +883,7 @@ class SQLStructureExpander:
         options: SQLTranslationOptions,
     ) -> SQLQuery:
         """Create SQL query for measures from a single table"""
-        select_expressions = []
+        select_expressions: List[str] = []
         all_filters = []
 
         for sql_measure in sql_measures:
@@ -970,12 +978,13 @@ class SQLStructureExpander:
         # Get expanded filters from KPI definition (stored in sql_definition)
         expanded_filters = {}
         if hasattr(sql_definition, "filters") and sql_definition.filters:
-            for filter_group, filters in sql_definition.filters.items():
-                if isinstance(filters, dict):
-                    for filter_name, filter_value in filters.items():
+            # (loop var must not shadow the ``filters`` parameter)
+            for filter_group, group_filters in sql_definition.filters.items():
+                if isinstance(group_filters, dict):
+                    for filter_name, filter_value in group_filters.items():
                         expanded_filters[filter_name] = filter_value
                 else:
-                    expanded_filters[filter_group] = str(filters)
+                    expanded_filters[filter_group] = str(group_filters)
 
         for filter_condition in filters:
             if not filter_condition:
@@ -1022,7 +1031,7 @@ class SQLStructureExpander:
         self,
         filter_condition: str,
         variables: Dict[str, Any],
-        expanded_filters: Dict[str, str] = None,
+        expanded_filters: Optional[Dict[str, str]] = None,
     ) -> str:
         """Substitute variables in a filter condition"""
         result = filter_condition

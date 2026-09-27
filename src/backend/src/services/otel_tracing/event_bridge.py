@@ -14,7 +14,7 @@ the rows that carried them (see the migration that rewrites
 import logging
 import threading
 from collections import OrderedDict, deque
-from typing import Any, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from opentelemetry.trace import (
     NonRecordingSpan,
@@ -219,7 +219,7 @@ _PLAN_TOOL = "todo"
 # The two halves of a tool call, by event type. The frontend reads this to
 # label a row "(input)" / "(output)"; see the operation block in
 # _set_extra_attributes for what its absence looked like.
-_TOOL_OPERATIONS = {
+_TOOL_OPERATIONS: Dict[Optional[str], str] = {
     "tool_usage_started": "tool_started",
     "tool_usage_finished": "tool_finished",
 }
@@ -396,7 +396,7 @@ class OTelEventBridge:
         self._group_context = group_context
         self._registered_count = 0
         self._scoped = scoped
-        self._subscriptions = []
+        self._subscriptions: List[Tuple[Any, Any, Callable[..., None]]] = []
         # Captured from CrewKickoffStartedEvent and stamped on all subsequent
         # spans so that task-level traces carry the crew name for flow monitoring.
         self._current_crew_name: Optional[str] = None
@@ -549,8 +549,8 @@ class OTelEventBridge:
             event_type,
         )
         try:
-            agent_name = _get_agent_name(event)
-            task_name = _get_task_name(event)
+            agent_name: Optional[str] = _get_agent_name(event)
+            task_name: Optional[str] = _get_task_name(event)
             tool_name = _get_tool_name(event)
             output = _get_output(event)
             event_task_id = getattr(event, "task_id", None)

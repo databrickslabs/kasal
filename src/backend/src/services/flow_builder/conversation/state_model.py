@@ -30,7 +30,17 @@ working, and ``state.region`` starts working too.
 """
 
 import logging
-from typing import Any, ClassVar, Dict, List, Optional, Type
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    ItemsView,
+    KeysView,
+    List,
+    Optional,
+    Type,
+    ValuesView,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
@@ -139,13 +149,13 @@ class DictLikeState(BaseModel):
     def __contains__(self, key: object) -> bool:
         return isinstance(key, str) and hasattr(self, key)
 
-    def keys(self):  # dict surface
+    def keys(self) -> KeysView[str]:  # dict surface
         return self.model_dump().keys()
 
-    def items(self):  # dict surface
+    def items(self) -> ItemsView[str, Any]:  # dict surface
         return self.model_dump().items()
 
-    def values(self):  # dict surface
+    def values(self) -> ValuesView[Any]:  # dict surface
         return self.model_dump().values()
 
     def update(self, other: Dict[str, Any]) -> None:
@@ -257,7 +267,9 @@ def build_state_model(
             fields.pop(inherited)
 
     try:
-        model = create_model(name, __base__=base, **fields)
+        model: Type[DictLikeState] = create_model(  # type: ignore[call-overload]
+            name, __base__=base, **fields  # pydantic stubs reject **field_definitions
+        )
     except Exception as exc:  # noqa: BLE001 — a bad schema must not break kickoff
         logger.warning("[flow-state] could not build state model: %s", exc)
         return None

@@ -100,7 +100,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         page: int = 0,
         per_page: int = 10,
         endpoint: Optional[str] = None,
-        tenant_ids: List[str] = None,
+        tenant_ids: Optional[List[str]] = None,
     ) -> List[LLMLog]:
         """
         Get paginated logs with optional endpoint filtering for specific tenants.
@@ -120,7 +120,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         # Start with a base query filtered by tenant
         query = (
             select(self.model)
-            .where(self.model.tenant_id.in_(tenant_ids))
+            .where(self.model.group_id.in_(tenant_ids))
             .order_by(desc(self.model.created_at))
         )
 
@@ -138,7 +138,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         return list(result.scalars().all())
 
     async def count_logs_by_tenant(
-        self, endpoint: Optional[str] = None, tenant_ids: List[str] = None
+        self, endpoint: Optional[str] = None, tenant_ids: Optional[List[str]] = None
     ) -> int:
         """
         Count logs with optional endpoint filtering for specific tenants.
@@ -154,7 +154,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
             return 0
 
         # Start with a base query filtered by tenant
-        query = select(self.model).where(self.model.tenant_id.in_(tenant_ids))
+        query = select(self.model).where(self.model.group_id.in_(tenant_ids))
 
         # Apply endpoint filter if provided
         if endpoint and endpoint != "all":
@@ -165,7 +165,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         return len(list(result.scalars().all()))
 
     async def get_unique_endpoints_by_tenant(
-        self, tenant_ids: List[str] = None
+        self, tenant_ids: Optional[List[str]] = None
     ) -> List[str]:
         """
         Get list of unique endpoints in the logs for specific tenants.
@@ -181,7 +181,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
 
         query = (
             select(self.model.endpoint)
-            .where(self.model.tenant_id.in_(tenant_ids))
+            .where(self.model.group_id.in_(tenant_ids))
             .distinct()
         )
         result = await self.session.execute(query)
@@ -193,7 +193,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         page: int = 0,
         per_page: int = 10,
         endpoint: Optional[str] = None,
-        group_ids: List[str] = None,
+        group_ids: Optional[List[str]] = None,
     ) -> List[LLMLog]:
         """
         Get paginated logs with optional endpoint filtering for specific groups.
@@ -229,7 +229,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         return list(result.scalars().all())
 
     async def count_logs_by_group(
-        self, endpoint: Optional[str] = None, group_ids: List[str] = None
+        self, endpoint: Optional[str] = None, group_ids: Optional[List[str]] = None
     ) -> int:
         """
         Count logs with optional endpoint filtering for specific groups.
@@ -256,7 +256,7 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         return len(list(result.scalars().all()))
 
     async def get_unique_endpoints_by_group(
-        self, group_ids: List[str] = None
+        self, group_ids: Optional[List[str]] = None
     ) -> List[str]:
         """
         Get list of unique endpoints in the logs for specific groups.

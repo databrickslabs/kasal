@@ -11,7 +11,8 @@ This connector can be used to:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from types import TracebackType
+from typing import Any, Dict, List, Optional, Self
 
 import requests
 
@@ -65,8 +66,8 @@ class DatabricksConnector:
         client_secret: Optional[str] = None,
         project_id: Optional[str] = None,
         use_database: bool = False,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """
         Initialize Databricks connector.
 
@@ -147,7 +148,7 @@ class DatabricksConnector:
             response.raise_for_status()
             result = response.json()
 
-            catalogs = result.get("catalogs", [])
+            catalogs: List[Dict[str, Any]] = result.get("catalogs", [])
             self.logger.info(f"Found {len(catalogs)} catalogs")
             return catalogs
 
@@ -180,7 +181,7 @@ class DatabricksConnector:
             response.raise_for_status()
             result = response.json()
 
-            schemas = result.get("schemas", [])
+            schemas: List[Dict[str, Any]] = result.get("schemas", [])
             self.logger.info(f"Found {len(schemas)} schemas in catalog '{catalog}'")
             return schemas
 
@@ -325,7 +326,7 @@ class DatabricksConnector:
                 "message": "Validation failed",
             }
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Context manager entry - validate connection."""
         if not self.validate_connection():
             raise ConnectionError(
@@ -333,7 +334,12 @@ class DatabricksConnector:
             )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit - cleanup if needed."""
         # No cleanup needed for REST API connections
         pass

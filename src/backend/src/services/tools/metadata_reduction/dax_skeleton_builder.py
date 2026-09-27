@@ -157,7 +157,7 @@ class DaxSkeletonBuilder:
         rtype = resolution.get("resolution_type", "unresolved")
         flags = resolution.get("expression_flags", {})
 
-        placeholders = []
+        placeholders: List[str] = []
         notes = []
 
         if rtype == "filtered_measure":
@@ -251,7 +251,7 @@ class DaxSkeletonBuilder:
         filter_col = resolution.get("filter_column", "")
         filter_val = resolution.get("filter_value", "")
 
-        placeholders = []
+        placeholders: List[str] = []
         filter_lines = self._format_filter_lines(active_filters)
 
         skeleton = (
@@ -286,7 +286,7 @@ class DaxSkeletonBuilder:
         base = resolution.get("base_measure", "")
         sibling_names = resolution.get("sibling_measures", [])
 
-        placeholders = []
+        placeholders: List[str] = []
         notes = [
             f"Composite measure aggregating {len(sibling_names)} filtered siblings"
         ]
@@ -342,7 +342,7 @@ class DaxSkeletonBuilder:
         active_filters: Optional[Dict[str, Any]] = None,
     ) -> DaxSkeleton:
         """Build skeleton for multiple filtered measures."""
-        placeholders = []
+        placeholders: List[str] = []
         measure_lines = []
         notes = []
 
@@ -387,7 +387,7 @@ class DaxSkeletonBuilder:
         active_filters: Optional[Dict[str, Any]] = None,
     ) -> DaxSkeleton:
         """Build skeleton for multiple model measures."""
-        placeholders = []
+        placeholders: List[str] = []
         measure_lines = []
 
         for m in measures:
@@ -432,7 +432,7 @@ class DaxSkeletonBuilder:
         """
         if not question_intent:
             return []
-        dims = question_intent.get("dimensions", [])
+        dims: List[str] = question_intent.get("dimensions", [])
         if not dims:
             return []
 

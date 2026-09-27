@@ -14,6 +14,8 @@ this domain's data, so the writes and the stamping belong here, matching how
 import logging
 from typing import Any, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.repositories.powerbi_extraction_repository import PowerBIExtractionRepository
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,9 @@ logger = logging.getLogger(__name__)
 class PowerBIExtractionService:
     """Owns ``powerbi_extraction`` rows."""
 
-    def __init__(self, session, group_context: Optional[Any] = None):
+    def __init__(
+        self, session: AsyncSession, group_context: Optional[Any] = None
+    ) -> None:
         """
         Args:
             session: database session, chosen by the caller's entry point.

@@ -12,7 +12,7 @@ This module orchestrates flow building using several specialized sub-modules:
 The FlowBuilder class coordinates these modules to construct complete CrewAI flows.
 """
 
-from typing import Any, Dict, Final, Optional
+from typing import Any, Callable, Dict, Final, List, Optional, cast
 
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
@@ -60,7 +60,7 @@ from src.utils.safe_eval import safe_eval
 logger = LoggerManager.get_instance().flow
 
 
-def pick_legacy_route(condition_value, route_names):
+def pick_legacy_route(condition_value: Any, route_names: Any) -> Any:
     """Select a route by value when a router has no condition expression.
 
     Coerces ``condition_value`` first (so a crew that emitted the field as
@@ -119,16 +119,16 @@ class FlowBuilder:
 
     @staticmethod
     async def build_flow(
-        flow_data,
-        repositories=None,
-        callbacks=None,
-        group_context=None,
-        restore_uuid=None,
-        resume_from_crew_sequence=None,
-        resume_from_execution_id=None,
-        user_token=None,
-        group_id=None,
-    ):
+        flow_data: Dict[str, Any],
+        repositories: Optional[Dict[str, Any]] = None,
+        callbacks: Any = None,
+        group_context: Any = None,
+        restore_uuid: Optional[str] = None,
+        resume_from_crew_sequence: Optional[int] = None,
+        resume_from_execution_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> Any:
         """
         Build a CrewAI flow from flow data.
 
@@ -178,7 +178,9 @@ class FlowBuilder:
                     try:
                         import json
 
-                        flow_config = json.loads(flow_data.get("flow_config"))
+                        flow_config = json.loads(
+                            cast(str, flow_data.get("flow_config"))
+                        )
                         logger.info("Successfully parsed flow_config from string")
                     except Exception as e:
                         logger.error(f"Failed to parse flow_config string: {e}")
@@ -257,8 +259,8 @@ class FlowBuilder:
             )
 
             # Parse all tasks, agents, and tools
-            all_agents = {}
-            all_tasks = {}
+            all_agents: Dict[str, Any] = {}
+            all_tasks: Dict[str, Any] = {}
 
             # Process all starting points first to collect tasks and agents using FlowProcessorManager
             # Note: FlowProcessorManager returns method names, but we need the actual task objects
@@ -422,9 +424,7 @@ class FlowBuilder:
                 logger.error(
                     "This is a critical error - flow cannot execute without start methods"
                 )
-
             return dynamic_flow
-
         except Exception as e:
             logger.error(f"Error building flow: {e}", exc_info=True)
             raise ValueError(f"Failed to build flow: {str(e)}")
@@ -434,22 +434,22 @@ class FlowBuilder:
 
     @staticmethod
     async def _create_dynamic_flow(
-        starting_points,
-        listener_crews,
-        routers,
-        all_agents,
-        all_tasks,
-        flow_config=None,
-        callbacks=None,
-        group_context=None,
-        restore_uuid=None,
-        resume_from_crew_sequence=None,
-        checkpoint_outputs=None,
-        user_token=None,
-        group_id=None,
-        checkpoint_identities=None,
-        resume_from_execution_id=None,
-    ):
+        starting_points: List[Any],
+        listener_crews: List[Any],
+        routers: List[Any],
+        all_agents: Dict[str, Any],
+        all_tasks: Dict[str, Any],
+        flow_config: Optional[Dict[str, Any]] = None,
+        callbacks: Any = None,
+        group_context: Any = None,
+        restore_uuid: Optional[str] = None,
+        resume_from_crew_sequence: Optional[int] = None,
+        checkpoint_outputs: Optional[Dict[str, Any]] = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
+        checkpoint_identities: Optional[Dict[str, Any]] = None,
+        resume_from_execution_id: Optional[str] = None,
+    ) -> Any:
         """
         Create a dynamic flow class with all start, listener, and router methods.
 
@@ -538,21 +538,21 @@ class FlowBuilder:
         # Adding methods via setattr() after class creation doesn't work!
 
         # Dictionary to collect all class methods
-        class_methods = {}
+        class_methods: Dict[str, Any] = {}
 
         # Create __init__ method for state management
         # IMPORTANT: Must accept **kwargs to support @persist decorator which passes 'persistence' kwarg
-        def create_init_method():
+        def create_init_method() -> Callable[..., None]:
             if state_enabled:
 
-                def __init__(self, **kwargs):
+                def __init__(self: Any, **kwargs: Any) -> None:
                     super(type(self), self).__init__(**kwargs)
                     if state_initial_values:
                         self.state.update(state_initial_values)
 
             else:
 
-                def __init__(self, **kwargs):
+                def __init__(self: Any, **kwargs: Any) -> None:
                     super(type(self), self).__init__(**kwargs)
 
             return __init__
@@ -1008,7 +1008,7 @@ class FlowBuilder:
             # If HITL gate was created, listener should listen to the gate instead
             if hitl_gate_method_name:
                 # Listener now listens to the HITL gate, not the source crew
-                method_condition = hitl_gate_method_name
+                method_condition: Any = hitl_gate_method_name
                 logger.info(f"  Using HITL gate condition: {method_condition}")
             elif condition_type == "AND" and len(method_names) > 1:
                 method_condition = and_(*method_names)
@@ -1242,14 +1242,14 @@ class FlowBuilder:
 
             # Create router method
             def router_factory(
-                router_routes,
-                router_condition_expr,
-                router_route_conditions,
-                router_condition_field,
-                router_method_name,
-            ):
+                router_routes: Any,
+                router_condition_expr: Any,
+                router_route_conditions: Any,
+                router_condition_field: Any,
+                router_method_name: str,
+            ) -> Any:
                 @router(listen_to_method)
-                def route_method(self, *args, **kwargs):
+                def route_method(self: Any, *args: Any, **kwargs: Any) -> Any:
                     logger.info(f"Router {router_method_name} evaluating condition")
 
                     # Build evaluation context for condition evaluation
@@ -1513,7 +1513,7 @@ class FlowBuilder:
                     route_listener_name = route_method_name(router_name, route_name, i)
 
                     # Try to get crew name from route tasks configuration
-                    route_crew_name = None
+                    route_crew_name: Any = None
                     if route_tasks and len(route_tasks) > 0:
                         route_crew_name = route_tasks[0].get("crewName") or route_tasks[
                             0

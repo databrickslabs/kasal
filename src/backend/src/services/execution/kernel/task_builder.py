@@ -163,7 +163,9 @@ async def build_task_args(
     return task_args
 
 
-def _build_human_review(task_config, config, task_key):
+def _build_human_review(
+    task_config: Dict[str, Any], config: Optional[Dict[str, Any]], task_key: str
+) -> Optional[Any]:
     """A HumanReviewGuardrail for a task that enables human_input, or None."""
     import os
 
@@ -190,7 +192,13 @@ def _build_human_review(task_config, config, task_key):
     )
 
 
-def _apply_code_guardrail(task_args, task_config, agent, config, task_key):
+def _apply_code_guardrail(
+    task_args: Dict[str, Any],
+    task_config: Dict[str, Any],
+    agent: Any,
+    config: Optional[Dict[str, Any]],
+    task_key: str,
+) -> None:
     """Code-based guardrail via GuardrailFactory. Mirrors the crew path; the
     crew-only callback fallback on failure is left to the caller."""
     guardrail_config = task_config["guardrail"]
@@ -274,7 +282,13 @@ def _apply_code_guardrail(task_args, task_config, agent, config, task_key):
         guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
 
 
-async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
+async def _apply_llm_guardrail(
+    task_args: Dict[str, Any],
+    task_config: Dict[str, Any],
+    agent: Any,
+    config: Optional[Dict[str, Any]],
+    task_key: str,
+) -> None:
     """LLM guardrail via the engine's LLMGuardrail. Mirrors the crew path,
     including the multi-tenant group_id requirement (raises if missing)."""
     llm_guardrail_config = task_config["llm_guardrail"]
@@ -344,7 +358,9 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
         guardrail_logger.error(f"Stack trace: {traceback.format_exc()}")
 
 
-async def _apply_output_pydantic(task_args, task_config, agent, task_key):
+async def _apply_output_pydantic(
+    task_args: Dict[str, Any], task_config: Dict[str, Any], agent: Any, task_key: str
+) -> None:
     """Resolve output_pydantic to a Pydantic class + converter compatibility."""
     from src.services.agent_builder.task_adapter import get_pydantic_class_from_name
 

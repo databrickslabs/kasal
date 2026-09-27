@@ -119,6 +119,8 @@ async def answer_from_state(
         from src.services.flow_builder.conversation.outcomes import render_recent
         from src.services.llm.manager import LLMManager
 
+        if not model:  # "no model" -> None, via the handler below
+            raise ValueError("no model to answer from state with")
         response = await LLMManager.completion(
             messages=build_messages(
                 question, material, render_recent(getattr(state, "messages", None))

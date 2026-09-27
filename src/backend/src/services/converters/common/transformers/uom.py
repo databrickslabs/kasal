@@ -4,9 +4,16 @@ Generates SQL/DAX code for unit of measure conversion based on KPI configuration
 Supports both fixed and dynamic UOM sources with predefined conversion presets.
 """
 
-from typing import List, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple, TypedDict
 
 from ...base.models import KPI
+
+
+class _UomPreset(TypedDict):
+    """One conversion preset: its base unit and each unit's factor to it."""
+
+    base_unit: str
+    conversions: Dict[str, float]
 
 
 class UnitOfMeasureConverter:
@@ -21,7 +28,7 @@ class UnitOfMeasureConverter:
     """
 
     # Standard UOM conversion presets with conversion factors to base units
-    CONVERSION_PRESETS = {
+    CONVERSION_PRESETS: ClassVar[Dict[str, _UomPreset]] = {
         "mass": {
             "base_unit": "KG",
             "conversions": {
@@ -81,7 +88,7 @@ class UnitOfMeasureConverter:
         },
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.uom_conversion_table = "UnitConversions"  # Default UOM conversion table
 
     def get_kbi_uom_recursive(
@@ -233,7 +240,7 @@ class UnitOfMeasureConverter:
         self,
         value_expression: str,
         preset: str,
-        source_unit: str,
+        source_unit: Optional[str],
         target_unit: str,
         uom_type: str = "fixed",
         uom_column: Optional[str] = None,
@@ -258,7 +265,8 @@ class UnitOfMeasureConverter:
         """
         if uom_type == "fixed":
             # Fixed UOM: simple multiplication with conversion factor
-            factor = self.get_conversion_factor(preset, source_unit, target_unit)
+            # A missing unit finds no factor, same as an unknown one
+            factor = self.get_conversion_factor(preset, source_unit or "", target_unit)
             if factor is None:
                 return value_expression  # No conversion available
 

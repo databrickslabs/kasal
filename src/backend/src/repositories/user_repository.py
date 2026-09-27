@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import ColumnElement, func, or_, select, update
 
 from src.core.base_repository import BaseRepository
 from src.models.user import User
@@ -40,7 +40,7 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 
     async def has_legacy_personal_collision(self, user_id: str, legacy: str) -> bool:
-        normalized = self.model.email
+        normalized: ColumnElement[str] = self.model.email.expression
         for separator in ("@", ".", "-", "+"):
             normalized = func.replace(normalized, separator, "_")
         result = await self.session.execute(

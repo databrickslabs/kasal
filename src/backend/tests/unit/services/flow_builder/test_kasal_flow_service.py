@@ -43,11 +43,11 @@ class TestKasalFlowServiceInitialization:
 
         assert service.session == mock_session
 
-    def test_initialization_without_session(self):
-        """Test service initialization without a database session."""
-        service = KasalFlowService()
-
-        assert service.session is None
+    def test_a_session_is_required(self):
+        """The no-session fallback built FlowRunnerService(None), whose
+        repositories cannot run a query; no caller ever used it."""
+        with pytest.raises(TypeError):
+            KasalFlowService()
 
 
 class TestGetFlowRunner:
@@ -63,18 +63,6 @@ class TestGetFlowRunner:
         ) as mock_flow_runner:
             service._get_flow_runner()
             mock_flow_runner.assert_called_once_with(mock_session)
-
-    @patch("src.services.flow_builder.kasal_flow_service.logger")
-    def test_get_flow_runner_without_session_logs_warning(self, mock_logger):
-        """Test getting flow runner without session logs warning."""
-        service = KasalFlowService()
-
-        with patch(
-            "src.services.flow_builder.kasal_flow_service.FlowRunnerService"
-        ) as mock_flow_runner:
-            service._get_flow_runner()
-            mock_flow_runner.assert_called_once_with(None)
-            mock_logger.warning.assert_called()
 
 
 class TestRunFlow:

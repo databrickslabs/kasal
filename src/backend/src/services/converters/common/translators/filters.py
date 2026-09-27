@@ -1,11 +1,11 @@
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ...base.models import KPI, KPIDefinition, QueryFilter
 
 
 class FilterResolver:
-    def __init__(self):
+    def __init__(self) -> None:
         self.variable_pattern = re.compile(r"\$var_(\w+)")
         self.query_filter_pattern = re.compile(r"\$query_filter")
 
@@ -39,7 +39,7 @@ class FilterResolver:
     def _resolve_variables(self, filter_text: str, variables: Dict[str, Any]) -> str:
         """Replace $var_xyz references with actual values."""
 
-        def replace_var(match):
+        def replace_var(match: re.Match[str]) -> str:
             var_name = match.group(1)
             if var_name in variables:
                 value = variables[var_name]
@@ -65,7 +65,7 @@ class FilterResolver:
         self,
         filter_text: str,
         query_filters: List[QueryFilter],
-        variables: Dict[str, Any] = None,
+        variables: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Replace $query_filter references with full expressions."""
         if "$query_filter" in filter_text:

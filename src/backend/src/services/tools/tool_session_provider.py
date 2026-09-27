@@ -37,6 +37,9 @@ if TYPE_CHECKING:
     from src.services.knowledge.databricks_service import DatabricksKnowledgeService
     from src.services.powerbi.conversions import ConverterService
     from src.services.powerbi.extractions import PowerBIExtractionService
+    from src.services.powerbi.semantic_model_cache import (
+        PowerBISemanticModelCacheService,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +87,9 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def cache_service():
+    async def cache_service() -> (
+        AsyncGenerator["PowerBISemanticModelCacheService", None]
+    ):
         """Yield a PowerBISemanticModelCacheService with scoped session.
 
         Usage::

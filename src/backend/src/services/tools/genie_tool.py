@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import List, Optional, Type
+from typing import Any, List, Optional, Type
 
 import aiohttp
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
@@ -20,7 +20,7 @@ class GenieInput(BaseModel):
 
     @field_validator("question", mode="before")
     @classmethod
-    def parse_question(cls, value):
+    def parse_question(cls, value: Any) -> Any:
         """
         Handle complex input formats for question, especially dictionaries
         that might come from LLM tools format.
@@ -63,7 +63,7 @@ class GenieTool(BaseTool):
     # Add alternative names for the tool
     aliases: List[str] = ["Genie", "DatabricksGenie", "DataSearch"]
     args_schema: Type[BaseModel] = GenieInput
-    _space_id: str = PrivateAttr(default=None)
+    _space_id: Optional[str] = PrivateAttr(default=None)
     _base_polling_delay: int = PrivateAttr(
         default=5
     )  # Base polling interval in seconds
@@ -78,10 +78,12 @@ class GenieTool(BaseTool):
     _backoff_after_seconds: int = PrivateAttr(
         default=120
     )  # Start backoff after 2 minutes
-    _current_conversation_id: str = PrivateAttr(default=None)
+    _current_conversation_id: Optional[str] = PrivateAttr(default=None)
     _tool_id: int = PrivateAttr(default=35)  # Default tool ID
-    _user_token: str = PrivateAttr(default=None)  # For OBO authentication
-    _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
+    _user_token: Optional[str] = PrivateAttr(default=None)  # For OBO authentication
+    _group_id: Optional[str] = PrivateAttr(
+        default=None
+    )  # For PAT authentication fallback
     _call_count: int = PrivateAttr(
         default=0
     )  # Tracks how many times _run has been invoked
@@ -95,11 +97,11 @@ class GenieTool(BaseTool):
         tool_config: Optional[dict] = None,
         tool_id: Optional[int] = None,
         token_required: bool = True,
-        user_token: str = None,
-        group_id: str = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
         result_as_answer: bool = False,
     ):
-        super().__init__(result_as_answer=result_as_answer)
+        super().__init__(result_as_answer=result_as_answer)  # type: ignore[call-arg]  # pydantic plugin: defaults live on the subclass
         if tool_config is None:
             tool_config = {}
 
@@ -184,7 +186,7 @@ class GenieTool(BaseTool):
             "Host and authentication will be obtained from databricks_auth module at runtime"
         )
 
-    def set_user_token(self, user_token: str):
+    def set_user_token(self, user_token: str) -> None:
         """Set user access token for OBO authentication."""
         self._user_token = user_token
         logger.info("User token set for centralized authentication")
@@ -227,7 +229,7 @@ class GenieTool(BaseTool):
 
         return f"{workspace_url}{path}"
 
-    async def _get_auth_headers(self) -> dict:
+    async def _get_auth_headers(self) -> Optional[dict]:
         """Get authentication headers using unified authentication."""
         try:
             from src.utils.databricks_auth import get_auth_context
@@ -499,7 +501,8 @@ class GenieTool(BaseTool):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 response.raise_for_status()
-                return await response.json()
+                body: dict = await response.json()
+                return body
 
     async def _get_query_result(self, conversation_id: str, message_id: str) -> dict:
         """Get the SQL query results for a message (without attachment_id - gets first/only result)."""
@@ -523,7 +526,8 @@ class GenieTool(BaseTool):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 response.raise_for_status()
-                return await response.json()
+                body: dict = await response.json()
+                return body
 
     def _run(self, question: str) -> str:
         """
@@ -532,7 +536,7 @@ class GenieTool(BaseTool):
         """
         import concurrent.futures
 
-        def run_async_in_new_loop():
+        def run_async_in_new_loop() -> str:
             """Helper to run async code in a new event loop in a separate thread."""
             return asyncio.run(self._run_async(question))
 
@@ -761,7 +765,7 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                     status_data = await self._get_message_status(
                         conversation_id, message_id
                     )
-                    status = status_data.get("status")
+                    status: Any = status_data.get("status")
 
                     # Log current status
                     status_msg = status_messages.get(status, f"Status: {status}")

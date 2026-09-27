@@ -13,7 +13,7 @@ endpoint cannot reach a tool without it.
 """
 
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional, Union
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
@@ -98,8 +98,8 @@ async def get_external_caller(
 CallerDep = Annotated[ExternalCaller, Depends(get_external_caller)]
 
 
-@router.get("/tools")
-async def list_tools(caller: CallerDep, session: SessionDep):
+@router.get("/tools", response_model=None)
+async def list_tools(caller: CallerDep, session: SessionDep) -> Dict[str, Any]:
     """The tools this caller may use.
 
     Group-scoped: the fixed control tools plus one per crew this caller's
@@ -113,13 +113,13 @@ async def list_tools(caller: CallerDep, session: SessionDep):
     }
 
 
-@router.post("/tools/call")
+@router.post("/tools/call", response_model=None)
 async def call_tool(
     request: ToolCallRequest,
     caller: CallerDep,
     session: SessionDep,
     accept: Annotated[Optional[str], Header()] = None,
-):
+) -> Union[Dict[str, Any], StreamingResponse]:
     """Invoke a tool as the resolved caller.
 
     ``stream: true`` asks for progress; the ``Accept`` header chooses the
@@ -172,7 +172,7 @@ async def call_tool(
         # A tool with no run to follow (list_crews is not a run at all). Emit
         # the single result as one frame so a streaming caller gets the same
         # shape whichever tool it called.
-        async def _single():
+        async def _single() -> AsyncIterator[Dict[str, Any]]:
             yield result
 
         frames = _single()

@@ -246,6 +246,32 @@ class TestTreeParsingDAXGenerator:
         # Should use 'Table' as default
         assert isinstance(result, DAXMeasure)
 
+    def test_calculated_measures_apply_kpi_filters(self, generator):
+        """KPI filters reach the DAX (regression: resolve_filters args swapped)"""
+        definition = KPIDefinition(
+            description="Test",
+            technical_name="test",
+            kpis=[
+                KPI(
+                    description="EU Sales",
+                    technical_name="eu_sales",
+                    formula="amount",
+                    aggregation_type="SUM",
+                    source_table="Sales",
+                    filter=["region = 'EU_ONLY'"],
+                )
+            ],
+        )
+
+        generator.dependency_resolver.register_measures(definition)
+        inline = generator._generate_calculated_measure(definition, definition.kpis[0])
+        refs = generator._generate_calculated_measure_with_references(
+            definition, definition.kpis[0]
+        )
+
+        assert "EU_ONLY" in inline.dax_formula
+        assert "EU_ONLY" in refs.dax_formula
+
     # ========== _generate_calculated_measure_with_references Tests ==========
 
     def test_generate_calculated_with_references(

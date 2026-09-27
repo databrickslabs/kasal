@@ -46,6 +46,7 @@ from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
+from src.services.prompt_optimization.host import PromptOptimizationHost
 from src.services.prompt_optimization.judge_registry import (
     JudgeRegistry,
     strip_guidelines,
@@ -118,7 +119,7 @@ def has_human_feedback(trace: Any, judge_name: str) -> bool:
     return False
 
 
-class JudgeAlignmentMixin:
+class JudgeAlignmentMixin(PromptOptimizationHost):
     """``align_judge`` for PromptOptimizationService — see the module docstring."""
 
     async def align_judge(

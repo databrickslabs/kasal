@@ -19,7 +19,7 @@ import asyncio
 import base64
 import logging
 import re
-from typing import Any, Dict, List, Type
+from typing import Any, Coroutine, Dict, List, Type
 
 import httpx
 from pydantic import BaseModel, Field, PrivateAttr
@@ -269,7 +269,7 @@ class PowerBIHierarchiesTool(BaseTool):
             ]
             selection_fields = ["auth_method"]  # User selection - must be deterministic
 
-            merged_kwargs = {}
+            merged_kwargs: Dict[str, Any] = {}
             for key in set(
                 list(self._default_config.keys()) + list(filtered_kwargs.keys())
             ):
@@ -382,7 +382,7 @@ class PowerBIHierarchiesTool(BaseTool):
             logger.error(f"PowerBIHierarchiesTool error: {str(e)}", exc_info=True)
             return f"Error: {str(e)}"
 
-    def _run_sync(self, coro):
+    def _run_sync(self, coro: Coroutine[Any, Any, str]) -> str:
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
 

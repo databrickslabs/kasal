@@ -24,7 +24,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Coroutine, Dict, List, Optional, Type, TypeVar, cast
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -40,19 +40,17 @@ from .metadata_reduction.question_preprocessor import QuestionPreprocessor
 from .metadata_reduction.value_normalizer import ValueNormalizer
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 logger.setLevel(logging.DEBUG)
 
 
-def _run_async_in_sync_context(coro):
-    """Run ``coro`` from this tool's synchronous code.
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from this tool's sync code via the shared ``async_bridge``.
 
-    Delegates to the shared bridge (``services/tools/async_bridge.py``), which
-    copies the caller's ContextVars (group, OBO token, execution id) into the
-    worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
-    coroutine's own exceptions through. The copy that lived here caught
-    ``RuntimeError`` around ``future.result()``, so a RuntimeError raised BY
-    the coroutine was mistaken for "no running loop" and the spent coroutine
-    was run a second time, and it waited forever.
+    The bridge copies the caller's ContextVars (group, OBO token, execution id)
+    into the worker thread, bounds the wait (``DEFAULT_TIMEOUT``) and lets the
+    coroutine's own exceptions through (the old local copy caught RuntimeError
+    around ``future.result()``, re-ran the spent coroutine and waited forever).
     """
     from src.services.tools.async_bridge import DEFAULT_TIMEOUT, run_async_with_context
 
@@ -485,12 +483,12 @@ class PowerBIMetadataReducerTool(BaseTool):
             )
             fuzzy_time = time.time() - t2
 
-            top_tables = [
+            top_ranked = [
                 (r["table"]["name"], r["score"], r["likely_relevant"])
                 for r in ranked_tables[:8]
             ]
             logger.info(
-                f"[MetadataReducer][FUZZY_SCORING] Done in {fuzzy_time:.2f}s. Top tables: {top_tables}"
+                f"[MetadataReducer][FUZZY_SCORING] Done in {fuzzy_time:.2f}s. Top tables: {top_ranked}"
             )
 
             t3 = time.time()
@@ -1060,7 +1058,7 @@ class PowerBIMetadataReducerTool(BaseTool):
                     f"Keys: {list(parsed.keys())}"
                 )
             else:
-                return parsed
+                return cast(Dict[str, Any], parsed)  # .get() above proves a dict
 
         # Priority 2: Cache fallback using dataset_id + workspace_id
         dataset_id = config.get("dataset_id")
@@ -1370,7 +1368,7 @@ Return ONLY valid JSON (no markdown, no explanation):
         """Extract JSON object from LLM response, handling markdown code blocks."""
         # Try direct parse
         try:
-            return json.loads(content.strip())
+            return cast(Optional[Dict], json.loads(content.strip()))
         except json.JSONDecodeError:
             pass
 
@@ -1378,7 +1376,7 @@ Return ONLY valid JSON (no markdown, no explanation):
         json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", content, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group(1).strip())
+                return cast(Optional[Dict], json.loads(json_match.group(1).strip()))
             except json.JSONDecodeError:
                 pass
 
@@ -1386,7 +1384,7 @@ Return ONLY valid JSON (no markdown, no explanation):
         brace_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content, re.DOTALL)
         if brace_match:
             try:
-                return json.loads(brace_match.group(0))
+                return cast(Optional[Dict], json.loads(brace_match.group(0)))
             except json.JSONDecodeError:
                 pass
 

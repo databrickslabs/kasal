@@ -364,3 +364,21 @@ class TestDatabricksAppsIdentityPrecedence:
         from_email.assert_awaited_once_with(
             email="proxy@example.com", access_token="proxy-token", group_id=None
         )
+
+
+def test_require_group_id_returns_the_primary_group():
+    from src.dependencies.providers import require_group_id
+    from src.utils.user_context import GroupContext
+
+    assert require_group_id(GroupContext(group_ids=["g1", "g2"])) == "g1"
+
+
+def test_require_group_id_refuses_a_context_without_a_group():
+    import pytest
+
+    from src.core.exceptions import ForbiddenError
+    from src.dependencies.providers import require_group_id
+    from src.utils.user_context import GroupContext
+
+    with pytest.raises(ForbiddenError):
+        require_group_id(GroupContext(group_ids=None))

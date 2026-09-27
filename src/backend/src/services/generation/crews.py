@@ -83,7 +83,7 @@ class CrewGenerationService(
         response: str,
         model: str,
         status: str = "success",
-        error_message: str = None,
+        error_message: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
     ) -> None:
         """
@@ -181,7 +181,7 @@ class CrewGenerationService(
         # it is also what records the trial once generation has produced ids.
         return system_message + tools_context
 
-    def _safe_get_attr(self, obj, attr, default=None):
+    def _safe_get_attr(self, obj: Any, attr: str, default: Any = None) -> Any:
         """
         Safely get an attribute from an object, whether it's a dictionary or an object.
 
@@ -363,7 +363,9 @@ class CrewGenerationService(
             ]
 
     @staticmethod
-    async def _has_persistent_memory_backend(session, group_context) -> bool:
+    async def _has_persistent_memory_backend(
+        session: Any, group_context: Optional[GroupContext]
+    ) -> bool:
         """Whether the group has a real (persistent) memory backend configured.
 
         Only Databricks Vector Search and Lakebase count — the default

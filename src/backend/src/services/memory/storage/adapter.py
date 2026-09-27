@@ -27,7 +27,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Optional
 
 from src.services.memory.engine import MemoryRecord, ScopeInfo
 from src.services.memory.engine.memory import StorageBackend
@@ -66,7 +66,7 @@ def embed_text(embedder: Any, text: str) -> list[float]:
     return list(vector)
 
 
-def build_litellm_embedder(provider_config: dict) -> Any:
+def build_litellm_embedder(provider_config: Optional[dict]) -> Any:
     """Turn an EmbedderConfigBuilder provider dict into an embedding callable.
 
     The DEFAULT memory backend historically relied on crewAI to materialize an
@@ -254,12 +254,14 @@ class EngineStorageAdapter(StorageBackend):
     def list_records(
         self, scope: str | None = None, limit: int = 100, offset: int = 0
     ) -> list[MemoryRecord]:
-        return self._backend.list_records(
+        result: list[MemoryRecord] = self._backend.list_records(
             scope_prefix=scope, limit=limit, offset=offset
         )
+        return result
 
     def list_scopes(self, path: str = "/") -> list[str]:
-        return self._backend.list_scopes(parent=path)
+        result: list[str] = self._backend.list_scopes(parent=path)
+        return result
 
     def list_categories(self, path: str = "/") -> list[str]:
         categories = self._backend.list_categories(scope_prefix=path)
@@ -268,13 +270,15 @@ class EngineStorageAdapter(StorageBackend):
         return list(categories or [])
 
     def get_scope_info(self, path: str) -> ScopeInfo:
-        return self._backend.get_scope_info(path)
+        result: ScopeInfo = self._backend.get_scope_info(path)
+        return result
 
     def get_record(self, record_id: str) -> MemoryRecord | None:
-        return self._backend.get_record(record_id)
+        result: MemoryRecord | None = self._backend.get_record(record_id)
+        return result
 
     def update(self, record_id: str, **changes: Any) -> MemoryRecord | None:
-        record = self._backend.get_record(record_id)
+        record: MemoryRecord | None = self._backend.get_record(record_id)
         if record is None:
             return None
         for key, value in changes.items():

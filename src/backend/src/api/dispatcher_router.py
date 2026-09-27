@@ -5,20 +5,24 @@ This module provides endpoints for analyzing user messages and determining
 whether they want to generate an agent, task, or crew, then calling the appropriate service.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.chat.dispatcher import DEFAULT_DISPATCHER_MODEL, DispatcherService
 from src.services.chat.intent_dispatch import detect_request_intent
 from src.services.tools.tool_service import ToolService
+from src.utils.user_context import GroupContext
 
 router = APIRouter(prefix="/dispatcher", tags=["dispatcher"])
 
 
-async def _fetch_available_tools(session, group_context) -> list:
+async def _fetch_available_tools(
+    session: AsyncSession, group_context: GroupContext
+) -> List[Dict[str, Any]]:
     """Fetch enabled tools for the workspace and return as list of dicts."""
     tool_service = ToolService(session)
     enabled_tools_resp = await tool_service.get_enabled_tools_for_group(group_context)

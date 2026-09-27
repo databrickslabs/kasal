@@ -16,7 +16,7 @@ product implying parity it does not have.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses.binding import Capability, HarnessName
@@ -191,7 +191,7 @@ class CrewAIBinding:
         )
 
         @contextmanager
-        def _run_scope():
+        def _run_scope() -> Iterator[None]:
             with ExitStack() as stack:
                 stack.enter_context(bridge_events())
                 stack.enter_context(enforce_turn_deadlines())

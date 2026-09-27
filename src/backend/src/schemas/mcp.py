@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _validate_mcp_server_url(value: Optional[str]) -> Optional[str]:
@@ -131,7 +131,7 @@ class MCPServerResponse(MCPServerBase):
         ..., description="Timestamp when the server was last updated"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MCPServerListResponse(BaseModel):
@@ -197,7 +197,7 @@ class MCPSettingsResponse(MCPSettingsBase):
         ..., description="Timestamp when the settings were last updated"
     )
 
-    model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ToolCallRequest(BaseModel):

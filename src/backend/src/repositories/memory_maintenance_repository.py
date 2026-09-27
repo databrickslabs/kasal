@@ -72,8 +72,8 @@ class MemoryMaintenanceRepository:
         never: List[str] = []
         overdue: List[tuple] = []
         for group_id in configured:
-            last = seen.get(group_id, "missing")
-            if last == "missing" or last is None:
+            last = seen.get(group_id)
+            if last is None:  # never run, or no watermark row yet
                 never.append(group_id)
             elif last <= cutoff:
                 overdue.append((last, group_id))

@@ -392,7 +392,7 @@ class TestGetExecutionOutputs:
             offset=5,
         )
         service.get_execution_outputs.assert_called_once_with(
-            "exec-1", 100, 5, group_ids=ctx.group_ids
+            "exec-1", 100, 5, tenant_ids=ctx.group_ids
         )
 
 
@@ -546,4 +546,36 @@ class TestDeleteExecutionByJobId:
         )
         service.delete_execution_by_job_id.assert_called_once_with(
             "job-9", group_ids=ctx.group_ids
+        )
+
+
+class TestCallsMatchServiceSignatures:
+    """The read routes must call the service with arguments it accepts.
+
+    Plain AsyncMocks accept any keyword, which is how ``group_ids=`` (the service
+    takes ``tenant_ids``) turned three routes into a TypeError/500 unnoticed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_read_routes_bind_to_real_signatures(self):
+        from unittest.mock import create_autospec
+
+        from src.services.execution.history import ExecutionHistoryService
+
+        service = create_autospec(ExecutionHistoryService, instance=True)
+        ctx = make_gc()
+
+        await get_execution_by_id(execution_id=1, group_context=ctx, service=service)
+        await get_execution_outputs(
+            execution_id="exec-1", group_context=ctx, service=service
+        )
+        await get_execution_debug_outputs(
+            execution_id="exec-1", group_context=ctx, service=service
+        )
+
+        service.get_execution_by_id.assert_awaited_once_with(
+            1, tenant_ids=ctx.group_ids
+        )
+        service.get_debug_outputs.assert_awaited_once_with(
+            "exec-1", tenant_ids=ctx.group_ids
         )

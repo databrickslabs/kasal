@@ -1,11 +1,15 @@
 """Establish user-requested stages before catalog contents can bias selection."""
 
 import json
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.llm.robust_json import robust_json_parser
 from src.services.llm.manager import LLMManager
+
+if TYPE_CHECKING:
+    from src.services.flow_builder.generation_context import FlowPlanningStep
 
 
 class FlowIntent(BaseModel):
@@ -69,9 +73,10 @@ async def analyze_flow_intent(
                     "content": "Return a JSON object with a nonempty stages array describing only the original request.",
                 }
             )
+    raise RuntimeError("unreachable: the last attempt returns or raises")
 
 
-def validate_stage_assignments(plan, intent: FlowIntent) -> None:
+def validate_stage_assignments(plan: "FlowPlanningStep", intent: FlowIntent) -> None:
     """A plausible explanation must never override the requested node structure."""
     expected = {f"stage_{index + 1}" for index in range(len(intent.stages))}
     if set(plan.stage_assignments) != expected:

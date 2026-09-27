@@ -47,7 +47,7 @@ class PromptImprovementService:
         status: str = "success",
         error_message: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
-    ):
+    ) -> None:
         """Log the LLM interaction; never let logging failures break the request."""
         try:
             await self.log_service.create_log(

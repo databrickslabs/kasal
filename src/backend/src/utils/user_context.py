@@ -32,11 +32,15 @@ import logging
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from fastapi import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.utils.request_identity import identity_from_headers
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,7 @@ _group_context: ContextVar[Optional["GroupContext"]] = ContextVar(
 # bounds staleness for anything that mutates outside this process.
 _MEMBERSHIP_CACHE_TTL = 30.0
 # email -> (expires_at_monotonic, (user, groups_with_roles))
-_membership_cache: Dict[str, tuple] = {}
+_membership_cache: Dict[str, Tuple[float, Tuple[Any, List[Any]]]] = {}
 
 
 def clear_membership_cache(email: Optional[str] = None) -> None:
@@ -193,9 +197,9 @@ class GroupContext:
     async def from_email(
         cls,
         email: str,
-        access_token: str = None,
-        user_id: str = None,
-        group_id: str = None,
+        access_token: Optional[str] = None,
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> "GroupContext":
         """Create GroupContext from user email with hybrid individual/group-based groups.
 
@@ -433,7 +437,7 @@ class GroupContext:
             from src.services.groups.users import UserService
             from src.utils.asyncio_utils import execute_db_operation_smart
 
-            async def _lookup(session):
+            async def _lookup(session: "AsyncSession") -> List[str]:
                 # Get or create the user
                 user_service = UserService(session)
                 user = await user_service.get_or_create_user_by_email(email)
@@ -491,7 +495,7 @@ class GroupContext:
             from src.services.groups.users import UserService
             from src.utils.asyncio_utils import execute_db_operation_smart
 
-            async def _lookup(session):
+            async def _lookup(session: "AsyncSession") -> Tuple[Any, List[Any]]:
                 # Get or create the user
                 logger.debug(
                     f"[USER CONTEXT] Creating UserService and calling get_or_create_user_by_email for {email}"
@@ -744,7 +748,7 @@ def extract_user_context_from_request(request: Request) -> Dict[str, Any]:
     Returns:
         Dictionary containing user context information
     """
-    context = {}
+    context: Dict[str, Any] = {}
 
     try:
         # Extract user token
@@ -795,10 +799,10 @@ class UserContextMiddleware:
     (e.g. Databricks Apps).  See: https://github.com/encode/starlette/issues/1012
     """
 
-    def __init__(self, app):
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -863,7 +867,9 @@ class UserContextMiddleware:
 
 
 # Keep the old function for backward compatibility (used in tests)
-async def user_context_middleware(request: Request, call_next):
+async def user_context_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Any]]
+) -> Any:
     """Legacy BaseHTTPMiddleware-style dispatch function (kept for tests)."""
     try:
         try:

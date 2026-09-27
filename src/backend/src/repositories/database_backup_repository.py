@@ -6,7 +6,7 @@ import json
 import os
 import sqlite3
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -428,7 +428,7 @@ class DatabaseBackupRepository:
 
                     # Convert and insert rows
                     for row in rows:
-                        row_values = []
+                        row_values: List[Any] = []
                         for i, value in enumerate(row):
                             if value is None:
                                 row_values.append(None)
@@ -829,7 +829,7 @@ class DatabaseBackupRepository:
                         current_statement = []
 
                 # Execute statements
-                restored_tables = set()
+                restored_names: Set[str] = set()
                 total_rows = 0
 
                 for stmt in statements:
@@ -844,7 +844,7 @@ class DatabaseBackupRepository:
                                     .split("(")[0]
                                     .strip()
                                 )
-                                restored_tables.add(table_match.lower())
+                                restored_names.add(table_match.lower())
                                 total_rows += 1
 
                             await db_session.execute(text(stmt))
@@ -858,7 +858,7 @@ class DatabaseBackupRepository:
                     "success": True,
                     "restored_from": f"{catalog}.{schema}.{volume_name}/{backup_filename}",
                     "database_type": "postgres",
-                    "restored_tables": list(restored_tables),
+                    "restored_tables": list(restored_names),
                     "total_rows": total_rows,
                 }
 
@@ -873,7 +873,7 @@ class DatabaseBackupRepository:
                     }
 
                 # Clear existing data and restore
-                restored_tables = []
+                restored_tables: List[str] = []
                 for table_name, rows in backup_data["tables"].items():
                     # Validate table name from backup JSON (untrusted source)
                     self._validate_identifier(table_name, "table name")

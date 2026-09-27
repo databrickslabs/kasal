@@ -12,10 +12,12 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from ._mixin_deps import ModelFetchDeps
+
 logger = logging.getLogger(__name__)
 
 
-class PowerBIModelFetchMixin:
+class PowerBIModelFetchMixin(ModelFetchDeps):
     async def _get_access_token(self, config: Dict[str, Any]) -> str:
         """
         Get OAuth access token using centralized AadService.
@@ -92,11 +94,12 @@ class PowerBIModelFetchMixin:
                                 result_url, headers=headers
                             )
                             result_response.raise_for_status()
-                            return (
+                            parts: List[Dict[str, Any]] = (
                                 result_response.json()
                                 .get("definition", {})
                                 .get("parts", [])
                             )
+                            return parts
                         elif poll_data.get("status") == "Failed":
                             logger.error(
                                 f"[TMDL] Fabric long-running operation failed: {poll_data}"
@@ -107,7 +110,8 @@ class PowerBIModelFetchMixin:
                     return None
 
                 elif response.status_code == 200:
-                    return response.json().get("definition", {}).get("parts", [])
+                    parts = response.json().get("definition", {}).get("parts", [])
+                    return parts
 
                 else:
                     # 400/403/404 typically means the workspace is not Fabric-enabled
@@ -620,7 +624,11 @@ class PowerBIModelFetchMixin:
         config: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Extract measures, relationships, and tables from the semantic model."""
-        model_context = {"measures": [], "relationships": [], "tables": []}
+        model_context: Dict[str, List[Any]] = {
+            "measures": [],
+            "relationships": [],
+            "tables": [],
+        }
 
         # Get Fabric token for TMDL (may need different scope)
         fabric_token = access_token

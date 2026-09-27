@@ -8,11 +8,12 @@ from the database, and managing the background log writer task.
 import asyncio
 from datetime import datetime
 from queue import Empty
-from typing import List, Optional
+from typing import List, Optional, Union, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
+from src.models.execution_logs import ExecutionLog
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
 from src.schemas.execution_logs import ExecutionLogResponse
 from src.services.execution.logs.queue import get_job_output_queue
@@ -46,8 +47,8 @@ class ExecutionLogsService:
         self,
         execution_id: str,
         content: str,
-        timestamp: datetime = None,
-        group_context: GroupContext = None,
+        timestamp: Optional[datetime] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> bool:
         """
         Create a new execution log entry via the repository layer.
@@ -90,10 +91,10 @@ class ExecutionLogsService:
         self,
         execution_id: str,
         content: str,
-        timestamp=None,
-        group_id: str = None,
-        group_email: str = None,
-    ):
+        timestamp: Union[datetime, str, None] = None,
+        group_id: Optional[str] = None,
+        group_email: Optional[str] = None,
+    ) -> ExecutionLog:
         """Write one log line with explicit group STAMPS rather than a context.
 
         :meth:`create_execution_log` takes a ``GroupContext``; the crew and flow
@@ -250,7 +251,7 @@ class ExecutionLogsService:
 # --- Logs Writer Functions ---
 
 
-async def logs_writer_loop(shutdown_event: asyncio.Event):
+async def logs_writer_loop(shutdown_event: asyncio.Event) -> None:
     """
     Background task that reads from the job output queue and writes logs to the database.
 
@@ -461,9 +462,9 @@ async def stop_logs_writer(timeout: float = 5.0) -> bool:
         logger.warning(
             "[stop_logs_writer] Logs writer task did not stop in time, cancelling."
         )
-        _logs_writer_task.cancel()
+        cast(asyncio.Task, _logs_writer_task).cancel()
         try:
-            await _logs_writer_task
+            await cast(asyncio.Task, _logs_writer_task)
         except asyncio.CancelledError:
             pass
         _logs_writer_task = None

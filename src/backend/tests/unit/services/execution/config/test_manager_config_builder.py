@@ -174,25 +174,26 @@ class TestManagerConfigBuilder:
         }
         manager_builder.config["crew"]["manager_agent"] = manager_agent_config
         mock_agent = MagicMock()
-        mock_llm = MagicMock()
 
-        with (
-            patch(
-                "src.services.execution.config.manager_config_builder.create_agent",
-                return_value=mock_agent,
-            ),
-            patch(
-                "src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm",
-                return_value=mock_llm,
-            ),
-        ):
-
+        # Autospec: the call must bind to the real create_agent signature (it
+        # used to pass llm=/user_token= and omit agent_key: always a TypeError).
+        with patch(
+            "src.services.execution.config.manager_config_builder.create_agent",
+            autospec=True,
+            return_value=mock_agent,
+        ) as create:
             result = await manager_builder.configure_manager(
                 crew_kwargs, Process.hierarchical
             )
 
             assert "manager_agent" in result
             assert result["manager_agent"] == mock_agent
+            spec = create.await_args.kwargs["agent_config"]
+            requested = manager_builder.config.get("model") or manager_builder.config[
+                "crew"
+            ].get("model")
+            if requested:
+                assert spec["llm"] == requested
             assert (
                 "manager_llm" not in result
             )  # Should not have manager_llm when agent is provided

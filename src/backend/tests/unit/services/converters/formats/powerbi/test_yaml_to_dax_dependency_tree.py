@@ -317,24 +317,15 @@ class TestProcessDefinitionAndDependencyTree:
                 generator._build_kbi_dependency_tree(calculated_kpi, [])
 
     def test_extract_formula_kbis_with_reference(self, generator):
-        """Lines 405-408: _extract_formula_kbis with mock resolver."""
-        from unittest.mock import MagicMock, patch
-
+        """_extract_formula_kbis resolves references with the real resolver
+        (regression: it called a non-existent resolve_kbi)."""
         base_kpi = make_kpi(technical_name="base_metric", formula="amount")
         calculated_kpi = make_kpi(
             technical_name="calc_metric",
             formula="{base_metric} * 2",
         )
-        # Patch the formula_parser to return a known reference
-        with patch.object(
-            generator._formula_parser,
-            "extract_kbi_references",
-            return_value=["base_metric"],
-        ):
-            # Patch the dependency_resolver to have a resolve_kbi method
-            mock_resolver = MagicMock()
-            mock_resolver.resolve_kbi.return_value = base_kpi
-            generator._dependency_resolver = mock_resolver
-            result = generator._extract_formula_kbis(calculated_kpi)
-            assert isinstance(result, list)
-            assert len(result) == 1
+        generator._dependency_resolver.build_kbi_lookup([base_kpi, calculated_kpi])
+
+        result = generator._extract_formula_kbis(calculated_kpi)
+
+        assert result == [base_kpi]

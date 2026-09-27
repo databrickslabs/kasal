@@ -54,7 +54,7 @@ except Exception:
 try:
     import builtins as _kasal_builtins_mod
 
-    def _kasal_noinput_global(prompt=None):
+    def _kasal_noinput_global(prompt: object = None) -> str:
         try:
             if prompt:
                 print(f"[SUBPROCESS] Suppressed interactive prompt at import: {prompt}")
@@ -71,7 +71,7 @@ try:
     import click as _kasal_click
 
     _kasal_click.confirm = lambda *a, **k: False
-    _kasal_click.prompt = lambda *a, **k: ""
+    _kasal_click.prompt = lambda *a, **k: ""  # type: ignore[assignment]  # monkeypatch
 except Exception:
     pass
 
@@ -82,7 +82,7 @@ import os
 import signal
 from datetime import datetime
 from multiprocessing.process import BaseProcess
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from src.services.execution.process_tree import (
     terminate_owned_processes,
@@ -228,7 +228,7 @@ def run_crew_in_process(
     original_stdout, original_stderr, captured_output = suppress_stdout_stderr()
 
     # Set up signal handlers for graceful shutdown with child process cleanup
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: Any) -> None:
         # Kill all child processes spawned by this subprocess
         try:
             import psutil
@@ -281,7 +281,7 @@ def run_crew_in_process(
         # Belt-and-suspenders: suppress any input() prompts in this subprocess
         import builtins as _kasal_builtins
 
-        def _kasal_noinput(prompt=None):
+        def _kasal_noinput(prompt: Any = None) -> str:
             try:
                 if prompt:
                     print(f"[SUBPROCESS] Suppressed interactive prompt: {prompt}")
@@ -458,7 +458,7 @@ def run_crew_in_process(
 
         # Rebuild the crew from config using async context
         # We need to run the async crew preparation in the subprocess
-        async def prepare_and_run():
+        async def prepare_and_run() -> Any:
             # Import within async context
             import os  # Import os first
 
@@ -875,7 +875,7 @@ def run_crew_in_process(
                     )
 
                 # Get the prepared crew
-                crew = crew_preparation.crew
+                crew: Any = crew_preparation.crew
 
                 # Log the full configuration with pretty formatting (only if crew_config is valid)
                 if isinstance(crew_config, dict):
@@ -1115,7 +1115,7 @@ def run_crew_in_process(
 
                     # os is already imported at the top of prepare_and_run()
                     # Get log directory from environment or determine dynamically
-                    log_dir = os.environ.get("LOG_DIR")
+                    log_dir: str | os.PathLike | None = os.environ.get("LOG_DIR")
                     if not log_dir:
                         # Determine log directory relative to backend root
                         import pathlib
@@ -1392,7 +1392,7 @@ def run_crew_in_process(
                         f"({len((resume_checkpoint.get('completed') or []))} completed task(s))"
                     )
 
-                async def kickoff_fn():
+                async def kickoff_fn() -> Any:
                     if inputs:
                         return await crew.kickoff_async(
                             inputs=inputs, from_checkpoint=resume_checkpoint
@@ -1720,7 +1720,7 @@ def run_crew_in_process(
                 )
                 max_wait = 5  # Shorter wait on error
                 wait_interval = 0.1
-                waited = 0
+                waited: float = 0
 
                 while trace_queue.qsize() > 0 and waited < max_wait:
                     time.sleep(wait_interval)
@@ -1866,7 +1866,7 @@ class ProcessCrewExecutor:
         group_context: Any,
         result_queue: mp.Queue,
         log_queue: mp.Queue,
-    ):
+    ) -> None:
         """
         Wrapper to run crew in subprocess and put result in queue.
 
@@ -2216,7 +2216,7 @@ class ProcessCrewExecutor:
             self._close_queue(log_queue)
 
     @staticmethod
-    def _close_queue(queue) -> None:
+    def _close_queue(queue: Any) -> None:
         """Safely close a multiprocessing.Queue and release its semaphores.
 
         A spawn-context ``mp.Queue`` is backed by three SemLock primitives
@@ -2238,8 +2238,8 @@ class ProcessCrewExecutor:
             logger.debug(f"[ProcessCrewExecutor] Error closing queue: {e}")
 
     async def _process_log_queue(
-        self, log_queue, execution_id: str, group_context=None
-    ):
+        self, log_queue: Any, execution_id: str, group_context: Any = None
+    ) -> None:
         """
         Read crew.log file and write logs for the execution to the database.
         This is a better approach than using queues since it captures ALL logs.
@@ -2346,7 +2346,7 @@ class ProcessCrewExecutor:
         """
         return self._metrics.copy()
 
-    def shutdown(self, wait: bool = True):
+    def shutdown(self, wait: bool = True) -> None:
         """
         Shutdown the process executor and terminate all running processes.
 
@@ -2373,11 +2373,11 @@ class ProcessCrewExecutor:
             f"ProcessCrewExecutor shutdown complete. Final metrics: {self.get_metrics()}"
         )
 
-    def __enter__(self):
+    def __enter__(self) -> "ProcessCrewExecutor":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         """Context manager exit."""
         self.shutdown(wait=True)
         return False

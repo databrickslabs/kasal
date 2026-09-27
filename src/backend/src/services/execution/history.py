@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
@@ -57,8 +58,11 @@ class ExecutionHistoryService:
     """Service for accessing and managing execution history."""
 
     def __init__(
-        self, session, execution_history_repository=None, execution_logs_repository=None
-    ):
+        self,
+        session: AsyncSession,
+        execution_history_repository: Optional[ExecutionHistoryRepository] = None,
+        execution_logs_repository: Optional[ExecutionLogsRepository] = None,
+    ) -> None:
         """
         Initialize the service with session and optionally a repository.
 
@@ -119,7 +123,7 @@ class ExecutionHistoryService:
         self,
         limit: int = 50,
         offset: int = 0,
-        group_ids: List[str] = None,
+        group_ids: Optional[List[str]] = None,
         include_payload: bool = False,
     ) -> ExecutionHistoryList:
         """
@@ -200,7 +204,7 @@ class ExecutionHistoryService:
             raise
 
     async def get_execution_by_id(
-        self, execution_id: int, tenant_ids: List[str] = None
+        self, execution_id: int, tenant_ids: Optional[List[str]] = None
     ) -> Optional[ExecutionHistoryItem]:
         """
         Get a specific execution by ID with group-based tenant filtering.
@@ -215,7 +219,7 @@ class ExecutionHistoryService:
         try:
             # Use the repository to get the data
             run = await self.history_repo.get_execution_by_id(
-                execution_id, tenant_ids=tenant_ids
+                execution_id, group_ids=tenant_ids
             )
 
             if not run:
@@ -267,7 +271,7 @@ class ExecutionHistoryService:
             raise
 
     async def check_execution_exists(
-        self, execution_id: int, group_ids: List[str] = None
+        self, execution_id: int, group_ids: Optional[List[str]] = None
     ) -> bool:
         """
         Check if an execution exists within the caller's groups.
@@ -301,7 +305,7 @@ class ExecutionHistoryService:
         execution_id: str,
         limit: int = 1000,
         offset: int = 0,
-        tenant_ids: List[str] = None,
+        tenant_ids: Optional[List[str]] = None,
     ) -> ExecutionOutputList:
         """
         Get outputs for an execution with tenant filtering.
@@ -319,7 +323,7 @@ class ExecutionHistoryService:
             # First verify the execution belongs to the user's tenant
             if tenant_ids:
                 execution = await self.history_repo.get_execution_by_job_id(
-                    execution_id, tenant_ids=tenant_ids
+                    execution_id, group_ids=tenant_ids
                 )
                 if not execution:
                     # Execution doesn't exist or doesn't belong to user's tenants
@@ -338,7 +342,7 @@ class ExecutionHistoryService:
 
             # Get total count
             total_count = await self.logs_repo.count_by_execution_id(
-                self.session, execution_id=execution_id
+                execution_id=execution_id
             )
 
             # Convert to schema objects
@@ -372,8 +376,8 @@ class ExecutionHistoryService:
             raise
 
     async def get_debug_outputs(
-        self, execution_id: str, tenant_ids: List[str] = None
-    ) -> ExecutionOutputDebugList:
+        self, execution_id: str, tenant_ids: Optional[List[str]] = None
+    ) -> Optional[ExecutionOutputDebugList]:
         """
         Get debug information about outputs for an execution with tenant filtering.
 
@@ -387,7 +391,7 @@ class ExecutionHistoryService:
         try:
             # Check if the run exists and belongs to user's tenant
             run = await self.history_repo.get_execution_by_job_id(
-                execution_id, tenant_ids=tenant_ids
+                execution_id, group_ids=tenant_ids
             )
 
             if not run:
@@ -430,7 +434,7 @@ class ExecutionHistoryService:
             raise
 
     async def delete_all_executions(
-        self, group_ids: List[str] = None
+        self, group_ids: Optional[List[str]] = None
     ) -> DeleteResponse:
         """
         Delete all executions and their associated data for specified groups.
@@ -556,8 +560,8 @@ class ExecutionHistoryService:
             raise
 
     async def delete_execution(
-        self, execution_id: int, group_ids: List[str] = None
-    ) -> DeleteResponse:
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Optional[DeleteResponse]:
         """
         Delete a specific execution and its associated data.
 
@@ -602,7 +606,8 @@ class ExecutionHistoryService:
             output_count = await logs_service.delete_by_execution_id(job_id)
 
             # Delete execution using repository (after dependent records are gone)
-            result = await self.history_repo.delete_execution(execution_id)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution(execution_id) or {}
 
             # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution.kasal_service import (
@@ -638,8 +643,8 @@ class ExecutionHistoryService:
             raise
 
     async def delete_execution_by_job_id(
-        self, job_id: str, group_ids: List[str] = None
-    ) -> DeleteResponse:
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[DeleteResponse]:
         """
         Delete a specific execution and its associated data by job_id (UUID).
 
@@ -684,7 +689,8 @@ class ExecutionHistoryService:
             output_count = await logs_service.delete_by_execution_id(job_id)
 
             # Delete execution using repository (after dependent records are gone)
-            result = await self.history_repo.delete_execution_by_job_id(job_id)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution_by_job_id(job_id) or {}
 
             # Clear in-memory execution from ExecutionService and KasalExecutionService
             from src.services.execution.kasal_service import (
@@ -788,7 +794,7 @@ class ExecutionHistoryService:
 
     async def get_checkpoints_for_flow(
         self,
-        flow_id,
+        flow_id: Any,
         group_id: Optional[str] = None,
         status_filter: Optional[str] = "active",
     ) -> List:
@@ -951,7 +957,7 @@ class ExecutionHistoryService:
         return out
 
     async def update_result(
-        self, job_id: str, result_data: dict, group_ids: list[str] = None
+        self, job_id: str, result_data: dict, group_ids: Optional[list[str]] = None
     ) -> dict:
         """
         Update the result field for an execution.
@@ -991,7 +997,9 @@ class ExecutionHistoryService:
             logger.error(f"Error updating result for job_id {job_id}: {str(e)}")
             raise
 
-    async def get_execution_groups_with_counts(self) -> list[tuple[str, int]]:
+    async def get_execution_groups_with_counts(
+        self,
+    ) -> list[tuple[Optional[str], int]]:
         """
         Get all unique group_ids from execution_history with their execution counts.
 

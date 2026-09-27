@@ -7,9 +7,12 @@ engine service instances.
 
 import asyncio
 import logging
-from typing import Any, Optional, Type
+from typing import TYPE_CHECKING, Optional, Type
 
 from src.services.execution.base import BaseEngineService
+
+if TYPE_CHECKING:
+    from src.services.execution.engine_service import KasalEngineService
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +24,9 @@ class EngineFactory:
     async def get_engine(
         engine_type: str,
         initialize: bool = True,
-        llm_provider: str = None,
-        model: str = None,
-    ) -> Optional[Any]:
+        llm_provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Optional["KasalEngineService"]:
         """
         Get an engine instance.
 

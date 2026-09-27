@@ -1,16 +1,21 @@
 """A traceable builder conversation turn, independent of executing its output."""
 
+from typing import Any, Dict
+
 from src.services.execution import generation_run
 from src.services.mlflow.builder_trace import builder_mlflow_trace
 from src.services.mlflow.mlflow_parent_setup import set_root_span_outputs
 from src.services.otel_tracing.generation_scope import generation_trace
+from src.utils.user_context import GroupContext
 
 
 class BuilderGenerationService:
-    def __init__(self, session):
+    # ``request`` is a FlowGenerationRequest when ``mode == "flow"``, else a
+    # DispatcherRequest; the mode string is what selects, so it stays ``Any``.
+    def __init__(self, session: Any) -> None:
         self.session = session
 
-    async def open(self, mode, request, group_context):
+    async def open(self, mode: str, request: Any, group_context: GroupContext) -> str:
         prompt = request.prompt if mode == "flow" else request.message
         job_id = await generation_run.open_run(
             self.session,
@@ -27,7 +32,9 @@ class BuilderGenerationService:
             raise RuntimeError("Could not start the generation run")
         return job_id
 
-    async def generate(self, mode, request, group_context, job_id):
+    async def generate(
+        self, mode: str, request: Any, group_context: GroupContext, job_id: str
+    ) -> Dict[str, Any]:
         async with (
             builder_mlflow_trace(
                 self.session, mode, request, group_context, job_id

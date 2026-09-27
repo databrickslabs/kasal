@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ConnectionService:
     """Service for generating connections between agents and tasks."""
 
-    def __init__(self, session=None):
+    def __init__(self, session: Any = None) -> None:
         """Initialize the service.
 
         Args:
@@ -37,7 +37,7 @@ class ConnectionService:
         response: str,
         model: str,
         status: str = "success",
-        error_message: str = None,
+        error_message: Optional[str] = None,
     ) -> None:
         """
         Log LLM interaction using standard Python logging.
@@ -202,9 +202,11 @@ class ConnectionService:
                     self.session
                 ).get_template_content("generate_connections")
             else:
-                # Fallback for backward compatibility when no session is provided
-                system_message = await TemplateService.get_template_content(
-                    "generate_connections"
+                # No session: the static helper opens its own. This called the
+                # INSTANCE method on the class, so "generate_connections" landed
+                # in ``self`` and ``name`` was missing — a TypeError every time.
+                system_message = await TemplateService.get_effective_template_content(
+                    "generate_connections", None
                 )
 
             if not system_message:

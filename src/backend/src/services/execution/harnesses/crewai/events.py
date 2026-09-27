@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import importlib
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Tuple
 
 from src.core import events as kasal_events
 from src.core.events import event_bus
@@ -220,7 +220,7 @@ def bridge_events() -> Iterator[None]:
 
     registered: List[Tuple[type, Any]] = []
 
-    def _make(kasal_cls: type):
+    def _make(kasal_cls: type) -> Callable[[Any, Any], None]:
         def _handler(source: Any, event: Any) -> None:
             try:
                 event_bus.emit(source, _translate(kasal_cls, event))

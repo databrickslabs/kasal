@@ -47,7 +47,7 @@ class ScanResult:
     has_findings: bool = False
     context: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.has_findings = self.injection.detected or self.secrets.detected
 
 
