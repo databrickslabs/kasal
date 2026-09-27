@@ -415,7 +415,9 @@ export class RunService {
       flow_id: flow_id,
       crew_id: typeof executionItem.crew_id === 'string' ? executionItem.crew_id : undefined,
       inputs,
-      result: executionItem.result as Record<string, OutputDataType> | undefined,
+      // A list row serializes the absent payload as `result: null`; keep it
+      // undefined so withPayload and overlays treat it as "not loaded".
+      result: (executionItem.result ?? undefined) as Record<string, OutputDataType> | undefined,
       result_preview: executionItem.result_preview as string | undefined,
       model: (executionItem.model as string | undefined) ?? (inputs?.model as string | undefined),
       harness: executionItem.harness as string | undefined,
@@ -458,7 +460,7 @@ export class RunService {
    * as is, and so is the list row when the detail cannot be fetched.
    */
   public async withPayload(run: Run): Promise<Run> {
-    if (!run.job_id || run.result !== undefined || run.inputs !== undefined) {
+    if (!run.job_id || run.result != null || run.inputs != null) {
       return run;
     }
     const detail = await this.getRunByJobId(run.job_id);
