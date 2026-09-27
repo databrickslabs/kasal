@@ -28,7 +28,7 @@
   "src/backend/src/services/databricks/lakebase/service.py": 2090,
   "src/backend/src/services/execution/history.py": 1001,
   "src/backend/src/services/execution/kasal_service.py": 1039,
-  "src/backend/src/services/execution/service.py": 2350,
+  "src/backend/src/services/execution/service.py": 2346,
   "src/backend/src/services/execution/status.py": 838,
   "src/backend/src/services/export/databricks_app_exporter.py": 909,
   "src/backend/src/services/export/templates/databricks_app/agent_server/agent.py": 935,

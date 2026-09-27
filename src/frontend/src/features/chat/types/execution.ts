@@ -31,10 +31,19 @@ export interface ExecutionConfig {
   flow_config?: Record<string, unknown>;
 }
 
+/** What Auto resolved to, on a response to a request that asked for `auto`. */
+export interface ModelSelection {
+  requested: 'auto';
+  model: string | null;
+  /** `selected` by the decision model, or the workspace default on `fallback`. */
+  status: 'selected' | 'fallback';
+}
+
 export interface Execution {
   id: string;
   job_id: string;
   execution_id?: string;
+  model_selection?: ModelSelection | null;
   status: ExecutionStatus;
   result?: string;
   error?: string;

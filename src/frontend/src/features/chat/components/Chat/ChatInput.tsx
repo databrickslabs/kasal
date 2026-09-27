@@ -11,6 +11,7 @@ import ComposerMenu from './ComposerMenu';
 import TrifectaNotice from './TrifectaNotice';
 import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useExecutionStore } from '../../store/executionStore';
+import { concreteModel } from '../../utils/autoModel';
 
 // The crew tool that searches uploaded knowledge. Passed to the dispatcher so a
 // generated crew can read files attached in chat.
@@ -473,7 +474,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (!canImprove) return;
     setIsImproving(true);
     try {
-      const improved = await improveChatPrompt(value.trim(), selectedModel);
+      const improved = await improveChatPrompt(value.trim(), concreteModel(selectedModel));
       // Only apply if the user hasn't kept typing while the rewrite ran.
       if (improved && inputRef.current) {
         setValue(improved);

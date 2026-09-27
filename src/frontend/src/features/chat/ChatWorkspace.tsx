@@ -146,6 +146,8 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
   useEffect(() => {
     const onGroupChange = () => {
       void refreshLibrary();
+      // Enabled models and Auto's availability are per workspace too.
+      void useAppStore.getState().loadModels();
     };
     window.addEventListener('group-changed', onGroupChange);
     return () => window.removeEventListener('group-changed', onGroupChange);

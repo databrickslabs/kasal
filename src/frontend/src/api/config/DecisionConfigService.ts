@@ -3,6 +3,8 @@ import { apiClient } from '../../shared/api/client';
 export interface DecisionConfig {
   enabled: boolean;
   api_key_configured: boolean;
+  /** URL set, workspace opted in and keyed: the chat selector offers Auto. */
+  available?: boolean;
 }
 
 export class DecisionConfigService {

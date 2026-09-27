@@ -26,7 +26,7 @@
   "src/backend/src/services/execution/harnesses/crewai/llm.py::build_kasal_backed_llm": 205,
   "src/backend/src/services/execution/kasal_service.py::KasalExecutionService.prepare_and_run_crew": 455,
   "src/backend/src/services/execution/kasal_service.py::KasalExecutionService.run_flow_execution": 204,
-  "src/backend/src/services/execution/service.py::ExecutionService.create_execution": 503,
+  "src/backend/src/services/execution/service.py::ExecutionService.create_execution": 499,
   "src/backend/src/services/execution/service.py::ExecutionService.run_crew_execution": 216,
   "src/backend/src/services/execution/service.py::ExecutionService.stop_execution": 257,
   "src/backend/src/services/execution/status.py::ExecutionStatusService.update_status": 364,

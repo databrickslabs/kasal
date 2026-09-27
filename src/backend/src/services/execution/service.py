@@ -1353,11 +1353,12 @@ class ExecutionService:
                 execution_id, getattr(group_context, "primary_group_id", None)
             )
 
-            # Generate a descriptive run name
-            # Determine model safely
-            model = (
-                config.model if config.model else "default-model"
-            )  # Provide a default if model can be None
+            # Freeze the config first ("auto" becomes one enabled model, saved
+            # agent settings are snapshot): history and worker see only this.
+            from src.services.execution.config import run_freeze
+
+            auto = await run_freeze.freeze(config, self.session, group_context)
+            model = config.model or "default-model"  # the run-name model
             # Ensure agents_yaml and tasks_yaml are dictionaries
             agents_yaml = (
                 config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
@@ -1378,13 +1379,6 @@ class ExecutionService:
                 logger.info(
                     f"[ExecutionService.create_execution] Extracted {len(agents_yaml)} agents and {len(tasks_yaml)} tasks from flow config for name generation"
                 )
-
-            # Snapshot agent settings before history persistence and worker launch.
-            from src.services.execution.config.agent_settings_snapshot import (
-                snapshot_agent_settings,
-            )
-
-            await snapshot_agent_settings(config, self.session, group_context)
 
             # Ensure GroupContext is available in UserContext for authentication
             # This is critical for both OBO (user_token) and PAT (group_id) authentication
@@ -1662,6 +1656,7 @@ class ExecutionService:
             logger.info(
                 f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING"
             )
+            run_freeze.record(auto, execution_id, group_context)
 
             # Add to in-memory storage with RUNNING status. Carry the group so a
             # status lookup that falls back to this entry (see get_execution_status)
@@ -1796,6 +1791,7 @@ class ExecutionService:
                 execution_id=execution_id,
                 status=ExecutionStatus.RUNNING.value,  # Return RUNNING status for immediate visibility
                 run_name=run_name,
+                model_selection=auto.to_response() if auto else None,
             ).model_dump()  # Return as dict
 
         except KasalError:

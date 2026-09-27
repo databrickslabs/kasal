@@ -407,5 +407,16 @@
       "title": "Delete Memory Permanently",
       "message": "Are you sure you want to permanently delete the memory folder for \"{{name}}\"? This action cannot be undone."
     }
+  },
+  "chat": {
+    "autoModel": {
+      "label": "Auto",
+      "description": "The decision model picks a model for each message",
+      "picked": "Auto → {{model}}",
+      "fellBack": "Auto → {{model}} (default)",
+      "defaultModel": "the default model",
+      "pickedDetail": "The decision model chose this model for the message.",
+      "fellBackDetail": "The decision model did not choose, so the workspace default was used."
+    }
   }
 }

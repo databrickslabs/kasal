@@ -168,3 +168,27 @@ async def test_repository_reads_exact_workspace_without_global_fallback():
     session.get.return_value = None
     assert await DecisionConfigRepository(session).get("workspace-b") is None
     session.get.assert_awaited_once_with(DecisionConfig, "workspace-b")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url, enabled, keyed, available",
+    [
+        ("https://example.com", True, True, True),
+        ("", True, True, False),
+        ("https://example.com", False, True, False),
+        ("https://example.com", True, False, False),
+    ],
+)
+async def test_available_needs_url_opt_in_and_key(
+    service, monkeypatch, url, enabled, keyed, available
+):
+    """``available`` is what the chat selector reads to offer Auto."""
+    monkeypatch.setitem(engine_settings._snapshot, engine_settings.JEV_API_BASE, url)
+    service.repository.get.return_value = SimpleNamespace(enabled=enabled)
+    service.api_keys.find_by_name.return_value = (
+        SimpleNamespace(encrypted_value="ciphertext") if keyed else None
+    )
+    config = await service.get()
+    assert config.available is available
+    assert "ciphertext" not in config.model_dump_json()

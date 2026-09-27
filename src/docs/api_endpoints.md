@@ -281,6 +281,23 @@ from `GET /crews/{crew_id}`) — or use the UI, which does exactly this.
 To run a **flow**, POST the same endpoint with `execution_type: "flow"` and
 either `flow_id` or an inline `nodes` / `edges` definition.
 
+### Letting the decision model choose the model
+
+`"model": "auto"` (on `POST /executions`, in an agent's `llm`, or on
+`POST /dispatcher/dispatch`) asks the workspace's decision model to pick one of
+its enabled models. The server replaces it before the run starts; if the
+decision model is off or unsure, the workspace default model is used. The
+response then carries `model_selection`:
+
+```json
+{"requested": "auto", "model": "databricks-claude-opus-5-5", "status": "selected"}
+```
+
+`status` is `selected` or `fallback`; `model_selection` is `null` (or absent on
+dispatch) when the request named a model. `GET /decision-config` returns
+`available: true` when Auto can be used in the workspace. See
+[Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto).
+
 ---
 
 ## Execution history

@@ -10,6 +10,8 @@ import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 import { PublicationService } from '../../../api/workflow/PublicationService';
 import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
 import { getDefaultModel } from '../../../config/defaultModel';
+import { DecisionConfigService } from '../../../api/config/DecisionConfigService';
+import { MODEL_EXPLICIT_STORAGE_KEY, pickChatModel } from '../utils/autoModel';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -71,6 +73,8 @@ interface AppState {
   catalogLoaded: boolean;
   catalogError: string | null;
   selectedModel: string;
+  /** The decision model can pick the model (Auto) for this workspace. */
+  autoModelAvailable: boolean;
   sidebarOpen: boolean;
   settingsOpen: boolean;
   // The rail's Catalog card expansion — in the store (not component state) so
@@ -121,6 +125,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return '';
     }
   })(),
+  autoModelAvailable: false,
   sidebarOpen: false,
   settingsOpen: false,
   catalogOpen: false,
@@ -136,17 +141,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   loadModels: async () => {
     try {
-      const m = await fetchEnabledModels();
-      const state = get();
-      set({ models: m });
-      if (m.length > 0 && !state.selectedModel) {
-        // Prefer the server-owned default; use the first enabled model only when
-        // that endpoint is not available in this workspace.
-        const preferred = getDefaultModel();
-        const key = m.some((x) => x.key === preferred)
-          ? preferred
-          : m[0].key;
-        set({ selectedModel: key });
+      // Auto is offered only when the decision model is available here; a
+      // failed availability read means "not available" (the old selector).
+      const [m, autoAvailable] = await Promise.all([
+        fetchEnabledModels(),
+        DecisionConfigService.getConfig()
+          .then((c) => !!c.available)
+          .catch(() => false),
+      ]);
+      let stored = '';
+      let explicit: boolean | null = null;
+      try {
+        stored = localStorage.getItem(MODEL_STORAGE_KEY) || '';
+        const flag = localStorage.getItem(MODEL_EXPLICIT_STORAGE_KEY);
+        explicit = flag === null ? null : flag === '1';
+      } catch { /* */ }
+      const key = pickChatModel({
+        stored,
+        explicit,
+        models: m,
+        autoAvailable,
+        serverDefault: getDefaultModel(),
+      });
+      set({ models: m, autoModelAvailable: autoAvailable, selectedModel: key });
+      // Persist only a default the old selector would also have stored; Auto
+      // and a user's own pick are already what is stored.
+      if (key && !stored && !autoAvailable) {
         try {
           localStorage.setItem(MODEL_STORAGE_KEY, key);
         } catch { /* */ }
@@ -229,6 +249,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ selectedModel: model });
     try {
       localStorage.setItem(MODEL_STORAGE_KEY, model);
+      // The user chose (a model or Auto): keep it across loads.
+      localStorage.setItem(MODEL_EXPLICIT_STORAGE_KEY, '1');
     } catch { /* */ }
   },
 

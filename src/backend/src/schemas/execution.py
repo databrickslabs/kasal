@@ -326,6 +326,14 @@ class ExecutionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ModelSelectionInfo(BaseModel):
+    """Auto's pick: ``selected`` by the decision model, or the ``fallback`` default."""
+
+    requested: str = "auto"
+    model: Optional[str] = None
+    status: str
+
+
 class ExecutionCreateResponse(BaseModel):
     """Simple response for execution creation."""
 
@@ -335,6 +343,10 @@ class ExecutionCreateResponse(BaseModel):
     status: str = Field(..., description="Initial status of the execution")
     run_name: Optional[str] = Field(
         None, description="Descriptive name for the execution"
+    )
+    model_selection: Optional[ModelSelectionInfo] = Field(
+        None,
+        description="What Auto resolved to, when the run asked for model 'auto'",
     )
 
 
