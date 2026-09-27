@@ -647,8 +647,14 @@ class ModelConfigService:
 
         Shows:
         1. Default models (group_id = null) - visible to everyone
-        2. Group-specific models - visible only to members of that group
+        2. The CURRENT workspace's models (``primary_group_id``: the selected
+           workspace, or where a no-selection request creates its data)
         3. If a model has both default and group versions, the group version takes precedence
+
+        The query is scoped to exactly the group the cache is keyed by. It used
+        to merge every id in ``group_ids`` under the primary id's key, so a
+        no-selection (union) request cached workspace B's models and disables
+        as workspace A's list, and Auto picked from it (audit V5-2).
 
         Args:
             group_context: Group context with group IDs
@@ -656,12 +662,9 @@ class ModelConfigService:
         Returns:
             List of model configurations for the group
         """
-        # Determine cache key based on group context
-        cache_group_id = (
-            (group_context.primary_group_id or "__default__")
-            if group_context and group_context.group_ids
-            else "__default__"
-        )
+        # The cache key IS the query scope: one workspace, or the defaults.
+        scope_group_id = group_context.primary_group_id if group_context else None
+        cache_group_id = scope_group_id or "__default__"
 
         # =========================================================================
         # TTL CACHE: Check cache first
@@ -682,7 +685,7 @@ class ModelConfigService:
         all_models = await self.repository.find_all()
 
         # If no group context, show only default models
-        if not group_context or not group_context.group_ids:
+        if not scope_group_id:
             default_models = [model for model in all_models if model.group_id is None]
             # Cache and return
             await model_config_cache.set(cache_group_id, "models", default_models)
@@ -696,9 +699,9 @@ class ModelConfigService:
             if model.group_id is None:
                 models_by_key[model.key] = model
 
-        # Then, override with group-specific models if they exist
+        # Then, override with the workspace's own models if they exist
         for model in all_models:
-            if model.group_id in group_context.group_ids:
+            if model.group_id == scope_group_id:
                 # This will override the default if it exists
                 models_by_key[model.key] = model
 

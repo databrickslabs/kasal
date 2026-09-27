@@ -160,6 +160,45 @@ async def test_route_enforces_workspace_admin():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["editor", "operator", None])
+async def test_recommend_is_403_for_non_admins(role):
+    from src.api.decision_config_router import recommend_settings
+    from src.schemas.decision_config import DecisionRecommendationRequest
+    from src.utils.user_context import GroupContext
+
+    member = GroupContext(group_ids=["workspace-a"], user_role=role)
+    with patch("src.services.decisions.recommendations.recommend") as recommend:
+        with pytest.raises(ForbiddenError) as denied:
+            await recommend_settings(
+                DecisionRecommendationRequest(prompt="p"), Mock(), member
+            )
+        recommend.assert_not_called()
+    assert denied.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_recommend_runs_for_a_workspace_admin():
+    from src.api.decision_config_router import recommend_settings
+    from src.schemas.decision_config import (
+        DecisionRecommendationRequest,
+        DecisionRecommendationResponse,
+    )
+    from src.utils.user_context import GroupContext
+
+    admin = GroupContext(group_ids=["workspace-a"], user_role="admin")
+    advice = DecisionRecommendationResponse(model="m", effort="low")
+    with patch(
+        "src.services.decisions.recommendations.recommend",
+        AsyncMock(return_value=advice),
+    ) as recommend:
+        result = await recommend_settings(
+            DecisionRecommendationRequest(prompt="p"), Mock(), admin
+        )
+    assert result is advice
+    recommend.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_repository_reads_exact_workspace_without_global_fallback():
     from src.models.decision_config import DecisionConfig
     from src.repositories.decision_config_repository import DecisionConfigRepository
