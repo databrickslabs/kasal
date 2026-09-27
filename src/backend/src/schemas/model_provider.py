@@ -20,6 +20,7 @@ class ModelProvider(str, Enum):
     GEMINI = "gemini"
     VLLM = "vllm"
     KIMI = "kimi"
+    OPENROUTER = "openrouter"
     CUSTOM = "custom"
 
 

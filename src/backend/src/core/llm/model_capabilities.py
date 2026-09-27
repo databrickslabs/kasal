@@ -478,6 +478,25 @@ _UNPROMPTED = ModelCapability(
 )
 
 
+# ── Routers ─────────────────────────────────────────────────────────────────
+
+#: TypeSafe's Jev Router on OpenRouter: it picks the model AND the reasoning
+#: effort per request, so there is nothing to steer and no sampling knob to set.
+#: OpenRouter lists it with `supported_parameters: []`.
+_JEV_ROUTER = ModelCapability(
+    style=ReasoningStyle.UNPROMPTED,
+    returns_text=False,
+    text_requires="depends on the model the router picks",
+    refuses=SAMPLING_PARAMS,
+    evidence="documented",
+    source="https://openrouter.ai/api/v1/models (typesafe/jev-router)",
+    note=(
+        "A router, not a model: the effort and sampling settings belong to the "
+        "model it chooses. OpenRouter ignores parameters the chosen model does "
+        "not support, but Kasal sends none of these."
+    ),
+)
+
 #: Model-name fragment -> capability. Ordered MOST SPECIFIC FIRST and matched in
 #: order, because the names nest: "gpt-5-1" contains "gpt-5", and matching the
 #: shorter one first would hand gpt-5-1 an enum that rejects its values.
@@ -544,6 +563,7 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("inkling", _INKLING),
     # Legacy unprompted model.
     ("kimi-k2-7", _UNPROMPTED),
+    ("jev-router", _JEV_ROUTER),
 )
 
 

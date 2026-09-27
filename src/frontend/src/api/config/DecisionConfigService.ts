@@ -5,6 +5,9 @@ export interface DecisionConfig {
   api_key_configured: boolean;
   /** URL set, workspace opted in and keyed: the chat selector offers Auto. */
   available?: boolean;
+  /** The deployment's connection, and the workspace key it needs. */
+  connection?: 'jev' | 'openrouter';
+  api_key_name?: string;
 }
 
 export class DecisionConfigService {

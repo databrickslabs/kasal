@@ -260,6 +260,13 @@ async def select_for_workspace(
     group context: the list the user can pick from by hand. There is no
     cross-workspace fallback: no workspace means no candidates and no decision.
     """
+    # OpenRouter connection: Auto is the Jev Router model (see jev_router.py).
+    from src.services.decisions.jev_router import select_router
+
+    routed = await select_router(session, group_context)
+    if routed is not None:
+        current_selection.set(routed)
+        return routed
     group_id = group_context.primary_group_id if group_context is not None else None
     models: list[ModelConfig] = []
     if group_id and group_context is not None:

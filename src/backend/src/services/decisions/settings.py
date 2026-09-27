@@ -1,6 +1,8 @@
-"""Workspace opt-in to the decision model (provider: Jev).
+"""Workspace opt-in to the decision model (Jev, directly or through OpenRouter).
 
-Credentials belong to the existing API key service.
+Credentials belong to the existing API key service. Which key a workspace
+needs follows the deployment's connection (``connection.current()``):
+``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter.
 """
 
 import logging
@@ -12,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import BadRequestError, ConflictError, KasalError
 from src.repositories.decision_config_repository import DecisionConfigRepository
 from src.schemas.decision_config import DecisionConfigResponse, DecisionConfigUpdate
-from src.services.decisions import provider
+from src.services.decisions.connection import Connection
+from src.services.decisions.connection import current as current_connection
 from src.services.settings.api_keys import ApiKeysService
 from src.utils.encryption_utils import EncryptionUtils
 
@@ -47,31 +50,41 @@ class DecisionSettingsService:
         self.api_keys = ApiKeysService(session, group_id=group_id)
 
     async def get(self) -> DecisionConfigResponse:
+        connection = current_connection()
         row = await self.repository.get(self.group_id)
-        key = await self.api_keys.find_by_name(JEV_KEY_NAME)
         return self._response(
-            bool(row and row.enabled), bool(key and key.encrypted_value)
+            connection, bool(row and row.enabled), await self._keyed(connection)
         )
 
+    async def _keyed(self, connection: Connection) -> bool:
+        """Whether this workspace has the key the deployment's connection spends."""
+        key = await self.api_keys.find_by_name(connection.key_name)
+        return bool(key and key.encrypted_value)
+
     @staticmethod
-    def _response(enabled: bool, keyed: bool) -> DecisionConfigResponse:
+    def _response(
+        connection: Connection, enabled: bool, keyed: bool
+    ) -> DecisionConfigResponse:
         return DecisionConfigResponse(
             enabled=enabled,
             api_key_configured=keyed,
-            available=enabled and keyed and provider.is_configured(),
+            available=enabled and keyed and connection.configured,
+            connection=connection.kind,
+            api_key_name=connection.key_name,
         )
 
     async def save(self, update: DecisionConfigUpdate) -> DecisionConfigResponse:
-        key = await self.api_keys.find_by_name(JEV_KEY_NAME)
-        if update.enabled and not provider.is_configured():
+        connection = current_connection()
+        keyed = await self._keyed(connection)
+        if update.enabled and not connection.configured:
             raise BadRequestError(
                 "No decision model is available on this deployment: a system admin "
                 "must set the Jev API URL in System administration → Models"
             )
-        if update.enabled and not (key and key.encrypted_value):
+        if update.enabled and not keyed:
             raise BadRequestError(
-                f"Configure {JEV_KEY_NAME} in Configuration > API Keys before enabling "
-                "the decision model"
+                f"Configure {connection.key_name} in Configuration > API Keys before "
+                "enabling the decision model"
             )
         try:
             await self.repository.save(self.group_id, update.enabled)
@@ -94,10 +107,13 @@ class DecisionSettingsService:
                 "Could not save decision model settings: the database rejected the "
                 "change. Check the server log."
             ) from exc
-        return self._response(update.enabled, bool(key and key.encrypted_value))
+        return self._response(connection, update.enabled, keyed)
 
     async def credential(self) -> str | None:
-        """The decrypted key when this workspace opted in, read on OUR session.
+        """The decrypted JEV_API_KEY when this workspace opted in, read on OUR session.
+
+        Only the native Jev connection spends it: under OpenRouter the runtime
+        abstains before asking (``provider.is_configured()`` is False).
 
         None when the workspace has not opted in or has no key. A key that
         exists but will not decrypt raises ``DecisionCredentialUnreadable``

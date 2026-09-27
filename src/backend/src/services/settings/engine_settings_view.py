@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 from src.core.exceptions import BadRequestError
+from src.services.decisions import connection as decision_connection
 from src.services.execution.config.budget_profile import (
     budget_field_names,
     default_profiles,
@@ -31,8 +32,13 @@ def _effective(stored: Dict[str, str]) -> Dict[str, Any]:
         }
         for mode, fields in defaults.items()
     }
+    # The effective decision connection: an old jev_api_base on OpenRouter
+    # reads as the OpenRouter connection with that URL (see decisions.connection).
+    connection = decision_connection.resolve(stored)
     return {
-        "jev_api_base": (stored.get(es.JEV_API_BASE) or "").strip() or None,
+        "jev_api_base": connection.jev_api_base,
+        "decision_connection": connection.kind,
+        "openrouter_api_base": connection.openrouter_api_base,
         "agent_max_execution_time": _as_int(
             stored.get(es.AGENT_MAX_EXECUTION_TIME),
             es.DEFAULT_AGENT_MAX_EXECUTION_TIME,
@@ -77,14 +83,19 @@ async def update_view(
 ) -> Dict[str, Any]:
     """Validate and save the fields the caller sent (``exclude_unset`` dict)."""
     values: Dict[str, str] = {}
-    if "jev_api_base" in sent:
-        url = (sent["jev_api_base"] or "").strip().rstrip("/")
-        parsed = urlparse(url)
-        if url and (parsed.scheme not in ("http", "https") or not parsed.netloc):
+    for field, key, label in (
+        ("jev_api_base", es.JEV_API_BASE, "Jev API"),
+        ("openrouter_api_base", es.OPENROUTER_API_BASE, "OpenRouter"),
+    ):
+        if field in sent:
+            values[key] = _http_url(sent[field], label)
+    if "decision_connection" in sent:
+        kind = (sent["decision_connection"] or "").strip().lower()
+        if kind and kind not in decision_connection.CONNECTIONS:
             raise BadRequestError(
-                "The Jev API URL must be an http:// or https:// address"
+                "The decision model connection must be 'jev' or 'openrouter'"
             )
-        values[es.JEV_API_BASE] = url
+        values[es.DECISION_CONNECTION] = kind
     if "agent_max_execution_time" in sent:
         value = sent["agent_max_execution_time"]
         values[es.AGENT_MAX_EXECUTION_TIME] = "" if value is None else str(value)
@@ -102,6 +113,15 @@ async def update_view(
                 values[es.budget_key(mode, field)] = "" if value is None else str(value)
     values.update(_advanced_values(sent.get("advanced") or {}))
     return _effective(await service.save_settings(values))
+
+
+def _http_url(raw: Optional[str], label: str) -> str:
+    """``raw`` without a trailing slash; empty clears it. http(s) only."""
+    url = (raw or "").strip().rstrip("/")
+    parsed = urlparse(url)
+    if url and (parsed.scheme not in ("http", "https") or not parsed.netloc):
+        raise BadRequestError(f"The {label} URL must be an http:// or https:// address")
+    return url
 
 
 def _advanced_values(sent: Dict[str, Any]) -> Dict[str, str]:

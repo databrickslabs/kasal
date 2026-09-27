@@ -5,7 +5,7 @@ import { DecisionConfigService } from '../../../../api/config/DecisionConfigServ
 import { notifyModelsChanged } from '../../../../store/models';
 import { useGroupStore } from '../../../../store/groups';
 import DecisionModelRecommendation from './DecisionModelRecommendation';
-import { DECISION_MODEL_PROVIDER } from './decisionModelProvider';
+import { decisionConnection, type DecisionModelConnection } from './decisionModelProvider';
 
 const K = 'configuration.models.decisionModel';
 
@@ -27,8 +27,9 @@ function openApiKeys() {
 
 /**
  * Workspace settings → Models: this workspace's decision-model opt-in. The key
- * is the workspace's provider key from API Keys; the provider endpoint is the
- * deployment's (System administration → Models). Only workspace admins may
+ * is the one the deployment's connection needs (JEV_API_KEY for the Jev API,
+ * OPENROUTER_API_KEY for OpenRouter) from API Keys; the connection and its URL
+ * are the deployment's (System administration → Models). Only workspace admins may
  * change it — the API enforces that, and the Models section is shown to
  * workspace admins only.
  *
@@ -42,7 +43,8 @@ const DecisionModelConfiguration: React.FC = () => {
 
 const DecisionModelForm: React.FC = () => {
   const { t } = useTranslation();
-  const provider = DECISION_MODEL_PROVIDER;
+  // The deployment's connection decides which key this workspace needs.
+  const [connection, setConnection] = useState<DecisionModelConnection>(decisionConnection(null));
   const [enabled, setEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -56,6 +58,7 @@ const DecisionModelForm: React.FC = () => {
       if (!active) return;
       setEnabled(config.enabled);
       setConfigured(config.api_key_configured);
+      setConnection(decisionConnection(config.connection));
       setLoading(false);
     }).catch((err: unknown) => {
       if (!active) return;
@@ -74,6 +77,7 @@ const DecisionModelForm: React.FC = () => {
       const config = await DecisionConfigService.saveConfig(value);
       setEnabled(config.enabled);
       setConfigured(config.api_key_configured);
+      setConnection(decisionConnection(config.connection));
       setSaved(true);
       // Auto appears in (or leaves) open chats and other tabs without a reload.
       void notifyModelsChanged();
@@ -98,7 +102,7 @@ const DecisionModelForm: React.FC = () => {
           {t(`${K}.title`, { defaultValue: 'Decision model' })}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {t(`${K}.provider`, { defaultValue: 'Provider: {{name}}', name: provider.name })}
+          {t(`${K}.connection`, { defaultValue: 'Connection: {{name}}', name: connection.name })}
         </Typography>
         <Typography variant="body2" color="text.secondary">
           {t(`${K}.disclosure`, {
@@ -115,8 +119,8 @@ const DecisionModelForm: React.FC = () => {
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Typography variant="body2" color="text.secondary">
             {configured
-              ? t(`${K}.keyConfigured`, { defaultValue: 'Uses {{key}} from Configuration → API Keys.', key: provider.apiKeyName })
-              : t(`${K}.keyMissing`, { defaultValue: 'Add {{key}} in Configuration → API Keys, then reopen this panel.', key: provider.apiKeyName })}
+              ? t(`${K}.keyConfigured`, { defaultValue: 'Uses {{key}} from Configuration → API Keys.', key: connection.apiKeyName })
+              : t(`${K}.keyMissing`, { defaultValue: 'Add {{key}} in Configuration → API Keys, then reopen this panel.', key: connection.apiKeyName })}
           </Typography>
           {!configured && !loading && (
             <Button size="small" onClick={openApiKeys}>
@@ -131,7 +135,8 @@ const DecisionModelForm: React.FC = () => {
             {t(`${K}.saving`, { defaultValue: 'Saving decision model settings…' })}
           </Typography>
         )}
-        {enabled && !loading && !saving && <DecisionModelRecommendation />}
+        {/* Recommendations need the native decision API; OpenRouter has none. */}
+        {enabled && !loading && !saving && connection.id === 'jev' && <DecisionModelRecommendation />}
       </Stack>
     </Paper>
   );

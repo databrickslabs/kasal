@@ -23,8 +23,8 @@ describe('ModelEndpointFields', () => {
     expect(onChange).toHaveBeenCalledWith({ tool_choice: 'required' });
   });
 
-  it('offers an optional override for hosted providers', () => {
-    renderFields('anthropic');
+  it.each(['anthropic', 'openrouter'])('offers an optional override for hosted %s models', (provider) => {
+    renderFields(provider);
     expect(screen.getByLabelText('Endpoint override')).toBeInTheDocument();
   });
 
