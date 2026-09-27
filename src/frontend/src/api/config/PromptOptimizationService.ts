@@ -84,6 +84,21 @@ export interface JudgeAlignment {
   guidelines: string[];
 }
 
+/** An MLflow built-in judge a crew optimization run can select. */
+export interface BuiltinJudge {
+  /** The mlflow.genai.scorers class name — what the request carries. */
+  id: string;
+  label: string;
+  description: string;
+  /** gate: a "no" zeroes the judge score; graded: the verdict joins the mean. */
+  role: 'gate' | 'graded';
+  weight: number;
+  /** Needs an expected answer per example — not selectable yet. */
+  needs_labels: boolean;
+  /** Whether the server's MLflow provides this judge. */
+  available: boolean;
+}
+
 export interface CrewEval {
   trace_id: string;
   timestamp_ms?: number | null;
@@ -99,6 +114,8 @@ export interface CrewOptimizationRequest {
   guidance?: string;
   max_metric_calls?: number;
   execution_timeout_seconds?: number;
+  /** MLflow built-in judges (catalog ids) to grade with, on demand. */
+  builtin_judges?: string[];
 }
 
 export interface StartOptimizationRequest {
@@ -188,6 +205,14 @@ export class PromptOptimizationService {
       '/prompt-optimization/judges/registry',
     );
     return response.data;
+  }
+
+  /** MLflow built-in judges (Safety, RelevanceToQuery, ...) runs can select. */
+  static async listBuiltinJudges(): Promise<BuiltinJudge[]> {
+    const response = await apiClient.get<{ judges: BuiltinJudge[] }>(
+      '/prompt-optimization/judges/builtin',
+    );
+    return response.data?.judges || [];
   }
 
   /** LLM judges in the MLflow prompt registry. */

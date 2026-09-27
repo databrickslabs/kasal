@@ -450,3 +450,25 @@ class TestRoleGate:
             CrewOptimizationRequest(crew_id="c1"), self._ctx("editor"), MagicMock()
         )
         assert response.run_id == "r1"
+
+
+class TestBuiltinJudges:
+    @pytest.mark.asyncio
+    async def test_lists_the_catalog_with_availability(self):
+        from src.api.prompt_optimization_router import list_builtin_judges
+
+        response = await list_builtin_judges(_group())
+        judges = {j.id: j for j in response.judges}
+        assert judges["Safety"].role == "gate"
+        assert judges["Safety"].available is True
+        assert judges["Correctness"].needs_labels is True
+        assert not judges["Completeness"].needs_labels
+
+    def test_route_is_registered(self):
+        paths = [(sorted(r.methods), r.path) for r in router.routes]
+        assert (["GET"], "/prompt-optimization/judges/builtin") in paths
+
+    def test_the_request_carries_the_selection(self):
+        request = CrewOptimizationRequest(crew_id="c1", builtin_judges=["Safety"])
+        assert request.builtin_judges == ["Safety"]
+        assert CrewOptimizationRequest(crew_id="c1").builtin_judges == []

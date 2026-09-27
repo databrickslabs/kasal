@@ -841,57 +841,16 @@ class MLflowEvaluationRunner:
                         }
                     ]
 
-                # Build GenAI scorers
-                scorers = []
-                try:
-                    genai_ns = getattr(mlflow, "genai", None)
-                    m_scorers = getattr(genai_ns, "scorers", None) if genai_ns else None
+                # Built-in judges from the shared catalog (the one Optimize uses).
+                from src.services.prompt_optimization.builtin_judges.catalog import (
+                    evaluation_scorers,
+                )
 
-                    def _add_scorer(name: str) -> None:
-                        if m_scorers is None:
-                            return
-                        cls = getattr(m_scorers, name, None)
-                        if cls is None:
-                            logger.warning(
-                                f"[MLflowEvaluationRunner] Scorer '{name}' not found - skipping"
-                            )
-                            return
-                        try:
-                            model_uri = _to_scorer_model_uri(self.judge_model_route)
-                            kw = {"model": model_uri} if model_uri else {}
-                            scorers.append(cls(**kw))
-                            logger.info(
-                                f"[MLflowEvaluationRunner] Added scorer: {name}"
-                            )
-                        except Exception as _e:
-                            logger.warning(
-                                f"[MLflowEvaluationRunner] Failed to init scorer {name}: {_e}"
-                            )
-
-                    # Core evaluation scorers
-                    _add_scorer("RelevanceToQuery")
-                    _add_scorer("Safety")
-
-                    # Correctness scorer (requires reference answers)
-                    if has_ref_col:
-                        _add_scorer("Correctness")
-
-                    # Retrieval-specific scorers (require contexts)
-                    if has_ctx_col:
-                        _add_scorer("Groundedness")
-                        _add_scorer("Relevance")
-                        if has_ref_col:
-                            _add_scorer("ContextSufficiency")
-
-                    try:
-                        scorer_names = [type(s).__name__ for s in scorers]
-                        logger.info(
-                            f"[MLflowEvaluationRunner] Using scorers: {scorer_names}"
-                        )
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                scorers = evaluation_scorers(
+                    _to_scorer_model_uri(self.judge_model_route),
+                    has_reference=has_ref_col,
+                    has_context=has_ctx_col,
+                )
 
                 # Ensure we attach to the same run/environment safely
                 try:
@@ -937,7 +896,6 @@ class MLflowEvaluationRunner:
                         # Pre-evaluation debug
                         try:
                             list(eval_data[0].keys()) if eval_data else []
-                            scorer_names = [type(s).__name__ for s in (scorers or [])]
                             from_types = (
                                 "trace"
                                 if (eval_data and "trace" in eval_data[0])

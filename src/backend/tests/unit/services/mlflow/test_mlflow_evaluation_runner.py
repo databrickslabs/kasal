@@ -941,7 +941,7 @@ class TestCompleteEvaluation:
             mock_mlflow.genai.evaluate.assert_called_once()
 
     def test_complete_evaluation_adds_extra_scorers_with_contexts(self):
-        """Adds Groundedness and Relevance scorers when contexts are present."""
+        """Contexts present: no retrieval judge is built (they need trace spans)."""
         import sys
 
         mock_mlflow = MagicMock()
@@ -995,8 +995,8 @@ class TestCompleteEvaluation:
 
             runner.complete_evaluation("run-abc", _make_auth_ctx())
 
-            # Groundedness should be instantiated when contexts detected
-            mock_scorers.Groundedness.assert_called()
+            # Neither the stale name nor the real class: rows carry no spans
+            assert not mock_scorers.RetrievalGroundedness.called, "retrieval judge"
 
     def test_complete_evaluation_adds_correctness_scorer_with_references(self):
         """Adds Correctness scorer when references are present."""
@@ -1425,7 +1425,7 @@ class TestCompleteEvaluationPaths:
         assert mock_mlflow.log_metric.call_count >= 2
 
     def test_complete_evaluation_with_contexts(self):
-        """complete_evaluation adds Groundedness/Relevance scorers when has_ctx_col=True."""
+        """has_ctx_col=True: the retrieval judges are skipped, core ones kept."""
         import sys
 
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
@@ -1452,8 +1452,8 @@ class TestCompleteEvaluationPaths:
 
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
 
-        # Groundedness and Relevance scorers should have been tried
-        mock_mlflow.genai.scorers.Groundedness.assert_called()
+        assert not mock_mlflow.genai.scorers.Groundedness.called  # stale name gone
+        mock_mlflow.genai.scorers.RelevanceToQuery.assert_called()
 
     def test_complete_evaluation_with_references(self):
         """complete_evaluation adds Correctness scorer when has_ref_col=True."""
