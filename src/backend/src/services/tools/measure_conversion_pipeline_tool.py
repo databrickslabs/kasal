@@ -13,6 +13,7 @@ from src.services.converters.base.connectors import ConnectorType
 # Import converters
 from src.services.converters.pipeline import ConversionPipeline, OutboundFormat
 from src.services.tools.base import BaseTool
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +299,7 @@ class MeasureConversionPipelineTool(BaseTool):
         self._pipeline = ConversionPipeline()
 
         logger.info(
-            f"[MeasureConversionPipelineTool.__init__] Instance {instance_id} initialized with config: {default_config}"
+            f"[MeasureConversionPipelineTool.__init__] Instance {instance_id} initialized with config: {mask_sensitive_fields(default_config)}"
         )
 
     def _resolve_parameter(self, value: Any, execution_inputs: Dict[str, Any]) -> Any:

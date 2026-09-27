@@ -6,6 +6,7 @@ from src.core.base_service import BaseService
 from src.models.task import Task
 from src.repositories.task_repository import TaskRepository
 from src.schemas.task import TaskCreate, TaskUpdate
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
 
@@ -134,7 +135,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         logger = logging.getLogger(__name__)
         if hasattr(obj_in, "tool_configs") and obj_in.tool_configs is not None:
             logger.info(
-                f"TaskService: Updating task {id} with tool_configs: {obj_in.tool_configs}"
+                f"TaskService: Updating task {id} with tool_configs: {mask_sensitive_fields(obj_in.tool_configs)}"
             )
 
         # Exclude unset fields (None) from update
@@ -226,7 +227,7 @@ class TaskService(BaseService[Task, TaskCreate]):
         logger = logging.getLogger(__name__)
         if hasattr(obj_in, "tool_configs") and obj_in.tool_configs is not None:
             logger.info(
-                f"TaskService: Updating task {id} with tool_configs: {obj_in.tool_configs}"
+                f"TaskService: Updating task {id} with tool_configs: {mask_sensitive_fields(obj_in.tool_configs)}"
             )
 
         # Exclude unset fields (None) from update

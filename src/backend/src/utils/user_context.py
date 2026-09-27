@@ -121,7 +121,7 @@ class GroupContext:
         user_id: Optional user identifier from authentication system
         access_token: Databricks or OAuth access token for API calls
         user_role: User's role in the primary group (admin, editor, operator)
-        highest_role: User's highest role across ALL groups (for authorization)
+        highest_role: User's highest role across ALL groups (display only; never authorises)
         current_user: The User model instance with permission fields
 
     Properties:
@@ -248,7 +248,7 @@ class GroupContext:
                     group.id: role for group, role in user_groups_with_roles
                 }
 
-                # Determine user's highest role across ALL groups (for authorization)
+                # Highest role across ALL groups: display only, never an authorisation input (V4-5)
                 highest_role = None
                 if any(role == "admin" for group, role in user_groups_with_roles):
                     highest_role = "admin"

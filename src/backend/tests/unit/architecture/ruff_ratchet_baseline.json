@@ -205,7 +205,7 @@
   "src/services/agent_builder/process_executor.py::S110": 16,
   "src/services/agent_builder/process_executor.py::TRY400": 25,
   "src/services/agent_builder/task_adapter.py::BLE001": 10,
-  "src/services/agent_builder/task_adapter.py::G004": 62,
+  "src/services/agent_builder/task_adapter.py::G004": 61,
   "src/services/agent_builder/task_adapter.py::TRY400": 13,
   "src/services/catalog/agents.py::BLE001": 1,
   "src/services/catalog/agents.py::G004": 6,

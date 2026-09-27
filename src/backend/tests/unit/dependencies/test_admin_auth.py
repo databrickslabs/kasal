@@ -197,19 +197,23 @@ class TestGetAdminUser:
         assert result is user
 
     @pytest.mark.asyncio
-    async def test_group_admin_via_highest_role_passes(self):
+    async def test_admin_in_another_group_only_raises_403(self):
+        """highest_role ("admin in ANY group") never authorises (audit V4-5)."""
         from src.dependencies.admin_auth import get_admin_user
 
         session = AsyncMock()
-        ctx = _make_group_context(email="gadmin@example.com", highest_role="admin")
+        ctx = _make_group_context(
+            email="gadmin@example.com", highest_role="admin", user_role="operator"
+        )
         user = _make_user("gadmin@example.com", is_system_admin=False)
 
         with patch(
             "src.dependencies.admin_auth.require_authenticated_user", return_value=user
         ):
-            result = await get_admin_user(session, ctx)
+            with pytest.raises(HTTPException) as exc_info:
+                await get_admin_user(session, ctx)
 
-        assert result is user
+        assert exc_info.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_group_admin_via_user_role_passes(self):
@@ -263,11 +267,11 @@ class TestGetAdminUser:
         assert exc_info.value.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_highest_role_case_insensitive(self):
+    async def test_user_role_case_insensitive(self):
         from src.dependencies.admin_auth import get_admin_user
 
         session = AsyncMock()
-        ctx = _make_group_context(email="upper@example.com", highest_role="ADMIN")
+        ctx = _make_group_context(email="upper@example.com", user_role="ADMIN")
         user = _make_user("upper@example.com", is_system_admin=False)
 
         with patch(
@@ -542,8 +546,8 @@ class TestGetAdminUserRoleChecks:
         assert result is user
 
     @pytest.mark.asyncio
-    async def test_get_admin_user_group_admin(self):
-        """Test group admin has access."""
+    async def test_get_admin_user_highest_role_without_current_role_raises_403(self):
+        """Admin elsewhere, no role in the current (personal) workspace: refused."""
         from src.dependencies.admin_auth import get_admin_user
 
         session = _make_session()
@@ -556,8 +560,9 @@ class TestGetAdminUserRoleChecks:
             new_callable=AsyncMock,
             return_value=user,
         ):
-            result = await get_admin_user(session, ctx)
-        assert result is user
+            with pytest.raises(HTTPException) as exc:
+                await get_admin_user(session, ctx)
+        assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_get_admin_user_user_role_admin(self):

@@ -4,7 +4,7 @@ from typing import Annotated, Any, Dict
 from fastapi import APIRouter, Depends, status
 
 from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
-from src.core.permissions import check_role_in_context, is_system_admin
+from src.core.permissions import is_system_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
@@ -555,7 +555,7 @@ async def delete_engine_config(
 ) -> None:
     """
     Delete an engine configuration.
-    Only Admins can delete engine configurations.
+    Only system admins can delete engine configurations.
 
     Args:
         engine_name: Name of the engine configuration to delete
@@ -564,9 +564,10 @@ async def delete_engine_config(
     Raises:
         HTTPException: If engine configuration not found
     """
-    # Check permissions - only admins can delete engine configurations
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can delete engine configurations")
+    # Engine configuration is GLOBAL (R2-03, audit V4-3): deleting a row resets
+    # a server-wide setting for every tenant, so a workspace admin must not.
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can delete engine configurations")
 
     logger.info(f"API call: DELETE /engine-config/engine/{engine_name}")
 

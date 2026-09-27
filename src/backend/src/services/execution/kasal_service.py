@@ -24,6 +24,7 @@ from src.services.catalog.tasks import TaskService
 from src.services.execution.engine_factory import EngineFactory
 from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
 if TYPE_CHECKING:
@@ -225,7 +226,7 @@ class KasalExecutionService:
                                     )
                                     if hasattr(db_agent, "tool_configs"):
                                         crew_logger.info(
-                                            f"Agent tool_configs value from DB: {db_agent.tool_configs}"
+                                            f"Agent tool_configs value from DB: {mask_sensitive_fields(db_agent.tool_configs)}"
                                         )
                                         # The payload wins when it CARRIES tool_configs, {} included: the canvas
                                         # sends {} for a node whose MCP servers were removed, and reading the
@@ -347,7 +348,7 @@ class KasalExecutionService:
                                     )
                                     if hasattr(db_task, "tool_configs"):
                                         crew_logger.info(
-                                            f"Task tool_configs value from DB: {db_task.tool_configs}"
+                                            f"Task tool_configs value from DB: {mask_sensitive_fields(db_task.tool_configs)}"
                                         )
                                         # Same rule as agents: an explicit {} is a decision, not an omission.
                                         if task_config.get("tool_configs") is None:

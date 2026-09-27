@@ -185,8 +185,8 @@ class FlowBuilder:
                     except Exception as e:
                         logger.error(f"Failed to parse flow_config string: {e}")
 
-            # Log the flow configuration for debugging
-            logger.info(f"Flow configuration for processing: {flow_config}")
+            flow_keys = sorted(flow_config) if isinstance(flow_config, dict) else []
+            logger.info(f"Flow configuration keys for processing: {flow_keys}")
 
             # Inject top-level edges and nodes into flow_config so that
             # downstream code (HITL gate detection, checkpoint checks) can find them.

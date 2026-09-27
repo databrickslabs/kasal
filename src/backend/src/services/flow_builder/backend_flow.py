@@ -43,6 +43,7 @@ from src.services.flow_builder.modules.flow_builder import (
     FlowBuilder,
 )
 from src.services.flow_builder.runtime import Flow as CrewAIFlow
+from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -199,7 +200,9 @@ class BackendFlow:
                 "flow_config": flow.flow_config,
             }
             logger.info(f"Successfully loaded flow: {flow.name}")
-            logger.info(f"Flow configuration: {flow.flow_config}")
+            logger.info(
+                f"Flow configuration: {mask_sensitive_fields(flow.flow_config)}"
+            )
             return self._flow_data
         except Exception as e:
             logger.error(f"Error loading flow data: {e}", exc_info=True)

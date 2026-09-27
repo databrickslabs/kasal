@@ -929,7 +929,7 @@ def run_crew_in_process(
                                     )
                                 else:
                                     async_logger.info(
-                                        f"[JOB_CONFIGURATION]     LLM: {llm_config}"
+                                        f"[JOB_CONFIGURATION]     LLM: {type(llm_config).__name__}"
                                     )
 
                         # Log tasks configuration
