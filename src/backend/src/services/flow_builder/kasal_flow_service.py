@@ -23,12 +23,13 @@ logger = LoggerManager.get_instance().flow
 class KasalFlowService:
     """Service for interfacing with the CrewAI Flow Runner"""
 
-    def __init__(self, session: Optional[AsyncSession] = None):
+    def __init__(self, session: AsyncSession):
         """
-        Initialize the service with an optional database session.
+        Initialize the service with the caller's database session.
 
         Args:
-            session: Optional database session
+            session: Database session (every caller passes one; the runner's
+                repositories cannot work without it)
         """
         self.session = session
 
@@ -39,16 +40,7 @@ class KasalFlowService:
         Returns:
             FlowRunnerService instance
         """
-        # If a session was provided to this service, use it
-        if self.session:
-            return FlowRunnerService(self.session)
-
-        # Cannot create sync session - need async refactoring
-        # For now, return service without session
-        logger.warning(
-            "FlowRunnerService created without session - needs async refactoring"
-        )
-        return FlowRunnerService(None)
+        return FlowRunnerService(self.session)
 
     async def run_flow(
         self,

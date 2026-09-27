@@ -1162,7 +1162,8 @@ class FlowRunnerService:
                     "result": execution.result,
                     "error": execution.error,
                     "created_at": execution.created_at,
-                    "updated_at": execution.updated_at,
+                    # ExecutionHistory has no updated_at (reading it raised, so
+                    # every details request failed); the list view omits it too.
                     "completed_at": execution.completed_at,
                     "nodes": [
                         {
