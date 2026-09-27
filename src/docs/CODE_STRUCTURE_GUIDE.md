@@ -165,7 +165,7 @@ The flat ESLint configuration enforces the boundaries already established.
 `shared/api/client.ts` reads `VITE_API_URL`, defaulting to
 `http://localhost:<port>/api/v1` in development (the port comes from
 `shared/api/backendOrigin.ts`, which follows `KASAL_PORT`) and `/api/v1` in production.
-`config/api/ApiConfig.ts` is a compatibility re-export. App startup registers the
+App startup registers the
 deduplicated database-outage toast; the transport does not import UI libraries.
 
 Every `Suspense` that wraps `lazy()` components sits inside a

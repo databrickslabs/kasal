@@ -14,7 +14,7 @@ Kasal ships a seeded model catalog defined in `src/backend/src/seeds/model_confi
 | Anthropic | `anthropic` | Disabled by default. Requires an Anthropic API key. |
 | DeepSeek | `deepseek` | Disabled by default. Requires a DeepSeek API key. |
 | Ollama | `ollama` | Self-hosted, local models. |
-| vLLM | `vllm` | Self-hosted, OpenAI-compatible serving endpoint (base URL from `VLLM_BASE_URL`). |
+| vLLM | `vllm` | Self-hosted, OpenAI-compatible serving endpoint (endpoint URL set on the model in Configuration → Models). |
 
 ## The model catalog
 
@@ -41,9 +41,9 @@ Tool-calling and structured-output caveats, all observed in the codebase and rec
 
 - Some Gemini-family endpoints fail multi-turn tool-calling crews (for example with a missing `thought_signature` error). For crews that call tools, prefer a `gpt-5*` or Claude Sonnet model.
 - Reasoning models that emit a "thinking" preamble can break the JSON-only generation prompts ("Could not parse response as JSON"). Such models have been pruned from the default catalog.
-- Reasoning is the model's own thinking budget: turning on Reasoning for a crew sets `reasoning_effort` (`low`/`medium`/`high`) on each agent's LLM. It applies only to models that accept that parameter (currently the `gpt-5*` family and the o3/o4 families); for any other model the setting is dropped silently and the run is unaffected. Set `KASAL_REASONING_EFFORT_MODELS` to extend the allow-list for a custom endpoint, or `KASAL_REASONING_EFFORT_DISABLED=true` to turn the feature off entirely.
+- Reasoning is the model's own thinking budget: turning on Reasoning for a crew sets `reasoning_effort` (`low`/`medium`/`high`) on each agent's LLM. It applies only to models that accept that parameter (currently the `gpt-5*` family and the o3/o4 families); for any other model the setting is dropped silently and the run is unaffected. Support comes from Kasal's model-capabilities registry, and whether a model uses it is that model's reasoning setting in Configuration → Models; the former `KASAL_REASONING_EFFORT_*` variables are gone.
 - Some endpoints only support the OpenAI Responses API and cannot be used through Kasal's chat-completions path; these are also pruned.
-- The internal generation services (agent, task, and crew generation) default to `databricks-gpt-5-3-codex`, overridable through environment variables such as `AGENT_MODEL`, `CREW_MODEL`, and `DEFAULT_TASK_MODEL`.
+- The internal generation services (agent, task, and crew generation) use the model the request names (the UI sends the one you chose), else the installed default model inside Databricks Apps, else `databricks-gemini-3-8-flash` (`DEFAULT_ENGINE_MODEL` in `src/backend/src/utils/model_config.py`). The former `AGENT_MODEL`, `CREW_MODEL` and `TASK_MODEL` environment variables are no longer read.
 
 ## Agent Bricks and Genie
 

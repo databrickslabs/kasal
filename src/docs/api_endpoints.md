@@ -48,6 +48,7 @@ Every path below is relative to that prefix.
 - [API keys](#api-keys)
 - [Schedules](#schedules)
 - [Engine configuration](#engine-configuration)
+- [Decision model](#decision-model)
 - [Other domains](#other-domains)
 - [Conventions](#conventions)
 - [Rate limiting](#rate-limiting)
@@ -449,6 +450,28 @@ curl -X POST https://<your-app>.databricksapps.com/api/v1/engine-config \
 ```
 
 For what a queued run looks like, see [Executions](#executions).
+
+---
+
+## Decision model
+
+The authenticated workspace's opt-in to the external decision model. The
+provider's base URL is a system setting (`jev_api_base`, through
+`GET`/`PATCH /engine-config/settings`), and the provider key is the workspace's
+`JEV_API_KEY` under [API keys](#api-keys); neither is set here.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/decision-config` | This workspace's switch: `{"enabled": bool, "api_key_configured": bool}` |
+| `PUT` | `/decision-config` | Turn it on or off: `{"enabled": true}`. Workspace admins only (`403` otherwise) |
+| `POST` | `/decision-config/recommend` | Model and effort advice for a task: `{"prompt": "..."}` (1 to 12,000 characters) returns `{"model": "<model key or null>", "effort": "<profile or null>"}` |
+
+`PUT` with `enabled: true` answers `400` when no provider URL is set on the
+deployment or the workspace has no `JEV_API_KEY`, and `409` when a concurrent
+save created the row first. `recommend` needs workspace membership only; it
+returns both fields `null` when the model abstains or the decision model is not
+available, and never changes a run's model or effort. For what the decision
+model decides and sends, see [Decision model](./DECISION_MODEL.md).
 
 ---
 

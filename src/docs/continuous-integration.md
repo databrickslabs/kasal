@@ -7,6 +7,7 @@ The GitHub Actions workflows in `.github/workflows/`, what each job checks, whic
 - [Security scanning](#security-scanning)
 - [Dependency updates](#dependency-updates)
 - [Run the checks locally](#run-the-checks-locally)
+- [Ratchets](#ratchets)
 - [Report-only checks and their follow-ups](#report-only-checks-and-their-follow-ups)
 
 ## Workflows at a glance
@@ -34,9 +35,9 @@ The jobs are:
 |---|---|---|
 | `backend-tests` | `uv sync --frozen`, then `run_tests.py --parallel 4 --skip-lint` on Python 3.11, without coverage (40-minute timeout) | Yes |
 | `backend-coverage` | The same suite under branch coverage: `run_tests.py --parallel 4 --skip-lint --coverage` (75-minute timeout). Uploads `coverage.xml` | Yes: fails below `fail_under = 80` in `[tool.coverage.report]` in `src/backend/pyproject.toml` (85% measured on 2026-09-27) |
-| `backend-lint` | Step 1, `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync --frozen` installs them. Step 2, `pytest tests/unit/architecture`: the architecture tests and the shrink-only ratchets (file and function size, ruff rule counts, env reads, HTTP exception text). The size ratchet also covers `src/frontend/src`, so a frontend-only change can fail this backend check | Yes |
+| `backend-lint` | Step 1, `run_tests.py --lint-only`: `black --check`, `isort --check-only`, `ruff check`, `check_types.py` (mypy, no new errors against `mypy-baseline.json`) and `lint-imports` (the architecture contracts). The type stubs mypy needs, such as `types-psutil`, are in the `dev` dependency group, so `uv sync --frozen` installs them. Step 2, `pytest tests/unit/architecture`: the architecture tests and the shrink-only [ratchets](#ratchets) (file and function size, ruff rule counts, env reads, HTTP exception text). The size ratchet also covers `src/frontend/src`, so a frontend-only change can fail this backend check | Yes |
 | `migrations` | On a `pgvector/pgvector:pg16` service: exactly one Alembic head; `init_db()` builds the app schema on an empty PostgreSQL; `alembic upgrade head` from empty | The first two gate. The upgrade step is report-only (`continue-on-error`) |
-| `frontend` | Node 22: `npm ci`, `npm run test:run -- --testTimeout=30000` (Vitest), `npm run lint -- --max-warnings <N>` (ESLint), `npm run build` (`tsc -b` and `vite build`) | Yes. ESLint errors fail the job, and so do warnings above the ceiling in the workflow; lower the ceiling when you fix warnings, never raise it |
+| `frontend` | Node 22: `npm ci`, `npm run test:run -- --testTimeout=30000` (Vitest), `npm run lint -- --max-warnings <N>` (ESLint), `npm run build` (`tsc -b` and `vite build`) | Yes. ESLint errors fail the job, and so do warnings above the ceiling in `quality.yml`; lower the ceiling when you fix warnings, never raise it (see [ratchets](#ratchets)) |
 | `frontend-coverage` | `vitest run --coverage` with `VITEST_COVERAGE_REPORT_ONLY=1`, which drops the per-path thresholds in `vitest.config.ts`. Uploads `coverage/` | No: the job is `continue-on-error` |
 
 The `migrations` job exists because the app does not run Alembic at startup. It builds its schema with `init_db()` (`create_all` plus the self-heal steps in `src/backend/src/db/self_heal/`), and the unit tests run on SQLite, so this job is the check that the models build a working schema on PostgreSQL.
@@ -73,6 +74,7 @@ Run the backend checks from `src/backend`:
 ```bash
 uv sync --frozen
 uv run python run_tests.py --lint-only   # what backend-lint runs
+uv run pytest -q tests/unit/architecture # architecture tests and ratchets (also in backend-lint)
 uv run python run_tests.py --skip-lint   # tests only, parallel by default
 uv run python run_tests.py --skip-lint --coverage --html-coverage
 uv run python run_tests.py               # tests, then every lint step
@@ -85,12 +87,41 @@ Run the frontend checks from `src/frontend`:
 ```bash
 npm ci
 npm run test:run
-npm run lint
+npm run lint                # CI adds --max-warnings <cap> from quality.yml
 npm run build
 npx vitest run --coverage   # coverage report in coverage/
 ```
 
 To reproduce the supply-chain checks, run `uv lock --check` in `src/backend` and `npm audit --audit-level=high` in `src/frontend`.
+
+## Ratchets
+
+A ratchet freezes existing debt so it can shrink but never grow. Each one records today's count in a baseline and fails when a count goes **up** (or a new file or function appears over the limit). Most also fail when a count goes **down** until you lower the baseline, so a gain cannot be quietly given back later. The backend ratchets are tests in `src/backend/tests/unit/architecture/` and run in both `backend-lint` and `backend-tests`.
+
+| Ratchet | What it counts | Baseline |
+|---|---|---|
+| File size (`test_size_ratchet.py`) | `.py` files under `src/backend/src` and `.ts`/`.tsx` files under `src/frontend/src` over 800 lines. A new file may not pass 800, a baselined one may not pass 1500, and one already over 1500 may not grow | `file_size_baseline.json` |
+| Function size (`test_size_ratchet.py`) | Python functions and methods in `src/backend/src` over 200 lines, keyed `path::Qualified.name`. Renaming or moving a long function counts as a new one | `function_size_baseline.json` |
+| Ruff (`test_ruff_ratchet.py`) | Per-file hits of `BLE001`, `S110`, `TRY400`, `G004` and `B904` in `src/backend/src`, which are not in the ruff gate itself. A deliberate exception takes `# noqa: <code> — <reason>` | `ruff_ratchet_baseline.json` |
+| Environment reads (`test_env_reads_stay_in_config.py`) | `os.getenv`/`os.environ` reads outside `config/settings.py`, `config/logging.py` and `core/databricks_app.py`, keyed `path::VARIABLE`; retired settings may not be read at all. See the [configuration reference](./CONFIGURATION.md#settings-that-moved-from-environment-variables-to-the-ui) | `env_read_baseline.json` |
+| Exception text in HTTP errors (`test_no_exception_text_in_http_errors.py`) | Routers that put an exception's text into an `HTTPException` detail | `http_exception_text_baseline.json` |
+
+When a ratchet test says a count went down, lock the gain in from `src/backend`:
+
+```bash
+uv run python tests/unit/architecture/test_size_ratchet.py --update
+uv run python tests/unit/architecture/test_ruff_ratchet.py --update
+uv run python tests/unit/architecture/test_env_reads_stay_in_config.py --update
+uv run python tests/unit/architecture/test_no_exception_text_in_http_errors.py --update
+```
+
+`--update` only lowers a baseline: it keeps the smaller of the recorded and current counts and drops keys that reached zero (`_ratchet.py`). It never records a new key or a higher count, so it cannot absorb a regression; when a count grows, fix the code. Commit the changed JSON with the change that earned it.
+
+Three more checks work the same way without a JSON file:
+
+- **import-linter** (`[tool.importlinter]` in `src/backend/pyproject.toml`, run by `lint-imports`). Each contract's `ignore_imports` list is a shrink-only baseline of known violations. import-linter errors on an ignore that no longer matches, so fixing an import means deleting its line; never add one.
+- **mypy** (`check_types.py`). New diagnostics fail against `src/backend/mypy-baseline.json`.
+- **ESLint warnings** (the `frontend` job). `--max-warnings` in `quality.yml` holds the warning count; lower it when you fix warnings, never raise it.
 
 ## Report-only checks and their follow-ups
 
