@@ -291,48 +291,6 @@ class TestDeleteVolumeFile:
         assert result["success"] is True
 
 
-class TestGetDatabricksUrl:
-
-    @pytest.mark.asyncio
-    @patch("src.utils.databricks_auth._databricks_auth")
-    async def test_generates_volume_url(self, mock_auth):
-        mock_auth.get_workspace_url = AsyncMock(
-            return_value="https://workspace.databricks.com"
-        )
-        repo = DatabricksVolumeRepository()
-
-        result = await repo.get_databricks_url("cat", "sch", "vol")
-
-        assert "cat/sch/vol" in result
-        assert result.startswith("https://")
-
-    @pytest.mark.asyncio
-    @patch("src.utils.databricks_auth._databricks_auth")
-    async def test_generates_file_url(self, mock_auth):
-        mock_auth.get_workspace_url = AsyncMock(
-            return_value="https://workspace.databricks.com"
-        )
-        repo = DatabricksVolumeRepository()
-
-        result = await repo.get_databricks_url("cat", "sch", "vol", "file.db")
-
-        assert "file.db" in result
-
-    @pytest.mark.asyncio
-    @patch("src.utils.databricks_auth.get_auth_context")
-    @patch("src.utils.databricks_auth._databricks_auth")
-    async def test_fallback_when_no_workspace_url(self, mock_auth, mock_ctx):
-        mock_auth.get_workspace_url = AsyncMock(return_value=None)
-        mock_ctx.return_value = MagicMock(
-            workspace_url="https://fallback.databricks.com"
-        )
-
-        repo = DatabricksVolumeRepository()
-        result = await repo.get_databricks_url("cat", "sch", "vol")
-
-        assert "cat/sch/vol" in result
-
-
 # ===========================================================================
 # Additional tests for expanded coverage
 # ===========================================================================

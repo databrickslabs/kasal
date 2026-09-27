@@ -219,32 +219,6 @@ async def test_toggle_global_enabled_error(server_repo, async_session):
     async_session.rollback.assert_called_once()
 
 
-# --- MCPSettings: update_individual_enabled ---
-
-
-@pytest.mark.asyncio
-async def test_update_individual_enabled_true(settings_repo, async_session):
-    s = MockSettings(individual_enabled=False)
-    with patch.object(
-        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
-    ):
-        result = await settings_repo.update_individual_enabled(True)
-    assert result is s
-    assert s.individual_enabled is True
-    async_session.flush.assert_called_once()
-    async_session.refresh.assert_called_once_with(s)
-
-
-@pytest.mark.asyncio
-async def test_update_individual_enabled_false(settings_repo, async_session):
-    s = MockSettings(individual_enabled=True)
-    with patch.object(
-        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
-    ):
-        await settings_repo.update_individual_enabled(False)
-    assert s.individual_enabled is False
-
-
 # --- MCPSettings: update_settings ---
 
 

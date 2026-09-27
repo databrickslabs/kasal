@@ -267,57 +267,6 @@ class FlowRepository(BaseRepository[Flow]):
         """
         return bindparam("flow_id", type_=PGUUID(as_uuid=True))
 
-    async def delete_with_executions(self, flow_id: uuid.UUID) -> bool:
-        """
-        Delete a flow and all its related execution records to handle foreign key constraints.
-
-        Args:
-            flow_id: UUID of the flow to delete
-
-        Returns:
-            True if flow was deleted, False if not found
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Check if the flow exists
-        flow = await self.get(flow_id)
-        if not flow:
-            logger.warning(f"Flow with ID {flow_id} not found for deletion")
-            return False
-
-        try:
-            # Delete all flow executions from executionhistory table
-            exec_delete_query = text("""
-            DELETE FROM executionhistory
-            WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """)
-            result = await self.session.execute(exec_delete_query, {"flow_id": flow_id})
-            deleted_count = result.rowcount
-            if deleted_count > 0:
-                logger.info(
-                    f"Deleted {deleted_count} flow executions for flow {flow_id}"
-                )
-
-            # Now delete the flow
-            flow_delete_query = text("""
-            DELETE FROM flows WHERE id = :flow_id
-            """)
-            result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
-
-            # Flush all changes
-            await self.session.flush()
-
-            logger.info(f"Successfully deleted flow {flow_id} and all its executions")
-            return True
-
-        except Exception as e:
-            # Roll back on error
-            await self.session.rollback()
-            logger.error(f"Error during cascading deletion of flow {flow_id}: {str(e)}")
-            raise
-
     async def delete_all(self) -> None:
         """
         Delete all flows, handling foreign key constraints by deleting related records first.

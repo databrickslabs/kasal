@@ -74,20 +74,6 @@ class ScheduleRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def find_by_tenant(self, tenant_id: str) -> List[Schedule]:
-        """
-        Find all schedules belonging to a specific tenant.
-
-        Args:
-            tenant_id: ID of the tenant to filter schedules by (mapped to group_id)
-
-        Returns:
-            List of Schedule objects belonging to the tenant
-        """
-        query = select(Schedule).where(Schedule.group_id == tenant_id)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-
     async def find_by_group(self, group_id: str) -> List[Schedule]:
         """
         Find all schedules belonging to a specific group.

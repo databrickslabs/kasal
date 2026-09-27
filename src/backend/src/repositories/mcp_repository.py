@@ -334,38 +334,6 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
 
         return settings
 
-    async def update_global_enabled(self, enabled: bool) -> MCPSettings:
-        """
-        Update the global enabled status.
-
-        Args:
-            enabled: New enabled status
-
-        Returns:
-            Updated MCPSettings object
-        """
-        settings = await self.get_settings()
-        settings.global_enabled = enabled
-        await self.session.flush()
-        await self.session.refresh(settings)
-        return settings
-
-    async def update_individual_enabled(self, enabled: bool) -> MCPSettings:
-        """
-        Update the individual enabled status.
-
-        Args:
-            enabled: New individual enabled status
-
-        Returns:
-            Updated MCPSettings object
-        """
-        settings = await self.get_settings()
-        settings.individual_enabled = enabled
-        await self.session.flush()
-        await self.session.refresh(settings)
-        return settings
-
     async def update_settings(
         self,
         global_enabled: Optional[bool] = None,

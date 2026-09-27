@@ -164,20 +164,3 @@ class A2AAgentRepository(BaseRepository[A2AAgent]):
             )
         )
         return result.scalars().first()
-
-    async def find_for_group(
-        self, agent_id: int, group_ids: List[str]
-    ) -> Optional[A2AAgent]:
-        """One agent, or None — including when it exists but belongs elsewhere.
-
-        The caller turns None into a 404 rather than a 403, so an id cannot be
-        probed to learn what other workspaces have configured.
-        """
-        if not group_ids:
-            return None
-        result = await self.session.execute(
-            select(self.model).where(
-                self.model.id == agent_id, self.model.group_id.in_(group_ids)
-            )
-        )
-        return result.scalars().first()

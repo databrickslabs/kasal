@@ -6,7 +6,7 @@ CRUD operations, JSON handling, keyword/tool searching, and error handling.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -168,59 +168,6 @@ class TestSchemaRepositoryFindByName:
         mock_async_session.execute.assert_called_once()
 
 
-class TestSchemaRepositoryFindByNameSync:
-    """Test cases for find_by_name_sync method."""
-
-    def test_find_by_name_sync_with_sync_session(self):
-        """Test sync find by name with synchronous session."""
-        schema = MockSchema(name="sync_schema")
-        mock_result = MockResult([schema])
-
-        # Create a non-async mock session for sync behavior
-        mock_sync_session = MagicMock()
-        mock_sync_session.execute.return_value = mock_result
-
-        repository = SchemaRepository(session=mock_sync_session)
-        result = repository.find_by_name_sync("sync_schema")
-
-        assert result == schema
-        mock_sync_session.execute.assert_called_once()
-
-    def test_find_by_name_sync_without_execute_attribute(self):
-        """Test sync find by name when session doesn't have execute attribute."""
-        schema = MockSchema(name="test_schema")
-        mock_result = MockResult([schema])
-
-        # Create a mock session without execute attribute to trigger else branch
-        mock_session = MagicMock()
-        # Remove execute attribute to trigger hasattr check to fail
-        if hasattr(mock_session, "execute"):
-            delattr(mock_session, "execute")
-
-        repository = SchemaRepository(session=mock_session)
-
-        # Add execute back after the hasattr check
-        mock_session.execute = MagicMock(return_value=mock_result)
-
-        with patch("logging.getLogger") as mock_logger:
-            mock_log = MagicMock()
-            mock_logger.return_value = mock_log
-
-            # Mock hasattr to return False for this specific test
-            with patch("builtins.hasattr") as mock_hasattr:
-                mock_hasattr.return_value = False
-
-                result = repository.find_by_name_sync("test_schema")
-
-                # Should have logged the warning
-                mock_log.warning.assert_called_once()
-                warning_message = mock_log.warning.call_args[0][0]
-                assert (
-                    "find_by_name_sync called with an async session" in warning_message
-                )
-                assert result == schema
-
-
 class TestSchemaRepositoryFindByType:
     """Test cases for find_by_type method."""
 
@@ -251,157 +198,6 @@ class TestSchemaRepositoryFindByType:
 
         assert result == []
         mock_async_session.execute.assert_called_once()
-
-
-class TestSchemaRepositoryFindByKeyword:
-    """Test cases for find_by_keyword method."""
-
-    @pytest.mark.asyncio
-    async def test_find_by_keyword_success(
-        self, schema_repository, mock_async_session, sample_schemas
-    ):
-        """Test successful schema search by keyword."""
-        user_schemas = [
-            schema for schema in sample_schemas if "user" in schema.keywords
-        ]
-        mock_result = MockResult(user_schemas)
-        mock_async_session.execute.return_value = mock_result
-
-        result = await schema_repository.find_by_keyword("user")
-
-        assert len(result) == len(user_schemas)
-        assert all("user" in schema.keywords for schema in result)
-        mock_async_session.execute.assert_called_once()
-
-        # Verify query uses JSON containment operators
-        call_args = mock_async_session.execute.call_args[0][0]
-        assert isinstance(call_args, type(select(Schema)))
-
-    @pytest.mark.asyncio
-    async def test_find_by_keyword_database_error_fallback(
-        self, schema_repository, mock_async_session, sample_schemas
-    ):
-        """Test find by keyword with database error falls back to application filtering."""
-        # First call fails (database query), second call succeeds (fallback query)
-        mock_async_session.execute.side_effect = [
-            Exception("JSONB not supported"),
-            MockResult(sample_schemas),
-        ]
-
-        with patch("logging.getLogger") as mock_logger:
-            mock_log = MagicMock()
-            mock_logger.return_value = mock_log
-
-            result = await schema_repository.find_by_keyword("user")
-
-            # Should fall back and filter application-level
-            user_schemas = [
-                schema for schema in sample_schemas if "user" in schema.keywords
-            ]
-            assert len(result) == len(user_schemas)
-
-            # Verify warning was logged
-            mock_log.warning.assert_called_once()
-            assert "Database JSON query failed" in mock_log.warning.call_args[0][0]
-
-        # Verify both database query and fallback query were attempted
-        assert mock_async_session.execute.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_find_by_keyword_empty_keywords(
-        self, schema_repository, mock_async_session
-    ):
-        """Test find by keyword when schemas have empty keywords."""
-        schemas_no_keywords = [
-            MockSchema(id=1, keywords=None),
-            MockSchema(id=2, keywords=[]),
-            MockSchema(id=3, keywords=["other"]),
-        ]
-
-        # Simulate database error to test fallback filtering
-        mock_async_session.execute.side_effect = [
-            Exception("DB error"),
-            MockResult(schemas_no_keywords),
-        ]
-
-        with patch("logging.getLogger"):
-            result = await schema_repository.find_by_keyword("test")
-
-            # Should return empty since none have the "test" keyword
-            assert result == []
-
-
-class TestSchemaRepositoryFindByTool:
-    """Test cases for find_by_tool method."""
-
-    @pytest.mark.asyncio
-    async def test_find_by_tool_success(
-        self, schema_repository, mock_async_session, sample_schemas
-    ):
-        """Test successful schema search by tool."""
-        api_schemas = [schema for schema in sample_schemas if "api" in schema.tools]
-        mock_result = MockResult(api_schemas)
-        mock_async_session.execute.return_value = mock_result
-
-        result = await schema_repository.find_by_tool("api")
-
-        assert len(result) == len(api_schemas)
-        assert all("api" in schema.tools for schema in result)
-        mock_async_session.execute.assert_called_once()
-
-        # Verify query uses JSON containment operators
-        call_args = mock_async_session.execute.call_args[0][0]
-        assert isinstance(call_args, type(select(Schema)))
-
-    @pytest.mark.asyncio
-    async def test_find_by_tool_database_error_fallback(
-        self, schema_repository, mock_async_session, sample_schemas
-    ):
-        """Test find by tool with database error falls back to application filtering."""
-        # First call fails (database query), second call succeeds (fallback query)
-        mock_async_session.execute.side_effect = [
-            Exception("JSON functions not available"),
-            MockResult(sample_schemas),
-        ]
-
-        with patch("logging.getLogger") as mock_logger:
-            mock_log = MagicMock()
-            mock_logger.return_value = mock_log
-
-            result = await schema_repository.find_by_tool("api")
-
-            # Should fall back and filter application-level
-            api_schemas = [schema for schema in sample_schemas if "api" in schema.tools]
-            assert len(result) == len(api_schemas)
-
-            # Verify warning was logged
-            mock_log.warning.assert_called_once()
-
-        # Verify both database query and fallback query were attempted
-        assert mock_async_session.execute.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_find_by_tool_empty_tools(
-        self, schema_repository, mock_async_session
-    ):
-        """Test find by tool when schemas have empty tools."""
-        schemas_no_tools = [
-            MockSchema(id=1, tools=None),
-            MockSchema(id=2, tools=[]),
-            MockSchema(id=3, tools=["other"]),
-        ]
-
-        # Simulate database error to test fallback filtering
-        mock_async_session.execute.side_effect = [
-            Exception("DB error"),
-            MockResult(schemas_no_tools),
-        ]
-
-        with patch("logging.getLogger"):
-            result = await schema_repository.find_by_tool("api")
-
-            # Should return empty since none have the "api" tool
-            assert result == []
 
 
 class TestSchemaRepositoryCreate:
@@ -670,35 +466,6 @@ class TestSchemaRepositoryIntegration:
                 assert create_result == created_schema
                 assert find_result == created_schema
 
-    @pytest.mark.asyncio
-    async def test_create_then_find_by_keyword(
-        self, schema_repository, mock_async_session
-    ):
-        """Test creating schema then finding it by keyword."""
-        schema_data = {"name": "keyword_schema", "keywords": ["integration", "test"]}
-
-        with patch("src.repositories.schema_repository.Schema") as mock_schema_class:
-            created_schema = MockSchema(**schema_data)
-            mock_schema_class.return_value = created_schema
-
-            # Mock create
-            with patch.object(
-                schema_repository.__class__.__bases__[0],
-                "create",
-                return_value=created_schema,
-            ):
-                create_result = await schema_repository.create(schema_data)
-
-                # Mock find_by_keyword
-                mock_result = MockResult([created_schema])
-                mock_async_session.execute.return_value = mock_result
-
-                find_result = await schema_repository.find_by_keyword("integration")
-
-                assert create_result == created_schema
-                assert len(find_result) == 1
-                assert find_result[0] == created_schema
-
 
 class TestSchemaRepositoryErrorHandling:
     """Test cases for error handling scenarios."""
@@ -757,41 +524,6 @@ class TestSchemaRepositoryErrorHandling:
 class TestSchemaRepositoryEdgeCases:
     """Test cases for edge cases and boundary conditions."""
 
-    @pytest.mark.asyncio
-    async def test_find_by_keyword_special_characters(
-        self, schema_repository, mock_async_session
-    ):
-        """Test find by keyword with special characters."""
-        special_keywords = ["test@example.com", "user-name", "data_field", "100%"]
-
-        for keyword in special_keywords:
-            mock_result = MockResult([])
-            mock_async_session.execute.return_value = mock_result
-
-            result = await schema_repository.find_by_keyword(keyword)
-
-            assert result == []
-            mock_async_session.execute.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_find_by_tool_case_sensitivity(
-        self, schema_repository, mock_async_session
-    ):
-        """Test find by tool case sensitivity."""
-        # Test exact case match
-        mock_result = MockResult([MockSchema(tools=["API"])])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await schema_repository.find_by_tool("API")
-        assert len(result) == 1
-
-        # Test different case (should not match unless database is case-insensitive)
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await schema_repository.find_by_tool("api")
-        assert len(result) == 0
-
     def test_sanitize_json_data_empty_strings(self, schema_repository):
         """Test sanitization with empty JSON strings."""
         data = {"schema_definition": "", "keywords": "", "tools": ""}
@@ -818,32 +550,6 @@ class TestSchemaRepositoryEdgeCases:
         assert data["keywords"] == 123  # json.loads("123") = 123
         assert data["tools"] == 456  # json.loads("456") = 456
         assert data["schema_definition"] == 789  # json.loads("789") = 789
-
-    @pytest.mark.asyncio
-    async def test_fallback_filtering_edge_cases(
-        self, schema_repository, mock_async_session
-    ):
-        """Test fallback filtering with edge case data."""
-        edge_case_schemas = [
-            MockSchema(id=1, keywords=None),  # None keywords
-            MockSchema(id=2, keywords="not_a_list"),  # String instead of list
-            MockSchema(id=3, keywords=[]),  # Empty list
-            MockSchema(id=4, keywords=["valid", "keyword"]),  # Valid list
-            MockSchema(id=5, tools={"not": "a_list"}),  # Dict instead of list for tools
-        ]
-
-        # Force database error to trigger fallback
-        mock_async_session.execute.side_effect = [
-            Exception("DB error"),
-            MockResult(edge_case_schemas),
-        ]
-
-        with patch("logging.getLogger"):
-            result = await schema_repository.find_by_keyword("keyword")
-
-            # Should only return schemas with valid keyword lists containing the keyword
-            assert len(result) == 1
-            assert result[0].id == 4
 
     @pytest.mark.asyncio
     async def test_complex_json_structures(self, schema_repository, mock_async_session):

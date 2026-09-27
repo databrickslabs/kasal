@@ -219,41 +219,6 @@ class TestDisableAllModels:
             await repo.disable_all_models()
 
 
-class TestUpsertModel:
-
-    @pytest.mark.asyncio
-    async def test_updates_existing_model(self, repo, mock_session):
-        existing = MagicMock(spec=ModelConfig, key="gpt-4", name="GPT-4")
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = existing
-        mock_session.execute.return_value = mock_result
-
-        result = await repo.upsert_model(
-            "gpt-4", {"name": "GPT-4 Updated", "provider": "openai"}
-        )
-
-        assert result == existing
-        assert existing.name == "GPT-4 Updated"
-
-    @pytest.mark.asyncio
-    async def test_creates_new_model_when_not_found(self, repo, mock_session):
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        result = await repo.upsert_model(
-            "new-model",
-            {
-                "name": "New Model",
-                "provider": "openai",
-                "temperature": 0.7,
-            },
-        )
-
-        assert result is not None
-        mock_session.add.assert_called_once()
-
-
 class TestDeleteByKey:
 
     @pytest.mark.asyncio
@@ -288,13 +253,6 @@ class TestDeleteByKey:
 
         with pytest.raises(Exception, match="DB error"):
             await repo.delete_by_key("gpt-4")
-
-    @pytest.mark.asyncio
-    async def test_upsert_raises_on_db_error(self, repo, mock_session):
-        mock_session.execute.side_effect = Exception("DB error")
-
-        with pytest.raises(Exception, match="DB error"):
-            await repo.upsert_model("bad-key", {"name": "bad"})
 
 
 class TestFindAllGlobal:

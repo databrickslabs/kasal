@@ -759,30 +759,6 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         """
         return await self._get_all_traces(limit, offset)
 
-    async def get_execution_job_id_by_run_id(self, run_id: int) -> Optional[str]:
-        """
-        Get job_id for an execution by run_id.
-
-        Args:
-            run_id: Run ID to look up
-
-        Returns:
-            job_id if found, None otherwise
-        """
-        return await self._get_execution_job_id_by_run_id(run_id)
-
-    async def get_execution_run_id_by_job_id(self, job_id: str) -> Optional[int]:
-        """
-        Get run_id for an execution by job_id.
-
-        Args:
-            job_id: Job ID to look up
-
-        Returns:
-            run_id if found, None otherwise
-        """
-        return await self._get_execution_run_id_by_job_id(job_id)
-
     async def delete_by_id(self, trace_id: int) -> int:
         """
         Delete an execution trace by ID.

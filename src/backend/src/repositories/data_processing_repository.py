@@ -6,7 +6,7 @@ This module provides database access functions for the data_processing table.
 
 from typing import Optional
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -43,104 +43,6 @@ class DataProcessingRepository(BaseRepository):
         # Explicitly set sync_session attribute for sync operations
         self.sync_session = sync_session
 
-    async def find_by_che_number(self, che_number: str) -> Optional[DataProcessing]:
-        """
-        Find a record by its che_number.
-
-        Args:
-            che_number: The che_number to look for
-
-        Returns:
-            DataProcessing record if found, None otherwise
-        """
-        if not self.session:
-            raise ValueError("Session not provided")
-
-        query = select(self.model).where(self.model.che_number == che_number)
-        result = await self.session.execute(query)
-        return result.scalars().first()
-
-    def find_by_che_number_sync(self, che_number: str) -> Optional[DataProcessing]:
-        """
-        Find a record by its che_number (synchronous version).
-
-        Args:
-            che_number: The che_number to look for
-
-        Returns:
-            DataProcessing record if found, None otherwise
-        """
-        if not self.sync_session:
-            raise ValueError("Sync session not provided")
-
-        query = select(self.model).where(self.model.che_number == che_number)
-        result = self.sync_session.execute(query)
-        return result.scalars().first()
-
-    async def update_processed_status(self, che_number: str, processed: bool) -> bool:
-        """
-        Update the processed status of a record.
-
-        Args:
-            che_number: The che_number of the record to update
-            processed: The new processed status
-
-        Returns:
-            True if record was updated, False otherwise
-        """
-        if not self.session:
-            raise ValueError("Session not provided")
-
-        stmt = (
-            update(self.model)
-            .where(self.model.che_number == che_number)
-            .values(processed=processed)
-        )
-
-        result = await self.session.execute(stmt)
-        return result.rowcount > 0
-
-    def update_processed_status_sync(self, che_number: str, processed: bool) -> bool:
-        """
-        Update the processed status of a record (synchronous version).
-
-        Args:
-            che_number: The che_number of the record to update
-            processed: The new processed status
-
-        Returns:
-            True if record was updated, False otherwise
-        """
-        if not self.sync_session:
-            raise ValueError("Sync session not provided")
-
-        stmt = (
-            update(self.model)
-            .where(self.model.che_number == che_number)
-            .values(processed=processed)
-        )
-
-        result = self.sync_session.execute(stmt)
-        return result.rowcount > 0
-
-    async def count_unprocessed_records(self) -> int:
-        """
-        Count records with processed=false.
-
-        Returns:
-            Number of unprocessed records
-        """
-        if not self.session:
-            raise ValueError("Session not provided")
-
-        query = (
-            select(func.count())
-            .select_from(self.model)
-            .where(self.model.processed == False)
-        )
-        result = await self.session.execute(query)
-        return result.scalar() or 0
-
     def count_unprocessed_records_sync(self) -> int:
         """
         Count records with processed=false (synchronous version).
@@ -170,24 +72,6 @@ class DataProcessingRepository(BaseRepository):
             raise ValueError("Sync session not provided")
 
         query = select(func.count()).select_from(self.model)
-        result = self.sync_session.execute(query)
-        return result.scalar() or 0
-
-    def count_null_company_name_sync(self) -> int:
-        """
-        Count records with null company_name.
-
-        Returns:
-            Number of records with null company_name
-        """
-        if not self.sync_session:
-            raise ValueError("Sync session not provided")
-
-        query = (
-            select(func.count())
-            .select_from(self.model)
-            .where(self.model.company_name.is_(None))
-        )
         result = self.sync_session.execute(query)
         return result.scalar() or 0
 
