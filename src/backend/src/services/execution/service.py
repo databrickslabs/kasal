@@ -43,7 +43,7 @@ from src.schemas.execution import (
 )
 from src.services.execution.flow_name_inputs import extract_flow_name_inputs
 from src.services.execution.kasal_service import KasalExecutionService
-from src.services.execution.naming import ExecutionNameService
+from src.services.execution.naming import ExecutionNameService, run_name_model
 from src.services.execution.serialization import sanitize_for_database
 from src.services.execution.status import ExecutionStatusService
 from src.utils.asyncio_utils import create_and_run_loop, run_in_thread_with_loop
@@ -620,7 +620,7 @@ class ExecutionService:
         execution_id: str,
         agents_yaml: Dict[str, Any],
         tasks_yaml: Dict[str, Any],
-        model: str,
+        model: Optional[str],
     ) -> None:
         """Generate the descriptive run name OFF the critical path and apply it.
 
@@ -1358,7 +1358,9 @@ class ExecutionService:
             from src.services.execution.config import run_freeze
 
             auto = await run_freeze.freeze(config, self.session, group_context)
-            model = config.model or "default-model"  # the run-name model
+            model = await run_name_model(
+                config, self.session, getattr(group_context, "primary_group_id", None)
+            )
             # Ensure agents_yaml and tasks_yaml are dictionaries
             agents_yaml = (
                 config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
@@ -1391,10 +1393,7 @@ class ExecutionService:
                 )
 
                 # Also set user_token if available for OBO authentication
-                if (
-                    hasattr(group_context, "access_token")
-                    and group_context.access_token
-                ):
+                if group_context.access_token:
                     UserContext.set_user_token(group_context.access_token)
                     logger.info(
                         "[ExecutionService.create_execution] Set user_token for OBO authentication"
@@ -1413,8 +1412,7 @@ class ExecutionService:
             )
 
             # Add run_name to config inputs for crew consistency
-            if not config.inputs:
-                config.inputs = {}
+            config.inputs = config.inputs or {}
             config.inputs["run_name"] = run_name
             logger.info(
                 "[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation"

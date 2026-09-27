@@ -35,7 +35,7 @@ from uuid import UUID
 
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
-from src.services.external.identity import ExternalCaller
+from src.services.external.identity import ExternalCaller, narrow_to_group
 from src.services.external.state import (
     ExternalTaskState,
     is_terminal,
@@ -297,6 +297,9 @@ async def start_run(
     # in production they always have. Without one the Databricks auth chain
     # applies, exactly as for a UI-initiated run.
     caller.obo_token()
+    # The run belongs to the publication's teamspace, not to whichever group
+    # an unpinned (multi-teamspace) caller's context happens to list first.
+    caller = await narrow_to_group(caller, getattr(publication, "group_id", None))
 
     entity_type = getattr(publication, "entity_type", "crew") or "crew"
     # entity_id on the model; crew_id only on the older schema objects. Reading
