@@ -11,7 +11,9 @@ One decision per run: every "auto" in the config gets the same model.
 
 import asyncio
 import logging
-from typing import Any, Iterator, Optional, Set, Tuple
+from typing import Iterator, Optional, Set, Tuple
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.execution import CrewConfig
 from src.services.decisions.model_selection import (
@@ -90,7 +92,9 @@ def apply_selection(config: CrewConfig, model: Optional[str]) -> None:
 
 
 async def resolve_run_models(
-    config: CrewConfig, session: Any, group_context: Optional[GroupContext]
+    config: CrewConfig,
+    session: Optional[AsyncSession],
+    group_context: Optional[GroupContext],
 ) -> Optional[ModelSelection]:
     """Replace every "auto" in ``config``; None when the run did not ask for Auto."""
     if not wants_auto(config):

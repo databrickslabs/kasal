@@ -71,12 +71,23 @@ import contextvars
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, Optional
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, Optional, ParamSpec, TypeVar
+
+if TYPE_CHECKING:
+    from databricks.sdk.config import Config
+    from mlflow.legacy_databricks_cli.configure.provider import (
+        DatabricksConfig,
+        EnvironmentVariableConfigProvider,
+    )
 
 logger = logging.getLogger(__name__)
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_F = TypeVar("_F", bound=Callable[..., object])
 
 
 @dataclass(frozen=True)
@@ -127,8 +138,8 @@ _HOOKS_LOCK = threading.Lock()
 _MARK = "_kasal_scoped_credentials"
 
 
-def _mark(wrapper: Any, original: Any) -> Any:
-    wrapper.__wrapped__ = original
+def _mark(wrapper: _F, original: object) -> _F:
+    setattr(wrapper, "__wrapped__", original)
     setattr(wrapper, _MARK, True)
     return wrapper
 
@@ -143,7 +154,7 @@ def _hook_sdk_config() -> None:
     if getattr(original, _MARK, False):
         return
 
-    def _load_from_env(self: Any) -> None:
+    def _load_from_env(self: Config) -> None:
         creds = _CREDENTIALS.get()
         if (
             creds is not None
@@ -160,7 +171,8 @@ def _hook_sdk_config() -> None:
             self.auth_type = "pat"
         original(self)
 
-    Config._load_from_env = _mark(_load_from_env, original)  # type: ignore[method-assign]
+    # setattr, not assignment: mypy rightly rejects assigning to a method.
+    setattr(Config, "_load_from_env", _mark(_load_from_env, original))
 
 
 def _hook_mlflow_env_provider() -> None:
@@ -172,14 +184,22 @@ def _hook_mlflow_env_provider() -> None:
     if getattr(original, _MARK, False):
         return
 
-    def get_config(self: Any) -> Any:
+    def get_config(
+        self: EnvironmentVariableConfigProvider,
+    ) -> Optional[DatabricksConfig]:
         creds = _CREDENTIALS.get()
+        # MLflow's provider module is untyped; these name what it returns.
+        config: Optional[DatabricksConfig]
         if creds is None or not creds.host:
-            return original(self)
-        return provider.DatabricksConfig.from_token(creds.host, creds.token)
+            config = original(self)
+        else:
+            config = provider.DatabricksConfig.from_token(creds.host, creds.token)
+        return config
 
-    provider.EnvironmentVariableConfigProvider.get_config = _mark(  # type: ignore[method-assign]
-        get_config, original
+    setattr(
+        provider.EnvironmentVariableConfigProvider,
+        "get_config",
+        _mark(get_config, original),
     )
 
 
@@ -188,13 +208,20 @@ def _hook_thread_pool_submit() -> None:
     if getattr(original, _MARK, False):
         return
 
-    def submit(self: Any, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    def submit(
+        self: ThreadPoolExecutor,
+        fn: Callable[_P, _T],
+        /,
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> Future[_T]:
         if _CREDENTIALS.get() is None:
             return original(self, fn, *args, **kwargs)
         # A fresh copy per task: one Context cannot be entered by two threads.
-        return original(self, contextvars.copy_context().run, fn, *args, **kwargs)
+        ctx = contextvars.copy_context()
+        return original(self, lambda: ctx.run(fn, *args, **kwargs))
 
-    ThreadPoolExecutor.submit = _mark(submit, original)  # type: ignore[method-assign]
+    setattr(ThreadPoolExecutor, "submit", _mark(submit, original))
 
 
 def install_hooks() -> None:

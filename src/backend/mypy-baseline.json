@@ -1,21 +1,5 @@
 {
   "source_commit": "985ecf22",
-  "description": "Allowed mypy diagnostics; may only shrink, new errors must be fixed. The only rows are the unused type: ignore comments under src/services/mlflow/, left for the branch that owns that package when warn_unused_ignores was turned on.",
-  "diagnostics": [
-    {
-      "file": "src/services/mlflow/integration.py",
-      "message": "Unused \"type: ignore\" comment  [unused-ignore]",
-      "count": 3
-    },
-    {
-      "file": "src/services/mlflow/mlflow_setup.py",
-      "message": "Unused \"type: ignore\" comment  [unused-ignore]",
-      "count": 1
-    },
-    {
-      "file": "src/services/mlflow/tracing.py",
-      "message": "Unused \"type: ignore\" comment  [unused-ignore]",
-      "count": 3
-    }
-  ]
+  "description": "Allowed mypy diagnostics; may only shrink, new errors must be fixed.",
+  "diagnostics": []
 }

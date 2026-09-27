@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def _get_mlflow() -> Any:
     """Get mlflow module if available."""
     try:
-        import mlflow  # type: ignore
+        import mlflow
 
         return mlflow
     except Exception as e:
@@ -78,7 +78,7 @@ def start_root_trace(
     entered = False
     if callable(start_trace_fn):
         try:
-            with start_trace_fn(name=trace_name, inputs=inputs) as rt:  # type: ignore[misc]
+            with start_trace_fn(name=trace_name, inputs=inputs) as rt:
                 entered = True
                 yield rt
                 return
@@ -92,7 +92,9 @@ def start_root_trace(
     if callable(start_span_fn):
         try:
             # start_span uses 'attributes' parameter, not 'inputs'
-            with start_span_fn(name=trace_name, span_type="CHAIN", attributes=inputs) as span:  # type: ignore[misc]
+            with start_span_fn(
+                name=trace_name, span_type="CHAIN", attributes=inputs
+            ) as span:
                 # Explicitly set inputs on the span if method exists
                 # This ensures inputs appear in the MLflow UI
                 if inputs and hasattr(span, "set_inputs"):

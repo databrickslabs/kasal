@@ -13,11 +13,15 @@ import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence, TypedDict
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.llm.model_capabilities import allowed_efforts, model_capability
+from src.models.model_config import ModelConfig
 from src.services.decisions.policies import question
 from src.services.decisions.runtime import decide
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,22 @@ current_selection: ContextVar[Optional["ModelSelection"]] = ContextVar(
 )
 
 
+class SelectionResponse(TypedDict):
+    """What Auto picked, as API responses and trace metadata carry it."""
+
+    requested: str
+    model: Optional[str]
+    status: str
+
+
+class RequestExcerpt(TypedDict):
+    """The prompt as the decision model receives it."""
+
+    text: str
+    truncated: bool
+    length: int
+
+
 @dataclass(frozen=True)
 class ModelSelection:
     """What Auto resolved to.
@@ -60,15 +80,15 @@ class ModelSelection:
     status: str
     duration_ms: float = 0.0
 
-    def to_response(self) -> dict[str, Any]:
+    def to_response(self) -> SelectionResponse:
         return {"requested": AUTO_MODEL, "model": self.model, "status": self.status}
 
 
-def is_auto(value: Any) -> bool:
+def is_auto(value: object) -> bool:
     return isinstance(value, str) and value.strip().lower() == AUTO_MODEL
 
 
-def request_excerpt(prompt: Any) -> dict[str, Any]:
+def request_excerpt(prompt: Optional[str]) -> RequestExcerpt:
     """The prompt as sent: capped at MAX_REQUEST_CHARS, head and tail kept."""
     text = str(prompt or "").strip()
     if len(text) <= MAX_REQUEST_CHARS:
@@ -81,7 +101,7 @@ def request_excerpt(prompt: Any) -> dict[str, Any]:
     }
 
 
-def describe_model(model: Any) -> dict[str, Any]:
+def describe_model(model: ModelConfig) -> dict[str, object]:
     """A candidate as the decision model sees it: capabilities, never the key."""
     key = str(getattr(model, "key", "") or "")
     capability = model_capability(key)
@@ -96,7 +116,7 @@ def describe_model(model: Any) -> dict[str, Any]:
     }
 
 
-def fallback_model(models: Sequence[Any]) -> Optional[str]:
+def fallback_model(models: Sequence[ModelConfig]) -> Optional[str]:
     """The workspace default: the server default when enabled, else the first model.
 
     The same rule the chat selector uses to preselect a model, so falling back
@@ -111,7 +131,7 @@ def fallback_model(models: Sequence[Any]) -> Optional[str]:
 
 
 async def choose_model(
-    models: Sequence[Any], prompt: Any, *, group_id: Optional[str]
+    models: Sequence[ModelConfig], prompt: Optional[str], *, group_id: Optional[str]
 ) -> ModelSelection:
     """Pick one of ``models`` for ``prompt``; fall back to the default on abstain."""
     started = monotonic()
@@ -142,7 +162,7 @@ async def choose_model(
 
 
 async def select_for_workspace(
-    session: Any, group_context: Any, prompt: Any
+    session: AsyncSession, group_context: Optional[GroupContext], prompt: Optional[str]
 ) -> ModelSelection:
     """Resolve Auto for one request, from the workspace's own enabled models only.
 
@@ -150,9 +170,9 @@ async def select_for_workspace(
     group context: the list the user can pick from by hand. There is no
     cross-workspace fallback: no workspace means no candidates and no decision.
     """
-    group_id = getattr(group_context, "primary_group_id", None)
-    models: list[Any] = []
-    if group_id:
+    group_id = group_context.primary_group_id if group_context is not None else None
+    models: list[ModelConfig] = []
+    if group_id and group_context is not None:
         from src.services.settings.models import ModelConfigService
 
         models = list(
@@ -173,7 +193,7 @@ async def select_for_workspace(
 
 def trace_row(
     selection: ModelSelection, job_id: str, group_id: Optional[str]
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """The run's trace row for an Auto pick, in the decision rows' shape."""
     verb = "picked" if selection.status == "selected" else "fell back to"
     return {

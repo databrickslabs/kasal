@@ -1020,7 +1020,7 @@ async def configure_mlflow_in_subprocess(
 def _try_import_mlflow() -> Any:
     """Import mlflow if available; return None otherwise."""
     try:
-        import mlflow  # type: ignore
+        import mlflow
 
         return mlflow
     except ImportError:
