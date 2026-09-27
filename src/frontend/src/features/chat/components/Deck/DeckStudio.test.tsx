@@ -3,13 +3,18 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import DeckStudio from './DeckStudio';
 import HtmlDeckBlock from '../Chat/HtmlDeckBlock';
 import { useAppStore } from '../../store/appStore';
-import { fetchEnabledModels } from '../../api/models';
+import { fetchEnabledModelRows as fetchEnabledModels } from '../../../../api/config/EnabledModelsService';
+import { resetModelsStoreForTests } from '../../../../store/models';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
 import { downloadDeckHtml } from '../../utils/deckExport';
 import { useThemeStore } from '../../../../store/theme';
 
-vi.mock('../../api/models', () => ({ fetchEnabledModels: vi.fn() }));
+// The picker reads the shared models store, which loads through this.
+vi.mock('../../../../api/config/EnabledModelsService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../api/config/EnabledModelsService')>()),
+  fetchEnabledModelRows: vi.fn(),
+}));
 
 const refineSlide = vi.fn();
 vi.mock('../../../../api/chat/DeckService', () => ({
@@ -48,7 +53,8 @@ describe('DeckStudio', () => {
   beforeEach(() => {
     useThemeStore.setState({ isDarkMode: false });
     refineSlide.mockReset();
-    useAppStore.setState({ selectedModel: 'chat-model', models: [] });
+    resetModelsStoreForTests();
+    useAppStore.setState({ selectedModel: 'chat-model' });
     vi.mocked(fetchEnabledModels).mockResolvedValue([
       { key: 'chat-model', name: 'Chat model' },
       { key: 'edit-model', name: 'Editing model' },

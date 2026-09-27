@@ -13,6 +13,8 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../../../api/config/DecisionConfigService', () => ({
   DecisionConfigService: { getConfig: vi.fn(), saveConfig: vi.fn(), recommend: vi.fn() },
 }));
+const { notifyModelsChanged } = vi.hoisted(() => ({ notifyModelsChanged: vi.fn(async () => undefined) }));
+vi.mock('../../../../store/models', () => ({ notifyModelsChanged }));
 vi.mock('../../../../store/groups', () => ({
   useGroupStore: (selector: (state: { currentGroupId: string }) => unknown) => selector({ currentGroupId: 'one' }),
 }));
@@ -63,6 +65,8 @@ describe('DecisionModelConfiguration', () => {
     fireEvent.click(toggle);
     await screen.findByText('Decision model settings saved.');
     expect(DecisionConfigService.saveConfig).toHaveBeenCalledWith(true);
+    // Open chats (and other tabs) pick up Auto without a reload.
+    expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
   });
 
   it('disables without overwriting the stored key', async () => {
@@ -78,6 +82,7 @@ describe('DecisionModelConfiguration', () => {
     fireEvent.click(toggle);
     await screen.findByText('Decision model settings saved.');
     expect(DecisionConfigService.saveConfig).toHaveBeenCalledWith(false);
+    expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
   });
 
   it('reverts the toggle and shows the fallback when the server gives no reason', async () => {
@@ -92,6 +97,8 @@ describe('DecisionModelConfiguration', () => {
     await screen.findByText(/Could not save decision model settings/);
     expect(screen.queryByText('Decision model settings saved.')).not.toBeInTheDocument();
     expect(toggle).not.toBeChecked();
+    // Nothing changed, so nothing to refresh.
+    expect(notifyModelsChanged).not.toHaveBeenCalled();
   });
 
   it('shows the server reason when a save is refused', async () => {

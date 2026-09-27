@@ -11,6 +11,7 @@
  */
 import i18n from 'i18next';
 import type { ModelSelection } from '../types/execution';
+import { fallbackModelKey } from '../../../utils/modelFallback';
 
 export type { ModelSelection };
 
@@ -61,8 +62,27 @@ export function pickChatModel(args: {
     return chosen && storedModel ? storedModel : AUTO_MODEL;
   }
   if (storedModel) return storedModel;
-  if (models.length === 0) return '';
-  return models.some((m) => m.key === serverDefault) ? serverDefault : models[0].key;
+  return fallbackModelKey(models, serverDefault);
+}
+
+/**
+ * The composer's model given the LIVE model list — `pickChatModel`, plus the
+ * rule for a stored model that is no longer enabled.
+ *
+ * Re-run whenever the enabled models or Auto's availability change, from the
+ * user's stored preference (not the current effective model), so:
+ * - an explicit choice that is still enabled is never overridden;
+ * - a disabled choice falls back to Auto when available, else the server
+ *   default, else the first enabled model — and returns if re-enabled;
+ * - Auto lost while selected falls back to the default; Auto gained is taken
+ *   when the user never chose a model themselves (pickChatModel's rule).
+ * An empty list means nothing to validate against, so the pick stands.
+ */
+export function resolveChatModel(args: Parameters<typeof pickChatModel>[0]): string {
+  const key = pickChatModel(args);
+  if (!key || isAutoModel(key) || args.models.length === 0) return key;
+  if (args.models.some((m) => m.key === key)) return key;
+  return args.autoAvailable ? AUTO_MODEL : fallbackModelKey(args.models, args.serverDefault);
 }
 
 /** "Auto → model" for the run activity, or the fallback wording. */

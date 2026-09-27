@@ -1,7 +1,5 @@
 import { formatModelLabel } from '../../../../utils/modelDisplay';
-import React, { useEffect, useState } from 'react';
-import { fetchEnabledModels } from '../../api/models';
-import { useAppStore } from '../../store/appStore';
+import { useModelsStore } from '../../../../store/models';
 
 interface Props {
   value: string;
@@ -11,21 +9,10 @@ interface Props {
 
 /** An edit-local choice: changing it does not change the chat or builder model. */
 export default function DeckModelPicker({ value, onChange, disabled }: Props) {
-  const [models, setModels] = useState(() => useAppStore.getState().models);
-  const [loadError, setLoadError] = useState(false);
-  useEffect(() => {
-    let active = true;
-    // Builder mode can open the studio without ever mounting ChatWorkspace.
-    void fetchEnabledModels().then((items) => {
-      if (active) {
-        if (Array.isArray(items)) setModels(items);
-        else setLoadError(true);
-      }
-    }).catch(() => {
-      if (active) setLoadError(true);
-    });
-    return () => { active = false; };
-  }, []);
+  // The shared live list: subscribing loads it (builder mode can open the
+  // studio without ever mounting ChatWorkspace) and keeps it current.
+  const models = useModelsStore((s) => s.models);
+  const loadError = useModelsStore((s) => s.error !== null);
 
   return (
     <label className="mr-2 inline-flex max-w-full items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>

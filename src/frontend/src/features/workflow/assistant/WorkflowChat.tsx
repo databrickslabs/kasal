@@ -37,11 +37,10 @@ import { useWorkflowStore } from '../../../store/workflow';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from './store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../../store/knowledgeConfigStore';
-import { useModelConfigStore } from '../../../store/modelConfig';
 import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../../api/chat/ChatHistoryService';
-import { ModelService } from '../../../api/config/ModelService';
+import { useBuilderModels } from '../../../hooks/global/useEnabledModels';
 import TraceService from '../../../api/execution/TraceService';
 import { CanvasLayoutManager } from '../canvas/lib/CanvasLayoutManager';
 import { buildModelLabels } from '../../../utils/modelDisplay';
@@ -51,8 +50,9 @@ import { useUILayoutState, useUILayoutStore } from '../../../store/uiLayout';
 import {
   WorkflowChatProps,
   ChatMessage,
-  ModelConfig
 } from './types/index';
+
+const noopSetModel = () => undefined;
 
 // Import utilities
 import { hasCrewContent, isExecuteCommand, isExecuteFlowCommand, extractJobIdFromCommand, filterSlashCommands, SlashCommand } from './utils/chatHelpers';
@@ -138,11 +138,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
-  const [models, setModels] = useState<Record<string, ModelConfig>>({});
+  // The shared, live enabled-model list: updates in place when an admin
+  // changes models (here or in another tab); a disabled pick falls back.
+  const { models, loadingModels: isLoadingModels } = useBuilderModels(selectedModel, setSelectedModel ?? noopSetModel);
   // Built over the whole set so colliding labels fall back to raw names —
   // three "GPT-5" rows you can't tell apart is worse than three long ids.
   const modelLabels = useMemo(() => buildModelLabels(models), [models]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   // rather than in Configuration because it is a per-RUN choice: the value is
   // sent with the execution payload and recorded on the run's own row.
@@ -161,9 +162,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   // Use Zustand store for knowledge configuration
   const { isMemoryBackendConfigured, isKnowledgeSourceEnabled, checkConfiguration } = useKnowledgeConfigStore(useShallow(s => ({
     isMemoryBackendConfigured: s.isMemoryBackendConfigured, isKnowledgeSourceEnabled: s.isKnowledgeSourceEnabled, checkConfiguration: s.checkConfiguration })));
-
-  // Use Zustand store for model configuration
-  const refreshKey = useModelConfigStore(s => s.refreshKey);
 
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -462,32 +460,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       return () => clearTimeout(timeoutId);
     }
   }, [isVisible]);
-
-  // Fetch models when component mounts or when refreshKey changes
-  useEffect(() => {
-    const fetchModels = async () => {
-      setIsLoadingModels(true);
-      try {
-        const modelService = ModelService.getInstance();
-        const response = await modelService.getEnabledModels();
-        setModels(response as Record<string, ModelConfig>);
-      } catch (error) {
-
-        setModels({
-          [getDefaultModel()]: {
-            name: getDefaultModel(),
-            temperature: 0.7,
-            context_window: 128000,
-            max_output_tokens: 4096,
-            enabled: true
-          }
-        });
-      } finally {
-        setIsLoadingModels(false);
-      }
-    };
-    fetchModels();
-  }, [refreshKey]);
 
   // Initialize knowledge configuration on mount
   useEffect(() => {

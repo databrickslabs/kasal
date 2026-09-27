@@ -48,6 +48,7 @@ import { ModelService } from '../../../../api/config/ModelService';
 import { ModelConfig, Models } from '../../../../types/config/models';
 import ThinkingFields from '../../models/components/ThinkingFields';
 import { useModelConfig } from '../../../../hooks/global/useModelConfig';
+import { notifyModelsChanged } from '../../../../store/models';
 import toast from 'react-hot-toast';
 
 interface ModelEditDialogProps {
@@ -452,6 +453,13 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
   } = useModelConfig();
   const [modelToDelete, setModelToDelete] = React.useState<string | null>(null);
 
+  // Every mutation below ends here: open chats, builders and other tabs pick
+  // up the new list from the shared models store without a reload.
+  const modelsChanged = () => {
+    incrementRefreshKey();
+    void notifyModelsChanged();
+  };
+
   const [providerFilter, setProviderFilter] = React.useState<string>('all');
   const uniqueProviders = React.useMemo(() => {
     const set = new Set<string>();
@@ -531,7 +539,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       setEditDialogOpen(false);
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error('Error saving model:', err);
       setError(err instanceof Error ? err.message : 'Failed to save model');
@@ -570,16 +578,14 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
 
       // Schedule a background refresh after a delay to ensure consistency
       setTimeout(() => {
-        console.log('[ModelConfiguration] Running background refresh after deletion');
         modelService.getGlobalModels()
           .then(refreshedModels => {
-            console.log('[ModelConfiguration] Background refresh complete, updating models');
             setModels(refreshedModels);
-            incrementRefreshKey();
+            modelsChanged();
           })
           .catch(err => {
             console.warn('[ModelConfiguration] Background refresh failed:', err);
@@ -631,7 +637,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error(`Error toggling model ${key}:`, err);
       setError(err instanceof Error ? err.message : 'Failed to update model status');
@@ -657,7 +663,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error('Error enabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to enable all models');
@@ -685,7 +691,7 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
       );
 
       // Notify other components that models have changed
-      incrementRefreshKey();
+      modelsChanged();
     } catch (err) {
       console.error('Error disabling all models:', err);
       setError(err instanceof Error ? err.message : 'Failed to disable all models');

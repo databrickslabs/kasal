@@ -10,6 +10,8 @@ vi.mock('react-i18next', () => ({
       (options.defaultValue ?? _key).replace(/{{(\w+)}}/g, (_m, name: string) => options[name] ?? ''),
   }),
 }));
+const { notifyModelsChanged } = vi.hoisted(() => ({ notifyModelsChanged: vi.fn(async () => undefined) }));
+vi.mock('../../../../store/models', () => ({ notifyModelsChanged }));
 vi.mock('../../../../api/config/EngineConfigService', () => ({
   EngineConfigService: { getSettings: vi.fn(), updateSettings: vi.fn() },
 }));
@@ -81,6 +83,8 @@ describe('DecisionModelSystemSettings', () => {
       }),
     );
     expect(await screen.findByText('Jev API URL saved.')).toBeInTheDocument();
+    // The URL gates Auto in every workspace: open chats and tabs refresh.
+    expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
   });
 
   it('clears the URL by sending null', async () => {
@@ -108,5 +112,6 @@ describe('DecisionModelSystemSettings', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText('The Jev API URL must use https://')).toBeInTheDocument();
+    expect(notifyModelsChanged).not.toHaveBeenCalled();
   });
 });

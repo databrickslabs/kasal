@@ -17,8 +17,7 @@ import {
   SelectChangeEvent
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { useModelConfigStore } from '../../../../store/modelConfig';
-import { ModelService } from '../../../../api/config/ModelService';
+import { useEnabledModels, useRefreshModelsWhen } from '../../../../hooks/global/useEnabledModels';
 
 export interface LLMSelectionDialogProps {
   open: boolean;
@@ -38,52 +37,22 @@ const LLMSelectionDialog: React.FC<LLMSelectionDialogProps> = ({
   isUpdating = false
 }) => {
   const [selectedModel, setSelectedModel] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const selectRef = useRef<HTMLInputElement>(null);
 
-  // Read models from the Zustand store
-  const storeModels = useModelConfigStore(state => state.models);
-  const setStoreModels = useModelConfigStore(state => state.setModels);
+  // The shared live list of ENABLED models (store/models.ts). It updates in
+  // place when an admin changes models; opening the dialog refreshes it when
+  // stale. (It used to read the Configuration page's store, which holds every
+  // model — disabled ones included — once that page has been opened.)
+  const { models, loading: isLoading } = useEnabledModels();
+  useRefreshModelsWhen(open);
 
-  // Ensure store has active models; refresh if empty or stale
   useEffect(() => {
-    if (open) {
-      setSelectedModel(currentLLM);
+    if (!open) return;
+    setSelectedModel(currentLLM);
+    const focus = setTimeout(() => selectRef.current?.focus(), 100);
+    return () => clearTimeout(focus);
+  }, [open, currentLLM]);
 
-      const ensureModels = async () => {
-        // If store already has models beyond defaults, use them directly
-        if (Object.keys(storeModels).length > 1) {
-          return;
-        }
-        setIsLoading(true);
-        try {
-          const modelService = ModelService.getInstance();
-          const fetched = await modelService.getActiveModels();
-          if (Object.keys(fetched).length > 0) {
-            setStoreModels(fetched);
-          }
-        } catch (error) {
-          console.error('Error fetching models:', error);
-          try {
-            const modelService = ModelService.getInstance();
-            const fallback = modelService.getActiveModelsSync();
-            if (Object.keys(fallback).length > 0) {
-              setStoreModels(fallback);
-            }
-          } catch (fallbackError) {
-            console.error('Error fetching fallback models:', fallbackError);
-          }
-        } finally {
-          setIsLoading(false);
-          setTimeout(() => selectRef.current?.focus(), 100);
-        }
-      };
-
-      void ensureModels();
-    }
-  }, [open, currentLLM, storeModels, setStoreModels]);
-
-  const models = storeModels;
   const modelKeys = Object.keys(models);
 
   const handleSelectModel = (event: SelectChangeEvent<string>) => {

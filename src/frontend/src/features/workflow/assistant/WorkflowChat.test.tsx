@@ -43,20 +43,14 @@ vi.mock('../../../api/chat/ChatHistoryService', () => ({
   },
 }));
 
-vi.mock('../../../api/config/ModelService', () => ({
-  ModelService: {
-    getInstance: vi.fn().mockReturnValue({
-      getEnabledModels: vi.fn().mockResolvedValue({
-        'test-model': {
-          name: 'test-model',
-          temperature: 0.7,
-          context_window: 128000,
-          max_output_tokens: 4096,
-          enabled: true,
-        },
-      }),
-    }),
-  },
+// The builder's model list is the shared models store, loaded through this.
+vi.mock('../../../api/config/EnabledModelsService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../api/config/EnabledModelsService')>()),
+  fetchEnabledModelRows: vi.fn().mockResolvedValue([{
+    id: 1, key: 'test-model', name: 'test-model', provider: null, temperature: 0.7,
+    context_window: 128000, max_output_tokens: 4096, extended_thinking: false,
+    enabled: true, created_at: '', updated_at: '',
+  }]),
 }));
 
 vi.mock('../../../api/execution/TraceService', () => ({
@@ -126,10 +120,6 @@ vi.mock('../../../store/knowledgeConfigStore', () => ({
     isKnowledgeSourceEnabled: false,
     checkConfiguration: vi.fn(),
   }),
-}));
-
-vi.mock('../../../store/modelConfig', () => ({
-  useModelConfigStore: (selector?: (s: { refreshKey: number }) => unknown) => (selector ? selector({ refreshKey: 0 }) : { refreshKey: 0 }),
 }));
 
 vi.mock('../../../store/uiLayout', () => ({

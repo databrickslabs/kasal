@@ -3,6 +3,7 @@ import { Alert, Button, Paper, Stack, TextField, Typography } from '@mui/materia
 import { useTranslation } from 'react-i18next';
 import { EngineConfigService } from '../../../../api/config/EngineConfigService';
 import { DECISION_MODEL_PROVIDER } from './decisionModelProvider';
+import { notifyModelsChanged } from '../../../../store/models';
 
 const K = 'configuration.models.decisionModel';
 
@@ -58,6 +59,8 @@ const DecisionModelSystemSettings: React.FC = () => {
       setStored(result.jev_api_base ?? null);
       setDraft(result.jev_api_base ?? '');
       setSaved(true);
+      // The URL gates Auto everywhere: open chats and other tabs follow it.
+      void notifyModelsChanged();
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
       setError(detail || t(`${K}.urlSaveError`, { defaultValue: 'Could not save the {{label}}.', label: urlLabel }));
