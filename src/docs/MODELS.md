@@ -15,6 +15,7 @@ Kasal ships a seeded model catalog defined in `src/backend/src/seeds/model_confi
 | DeepSeek | `deepseek` | Disabled by default. Requires a DeepSeek API key. |
 | Ollama | `ollama` | Self-hosted, local models. |
 | vLLM | `vllm` | Self-hosted, OpenAI-compatible serving endpoint (endpoint URL set on the model in Configuration → Models). |
+| OpenRouter | `openrouter` | Disabled by default. Requires `OPENROUTER_API_KEY` per workspace. Any OpenRouter model can be added in Configuration → Models: its `name` is the OpenRouter model id (for example `anthropic/claude-sonnet-4.5`), sent as is. See [OpenRouter and Jev Router](#openrouter-and-jev-router). |
 
 ## The model catalog
 
@@ -26,6 +27,7 @@ The seeded catalog (`DEFAULT_MODELS` in `model_configs.py`) groups models by pro
 - Anthropic: `claude-opus-4-*` and `claude-sonnet-4-*`.
 - DeepSeek: `deepseek-chat`, `deepseek-reasoner`, and `deepseek-v3` / `deepseek-coder-v2` variants.
 - Ollama and vLLM: self-hosted models such as `llama3.2`, `qwen2.5`, `gemma2`, `deepseek-r1`, and `Qwen3-Coder-30B-A3B-Instruct`.
+- OpenRouter: `jev-router` (TypeSafe's Jev Router, `typesafe/jev-router`).
 
 Models that have been retired or that proved incompatible are listed in `REMOVED_MODEL_KEYS` and are pruned from the database on every seed run, so they disappear from the model picker even on already-seeded installations.
 
@@ -59,9 +61,11 @@ In the chat, the **Model** row of the composer's **+** menu can be set to **Auto
 
 Auto appears at the top of the model list only when the decision model is available to your workspace:
 
-1. A system administrator has set the **Jev API URL** (System administration → **Models** → **Decision model**).
-2. Your workspace has a `JEV_API_KEY` under **Configuration → API Keys**.
+1. A system administrator has chosen the connection (System administration → **Models** → **Decision model**): **Jev API** with its URL set, or **OpenRouter**.
+2. Your workspace has the key that connection needs under **Configuration → API Keys**: `JEV_API_KEY` for the Jev API, `OPENROUTER_API_KEY` for OpenRouter.
 3. A workspace administrator has turned on **Use a decision model** (Workspace settings → **Models** → **Decision model**).
+
+Under the **OpenRouter** connection, Auto is **Jev Router**: every Auto message runs on `jev-router`, which picks the model and effort on OpenRouter's side. The activity step reads "Auto → jev-router".
 
 When all three are true, Auto is also the default: a new chat, or a chat where you never picked a model, starts on Auto. When any of them is missing, there is no Auto option and the selector works as before.
 
@@ -81,7 +85,25 @@ A few chat actions that call a model directly, such as improving a prompt, draft
 
 ### Turning Auto on (administrators)
 
-Auto needs no setting of its own: it follows the decision model. A system administrator sets the Jev API URL once for the deployment. Then, per workspace, someone who manages API keys adds `JEV_API_KEY`, and a workspace administrator turns on **Use a decision model**. Turning the decision model off removes Auto from the selector for that workspace. For what is sent to the provider and how each decision falls back, see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto) and [Configuration](./DECISION_MODEL.md#configuration) in the decision model guide.
+Auto needs no setting of its own: it follows the decision model. A system administrator chooses the connection (Jev API with its URL, or OpenRouter) once for the deployment. Then, per workspace, someone who manages API keys adds the connection's key (`JEV_API_KEY` or `OPENROUTER_API_KEY`), and a workspace administrator turns on **Use a decision model**. Turning the decision model off removes Auto from the selector for that workspace. For what is sent to the provider and how each decision falls back, see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto) and [Configuration](./DECISION_MODEL.md#configuration) in the decision model guide.
+
+## OpenRouter and Jev Router
+
+The `openrouter` provider calls OpenRouter's OpenAI-compatible chat API:
+
+- **Key.** `OPENROUTER_API_KEY` from the workspace's **Configuration → API Keys** (the same `<PROVIDER>_API_KEY` rule as the other hosted providers). A model build without it fails with "No OpenRouter API key found for workspace ...".
+- **Endpoint.** The model's own endpoint override (Configuration → Models), else the OpenRouter URL from System administration → Models → Decision model, else `https://openrouter.ai/api/v1`.
+- **Model id.** The model's `name` goes on the wire unchanged, vendor prefix included (`typesafe/jev-router`, `openai/...`). Kasal labels the LLM with provider `openrouter` so its own transport never strips an `openai/` or `anthropic/` prefix that belongs to OpenRouter.
+- **Parameters.** The usual per-model rules apply (`core/llm/model_capabilities.py`). OpenRouter ignores a parameter the served model does not support.
+
+**Jev Router** is seeded as `jev-router` (name `typesafe/jev-router`, provider `openrouter`, 1,000,000-token context, 32,768 output tokens), disabled like every non-Databricks model. It picks the model and reasoning effort for each request and answers itself. OpenRouter lists it with `supported_parameters: []`, so its capability entry refuses every sampling parameter (`temperature`, `top_p`, the penalties, `stop`) and offers no effort levels: Kasal sends none of them. Its output cap is conservative, since the model it picks has the real limit.
+
+You do not need to enable Jev Router for Auto: under the decision model's **OpenRouter** connection, Auto resolves to it for any workspace that is opted in and has `OPENROUTER_API_KEY` (see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto)). Enable it in Configuration → Models only if you also want to pick it by hand.
+
+Things to know:
+
+- Jev Router's pick is not reported back to Kasal yet. OpenRouter returns the model that served in the response's `model` field, but Kasal's transport does not read it, so traces and logs show `typesafe/jev-router`.
+- `supported_parameters: []` also leaves open whether tool calls reach the model it picks. Kasal has not verified agent tool use through Jev Router; try a tool-using crew before relying on it.
 
 ## Agent Bricks and Genie
 

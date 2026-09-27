@@ -40,11 +40,45 @@ describe('DecisionModelSystemSettings', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('is the Decision model card with Jev as its provider', async () => {
+  it('offers the two connections, Jev API by default', async () => {
     render(<DecisionModelSystemSettings />);
     expect(await screen.findByText('Decision model')).toBeInTheDocument();
-    expect(screen.getByText('Provider: Jev')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Jev API: Jev chooses among your enabled models/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /OpenRouter: Requests go to Jev Router/ })).not.toBeChecked();
     expect(screen.getByText(/workspace's own JEV_API_KEY/)).toBeInTheDocument();
+  });
+
+  it('saves the OpenRouter connection with its URL and names OPENROUTER_API_KEY', async () => {
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
+      settings({ decision_connection: 'openrouter', openrouter_api_base: 'https://openrouter.ai/api/v1' }),
+    );
+    render(<DecisionModelSystemSettings />);
+    fireEvent.click(await screen.findByRole('radio', { name: /OpenRouter/ }));
+    expect(screen.getByText(/workspace's own OPENROUTER_API_KEY/)).toBeInTheDocument();
+    const field = screen.getByLabelText('OpenRouter API URL');
+    fireEvent.change(field, { target: { value: 'https://openrouter.ai/api/v1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        decision_connection: 'openrouter',
+        jev_api_base: null,
+        openrouter_api_base: 'https://openrouter.ai/api/v1',
+      }),
+    );
+    expect(await screen.findByText('Decision model connection saved.')).toBeInTheDocument();
+    // The connection gates Auto: open chats and the live model store refresh.
+    expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a migrated OpenRouter URL as the OpenRouter connection', async () => {
+    vi.mocked(EngineConfigService.getSettings).mockResolvedValue(
+      settings({ decision_connection: 'openrouter', openrouter_api_base: 'https://openrouter.ai/api/v1' }),
+    );
+    render(<DecisionModelSystemSettings />);
+    expect(await screen.findByRole('radio', { name: /OpenRouter/ })).toBeChecked();
+    expect(screen.getByLabelText('OpenRouter API URL')).toHaveValue('https://openrouter.ai/api/v1');
+    // Nothing changed yet.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
   it('accepts a plain http endpoint and warns that it is unencrypted', async () => {
@@ -59,7 +93,9 @@ describe('DecisionModelSystemSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        decision_connection: 'jev',
         jev_api_base: 'http://jev.internal:8080',
+        openrouter_api_base: null,
       }),
     );
   });
@@ -79,10 +115,12 @@ describe('DecisionModelSystemSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        decision_connection: 'jev',
         jev_api_base: 'https://jev.example.com',
+        openrouter_api_base: null,
       }),
     );
-    expect(await screen.findByText('Jev API URL saved.')).toBeInTheDocument();
+    expect(await screen.findByText('Decision model connection saved.')).toBeInTheDocument();
     // The URL gates Auto in every workspace: open chats and tabs refresh.
     expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
   });
@@ -98,7 +136,11 @@ describe('DecisionModelSystemSettings', () => {
     fireEvent.change(field, { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
-      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({ jev_api_base: null }),
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        decision_connection: 'jev',
+        jev_api_base: null,
+        openrouter_api_base: null,
+      }),
     );
   });
 

@@ -5,6 +5,10 @@ export type BudgetTable = Record<string, Record<string, number>>;
 export interface EngineSettings {
   /** The Jev decisions API URL; null when not set (Jev then stays off). */
   jev_api_base: string | null;
+  /** How the decision model is reached: the Jev API or OpenRouter. */
+  decision_connection?: 'jev' | 'openrouter';
+  /** OpenRouter's API URL (its public API when not set). */
+  openrouter_api_base?: string | null;
   /** Seconds for one agent call when the agent sets none; 0 turns it off. */
   agent_max_execution_time: number;
   agent_max_execution_time_default: number;
@@ -25,6 +29,8 @@ export interface EngineSettingSpec {
 /** Partial update: an omitted field is left alone, null resets it. */
 export interface EngineSettingsPatch {
   jev_api_base?: string | null;
+  decision_connection?: 'jev' | 'openrouter' | null;
+  openrouter_api_base?: string | null;
   agent_max_execution_time?: number | null;
   budgets?: Record<string, Record<string, number | null>>;
   advanced?: Record<string, boolean | number | string | null>;

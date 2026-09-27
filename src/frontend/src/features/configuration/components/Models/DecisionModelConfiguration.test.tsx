@@ -29,10 +29,10 @@ describe('DecisionModelConfiguration', () => {
     });
   });
 
-  it('names the setting generically and Jev only as its provider', async () => {
+  it('names the setting generically and the connection it uses', async () => {
     render(<DecisionModelConfiguration />);
     expect(screen.getByText('Decision model')).toBeInTheDocument();
-    expect(screen.getByText('Provider: Jev')).toBeInTheDocument();
+    expect(screen.getByText('Connection: Jev API')).toBeInTheDocument();
     expect(screen.getByText(/sent to the decision model provider when enabled/)).toBeInTheDocument();
     expect(screen.queryByText(/Jev decisions/)).not.toBeInTheDocument();
   });
@@ -67,6 +67,25 @@ describe('DecisionModelConfiguration', () => {
     expect(DecisionConfigService.saveConfig).toHaveBeenCalledWith(true);
     // Open chats (and other tabs) pick up Auto without a reload.
     expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('under OpenRouter, asks for OPENROUTER_API_KEY and says when it is configured', async () => {
+    vi.mocked(DecisionConfigService.getConfig).mockResolvedValue({
+      enabled: false, api_key_configured: false, connection: 'openrouter', api_key_name: 'OPENROUTER_API_KEY',
+    });
+    const first = render(<DecisionModelConfiguration />);
+    expect(await screen.findByText('Connection: OpenRouter')).toBeInTheDocument();
+    expect(screen.getByText(/Add OPENROUTER_API_KEY in Configuration/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', TOGGLE)).toBeDisabled();
+    first.unmount();
+
+    vi.mocked(DecisionConfigService.getConfig).mockResolvedValue({
+      enabled: true, api_key_configured: true, connection: 'openrouter', api_key_name: 'OPENROUTER_API_KEY',
+    });
+    render(<DecisionModelConfiguration />);
+    expect(await screen.findByText('Uses OPENROUTER_API_KEY from Configuration → API Keys.')).toBeInTheDocument();
+    // No native decision API on OpenRouter, so no recommendation box.
+    expect(screen.queryByText(/Ask the decision model/)).not.toBeInTheDocument();
   });
 
   it('disables without overwriting the stored key', async () => {

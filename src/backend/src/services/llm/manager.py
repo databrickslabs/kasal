@@ -290,6 +290,7 @@ try:
         "vllm": "openai/",
         "airllm": "openai/",
         "kimi": "openai/",
+        "openrouter": "",
         "openai": "",
         "anthropic": "anthropic/",
         "gemini": "gemini/",
@@ -504,6 +505,17 @@ async def _self_hosted_api_key(provider: str, group_id: Optional[str]) -> str:
         if key:
             return key
     return NO_API_KEY
+
+
+async def _required_provider_key(provider: str, group_id: str, label: str) -> str:
+    """The workspace's key for a hosted provider, or a clear error naming it."""
+    key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+    if not key:
+        raise ValueError(
+            f"No {label} API key found for workspace '{group_id}'. "
+            f"Add {provider.upper()}_API_KEY under Configuration -> API Keys."
+        )
+    return key
 
 
 class LLMManager:
@@ -1193,18 +1205,15 @@ class LLMManager:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
             # native "moonshot" provider, so route via the openai/ prefix with an
             # explicit api_base, exactly like the self-hosted vLLM path.
-            api_key = await ApiKeysService.get_provider_api_key(
-                provider, group_id=group_id
-            )
-            if not api_key:
-                raise ValueError(
-                    f"No Kimi API key found for workspace '{group_id}'. "
-                    f"Add KIMI_API_KEY under Configuration -> API Keys."
-                )
+            api_key = await _required_provider_key(provider, group_id, "Kimi")
             api_base = require_api_base("kimi", model_params, model_name_value)
             prefixed_model = f"openai/{model_name_value}"
-            # (see the vLLM branch: the litellm.register_model call that used to
-            # be here was inert once the engine stopped reading litellm's registry)
+        elif provider == ModelProvider.OPENROUTER:
+            # OpenAI-compatible, by api_base: the model id ("typesafe/jev-router",
+            # "anthropic/...") goes on the wire as-is (see "provider" below).
+            api_key = await _required_provider_key(provider, group_id, "OpenRouter")
+            api_base = require_api_base("openrouter", model_params, model_name_value)
+            prefixed_model = model_name_value
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
             api_key = await ApiKeysService.get_provider_api_key(
@@ -1237,6 +1246,8 @@ class LLMManager:
             "model": prefixed_model,
             "timeout": 300,
         }
+        if provider == ModelProvider.OPENROUTER:  # keeps "openai/..." ids intact
+            llm_params["provider"] = "openrouter"
         if provider == ModelProvider.OPENAI and model_name_value in {
             "gpt-6-astra",
             "gpt-6-sol",

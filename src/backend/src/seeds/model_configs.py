@@ -330,6 +330,21 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
         "context_window": 1048576,
         "max_output_tokens": 131072,
     },
+    # --- OpenRouter (OpenAI-compatible; key = OPENROUTER_API_KEY) ---
+    "jev-router": {
+        # TypeSafe's Jev Router: picks the model and reasoning effort per request
+        # and answers itself. Auto resolves to it under the Decision model's
+        # OpenRouter connection (services/decisions/jev_router.py), with no need
+        # to enable it here. OpenRouter lists a 1M context, router pricing and
+        # `supported_parameters: []`, so model_capabilities marks every sampling
+        # knob refused. The output cap is conservative: the model the router
+        # picks decides the real one.
+        "name": "typesafe/jev-router",
+        "temperature": 1,
+        "provider": "openrouter",
+        "context_window": 1000000,
+        "max_output_tokens": 32768,
+    },
     # --- Databricks (sorted alphabetically) ---
     "databricks-claude-fable-5": {
         # Re-seeded 2026-08-05: Anthropic's 2026-06-12 export-control suspension

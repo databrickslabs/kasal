@@ -14,6 +14,11 @@ class DecisionConfigResponse(BaseModel):
     api_key_configured: bool = False
     # Enabled, keyed and a provider URL set: the chat model selector offers Auto.
     available: bool = False
+    # The deployment's connection ("jev" or "openrouter") and the workspace key
+    # it needs (JEV_API_KEY or OPENROUTER_API_KEY); ``api_key_configured`` is
+    # about that key.
+    connection: str = "jev"
+    api_key_name: str = "JEV_API_KEY"
 
 
 class DecisionRecommendationRequest(BaseModel):

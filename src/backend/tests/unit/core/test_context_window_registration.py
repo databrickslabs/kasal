@@ -39,6 +39,9 @@ PREFIXES = {
     # Self-hosted OpenAI-compatible endpoint: the model name is passed through
     # unchanged, since the box answers for whatever name it was deployed under.
     "custom": "",
+    # OpenRouter: OpenAI-compatible, the model id is sent as-is. (The served id,
+    # e.g. "typesafe/jev-router", is registered when the model is built.)
+    "openrouter": "",
 }
 
 

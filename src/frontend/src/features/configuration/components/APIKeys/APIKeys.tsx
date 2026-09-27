@@ -106,6 +106,7 @@ function APIKeys(): JSX.Element {
     'GROK_API_KEY',
     'GEMINI_API_KEY',
     'KIMI_API_KEY',
+    'OPENROUTER_API_KEY',
     'POWERBI_USERNAME',
     'POWERBI_PASSWORD',
     'POWERBI_CLIENT_SECRET'
@@ -122,7 +123,8 @@ function APIKeys(): JSX.Element {
       'jev': 'JEV_API_KEY',
       'grok': 'GROK_API_KEY',
       'gemini': 'GEMINI_API_KEY',
-      'kimi': 'KIMI_API_KEY'
+      'kimi': 'KIMI_API_KEY',
+      'openrouter': 'OPENROUTER_API_KEY'
     };
     return mapping;
   }, []);

@@ -3,7 +3,7 @@
 /** Providers served from a machine you run: the endpoint is required in Apps. */
 export const SELF_HOSTED_PROVIDERS = ['vllm', 'ollama', 'custom'];
 /** Hosted providers whose public API can be overridden (e.g. a gateway). */
-export const HOSTED_OVERRIDABLE = ['anthropic', 'deepseek', 'gemini', 'kimi'];
+export const HOSTED_OVERRIDABLE = ['anthropic', 'deepseek', 'gemini', 'kimi', 'openrouter'];
 
 export const LOCAL_DEFAULTS: Record<string, string> = {
   vllm: 'http://localhost:8081/v1',

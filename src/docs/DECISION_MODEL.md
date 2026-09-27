@@ -3,6 +3,7 @@
 How Kasal can hand certain bounded choices to an external decision model instead of its built-in heuristics: what it decides, how a decision travels, what data leaves the deployment, and how to configure and observe it. For administrators deciding whether to turn it on and for developers adding a decision or a provider.
 
 - [What it is and what it is not](#what-it-is-and-what-it-is-not)
+- [Connections: Jev API or OpenRouter](#connections-jev-api-or-openrouter)
 - [Where it is used](#where-it-is-used)
 - [How a decision works](#how-a-decision-works)
 - [Model selection (Auto)](#model-selection-auto)
@@ -17,7 +18,7 @@ How Kasal can hand certain bounded choices to an external decision model instead
 
 Kasal makes many small choices while it works: which published capability a chat message is for, which knowledge chunks to put first, whether a memory is a fact or an event. By default each one is made by a heuristic or by an ordinary LLM prompt. The decision model is an optional, per-workspace alternative that answers a subset of those choices with a calibrated multiple-choice answer.
 
-The product calls the feature **Decision model**. Jev is the only provider today; the name deliberately leaves room for others.
+The product calls the feature **Decision model**. Jev is the only provider today, reached through one of two [connections](#connections-jev-api-or-openrouter): TypeSafe's native Jev API or OpenRouter. The name deliberately leaves room for others.
 
 The decision model:
 
@@ -27,6 +28,23 @@ The decision model:
 - **Is advisory for arguments and content.** It picks which capability; the LLM still extracts the arguments. It orders retrieved items; it never adds, drops or rewrites them (with one caller-side exception, noted in the table below).
 
 The package is `src/backend/src/services/decisions/`. Its module docstring states the contract in one line: "Optional typed decisions. Disabled workspaces retain existing behavior."
+
+## Connections: Jev API or OpenRouter
+
+A system administrator picks how the deployment reaches the decision model (`services/decisions/connection.py`). Each connection has its own URL and its own per-workspace key:
+
+| | Jev API | OpenRouter |
+|---|---|---|
+| Setting | `decision_connection` = `jev` (the default) | `decision_connection` = `openrouter` |
+| URL | `jev_api_base`, required; empty keeps the decision model off | `openrouter_api_base`; empty uses `https://openrouter.ai/api/v1` |
+| Workspace key | `JEV_API_KEY` | `OPENROUTER_API_KEY` |
+| Auto | Jev chooses among the workspace's enabled models (`POST {jev_api_base}/v1/systemone`) | Auto resolves to the **Jev Router** model (`typesafe/jev-router`), which picks the model and effort on OpenRouter's side and answers itself. No decision call is made |
+| The other policies (routing, ranking, memory, guardrail, recommendations, ...) | Work as described on this page | Abstain, exactly as when the feature is off: OpenRouter has no native decision endpoint, so `provider.is_configured()` is false and `runtime.decide` returns before reading any key |
+| What leaves the deployment | Each decision's `state` goes to the Jev API | Every Auto message's prompts, context and answers go through OpenRouter to the model Jev Router picks |
+
+Why the policies abstain on OpenRouter: TypeSafe documents one evaluation endpoint, `POST /v1/systemone`, and no chat endpoint; Jev "does not generate text, write code, or hold a conversation". OpenRouter offers Jev only inside Jev Router, a chat model. Mapping choice questions onto a chat completion would need a new transport and its own validation, which is not built.
+
+**Migration.** Before the setting existed there was one URL, `jev_api_base`, and a deployment could point it at OpenRouter (every decision then got a 404 from `/v1/systemone` and fell back). With no `decision_connection` saved, a `jev_api_base` whose host is `openrouter.ai` now reads as the OpenRouter connection with that URL, and the Jev API URL reads as empty. The first save from the settings card writes all three settings, which makes the migration permanent.
 
 ## Where it is used
 
@@ -93,7 +111,7 @@ Step by step, in `src/backend/src/services/decisions/runtime.py`:
 
 1. **Resolve the workspace.** `workspace_id` uses the `group_id` the caller passed, or the primary group of the current `UserContext`. No workspace means abstain.
 2. **Check the limits.** Abstain when the JSON-encoded `state` or `questions` exceeds 20,000 bytes, when there are more than 64 questions, or when any question has fewer than 2 or more than 255 options. Oversized evidence is never truncated to fit, because a decision made on partial evidence is worse than none.
-3. **Check the deployment.** Abstain silently when no Jev API URL is configured (`provider.is_configured()`).
+3. **Check the deployment.** Abstain silently when the connection is not the Jev API, or no Jev API URL is configured (`provider.is_configured()`).
 4. **Look up the credential**, within an overall 6-second budget (`asyncio.timeout(6)`) that also covers the HTTP call. `credentials.decision_credential` opens an isolated session and asks `DecisionSettingsService.credential()` for the workspace's decrypted `JEV_API_KEY`. The service returns it only when that workspace's `decision_config` row is enabled. No row, not enabled, or no key means abstain.
 5. **Call the provider.** `provider.evaluate` posts the request with a 5-second HTTP timeout and redirects disabled.
 6. **Validate the answer.** `contracts.choices_from_response` turns the response into one `Choice` per question or raises.
@@ -174,7 +192,7 @@ When the decision model is available to a workspace, the chat model selector off
 
 ### When Auto is offered
 
-`GET /api/v1/decision-config` returns `available: true` when all three setup steps in [Configuration](#configuration) are done: the deployment has a Jev API URL, the workspace opted in, and the workspace has a `JEV_API_KEY`. The chat store (`features/chat/store/appStore.ts`) reads it with the enabled models, and hides Auto when it is `false` or the read fails. Any workspace member can read it.
+`GET /api/v1/decision-config` returns `available: true` when all three setup steps in [Configuration](#configuration) are done: the deployment's connection is configured (a Jev API URL, or the OpenRouter connection), the workspace opted in, and the workspace has that connection's key (`JEV_API_KEY` or `OPENROUTER_API_KEY`). The response also carries `connection` and `api_key_name`, and `api_key_configured` is about that key. The chat store (`features/chat/store/appStore.ts`) reads it with the enabled models, and hides Auto when it is `false` or the read fails. Any workspace member can read it.
 
 ### Where `auto` is resolved
 
@@ -186,6 +204,16 @@ When the decision model is available to a workspace, the chat model selector off
 After these points the execution history, the crew and flow subprocesses and anything exported from a run hold only real keys. A request that bypasses both and names `auto` anyway fails model lookup ("Model configuration not found for model: auto") rather than reaching the transport.
 
 Requests from the chat that call a model directly (prompt improvement, skill drafts, saving a crew from the conversation, slide edits) do not resolve Auto. The frontend sends no model for them (`concreteModel` in `features/chat/utils/autoModel.ts`), so they use the server default, as they do when no model is selected.
+
+### Under the OpenRouter connection
+
+`select_for_workspace` asks `jev_router.select_router` first. Under the OpenRouter connection, for a workspace whose `available` is true and a catalogue that has the `jev-router` row, it returns `ModelSelection("jev-router", "selected")` at once: no enabled-model list, no decision call, never `auto` and never `/v1/systemone`. The trace row reads "Auto picked jev-router" and the chat step "Auto → jev-router".
+
+The connection implies the model: Jev Router does not need to be enabled in Configuration → Models, because choosing the OpenRouter connection is the administrator's choice of it. If the workspace is not available (not opted in, no `OPENROUTER_API_KEY`) or the row is missing, `select_router` returns nothing and Auto takes the usual path, which abstains and [falls back](#fallback) to the workspace default.
+
+Which model Jev Router picked is not recorded yet. OpenRouter reports it in the response's `model` field, but Kasal's transport does not read that field, so traces show `typesafe/jev-router`.
+
+The rest of this section describes the Jev API connection.
 
 ### What is sent
 
@@ -250,7 +278,7 @@ The HTTP client uses a 5-second timeout and `follow_redirects=False`. A redirect
 
 ### Tenant isolation
 
-The opt-in (`decision_config`, one row per workspace ID) and the key (`JEV_API_KEY` in that workspace's **Configuration → API Keys**) are both per workspace. `DecisionSettingsService.credential()` reads both on one session scoped to the workspace being served. There is no fallback to another workspace's key or opt-in, and no deployment-wide key. The system URL is the only shared setting.
+The opt-in (`decision_config`, one row per workspace ID) and the key (`JEV_API_KEY` or `OPENROUTER_API_KEY` in that workspace's **Configuration → API Keys**) are both per workspace. `DecisionSettingsService.credential()` reads both on one session scoped to the workspace being served. There is no fallback to another workspace's key or opt-in, and no deployment-wide key. The connection and its URLs are the only shared settings.
 
 `decision_config.group_id` is a plain workspace ID, not a foreign key, so personal workspaces (`user_<email>`) can opt in too.
 
@@ -268,15 +296,15 @@ Setup takes three steps, done by two roles:
 
 | Step | Where | Who | Stored as | API |
 |---|---|---|---|---|
-| 1. Point the deployment at the provider | System administration → **Models** → **Decision model** tab: **Jev API URL** | System administrators | The `jev_api_base` system setting (an `engine_config` row for engine `kasal`) | `GET` / `PATCH /api/v1/engine-config/settings` with `{"jev_api_base": "https://jev.example.com"}`; `null` or `""` clears it |
-| 2. Add the workspace's key | **Configuration → API Keys**: `JEV_API_KEY` | Whoever manages the workspace's API keys | Encrypted API key row for that workspace | The existing API keys endpoints |
+| 1. Choose the connection and its URL | System administration → **Models** → **Decision model**: **Jev API** or **OpenRouter**, and the URL field for the chosen one | System administrators | The `decision_connection`, `jev_api_base` and `openrouter_api_base` system settings (`engine_config` rows for engine `kasal`) | `GET` / `PATCH /api/v1/engine-config/settings` with `{"decision_connection": "openrouter", "openrouter_api_base": null, "jev_api_base": null}`; `null` or `""` clears a value |
+| 2. Add the workspace's key | **Configuration → API Keys**: `JEV_API_KEY` (Jev API) or `OPENROUTER_API_KEY` (OpenRouter) | Whoever manages the workspace's API keys | Encrypted API key row for that workspace | The existing API keys endpoints |
 | 3. Opt the workspace in | Workspace settings → **Models** → **Decision model** tab: **Use a decision model** | Workspace administrators | `decision_config` row: workspace ID and `enabled` | `GET` / `PUT /api/v1/decision-config` with `{"enabled": true}` |
 
-- **URL.** An empty URL keeps the decision model off for every workspace. There is no built-in default endpoint. A trailing `/` is removed on save.
+- **URL.** For the Jev API, an empty URL keeps the decision model off for every workspace; there is no built-in default endpoint. For OpenRouter, an empty URL uses OpenRouter's public API. A trailing `/` is removed on save. The OpenRouter URL is also the default endpoint of every `openrouter` model in Configuration → Models.
 - **Setting cache.** The setting is held in an in-process snapshot. It is loaded at server startup and when each crew or flow subprocess starts, and a save updates it in the process that handled the save.
-- **Workspace toggle.** The toggle stays disabled until the workspace has a `JEV_API_KEY`. The panel offers an **Open API Keys** button.
+- **Workspace toggle.** The panel shows the connection ("Connection: Jev API" or "Connection: OpenRouter") and the key it needs. The toggle stays disabled until the workspace has that key; the panel offers an **Open API Keys** button.
 - **Auto in the chat.** `GET /api/v1/decision-config` also returns `available`, which is `true` only when the URL is set, the workspace is opted in and it has a key. The chat model selector then offers Auto and makes it the default. See [Model selection (Auto)](#model-selection-auto).
-- **Recommendation box.** Once the workspace is opted in, the panel shows a text box that calls `POST /api/v1/decision-config/recommend`. It takes `{"prompt": "..."}` (1 to 12,000 characters) and returns `{"model": "<model key or null>", "effort": "<profile or null>"}`. Both are `null` when the model abstains. The endpoint requires workspace membership only.
+- **Recommendation box.** Once the workspace is opted in under the Jev API connection, the panel shows a text box that calls `POST /api/v1/decision-config/recommend`. It takes `{"prompt": "..."}` (1 to 12,000 characters) and returns `{"model": "<model key or null>", "effort": "<profile or null>"}`. Both are `null` when the model abstains. The endpoint requires workspace membership only.
 
 For the full list of Configuration → Engines system settings, see the [configuration reference](./CONFIGURATION.md#decision-model).
 
@@ -288,6 +316,8 @@ Saving the system URL can fail with these errors:
 |---|---|---|
 | "Must start with http:// or https://" | Form validation | The URL has another scheme or no host. **Save** stays disabled |
 | "The Jev API URL must be an http:// or https:// address" | 400 | The server rejected the URL for the same reason |
+| "The OpenRouter URL must be an http:// or https:// address" | 400 | The same, for the OpenRouter URL |
+| "The decision model connection must be 'jev' or 'openrouter'" | 400 | An API caller sent another connection |
 | "Only system administrators can change engine configuration" | 403 | You are not a system administrator. Non-administrators do not see the setting at all |
 
 Saving the workspace opt-in can fail with these errors:
@@ -295,7 +325,7 @@ Saving the workspace opt-in can fail with these errors:
 | Error | Status | Meaning |
 |---|---|---|
 | "No decision model is available on this deployment: a system admin must set the Jev API URL in System administration → Models" | 400 | You tried to enable it, but step 1 is not done |
-| "Configure JEV_API_KEY in Configuration > API Keys before enabling the decision model" | 400 | You tried to enable it, but the workspace has no key |
+| "Configure JEV_API_KEY in Configuration > API Keys before enabling the decision model" | 400 | You tried to enable it, but the workspace has no key. Under OpenRouter the message names `OPENROUTER_API_KEY` |
 | "Only workspace admins can configure the decision model" | 403 | You are not an administrator of this workspace |
 | "Decision model settings changed concurrently. Reload and try again." | 409 | Someone else created the row at the same moment. Reload and retry |
 | "Could not save decision model settings: the database rejected the change. Check the server log." | 500 | A database fault other than a concurrent insert. The server log has the traceback |
@@ -339,7 +369,8 @@ The trace view has no dedicated rendering for `decision_evaluated` rows. The cha
 - **Hard-coded model, timeouts and gate.** Several values are constants, not settings: the model (`provider.MODEL = "jev-1.13.0"`), the 5-second HTTP timeout and 6-second overall budget, the 0.85 confidence gate, the 20,000-byte payload cap, and the per-helper candidate caps (64 for `select`, 32 for `rank`, 64 pairs for `assign`, 40 records for supersession).
 - **All-or-nothing gate.** One uncertain answer discards the whole decision. For `rank` over 32 items, or supersession over 40 records, a single low-confidence item means no ranking at all.
 - **English-only UI strings.** The decision model's i18n keys exist only in `en.json`; other locales show the English defaults. `DecisionModelRecommendation.tsx` also hard-codes its result messages and text-box label instead of using translation keys.
-- **No OpenRouter access yet.** The transport speaks Jev's native `/v1/systemone` API. Reaching a decision model through OpenRouter would need a different, chat-completions-based transport that maps choice questions onto a completion and validates the result against the same contract. That transport is not designed yet.
+- **OpenRouter runs Auto only.** Under the OpenRouter connection only Auto uses Jev (as Jev Router); every other policy abstains. Reaching the choice-question policies through OpenRouter would need a chat-completions-based transport that maps choice questions onto a completion and validates the result against the same contract. That transport is not designed.
+- **Jev Router's pick is not recorded.** OpenRouter reports the served model in the response's `model` field; Kasal's transport does not read it yet, so traces and logs show `typesafe/jev-router`.
 - **Exported apps rank nothing.** The decisions package needs Kasal's database layer, so the export (`services/export/runtime_vendor.py`) does not vendor it. The vendored Serper tool detects the missing package and returns results unranked. This used to break exported apps. It is fixed: `serper_search._load_ranker` tolerates only the decisions package itself being absent, and `tests/unit/services/tools/test_serper_search.py` covers the vendored case.
 - **Sync callers inside an event loop abstain.** `decide_sync`, `rank_sync` and the memory adapter's ranking abstain whenever their thread already runs an event loop. The memory, guardrail and Serper decisions only happen when those paths run on a worker thread.
 - **Implicit workspace on some paths.** `completion_check`, `task_capabilities` and Serper's `research_triage` pass no workspace. They rely on the request's `UserContext`, and abstain when it is not set on that thread.
@@ -354,9 +385,9 @@ This section describes where the seams are today. It is guidance for a contribut
 
 - **Transport: `services/decisions/provider.py`.** It is independent of storage and policy. It exposes `MODEL`, `api_base()`, `is_configured()` and `async evaluate(api_key, state, questions) -> dict`. A second provider needs its own `evaluate`, which must return the `{"answers": {...}}` shape that `contracts.choices_from_response` validates, or be adapted to it. Keep the contract check as the single gate: a transport must never hand a caller an option the question did not offer.
 - **Selection: `runtime.decide`.** It calls `provider.is_configured()`, `provider.MODEL` and `provider.evaluate` directly. Choosing between providers means putting a small registry or a per-workspace provider field behind those three calls. `record_decision` already takes the model name, so traces would distinguish providers.
-- **Endpoint setting: `services/settings/engine_settings.py` and `engine_settings_view.py`.** `JEV_API_BASE` is one named system setting with its own validation in `update_view`. A second provider needs its own setting (or a keyed map) and the same validation.
-- **Credentials: `services/decisions/settings.py` and `credentials.py`.** The key name is the constant `JEV_KEY_NAME = "JEV_API_KEY"`, read through `ApiKeysService` on the lookup session. A second provider needs its own key name and, if workspaces choose a provider, a provider column on `decision_config` (model, repository, migration and self-heal in `src/backend/src/db/self_heal/tables.py`).
-- **Frontend: `src/frontend/src/features/configuration/components/Models/decisionModelProvider.ts`.** `DECISION_MODEL_PROVIDER` holds the display name and API key name that both Decision model panels use. Its comment anticipates the change: a second provider becomes a second entry there plus a selector in `DecisionModelSystemSettings.tsx` and `DecisionModelConfiguration.tsx`. Do not rename the existing `apiKeyName`: workspaces already saved their key under it.
+- **Endpoint setting: `services/decisions/connection.py`, `services/settings/engine_settings.py` and `engine_settings_view.py`.** `decision_connection` picks the connection, and each connection has its own URL setting validated in `update_view`. A new connection is a new entry in `connection.CONNECTIONS` and `KEY_NAMES`, a URL setting, and a branch where it changes behavior (`provider.api_base`, `jev_router.select_router`).
+- **Credentials: `services/decisions/settings.py` and `credentials.py`.** The key a workspace needs follows the connection (`Connection.key_name`); the runtime's credential is always `JEV_KEY_NAME = "JEV_API_KEY"`, since only the Jev API connection calls the decision transport. A second provider needs its own key name and, if workspaces choose a provider, a provider column on `decision_config` (model, repository, migration and self-heal in `src/backend/src/db/self_heal/tables.py`).
+- **Frontend: `src/frontend/src/features/configuration/components/Models/decisionModelProvider.ts`.** `DECISION_CONNECTIONS` holds each connection's display name, API key name and URL field label; `DecisionModelSystemSettings.tsx` renders the selector and `DecisionModelConfiguration.tsx` shows the workspace's connection and key. Do not rename an existing `apiKeyName`: workspaces already saved their keys under it.
 - **Telemetry and fallback messages.** `telemetry.py` and the fallback warning in `runtime.py` hard-code the word "Jev" in their text. Make them provider-neutral when a second provider lands.
 
 ## See also

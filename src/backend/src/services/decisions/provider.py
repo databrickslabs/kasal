@@ -4,7 +4,8 @@ from typing import Any
 
 import httpx
 
-from src.services.settings import engine_settings
+from src.services.decisions.connection import JEV
+from src.services.decisions.connection import current as current_connection
 
 MODEL = "jev-1.13.0"
 
@@ -15,9 +16,12 @@ def api_base() -> str | None:
     Deployment-owned configuration, never supplied by a prompt or tool result
     (it replaced the JEV_API_BASE env var). There is deliberately no built-in
     default: a deployment that has not configured an endpoint does not call one.
+
+    None under the OpenRouter connection: OpenRouter has no native decision
+    endpoint, so every policy abstains there exactly as when the feature is off.
     """
-    base = (engine_settings.value(engine_settings.JEV_API_BASE) or "").strip()
-    return base.rstrip("/") or None
+    connection = current_connection()
+    return connection.jev_api_base if connection.kind == JEV else None
 
 
 def is_configured() -> bool:

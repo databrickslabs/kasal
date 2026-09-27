@@ -273,6 +273,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
               <MenuItem value="custom">Custom OpenAI-compatible (e.g. KAT Coder)</MenuItem>
               <MenuItem value="deepseek">DeepSeek</MenuItem>
               <MenuItem value="kimi">Kimi</MenuItem>
+              <MenuItem value="openrouter">OpenRouter</MenuItem>
               <MenuItem value="cohere">Cohere</MenuItem>
               <MenuItem value="databricks">Databricks</MenuItem>
               <MenuItem value="local">Local</MenuItem>

@@ -70,6 +70,12 @@ def model_api_base(provider: str, params: Optional[Mapping[str, Any]]) -> Option
     if configured:
         return configured
     provider = (provider or "").lower()
+    if provider == "openrouter":
+        # The OpenRouter URL from System administration → Models → Decision
+        # model, else OpenRouter's public API.
+        from src.services.decisions.connection import current
+
+        return current().openrouter_api_base
     if provider in HOSTED_DEFAULTS:
         return HOSTED_DEFAULTS[provider]
     if provider in SELF_HOSTED_DEFAULTS and not on_databricks_apps():

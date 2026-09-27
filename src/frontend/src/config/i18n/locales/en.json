@@ -103,7 +103,10 @@
       "disableAllSuccess": "All models disabled successfully",
       "decisionModel": {
         "title": "Decision model",
-        "provider": "Provider: {{name}}",
+        "connection": "Connection: {{name}}",
+        "connectionLabel": "Connection",
+        "connectionJevHelp": "Jev chooses among your enabled models.",
+        "connectionOpenRouterHelp": "Requests go to Jev Router, which picks from OpenRouter's models; answers and prompts go through OpenRouter.",
         "disclosure": "Off by default. Enable a decision model for supported decisions in this workspace. When off, Kasal uses its existing approach. Unavailable or uncertain decision model answers also fall back to that approach. Relevant prompts and candidate content are sent to the decision model provider when enabled.",
         "toggle": "Use a decision model",
         "keyConfigured": "Uses {{key}} from Configuration → API Keys.",
@@ -119,8 +122,9 @@
         "urlHelp": "Where the {{name}} decisions API lives. Empty keeps the decision model off for every workspace.",
         "urlScheme": "Must start with http:// or https://",
         "urlUnencrypted": "Plain http is not encrypted: prompts and candidate content travel in clear text. Use it only on a private network.",
-        "urlSaved": "{{label}} saved.",
-        "urlSaveError": "Could not save the {{label}}.",
+        "urlHelpOpenRouter": "OpenRouter's API. Empty uses its public API.",
+        "systemSaved": "Decision model connection saved.",
+        "systemSaveError": "Could not save the decision model connection.",
         "save": "Save"
       },
       "tabs": {
