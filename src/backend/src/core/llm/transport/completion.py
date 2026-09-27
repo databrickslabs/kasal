@@ -329,6 +329,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         # Attribution for every delta this call streams — see BaseLLM._call_scope.
         with self._attributed(from_task, from_agent), call_deadline(from_agent):
             conversation = self._normalize_messages(messages)
+            self._served_model = None  # per call, like _reasoning_text
             self._emit_call_started_event(conversation, tools, from_task, from_agent)
             try:
                 if self.api == "responses":
@@ -787,6 +788,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 continue
             usage = self._extract_chat_token_usage(response)
             self._track_token_usage_internal(usage)
+            self._note_served_model(response)
             function_calls = self._extract_function_calls_from_response(response)
             # Same block-list shape as the streaming path: without this the
             # reasoning blocks became part of the returned "answer".
@@ -932,6 +934,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         with closing(self._chat_stream_chunks(params)) as response_stream:
             for part in response_stream:
                 check_request_deadline("".join(chunks))
+                self._note_served_model(part)
                 if getattr(part, "usage", None) is not None:
                     usage = self._extract_chat_token_usage(part)
                 choices = getattr(part, "choices", None)
@@ -1226,6 +1229,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
     ) -> tuple[str, list[dict[str, Any]]]:
         """Extract output text + function calls; track chaining state."""
         self._last_response_id = getattr(response, "id", None)
+        self._note_served_model(response)
         if self.auto_chain_reasoning:
             self._last_reasoning_items = self._extract_reasoning_items(response)
         reasoning = responses_reasoning_text(response)

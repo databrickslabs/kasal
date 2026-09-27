@@ -601,3 +601,30 @@ describe('the light-agent answer row', () => {
     expect(result?.description).toBe('LLM Response (4,578 chars)');
   });
 });
+
+describe('llm_response — the model a router actually served', () => {
+  it('names the served model when the backend recorded one', () => {
+    const fromMetadata = EVENT_PROCESSORS.llm_response(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'y'.repeat(628) },
+      trace_metadata: { model: 'typesafe/jev-router', served_model: 'anthropic/claude-opus-5-5' },
+    }));
+    const fromExtraData = EVENT_PROCESSORS.llm_response(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'y'.repeat(628), extra_data: { served_model: 'anthropic/claude-opus-5-5' } },
+    }));
+
+    expect(fromMetadata?.description).toBe('LLM Response — anthropic/claude-opus-5-5 (628 chars)');
+    expect(fromExtraData?.description).toBe('LLM Response — anthropic/claude-opus-5-5 (628 chars)');
+  });
+
+  it('adds nothing when no served model was recorded', () => {
+    const result = EVENT_PROCESSORS.llm_response(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'y'.repeat(628) },
+      trace_metadata: { model: 'typesafe/jev-router' },
+    }));
+
+    expect(result?.description).toBe('LLM Response (628 chars)');
+  });
+});

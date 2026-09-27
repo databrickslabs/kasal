@@ -1260,9 +1260,9 @@ class OTelEventBridge:
         # span per delta is unreadable. Kept as its own attribute rather than
         # folded into the response so the UI can show it collapsed and separate:
         # it is the model's private deliberation, not the answer.
-        reasoning = getattr(event, "reasoning", None)
-        if reasoning:
-            span.set_attribute("kasal.extra.reasoning", str(reasoning))
+        for key in ("reasoning", "served_model"):  # served_model: a router's pick
+            if value := getattr(event, key, None):
+                span.set_attribute(f"kasal.extra.{key}", str(value))
 
         # ── Agent execution fields ──
         task_prompt = getattr(event, "task_prompt", None)

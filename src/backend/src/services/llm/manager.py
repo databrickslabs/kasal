@@ -492,6 +492,17 @@ def _is_http_400(exc: Exception) -> bool:
     return False
 
 
+def _reply(
+    result: str, llm: object, resolved: str, with_served_model: bool
+) -> Union[str, Tuple[str, str]]:
+    """``completion``'s return. The served model is the one the response named
+    when a router (Jev Router) picked it, else ``resolved``."""
+    if not with_served_model:
+        return result
+    served = getattr(llm, "served_model", None)
+    return result, served if isinstance(served, str) and served else resolved
+
+
 async def _self_hosted_api_key(provider: str, group_id: Optional[str]) -> str:
     """The workspace's key for a self-hosted endpoint, or a harmless placeholder.
 
@@ -635,6 +646,7 @@ class LLMManager:
                 Databricks model on a deployment with no workspace resolves to a
                 stand-in — so callers that record which model answered (the
                 llmlog rows behind the LLM Logs table) need the resolved key.
+                A router (Jev Router) reports the model it handed the call to.
                 Opt-in so the 38+ existing call sites keep their str return.
 
         Returns:
@@ -734,7 +746,7 @@ class LLMManager:
                     f"LLM completion: model={served_model}, duration={duration:.2f}s, response_length={len(result) if result else 0}"
                 )
                 _set_span_outputs(_span, result)
-                return (result, _resolved) if with_served_model else result
+                return _reply(result, llm, _resolved, with_served_model)
             except Exception as e:
                 duration = time.time() - start_time
                 # On HTTP 400 with fallback enabled, retry without system messages
@@ -752,7 +764,7 @@ class LLMManager:
                                 f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
                             )
                             _set_span_outputs(_span, result)
-                            return (result, _resolved) if with_served_model else result
+                            return _reply(result, llm, _resolved, with_served_model)
                         except Exception as retry_err:
                             logger.error(
                                 f"LLM completion user-only fallback also failed: {retry_err}"
