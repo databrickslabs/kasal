@@ -7,6 +7,7 @@ import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCata
 import { SaveCrewProps } from '../types/dialogs';
 import { Edge } from 'reactflow';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
+import { useUnmountSafeTimeout } from '../../../../hooks/global/useUnmountSafeTimeout';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useAppStore as useChatAppStore } from '../../../chat/store/appStore';
 
@@ -28,6 +29,9 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [isSaving, setIsSaving] = useState(false);
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
+  // Cleared on unmount: a bare setTimeout here outlived the component (and,
+  // in tests, the jsdom window), which failed CI after every test had passed.
+  const scheduleTimeout = useUnmountSafeTimeout();
 
   const { activeCanvasId, updateCanvasCrewInfo } = useBuilderCanvasStore(useShallow(state => ({
     activeCanvasId: state.activeCanvasId,
@@ -167,7 +171,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         refreshChatCatalog();
         
         // Dispatch completion event
-        setTimeout(() => {
+        scheduleTimeout(() => {
           const completeEvent = new CustomEvent('updateCrewComplete', {
             detail: { crewId: updatedCrew.id, crewName: updatedCrew.name }
           });
@@ -267,7 +271,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         refreshChatCatalog();
         
         // Dispatch completion event
-        setTimeout(() => {
+        scheduleTimeout(() => {
           const completeEvent = new CustomEvent('updateCrewComplete', {
             detail: { crewId: updatedCrew.id, crewName: updatedCrew.name }
           });
@@ -292,7 +296,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       window.removeEventListener('updateExistingCrew', handleUpdateExistingCrew);
       window.removeEventListener('updateExistingCrewByName', handleUpdateExistingCrewByName);
     };
-  }, [disabled]);
+  }, [disabled, scheduleTimeout]);
 
   // Auto-save when name is set programmatically (via slash command)
   useEffect(() => {
@@ -317,15 +321,6 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     setOpen(false);
     setName('');
     setError('');
-  };
-
-  // Focus management with Dialog's callback
-  const _handleDialogEntered = () => {
-    setTimeout(() => {
-      if (nameInputRef.current) {
-        nameInputRef.current.focus();
-      }
-    }, 150); // Increased delay to ensure dialog is fully rendered
   };
 
   // Handle Enter key press in the name input
@@ -573,7 +568,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       handleClose();
       
       // Wait for dialog to fully close before dispatching event
-      setTimeout(() => {
+      scheduleTimeout(() => {
         console.log('SaveCrew: Dispatching saveCrewComplete event', {
           dialogOpen: document.querySelector('.MuiDialog-root') !== null
         });

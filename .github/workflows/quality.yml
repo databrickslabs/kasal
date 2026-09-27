@@ -15,11 +15,24 @@ concurrency:
 
 # Actions are pinned to full commit SHAs (the comment names the release);
 # Dependabot (.github/dependabot.yml) proposes the bumps.
+#
+# Runners are pinned to ubuntu-24.04 in every workflow: `ubuntu-latest` moves to
+# Ubuntu 26.04 on 2026-10-19, and an unplanned image change must not be what
+# turns a required check red. Move the pin deliberately, after a
+# workflow_dispatch trial on the new image passes.
 
 jobs:
+  # The test gate and the coverage gate are two jobs, so the one that answers
+  # "do the tests pass" finishes well inside its timeout. Before the split one
+  # job ran `-n 2 --cov` in 40 min: main's CI took 13-25 min at `-n 2` WITHOUT
+  # coverage, branch coverage multiplies that by 1.9-3.0 (measured), so it
+  # projected to 25-72 min and would have been cancelled. The public-repo
+  # ubuntu runner has 4 vCPUs, and going from 2 to 4 workers took 0.54-0.58x
+  # the time locally (tests/unit/services/tools, 4,347 tests). Projected:
+  # about 7-15 min here, 13-45 min for the coverage job.
   backend-tests:
-    name: Backend tests (+ coverage report)
-    runs-on: ubuntu-latest
+    name: Backend tests
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
       run:
@@ -33,11 +46,31 @@ jobs:
           python-version: '3.11'
           enable-cache: true
       - run: uv sync --frozen
-      # Coverage is REPORT-ONLY: there is no fail_under yet. Follow-up: set
-      # [tool.coverage.report] fail_under in src/backend/pyproject.toml from
-      # the total this job first reports, then ratchet it upwards.
-      - name: Tests with coverage
-        run: uv run python run_tests.py --parallel 2 --skip-lint --coverage
+      - name: Tests
+        run: uv run python run_tests.py --parallel 4 --skip-lint
+
+  # GATING: fails below [tool.coverage.report] fail_under (80, branch
+  # coverage) in src/backend/pyproject.toml. Runs the whole suite again under
+  # the tracer, hence the longer timeout; a test failure fails it too, but the
+  # job above is where to read test results.
+  backend-coverage:
+    name: Backend coverage (80% floor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Tests with coverage (fails under the floor)
+        run: uv run python run_tests.py --parallel 4 --skip-lint --coverage
       - name: Upload coverage report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -51,7 +84,7 @@ jobs:
   # formatting / lint / typing / architecture feedback in the same run.
   backend-lint:
     name: Backend format, lint, typing baseline, architecture
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -75,7 +108,7 @@ jobs:
 
   migrations:
     name: Migrations and schema on PostgreSQL
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
@@ -165,7 +198,7 @@ jobs:
           uv run alembic upgrade head
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -180,12 +213,16 @@ jobs:
           cache: npm
           cache-dependency-path: src/frontend/package-lock.json
       - run: npm ci
-      - run: npm run test:run
+      # 30 s per test instead of the 10 s in vitest.config.ts: a 4-vCPU runner
+      # running the whole suite is far more loaded than a dev machine, and
+      # interaction tests have timed out under full-run load before. Same value
+      # the coverage job uses; a genuinely hung test still fails.
+      - run: npm run test:run -- --testTimeout=30000
       # Warning RATCHET: the count ESLint reported when this landed. Lower the
       # number whenever warnings are fixed; never raise it. Passed here rather
       # than in package.json so local `npm run lint` output is unchanged.
       - name: Lint (warnings may not grow)
-        run: npm run lint -- --max-warnings 968
+        run: npm run lint -- --max-warnings 964
       - run: npm run build
 
   # Coverage is a separate, non-blocking job: the test gate above stays exactly
@@ -199,7 +236,7 @@ jobs:
   # artifact, remove the env switch, then drop continue-on-error.
   frontend-coverage:
     name: Frontend coverage report
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     continue-on-error: true
     defaults:

@@ -63,6 +63,14 @@ try:
 except Exception:
     pass
 
+# Build the LLM handler classes from the REAL transport LLM before any test can
+# patch it. `class VLLMFunctionCallingLLM(LLM)` evaluated while a test has
+# `src.core.llm.transport.LLM` patched becomes a MagicMock, stays cached, and
+# fails every later test in that xdist worker that imports the LLM manager
+# (`Forward reference must be an expression`): an order-dependent failure that
+# only shows up with some file-to-worker assignments.
+import src.services.llm.handlers  # noqa: E402,F401
+
 # Suppress noisy third-party warnings early (before module imports trigger them).
 # These come from pyspark (distutils), starlette (python_multipart), and mlflow
 # (type hints) and are not actionable — they originate in vendored dependencies.

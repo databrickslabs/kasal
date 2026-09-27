@@ -59,8 +59,8 @@ def run_tests(args, backend_dir):
     if args.markers:
         pytest_cmd.extend(["-m", args.markers])
 
-    # Add coverage options. Scope, branch mode and the (not yet set)
-    # fail_under floor live in [tool.coverage.*] in pyproject.toml.
+    # Add coverage options. Scope, branch mode and the fail_under floor (the
+    # run fails below it) live in [tool.coverage.*] in pyproject.toml.
     # coverage.xml is what CI uploads as an artifact.
     if args.coverage or args.html_coverage:
         pytest_cmd.extend(
