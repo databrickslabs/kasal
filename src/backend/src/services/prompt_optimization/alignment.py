@@ -53,6 +53,7 @@ from src.services.prompt_optimization.judge_registry import (
     uc_schema_of,
     with_guidelines,
 )
+from src.services.prompt_optimization.labels.review import trace_filter
 from src.utils.user_context import GroupContext, UserContext
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,9 @@ class JudgeAlignmentMixin(PromptOptimizationHost):
                     feedback_value_type=float,
                 )
                 traces = mlflow.search_traces(
-                    filter_string=f"tags.kasal_crew_id = '{crew_id}'",
+                    filter_string=trace_filter(
+                        crew_id, getattr(group_context, "primary_group_id", None)
+                    ),
                     max_results=TRACE_WINDOW,
                     return_type="list",
                 )

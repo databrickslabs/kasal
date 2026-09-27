@@ -22,6 +22,7 @@ from src.schemas.prompt_optimization import CrewOptimizationRequest
 from src.services.prompt_optimization import service as svc_module
 from src.services.prompt_optimization.builtin_judges import bridge
 from src.services.prompt_optimization.gepa import reflection as gepa_reflection
+from src.services.prompt_optimization.labels.review import ReviewHarvest
 from src.services.prompt_optimization.service import PromptOptimizationService
 from tests.unit.services.prompt_optimization.test_prompt_optimization_service import (
     _crew_fixture,
@@ -178,6 +179,7 @@ class TestStartValidatesTheSelection:
         service._record_run = AsyncMock()
         service._prune_runs = MagicMock()
         service._run_optimization = AsyncMock()
+        service._review_and_save = AsyncMock(return_value=ReviewHarvest())
         request = CrewOptimizationRequest(
             crew_id=crew.id, builtin_judges=builtin_judges
         )
@@ -200,7 +202,6 @@ class TestStartValidatesTheSelection:
         kwargs = self._start(["Completeness", "Safety"])
         assert kwargs["builtin_judges"] == ["Safety", "Completeness"]
 
-    @pytest.mark.parametrize("judge_id", ["Nope", "Correctness"])
-    def test_an_unusable_judge_is_refused_before_the_run(self, judge_id):
+    def test_an_unusable_judge_is_refused_before_the_run(self):
         with pytest.raises(ValueError):
-            self._start([judge_id])
+            self._start(["Nope"])

@@ -11,6 +11,8 @@ export interface PromptOptimizationStart {
   run_id: string;
   status: string;
   dataset_size: number;
+  /** Selected judges left out of the run, with why ("Correctness skipped: not labelled"). */
+  skipped_judges?: string[];
 }
 
 export interface PromptOptimizationRun {
@@ -93,8 +95,10 @@ export interface BuiltinJudge {
   /** gate: a "no" zeroes the judge score; graded: the verdict joins the mean. */
   role: 'gate' | 'graded';
   weight: number;
-  /** Needs an expected answer per example — not selectable yet. */
+  /** Needs labels: selectable only once one of `label_fields` is present. */
   needs_labels: boolean;
+  /** Expectation fields it reads (expected_facts, expected_response, guidelines). */
+  label_fields?: string[];
   /** Whether the server's MLflow provides this judge. */
   available: boolean;
 }
@@ -104,6 +108,21 @@ export interface CrewEval {
   timestamp_ms?: number | null;
   deliverable: string;
   assessment_count: number;
+}
+
+/** A crew's labels: what its deliverable must contain. */
+export interface CrewLabels {
+  expected_facts: string[];
+  expected_response: string;
+}
+
+/** A crew's confirmed labels, plus review notes offered as suggestions. */
+export interface CrewLabelsInfo {
+  labels: CrewLabels | null;
+  /** Never used as labels until the user accepts or edits one. */
+  suggestions: string[];
+  /** Review notes exist for Expectations guidelines to check against. */
+  has_review_notes: boolean;
 }
 
 export interface CrewOptimizationRequest {
@@ -116,6 +135,8 @@ export interface CrewOptimizationRequest {
   execution_timeout_seconds?: number;
   /** MLflow built-in judges (catalog ids) to grade with, on demand. */
   builtin_judges?: string[];
+  /** The labels the user confirmed (saved for the crew when changed). */
+  labels?: CrewLabels;
 }
 
 export interface StartOptimizationRequest {
@@ -163,6 +184,14 @@ export class PromptOptimizationService {
   static async getRun(runId: string): Promise<PromptOptimizationRun> {
     const response = await apiClient.get<PromptOptimizationRun>(
       `/prompt-optimization/runs/${runId}`,
+    );
+    return response.data;
+  }
+
+  /** The crew's confirmed labels and the suggested ones (this workspace only). */
+  static async getCrewLabels(crewId: string): Promise<CrewLabelsInfo> {
+    const response = await apiClient.get<CrewLabelsInfo>(
+      `/prompt-optimization/crew-labels/${crewId}`,
     );
     return response.data;
   }

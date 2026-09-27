@@ -425,7 +425,21 @@
       "builtinTitle": "MLflow built-in judges",
       "builtinHint": "Optional. They use the judge model above and run on demand; nothing is registered or scheduled.",
       "gate": "gate",
-      "noLabels": "no labels needed"
+      "noLabels": "no labels needed",
+      "needsLabels": "needs labels",
+      "needsExpected": "Add expected facts or an expected answer below",
+      "needsReviewNotes": "Needs review notes: grade past answers and say what they should contain"
+    },
+    "labels": {
+      "title": "Labels (optional)",
+      "facts": "Expected facts",
+      "factsHint": "One point per line that every good deliverable must contain.",
+      "answer": "Expected answer",
+      "suggested": "Suggested from your review notes (not used until you accept it)",
+      "accept": "Accept",
+      "edit": "Edit",
+      "editSuggestion": "Edit suggested fact",
+      "add": "Add"
     }
   }
 }

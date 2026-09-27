@@ -52,9 +52,6 @@ from src.services.prompt_optimization import (
     TemplateRunnerMixin,
     run_state,
 )
-from src.services.prompt_optimization.builtin_judges.catalog import (
-    resolve_selection,
-)
 from src.services.prompt_optimization.config import (
     DEFAULT_TARGET_MODEL,
     MIN_EXAMPLES,
@@ -105,6 +102,7 @@ from src.services.prompt_optimization.gepa.reflection import (  # noqa: F401
     _sync_llm_completion,
     _sync_run_crew,
 )
+from src.services.prompt_optimization.labels.operations import LabelOperationsMixin
 from src.services.prompt_optimization.run_state import (  # noqa: F401
     _LIVE_COUNTERS,
     _MAX_KEPT_RUNS,
@@ -185,6 +183,7 @@ class PromptOptimizationService(
     CrewRunnerMixin,
     JudgeOperationsMixin,
     JudgeAlignmentMixin,
+    LabelOperationsMixin,
     RunRegistryMixin,
 ):
     """Service for optimizing seeded prompt templates against logged usage."""
@@ -675,10 +674,9 @@ class PromptOptimizationService(
             rubric += f"\nAdditional guidance: {request.guidance}"
 
         rubric = await self._rubric_with_feedback(rubric, crew, group_context)
-        # Fail fast (400) on a built-in judge the run could not use (off the
-        # loop: the first check imports mlflow's scorer module).
-        selected = await asyncio.to_thread(resolve_selection, request.builtin_judges)
-        builtin_judges = [judge.id for judge in selected]
+        # Labels, review notes and the built-ins that count (400 on one the run
+        # could not use; a label judge without labels is skipped with a reason).
+        prepared = await self._prepare_run_labels(str(crew.id), request, group_context)
 
         # Fall back to the model the crew ACTUALLY runs on, not a global default.
         # Each agent keeps its own ``llm`` during optimization (agents_yaml below
@@ -740,7 +738,7 @@ class PromptOptimizationService(
             "baseline_template": baseline_doc,
             "baseline_fields": baseline_fields,
             "applied": False,
-            "human_feedback_count": 0,
+            "human_feedback_count": prepared.feedback_count,
             "candidates_tried": 0,
             "created_at": datetime.now(timezone.utc),
         }
@@ -770,12 +768,19 @@ class PromptOptimizationService(
                 group_context=group_context,
                 crew_traces_experiment=crew_traces_experiment,
                 judge_samples=judge_samples,
-                builtin_judges=builtin_judges,
+                builtin_judges=prepared.judge_ids,
+                label_expectations=prepared.expectations,
+                human_requirements=prepared.human_requirements,
             )
             # Spawned mid-request but outlives it: routed_scoped_session routes a
             # fresh session for this child task (different current_task()).
         )
-        return {"run_id": run_id, "status": "pending", "dataset_size": 1}
+        return {
+            "run_id": run_id,
+            "status": "pending",
+            "dataset_size": 1,
+            "skipped_judges": prepared.skipped,
+        }
 
     # -------------------------------------------------- crew eval feedback
 

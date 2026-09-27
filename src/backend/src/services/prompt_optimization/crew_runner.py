@@ -16,7 +16,6 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 from src.core.databricks_app import fallback_trace_experiment
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.crew_doc import (
-    _distill_requirements,
     _parse_crew_doc,
     _parse_requirement_lines,
 )
@@ -39,6 +38,7 @@ from src.services.prompt_optimization.gepa.reflection import (
 from src.services.prompt_optimization.gepa.registered_judges import (
     grade_registered_judges,
 )
+from src.services.prompt_optimization.labels.review import trace_tags
 from src.services.prompt_optimization.run_state import _RUNS
 from src.utils.user_context import GroupContext
 
@@ -68,18 +68,25 @@ class CrewRunnerMixin:
         crew_traces_experiment: str = "",
         judge_samples: Optional[int] = None,
         builtin_judges: Sequence[str] = (),
+        label_expectations: Optional[Dict[str, object]] = None,
+        human_requirements: Sequence[str] = (),
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
         template body's MLflow span setup; predict = execute the crew.
 
         ``crew_traces_experiment`` is the experiment to pin on the Databricks
         backend, resolved from the MLflow configuration (Configuration.tsx) by
-        the async caller — the source of truth, not a hardcoded default."""
+        the async caller — the source of truth, not a hardcoded default.
+
+        ``human_requirements`` (deduplicated review notes) and
+        ``label_expectations`` (the user's confirmed labels) were read by the
+        async caller (``labels.operations``) on either backend."""
         import copy
 
         user_token = (
             getattr(group_context, "access_token", None) if group_context else None
         )
+        group_id = getattr(group_context, "primary_group_id", None)
         os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
         import mlflow
         from mlflow.entities import Feedback
@@ -168,58 +175,13 @@ class CrewRunnerMixin:
                 logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")
 
             # HUMAN JUDGMENT via MLflow Assessments: every evaluation logs its
-            # deliverable as a trace (tagged kasal_crew_id); Feedback and
-            # Expectations the user adds on those traces in the MLflow UI are
-            # harvested here and folded into the judge's rubric on the NEXT run.
+            # deliverable as a trace (tagged with the crew and workspace);
+            # Feedback and Expectations the user adds on those traces were
+            # harvested at run start and steer the judge on this run.
             judge_rubric = rubric
             objective_for_training = objective
-            train_expectations: Dict[str, str] = {}
-            human_requirements: List[str] = []
-            if local_mode and crew_id:
-                try:
-                    prior = mlflow.search_traces(
-                        filter_string=f"tags.kasal_crew_id = '{crew_id}'",
-                        max_results=50,
-                        return_type="list",
-                    )
-                    # Oldest-first so the "keep the last 12" slice below keeps
-                    # the NEWEST notes (search order is not guaranteed).
-                    prior.sort(key=lambda t: t.info.request_time or 0)
-                    notes: List[str] = []
-                    req_texts: List[str] = []
-                    for trace in prior:
-                        for assessment in trace.search_assessments() or []:
-                            name = getattr(assessment, "name", "") or ""
-                            value = getattr(
-                                getattr(assessment, "feedback", None), "value", None
-                            )
-                            exp_value = getattr(
-                                getattr(assessment, "expectation", None),
-                                "value",
-                                None,
-                            )
-                            if exp_value is not None:
-                                req_texts.append(str(exp_value))
-                            if value is None:
-                                value = exp_value
-                            rationale = getattr(assessment, "rationale", None) or ""
-                            if rationale:
-                                req_texts.append(rationale)
-                            if value is not None or rationale:
-                                notes.append(
-                                    f"- {name}: {value if value is not None else ''} {rationale}".strip()
-                                )
-                    # Deduplicated constraints, NOT the grade litany: repeating
-                    # "human_grade: 0.0 ..." thirteen times anchored the judge
-                    # to zero even for a compliant answer (verified live A/B).
-                    human_requirements = _distill_requirements(req_texts)
-                    harvest_entry = _RUNS.get(cancel_run_id) if cancel_run_id else None
-                    if harvest_entry is not None:
-                        harvest_entry["human_feedback_count"] = len(notes)
-                except Exception as assess_err:
-                    logger.warning(
-                        f"Could not harvest MLflow assessments: {assess_err}"
-                    )
+            train_expectations: Dict[str, object] = dict(label_expectations or {})
+            human_requirements = list(human_requirements)
 
             if human_requirements:
                 # LLM-refine the raw complaints into testable imperatives —
@@ -274,7 +236,7 @@ class CrewRunnerMixin:
                 # Ground truth rides GEPA's expectations channel too — the
                 # reflective dataset surfaces it to the mutator as explicit
                 # targets, not just prose inside the request.
-                train_expectations = {"human_requirements": req_block[:2000]}
+                train_expectations["human_requirements"] = req_block[:2000]
                 # The requirements must ALSO reach GEPA's reflection model,
                 # which only sees training inputs and scorer feedback — a
                 # judge that grades 0 "because wrong region" is useless to a
@@ -349,6 +311,14 @@ class CrewRunnerMixin:
                 judge_model,
                 bridge.JudgeRoute(loop, group_context, user_token),
                 rubric=judge_rubric,
+                # The label judges' row: the user's labels, and the refined
+                # review requirements as ExpectationsGuidelines' guidelines.
+                expectations={
+                    **(label_expectations or {}),
+                    **(
+                        {"guidelines": human_requirements} if human_requirements else {}
+                    ),
+                },
             )
 
             def _apply_fields(fields: Dict[str, str]) -> Tuple[Any, Any]:
@@ -521,7 +491,8 @@ class CrewRunnerMixin:
                 # Log this evaluation as an MLflow trace so the user can attach
                 # Feedback/Expectations (Assessments panel) that steer the judge
                 # on the next run. Advisory only — never fail the eval over it.
-                if local_mode and crew_id:
+                # Both backends: the review is how labels are suggested.
+                if crew_id:
                     try:
                         with mlflow.start_span(name="crew_optimization_eval") as span:
                             span.set_inputs(
@@ -531,7 +502,9 @@ class CrewRunnerMixin:
                                 }
                             )
                             span.set_outputs({"deliverable": deliverable[:8000]})
-                            mlflow.update_current_trace(tags={"kasal_crew_id": crew_id})
+                            mlflow.update_current_trace(
+                                tags=trace_tags(crew_id, group_id)
+                            )
                     except Exception as trace_err:
                         # Warning, not debug: a lost trace means the user
                         # cannot grade that answer (a baseline eval vanished
