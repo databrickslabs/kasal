@@ -222,25 +222,6 @@ class DAXBaseKBIContext:
 
         return filter_expressions
 
-    def get_dax_constant_selection_expressions(self, table_name: str) -> List[str]:
-        """
-        Build DAX REMOVEFILTERS expressions for constant selection fields
-
-        Args:
-            table_name: The table name to use in REMOVEFILTERS
-
-        Returns:
-            List of REMOVEFILTERS strings for use in CALCULATE
-        """
-        if not self.fields_for_constant_selection:
-            return []
-
-        removefilters = []
-        for field in self.fields_for_constant_selection:
-            removefilters.append(f"REMOVEFILTERS({table_name}[{field}])")
-
-        return removefilters
-
     def get_target_columns_for_calculation(
         self, base_target_columns: Set[str]
     ) -> Set[str]:

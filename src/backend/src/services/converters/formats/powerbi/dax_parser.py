@@ -211,22 +211,6 @@ class DAXExpressionParser:
             "aggregation_type": simple_parse["aggregation_type"],
         }
 
-    def check_transpilability(
-        self, expression: str, measures_list: Optional[List[str]] = None
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Quick check if expression can be transpiled to SQL.
-
-        Args:
-            expression: DAX expression
-            measures_list: List of known measure names
-
-        Returns:
-            (is_transpilable, reason_if_not)
-        """
-        tokens = self._tokenize(expression, measures_list or [])
-        return self.transpilation_engine.can_transpile(tokens)
-
     def _empty_advanced_result(self) -> Dict[str, Any]:
         """Return empty result structure for advanced parsing."""
         return {

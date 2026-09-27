@@ -227,21 +227,6 @@ class Hierarchy:
     description: Optional[str] = None
     is_hidden: bool = False
 
-    def get_columns_ordered(self) -> List[str]:
-        """Get column names ordered by hierarchy level (top to bottom)"""
-        sorted_levels = sorted(self.levels, key=lambda x: x.ordinal)
-        return [level.column_name for level in sorted_levels]
-
-    def to_sql_comment(self) -> str:
-        """Generate SQL comment documenting the hierarchy"""
-        level_info = " → ".join(
-            [
-                f"{level.name} ({level.column_name})"
-                for level in sorted(self.levels, key=lambda x: x.ordinal)
-            ]
-        )
-        return f"-- Hierarchy: {self.name} on table {self.table_name}\n-- Levels: {level_info}"
-
 
 @dataclass
 class SemanticModel:

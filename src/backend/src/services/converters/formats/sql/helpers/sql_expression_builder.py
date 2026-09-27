@@ -146,37 +146,6 @@ class SQLExpressionEngine:
             )
             return self._build_sum(column_name, table_name, context)
 
-    def build_filter(
-        self,
-        filter_expr: str,
-        table_name: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Build SQL filter expression (WHERE clause).
-
-        Args:
-            filter_expr: Filter expression to build
-            table_name: Source table name
-            context: Additional context
-
-        Returns:
-            SQL WHERE clause expression
-        """
-        if context is None:
-            context = {}
-
-        # Handle various filter formats
-        if not filter_expr or filter_expr.strip() == "":
-            return ""
-
-        # If it's already a valid SQL expression, return as-is
-        if self._is_valid_sql_filter(filter_expr):
-            return filter_expr
-
-        # Otherwise, build filter expression
-        return self._build_filter_expression(filter_expr, table_name, context)
-
     def build_case_when(
         self, conditions: List[Tuple[str, Any]], else_value: Any = None
     ) -> str:

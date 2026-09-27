@@ -155,19 +155,6 @@ class KbiFormulaParser:
 
         return var_names
 
-    def extract_dependencies(self, formula: str) -> Dict[str, List[str]]:
-        """
-        Extract all dependencies from formula
-
-        Returns:
-            Dictionary with keys: 'kbis', 'variables', 'columns'
-        """
-        return {
-            "kbis": self.extract_kbi_references(formula),
-            "variables": self.extract_variables(formula),
-            "columns": self._extract_column_references(formula),
-        }
-
     def _extract_kbi_references(self, formula: str) -> List[FormulaToken]:
         """Extract KBI reference tokens"""
         tokens = []

@@ -163,52 +163,6 @@ class TestConvertFilterToDAX:
         assert result == ""
 
 
-class TestValidateDaxSyntax:
-    """Lines 282-321: validate_dax_syntax"""
-
-    @pytest.fixture
-    def generator(self):
-        return DAXGenerator()
-
-    def test_valid_formula(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount])")
-        assert isinstance(is_valid, bool)
-
-    def test_unbalanced_parentheses(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount]")
-        assert is_valid is False
-        assert "Unbalanced parentheses" in msg
-
-    def test_invalid_not_in_syntax(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount] NOT IN {1,2})")
-        assert is_valid is False
-        assert "NOT IN" in msg
-
-    def test_and_outside_filter(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(T[a]) AND SUM(T[b])")
-        assert is_valid is False
-
-    def test_no_dax_function(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("Sales[Amount]")
-        assert is_valid is False
-        assert "No recognized DAX functions" in msg
-
-    def test_no_column_references(self, generator):
-        is_valid, msg = generator.validate_dax_syntax("SUM(100)")
-        assert is_valid is False
-
-    def test_valid_calculate_with_filter(self, generator):
-        formula = 'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "West"))'
-        is_valid, msg = generator.validate_dax_syntax(formula)
-        assert is_valid is True
-
-    def test_positive_valid_message(self, generator):
-        formula = "SUM(Sales[Amount])"
-        is_valid, msg = generator.validate_dax_syntax(formula)
-        # Should have some message
-        assert isinstance(msg, str)
-
-
 class TestProcessDefinitionAndDependencyTree:
     """Lines 325-410: process_definition and dependency tree building"""
 

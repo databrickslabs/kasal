@@ -276,56 +276,6 @@ measures:
 
     # ========== Generate SQL Documentation Tests ==========
 
-    def test_generate_sql_documentation_simple(self, transpiler, simple_uc_metrics):
-        """Test generating SQL documentation"""
-        result = transpiler.generate_sql_documentation(simple_uc_metrics)
-
-        assert isinstance(result, str)
-        assert "UC Metrics to SQL Transpilation" in result
-        assert "Version: 0.1" in result
-        assert "Description: Sales metrics" in result
-        assert "total_revenue" in result
-
-    def test_generate_sql_documentation_includes_individual_queries(
-        self, transpiler, uc_metrics_multiple_measures
-    ):
-        """Test documentation includes individual queries"""
-        result = transpiler.generate_sql_documentation(uc_metrics_multiple_measures)
-
-        assert "Individual Measure Queries" in result
-        assert "total_revenue" in result
-        assert "transaction_count" in result
-        assert "avg_transaction" in result
-
-    def test_generate_sql_documentation_includes_consolidated_query(
-        self, transpiler, uc_metrics_multiple_measures
-    ):
-        """Test documentation includes consolidated query"""
-        result = transpiler.generate_sql_documentation(uc_metrics_multiple_measures)
-
-        assert "Consolidated Query" in result
-        # Should have all measures in one query
-        consolidated_section = result.split("Consolidated Query")[1]
-        assert "total_revenue" in consolidated_section
-        assert "transaction_count" in consolidated_section
-
-    def test_generate_sql_documentation_with_filter(
-        self, transpiler, uc_metrics_with_filter
-    ):
-        """Test documentation includes filter information"""
-        result = transpiler.generate_sql_documentation(uc_metrics_with_filter)
-
-        assert "Common Filter: year = 2024" in result
-
-    def test_generate_sql_documentation_includes_table_references(
-        self, transpiler, simple_uc_metrics
-    ):
-        """Test documentation includes table references"""
-        result = transpiler.generate_sql_documentation(simple_uc_metrics)
-
-        assert "Source Tables:" in result
-        assert "main.sales.transactions" in result
-
     # ========== Window Function Tests ==========
 
     def test_transpile_with_window_function(self, transpiler):

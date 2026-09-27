@@ -92,21 +92,6 @@ class TestKbiFormulaParser:
         assert "surcharge" in vars
         assert "credit" in vars
 
-    def test_extract_dependencies_combined(self):
-        """Test extraction of all dependencies at once"""
-        parser = KbiFormulaParser()
-
-        formula = "[Base_Revenue] * (1 + $growth_rate) - overhead_cost"
-        deps = parser.extract_dependencies(formula)
-
-        assert "kbis" in deps
-        assert "variables" in deps
-        assert "columns" in deps
-
-        assert "Base_Revenue" in deps["kbis"]
-        assert "growth_rate" in deps["variables"]
-        assert "overhead_cost" in deps["columns"]
-
     def test_parse_formula_tokens(self):
         """Test full formula parsing into tokens"""
         parser = KbiFormulaParser()

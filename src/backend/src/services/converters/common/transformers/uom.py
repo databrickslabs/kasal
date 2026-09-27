@@ -4,7 +4,7 @@ Generates SQL/DAX code for unit of measure conversion based on KPI configuration
 Supports both fixed and dynamic UOM sources with predefined conversion presets.
 """
 
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from ...base.models import KPI
 
@@ -312,18 +312,3 @@ class UnitOfMeasureConverter:
         has_preset = bool(kbi.uom_preset)
 
         return has_source and has_target and has_preset
-
-    def get_supported_units(self, preset: str) -> List[str]:
-        """
-        Get list of supported units for a given preset.
-
-        Args:
-            preset: Conversion preset name
-
-        Returns:
-            List of supported unit codes
-        """
-        if preset not in self.CONVERSION_PRESETS:
-            return []
-
-        return list(self.CONVERSION_PRESETS[preset]["conversions"].keys())

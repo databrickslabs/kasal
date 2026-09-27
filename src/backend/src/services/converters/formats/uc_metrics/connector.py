@@ -11,7 +11,7 @@ This connector can be used to:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -126,68 +126,6 @@ class DatabricksConnector:
             self.logger.error(f"Connection validation error: {str(ex)}")
             return False
 
-    def get_catalogs(self) -> List[Dict[str, Any]]:
-        """
-        Get list of available Unity Catalog catalogs.
-
-        Returns:
-            List of catalog information dictionaries
-
-        Raises:
-            Exception: If API call fails
-        """
-        try:
-            headers = self.auth_service.get_headers()
-
-            response = requests.get(
-                f"{self.workspace_url}/api/2.1/unity-catalog/catalogs",
-                headers=headers,
-            )
-
-            response.raise_for_status()
-            result = response.json()
-
-            catalogs = result.get("catalogs", [])
-            self.logger.info(f"Found {len(catalogs)} catalogs")
-            return catalogs
-
-        except Exception as ex:
-            self.logger.error(f"Failed to get catalogs: {str(ex)}")
-            raise
-
-    def get_schemas(self, catalog: str) -> List[Dict[str, Any]]:
-        """
-        Get list of schemas in a catalog.
-
-        Args:
-            catalog: Catalog name
-
-        Returns:
-            List of schema information dictionaries
-
-        Raises:
-            Exception: If API call fails
-        """
-        try:
-            headers = self.auth_service.get_headers()
-
-            response = requests.get(
-                f"{self.workspace_url}/api/2.1/unity-catalog/schemas",
-                headers=headers,
-                params={"catalog_name": catalog},
-            )
-
-            response.raise_for_status()
-            result = response.json()
-
-            schemas = result.get("schemas", [])
-            self.logger.info(f"Found {len(schemas)} schemas in catalog '{catalog}'")
-            return schemas
-
-        except Exception as ex:
-            self.logger.error(f"Failed to get schemas: {str(ex)}")
-            raise
-
     def deploy_uc_metrics(
         self,
         catalog: str,
@@ -232,98 +170,6 @@ class DatabricksConnector:
             "UC Metrics deployment to Databricks is not yet implemented. "
             "This will be added in a future release."
         )
-
-    def get_metric_definitions(
-        self,
-        catalog: str,
-        schema: str,
-    ) -> List[Dict[str, Any]]:
-        """
-        Retrieve existing metric definitions from Unity Catalog.
-
-        Note: This is a placeholder for future implementation.
-
-        Args:
-            catalog: Catalog name
-            schema: Schema name
-
-        Returns:
-            List of metric definition dictionaries
-
-        Raises:
-            NotImplementedError: Retrieval not yet implemented
-        """
-        # TODO: Implement metric retrieval
-        # This would query Unity Catalog Metrics Store for existing metrics
-
-        self.logger.warning("Metric retrieval not yet implemented")
-        raise NotImplementedError(
-            "Retrieving existing UC Metrics is not yet implemented. "
-            "This will be added in a future release."
-        )
-
-    def validate_metric_definition(self, metrics_definition: str) -> Dict[str, Any]:
-        """
-        Validate UC Metrics definition without deploying.
-
-        Checks YAML syntax and validates against UC Metrics schema.
-
-        Args:
-            metrics_definition: UC Metrics YAML definition
-
-        Returns:
-            Dict with validation results (valid: bool, errors: List[str])
-        """
-        import yaml
-
-        try:
-            # Parse YAML
-            metrics_data = yaml.safe_load(metrics_definition)
-
-            # Basic validation
-            errors = []
-
-            # Check required fields
-            if "version" not in metrics_data:
-                errors.append("Missing required field: version")
-
-            if "measures" not in metrics_data:
-                errors.append("Missing required field: measures")
-            elif not isinstance(metrics_data["measures"], list):
-                errors.append("Field 'measures' must be a list")
-
-            # Validate each measure
-            for idx, measure in enumerate(metrics_data.get("measures", [])):
-                if not isinstance(measure, dict):
-                    errors.append(f"Measure {idx} must be a dictionary")
-                    continue
-
-                if "name" not in measure:
-                    errors.append(f"Measure {idx}: Missing required field 'name'")
-
-                if "expr" not in measure:
-                    errors.append(f"Measure {idx}: Missing required field 'expr'")
-
-            # Return validation results
-            is_valid = len(errors) == 0
-            return {
-                "valid": is_valid,
-                "errors": errors,
-                "message": "Validation passed" if is_valid else "Validation failed",
-            }
-
-        except yaml.YAMLError as ex:
-            return {
-                "valid": False,
-                "errors": [f"YAML parsing error: {str(ex)}"],
-                "message": "Invalid YAML syntax",
-            }
-        except Exception as ex:
-            return {
-                "valid": False,
-                "errors": [f"Validation error: {str(ex)}"],
-                "message": "Validation failed",
-            }
 
     def __enter__(self):
         """Context manager entry - validate connection."""

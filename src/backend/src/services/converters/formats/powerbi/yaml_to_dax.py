@@ -243,51 +243,6 @@ class DAXGenerator:
 
         return f"CALCULATE(\n    {base_dax_formula},\n\n    {filters_formatted}\n)"
 
-    def validate_dax_syntax(self, dax_formula: str) -> tuple[bool, str]:
-        """Enhanced DAX syntax validation."""
-        issues = []
-
-        # Check for balanced parentheses
-        open_parens = dax_formula.count("(")
-        close_parens = dax_formula.count(")")
-        if open_parens != close_parens:
-            issues.append(
-                f"Unbalanced parentheses: {open_parens} open, {close_parens} close"
-            )
-
-        # Check for invalid NOT IN syntax
-        if "NOT IN" in dax_formula:
-            issues.append(
-                "Contains invalid 'NOT IN' syntax - should use 'NOT(column IN {})'"
-            )
-
-        # Check for raw AND operations outside FILTER functions
-        if " AND " in dax_formula and "FILTER(" not in dax_formula:
-            issues.append("Contains raw AND operations outside FILTER functions")
-
-        # Check for basic DAX function syntax
-        dax_functions = ["CALCULATE", "SUM", "COUNT", "AVERAGE", "MAX", "MIN", "FILTER"]
-        has_dax_function = any(func in dax_formula.upper() for func in dax_functions)
-        if not has_dax_function:
-            issues.append("No recognized DAX functions found")
-
-        # Check for table references
-        if "[" in dax_formula and "]" in dax_formula:
-            # Good - has column references
-            pass
-        else:
-            issues.append("No column references found (missing [column] syntax)")
-
-        # Positive validation for proper FILTER usage
-        if "CALCULATE(" in dax_formula and "FILTER(" in dax_formula:
-            if not issues:
-                return True, "Valid DAX with proper FILTER functions"
-
-        is_valid = len(issues) == 0
-        message = "DAX formula appears valid" if is_valid else "; ".join(issues)
-
-        return is_valid, message
-
     # Dependency Tree Building Methods
 
     def process_definition(self, definition: KPIDefinition) -> None:

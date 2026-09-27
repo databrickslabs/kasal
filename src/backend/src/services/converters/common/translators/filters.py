@@ -148,12 +148,3 @@ class FilterResolver:
         else:
             # Default case
             return f"'{clean_field}'[{field}] {operator} {value}"
-
-    def combine_filters(self, filters: List[str], logical_operator: str = "AND") -> str:
-        """Combine multiple filters with logical operators."""
-        if not filters:
-            return ""
-        if len(filters) == 1:
-            return filters[0]
-
-        return f" {logical_operator} ".join([f"({f})" for f in filters])

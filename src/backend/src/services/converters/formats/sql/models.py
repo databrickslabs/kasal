@@ -367,15 +367,6 @@ class SQLMeasure(BaseModel):
 
         return base_expression
 
-    def to_case_statement(self) -> str:
-        """Generate CASE statement for conditional logic"""
-        if not self.filters:
-            return self.to_sql_expression()
-
-        # Build CASE WHEN statement with filters
-        conditions = " AND ".join(self.filters)
-        return f"CASE WHEN {conditions} THEN {self.to_sql_expression()} ELSE NULL END"
-
 
 class SQLStructure(BaseModel):
     """SQL equivalent of SAP BW structures"""
@@ -429,18 +420,6 @@ class SQLDefinition(BaseModel):
     # Original KBI data for reference
     original_kbis: List[KPI] = Field(default=[])
 
-    def get_full_table_name(self, table_name: str) -> str:
-        """Get fully qualified table name"""
-        parts = []
-        if self.database:
-            parts.append(self.database)
-        if self.database_schema:
-            parts.append(self.database_schema)
-        parts.append(table_name)
-
-        # DATABRICKS and STANDARD both use dot notation
-        return ".".join(parts) if len(parts) > 1 else table_name
-
 
 class SQLTranslationOptions(BaseModel):
     """Options for SQL translation"""
@@ -487,31 +466,6 @@ class SQLTranslationResult(BaseModel):
     estimated_complexity: str = "LOW"  # LOW, MEDIUM, HIGH
     optimization_suggestions: List[str] = Field(default=[])
 
-    def get_primary_query(self, formatted: bool = True) -> Optional[str]:
-        """Get the main SQL query as a string"""
-        if self.sql_queries:
-            return self.sql_queries[0].to_sql(formatted=formatted)
-        return None
-
-    def get_all_sql_statements(self, formatted: bool = True) -> List[str]:
-        """Get all SQL statements as strings"""
-        statements = []
-
-        # Add any CREATE VIEW statements if requested
-        if self.translation_options.create_view_statements:
-            for i, query in enumerate(self.sql_queries):
-                view_name = f"vw_{query.original_kbi.technical_name if query.original_kbi else f'measure_{i+1}'}"
-                formatted_query = query.to_sql(formatted=formatted)
-                statements.append(
-                    f"CREATE OR REPLACE VIEW {view_name} AS\n{formatted_query}"
-                )
-
-        # Add the main queries
-        for query in self.sql_queries:
-            statements.append(query.to_sql(formatted=formatted))
-
-        return statements
-
     def get_formatted_sql_output(self) -> str:
         """Get beautifully formatted SQL output ready for copy-pasting"""
         if not self.sql_queries:
@@ -550,19 +504,3 @@ class SQLTranslationResult(BaseModel):
             output_lines.append(query.to_sql(formatted=True))
 
         return "\n".join(output_lines)
-
-    def get_measures_summary(self) -> Dict[str, Any]:
-        """Get summary of translated measures"""
-        return {
-            "total_measures": len(self.sql_measures),
-            "aggregation_types": list(
-                set(measure.aggregation_type.value for measure in self.sql_measures)
-            ),
-            "dialects": list(
-                set(measure.dialect.value for measure in self.sql_measures)
-            ),
-            "has_filters": sum(1 for measure in self.sql_measures if measure.filters),
-            "has_grouping": sum(
-                1 for measure in self.sql_measures if measure.group_by_columns
-            ),
-        }

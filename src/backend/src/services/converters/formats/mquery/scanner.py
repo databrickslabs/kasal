@@ -274,53 +274,6 @@ class PowerBIAdminScanner:
         )
         return semantic_models, raw_data
 
-    async def scan_multiple_workspaces(
-        self, workspace_ids: List[str], timeout_seconds: int = 600
-    ) -> Tuple[List[SemanticModel], Dict[str, Any]]:
-        """
-        Scan multiple workspaces at once.
-
-        Args:
-            workspace_ids: List of workspace IDs to scan
-            timeout_seconds: Maximum time to wait for scan
-
-        Returns:
-            Tuple of (list of SemanticModels, raw scan data)
-        """
-        # Initiate scan for all workspaces
-        scan_status = await self.initiate_scan(workspace_ids)
-
-        # Wait for completion
-        final_status = await self.wait_for_scan(
-            scan_status.scan_id,
-            timeout_seconds=timeout_seconds,
-            poll_interval=10,  # Longer poll interval for multi-workspace scans
-        )
-
-        if final_status.status != "Succeeded":
-            raise RuntimeError(f"Scan failed: {final_status.error}")
-
-        # Get results
-        raw_data = await self.get_scan_result(scan_status.scan_id)
-
-        # Parse into SemanticModels
-        semantic_models = []
-        for workspace in raw_data.get("workspaces", []):
-            ws_id = workspace.get("id")
-            ws_name = workspace.get("name")
-
-            for dataset in workspace.get("datasets", []):
-                model = SemanticModel.from_scan_result(
-                    dataset, workspace_id=ws_id, workspace_name=ws_name
-                )
-                semantic_models.append(model)
-
-        logger.info(
-            f"Extracted {len(semantic_models)} semantic model(s) "
-            f"from {len(workspace_ids)} workspace(s)"
-        )
-        return semantic_models, raw_data
-
     def extract_tables_with_mquery(
         self, semantic_model: SemanticModel, include_hidden: bool = False
     ) -> List[PowerBITable]:
@@ -458,30 +411,3 @@ class PowerBIAdminScanner:
         except Exception as e:
             logger.warning(f"Error fetching relationships via Execute Queries API: {e}")
             return []
-
-    async def enrich_model_with_relationships(
-        self, model: SemanticModel, workspace_id: str
-    ) -> SemanticModel:
-        """
-        Enrich a semantic model with relationships fetched via Execute Queries API.
-
-        This method is useful when the Admin API scan doesn't return relationships.
-        It uses the INFO.VIEW.RELATIONSHIPS() DAX function which reliably returns
-        all relationships in the model.
-
-        Args:
-            model: SemanticModel to enrich
-            workspace_id: Workspace ID containing the model
-
-        Returns:
-            SemanticModel with enriched relationships
-        """
-        if not model.relationships:
-            logger.info(
-                f"Model '{model.name}' has no relationships from Admin API scan, "
-                f"attempting to fetch via Execute Queries API..."
-            )
-            model.relationships = await self.fetch_relationships_via_execute_queries(
-                workspace_id=workspace_id, dataset_id=model.id
-            )
-        return model

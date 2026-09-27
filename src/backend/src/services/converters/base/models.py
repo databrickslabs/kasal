@@ -102,23 +102,6 @@ class KPIDefinition(BaseModel):
     structures: Optional[Dict[str, Structure]] = None
     kpis: List[KPI]
 
-    def get_expanded_filters(self) -> Dict[str, str]:
-        """
-        Get all filters as a flat dictionary for variable substitution.
-
-        Returns:
-            Dictionary of filter names to filter expressions
-        """
-        expanded_filters = {}
-        if self.filters:
-            for filter_group, filters in self.filters.items():
-                if isinstance(filters, dict):
-                    for filter_name, filter_value in filters.items():
-                        expanded_filters[filter_name] = filter_value
-                else:
-                    expanded_filters[filter_group] = str(filters)
-        return expanded_filters
-
 
 class DAXMeasure(BaseModel):
     """DAX measure output model"""

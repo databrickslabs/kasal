@@ -202,19 +202,6 @@ class SQLBaseKBIContext:
             or kbi.fields_for_exception_aggregation
         )
 
-    def get_sql_where_clause(self) -> str:
-        """
-        Build SQL WHERE clause from combined filters
-
-        Returns:
-            SQL WHERE clause string (without 'WHERE' keyword)
-        """
-        if not self.combined_filters:
-            return ""
-
-        # Join all filters with AND
-        return " AND ".join([f"({f})" for f in self.combined_filters])
-
     def get_target_columns_for_calculation(
         self, base_target_columns: Set[str]
     ) -> Set[str]:

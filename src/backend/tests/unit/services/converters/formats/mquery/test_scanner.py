@@ -18,7 +18,6 @@ from src.services.converters.formats.mquery.models import (
     ScanStatus,
     SemanticModel,
     StorageMode,
-    TableRelationship,
 )
 from src.services.converters.formats.mquery.scanner import PowerBIAdminScanner
 
@@ -480,65 +479,6 @@ async def test_scan_workspace_raises_on_failed_scan():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_scan_multiple_workspaces_returns_all_models():
-    """scan_multiple_workspaces returns models from all workspaces."""
-    scanner = _make_scanner()
-
-    raw_data = {
-        "workspaces": [
-            {
-                "id": "ws-1",
-                "name": "WS1",
-                "datasets": [
-                    {"id": "ds-1", "name": "Model1", "tables": [], "relationships": []}
-                ],
-            },
-            {
-                "id": "ws-2",
-                "name": "WS2",
-                "datasets": [
-                    {"id": "ds-2", "name": "Model2", "tables": [], "relationships": []}
-                ],
-            },
-        ]
-    }
-
-    async def mock_initiate(workspace_ids):
-        return ScanStatus(scan_id="scan-multi", status="Running")
-
-    async def mock_wait(scan_id, **kwargs):
-        return ScanStatus(scan_id=scan_id, status="Succeeded")
-
-    async def mock_get_result(scan_id):
-        return raw_data
-
-    scanner.initiate_scan = mock_initiate
-    scanner.wait_for_scan = mock_wait
-    scanner.get_scan_result = mock_get_result
-
-    models, _ = await scanner.scan_multiple_workspaces(["ws-1", "ws-2"])
-    assert len(models) == 2
-
-
-@pytest.mark.asyncio
-async def test_scan_multiple_workspaces_raises_on_failure():
-    """scan_multiple_workspaces raises RuntimeError when scan fails."""
-    scanner = _make_scanner()
-
-    async def mock_initiate(workspace_ids):
-        return ScanStatus(scan_id="scan-fail", status="Running")
-
-    async def mock_wait(scan_id, **kwargs):
-        return ScanStatus(scan_id=scan_id, status="Failed", error="Quota exceeded")
-
-    scanner.initiate_scan = mock_initiate
-    scanner.wait_for_scan = mock_wait
-
-    with pytest.raises(RuntimeError, match="Scan failed"):
-        await scanner.scan_multiple_workspaces(["ws-1", "ws-2"])
-
-
 # ---------------------------------------------------------------------------
 # extract_tables_with_mquery tests
 # ---------------------------------------------------------------------------
@@ -840,59 +780,3 @@ async def test_fetch_relationships_handles_cardinality_variants():
 # ---------------------------------------------------------------------------
 # enrich_model_with_relationships tests
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_enrich_model_skips_when_relationships_exist():
-    """enrich_model_with_relationships skips fetch when model has relationships."""
-    scanner = _make_scanner()
-
-    existing_rel = TableRelationship(
-        name="existing_rel",
-        from_table="A",
-        from_column="id",
-        to_table="B",
-        to_column="id",
-    )
-    model = SemanticModel(
-        id="ds-1",
-        name="Model",
-        tables=[],
-        relationships=[existing_rel],
-    )
-
-    enriched = await scanner.enrich_model_with_relationships(model, "ws-1")
-    # Should not have fetched additional relationships
-    assert len(enriched.relationships) == 1
-
-
-@pytest.mark.asyncio
-async def test_enrich_model_fetches_when_no_relationships():
-    """enrich_model_with_relationships fetches relationships when model has none."""
-    scanner = _make_scanner()
-
-    model = SemanticModel(
-        id="ds-1",
-        name="Model",
-        tables=[],
-        relationships=[],
-    )
-
-    fetched_rels = [
-        TableRelationship(
-            name="fetched_rel",
-            from_table="A",
-            from_column="id",
-            to_table="B",
-            to_column="id",
-        )
-    ]
-
-    async def mock_fetch(workspace_id, dataset_id):
-        return fetched_rels
-
-    scanner.fetch_relationships_via_execute_queries = mock_fetch
-
-    enriched = await scanner.enrich_model_with_relationships(model, "ws-1")
-    assert len(enriched.relationships) == 1
-    assert enriched.relationships[0].name == "fetched_rel"

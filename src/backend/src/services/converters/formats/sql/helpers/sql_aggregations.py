@@ -432,37 +432,6 @@ GROUP BY {", ".join(middle_group_by)}"""
         # DATABRICKS and STANDARD both support window functions
         return True
 
-    def build_conditional_aggregation(
-        self, base_aggregation: str, conditions: List[str], table_name: str
-    ) -> str:
-        """Build conditional aggregation with CASE WHEN logic"""
-        if not conditions:
-            return base_aggregation
-
-        # Combine conditions with AND
-        combined_condition = " AND ".join(conditions)
-
-        # Extract the aggregation function and column from base aggregation
-        # This is a simplified approach - real implementation would be more robust
-        if self.dialect == SQLDialect.DATABRICKS:
-            # Use FILTER clause where supported
-            return f"{base_aggregation} FILTER (WHERE {combined_condition})"
-        else:
-            # Use CASE WHEN for other dialects
-            # Extract column reference from base aggregation
-            column_pattern = r"\(([^)]+)\)"
-            match = re.search(column_pattern, base_aggregation)
-
-            if match:
-                column_ref = match.group(1)
-                agg_function = base_aggregation[: base_aggregation.find("(")]
-                case_expr = (
-                    f"CASE WHEN {combined_condition} THEN {column_ref} ELSE NULL END"
-                )
-                return f"{agg_function}({case_expr})"
-            else:
-                return base_aggregation
-
     def build_exception_handling(
         self, base_expression: str, exceptions: List[Dict[str, Any]]
     ) -> str:

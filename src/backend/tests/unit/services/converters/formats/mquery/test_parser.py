@@ -222,16 +222,6 @@ def test_parse_table_updates_expressions(parser):
 # ---------------------------------------------------------------------------
 
 
-def test_get_expression_summary(parser):
-    """get_expression_summary returns a dict with expected keys."""
-    expr = parser.parse_expression('Sql.Database("srv", "db")')
-    summary = parser.get_expression_summary(expr)
-    assert "type" in summary
-    assert "server" in summary
-    assert "database" in summary
-    assert summary["type"] == ExpressionType.SQL_DATABASE.value
-
-
 # ---------------------------------------------------------------------------
 # TableFromRowsConverter tests
 # ---------------------------------------------------------------------------
@@ -279,19 +269,6 @@ def test_extract_column_definitions(from_rows_converter):
     names = [c[0] for c in cols]
     assert "Name" in names
     assert "Age" in names
-
-
-def test_mquery_type_to_sql_known_types(from_rows_converter):
-    """mquery_type_to_sql converts known types to SQL equivalents."""
-    assert from_rows_converter.mquery_type_to_sql("text") == "STRING"
-    assert from_rows_converter.mquery_type_to_sql("number") == "DOUBLE"
-    assert from_rows_converter.mquery_type_to_sql("int64.type") == "BIGINT"
-    assert from_rows_converter.mquery_type_to_sql("type date") == "DATE"
-
-
-def test_mquery_type_to_sql_unknown_defaults_to_string(from_rows_converter):
-    """Unknown M-Query type defaults to STRING."""
-    assert from_rows_converter.mquery_type_to_sql("something_unknown") == "STRING"
 
 
 def test_convert_to_sql_full(from_rows_converter):

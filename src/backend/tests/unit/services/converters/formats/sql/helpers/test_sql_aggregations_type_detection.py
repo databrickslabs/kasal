@@ -268,47 +268,6 @@ class TestSQLAggregationBuilderWindowFunctions:
         assert "ROWS UNBOUNDED PRECEDING" in result
 
 
-class TestSQLAggregationBuilderConditional:
-    """Tests for build_conditional_aggregation"""
-
-    @pytest.fixture
-    def databricks_builder(self):
-        return SQLAggregationBuilder(SQLDialect.DATABRICKS)
-
-    @pytest.fixture
-    def standard_builder(self):
-        return SQLAggregationBuilder(SQLDialect.STANDARD)
-
-    def test_conditional_aggregation_databricks_uses_filter(self, databricks_builder):
-        """Test Databricks uses FILTER clause for conditional aggregation"""
-        result = databricks_builder.build_conditional_aggregation(
-            "SUM(amount)", ["status = 'active'"], "Sales"
-        )
-        assert "FILTER" in result
-        assert "WHERE" in result
-
-    def test_conditional_aggregation_standard_uses_case_when(self, standard_builder):
-        """Test Standard uses CASE WHEN for conditional aggregation"""
-        result = standard_builder.build_conditional_aggregation(
-            "SUM(amount)", ["status = 'active'"], "Sales"
-        )
-        assert "CASE WHEN" in result.upper() or "FILTER" in result
-
-    def test_conditional_aggregation_no_conditions(self, databricks_builder):
-        """Test conditional aggregation with no conditions returns base"""
-        base = "SUM(amount)"
-        result = databricks_builder.build_conditional_aggregation(base, [], "Sales")
-        assert result == base
-
-    def test_conditional_aggregation_multiple_conditions(self, databricks_builder):
-        """Test conditional aggregation with multiple conditions"""
-        result = databricks_builder.build_conditional_aggregation(
-            "SUM(amount)", ["status = 'active'", "year = 2024"], "Sales"
-        )
-        assert "status" in result
-        assert "year" in result
-
-
 class TestSQLAggregationBuilderExceptionHandling:
     """Tests for build_exception_handling"""
 

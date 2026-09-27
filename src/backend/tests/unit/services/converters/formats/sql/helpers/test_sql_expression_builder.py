@@ -243,21 +243,6 @@ class TestSQLExpressionEngine:
 
     # ========== Filter Building Tests ==========
 
-    def test_build_filter_empty(self, standard_engine):
-        """Test building filter with empty expression"""
-        result = standard_engine.build_filter("", "Sales")
-        assert result == ""
-
-    def test_build_filter_simple(self, standard_engine):
-        """Test building simple filter expression"""
-        result = standard_engine.build_filter("status = 'active'", "Sales")
-        assert "status = 'active'" in result
-
-    def test_build_filter_with_table(self, standard_engine):
-        """Test building filter expression with table name"""
-        result = standard_engine.build_filter("region = 'US'", "Sales")
-        assert result != ""
-
     # ========== CASE WHEN Building Tests ==========
 
     def test_build_case_when_simple(self, standard_engine):
