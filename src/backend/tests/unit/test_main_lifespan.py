@@ -437,8 +437,24 @@ class TestLifespanStartup:
                 pass
 
     @pytest.mark.asyncio
-    async def test_lifespan_seeding_enabled(self):
-        """When AUTO_SEED_DATABASE=True, seeders are triggered in background."""
+    @pytest.mark.parametrize(
+        "seed_error",
+        [None, "failure"],
+        ids=["seeding-succeeds", "seeding-fails-startup-continues"],
+    )
+    async def test_lifespan_seeding_enabled(self, seed_error):
+        """When AUTO_SEED_DATABASE=True, seeders are triggered in background.
+
+        A seeding failure is logged by the background task and never reaches
+        startup: the app still comes up (see src/seeds/startup.py).
+        """
+        from src.seeds.errors import SeedingError
+
+        side_effect = (
+            SeedingError({"example_crews": "no such table: agents"})
+            if seed_error
+            else None
+        )
         from fastapi import FastAPI
 
         from src.main import lifespan
@@ -456,7 +472,9 @@ class TestLifespanStartup:
                     "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
                         return_value=0
                     ),
-                    "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
+                    "src.seeds.seed_runner.run_all_seeders": AsyncMock(
+                        side_effect=side_effect
+                    ),
                     "src.main.SchedulerService": None,
                     "src.main.get_db": None,
                     "src.main.async_session_factory": None,
@@ -511,7 +529,10 @@ class TestLifespanStartup:
 
             ctx = lifespan(fake_app)
             async with ctx:
-                pass
+                # Startup finished; the background task swallows (and logs)
+                # a seeding failure instead of raising it.
+                await fake_app.state.seeder_task
+            mocks["src.seeds.seed_runner.run_all_seeders"].assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_lifespan_sqlite_table_check_exception(self):

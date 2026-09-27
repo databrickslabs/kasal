@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.seeds import model_configs, prompt_templates, seed_runner
+from src.seeds.errors import SeedingError
 
 
 class TestSeedRunnerModuleAttributes:
@@ -86,7 +87,8 @@ class TestRunSeedersFunction:
             "SEEDERS",
             {"fail_seeder": failing_seeder, "pass_seeder": passing_seeder},
         ):
-            await seed_runner.run_seeders(["fail_seeder", "pass_seeder"])
+            with pytest.raises(SeedingError, match="fail_seeder"):
+                await seed_runner.run_seeders(["fail_seeder", "pass_seeder"])
         failing_seeder.assert_awaited_once()
         passing_seeder.assert_awaited_once()
 
@@ -98,9 +100,8 @@ class TestRunAllSeedersFunction:
     async def test_run_all_seeders_empty(self):
         """Test run_all_seeders with no registered seeders."""
         with patch.object(seed_runner, "SEEDERS", {}):
-            with patch.object(seed_runner.logger, "warning") as mock_warn:
+            with pytest.raises(SeedingError):
                 await seed_runner.run_all_seeders()
-            mock_warn.assert_called()
 
     @pytest.mark.asyncio
     async def test_run_all_seeders_runs_fast_seeders(self):
@@ -116,7 +117,8 @@ class TestRunAllSeedersFunction:
         failing_seeder = AsyncMock(side_effect=Exception("boom"))
         with patch.object(seed_runner, "SEEDERS", {"tools": failing_seeder}):
             with patch.object(seed_runner.logger, "error"):
-                await seed_runner.run_all_seeders()
+                with pytest.raises(SeedingError, match="tools"):
+                    await seed_runner.run_all_seeders()
         failing_seeder.assert_awaited_once()
 
 

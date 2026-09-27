@@ -5,7 +5,7 @@
   "src/backend/src/core/logger.py": 838,
   "src/backend/src/db/lakebase_session.py": 852,
   "src/backend/src/db/session.py": 1167,
-  "src/backend/src/main.py": 1010,
+  "src/backend/src/main.py": 994,
   "src/backend/src/repositories/database_backup_repository.py": 1283,
   "src/backend/src/repositories/databricks_volume_repository.py": 1115,
   "src/backend/src/repositories/execution_history_repository.py": 1465,

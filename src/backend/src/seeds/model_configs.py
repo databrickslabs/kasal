@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from src.db.session import async_session_factory
 from src.models.model_config import ModelConfig
+from src.seeds.errors import SeederIncomplete
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -981,6 +982,11 @@ async def seed_async() -> None:
             await session.rollback()
             raise
 
+    # Raised after the commit: the valid models are kept, the run still fails.
+    # A retired-model prune failure above is NOT counted — it is best-effort.
+    if models_error:
+        raise SeederIncomplete("model_configs", models_error, len(models))
+
 
 async def seed() -> None:
     """Main entry point for seeding model configurations."""
@@ -993,7 +999,8 @@ async def seed() -> None:
         import traceback
 
         logger.error(f"Model configs seeding traceback: {traceback.format_exc()}")
-        # Don't re-raise - allow other seeds to run
+        # Re-raise: the runner still runs the other seeders, then reports this.
+        raise
 
 
 # For backwards compatibility or direct command-line usage

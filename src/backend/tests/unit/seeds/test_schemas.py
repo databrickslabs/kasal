@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.seeds.errors import SeederIncomplete
 from src.seeds.schemas import SAMPLE_SCHEMAS, seed, seed_async
 
 
@@ -275,10 +276,9 @@ class TestAsyncSeeding:
 
         # Patch SAMPLE_SCHEMAS with our test data
         with patch("src.seeds.schemas.SAMPLE_SCHEMAS", [sample_schema_data]):
-            # Should not raise - errors are logged
-            await seed_async()
-
-        # Verify error was handled (no crash)
+            # Every item is attempted, then the failure is reported.
+            with pytest.raises(SeederIncomplete):
+                await seed_async()
 
 
 class TestMainSeedFunction:
@@ -300,8 +300,9 @@ class TestMainSeedFunction:
         """Test seed execution with error."""
         mock_seed_async.side_effect = Exception("Seeding error")
 
-        # Should not raise exception (errors are logged)
-        await seed()
+        # Logged, then re-raised for the runner to report
+        with pytest.raises(Exception, match="Seeding error"):
+            await seed()
 
         mock_seed_async.assert_called_once()
 

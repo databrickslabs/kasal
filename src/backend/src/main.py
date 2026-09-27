@@ -363,63 +363,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "[WorkflowRecipes] Mining on run completion; back-filling history once"
         )
 
-    # Run database seeders after DB initialization
+    # Run database seeders after DB initialization.
+    #
+    # Whether a seeding failure blocks startup is decided per path:
+    # - a fresh Lakebase installation awaits seeding and REFUSES to start when
+    #   an essential seeder (models, tools, prompts) failed — it has nothing to
+    #   fall back on (seeds/installation.py);
+    # - everywhere else seeding runs in the background and a failure is logged
+    #   as an ERROR naming the failed seeders while the server keeps serving:
+    #   seeding upserts shipped defaults, and a failed demo-crew seed must not
+    #   take the dev server or an existing install down (seeds/startup.py).
     if db_initialized:
-        # Import needed for seeders
-        # pylint: disable=unused-import,import-outside-toplevel
-        from src.seeds.seed_runner import run_all_seeders
-
-        # Check if seeding is enabled
         should_seed = settings.AUTO_SEED_DATABASE
         system_logger.info(f"AUTO_SEED_DATABASE setting: {settings.AUTO_SEED_DATABASE}")
 
-        # Run seeders if enabled
         if should_seed and installed_database:
-            # A fresh installation must have its defaults before its first user
-            # request. This awaits async DB work on the server's own event loop.
             from src.seeds.installation import seed_installed_database
 
             await seed_installed_database()
         elif should_seed:
-            system_logger.info("Running database seeders...")
-            try:
-                # Always run seeders in background to avoid blocking startup
-                import asyncio
+            import asyncio
 
-                system_logger.info("Starting seeders in background...")
+            from src.seeds.startup import run_seeders_in_background
 
-                async def run_seeders_background() -> None:
-                    try:
-                        system_logger.info("Background seeders started...")
-                        await run_all_seeders()
-                        system_logger.info(
-                            "Background database seeding completed successfully!"
-                        )
-                    except Exception as e:
-                        system_logger.error(
-                            f"Error running background seeders: {str(e)}"
-                        )
-                        import traceback
-
-                        error_trace = traceback.format_exc()
-                        system_logger.error(
-                            f"Background seeder error trace: {error_trace}"
-                        )
-
-                # Create the background task and KEEP A REFERENCE: the loop holds
-                # tasks weakly, and an unreferenced one can be garbage-collected
-                # before it finishes (issue #9).
-                app.state.seeder_task = asyncio.create_task(run_seeders_background())
-                system_logger.info(
-                    "Seeders started in background, application startup continues..."
-                )
-            except Exception as e:
-                system_logger.error(f"Error starting seeders: {str(e)}")
-                import traceback
-
-                error_trace = traceback.format_exc()
-                system_logger.error(f"Seeder startup error trace: {error_trace}")
-                # Don't raise so app can start even if seeding fails
+            # KEEP A REFERENCE: the loop holds tasks weakly, and an
+            # unreferenced one can be garbage-collected before it finishes
+            # (issue #9).
+            app.state.seeder_task = asyncio.create_task(run_seeders_in_background())
+            system_logger.info(
+                "Seeders started in background, application startup continues..."
+            )
         else:
             system_logger.info("Database seeding skipped (AUTO_SEED_DATABASE is False)")
     else:

@@ -9,10 +9,11 @@ import logging
 import os
 import sys
 import traceback
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
 # Use centralized logger - no need for basicConfig
 from src.core.logger import get_logger
+from src.seeds.errors import SeedingError
 
 # Create module logger using centralized configuration
 logger = get_logger(__name__)
@@ -130,21 +131,47 @@ except (NameError, AttributeError) as e:
 logger.info(f"Available seeders: {list(SEEDERS.keys())}")
 
 
+async def _run_one(
+    seeder_name: str,
+    seeder_func: Callable[[], Awaitable[None]],
+    failures: Dict[str, str],
+) -> None:
+    """Run one seeder, recording (not raising) its failure.
+
+    The run carries on to the next seeder so one failure cannot hide another;
+    the caller raises SeedingError once every seeder has had its turn.
+    """
+    logger.info(f"Running {seeder_name} seeder...")
+    try:
+        debug_log(f"About to execute {seeder_name} seeder function")
+        await seeder_func()
+        logger.info(f"Completed {seeder_name} seeder.")
+    except Exception as e:
+        failures[seeder_name] = str(e) or type(e).__name__
+        logger.error(f"❌ {seeder_name} seeder FAILED: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+
+def _raise_if_failed(failures: Dict[str, str], ran: int) -> None:
+    """Log the run's outcome in one line and raise if anything failed."""
+    if failures:
+        error = SeedingError(failures)
+        logger.error(f"❌ Seeding FAILED: {error}")
+        raise error
+    logger.info(f"✅ All {ran} seeder(s) completed.")
+
+
 async def run_seeders(seeders_to_run: List[str]) -> None:
-    """Run the specified seeders."""
+    """Run the specified seeders; raise SeedingError if any of them failed."""
+    failures: Dict[str, str] = {}
+    ran = 0
     for seeder_name in seeders_to_run:
         if seeder_name in SEEDERS:
-            logger.info(f"Running {seeder_name} seeder...")
-            try:
-                debug_log(f"Calling {seeder_name}.seed() function")
-                await SEEDERS[seeder_name]()
-                logger.info(f"Completed {seeder_name} seeder.")
-            except Exception as e:
-                logger.error(f"Error running {seeder_name} seeder: {e}")
-                logger.error(traceback.format_exc())
-                # Continue to next seeder even if this one fails
+            await _run_one(seeder_name, SEEDERS[seeder_name], failures)
+            ran += 1
         else:
             logger.warning(f"Unknown seeder: {seeder_name}")
+    _raise_if_failed(failures, ran)
 
 
 async def run_all_seeders() -> None:
@@ -153,10 +180,11 @@ async def run_all_seeders() -> None:
     logger.info(f"Attempting to run {len(SEEDERS)} seeders: {list(SEEDERS.keys())}")
 
     if not SEEDERS:
-        logger.warning(
-            "No seeders are registered! Check if seeder modules were imported correctly."
+        # Only happens when the seeder modules failed to import (logged above);
+        # seeding nothing is a failure, not a successful empty run.
+        _raise_if_failed(
+            {"<registry>": "no seeders are registered; the seeder imports failed"}, 0
         )
-        return
 
     # Separate fast seeders from slow ones. Anything not explicitly fast runs
     # in the background so a slow seeder can never block startup (the removed
@@ -173,18 +201,15 @@ async def run_all_seeders() -> None:
     ]
     slow_seeders = [name for name in SEEDERS if name not in fast_seeders]
 
+    # Every seeder gets its turn even after one fails, so a single run reports
+    # every failure; SeedingError is raised at the end (after the sequence
+    # resync, which the rows that DID land still need).
+    failures: Dict[str, str] = {}
+
     # Run fast seeders first (sequentially as they're quick)
     for seeder_name, seeder_func in SEEDERS.items():
         if seeder_name in fast_seeders:
-            logger.info(f"Running {seeder_name} seeder...")
-            try:
-                debug_log(f"About to execute {seeder_name} seeder function")
-                await seeder_func()
-                logger.info(f"Completed {seeder_name} seeder successfully.")
-            except Exception as e:
-                logger.error(f"Error in {seeder_name} seeder: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                # Continue to next seeder even if current one fails
+            await _run_one(seeder_name, seeder_func, failures)
 
     # Then the slow ones, AWAITED. run_all_seeders itself already runs as a
     # background task (main.py), so nothing here blocks startup — and the old
@@ -196,20 +221,14 @@ async def run_all_seeders() -> None:
     # (issue #9). Awaiting also lets the sequence resync below see these rows.
     for seeder_name, seeder_func in SEEDERS.items():
         if seeder_name in slow_seeders:
-            logger.info(f"Running {seeder_name} seeder (after the fast seeders)...")
-            try:
-                debug_log(f"About to execute {seeder_name} seeder function")
-                await seeder_func()
-                logger.info(f"✅ {seeder_name} seeder completed successfully.")
-            except Exception as e:
-                logger.error(f"❌ Error in {seeder_name} seeder: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-    logger.info("✅ All seeders completed.")
+            await _run_one(seeder_name, seeder_func, failures)
 
     # Resync PostgreSQL sequences after seeding.
     # Seeds (and backup restores) insert rows with explicit IDs which leaves
     # PostgreSQL auto-increment sequences behind, causing duplicate-key errors.
     await resync_postgres_sequences()
+
+    _raise_if_failed(failures, len(SEEDERS))
 
 
 async def resync_postgres_sequences() -> None:
@@ -282,8 +301,9 @@ async def run_seeders_with_factory(
     exclude = exclude or set()
 
     if not SEEDERS:
-        logger.warning("No seeders registered — skipping run_seeders_with_factory")
-        return
+        _raise_if_failed(
+            {"<registry>": "no seeders are registered; the seeder imports failed"}, 0
+        )
 
     # Collect seeder modules that reference async_session_factory.
     # Use sys.modules to avoid NameError if a module failed to import.
@@ -317,28 +337,26 @@ async def run_seeders_with_factory(
         originals[mod] = mod.async_session_factory
         mod.async_session_factory = factory
 
+    failures: Dict[str, str] = {}
+    ran = 0
     try:
         for seeder_name, seeder_func in SEEDERS.items():
             if seeder_name in exclude:
                 logger.info(f"Skipping {seeder_name} seeder (excluded)")
                 continue
-            logger.info(f"Running {seeder_name} seeder with custom factory...")
-            try:
-                await seeder_func()
-                logger.info(f"Completed {seeder_name} seeder.")
-            except Exception as e:
-                logger.error(f"Error running {seeder_name} seeder: {e}")
-                logger.error(traceback.format_exc())
+            await _run_one(seeder_name, seeder_func, failures)
+            ran += 1
     finally:
         # Restore original factories
         for mod, original in originals.items():
             mod.async_session_factory = original
         logger.debug("Restored original session factory in all seeder modules")
+    _raise_if_failed(failures, ran)
 
 
 # Command-line entry point
-async def main() -> None:
-    """Main entry point for the seed runner."""
+async def main() -> int:
+    """Main entry point for the seed runner; returns the process exit code."""
     parser = argparse.ArgumentParser(description="Database seeding tool")
     parser.add_argument("--all", action="store_true", help="Run all seeders")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -360,18 +378,24 @@ async def main() -> None:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug mode enabled via command line")
 
-    # If --all is specified or no specific seeders are selected, run all
-    if args.all or all(
-        not getattr(args, seeder_name) for seeder_name in SEEDERS.keys()
-    ):
-        await run_all_seeders()
-    else:
-        # Run only the specified seeders
-        selected_seeders = [
-            seeder_name for seeder_name in SEEDERS.keys() if getattr(args, seeder_name)
-        ]
-        await run_seeders(selected_seeders)
+    try:
+        # If --all is specified or no specific seeders are selected, run all
+        if args.all or all(
+            not getattr(args, seeder_name) for seeder_name in SEEDERS.keys()
+        ):
+            await run_all_seeders()
+        else:
+            # Run only the specified seeders
+            selected_seeders = [
+                seeder_name
+                for seeder_name in SEEDERS.keys()
+                if getattr(args, seeder_name)
+            ]
+            await run_seeders(selected_seeders)
+    except SeedingError:
+        return 1  # already logged by _raise_if_failed
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

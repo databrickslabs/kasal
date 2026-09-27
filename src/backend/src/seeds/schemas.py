@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from src.db.session import async_session_factory
 from src.models.schema import Schema
+from src.seeds.errors import SeederIncomplete
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +296,7 @@ async def seed_async() -> None:
     schemas_added = 0
     schemas_updated = 0
     schemas_removed = 0
+    schemas_failed = 0
 
     for schema_data in SAMPLE_SCHEMAS:
         try:
@@ -325,6 +327,7 @@ async def seed_async() -> None:
                 await session.commit()
         except Exception as e:
             logger.error(f"Error processing schema {schema_data['name']}: {e}")
+            schemas_failed += 1
 
     # Prune schemas from earlier seed versions that no longer fit the routing model.
     for name in OBSOLETE_SCHEMA_NAMES:
@@ -340,10 +343,18 @@ async def seed_async() -> None:
                     schemas_removed += 1
         except Exception as e:
             logger.error(f"Error removing obsolete schema {name}: {e}")
+            schemas_failed += 1
 
     logger.info(
-        f"Schemas: {schemas_added} added, {schemas_updated} updated, {schemas_removed} removed"
+        f"Schemas: {schemas_added} added, {schemas_updated} updated, "
+        f"{schemas_removed} removed, {schemas_failed} failed"
     )
+    if schemas_failed:
+        raise SeederIncomplete(
+            "schemas",
+            schemas_failed,
+            len(SAMPLE_SCHEMAS) + len(OBSOLETE_SCHEMA_NAMES),
+        )
 
 
 async def seed() -> None:
@@ -352,6 +363,7 @@ async def seed() -> None:
         await seed_async()
     except Exception as e:
         logger.error(f"Schema seeding error: {e}")
+        raise
 
 
 if __name__ == "__main__":

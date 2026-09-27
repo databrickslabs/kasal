@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.seeds.errors import SeederIncomplete
 from src.seeds.prompt_templates import (
     DEFAULT_TEMPLATES,
     DETECT_INTENT_TEMPLATE,
@@ -232,13 +233,14 @@ class TestSeedEntryPoint:
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_seed_does_not_raise_on_error(self):
-        """Test that seed() suppresses exceptions and logs them."""
+    async def test_seed_reraises_on_error(self):
+        """seed() logs the failure and re-raises it for the runner to report."""
         with patch(
             "src.seeds.prompt_templates.seed_async", new_callable=AsyncMock
         ) as mock:
             mock.side_effect = Exception("Seed failure")
-            await seed()
+            with pytest.raises(Exception, match="Seed failure"):
+                await seed()
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -249,7 +251,8 @@ class TestSeedEntryPoint:
         ) as mock_async:
             with patch("src.seeds.prompt_templates.logger") as mock_logger:
                 mock_async.side_effect = Exception("Test error")
-                await seed()
+                with pytest.raises(Exception, match="Test error"):
+                    await seed()
 
                 mock_logger.info.assert_any_call(
                     "Starting prompt templates seeding process..."
@@ -456,7 +459,8 @@ class TestSeedAsyncCommitExceptions:
         ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
-                    await seed_async()
+                    with pytest.raises(SeederIncomplete):
+                        await seed_async()
 
         mock_template_session.rollback.assert_awaited()
         # Should log error (not warning)
@@ -494,14 +498,16 @@ class TestSeedAsyncCommitExceptions:
         # the `async with` statement. Since __aenter__ fails, session won't be
         # bound. But Python's `with` will raise before binding. The except block
         # references `session` which would be the mock_initial_session from the
-        # prior `async with` (the initial query). Let's just verify no crash.
+        # prior `async with` (the initial query). The failure is counted and
+        # reported as SeederIncomplete once every template has had its turn.
         with patch(
             "src.seeds.prompt_templates.async_session_factory",
             side_effect=session_factory,
         ):
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 with patch("src.seeds.prompt_templates.logger") as mock_logger:
-                    await seed_async()
+                    with pytest.raises(SeederIncomplete):
+                        await seed_async()
 
         mock_logger.error.assert_called()
 

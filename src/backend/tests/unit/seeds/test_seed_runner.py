@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.seeds import seed_runner
+from src.seeds.errors import SeedingError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -143,16 +144,19 @@ class TestRunSeeders:
         failing = AsyncMock(side_effect=RuntimeError("boom"))
         passing = AsyncMock()
         with patch.object(seed_runner, "SEEDERS", {"fail": failing, "pass": passing}):
-            await seed_runner.run_seeders(["fail", "pass"])
+            with pytest.raises(SeedingError) as exc:
+                await seed_runner.run_seeders(["fail", "pass"])
         failing.assert_awaited_once()
         passing.assert_awaited_once()
+        assert exc.value.failures == {"fail": "boom"}
 
     @pytest.mark.asyncio
     async def test_error_logged_on_failure(self):
         failing = AsyncMock(side_effect=ValueError("bad value"))
         with patch.object(seed_runner, "SEEDERS", {"broken": failing}):
             with patch.object(seed_runner.logger, "error") as mock_err:
-                await seed_runner.run_seeders(["broken"])
+                with pytest.raises(SeedingError):
+                    await seed_runner.run_seeders(["broken"])
         # First error call is the message, second is the traceback
         assert mock_err.call_count >= 1
         assert "bad value" in str(mock_err.call_args_list[0])
@@ -183,15 +187,15 @@ class TestRunAllSeeders:
     """Tests for run_all_seeders()."""
 
     @pytest.mark.asyncio
-    async def test_empty_seeders_warns_and_returns(self):
+    async def test_empty_registry_is_a_failure(self):
+        # An empty SEEDERS means the seeder imports failed: not a clean run.
         with patch.object(seed_runner, "SEEDERS", {}):
-            with patch.object(seed_runner.logger, "warning") as mock_warn:
-                with patch.object(
-                    seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
-                ) as mock_resync:
+            with patch.object(
+                seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
+            ) as mock_resync:
+                with pytest.raises(SeedingError, match="no seeders are registered"):
                     await seed_runner.run_all_seeders()
-        mock_warn.assert_called()
-        # resync should NOT be called when SEEDERS is empty (early return)
+        # resync should NOT be called when SEEDERS is empty
         mock_resync.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -249,9 +253,11 @@ class TestRunAllSeeders:
             with patch.object(
                 seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
             ) as mock_resync:
-                await seed_runner.run_all_seeders()
+                with pytest.raises(SeedingError) as exc:
+                    await seed_runner.run_all_seeders()
         seeders["skills"].assert_awaited_once()
         mock_resync.assert_awaited_once()
+        assert list(exc.value.failures) == ["skills"]
 
     @pytest.mark.asyncio
     async def test_fast_seeder_failure_continues(self):
@@ -263,7 +269,8 @@ class TestRunAllSeeders:
             with patch.object(
                 seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
             ):
-                await seed_runner.run_all_seeders()
+                with pytest.raises(SeedingError):
+                    await seed_runner.run_all_seeders()
         failing.assert_awaited_once()
         passing.assert_awaited_once()
 
@@ -524,11 +531,10 @@ class TestRunSeedersWithFactory:
     """Tests for run_seeders_with_factory(factory, exclude)."""
 
     @pytest.mark.asyncio
-    async def test_empty_seeders_returns_early(self):
+    async def test_empty_registry_is_a_failure(self):
         with patch.object(seed_runner, "SEEDERS", {}):
-            with patch.object(seed_runner.logger, "warning") as mock_warn:
+            with pytest.raises(SeedingError, match="no seeders are registered"):
                 await seed_runner.run_seeders_with_factory(MagicMock())
-        mock_warn.assert_called()
 
     @pytest.mark.asyncio
     async def test_patches_session_factory_on_modules(self):
@@ -591,7 +597,8 @@ class TestRunSeedersWithFactory:
 
         with patch.object(seed_runner, "SEEDERS", seeders):
             with patch.dict("sys.modules", {"src.seeds.tools": fake_mod}):
-                await seed_runner.run_seeders_with_factory(custom_factory)
+                with pytest.raises(SeedingError):
+                    await seed_runner.run_seeders_with_factory(custom_factory)
 
         # Factory should still be restored despite the error
         assert fake_mod.async_session_factory is original_factory
@@ -699,7 +706,8 @@ class TestRunSeedersWithFactory:
 
         with patch.object(seed_runner, "SEEDERS", seeders):
             with patch.object(seed_runner.logger, "error") as mock_err:
-                await seed_runner.run_seeders_with_factory(MagicMock())
+                with pytest.raises(SeedingError):
+                    await seed_runner.run_seeders_with_factory(MagicMock())
 
         failing.assert_awaited_once()
         passing.assert_awaited_once()
