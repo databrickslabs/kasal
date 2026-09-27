@@ -189,11 +189,7 @@ REVIEWED_NOT_SECRET = {
 # NOT reviewed safe: real whole-config logs left open because the file belongs
 # to parallel work. Recorded so the guard stays green without hiding them; fix
 # (log keys/counts) and delete the entry. Shrink-only, like the list above.
-KNOWN_WHOLE_CONFIG_LEAKS = {
-    # INFO: the schedule's agents/tasks YAML, which can carry tool_configs.
-    ("services/scheduling/scheduler.py", "agents_yaml"),
-    ("services/scheduling/scheduler.py", "tasks_yaml"),
-}
+KNOWN_WHOLE_CONFIG_LEAKS: set[tuple[str, str]] = set()
 ALLOWED = REVIEWED_NOT_SECRET | KNOWN_WHOLE_CONFIG_LEAKS
 
 
