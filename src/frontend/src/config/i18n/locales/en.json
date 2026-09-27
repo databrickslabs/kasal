@@ -100,7 +100,28 @@
       "enableAll": "Enable All",
       "disableAll": "Disable All",
       "enableAllSuccess": "All models enabled successfully",
-      "disableAllSuccess": "All models disabled successfully"
+      "disableAllSuccess": "All models disabled successfully",
+      "decisionModel": {
+        "title": "Decision model",
+        "provider": "Provider: {{name}}",
+        "disclosure": "Off by default. Enable a decision model for supported decisions in this workspace. When off, Kasal uses its existing approach. Unavailable or uncertain decision model answers also fall back to that approach. Relevant prompts and candidate content are sent to the decision model provider when enabled.",
+        "toggle": "Use a decision model",
+        "keyConfigured": "Uses {{key}} from Configuration → API Keys.",
+        "keyMissing": "Add {{key}} in Configuration → API Keys, then reopen this panel.",
+        "openApiKeys": "Open API Keys",
+        "loadError": "Could not load decision model settings. Reopen Configuration to retry.",
+        "saveError": "Could not save decision model settings. A workspace admin and an API key are required to enable the decision model.",
+        "saved": "Decision model settings saved.",
+        "saving": "Saving decision model settings…",
+        "recommend": "Ask the decision model for a recommendation",
+        "systemCaption": "Applies to every workspace. Each workspace admin still turns the decision model on for their workspace in its Models settings, with the workspace's own {{key}}.",
+        "urlLabel": "{{name}} API URL",
+        "urlHelp": "Where the {{name}} decisions API lives. Empty keeps the decision model off for every workspace.",
+        "urlHttps": "Must start with https://",
+        "urlSaved": "{{label}} saved.",
+        "urlSaveError": "Could not save the {{label}}.",
+        "save": "Save"
+      }
     }
   },
   "runHistory": {

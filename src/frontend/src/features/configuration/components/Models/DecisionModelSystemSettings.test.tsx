@@ -1,0 +1,95 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import DecisionModelSystemSettings from './DecisionModelSystemSettings';
+import { EngineConfigService } from '../../../../api/config/EngineConfigService';
+import type { EngineSettings } from '../../../../types/config/engines';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_key: string, options: Record<string, string>) =>
+      (options.defaultValue ?? _key).replace(/{{(\w+)}}/g, (_m, name: string) => options[name] ?? ''),
+  }),
+}));
+vi.mock('../../../../api/config/EngineConfigService', () => ({
+  EngineConfigService: { getSettings: vi.fn(), updateSettings: vi.fn() },
+}));
+
+function settings(overrides: Partial<EngineSettings> = {}): EngineSettings {
+  return {
+    jev_api_base: null,
+    agent_max_execution_time: 900,
+    agent_max_execution_time_default: 900,
+    budgets: {},
+    budget_defaults: {},
+    ...overrides,
+  } as EngineSettings;
+}
+
+describe('DecisionModelSystemSettings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(EngineConfigService.getSettings).mockResolvedValue(settings());
+  });
+
+  it('renders nothing when the viewer may not read system settings', async () => {
+    vi.mocked(EngineConfigService.getSettings).mockRejectedValue({ response: { status: 403 } });
+    const { container } = render(<DecisionModelSystemSettings />);
+    await waitFor(() => expect(EngineConfigService.getSettings).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('is the Decision model card with Jev as its provider', async () => {
+    render(<DecisionModelSystemSettings />);
+    expect(await screen.findByText('Decision model')).toBeInTheDocument();
+    expect(screen.getByText('Provider: Jev')).toBeInTheDocument();
+    expect(screen.getByText(/workspace's own JEV_API_KEY/)).toBeInTheDocument();
+  });
+
+  it('saves the Jev API URL to the existing jev_api_base setting and refuses plain http', async () => {
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
+      settings({ jev_api_base: 'https://jev.example.com' }),
+    );
+    render(<DecisionModelSystemSettings />);
+    const field = await screen.findByLabelText('Jev API URL');
+
+    fireEvent.change(field, { target: { value: 'http://jev.example.com' } });
+    expect(screen.getByText('Must start with https://')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    fireEvent.change(field, { target: { value: ' https://jev.example.com ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        jev_api_base: 'https://jev.example.com',
+      }),
+    );
+    expect(await screen.findByText('Jev API URL saved.')).toBeInTheDocument();
+  });
+
+  it('clears the URL by sending null', async () => {
+    vi.mocked(EngineConfigService.getSettings).mockResolvedValue(
+      settings({ jev_api_base: 'https://jev.example.com' }),
+    );
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(settings());
+    render(<DecisionModelSystemSettings />);
+    const field = await screen.findByLabelText('Jev API URL');
+    expect(field).toHaveValue('https://jev.example.com');
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({ jev_api_base: null }),
+    );
+  });
+
+  it('shows the server reason when a save is refused', async () => {
+    vi.mocked(EngineConfigService.updateSettings).mockRejectedValue({
+      response: { data: { detail: 'The Jev API URL must use https://' } },
+    });
+    render(<DecisionModelSystemSettings />);
+    fireEvent.change(await screen.findByLabelText('Jev API URL'), {
+      target: { value: 'https://jev.example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('The Jev API URL must use https://')).toBeInTheDocument();
+  });
+});

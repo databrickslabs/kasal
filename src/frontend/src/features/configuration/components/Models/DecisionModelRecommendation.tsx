@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { Alert, Button, Stack, TextField } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import { DecisionConfigService } from '../../../../api/config/DecisionConfigService';
 
+const K = 'configuration.models.decisionModel';
+
 /** A user-requested recommendation, never an automatic model change. */
-export default function JevRecommendation() {
+export default function DecisionModelRecommendation() {
+  const { t } = useTranslation();
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState('');
@@ -28,7 +32,7 @@ export default function JevRecommendation() {
       disabled={busy} inputProps={{ maxLength: 12000 }}
       onChange={(event) => { setPrompt(event.target.value); setResult(''); }} />
     <Button disabled={busy || !prompt.trim()} onClick={() => void recommend()} sx={{ alignSelf: 'flex-start' }}>
-      Ask Jev for a recommendation
+      {t(`${K}.recommend`, { defaultValue: 'Ask the decision model for a recommendation' })}
     </Button>
     {result && <Alert severity="info">{result}</Alert>}
   </Stack>;

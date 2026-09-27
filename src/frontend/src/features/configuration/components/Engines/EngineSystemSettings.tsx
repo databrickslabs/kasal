@@ -5,10 +5,7 @@ import {
   AccordionSummary,
   Alert,
   Box,
-  Button,
   Paper,
-  Stack,
-  TextField,
   Typography,
 } from '@mui/material';
 import { ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
@@ -27,16 +24,16 @@ const BUDGET_FIELDS: Record<string, { label: string; helper: string; max: number
 };
 
 /**
- * System-wide engine settings: the Jev API URL and, under Advanced, the agent
- * time limit, run budgets and server-wide memory/knowledge settings. These
- * replaced the JEV_API_BASE,
+ * System-wide engine settings, under Advanced: the agent time limit, run
+ * budgets and server-wide memory/knowledge settings. These replaced the
  * KASAL_AGENT_MAX_EXECUTION_TIME and KASAL_BUDGET_<MODE>_<FIELD> environment
- * variables, which a Databricks App never sets. Hidden unless the API lets the
- * viewer read them (system administrators).
+ * variables, which a Databricks App never sets. The decision model's provider
+ * URL (the Jev API URL) is stored in the same settings but edited under System
+ * administration → Models (`Models/DecisionModelSystemSettings`). Hidden
+ * unless the API lets the viewer read them (system administrators).
  */
 const EngineSystemSettings: React.FC = () => {
   const [settings, setSettings] = useState<EngineSettings | null>(null);
-  const [jevDraft, setJevDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -46,7 +43,6 @@ const EngineSystemSettings: React.FC = () => {
       .then((loaded) => {
         if (!active) return;
         setSettings(loaded);
-        setJevDraft(loaded.jev_api_base ?? '');
       })
       .catch(() => {
         // Not a system administrator (403) or unavailable: show nothing.
@@ -64,7 +60,6 @@ const EngineSystemSettings: React.FC = () => {
     try {
       const saved = await EngineConfigService.updateSettings(body);
       setSettings(saved);
-      setJevDraft(saved.jev_api_base ?? '');
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail;
       setError(detail || 'Could not save the engine settings.');
@@ -72,10 +67,6 @@ const EngineSystemSettings: React.FC = () => {
       setSaving(false);
     }
   };
-
-  const jevTrimmed = jevDraft.trim();
-  const jevInvalid = jevTrimmed !== '' && !jevTrimmed.startsWith('https://');
-  const jevChanged = jevTrimmed !== (settings.jev_api_base ?? '');
 
   return (
     <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
@@ -91,33 +82,6 @@ const EngineSystemSettings: React.FC = () => {
           {error}
         </Alert>
       )}
-
-      <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mb: 2 }}>
-        <TextField
-          size="small"
-          label="Jev API URL"
-          value={jevDraft}
-          onChange={(e) => setJevDraft(e.target.value)}
-          placeholder="https://jev.example.com"
-          error={jevInvalid}
-          helperText={
-            jevInvalid
-              ? 'Must start with https://'
-              : 'Where the Jev decisions API lives. Empty keeps Jev off for every workspace.'
-          }
-          inputProps={{ 'aria-label': 'Jev API URL' }}
-          sx={{ flex: 1, maxWidth: 480 }}
-        />
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={saving || jevInvalid || !jevChanged}
-          onClick={() => void patch({ jev_api_base: jevTrimmed || null })}
-          sx={{ mt: 0.5 }}
-        >
-          Save
-        </Button>
-      </Stack>
 
       <Accordion disableGutters variant="outlined">
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>

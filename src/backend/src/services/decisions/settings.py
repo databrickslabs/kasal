@@ -1,4 +1,7 @@
-"""Workspace opt-in; credentials belong to the existing API key service."""
+"""Workspace opt-in to the decision model (provider: Jev).
+
+Credentials belong to the existing API key service.
+"""
 
 import logging
 from typing import cast
@@ -55,20 +58,34 @@ class DecisionSettingsService:
         key = await self.api_keys.find_by_name(JEV_KEY_NAME)
         if update.enabled and not provider.is_configured():
             raise BadRequestError(
-                "Jev is not available on this deployment: a system admin must set the "
-                "Jev API URL in Configuration → Engines"
+                "No decision model is available on this deployment: a system admin "
+                "must set the Jev API URL in System administration → Models"
             )
         if update.enabled and not (key and key.encrypted_value):
             raise BadRequestError(
-                "Configure JEV_API_KEY in Configuration > API Keys before enabling Jev"
+                f"Configure {JEV_KEY_NAME} in Configuration > API Keys before enabling "
+                "the decision model"
             )
         try:
             await self.repository.save(self.group_id, update.enabled)
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
-            raise ConflictError(
-                "Jev settings changed concurrently. Reload and try again."
+            # Only a row that appeared since our read is a concurrent insert;
+            # anything else is a fault and must not be reported as one.
+            if await self.repository.get(self.group_id) is not None:
+                raise ConflictError(
+                    "Decision model settings changed concurrently. Reload and try again."
+                ) from exc
+            # decision_config holds only a workspace id and a flag: nothing
+            # secret in the statement, so the traceback is safe to log.
+            logger.exception(
+                "Saving decision model settings for workspace %s failed",
+                self.group_id,
+            )
+            raise KasalError(
+                "Could not save decision model settings: the database rejected the "
+                "change. Check the server log."
             ) from exc
         return DecisionConfigResponse(
             enabled=update.enabled,
