@@ -12,8 +12,6 @@ import {
   FormControl,
   IconButton,
   InputLabel,
-  ListItemText,
-  Menu,
   MenuItem,
   Paper,
   Select,
@@ -22,15 +20,11 @@ import {
   Typography,
   FormHelperText,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import GavelIcon from '@mui/icons-material/Gavel';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'react-hot-toast';
@@ -43,6 +37,8 @@ import {
   PromptOptimizationService,
 } from '../../../../api/config/PromptOptimizationService';
 import CrewOptimizeFrame from './CrewOptimizeFrame';
+import JudgePicker from './JudgePicker';
+import { useBuiltinJudges } from '../hooks/useBuiltinJudges';
 import { ModelService } from '../../../../api/config/ModelService';
 
 interface CrewOptimizeDialogProps {
@@ -159,7 +155,6 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
 
   // Custom LLM judges (registered scorers) — created here, used automatically.
   const [judges, setJudges] = useState<LLMJudge[]>([]);
-  const [assignAnchor, setAssignAnchor] = useState<HTMLElement | null>(null);
   const [showJudgeForm, setShowJudgeForm] = useState(false);
   const [judgeName, setJudgeName] = useState('');
   const [judgeCriteria, setJudgeCriteria] = useState('');
@@ -170,6 +165,8 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [savingEdit, setSavingEdit] = useState(false);
   const [deleteJudgeTarget, setDeleteJudgeTarget] = useState<LLMJudge | null>(null);
   const [deletingJudge, setDeletingJudge] = useState(false);
+  // MLflow built-in judges picked for the next run.
+  const builtin = useBuiltinJudges(open);
 
   const refreshRuns = useCallback(async () => {
     if (!crewId) return;
@@ -267,6 +264,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
         judge_model: runJudgeModel || undefined,
         guidance: guidance || undefined,
         max_metric_calls: budget,
+        builtin_judges: builtin.selected.length ? builtin.selected : undefined,
       });
       setExpandedRun(started.run_id);
       await refreshRuns();
@@ -562,174 +560,21 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               value={guidance} onChange={event => setGuidance(event.target.value)} multiline minRows={2} InputLabelProps={{ shrink: true }} />
           </Box>
 
-          {/* Judges */}
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              flexWrap: 'wrap',
-              mt: 2,
-              pt: 1.5,
-              borderTop: 0,
-              borderColor: 'divider',
-            }}
-          >
-            <GavelIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-              Scoring criteria
-              {judgeRegistry?.location && (
-                <>
-                  {' · '}
-                  {judgeRegistry.url ? (
-                    <a
-                      href={judgeRegistry.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: 'inherit' }}
-                    >
-                      {judgeRegistry.location}
-                    </a>
-                  ) : (
-                    judgeRegistry.location
-                  )}
-                </>
-              )}
-            </Typography>
-            <Chip
-              size="small"
-              variant="outlined"
-              label="Quality (built-in)"
-              title="Grades every deliverable 0-10 on completeness, specificity, and fidelity to the expected outputs"
-            />
-            {assignedJudges.map((j) => (
-              <Box
-                key={j.full_name || j.name}
-                sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}
-              >
-                <Chip
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                  clickable
-                  label={j.name}
-                  title={`${j.instructions || ''}\n\nClick to edit this judge.`}
-                  onClick={() => openEditJudge(j)}
-                  onDelete={() => handleUnassignJudge(j.full_name || j.name)}
-                />
-                <Tooltip
-                  title={`Align "${j.name}" to the grades you gave with it selected: it learns where it disagreed with you and scores like you from then on`}
-                >
-                  <span>
-                    <IconButton
-                      size="small"
-                      aria-label={`Align ${j.name}`}
-                      disabled={aligning !== null}
-                      onClick={() => void handleAlignJudge(j)}
-                    >
-                      {aligning === (j.full_name || j.name) ? (
-                        <CircularProgress size={14} />
-                      ) : (
-                        <AutoFixHighIcon sx={{ fontSize: 16 }} />
-                      )}
-                    </IconButton>
-                  </span>
-                </Tooltip>
-                {j.url && (
-                  <Tooltip title="Open this judge in MLflow">
-                    <IconButton
-                      size="small"
-                      component="a"
-                      href={j.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`Open ${j.name} in MLflow`}
-                    >
-                      <OpenInNewIcon sx={{ fontSize: 15 }} />
-                    </IconButton>
-                  </Tooltip>
-                )}
-              </Box>
-            ))}
-            {libraryJudges.length > 0 && (
-              <>
-                <Chip
-                  size="small"
-                  clickable
-                  variant="outlined"
-                  icon={<AddIcon sx={{ fontSize: 16 }} />}
-                  label="Assign"
-                  onClick={(e) => setAssignAnchor(e.currentTarget)}
-                />
-                <Menu
-                  anchorEl={assignAnchor}
-                  open={Boolean(assignAnchor)}
-                  onClose={() => setAssignAnchor(null)}
-                >
-                  {libraryJudges.map((j) => (
-                    <MenuItem
-                      key={j.full_name || j.name}
-                      onClick={() => {
-                        setAssignAnchor(null);
-                        void handleAssignJudge(j.name);
-                      }}
-                    >
-                      <ListItemText
-                        primary={<Typography variant="body2">{j.name}</Typography>}
-                        secondary={
-                          j.instructions ? (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{
-                                display: 'block',
-                                maxWidth: 320,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {j.instructions}
-                            </Typography>
-                          ) : undefined
-                        }
-                      />
-                      <Tooltip title="Edit judge">
-                        <IconButton
-                          size="small"
-                          edge="end"
-                          sx={{ ml: 1 }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAssignAnchor(null);
-                            openEditJudge(j);
-                          }}
-                        >
-                          <EditIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete from library">
-                        <IconButton
-                          size="small"
-                          edge="end"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAssignAnchor(null);
-                            setDeleteJudgeTarget(j);
-                          }}
-                        >
-                          <DeleteOutlineIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </Tooltip>
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </>
-            )}
-            <Button size="small" onClick={() => setShowJudgeForm((v) => !v)}>
-              {showJudgeForm ? 'Cancel' : '+ Custom criteria'}
-            </Button>
-          </Box>
+          {/* Judges: the registry's and MLflow's built-ins */}
+          <JudgePicker
+            judgeRegistry={judgeRegistry}
+            assignedJudges={assignedJudges}
+            libraryJudges={libraryJudges}
+            aligning={aligning}
+            showJudgeForm={showJudgeForm}
+            onToggleJudgeForm={() => setShowJudgeForm((v) => !v)}
+            onEdit={openEditJudge}
+            onUnassign={(fullName) => void handleUnassignJudge(fullName)}
+            onAlign={(judge) => void handleAlignJudge(judge)}
+            onAssign={(name) => void handleAssignJudge(name)}
+            onDeleteLibrary={setDeleteJudgeTarget}
+            builtin={builtin}
+          />
           {Object.values(alignments).map((a) => (
             <Alert
               key={a.full_name}

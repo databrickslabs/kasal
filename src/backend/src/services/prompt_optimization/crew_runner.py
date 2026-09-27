@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 import uuid
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from src.core.databricks_app import fallback_trace_experiment
 from src.services.prompt_optimization.gepa import reflection
@@ -23,15 +23,11 @@ from src.services.prompt_optimization.gepa.crew_doc import (
 from src.services.prompt_optimization.gepa.grading import (
     _grade_judge_verdict,
     _median_sample,
-    _parse_grade_from_text,
     _to_float,
 )
 from src.services.prompt_optimization.gepa.judge_memory import (
     JudgeMemory,
     majority_embedder,
-)
-from src.services.prompt_optimization.gepa.judge_model import (
-    _stored_judge_model_to_key,
 )
 from src.services.prompt_optimization.gepa.reflection import (
     _GEPA_REFLECTION_STATE,
@@ -39,6 +35,9 @@ from src.services.prompt_optimization.gepa.reflection import (
     _judge_sample_count,
     _make_reflection_fn,
     _preflight_reflection,
+)
+from src.services.prompt_optimization.gepa.registered_judges import (
+    grade_registered_judges,
 )
 from src.services.prompt_optimization.run_state import _RUNS
 from src.utils.user_context import GroupContext
@@ -68,6 +67,7 @@ class CrewRunnerMixin:
         group_context: Optional[GroupContext] = None,
         crew_traces_experiment: str = "",
         judge_samples: Optional[int] = None,
+        builtin_judges: Sequence[str] = (),
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
         template body's MLflow span setup; predict = execute the crew.
@@ -334,6 +334,22 @@ class CrewRunnerMixin:
                 )
                 for judge in registered_scorers
             }
+            # MLflow built-in judges the user picked for this run (mlflow is
+            # imported by now, so the lazy import below is safe).
+            from src.services.prompt_optimization.builtin_judges import bridge
+            from src.services.prompt_optimization.builtin_judges.runner import (
+                BuiltinJudgeRunner,
+            )
+            from src.services.prompt_optimization.builtin_judges.runner import (
+                combine as combine_builtin_verdicts,
+            )
+
+            builtin_runner = BuiltinJudgeRunner.for_run(
+                builtin_judges,
+                judge_model,
+                bridge.JudgeRoute(loop, group_context, user_token),
+                rubric=judge_rubric,
+            )
 
             def _apply_fields(fields: Dict[str, str]) -> Tuple[Any, Any]:
                 agents_over = copy.deepcopy(agents_yaml)
@@ -728,75 +744,26 @@ class CrewRunnerMixin:
                     grades.append(median_grade)
                     if median_rationale:
                         rationale_parts.append(median_rationale)
-                # Registered judges grade the SAME deliverable here rather than
-                # running as separate MLflow scorers — trace-based scorers were
-                # each re-triggering their own crew execution (observed live as
-                # bursts of one execution per judge), multiplying the budget.
-                # Registered judges are RENDERED AND INVOKED HERE through
-                # LLMManager — never via mlflow's own model client. The judge
-                # entity contributes its instructions, retrieved examples and model key;
-                # provider routing, keys and request quirks stay centralized
-                # in the manager (invoking judges through mlflow's client is
-                # what produced the retired-DeepSeek and Kimi failures).
-                for judge in registered_scorers:
-                    judge_name = getattr(judge, "name", "judge")
-                    try:
-                        instructions = judge_memories[judge_name].instructions(
-                            inputs=inputs.get("request", objective), outputs=text
-                        )
-                        rendered = (
-                            instructions.replace("{{ outputs }}", text)
-                            .replace("{{outputs}}", text)
-                            .replace(
-                                "{{ inputs }}", str(inputs.get("request", objective))
-                            )
-                            .replace(
-                                "{{inputs}}", str(inputs.get("request", objective))
-                            )
-                        )
-                        judge_reply = reflection._sync_llm_completion(
-                            loop,
-                            messages=[
-                                {
-                                    "role": "user",
-                                    "content": (
-                                        f"{rendered}\n\nEnd your reply with the "
-                                        "numeric grade 0-10 alone on the LAST line."
-                                    ),
-                                }
-                            ],
-                            model=_stored_judge_model_to_key(
-                                getattr(judge, "model", None)
-                            )
-                            or judge_model,
-                            max_tokens=1500,
-                            group_context=group_context,
-                            user_token=user_token,
-                        )
-                        grade = _parse_grade_from_text(judge_reply)
-                        if grade is None:
-                            logger.warning(
-                                f"Registered judge '{judge_name}' reply not "
-                                f"numeric; skipping: {judge_reply!r:.200}"
-                            )
-                        else:
-                            grades.append(grade)
-                            if judge_reply and judge_reply.strip():
-                                rationale_parts.append(
-                                    f"[{judge_name}] {judge_reply.strip()}"
-                                )
-                    except Exception as judge_err:
-                        if getattr(judge, "memory", None):
-                            # Do not silently drop an aligned judge from the
-                            # optimization metric when memory/provider access fails.
-                            raise RuntimeError(
-                                f"Aligned judge '{judge_name}' could not score with its memory"
-                            ) from judge_err
-                        logger.warning(
-                            f"Registered judge '{judge_name}' failed: {judge_err}"
-                        )
-                grade_value = sum(grades) / len(grades) if grades else 0.0
-                rationale = "\n".join(rationale_parts)[:4000]
+                # Custom judges (gepa/registered_judges.py), then the selected
+                # MLflow built-ins (builtin_judges/runner.py), fold into one grade.
+                request_text = str(inputs.get("request", objective))
+                custom_grades, custom_lines = grade_registered_judges(
+                    loop,
+                    registered_scorers,
+                    judge_memories,
+                    request_text,
+                    text,
+                    judge_model,
+                    group_context,
+                    user_token,
+                )
+                grades += custom_grades
+                rationale_parts += custom_lines
+                verdicts = (
+                    builtin_runner.score(request_text, text) if builtin_runner else []
+                )
+                grade_value, builtin_lines = combine_builtin_verdicts(grades, verdicts)
+                rationale = "\n".join(rationale_parts + builtin_lines)[:4000]
                 judge_cache[text_key] = (grade_value, rationale)
                 return Feedback(
                     name="output_correct", value=grade_value, rationale=rationale

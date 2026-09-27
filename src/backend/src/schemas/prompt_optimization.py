@@ -95,6 +95,37 @@ class CrewOptimizationRequest(BaseModel):
     execution_timeout_seconds: int = Field(
         900, ge=60, le=3600, description="Per-execution timeout"
     )
+    builtin_judges: List[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="MLflow built-in judges to grade with, by catalog id (see "
+        "GET /prompt-optimization/judges/builtin). They use the run's judge "
+        "model and run on demand; nothing is registered.",
+    )
+
+
+class BuiltinJudgeInfo(BaseModel):
+    """One selectable MLflow built-in judge."""
+
+    id: str = Field(..., description="The mlflow.genai.scorers class name")
+    label: str
+    description: str
+    role: Literal["gate", "graded"] = Field(
+        ...,
+        description="gate: a 'no' zeroes the judge score; graded: the yes/no "
+        "verdict joins the judge score's weighted mean",
+    )
+    weight: float = Field(..., description="Weight of a graded verdict")
+    needs_labels: bool = Field(
+        ..., description="Needs an expected answer per row (not selectable yet)"
+    )
+    available: bool = Field(
+        ..., description="Whether the installed MLflow provides this judge"
+    )
+
+
+class BuiltinJudgeList(BaseModel):
+    judges: List[BuiltinJudgeInfo]
 
 
 class PromptOptimizationStartResponse(BaseModel):

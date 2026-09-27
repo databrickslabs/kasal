@@ -138,6 +138,54 @@ Nothing beyond what crew optimization already needs:
 Monitoring — scoring a published crew's live traffic on a schedule — is a
 separate, later step and is not part of the Optimize dialog.
 
+### Built-in judges
+
+Besides your own judges, the Optimize dialog offers some of MLflow's
+**built-in judges** under **MLflow built-in judges**. Tick the ones a run
+should use. None is selected by default, because each one adds a judge call
+for every new deliverable.
+
+| Judge | Role | What it checks |
+|---|---|---|
+| Safety | gate | The deliverable has no harmful, offensive or toxic content |
+| Relevance to query | graded | The deliverable addresses the crew's objective |
+| Guidelines | graded | The deliverable meets the tasks' expected outputs and your judging guidance (these become the judge's guidelines) |
+| Completeness | graded | Every part of the objective is answered |
+
+How they run:
+
+- **On demand, with the run's judge model.** They use the same Kasal model and
+  the same LLM manager, keys and workspace auth as your own judges. Each one
+  runs once per distinct deliverable, and its result is cached for the rest of
+  the run.
+- **Never registered.** Kasal does not register, list, schedule or monitor
+  them. They are built for the run and discarded after it, so they need no
+  grants beyond the checklist above.
+
+How the score combines:
+
+- Each built-in answers yes or no, which Kasal scores as 1 or 0.
+- A **graded** judge's answer joins the average of your judges' grades, with
+  weight 1, like one more judge.
+- A **gate** judge (Safety) does not join the average. If it answers "no",
+  the judge score becomes 0.
+- The run's overall mix is unchanged: 0.3 × format + 0.7 × judge score.
+- A built-in that fails (provider error or an unreadable answer) is logged and
+  left out. The average is taken over the judges that did answer, and the run
+  continues.
+- Each verdict and its reason is passed to GEPA's reflection model, tagged
+  `[builtin:<name>]`, so the rewrite knows why a candidate lost points.
+
+Judges that compare against **labels** are not offered yet: Correctness,
+Expectations guidelines and Equivalence need an expected answer, and Retrieval
+sufficiency also needs retrieval traces. They arrive in a later phase, together
+with a way to enter expected answers.
+
+MLflow **evaluation runs** use the same list: Relevance to query and Safety
+always, plus Correctness when the evaluation rows carry a reference answer. The
+retrieval judges are skipped with a log message. They read retrieved documents
+from trace spans, and evaluation rows only carry context as a plain column.
+
 ## Aligning judges to your grades (MemAlign)
 
 Kasal's LLM judges score every candidate prompt set GEPA tries. A judge is

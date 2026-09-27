@@ -418,5 +418,14 @@
       "pickedDetail": "The decision model chose this model for the message.",
       "fellBackDetail": "The decision model did not choose, so the workspace default was used."
     }
+  },
+  "optimize": {
+    "judges": {
+      "yourJudges": "Your judges",
+      "builtinTitle": "MLflow built-in judges",
+      "builtinHint": "Optional. They use the judge model above and run on demand; nothing is registered or scheduled.",
+      "gate": "gate",
+      "noLabels": "no labels needed"
+    }
   }
 }

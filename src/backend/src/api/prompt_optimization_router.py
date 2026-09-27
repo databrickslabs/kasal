@@ -7,6 +7,7 @@ completed proposal as a group-scoped template override.
 """
 
 import logging
+from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
@@ -15,6 +16,8 @@ from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.prompt_optimization import (
+    BuiltinJudgeInfo,
+    BuiltinJudgeList,
     CrewOptimizationRequest,
     PromptOptimizationApplyResponse,
     PromptOptimizationRequest,
@@ -23,6 +26,7 @@ from src.schemas.prompt_optimization import (
     PromptOptimizationRunStatus,
     PromptOptimizationStartResponse,
 )
+from src.services.prompt_optimization.builtin_judges import catalog as builtin_catalog
 from src.services.prompt_optimization.service import PromptOptimizationService
 from src.utils.user_context import GroupContext
 
@@ -168,6 +172,20 @@ async def judge_registry_info(
     no registry resolves. Lets the Optimize dialog show the reason instead of
     an empty judge list."""
     return await PromptOptimizationService(session).judge_registry_info(group_context)
+
+
+@router.get("/judges/builtin", response_model=BuiltinJudgeList)
+async def list_builtin_judges(group_context: GroupContextDep) -> BuiltinJudgeList:
+    """The MLflow built-in judges a crew optimization run can select, with
+    whether the installed MLflow provides each. Read-only and not tenant data
+    (a static catalog), so any member may read it, like the judge list."""
+    entries = await builtin_catalog.list_with_availability()
+    return BuiltinJudgeList(
+        judges=[
+            BuiltinJudgeInfo(**asdict(judge), available=available)
+            for judge, available in entries
+        ]
+    )
 
 
 @router.post("/judges", response_model=None)
