@@ -293,7 +293,7 @@ class TestAutoUnderOpenRouter:
             2,
             "1",
         )
-        assert result.summary() == "Auto (Jev via OpenRouter) → claude-opus-5-5"
+        assert result.summary() == "Auto (Jev via OpenRouter) → claude-opus-5-5 (1.00)"
         request = seen[0]
         assert str(request.url) == f"{OPENROUTER_URL}/systemone"
         assert request.headers["Authorization"] == "Bearer or-key"

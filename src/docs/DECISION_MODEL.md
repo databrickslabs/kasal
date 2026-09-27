@@ -115,7 +115,7 @@ Step by step, in `src/backend/src/services/decisions/runtime.py`:
 4. **Look up the credential**, within an overall 6-second budget (`asyncio.timeout(6)`) that also covers the HTTP call. `credentials.decision_credential` opens an isolated session and asks `DecisionSettingsService.credential()` for the workspace's decrypted `JEV_API_KEY`. The service returns it only when that workspace's `decision_config` row is enabled. No row, not enabled, or no key means abstain.
 5. **Call the provider.** `provider.evaluate` posts the request with a 5-second HTTP timeout and redirects disabled.
 6. **Validate the answer.** `contracts.choices_from_response` turns the response into one `Choice` per question or raises.
-7. **Apply the confidence gate.** A `Choice` is accepted only when its `confidence` and the probability of its selected option are both at least 0.85. If any question in the request is not accepted, the whole decision abstains, with status `uncertain`.
+7. **Apply the confidence gate.** A `Choice` is accepted only when its `confidence` and the probability of its selected option are both at least 0.85. If any question in the request is not accepted, the whole decision abstains, with status `uncertain`. The one exception is Auto (`model_selection`), which passes `accept_uncertain=True`: it gets its valid answers back below the gate, while telemetry still records status `uncertain` (see [From index to model](#from-index-to-model)).
 8. **Record telemetry** and return the choices, or `None`.
 
 Any exception in steps 1 to 7 (timeout, HTTP error, malformed JSON, a failed contract check, an undecryptable key) is caught, logged as a one-line warning with only the exception type, and turned into an abstain. Only cancellation propagates.
@@ -243,7 +243,7 @@ The decision is made in the API process before the run exists, and the run conti
 - **Ids.** `ModelSelection` gets an OTel trace id and span id when it is made. `run_freeze.record` writes the decision row with them (`span_name` `kasal.decision.model_selection`, no parent) and keeps the selection by run id.
 - **Crew and flow runs.** `KasalEngineService` stamps the decision into the payload the subprocess receives (`auto_decision`, next to the harness). The run's `OTelEventBridge` emits the decision as a span with exactly those ids (the run's provider has a `SeedableIdGenerator`), and parents every span that would otherwise start a trace of its own to it. So the run's spans, and the `execution_trace` rows the DB exporter writes from them, share the decision's `trace_id`, and the run's root rows have the decision as `parent_span_id`. The DB exporter skips the decision span, since its row already exists. The MLflow exporter buffers it with the rest of the run's spans, so the MLflow trace holds both.
 - **The chosen model's calls.** LLM spans for the chosen model carry `kasal.auto.selected_model` and `kasal.auto.decision_span_id`; their rows carry `auto_selected_model` and `auto_decision_span_id` in `trace_metadata`. Calls to other models in the same run (an agent with its own explicit model) carry neither.
-- **Decision span attributes.** `kasal.decision.policy`, `.connection`, `.picked` (Jev's raw option, or the refused key), `.model`, `.status`, `.reason`, `.duration_ms`, `.candidates`. Never the prompt, never a key.
+- **Decision span attributes.** `kasal.decision.policy`, `.connection`, `.picked` (Jev's raw option, or the refused key), `.confidence` (the probability Jev gave that option), `.model`, `.status`, `.reason`, `.duration_ms`, `.candidates`. Never the prompt, never a key.
 - **Chat.** The chat path has no event bridge; it writes its rows by hand, and `auto_model.link_run_row` gives each the decision's `trace_id` and parent, and the LLM rows the two `auto_*` fields. The chat's MLflow trace (autolog) is not linked.
 
 ### What is sent
@@ -258,7 +258,9 @@ The request is skipped, and Auto falls back, when the workspace has no enabled m
 
 ### From index to model
 
-An accepted answer `"i"` maps to `models[i].key`, where `models` is the list Kasal built. A provider that answers with a model name, or anything that is not one of the offered keys, fails the contract check and the decision abstains (see [Opaque indices](#opaque-indices)).
+Auto takes Jev's top pick whatever its confidence, unless it answers `none`: the 0.85 gate does not apply to this policy. Any enabled model is at least as safe as the default Jev could not rank, and with many enabled models and thin metadata Jev rarely reaches 0.85 (a logic puzzle over 14 models came back at 0.61), so the gate made Auto fall back almost every time. The probability Jev gave the pick is recorded as `ModelSelection.confidence` and shown in the trace.
+
+An answer `"i"` maps to `models[i].key`, where `models` is the list Kasal built. A provider that answers with a model name, or anything that is not one of the offered keys, fails the contract check and the decision abstains (see [Opaque indices](#opaque-indices)).
 
 ### Fallback
 
@@ -278,7 +280,7 @@ Every fallback records why, as a short code in `ModelSelection.reason` (`runtime
 | `timeout` | decision model timed out | the 6-second budget or an HTTP timeout |
 | `unreachable` | decision model unreachable | connection refused or failed |
 | `provider_error` | decision model error | any other HTTP or contract failure |
-| `abstained` | decision model abstained | `none`, or under the confidence gate |
+| `abstained` | decision model abstained | `none` (the confidence gate does not apply to Auto) |
 | `router_picked_disabled_model` | decision model picked a model that is not enabled | the answer mapped to a key outside the enabled, non-router candidates; the row names it |
 
 ### Tenancy
@@ -288,7 +290,7 @@ The candidates are exactly what `GET /api/v1/models/enabled` returns for the req
 ### What is recorded
 
 - **Telemetry.** `runtime.decide` emits the usual `DecisionEvaluatedEvent` with policy `model_selection` whenever the provider was called (see [Observability](#observability)).
-- **The run's trace.** Once a run's history row exists, `run_freeze.record` writes one trace row for it: `event_type` `decision_evaluated`, `event_context` `model_selection`, `span_name` `kasal.decision.model_selection` with the decision's own `span_id` and `trace_id`, `output` `Auto (Jev) → <model>`, `Auto (Jev via OpenRouter) → <model>` or `Auto fell back to <model> (default: <reason>)`, and `trace_metadata` `{"policy", "requested", "model", "status", "reason", "connection", "picked", "candidates"}`. The run's own rows join its trace (see [How the decision and the call are tied together](#how-the-decision-and-the-call-are-tied-together)). It is written directly through `ExecutionTraceService` on a task of its own, because the run's event bridge is not listening yet, and on a private connection (`get_isolated_db_session`), like the other out-of-band trace writers. It used to share the routed session's connection: on SQLite that is one StaticPool connection for every session, so the request's session returning it rolled back the uncommitted row, and the write failed with "15 validation errors for ExecutionTraceItem ... MissingGreenlet". No row was ever saved. A chat message's pick is attributed to the answer run it starts when that run uses the picked model (`auto_model.selection_for`). A failed write logs a warning and never fails the run.
+- **The run's trace.** Once a run's history row exists, `run_freeze.record` writes one trace row for it: `event_type` `decision_evaluated`, `event_context` `model_selection`, `span_name` `kasal.decision.model_selection` with the decision's own `span_id` and `trace_id`, `output` `Auto (Jev) → <model> (<p>)`, `Auto (Jev via OpenRouter) → <model> (<p>)` (`<p>`: the probability Jev gave the pick, two decimals) or `Auto fell back to <model> (default: <reason>)`, and `trace_metadata` `{"policy", "requested", "model", "status", "reason", "connection", "picked", "confidence", "candidates"}`. The run's own rows join its trace (see [How the decision and the call are tied together](#how-the-decision-and-the-call-are-tied-together)). It is written directly through `ExecutionTraceService` on a task of its own, because the run's event bridge is not listening yet, and on a private connection (`get_isolated_db_session`), like the other out-of-band trace writers. It used to share the routed session's connection: on SQLite that is one StaticPool connection for every session, so the request's session returning it rolled back the uncommitted row, and the write failed with "15 validation errors for ExecutionTraceItem ... MissingGreenlet". No row was ever saved. A chat message's pick is attributed to the answer run it starts when that run uses the picked model (`auto_model.selection_for`). A failed write logs a warning and never fails the run.
 - **The API response.** `POST /dispatcher/dispatch` and `POST /executions` return `model_selection`: `{"requested": "auto", "model": "<key>", "status": "selected" | "fallback", "reason": <code or null>, "connection": "jev" | "openrouter"}`. It is absent (dispatch) or `null` (executions) when the request named a model.
 - **The chat.** The chat posts a run-activity step to the session that sent the message: "Auto → `<model>`", or "Auto → `<model>` (default: decision model unreachable)" on a fallback. The reasons are i18n keys, `chat.autoModel.reasons.<code>`; an unknown code shows "(default)".
 - **The server log.** `Auto model selection for workspace <id>: <model> (<status>[: <reason>])`, at info level.
@@ -399,7 +401,7 @@ Each decision that reached the provider emits a `DecisionEvaluatedEvent` on Kasa
 What each status means:
 
 - **`accepted`**: every answer passed the contract and the 0.85 confidence gate. The caller used the decision.
-- **`uncertain`**: the response was valid, but at least one answer fell below the gate. The caller used its existing path.
+- **`uncertain`**: the response was valid, but at least one answer fell below the gate. The caller used its existing path, except Auto, which still takes Jev's top pick (unless it is `none`).
 - **`fallback`**: the call or the response failed (timeout, HTTP error, redirect, malformed answer). The caller used its existing path.
 
 During a crew or flow run, the OpenTelemetry event bridge (`services/otel_tracing/event_bridge.py`) turns the event into a `kasal.decision.evaluate` span. The span is stored in `execution_trace` with `event_type` `decision_evaluated`, next to the run's other trace rows. Kasal's trace bus emits it directly; the CrewAI harness has no counterpart, as noted in `services/execution/harnesses/crewai/events.py`.

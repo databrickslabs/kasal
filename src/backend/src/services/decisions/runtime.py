@@ -50,9 +50,19 @@ async def decide(
 
 
 async def decide_with_reason(
-    policy: str, state: dict, questions: dict, *, group_id: str | None = None
+    policy: str,
+    state: dict,
+    questions: dict,
+    *,
+    group_id: str | None = None,
+    accept_uncertain: bool = False,
 ) -> tuple[dict[str, Choice] | None, str | None]:
-    """``decide``, plus why it abstained: ``(answers, None)`` or ``(None, reason)``."""
+    """``decide``, plus why it abstained: ``(answers, None)`` or ``(None, reason)``.
+
+    ``accept_uncertain`` returns valid answers that miss the confidence gate
+    instead of abstaining (Auto model selection only: its top pick is still
+    one of the enabled models). Telemetry still reports them as ``uncertain``.
+    """
     if not questions:
         return None, ABSTAINED
     started = monotonic()
@@ -87,7 +97,7 @@ async def decide_with_reason(
             status = (
                 "accepted" if all(a.accepted for a in answers.values()) else "uncertain"
             )
-            if status == "accepted":
+            if status == "accepted" or accept_uncertain:
                 return answers, None
             return None, ABSTAINED
     except asyncio.CancelledError:
