@@ -19,7 +19,7 @@ def tuned(memory: Any, name: str, default: T) -> T:
     """``memory.<name>`` when it has the type of ``default``, else ``default``."""
     value = getattr(memory, name, None)
     if isinstance(default, bool):
-        return value if isinstance(value, bool) else default  # type: ignore[return-value]
+        return value if isinstance(value, bool) else default
     if isinstance(value, bool):
         return default
     if isinstance(default, float) and isinstance(value, (int, float)):

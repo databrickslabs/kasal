@@ -29,7 +29,7 @@ except ImportError:
 
     logger.warning("rapidfuzz not installed — falling back to difflib (slower)")
 
-    def _fuzzy_score(query: str, candidate: str, threshold: int = 70) -> float:  # type: ignore[misc]
+    def _fuzzy_score(query: str, candidate: str, threshold: int = 70) -> float:
         ratio = (
             difflib.SequenceMatcher(None, query.lower(), candidate.lower()).ratio()
             * 100

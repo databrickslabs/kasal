@@ -27,7 +27,7 @@ try:
 except ImportError:
     import difflib
 
-    def _token_set_ratio(a: str, b: str) -> float:  # type: ignore[misc]
+    def _token_set_ratio(a: str, b: str) -> float:
         return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio() * 100
 
 

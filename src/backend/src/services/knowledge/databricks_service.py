@@ -418,7 +418,7 @@ class DatabricksKnowledgeService:
         if lower_name.endswith(".xls"):
             # Legacy binary .xls — openpyxl cannot read it.
             try:
-                import xlrd  # type: ignore
+                import xlrd  # type: ignore[import-untyped]
             except ImportError:
                 logger.error("xlrd not installed — cannot extract legacy .xls text")
                 return {

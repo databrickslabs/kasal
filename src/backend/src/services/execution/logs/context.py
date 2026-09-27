@@ -44,9 +44,9 @@ class ExecutionContextFormatter(logging.Formatter):
 
         if execution_id:
             # Add execution ID to the format
-            record.exec_id = f"[{execution_id[:8]}]"  # type: ignore[attr-defined]  # LogRecord takes extra attrs
+            record.exec_id = f"[{execution_id[:8]}]"
         else:
-            record.exec_id = ""  # type: ignore[attr-defined]  # LogRecord takes extra attrs
+            record.exec_id = ""
 
         # Use the original format with execution ID, preserving the prefix
         if record.exec_id:  # type: ignore[attr-defined]  # set just above
