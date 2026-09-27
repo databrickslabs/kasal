@@ -59,11 +59,15 @@ from src.services.agent_builder.execution_runner import (  # noqa: E402 - import
 from src.services.execution.base import (  # noqa: E402 - import follows module initialization
     BaseEngineService,
 )
+from src.services.execution.config.auto_model import (  # noqa: E402 - import follows module initialization
+    stamp_decision,
+)
 from src.services.execution.config_adapter import (  # noqa: E402 - import follows module initialization
     normalize_config,
     normalize_flow_config,
 )
 from src.services.execution.harness_choice import (  # noqa: E402 - import follows module initialization
+    HarnessName,
     dispatch_session,
     harness_for_execution,
     stamp_on_config,
@@ -86,6 +90,19 @@ from src.utils.user_context import (  # noqa: E402 - import follows module initi
 )
 
 logger = LoggerManager.get_instance().crew
+
+
+def _stamp_payload(
+    config: Dict[str, object], execution_id: str, engine: HarnessName
+) -> None:
+    """What the spawned interpreter must know before it parses the config.
+
+    The engine this run was created with (payload and environment), and the
+    run's Auto decision, which its trace continues (``auto_model``).
+    """
+    stamp_on_config(config, engine)
+    stamp_decision(config, execution_id)
+    os.environ.update(subprocess_env(engine))
 
 
 class KasalEngineService(BaseEngineService):
@@ -257,8 +274,7 @@ class KasalEngineService(BaseEngineService):
             # it to a different runtime than the one recorded against it.
             async with dispatch_session(session) as db:
                 engine = await harness_for_execution(db, execution_id)
-            stamp_on_config(execution_config, engine)
-            os.environ.update(subprocess_env(engine))
+            _stamp_payload(execution_config, execution_id, engine)
             logger.info(
                 f"[KasalEngineService] Execution {execution_id} engine: {engine}"
             )
@@ -610,8 +626,7 @@ class KasalEngineService(BaseEngineService):
             # every caller would pass as None.
             async with dispatch_session() as db:
                 engine = await harness_for_execution(db, execution_id)
-            stamp_on_config(flow_config, engine)
-            os.environ.update(subprocess_env(engine))
+            _stamp_payload(flow_config, execution_id, engine)
             flow_logger.info(
                 f"[KasalEngineService] Flow {execution_id} engine: {engine}"
             )

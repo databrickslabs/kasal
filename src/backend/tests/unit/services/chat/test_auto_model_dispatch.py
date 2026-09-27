@@ -81,6 +81,7 @@ async def test_router_reports_the_pick_and_the_service_never_sees_auto():
         "model": PICK.model,
         "status": "selected",
         "reason": None,
+        "connection": None,
     }
 
 

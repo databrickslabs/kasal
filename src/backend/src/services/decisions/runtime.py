@@ -57,7 +57,7 @@ async def decide_with_reason(
         return None, ABSTAINED
     started = monotonic()
     status = "fallback"
-    model = provider.MODEL
+    model = provider.model_for()
     key = None
     try:
         group_id = workspace_id(group_id)
@@ -74,7 +74,7 @@ async def decide_with_reason(
         ):
             return None, TOO_LARGE
         # No endpoint configured for this deployment: off, silently.
-        if not provider.is_configured():
+        if not provider.is_configured(policy):
             return None, NOT_CONFIGURED
         async with asyncio.timeout(6):
             from src.services.decisions.credentials import decision_credential
@@ -82,7 +82,7 @@ async def decide_with_reason(
             key = await decision_credential(group_id)
             if not key:
                 return None, NO_KEY
-            payload = await provider.evaluate(key, state, questions)
+            payload = await provider.evaluate(key, state, questions, policy)
             answers = choices_from_response(payload, questions)
             status = (
                 "accepted" if all(a.accepted for a in answers.values()) else "uncertain"

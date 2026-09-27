@@ -12,6 +12,8 @@ All OTel SDK dependencies are mocked to keep tests fast and isolated.
 import logging
 from unittest.mock import MagicMock, patch
 
+from src.services.otel_tracing.auto_decision import SeedableIdGenerator
+
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -111,7 +113,12 @@ class TestCreateKasalTracerProvider:
 
         create_kasal_tracer_provider("job-res")
 
-        mock_tp_cls.assert_called_once_with(resource=fake_resource)
+        mock_tp_cls.assert_called_once()
+        assert mock_tp_cls.call_args.kwargs["resource"] is fake_resource
+        # Seedable, so the run's Auto decision span keeps its row's ids.
+        assert isinstance(
+            mock_tp_cls.call_args.kwargs["id_generator"], SeedableIdGenerator
+        )
 
     @patch("src.services.otel_tracing.otel_config.TracerProvider")
     @patch("src.services.otel_tracing.otel_config.Resource")

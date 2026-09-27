@@ -6,10 +6,11 @@ connection has its own URL and its own per-workspace API key:
 - ``jev``: TypeSafe's native API. Decisions POST to ``{jev_api_base}/v1/systemone``
   and Auto asks Jev to choose among the workspace's enabled models. Key:
   ``JEV_API_KEY``.
-- ``openrouter``: OpenRouter's chat API. There is no native decision endpoint
-  there, so the choice-question policies abstain, and Auto resolves to the Jev
-  Router model, which picks the model and effort per request and answers
-  itself. Key: ``OPENROUTER_API_KEY``.
+- ``openrouter``: Jev through OpenRouter's System One route
+  (``{openrouter_api_base}/systemone``, see ``provider.py``). Auto asks it to
+  choose among the workspace's enabled models, exactly as under ``jev``, and
+  the chosen model then answers through its own provider. The other policies
+  abstain there. Key: ``OPENROUTER_API_KEY``.
 
 Before the setting existed, the only URL was ``jev_api_base``, and a deployment
 pointed it at OpenRouter. With no explicit connection, a ``jev_api_base`` on
@@ -36,6 +37,7 @@ KEY_NAMES = {JEV: "JEV_API_KEY", OPENROUTER: "OPENROUTER_API_KEY"}
 OPENROUTER_DEFAULT_BASE = "https://openrouter.ai/api/v1"
 
 #: The catalogue key of the Jev Router model (served as ``typesafe/jev-router``).
+#: Never an Auto answer: see ``model_selection.is_router_model``.
 JEV_ROUTER_KEY = "jev-router"
 
 

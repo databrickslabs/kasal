@@ -65,7 +65,7 @@ Auto appears at the top of the model list only when the decision model is availa
 2. Your workspace has the key that connection needs under **Configuration → API Keys**: `JEV_API_KEY` for the Jev API, `OPENROUTER_API_KEY` for OpenRouter.
 3. A workspace administrator has turned on **Use a decision model** (Workspace settings → **Models** → **Decision model**).
 
-Under the **OpenRouter** connection, Auto is **Jev Router**: every Auto message runs on `jev-router`, which picks the model and effort on OpenRouter's side. The activity step reads "Auto → jev-router".
+Under either connection, Auto first asks Jev which of your **enabled** models to use, then calls that model through its own provider. Under the **OpenRouter** connection the question goes to Jev through OpenRouter; the answer still comes from the chosen enabled model (for example Anthropic, with your `ANTHROPIC_API_KEY`), not from OpenRouter. Only enabled models ever answer an Auto message: Jev can only pick from that list, Kasal checks its pick against the list again, and a router model (Jev Router, `openrouter/auto`) is never offered. See [Under the OpenRouter connection](./DECISION_MODEL.md#under-the-openrouter-connection).
 
 When all three are true, Auto is also the default: a new chat, or a chat where you never picked a model, starts on Auto. When any of them is missing, there is no Auto option and the selector works as before.
 
@@ -75,7 +75,7 @@ Auto is a default, not a lock. Open the **+** menu, select **Model**, and pick a
 
 ### Seeing which model Auto picked
 
-After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) has the same pick as a `decision_evaluated` row, and the run's details show the model it ran on.
+After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) starts with the decision, "Auto (Jev via OpenRouter) → claude-opus-5-5" (or "Auto (Jev) → …" under the Jev API), followed by "LLM Request — claude-opus-5-5", the tool calls and "LLM Response — claude-opus-5-5". The decision and the calls share one trace id, in the run's rows and in its OpenTelemetry/MLflow trace, and the run's details show the model it ran on.
 
 ### When the decision model cannot decide
 
@@ -96,13 +96,15 @@ The `openrouter` provider calls OpenRouter's OpenAI-compatible chat API:
 - **Model id.** The model's `name` goes on the wire unchanged, vendor prefix included (`typesafe/jev-router`, `openai/...`). Kasal labels the LLM with provider `openrouter` so its own transport never strips an `openai/` or `anthropic/` prefix that belongs to OpenRouter.
 - **Parameters.** The usual per-model rules apply (`core/llm/model_capabilities.py`). OpenRouter ignores a parameter the served model does not support.
 
-**Jev Router** is seeded as `jev-router` (name `typesafe/jev-router`, provider `openrouter`, 1,000,000-token context, 32,768 output tokens), disabled like every non-Databricks model. It picks the model and reasoning effort for each request and answers itself. OpenRouter lists it with `supported_parameters: []`, so its capability entry refuses every sampling parameter (`temperature`, `top_p`, the penalties, `stop`) and offers no effort levels: Kasal sends none of them. Its output cap is conservative, since the model it picks has the real limit.
+**Jev Router** is seeded as `jev-router` (name `typesafe/jev-router`, provider `openrouter`, 1,000,000-token context, 32,768 output tokens), disabled like every non-Databricks model. It forwards each request to a model it picks from OpenRouter's whole catalogue, which can include models you never enabled (including anonymous "stealth" models that may log or train on prompts), and there is no way to restrict its choice. OpenRouter lists it with `supported_parameters: []`, so its capability entry refuses every sampling parameter (`temperature`, `top_p`, the penalties, `stop`) and offers no effort levels: Kasal sends none of them. Its output cap is conservative, since the model it picks has the real limit.
 
-You do not need to enable Jev Router for Auto: under the decision model's **OpenRouter** connection, Auto resolves to it for any workspace that is opted in and has `OPENROUTER_API_KEY` (see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto)). Enable it in Configuration → Models only if you also want to pick it by hand.
+**Auto never uses Jev Router**, under either connection, even when it is enabled: router models are not offered to the decision, are never the fallback, and the LLM builder refuses Jev Router as Auto's answer. Auto asks Jev itself (`typesafe/jev-1.13` on OpenRouter) to choose among your enabled models instead; see [Under the OpenRouter connection](./DECISION_MODEL.md#under-the-openrouter-connection). Enable Jev Router in Configuration → Models only if you want to pick it by hand, knowing it answers with models outside your list.
+
+**Privacy.** Under the OpenRouter connection, Auto's decision (the start and end of the message, at most 2,000 characters, and your enabled models' descriptions) goes through OpenRouter to TypeSafe. Turn off prompt logging and training for your OpenRouter key in the OpenRouter account's privacy settings.
 
 Things to know:
 
-- Jev Router's pick is shown on each call's response row. OpenRouter names the model that served in the response's `model` field (and in each streamed chunk). The transport reads it, and the run activity's row reads "LLM Response — anthropic/claude-opus-5-5 (628 chars)" while the request row still reads "LLM Request — jev-router". The Auto step still reads "Auto → jev-router", because Auto chooses before the call is made.
+- When you pick a router by hand, its pick is shown on each call's response row. OpenRouter names the model that served in the response's `model` field (and in each streamed chunk). The transport reads it, and the run activity's row reads "LLM Response — anthropic/claude-opus-5-5 (628 chars)" while the request row reads "LLM Request — jev-router".
 - This works for any provider, not only OpenRouter. The served id is shown only when it names a different model from the one requested. Both ids are compared after lowercasing, dropping a `vendor/` prefix and a `:variant` suffix, reading `.` and `_` as `-`, and removing date stamps. If either id then contains the other, they count as the same model. So Anthropic answering `claude-sonnet-4-5-20250929` for `claude-sonnet-4-5`, or a gateway adding a prefix, shows nothing extra (`core/llm/transport/served_model.py`).
 - `supported_parameters: []` also leaves open whether tool calls reach the model it picks. Kasal has not verified agent tool use through Jev Router; try a tool-using crew before relying on it.
 

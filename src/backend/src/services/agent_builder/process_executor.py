@@ -1023,7 +1023,7 @@ def run_crew_in_process(
                                 "kasal-event-bridge"
                             )
                             _otel_bridge = OTelEventBridge(
-                                _bridge_tracer, execution_id, group_context
+                                _bridge_tracer, execution_id, group_context, crew_config
                             )
                             _otel_bridge.register(event_bus)
                             async_logger.info(

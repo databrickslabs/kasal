@@ -5,6 +5,7 @@ connection and key, Auto under each connection, and the other policies
 abstaining under OpenRouter.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,7 +14,6 @@ import pytest
 from src.core.exceptions import BadRequestError
 from src.schemas.decision_config import DecisionConfigUpdate
 from src.services.decisions import connection, model_selection, provider, runtime
-from src.services.decisions.jev_router import select_router
 from src.services.decisions.model_selection import ModelSelection, select_for_workspace
 from src.services.decisions.policies import question
 from src.services.decisions.settings import DecisionSettingsService
@@ -202,10 +202,13 @@ class TestPoliciesUnderOpenRouter:
             {es.JEV_API_BASE: OPENROUTER_URL},
         ],
     )  # fmt: skip
-    async def test_every_policy_abstains_without_a_call(self, monkeypatch, settings):
-        """No /v1/systemone on OpenRouter: the same silent abstain as "off"."""
+    async def test_every_policy_but_auto_abstains_without_a_call(
+        self, monkeypatch, settings
+    ):
+        """Only Auto goes to OpenRouter; the rest stay as off as before."""
         configure(monkeypatch, **settings)
         assert provider.api_base() is None and not provider.is_configured()
+        assert provider.api_base("model_selection") == OPENROUTER_URL
         with (
             patch(
                 "src.services.decisions.credentials.decision_credential",
@@ -215,11 +218,7 @@ class TestPoliciesUnderOpenRouter:
                 "src.services.decisions.provider.evaluate", new_callable=AsyncMock
             ) as evaluate,
         ):
-            for policy in (
-                "knowledge_ranking",
-                "memory_classification",
-                "model_selection",
-            ):
+            for policy in ("knowledge_ranking", "memory_classification"):
                 assert (
                     await runtime.decide(policy, {}, QUESTIONS, group_id="ws") is None
                 )
@@ -231,55 +230,87 @@ def _context(group_id="ws-1"):
     return SimpleNamespace(primary_group_id=group_id, group_ids=[group_id])
 
 
+def _enabled(*models):
+    return Mock(find_enabled_models_for_group=AsyncMock(return_value=list(models)))
+
+
+def _answer(selected, options):
+    probabilities = {option: 0.0 for option in options}
+    probabilities[selected] = 1.0
+    return {
+        "answers": {
+            "model": {
+                "type": "choice",
+                "choice": selected,
+                "confidence": 0.99,
+                "probabilities": probabilities,
+            }
+        }
+    }
+
+
 class TestAutoUnderOpenRouter:
+    """Decide, then call: Jev through OpenRouter picks among the enabled models."""
+
     @pytest.fixture
     def openrouter(self, monkeypatch):
         configure(monkeypatch, **{es.DECISION_CONNECTION: "openrouter"})
 
     @pytest.mark.asyncio
-    async def test_auto_resolves_to_jev_router_without_a_decision_call(
-        self, openrouter
+    async def test_the_decision_goes_to_openrouters_system_one_route(
+        self, openrouter, monkeypatch
     ):
-        available = SimpleNamespace(available=True)
-        catalogue = Mock(find_by_key=AsyncMock(return_value=SimpleNamespace()))
-        with (
-            patch(
-                "src.services.decisions.settings.DecisionSettingsService.get",
-                new=AsyncMock(return_value=available),
-            ),
-            patch(
-                "src.services.settings.models.ModelConfigService",
-                return_value=catalogue,
-            ),
-            patch.object(
-                model_selection, "decide_with_reason", new=AsyncMock()
-            ) as decide,
-            patch(
-                "src.services.decisions.provider.evaluate", new_callable=AsyncMock
-            ) as evaluate,
-        ):
-            result = await select_for_workspace(Mock(), _context(), "hello")
-        assert result.model == "jev-router" and result.status == "selected"
-        assert result.model != "auto"
-        catalogue.find_by_key.assert_awaited_once_with("jev-router")
-        catalogue.find_enabled_models_for_group.assert_not_called()
-        decide.assert_not_awaited()
-        evaluate.assert_not_awaited()
-        assert model_selection.current_selection.get() == result
+        """The restriction is the payload: the enabled models are the options."""
+        import httpx
 
-    @pytest.mark.asyncio
-    async def test_not_available_falls_back_to_the_default(self, openrouter):
-        """Not opted in or no OPENROUTER_API_KEY: Auto's usual fallback."""
-        enabled = Mock(
-            find_enabled_models_for_group=AsyncMock(
-                return_value=[SimpleNamespace(key="ws-model")]
-            )
+        seen = []
+
+        def handle(request):
+            seen.append(request)
+            return httpx.Response(200, json=_answer("1", ["0", "1", "none"]))
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        monkeypatch.setattr(provider.httpx, "AsyncClient", lambda **kwargs: client)
+        enabled = _enabled(
+            SimpleNamespace(key="ws-a", name="a", provider="databricks"),
+            SimpleNamespace(key="claude-opus-5-5", name="o", provider="anthropic"),
+            SimpleNamespace(key="jev-router", name="typesafe/jev-router"),
         )
         with (
             patch(
-                "src.services.decisions.settings.DecisionSettingsService.get",
-                new=AsyncMock(return_value=SimpleNamespace(available=False)),
+                "src.services.settings.models.ModelConfigService", return_value=enabled
             ),
+            patch(
+                "src.services.decisions.credentials.decision_credential",
+                new=AsyncMock(return_value="or-key"),
+            ),
+            patch("src.services.decisions.telemetry.record_decision"),
+        ):
+            result = await select_for_workspace(Mock(), _context(), "hello")
+        assert (result.model, result.status) == ("claude-opus-5-5", "selected")
+        assert (result.connection, result.candidates, result.picked) == (
+            "openrouter",
+            2,
+            "1",
+        )
+        assert result.summary() == "Auto (Jev via OpenRouter) → claude-opus-5-5"
+        request = seen[0]
+        assert str(request.url) == f"{OPENROUTER_URL}/systemone"
+        assert request.headers["Authorization"] == "Bearer or-key"
+        body = json.loads(request.content)
+        assert body["model"] == "typesafe/jev-1.13"
+        # Only the enabled, non-router models are offered, and never by key.
+        assert set(body["questions"]["model"]["criteria"]) == {"0", "1", "none"}
+        assert [m["name"] for m in body["state"]["models"]] == ["a", "o"]
+        assert "jev-router" not in request.content.decode()
+
+    @pytest.mark.asyncio
+    async def test_never_resolves_to_jev_router(self, openrouter):
+        """Only a router enabled: nothing to offer, and no router as the answer."""
+        enabled = _enabled(
+            SimpleNamespace(key="jev-router", name="typesafe/jev-router")
+        )
+        with (
             patch(
                 "src.services.settings.models.ModelConfigService", return_value=enabled
             ),
@@ -288,26 +319,40 @@ class TestAutoUnderOpenRouter:
             ) as evaluate,
         ):
             result = await select_for_workspace(Mock(), _context(), "hello")
-        assert result.model == "ws-model" and result.status == "fallback"
+        assert result.model is None and result.reason == "no_models"
         evaluate.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_a_missing_router_row_falls_through(self, openrouter):
+    async def test_not_opted_in_falls_back_to_the_default(self, openrouter):
+        """No opt-in or no OPENROUTER_API_KEY: no call, the workspace default."""
+        enabled = _enabled(SimpleNamespace(key="ws-model", name="m"))
         with (
             patch(
-                "src.services.decisions.settings.DecisionSettingsService.get",
-                new=AsyncMock(return_value=SimpleNamespace(available=True)),
+                "src.services.settings.models.ModelConfigService", return_value=enabled
             ),
             patch(
-                "src.services.settings.models.ModelConfigService",
-                return_value=Mock(find_by_key=AsyncMock(return_value=None)),
+                "src.services.decisions.credentials.decision_credential",
+                new=AsyncMock(return_value=None),
             ),
+            patch(
+                "src.services.decisions.provider.evaluate", new_callable=AsyncMock
+            ) as evaluate,
         ):
-            assert await select_router(Mock(), _context()) is None
+            result = await select_for_workspace(Mock(), _context(), "hello")
+        assert (result.model, result.status, result.reason) == (
+            "ws-model",
+            "fallback",
+            "no_key",
+        )
+        evaluate.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_no_workspace_is_not_routed(self, openrouter):
-        assert await select_router(Mock(), _context(None)) is None
+    async def test_the_openrouter_key_is_the_credential(self, openrouter):
+        service = DecisionSettingsService(Mock(), "ws")
+        service.repository = Mock(get=AsyncMock(return_value=Mock(enabled=True)))
+        service.api_keys = Mock(find_by_name=AsyncMock(return_value=None))
+        assert await service.credential() is None
+        service.api_keys.find_by_name.assert_awaited_once_with("OPENROUTER_API_KEY")
 
 
 class TestAutoUnderJev:

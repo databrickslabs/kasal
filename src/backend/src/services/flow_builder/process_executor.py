@@ -478,7 +478,7 @@ def run_flow_in_process(
 
                         _bridge_tracer = otel_provider.get_tracer("kasal-event-bridge")
                         _otel_bridge = OTelEventBridge(
-                            _bridge_tracer, execution_id, group_context
+                            _bridge_tracer, execution_id, group_context, flow_config
                         )
                         _otel_bridge.register(event_bus)
                         async_logger.info(

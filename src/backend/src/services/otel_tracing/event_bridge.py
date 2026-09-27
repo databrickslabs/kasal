@@ -14,15 +14,18 @@ the rows that carried them (see the migration that rewrites
 import logging
 import threading
 from collections import OrderedDict, deque
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from opentelemetry.context import Context
 from opentelemetry.trace import (
     NonRecordingSpan,
+    Span,
     StatusCode,
     Tracer,
     set_span_in_context,
 )
 
+from src.services.otel_tracing.auto_decision import LLM_EVENT_TYPES, AutoDecision
 from src.services.otel_tracing.event_subscriptions import _EVENT_CLASSES
 
 logger = logging.getLogger(__name__)
@@ -388,10 +391,14 @@ class OTelEventBridge:
         tracer: Tracer,
         job_id: str,
         group_context: Optional[Any] = None,
+        run_config: Optional[Mapping[str, object]] = None,
         *,
         scoped: bool = False,
     ):
         self._tracer = tracer
+        # The run's Auto decision, from its payload: the run's trace starts
+        # there (see otel_tracing/auto_decision.py).
+        self._auto = AutoDecision.from_payload(run_config)
         self._job_id = job_id
         self._group_context = group_context
         self._registered_count = 0
@@ -487,6 +494,8 @@ class OTelEventBridge:
                 missing.append(class_name)
 
         self._registered_count = registered
+        if self._auto is not None:
+            self._auto.emit(self._tracer)
         logger.info(
             f"[OTel-Bridge][{self._job_id}] Registered {registered} event types on event bus"
         )
@@ -733,11 +742,9 @@ class OTelEventBridge:
             self._bridge_tool_to_mlflow(span_name, tool_name, output, event)
 
             # Parent this span to the span of the event that caused it, so the
-            # bus's causality DAG survives into parent_span_id. Falls back to the
-            # ambient context (previous behavior) when the parent is unknown —
-            # e.g. the root event, or a parent emitted before this bridge
-            # registered.
-            parent_context = self._dag_parent_context(event)
+            # bus's causality DAG survives into parent_span_id (see
+            # _parent_context for a span with no known parent).
+            parent_context = self._parent_context(event)
 
             with self._tracer.start_as_current_span(
                 span_name, context=parent_context
@@ -789,6 +796,7 @@ class OTelEventBridge:
 
                 # Extra metadata
                 self._set_extra_attributes(span, event, skip_attribution=is_run_level)
+                self._set_auto_attributes(span, event_type, event)
 
                 # Mark failed events with error status
                 if "failed" in event_type or "error" in event_type:
@@ -903,6 +911,25 @@ class OTelEventBridge:
                 "[OTel-Bridge][%s] DAG parent resolution failed: %s", self._job_id, e
             )
             return None
+
+    def _parent_context(self, event: object) -> Optional[Context]:
+        """The causal parent's context; else the run's Auto decision, else ambient.
+
+        Ambient (None) is the previous behavior for a span with no known parent:
+        the root event, or a parent emitted before this bridge registered. A run
+        that used Auto continues the decision's trace there instead.
+        """
+        parent_context: Optional[Context] = self._dag_parent_context(event)
+        if parent_context is None and self._auto is not None:
+            return self._auto.parent_context()
+        return parent_context
+
+    def _set_auto_attributes(self, span: Span, event_type: str, event: object) -> None:
+        """Link a call to the model Auto chose back to the decision span."""
+        if self._auto is not None and event_type in LLM_EVENT_TYPES:
+            span.set_attributes(
+                self._auto.llm_attributes(getattr(event, "model", None))
+            )
 
     def _track_span_for_dag(self, event: Any, span: Any) -> None:
         """Remember this event's SpanContext so its children can parent to it."""

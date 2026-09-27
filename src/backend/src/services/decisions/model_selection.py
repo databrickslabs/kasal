@@ -7,19 +7,29 @@ answers with an opaque index; the key comes from Kasal's own row. When it
 abstains (off, no key, slow, unsure, too many candidates), the workspace's
 default model is used, which is what the selector would have preselected
 before Auto existed.
+
+Both connections decide the same way: Jev through the Jev API, or Jev through
+OpenRouter's System One route (``provider.py``). Either way the candidates are
+the enabled models and nothing else, and ``choose_model`` checks the answer
+against them again before anything is called. A router model (Jev Router,
+``openrouter/auto``, ...) is never a candidate: it would hand the request to a
+model of its own choosing, outside the enabled list.
 """
 
 import logging
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 from typing import Optional, Sequence, Tuple, TypedDict
 
+from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.llm.model_capabilities import allowed_efforts, model_capability
 from src.models.model_config import ModelConfig
 from src.services.decisions import runtime
+from src.services.decisions.connection import JEV_ROUTER_KEY, OPENROUTER
+from src.services.decisions.connection import current as current_connection
 from src.services.decisions.policies import question
 from src.services.decisions.runtime import decide_with_reason, encoded_size
 from src.utils.user_context import GroupContext
@@ -40,6 +50,11 @@ MAX_REQUEST_CHARS = 2000
 NO_MODELS = "no_models"
 TOO_MANY_MODELS = "too_many_models"
 EMPTY_PROMPT = "empty_prompt"
+#: The answer named a model outside the enabled, non-router candidates.
+ROUTER_PICKED_DISABLED = "router_picked_disabled_model"
+
+#: The span the decision gets in the run's trace (``execution_trace`` and OTel).
+SPAN_NAME = "kasal.decision.model_selection"
 
 #: The reason as the trace row reads it. The chat has its own i18n keys
 #: (``chat.autoModel.reasons.*``) for the same codes.
@@ -55,6 +70,7 @@ FALLBACK_REASONS = {
     NO_MODELS: "no enabled models",
     TOO_MANY_MODELS: "too many enabled models",
     EMPTY_PROMPT: "empty request",
+    ROUTER_PICKED_DISABLED: "decision model picked a model that is not enabled",
 }
 
 INSTRUCTIONS = (
@@ -80,6 +96,26 @@ class SelectionResponse(TypedDict):
     model: Optional[str]
     status: str
     reason: Optional[str]
+    connection: Optional[str]
+
+
+class DecisionTrace(TypedDict):
+    """The decision as a run carries it into its own trace (and subprocess).
+
+    Ids are OTel hex strings. Never the prompt, never a key.
+    """
+
+    policy: str
+    trace_id: str
+    span_id: str
+    model: Optional[str]
+    status: str
+    reason: Optional[str]
+    connection: Optional[str]
+    picked: Optional[str]
+    candidates: int
+    duration_ms: float
+    summary: str
 
 
 class RequestExcerpt(TypedDict):
@@ -88,6 +124,18 @@ class RequestExcerpt(TypedDict):
     text: str
     truncated: bool
     length: int
+
+
+_IDS = RandomIdGenerator()
+
+
+def _new_span_id() -> str:
+    return f"{_IDS.generate_span_id():016x}"
+
+
+def _new_trace_id() -> str:
+    # The same formatting the span exporter gives the run's own rows.
+    return f"{_IDS.generate_trace_id():016x}"
 
 
 @dataclass(frozen=True)
@@ -99,12 +147,22 @@ class ModelSelection:
     key of ``FALLBACK_REASONS``). ``model`` is None only when the workspace has
     no enabled model: the caller then sends no model, exactly as when nothing
     was selected.
+
+    The rest describes the decision for the trace: which connection asked,
+    how many enabled models were offered, what came back (``picked``: Jev's
+    raw option, or the key the guard refused), and the span ids the decision
+    row and the run's spans share.
     """
 
     model: Optional[str]
     status: str
     duration_ms: float = 0.0
     reason: Optional[str] = None
+    connection: Optional[str] = field(default=None, compare=False)
+    candidates: int = field(default=0, compare=False)
+    picked: Optional[str] = field(default=None, compare=False)
+    span_id: str = field(default_factory=_new_span_id, compare=False)
+    trace_id: str = field(default_factory=_new_trace_id, compare=False)
 
     def to_response(self) -> SelectionResponse:
         return {
@@ -112,19 +170,53 @@ class ModelSelection:
             "model": self.model,
             "status": self.status,
             "reason": self.reason,
+            "connection": self.connection,
         }
 
     def summary(self) -> str:
-        """``Auto picked m``, or ``Auto fell back to m (default: <reason>)``."""
+        """``Auto (Jev via OpenRouter) → m``, or ``Auto fell back to m (default: …)``."""
         model = self.model or "the default model"
         if self.status == "selected":
-            return f"Auto picked {model}"
+            via = " via OpenRouter" if self.connection == OPENROUTER else ""
+            return f"Auto (Jev{via}) → {model}"
         why = FALLBACK_REASONS.get(self.reason or "")
+        if why and self.reason == ROUTER_PICKED_DISABLED and self.picked:
+            why = f"{why}: {self.picked}"
         return f"Auto fell back to {model}" + (f" (default: {why})" if why else "")
+
+    def trace(self) -> DecisionTrace:
+        return {
+            "policy": POLICY,
+            "trace_id": self.trace_id,
+            "span_id": self.span_id,
+            "model": self.model,
+            "status": self.status,
+            "reason": self.reason,
+            "connection": self.connection,
+            "picked": self.picked,
+            "candidates": self.candidates,
+            "duration_ms": self.duration_ms,
+            "summary": self.summary(),
+        }
 
 
 def is_auto(value: object) -> bool:
     return isinstance(value, str) and value.strip().lower() == AUTO_MODEL
+
+
+def is_router_model(model: ModelConfig) -> bool:
+    """A model that forwards each request to a model of its own choosing.
+
+    Jev Router (``typesafe/jev-router``) and OpenRouter's own routers
+    (``openrouter/auto``, ``openrouter/free``, ...) pick from OpenRouter's
+    whole catalogue, so Auto never offers them, even when enabled.
+    """
+    name = str(getattr(model, "name", "") or "").strip().lower()
+    return (
+        str(getattr(model, "key", "") or "") == JEV_ROUTER_KEY
+        or name == "typesafe/jev-router"
+        or name.startswith("openrouter/")
+    )
 
 
 def _cut(text: str, limit: int) -> str:
@@ -195,18 +287,21 @@ def _request_budget(described: list[dict[str, object]]) -> int:
 
 async def _ask(
     models: Sequence[ModelConfig], prompt: Optional[str], group_id: Optional[str]
-) -> Tuple[Optional[str], Optional[str]]:
-    """``(key, None)`` when the decision model chose, else ``(None, reason)``."""
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """``(key, None, raw)`` when the decision model chose, else ``(None, reason, raw)``.
+
+    ``raw`` is the option the decision model answered, when it answered.
+    """
     if not models:
-        return None, NO_MODELS
+        return None, NO_MODELS, None
     if len(models) > MAX_CANDIDATES:
-        return None, TOO_MANY_MODELS
+        return None, TOO_MANY_MODELS, None
     if not str(prompt or "").strip():
-        return None, EMPTY_PROMPT
+        return None, EMPTY_PROMPT, None
     described = [describe_model(m) for m in models]
     excerpt = request_excerpt(prompt, _request_budget(described))
     if not excerpt["text"]:
-        return None, runtime.TOO_LARGE
+        return None, runtime.TOO_LARGE, None
     answers, reason = await decide_with_reason(
         POLICY,
         {"request": excerpt, "models": described},
@@ -222,23 +317,38 @@ async def _ask(
         group_id=group_id,
     )
     if answers is None:
-        return None, reason
+        return None, reason, None
     choice = answers["model"].selected
     if choice == "none":
-        return None, runtime.ABSTAINED
-    return str(models[int(choice)].key), None
+        return None, runtime.ABSTAINED, choice
+    return str(models[int(choice)].key), None, choice
 
 
 async def choose_model(
     models: Sequence[ModelConfig], prompt: Optional[str], *, group_id: Optional[str]
 ) -> ModelSelection:
-    """Pick one of ``models`` for ``prompt``; fall back to the default on abstain."""
+    """Pick one of ``models`` for ``prompt``; fall back to the default on abstain.
+
+    The guarantee lives here: whatever came back, the result is one of the
+    enabled, non-router ``models`` (or None when there is none), never a model
+    the workspace did not enable.
+    """
     started = monotonic()
-    selected, reason = await _ask(models, prompt, group_id)
-    elapsed = (monotonic() - started) * 1000
-    if selected is not None:
-        return ModelSelection(selected, "selected", elapsed)
-    return ModelSelection(fallback_model(models), "fallback", elapsed, reason)
+    candidates = [m for m in models if not is_router_model(m)]
+    keys = {str(m.key) for m in candidates}
+    selected, reason, picked = await _ask(candidates, prompt, group_id)
+    if selected is not None and selected not in keys:
+        logger.warning("Auto: refusing %s, which is not an enabled model", selected)
+        selected, reason, picked = None, ROUTER_PICKED_DISABLED, selected
+    return ModelSelection(
+        selected if selected is not None else fallback_model(candidates),
+        "selected" if selected is not None else "fallback",
+        (monotonic() - started) * 1000,
+        reason,
+        connection=current_connection().kind,
+        candidates=len(candidates),
+        picked=picked,
+    )
 
 
 async def _enabled_models(
@@ -260,13 +370,6 @@ async def select_for_workspace(
     group context: the list the user can pick from by hand. There is no
     cross-workspace fallback: no workspace means no candidates and no decision.
     """
-    # OpenRouter connection: Auto is the Jev Router model (see jev_router.py).
-    from src.services.decisions.jev_router import select_router
-
-    routed = await select_router(session, group_context)
-    if routed is not None:
-        current_selection.set(routed)
-        return routed
     group_id = group_context.primary_group_id if group_context is not None else None
     models: list[ModelConfig] = []
     if group_id and group_context is not None:
@@ -285,29 +388,41 @@ async def select_for_workspace(
 
 async def workspace_default(session: AsyncSession, group_id: str) -> Optional[str]:
     """The model Auto falls back to in ``group_id``, without asking anything."""
-    return fallback_model(
-        await _enabled_models(session, GroupContext(group_ids=[group_id]))
-    )
+    models = await _enabled_models(session, GroupContext(group_ids=[group_id]))
+    return fallback_model([m for m in models if not is_router_model(m)])
 
 
 async def resolve_leaked_auto(
     session: AsyncSession, model_name: str, group_id: str
 ) -> str:
-    """The safety net: "auto" at the LLM builder becomes the workspace default.
+    """The safety net at the LLM builder: Auto never builds a router or "auto".
 
-    Every entry point resolves Auto before a model is built, so reaching this
-    is a bug in the path that called it. The warning carries the stack, which
-    names that path; the run still gets a real model instead of failing late
-    or, under the CrewAI harness, becoming a native OpenAI client.
+    "auto" becomes the workspace default. Every entry point resolves Auto
+    before a model is built, so reaching this is a bug in the path that called
+    it. The warning carries the stack, which names that path; the run still
+    gets a real model instead of failing late or, under the CrewAI harness,
+    becoming a native OpenAI client.
+
+    Jev Router is refused the same way when this request's Auto pick names it:
+    it would answer with a model of OpenRouter's choosing. Picking it by hand
+    is still allowed.
     """
-    if not is_auto(model_name):
+    selection = current_selection.get()
+    auto_router = (
+        model_name == JEV_ROUTER_KEY
+        and selection is not None
+        and selection.model == model_name
+    )
+    if not is_auto(model_name) and not auto_router:
         return model_name
     from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
     default = await workspace_default(session, group_id) or DEFAULT_ENGINE_MODEL
     logger.warning(
-        "'auto' reached the LLM builder unresolved; using the workspace default "
-        "%s. Resolve it where the request enters (run_freeze); leaked by:",
+        "%r reached the LLM builder unresolved as Auto's answer; using the "
+        "workspace default "
+        "%s. Resolve Auto where the request enters (run_freeze); leaked by:",
+        model_name,
         default,
         stack_info=True,
     )
@@ -323,11 +438,16 @@ def trace_row(
         "event_source": "decision",
         "event_context": POLICY,
         "event_type": "decision_evaluated",
-        "span_name": "kasal.decision.evaluate",
+        "span_name": SPAN_NAME,
+        "span_id": selection.span_id,
+        "trace_id": selection.trace_id,
+        "parent_span_id": None,
         "output": selection.summary(),
         "trace_metadata": {
             "policy": POLICY,
             **selection.to_response(),
+            "picked": selection.picked,
+            "candidates": selection.candidates,
         },
         "duration_ms": int(selection.duration_ms),
         "group_id": group_id,

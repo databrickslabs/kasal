@@ -279,11 +279,14 @@ def _extract_trace_metadata(span: ReadableSpan) -> Dict[str, Any]:
     attrs: Dict[str, Any] = dict(span.attributes) if span.attributes else {}
     metadata: Dict[str, Any] = {}
 
-    # Kasal bridge attributes — capture ALL kasal.extra.* dynamically
+    # Kasal bridge attributes — capture ALL kasal.extra.* dynamically, and the
+    # Auto link (kasal.auto.* -> auto_*) on the chosen model's LLM calls.
     prefix = "kasal.extra."
     for key, val in attrs.items():
         if key.startswith(prefix) and val is not None:
             metadata[key[len(prefix) :]] = val
+        elif key.startswith("kasal.auto.") and val is not None:
+            metadata["auto_" + key[len("kasal.auto.") :]] = val
 
     # CrewAI instrumentor IDs
     for key, meta_key in (
@@ -408,7 +411,13 @@ class KasalDBSpanExporter(SpanExporter):
         return SpanExportResult.SUCCESS
 
     def _span_to_record(self, span: ReadableSpan) -> Optional[Dict[str, Any]]:
-        """Convert a single span to a trace DB record dict."""
+        """Convert a single span to a trace DB record dict.
+
+        None for the run's Auto decision span: the API process wrote its row,
+        with these same ids, before the run started (``auto_decision.py``).
+        """
+        if span.attributes and span.attributes.get("kasal.decision.persisted"):
+            return None
         event_type = _extract_event_type(span)
 
         # Build the record matching execution_trace columns

@@ -294,10 +294,15 @@ class TestSelectForWorkspace:
 
 
 def test_trace_row_shape():
-    row = trace_row(ModelSelection("m", "fallback", 12.7, "timeout"), "job-1", "ws")
+    selection = ModelSelection("m", "fallback", 12.7, "timeout")
+    row = trace_row(selection, "job-1", "ws")
     assert row["job_id"] == "job-1" and row["group_id"] == "ws"
     assert row["event_type"] == "decision_evaluated"
     assert row["event_context"] == "model_selection"
+    assert row["span_name"] == "kasal.decision.model_selection"
+    assert (row["span_id"], row["trace_id"]) == (selection.span_id, selection.trace_id)
+    assert len(selection.span_id) == 16 and len(selection.trace_id) >= 16
+    assert row["parent_span_id"] is None
     assert row["output"] == "Auto fell back to m (default: decision model timed out)"
     assert row["trace_metadata"] == {
         "policy": "model_selection",
@@ -305,14 +310,81 @@ def test_trace_row_shape():
         "model": "m",
         "status": "fallback",
         "reason": "timeout",
+        "connection": None,
+        "picked": None,
+        "candidates": 0,
     }
     assert row["duration_ms"] == 12
     assert trace_row(ModelSelection("m", "selected"), "j", None)["output"] == (
-        "Auto picked m"
+        "Auto (Jev) → m"
+    )
+    via_openrouter = ModelSelection("m", "selected", connection="openrouter")
+    assert trace_row(via_openrouter, "j", None)["output"] == (
+        "Auto (Jev via OpenRouter) → m"
     )
     assert trace_row(ModelSelection("m", "fallback"), "j", None)["output"] == (
         "Auto fell back to m"
     )
+    refused = ModelSelection(
+        "m", "fallback", reason="router_picked_disabled_model", picked="stealth/x"
+    )
+    assert trace_row(refused, "j", None)["output"] == (
+        "Auto fell back to m (default: decision model picked a model that is not "
+        "enabled: stealth/x)"
+    )
+
+
+class TestTheGuarantee:
+    """Nothing outside the enabled, non-router models ever answers under Auto."""
+
+    @pytest.mark.asyncio
+    async def test_an_answer_outside_the_enabled_models_falls_back(self):
+        from src.services.decisions import model_selection as ms
+
+        async def ask(models, prompt, group_id):
+            return "stealth/space-bunny-alpha", None, "stealth/space-bunny-alpha"
+
+        with patch.object(ms, "_ask", new=ask):
+            result = await choose_model([model("a"), model("b")], "hi", group_id="ws")
+        assert (result.model, result.status) == ("a", "fallback")
+        assert result.reason == "router_picked_disabled_model"
+        assert result.picked == "stealth/space-bunny-alpha"
+
+    @pytest.mark.asyncio
+    async def test_routers_are_never_offered_nor_the_fallback(self):
+        router = model("jev-router", name="typesafe/jev-router", provider="openrouter")
+        auto = model("or-auto", name="openrouter/auto", provider="openrouter")
+        seen = []
+
+        async def decide(policy, state, questions, group_id):
+            seen.append([m["name"] for m in state["models"]])
+            return answer("0", ["0", "none"]), None
+
+        with patch.object(model_selection, "decide_with_reason", new=decide):
+            result = await choose_model([router, auto, model("a")], "hi", group_id="ws")
+        assert seen == [["a name"]]
+        assert (result.model, result.candidates) == ("a", 1)
+        only_routers = await choose_model([router, auto], "hi", group_id="ws")
+        assert only_routers.model is None and only_routers.reason == "no_models"
+
+    @pytest.mark.asyncio
+    async def test_the_llm_builder_refuses_jev_router_as_autos_answer(self):
+        enabled = AsyncMock(return_value=[model("jev-router"), model("ws-default")])
+        token = current_selection.set(ModelSelection("jev-router", "selected"))
+        try:
+            with patch.object(model_selection, "_enabled_models", new=enabled):
+                built = await resolve_leaked_auto(None, "jev-router", "ws")
+        finally:
+            current_selection.reset(token)
+        assert built == "ws-default"
+
+    @pytest.mark.asyncio
+    async def test_jev_router_picked_by_hand_is_left_alone(self):
+        token = current_selection.set(None)
+        try:
+            assert await resolve_leaked_auto(None, "jev-router", "ws") == "jev-router"
+        finally:
+            current_selection.reset(token)
 
 
 def test_every_reason_code_has_words():
@@ -322,7 +394,11 @@ def test_every_reason_code_has_words():
         value
         for name, value in vars(runtime).items()
         if name.isupper() and isinstance(value, str)
-    } | {model_selection.NO_MODELS, model_selection.TOO_MANY_MODELS}
+    } | {
+        model_selection.NO_MODELS,
+        model_selection.TOO_MANY_MODELS,
+        model_selection.ROUTER_PICKED_DISABLED,
+    }
     codes.add(model_selection.EMPTY_PROMPT)
     assert codes <= set(FALLBACK_REASONS)
 
