@@ -162,7 +162,7 @@ async def ask(
             "job_id": execution_id,
             "status": ExecutionStatus.PENDING.value,
             "run_name": f"ask via {caller.protocol}",
-            "created_at": datetime.now(),
+            "created_at": datetime.utcnow(),
             # The origin tag. One field, written at the only point every
             # external invocation passes through.
             "inputs": {"external_origin": caller.origin, "question": question},

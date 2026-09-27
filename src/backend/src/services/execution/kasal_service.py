@@ -636,7 +636,7 @@ class KasalExecutionService:
         executions[execution_id] = {
             "task": task,
             "status": ExecutionStatus.PENDING.value,
-            "created_at": datetime.now(),
+            "created_at": datetime.utcnow(),
         }
 
         # Return immediate response
@@ -679,7 +679,7 @@ class KasalExecutionService:
             "execution_id": execution_id,
             "status": status,
             "run_name": run_name,
-            "created_at": created_at or datetime.now(),
+            "created_at": created_at or datetime.utcnow(),
         }
 
     async def update_execution_status(

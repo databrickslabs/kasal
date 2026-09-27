@@ -816,7 +816,7 @@ class ExecutionStatusService:
             if hasattr(created_at, "isoformat"):
                 created_at = created_at.isoformat()
             elif not isinstance(created_at, str):
-                created_at = dt.now().isoformat()
+                created_at = dt.utcnow().isoformat()
 
             event_data = {
                 "job_id": job_id,
