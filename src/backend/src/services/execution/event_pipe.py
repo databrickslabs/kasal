@@ -239,6 +239,7 @@ class EventPipeWriter:
             "crew_name": _safe_str(getattr(event, "crew_name", None), 200),
             "tool_name": tool_name,
             "model": _safe_str(getattr(event, "model", None), 200),
+            "served_model": _safe_str(getattr(event, "served_model", None), 200),
             "error": _safe_str(getattr(event, "error", None), 500),
             # The SAME two fields the OTel bridge stamps, because a row has two
             # producers — this pipe live, the database on reload — and a field

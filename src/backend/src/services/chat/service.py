@@ -719,18 +719,16 @@ class LightAgentService:
                             "model": model_name,
                             "output_length": len(content),
                         }
-                        # The model's thinking, when it exposed any. This path
-                        # builds `extra` BY HAND rather than going through the
-                        # otel bridge's kasal.extra.* pass-through, so a new field
-                        # on LLMCallCompletedEvent reaches the crew timeline and
-                        # silently misses ChatMode — which is exactly what
-                        # happened here: the same gemini-3-1-pro run showed 608
-                        # chars of reasoning in Jobs and nothing in the chat's Run
-                        # activity. Mirrored into trace_metadata too, since the
-                        # timeline row label reads from there.
+                        # Built BY HAND, not via the otel bridge's kasal.extra.*
+                        # pass-through, so each new LLMCallCompletedEvent field
+                        # (reasoning, the router's served model) is copied here
+                        # or it silently misses ChatMode's Run activity. Also
+                        # mirrored into trace_metadata: the row label reads there.
                         reasoning = getattr(event, "reasoning", None)
                         if reasoning:
                             extra["reasoning"] = str(reasoning)
+                        if served := getattr(event, "served_model", None):
+                            extra["served_model"] = str(served)
                         usage = getattr(event, "usage", None)
                         if usage is not None:
                             try:
@@ -752,6 +750,8 @@ class LightAgentService:
                         td["trace_metadata"]["model"] = model_name
                         if reasoning:
                             td["trace_metadata"]["reasoning"] = str(reasoning)
+                        if served:
+                            td["trace_metadata"]["served_model"] = str(served)
                         _log(f"LLM responded ({len(content)} chars, {model_name})")
                         _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001

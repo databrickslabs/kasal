@@ -102,7 +102,8 @@ You do not need to enable Jev Router for Auto: under the decision model's **Open
 
 Things to know:
 
-- Jev Router's pick is not reported back to Kasal yet. OpenRouter returns the model that served in the response's `model` field, but Kasal's transport does not read it, so traces and logs show `typesafe/jev-router`.
+- Jev Router's pick is shown on each call's response row. OpenRouter names the model that served in the response's `model` field (and in each streamed chunk). The transport reads it, and the run activity's row reads "LLM Response — anthropic/claude-opus-5-5 (628 chars)" while the request row still reads "LLM Request — jev-router". The Auto step still reads "Auto → jev-router", because Auto chooses before the call is made.
+- This works for any provider, not only OpenRouter. The served id is shown only when it names a different model from the one requested. Both ids are compared after lowercasing, dropping a `vendor/` prefix and a `:variant` suffix, reading `.` and `_` as `-`, and removing date stamps. If either id then contains the other, they count as the same model. So Anthropic answering `claude-sonnet-4-5-20250929` for `claude-sonnet-4-5`, or a gateway adding a prefix, shows nothing extra (`core/llm/transport/served_model.py`).
 - `supported_parameters: []` also leaves open whether tool calls reach the model it picks. Kasal has not verified agent tool use through Jev Router; try a tool-using crew before relying on it.
 
 ## Agent Bricks and Genie

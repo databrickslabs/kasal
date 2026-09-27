@@ -292,11 +292,14 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     }
 
     const attempt = metadata?.attempt as number | undefined;
-    const label = metadata?.llm_purpose === 'a2ui_compose'
+    // Set only when a router (Jev Router) answered with a different model than
+    // the request named, so the row says which model actually replied.
+    const served = String(getField(trace, 'served_model') || '');
+    const label = (metadata?.llm_purpose === 'a2ui_compose'
       ? `A2UI Compose Response${attempt ? ` #${attempt}` : ''}`
       : isMemoryLabelling(metadata)
         ? 'Memory Labels'
-        : 'LLM Response';
+        : 'LLM Response') + (served ? ` — ${served}` : '');
     // Flag reasoning in the row itself so it is discoverable without opening
     // the detail pane — otherwise the only hint that a model exposed its
     // thinking is a collapsed section one click away. The REDACTED sentinel gets
