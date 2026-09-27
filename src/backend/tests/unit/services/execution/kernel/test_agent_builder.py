@@ -263,6 +263,15 @@ class TestReasoningEffortReachesTheLLM:
         assert llm.reasoning_effort == "max"
 
     @pytest.mark.asyncio
+    async def test_databricks_gpt6_sol_takes_its_documented_max(self):
+        llm = await self._build(
+            "databricks-gpt-6-sol",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "max"},
+        )
+        assert llm.reasoning_effort == "max"
+
+    @pytest.mark.asyncio
     async def test_model_specific_invalid_effort_is_ignored(self):
         llm = await self._build(
             "databricks-gemini-3-8-flash",

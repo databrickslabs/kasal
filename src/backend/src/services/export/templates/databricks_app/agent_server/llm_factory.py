@@ -32,6 +32,8 @@ ENABLE_OBO = {{ENABLE_OBO}}
 # endpoint IDs so GPT OSS and user-created aliases stay on their existing route.
 _DATABRICKS_OPENAI_RESPONSES_MODELS = frozenset(
     {
+        "databricks-gpt-6-sol",
+        "databricks-gpt-6-luna",
         "databricks-gpt-6-astra",
         "databricks-gpt-5-6-sol",
         "databricks-gpt-5-6-terra",

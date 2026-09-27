@@ -603,6 +603,7 @@ class TestAuditedDatabricksModels:
     )
     CURRENT_ADDED = (
         "databricks-claude-fable-5-1",
+        "databricks-claude-opus-5-5",
         "databricks-deepseek-v4-flash-0731",
         "databricks-deepseek-v4-pro-0813",
         "databricks-gemini-3-7-flash",
@@ -612,6 +613,8 @@ class TestAuditedDatabricksModels:
         "databricks-gpt-5-5",
         "databricks-gpt-5-5-pro",
         "databricks-gpt-6-astra",
+        "databricks-gpt-6-luna",
+        "databricks-gpt-6-sol",
         "databricks-grok-4-6",
         "databricks-kimi-k3",
     )
@@ -664,6 +667,24 @@ class TestAuditedDatabricksModels:
 
         assert model_rejects_temperature("databricks-claude-fable-5") is True
         assert model_rejects_temperature("global.anthropic.claude-fable-5") is True
+
+    def test_claude_opus_5_5_on_databricks_matches_its_direct_api_limits(self):
+        """Databricks keeps the provider's limits for Anthropic models, so the
+        Databricks row and the direct-API row must agree: 1M in, 128K out."""
+        databricks = DEFAULT_MODELS["databricks-claude-opus-5-5"]
+        direct = DEFAULT_MODELS["claude-opus-5-5"]
+        assert databricks["context_window"] == direct["context_window"] == 1000000
+        assert databricks["max_output_tokens"] == direct["max_output_tokens"] == 128000
+
+    @pytest.mark.parametrize("variant", ["astra", "sol", "luna"])
+    def test_databricks_gpt6_matches_its_direct_api_limits(self, variant):
+        """Databricks publishes no GPT-6 limits, so each Databricks row mirrors
+        the direct-OpenAI row — and all three stay consistent with each other."""
+        databricks = DEFAULT_MODELS[f"databricks-gpt-6-{variant}"]
+        direct = DEFAULT_MODELS[f"gpt-6-{variant}"]
+        assert databricks["provider"] == "databricks"
+        assert databricks["context_window"] == direct["context_window"] == 1050000
+        assert databricks["max_output_tokens"] == direct["max_output_tokens"] == 128000
 
     def test_codex_model_that_works_via_kasal_kept(self):
         """gpt-5-3-codex 400s on raw /invocations but works through Kasal's

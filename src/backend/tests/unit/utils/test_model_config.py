@@ -44,6 +44,8 @@ class TestModelRejectsTemperature:
             "gpt-5",
             "databricks-gpt-5-1",
             "databricks-gpt-6-astra",
+            "databricks-gpt-6-sol",
+            "databricks-gpt-6-luna",
             "databricks-gpt-5-5-pro",
             # Live endpoint regression: the catalogue's 0.7 default made every
             # Gemini 3.8 request fail before generation.
