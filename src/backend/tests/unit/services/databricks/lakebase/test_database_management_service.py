@@ -1147,6 +1147,19 @@ class TestImportFromVolume:
 class TestListBackups:
     """Tests for DatabaseManagementService.list_backups."""
 
+    @pytest.fixture(autouse=True)
+    def _no_workspace_auth(self):
+        """``list_backups`` awaits the real auth lookup; keep it off the network.
+
+        Tests that need a workspace URL patch it again inside the test.
+        """
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_list_backups_success(self, service, mock_repository):
         """Successful listing formats backups and returns correct structure."""
@@ -1199,7 +1212,14 @@ class TestListBackups:
             }
         ]
 
-        result = await service.list_backups(catalog="c", schema="s", volume_name="v")
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("no auth"),
+        ):
+            result = await service.list_backups(
+                catalog="c", schema="s", volume_name="v"
+            )
 
         assert result["success"] is True
         assert "your-workspace" in result["backups"][0]["databricks_url"]
@@ -1208,9 +1228,12 @@ class TestListBackups:
     async def test_list_backups_with_workspace_url_from_auth(
         self, service, mock_repository
     ):
-        """When asyncio.run(get_auth_context()) returns a workspace URL, it is used."""
-        import asyncio
+        """The awaited get_auth_context() workspace URL is used in backup links.
 
+        This used to call ``asyncio.run`` inside the running loop, which always
+        raised, so every link got the placeholder; the test patched
+        ``asyncio.run`` and so pinned the bug instead of catching it.
+        """
         mock_repository.list_backups.return_value = [
             {
                 "filename": "backup.db",
@@ -1220,16 +1243,21 @@ class TestListBackups:
             }
         ]
 
-        # The list_backups method does `import asyncio; asyncio.run(get_auth_context())`
-        # which fails in a running loop.  We patch asyncio.run at the builtins level.
-        mock_auth = SimpleNamespace(workspace_url="https://my-ws.databricks.com/")
-        with patch.object(asyncio, "run", return_value=mock_auth):
+        mock_auth = SimpleNamespace(workspace_url="https://example.com/")
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=mock_auth,
+        ) as mock_get_auth:
             result = await service.list_backups(
                 catalog="c", schema="s", volume_name="v"
             )
 
+        mock_get_auth.assert_awaited_once()
         assert result["success"] is True
-        assert "my-ws" in result["backups"][0]["databricks_url"]
+        assert result["backups"][0]["databricks_url"] == (
+            "https://example.com/explore/data/volumes/c/s/v/backup.db"
+        )
 
     @pytest.mark.asyncio
     async def test_list_backups_exception(self, service, mock_repository):

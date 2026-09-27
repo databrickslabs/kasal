@@ -416,11 +416,9 @@ class DatabaseManagementService:
             # Generate Databricks URLs for each backup using unified auth
             workspace_url = ""
             try:
-                import asyncio
-
                 from src.utils.databricks_auth import get_auth_context
 
-                auth = asyncio.run(get_auth_context())
+                auth = await get_auth_context()
                 if auth and auth.workspace_url:
                     workspace_url = auth.workspace_url.rstrip("/")
             except Exception:
