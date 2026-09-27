@@ -189,11 +189,11 @@ Two former variables are now constants in `src/backend/src/services/llm/manager.
 
 ## Decision model
 
-The decision model lets Kasal ask an external provider to make supported decisions (for example which published capability to route to) instead of using its built-in approach. Jev is the provider today. It is configured in **Models** at two levels:
+The decision model lets Kasal ask an external provider to make supported decisions (for example which published capability to route to) instead of using its built-in approach. Jev is the provider today. It is configured in **Models** at two levels. For what it decides, the data it sends, its errors and its traces, see [Decision model](./DECISION_MODEL.md).
 
 | Where | Who | Setting |
 |---|---|---|
-| System administration → **Models** → Decision model | System administrators | **Jev API URL**: base URL of the Jev decisions API; it must use `https://`. Unset keeps the decision model off for every workspace: the runtime reads no credentials and enabling it is refused with `400`. Stored as the `jev_api_base` system setting (an `engine_config` row for engine `kasal`, read through `GET`/`PATCH /api/v1/engine-config/settings`). Replaced `JEV_API_BASE` |
+| System administration → **Models** → Decision model | System administrators | **Jev API URL**: base URL of the Jev decisions API, `http://` or `https://` (the form warns that plain http is unencrypted; use it only on a private network). Unset keeps the decision model off for every workspace: the runtime reads no credentials and enabling it is refused with `400`. Stored as the `jev_api_base` system setting (an `engine_config` row for engine `kasal`, read through `GET`/`PATCH /api/v1/engine-config/settings`). Replaced `JEV_API_BASE` |
 | Workspace settings → **Models** → Decision model | Workspace administrators | **Use a decision model**: this workspace's opt-in, off by default. It needs the provider key, stored per workspace as `JEV_API_KEY` under **Configuration → API Keys**. Stored in `decision_config` (one row per workspace id, `GET`/`PUT /api/v1/decision-config`) |
 
 When on, relevant prompts and candidate content are sent to the decision model provider; unavailable or uncertain answers fall back to Kasal's existing approach. The opt-in, the key and the setting are all per workspace: nothing falls back to another workspace's key or setting.
