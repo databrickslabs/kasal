@@ -146,24 +146,6 @@ class TestGetDaxMeasure:
 # ---------------------------------------------------------------------------
 
 
-class TestGetAllYamlMeasures:
-    def test_returns_list(self, tmp_path):
-        h = _make_handler(tmp_path)
-        measures = h.get_all_yaml_measures()
-        assert isinstance(measures, list)
-        assert len(measures) == 2
-
-    def test_uses_cache_on_second_call(self, tmp_path):
-        h = _make_handler(tmp_path)
-        first = h.get_all_yaml_measures()
-        # Poison the parser so a second load would fail
-        h.mv_parser.extract_measures = lambda: (_ for _ in ()).throw(
-            AssertionError("should not be called again")
-        )
-        second = h.get_all_yaml_measures()
-        assert first is second
-
-
 # ---------------------------------------------------------------------------
 # get_all_dax_measures() – cache behaviour
 # ---------------------------------------------------------------------------

@@ -439,25 +439,6 @@ class PowerBIModelFetchMixin:
                 logger.error(f"Relationships extraction error: {e}")
                 return []
 
-    async def _fetch_column_metadata(
-        self,
-        workspace_id: str,
-        dataset_id: str,
-        access_token: str,
-        config: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        """
-        Fetch column metadata using INFO.COLUMNS("TableName") DAX function.
-
-        Note: INFO.COLUMNS() requires a table name parameter and must be called
-        per table. This method is called BEFORE model_context has tables populated,
-        so it returns an empty list. Use _enrich_model_context_with_metadata() instead
-        which is called after tables are extracted.
-        """
-        # This method is kept for backwards compatibility but is not used
-        # Column metadata is now fetched in _fetch_column_metadata_for_table()
-        return []
-
     async def _fetch_column_metadata_for_table(
         self,
         workspace_id: str,

@@ -1910,31 +1910,6 @@ class MqueryConversionPipelineTool(BaseTool):
                     types[cols[i]] = "DATE"
         return types
 
-    def _infer_schema(self, cols: list, sample_rows: list) -> str:
-        import re as _re
-
-        types: Dict[str, str] = {c: "STRING" for c in cols}
-        for row in sample_rows:
-            vals = list(row.values()) if isinstance(row, dict) else list(row)
-            for i, v in enumerate(vals):
-                if i >= len(cols) or v is None or types[cols[i]] != "STRING":
-                    continue
-                try:
-                    int(v)
-                    types[cols[i]] = "BIGINT"
-                    continue
-                except (ValueError, TypeError):
-                    pass
-                try:
-                    float(v)
-                    types[cols[i]] = "DOUBLE"
-                    continue
-                except (ValueError, TypeError):
-                    pass
-                if _re.match(r"^\d{4}-\d{2}-\d{2}", str(v)):
-                    types[cols[i]] = "DATE"
-        return ", ".join(f"`{c}` {t}" for c, t in types.items())
-
     # ── DBSQL connection resolver ─────────────────────────────────────────────
 
     async def _resolve_dbsql(self, sql_endpoint: str, pat: str) -> Tuple[str, str]:

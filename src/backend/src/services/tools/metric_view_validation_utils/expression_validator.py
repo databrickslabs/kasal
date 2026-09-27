@@ -438,16 +438,6 @@ class ExpressionValidator:
                     return True
         return False
 
-    def _is_expected_ref_mapping(self, diff, result: dict = None) -> bool:
-        """Check if reference difference is just a table prefix change.
-
-        The typical pattern is Table[col] in DAX becoming source.col in UCMV.
-        Table prefix differences are ALWAYS expected in DAX→SQL translation.
-        """
-        # Reference mismatches are almost always expected — DAX uses Table[col],
-        # SQL uses source.col or alias.col. This is always a valid translation.
-        return True
-
     def _is_review_candidate(self, result: dict) -> bool:
         """Check if there is enough similarity to warrant human review instead of INVALID."""
         sims = result.get("similarities", [])

@@ -492,40 +492,6 @@ class TestCreateToolsForServerExtended:
         assert any("generic error" in w for w in warnings)
 
 
-class TestValidateMcpConfigurationExtended:
-    """Extended coverage for validate_mcp_configuration."""
-
-    def test_invalid_agent_not_dict_returns_false(self):
-        """Agent that is not a dict should return False."""
-        config = {"agents": ["not_a_dict"], "tasks": []}
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-    def test_invalid_task_not_dict_returns_false(self):
-        """Task that is not a dict should return False."""
-        config = {"agents": [], "tasks": ["not_a_dict"]}
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-    def test_agent_tool_configs_not_dict_returns_false(self):
-        """Agent tool_configs that is not a dict should return False."""
-        config = {
-            "agents": [{"id": "a1", "tool_configs": "not_a_dict"}],
-            "tasks": [],
-        }
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-    def test_task_tool_configs_not_dict_returns_false(self):
-        """Task tool_configs that is not a dict should return False."""
-        config = {
-            "agents": [],
-            "tasks": [{"id": "t1", "tool_configs": ["list_not_dict"]}],
-        }
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is False
-
-
 class TestResolveAgentReferenceEdgeCases:
     """Edge cases for _resolve_agent_reference."""
 

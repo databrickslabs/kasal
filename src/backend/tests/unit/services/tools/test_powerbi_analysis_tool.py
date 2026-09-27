@@ -1895,35 +1895,6 @@ class TestParseFilterConditionExtended:
 # ===========================================================================
 
 
-class TestExtractFiltersFromTmdlContent:
-    """Tests for _extract_filters_from_tmdl_content."""
-
-    def setup_method(self):
-        self.tool = PowerBIAnalysisTool()
-
-    def test_empty_content_returns_empty(self):
-        result = self.tool._extract_filters_from_tmdl_content("", "section")
-        assert result == {}
-
-    def test_no_matching_section_returns_empty(self):
-        content = "table Sales\n\tcolumn Amount\n"
-        result = self.tool._extract_filters_from_tmdl_content(content, "nonexistent")
-        assert result == {}
-
-    def test_filter_with_equals_extracted(self):
-        content = (
-            "overview section\n    filter 'Region' on 'Sales'[Region] = \"North\"\n"
-        )
-        result = self.tool._extract_filters_from_tmdl_content(content, "overview")
-        assert "Region" in result
-        assert result["Region"] == "North"
-
-    def test_filter_with_in_set_extracted(self):
-        content = "overview section\n    filter 'Status' on 'Sales'[Status] in {\"A\", \"B\"}\n"
-        result = self.tool._extract_filters_from_tmdl_content(content, "overview")
-        assert "Status" in result
-
-
 # ===========================================================================
 # _build_enriched_semantic_context tests
 # ===========================================================================
@@ -2656,19 +2627,6 @@ class TestExecuteDaxQuery:
 # ===========================================================================
 # _fetch_column_metadata tests (backward-compatible empty method)
 # ===========================================================================
-
-
-class TestFetchColumnMetadata:
-    """Tests for _fetch_column_metadata."""
-
-    def setup_method(self):
-        self.tool = PowerBIAnalysisTool()
-
-    def test_returns_empty_list(self):
-        result = asyncio.run(
-            self.tool._fetch_column_metadata(WS_ID, DS_ID, ACCESS_TOKEN, {})
-        )
-        assert result == []
 
 
 # ===========================================================================

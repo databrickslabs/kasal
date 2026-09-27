@@ -612,26 +612,6 @@ class TestGetMcpSettings:
         assert result["individual_enabled"] is True
 
 
-class TestValidateMcpConfiguration:
-    """Test validate_mcp_configuration static method."""
-
-    def test_valid_config(self):
-        config = {
-            "agents": [{"id": "a1", "tool_configs": {"MCP_SERVERS": ["s1"]}}],
-            "tasks": [{"id": "t1", "tool_configs": {"MCP_SERVERS": ["s1"]}}],
-        }
-        result = MCPIntegration.validate_mcp_configuration(config)
-        assert result is True
-
-    def test_non_dict_config(self):
-        result = MCPIntegration.validate_mcp_configuration("not a dict")
-        assert result is False
-
-    def test_empty_config(self):
-        result = MCPIntegration.validate_mcp_configuration({})
-        assert result is True
-
-
 class TestCollectAgentMcpRequirements:
     """Test collect_agent_mcp_requirements."""
 

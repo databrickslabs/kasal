@@ -41,9 +41,6 @@ KNOWN_OFFENDERS = {
     # INFO in the MLflow subprocess: "prefix" of the SPN auth header. Seven
     # characters is "Bearer " on the normal path, but token text otherwise.
     ("services/mlflow/mlflow_setup.py", "auth_header[:7]"),
-    # _mask_secret: now unused (its one log call logs bool(token) instead);
-    # delete it with the dead llm_token fields (audit V3-5).
-    ("services/tools/uc_metric_view_generator_tool.py", "{value[:4]}...{value[-4:]}"),
 }
 
 

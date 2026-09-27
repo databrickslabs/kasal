@@ -127,15 +127,6 @@ class UCMetricViewGeneratorTool(BaseTool):
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
-    @staticmethod
-    def _mask_secret(value: str | None) -> str:
-        """Mask a secret value for logging."""
-        if not value:
-            return "none"
-        if len(value) <= 8:
-            return "***"
-        return f"{value[:4]}...{value[-4:]}"
-
     def __init__(self, **kwargs: Any) -> None:
         config_keys = (
             "measures_json",
