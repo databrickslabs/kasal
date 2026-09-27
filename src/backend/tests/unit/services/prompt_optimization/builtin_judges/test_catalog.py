@@ -31,7 +31,7 @@ def scorers_without_completeness():
 
 
 class TestCatalog:
-    def test_phase_one_is_the_four_no_label_judges_and_a_labelled_seam(self):
+    def test_four_no_label_judges_and_two_label_judges(self):
         selectable = [j.id for j in catalog.CATALOG if not j.needs_labels]
         assert selectable == [
             "Safety",
@@ -39,7 +39,11 @@ class TestCatalog:
             "Guidelines",
             "Completeness",
         ]
-        assert [j.id for j in catalog.CATALOG if j.needs_labels] == ["Correctness"]
+        labelled = {j.id: j.label_fields for j in catalog.CATALOG if j.needs_labels}
+        assert labelled == {
+            "Correctness": ("expected_facts", "expected_response"),
+            "ExpectationsGuidelines": ("guidelines",),
+        }
 
     def test_safety_is_the_only_gate(self):
         assert [j.id for j in catalog.CATALOG if j.role == "gate"] == ["Safety"]
@@ -71,14 +75,20 @@ class TestResolveSelection:
 
     @pytest.mark.parametrize(
         "judge_id,message",
-        [
-            ("Nope", "Unknown built-in judge"),
-            ("Correctness", "needs labelled examples"),
-        ],
+        [("Nope", "Unknown built-in judge")],
     )
     def test_rejects_what_a_run_cannot_use(self, judge_id, message):
         with pytest.raises(ValueError, match=message):
             catalog.resolve_selection([judge_id])
+
+    def test_label_judges_are_selectable_coverage_decides_later(self):
+        ids = [
+            j.id
+            for j in catalog.resolve_selection(
+                ["ExpectationsGuidelines", "Correctness"]
+            )
+        ]
+        assert ids == ["Correctness", "ExpectationsGuidelines"]
 
     def test_rejects_a_judge_the_installed_mlflow_lacks(
         self, scorers_without_completeness

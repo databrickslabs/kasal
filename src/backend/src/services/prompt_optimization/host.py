@@ -31,3 +31,7 @@ class PromptOptimizationHost:
 
         @staticmethod
         def _crew_judge_prefix(crew_id: str) -> str: ...
+
+        async def _judge_registry_target(
+            self, group_context: Optional[GroupContext]
+        ) -> Tuple[str, Optional[str]]: ...

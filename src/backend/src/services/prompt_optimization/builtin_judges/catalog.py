@@ -11,9 +11,10 @@ Judges run on demand as plain scorer objects. Nothing here registers a scorer,
 lists the scorer registry or starts monitoring; the only stored judges are the
 custom ones in the MLflow Prompt Registry.
 
-Phase 1 ships the judges that need no labels. ``needs_labels`` is the seam for
-the ones that need an expected answer (Correctness): they are listed so the
-evaluation runner can build them, but a run may not select them yet.
+Some judges need labels on the row (``label_fields``): Correctness reads the
+crew's expected facts or expected answer, ExpectationsGuidelines the
+requirements distilled from the user's review notes. ``coverage`` decides
+whether a run has enough of them; a judge without them is skipped, never called.
 """
 
 from __future__ import annotations
@@ -47,8 +48,10 @@ class BuiltinJudge:
     #: Weight of a graded judge's 0/1 verdict in the judge score's weighted
     #: mean (Kasal's own judges weigh 1 each). Gates are not averaged.
     weight: float = 1.0
-    #: Needs expected_response / expected_facts on the row (a later phase).
+    #: Needs labels on the row: at least one of ``label_fields`` present.
     needs_labels: bool = False
+    #: The expectation keys mlflow reads for this judge (any one suffices).
+    label_fields: Tuple[str, ...] = ()
 
 
 CATALOG: Tuple[BuiltinJudge, ...] = (
@@ -78,8 +81,18 @@ CATALOG: Tuple[BuiltinJudge, ...] = (
     BuiltinJudge(
         id="Correctness",
         label="Correctness",
-        description="Compares the deliverable with an expected answer.",
+        description="Checks the deliverable contains your expected facts, or "
+        "agrees with your expected answer.",
         needs_labels=True,
+        label_fields=("expected_facts", "expected_response"),
+    ),
+    BuiltinJudge(
+        id="ExpectationsGuidelines",
+        label="Expectations guidelines",
+        description="Checks the deliverable meets the requirements distilled "
+        "from your review notes on past answers.",
+        needs_labels=True,
+        label_fields=("guidelines",),
     ),
 )
 
@@ -127,20 +140,16 @@ def build_scorer(
 def resolve_selection(judge_ids: Sequence[str]) -> List[BuiltinJudge]:
     """The catalog entries for a run's selection, in catalog order.
 
-    Raises ValueError (a 400 at the router) for an unknown id, a judge that
-    needs labels, or one the installed mlflow does not provide — a run must
-    not start with a judge that would silently never score.
+    Raises ValueError (a 400 at the router) for an unknown id or one the
+    installed mlflow does not provide — a run must not start with a judge that
+    would silently never score. Whether a label judge has its labels is
+    ``coverage``'s call: it is skipped with a reason, not refused.
     """
     wanted = set(judge_ids)
     for judge_id in wanted:
         judge = get(judge_id)
         if judge is None:
             raise ValueError(f"Unknown built-in judge '{judge_id}'")
-        if judge.needs_labels:
-            raise ValueError(
-                f"Built-in judge '{judge_id}' needs labelled examples, which "
-                "optimization runs do not collect yet"
-            )
         if not is_available(judge_id):
             raise ValueError(
                 f"Built-in judge '{judge_id}' is not provided by the installed MLflow"

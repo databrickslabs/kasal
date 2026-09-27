@@ -80,7 +80,7 @@
   "src/backend/src/services/otel_tracing/event_bridge.py::OTelEventBridge._emit_span": 263,
   "src/backend/src/services/otel_tracing/event_bridge.py::OTelEventBridge._set_extra_attributes": 495,
   "src/backend/src/services/otel_tracing/mlflow_exporter.py::KasalMLflowSpanExporter._build_mlflow_trace": 333,
-  "src/backend/src/services/prompt_optimization/crew_runner.py::CrewRunnerMixin._execute_crew_optimization_sync": 883,
+  "src/backend/src/services/prompt_optimization/crew_runner.py::CrewRunnerMixin._execute_crew_optimization_sync": 856,
   "src/backend/src/services/prompt_optimization/crew_runner.py::CrewRunnerMixin._execute_crew_optimization_sync.output_correct": 223,
   "src/backend/src/services/prompt_optimization/template_runner.py::TemplateRunnerMixin._execute_optimization_sync": 258,
   "src/backend/src/services/tools/config_generator_tool.py::ConfigGeneratorTool._run": 363,

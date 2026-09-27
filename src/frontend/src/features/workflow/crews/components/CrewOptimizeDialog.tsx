@@ -38,7 +38,9 @@ import {
 } from '../../../../api/config/PromptOptimizationService';
 import CrewOptimizeFrame from './CrewOptimizeFrame';
 import JudgePicker from './JudgePicker';
+import CrewLabelsFields from './CrewLabelsFields';
 import { useBuiltinJudges } from '../hooks/useBuiltinJudges';
+import { useCrewLabels } from '../hooks/useCrewLabels';
 import { ModelService } from '../../../../api/config/ModelService';
 
 interface CrewOptimizeDialogProps {
@@ -166,7 +168,8 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [deleteJudgeTarget, setDeleteJudgeTarget] = useState<LLMJudge | null>(null);
   const [deletingJudge, setDeletingJudge] = useState(false);
   // MLflow built-in judges picked for the next run.
-  const builtin = useBuiltinJudges(open);
+  const labels = useCrewLabels(open, crewId);
+  const builtin = useBuiltinJudges(open, labels.present);
 
   const refreshRuns = useCallback(async () => {
     if (!crewId) return;
@@ -265,7 +268,9 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
         guidance: guidance || undefined,
         max_metric_calls: budget,
         builtin_judges: builtin.selected.length ? builtin.selected : undefined,
+        labels: labels.payload(),
       });
+      labels.setSkipped(started.skipped_judges || []);
       setExpandedRun(started.run_id);
       await refreshRuns();
     } catch (e: unknown) {
@@ -575,6 +580,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
             onDeleteLibrary={setDeleteJudgeTarget}
             builtin={builtin}
           />
+          <CrewLabelsFields labels={labels} />
           {Object.values(alignments).map((a) => (
             <Alert
               key={a.full_name}

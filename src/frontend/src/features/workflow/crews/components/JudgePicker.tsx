@@ -21,6 +21,7 @@ import GavelIcon from '@mui/icons-material/Gavel';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useTranslation } from 'react-i18next';
 import {
+  BuiltinJudge,
   JudgeRegistryInfo,
   LLMJudge,
 } from '../../../../api/config/PromptOptimizationService';
@@ -43,6 +44,18 @@ interface JudgePickerProps {
 }
 
 const GROUP_TITLE_SX = { fontWeight: 600, display: 'block', mt: 2, mb: 0.5 } as const;
+
+type Translate = (key: string, options: { defaultValue: string }) => string;
+
+/** Why a label judge is disabled: the labels it reads are not there yet. */
+const missingLabelsReason = (judge: BuiltinJudge, t: Translate): string =>
+  (judge.label_fields || []).includes('guidelines')
+    ? t('optimize.judges.needsReviewNotes', {
+        defaultValue: 'Needs review notes: grade past answers and say what they should contain',
+      })
+    : t('optimize.judges.needsExpected', {
+        defaultValue: 'Add expected facts or an expected answer below',
+      });
 
 /**
  * The judges that score a crew optimization run, in two groups: the user's
@@ -96,7 +109,7 @@ const JudgePicker: React.FC<JudgePickerProps> = ({
         <Chip
           size="small"
           variant="outlined"
-          label="Quality (built-in)"
+          label="Quality (Kasal)"
           title="Grades every deliverable 0-10 on completeness, specificity, and fidelity to the expected outputs"
         />
         {assignedJudges.map((j) => (
@@ -232,34 +245,40 @@ const JudgePicker: React.FC<JudgePickerProps> = ({
                 'Optional. They use the judge model above and run on demand; nothing is registered or scheduled.',
             })}
           </Typography>
-          {builtin.judges.map((judge) => (
-            <Box key={judge.id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <FormControlLabel
-                sx={{ mr: 0 }}
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={builtin.selected.includes(judge.id)}
-                    onChange={() => builtin.toggle(judge.id)}
-                  />
-                }
-                label={<Typography variant="body2">{judge.label}</Typography>}
-              />
-              <Chip
-                size="small"
-                variant="outlined"
-                color={judge.role === 'gate' ? 'warning' : 'default'}
-                label={
-                  judge.role === 'gate'
-                    ? t('optimize.judges.gate', { defaultValue: 'gate' })
-                    : t('optimize.judges.noLabels', { defaultValue: 'no labels needed' })
-                }
-              />
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-                {judge.description}
-              </Typography>
-            </Box>
-          ))}
+          {builtin.judges.map((judge) => {
+            const enabled = builtin.isEnabled(judge);
+            return (
+              <Box key={judge.id} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <FormControlLabel
+                  sx={{ mr: 0 }}
+                  disabled={!enabled}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={builtin.selected.includes(judge.id)}
+                      onChange={() => builtin.toggle(judge.id)}
+                    />
+                  }
+                  label={<Typography variant="body2">{judge.label}</Typography>}
+                />
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={judge.role === 'gate' ? 'warning' : judge.needs_labels ? 'info' : 'default'}
+                  label={
+                    judge.role === 'gate'
+                      ? t('optimize.judges.gate', { defaultValue: 'gate' })
+                      : judge.needs_labels
+                        ? t('optimize.judges.needsLabels', { defaultValue: 'needs labels' })
+                        : t('optimize.judges.noLabels', { defaultValue: 'no labels needed' })
+                  }
+                />
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+                  {enabled ? judge.description : missingLabelsReason(judge, t)}
+                </Typography>
+              </Box>
+            );
+          })}
         </Box>
       )}
     </Box>

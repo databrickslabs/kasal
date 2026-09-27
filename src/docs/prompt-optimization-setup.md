@@ -176,10 +176,56 @@ How the score combines:
 - Each verdict and its reason is passed to GEPA's reflection model, tagged
   `[builtin:<name>]`, so the rewrite knows why a candidate lost points.
 
-Judges that compare against **labels** are not offered yet: Correctness,
-Expectations guidelines and Equivalence need an expected answer, and Retrieval
-sufficiency also needs retrieval traces. They arrive in a later phase, together
-with a way to enter expected answers.
+#### Labels
+
+Some built-in judges compare the deliverable with **labels**: what a good
+deliverable should contain. The picker shows them with a **needs labels**
+badge, disabled with the reason until their labels exist.
+
+| Judge | Needs |
+|---|---|
+| Correctness | Expected facts, or an expected answer |
+| Expectations guidelines | Review notes on past answers (see below) |
+
+Under the picker, **Labels** has two optional fields, one set per crew (a crew
+run has a single objective):
+
+- **Expected facts**: one point per line that every good deliverable must
+  contain. This is Correctness' main input.
+- **Expected answer**: free text, if you have a model answer.
+
+**Suggested labels.** The **Expectation** notes you wrote on past evaluation
+answers ("what SHOULD this answer contain?") are offered as suggestions. A
+suggestion is never used on its own: **Accept** adds it to the expected facts,
+and **Edit** lets you reword it first.
+
+**Expectations guidelines** needs no typing. Its guidelines are the
+requirements Kasal distils from your grades and notes on past answers (the same
+checklist that steers the run), so it is enabled once such notes exist.
+
+**Where labels are stored.** When a run starts, the labels in the fields are
+saved for the crew if they changed. They go to the MLflow Prompt Registry, next
+to your judges, as the prompt `kasal_labels__crew_<id>__<workspace>`, a new
+version per change. Only confirmed labels are stored; suggestions are not.
+
+**Workspaces.** Evaluation answers are logged as traces on both local MLflow
+and Databricks, tagged with the crew and the workspace (`kasal_crew_id`,
+`kasal_group_id`). Every read (suggestions, review notes, the answers to grade,
+alignment) filters on both tags, and stored labels are read only by the
+workspace that saved them. So workspaces that share an experiment never see
+each other's labels. Answers logged before this change carry no workspace tag
+and no longer appear.
+
+**Coverage.** A label judge counts only when at least half of the dataset's
+rows are labelled, and at least 3 rows (every row, when there are fewer than
+3). A crew run has one row, so it simply needs its labels. A judge below the
+floor is left out of the run, and the dialog says why, for example
+"Correctness skipped: not labelled". A judge is never called on a row without
+its labels.
+
+Equivalence is not offered: it compares against one exact answer, which suits
+short answers rather than crew deliverables. Retrieval sufficiency also needs
+retrieval traces and arrives in a later phase.
 
 MLflow **evaluation runs** use the same list: Relevance to query and Safety
 always, plus Correctness when the evaluation rows carry a reference answer. The

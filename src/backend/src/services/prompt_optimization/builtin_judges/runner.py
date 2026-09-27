@@ -11,15 +11,18 @@ into the judge score:
 
 A built-in that fails (provider error, unparseable reply, a verdict that is
 not yes/no) is logged and left out; the mean is then taken over the judges
-that did score. Scoring never raises.
+that did score. So is a label judge on a row without its labels: that is
+checked BEFORE the call, because mlflow raises on a missing label. Scoring
+never raises.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.services.prompt_optimization.builtin_judges.bridge import (
     JudgeRoute,
@@ -32,6 +35,7 @@ from src.services.prompt_optimization.builtin_judges.catalog import (
     build_scorer,
     resolve_selection,
 )
+from src.services.prompt_optimization.builtin_judges.coverage import is_labelled
 
 if TYPE_CHECKING:
     from mlflow.genai.scorers import Scorer
@@ -90,11 +94,15 @@ class BuiltinJudgeRunner:
         judge_model: str,
         route: JudgeRoute,
         guidelines: Sequence[str] = (),
+        expectations: Optional[Mapping[str, object]] = None,
     ) -> None:
         self.judges = list(judges)
         self._model_uri = placeholder_uri(judge_model)
         self._route = route
         self._guidelines = list(guidelines)
+        #: The row's labels (a crew run has one row), used when ``score`` is
+        #: not given the row's own.
+        self._expectations: Dict[str, object] = dict(expectations or {})
         self._scorers: Dict[str, Scorer] = {}
         self._cache: Dict[str, List[BuiltinVerdict]] = {}
 
@@ -105,11 +113,14 @@ class BuiltinJudgeRunner:
         judge_model: str,
         route: JudgeRoute,
         rubric: str = "",
+        expectations: Optional[Mapping[str, object]] = None,
     ) -> Optional["BuiltinJudgeRunner"]:
         """The runner for a run's selection, or None when nothing is selected.
 
         ``rubric`` (the tasks' expected outputs plus the user's guidance, one
-        per line) becomes the Guidelines judge's guidelines.
+        per line) becomes the Guidelines judge's guidelines. ``expectations``
+        are the row's labels (``expected_facts``, ``expected_response``,
+        ``guidelines``) the label judges read.
         """
         if not judge_ids:
             return None
@@ -118,30 +129,56 @@ class BuiltinJudgeRunner:
             for line in rubric.splitlines()
             if line.strip().lstrip("-").strip()
         ]
-        return cls(resolve_selection(judge_ids), judge_model, route, guidelines)
+        return cls(
+            resolve_selection(judge_ids), judge_model, route, guidelines, expectations
+        )
 
-    def score(self, request: str, response: str) -> List[BuiltinVerdict]:
-        """Every selected judge's verdict on ``response``. Never raises."""
-        key = hashlib.sha256(f"{request}\x00{response}".encode("utf-8")).hexdigest()
+    def score(
+        self,
+        request: str,
+        response: str,
+        expectations: Optional[Mapping[str, object]] = None,
+    ) -> List[BuiltinVerdict]:
+        """Every selected judge's verdict on ``response``. Never raises.
+
+        ``expectations`` are this row's labels (default: the run's)."""
+        row = dict(self._expectations if expectations is None else expectations)
+        labels = json.dumps(row, sort_keys=True, default=str)
+        key = hashlib.sha256(
+            f"{request}\x00{response}\x00{labels}".encode("utf-8")
+        ).hexdigest()
         cached = self._cache.get(key)
         if cached is not None:
             return cached
         with judge_route(self._route):
-            verdicts = [self._score_one(j, request, response) for j in self.judges]
+            verdicts = [self._score_one(j, request, response, row) for j in self.judges]
         self._cache[key] = verdicts
         return verdicts
 
     def _score_one(
-        self, judge: BuiltinJudge, request: str, response: str
+        self,
+        judge: BuiltinJudge,
+        request: str,
+        response: str,
+        row: Mapping[str, object],
     ) -> BuiltinVerdict:
+        if judge.label_fields and not is_labelled(judge, row):
+            # Skipped BEFORE the call: mlflow raises on a missing label.
+            logger.info("Built-in judge %s skipped: row not labelled", judge.id)
+            return BuiltinVerdict(judge, None)
         try:
             scorer = self._scorers.get(judge.id)
             if scorer is None:
                 scorer = build_scorer(judge.id, self._model_uri, self._guidelines)
                 self._scorers[judge.id] = scorer
-            return _verdict(
-                judge, scorer.run(inputs={"request": request}, outputs=response)
-            )
+            if judge.label_fields:
+                labels = {f: row[f] for f in judge.label_fields if row.get(f)}
+                result = scorer.run(
+                    inputs={"request": request}, outputs=response, expectations=labels
+                )
+            else:
+                result = scorer.run(inputs={"request": request}, outputs=response)
+            return _verdict(judge, result)
         except Exception:
             # One broken judge must not fail the metric (mlflow would abort the
             # whole optimization); it is left out and the mean renormalises.

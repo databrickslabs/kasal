@@ -23,6 +23,7 @@ from src.services.prompt_optimization.judge_registry import (
     JudgeRegistry,
     uc_schema_of,
 )
+from src.services.prompt_optimization.labels.review import trace_filter
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,9 @@ class JudgeOperationsMixin(PromptOptimizationHost):
                 # too-small page silently hides previously GRADED answers
                 # (observed live — graded traces fell out of a 25-trace page).
                 traces = mlflow.search_traces(
-                    filter_string=f"tags.kasal_crew_id = '{crew_id}'",
+                    filter_string=trace_filter(
+                        crew_id, getattr(group_context, "primary_group_id", None)
+                    ),
                     max_results=200,
                     return_type="list",
                 )

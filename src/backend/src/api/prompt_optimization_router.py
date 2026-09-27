@@ -18,6 +18,7 @@ from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.prompt_optimization import (
     BuiltinJudgeInfo,
     BuiltinJudgeList,
+    CrewLabelsInfo,
     CrewOptimizationRequest,
     PromptOptimizationApplyResponse,
     PromptOptimizationRequest,
@@ -119,6 +120,18 @@ async def list_crew_evals(
     they can be graded in-app. Empty when local MLflow mode is not enabled."""
     service = PromptOptimizationService(session)
     return {"evals": await service.list_crew_evals(crew_id, group_context)}
+
+
+@router.get("/crew-labels/{crew_id}", response_model=CrewLabelsInfo)
+async def get_crew_labels(
+    crew_id: str, group_context: GroupContextDep, session: SessionDep
+) -> CrewLabelsInfo:
+    """The crew's confirmed labels (what its deliverable must contain), plus
+    the human expectation notes offered as suggestions. Suggestions are never
+    used until the user confirms one; the labels a run uses are the ones its
+    start request carries."""
+    service = PromptOptimizationService(session)
+    return await service.get_crew_labels(crew_id, group_context)
 
 
 @router.post("/crew-evals/{trace_id}/feedback", response_model=None)

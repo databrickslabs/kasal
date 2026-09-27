@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CrewOptimizeDialog from './CrewOptimizeDialog';
 import { PromptOptimizationService } from '../../../../api/config/PromptOptimizationService';
@@ -45,6 +45,7 @@ vi.mock('../../../../api/config/PromptOptimizationService', () => ({
     listJudges: vi.fn(),
     judgeRegistryInfo: vi.fn(),
     listBuiltinJudges: vi.fn(),
+    getCrewLabels: vi.fn(),
     startCrewOptimization: vi.fn(),
     cancelRun: vi.fn(),
     applyRun: vi.fn(),
@@ -101,8 +102,12 @@ const builtin = (id: string, role: 'gate' | 'graded', extra = {}) => ({
 const BUILTINS = [
   builtin('Safety', 'gate'),
   builtin('RelevanceToQuery', 'graded'),
-  // Needs labels / not installed: never offered in Phase 1.
-  builtin('Correctness', 'graded', { needs_labels: true }),
+  // Needs labels: offered, disabled until expected facts/answer exist.
+  builtin('Correctness', 'graded', {
+    needs_labels: true,
+    label_fields: ['expected_facts', 'expected_response'],
+  }),
+  // Not installed: never offered.
   builtin('Completeness', 'graded', { available: false }),
 ];
 
@@ -164,6 +169,7 @@ beforeEach(() => {
   });
   getEnabledModels.mockResolvedValue({ 'qwen-30b': {} });
   service.listBuiltinJudges.mockResolvedValue(BUILTINS);
+  service.getCrewLabels.mockResolvedValue({ labels: null, suggestions: [], has_review_notes: false });
 });
 
 describe('Optimization setup', () => {
@@ -290,7 +296,7 @@ describe('runs and progress chips', () => {
 });
 
 describe('MLflow built-in judges', () => {
-  it('shows the two judge groups and only the selectable built-ins, with one badge each', async () => {
+  it('shows the two judge groups and the installed built-ins, with one badge each', async () => {
     renderDialog();
     const group = await screen.findByTestId('builtin-judges');
     expect(screen.getByText('Your judges')).toBeInTheDocument();
@@ -298,8 +304,40 @@ describe('MLflow built-in judges', () => {
     expect(within(group).getByText('Safety description')).toBeInTheDocument();
     expect(within(group).getByText('gate')).toBeInTheDocument();
     expect(within(group).getByText('no labels needed')).toBeInTheDocument();
-    expect(within(group).queryByText('Correctness')).not.toBeInTheDocument();
+    expect(within(group).getByText('needs labels')).toBeInTheDocument();
+    expect(within(group).getByRole('checkbox', { name: 'Correctness' })).toBeDisabled();
     expect(within(group).queryByText('Completeness')).not.toBeInTheDocument();
+  });
+
+  it('enables Correctness once facts are entered and sends the labels with the run', async () => {
+    service.startCrewOptimization.mockResolvedValue({
+      run_id: 'r3',
+      status: 'pending',
+      dataset_size: 1,
+      skipped_judges: ['Expectations guidelines skipped: not labelled'],
+    });
+    renderDialog();
+    const group = await screen.findByTestId('builtin-judges');
+    await waitFor(() => expect(service.getCrewLabels).toHaveBeenCalledWith(CREW_ID));
+    fireEvent.change(screen.getByLabelText('Expected facts'), {
+      target: { value: 'Zurich is listed\nPrices in CHF' },
+    });
+    const correctness = within(group).getByRole('checkbox', { name: 'Correctness' });
+    await waitFor(() => expect(correctness).toBeEnabled());
+    await userEvent.click(correctness);
+    const start = screen.getByRole('button', { name: 'Start optimization' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await userEvent.click(start);
+    await waitFor(() => expect(service.startCrewOptimization).toHaveBeenCalled());
+    const request = service.startCrewOptimization.mock.calls[0][0];
+    expect(request.builtin_judges).toEqual(['Correctness']);
+    expect(request.labels).toEqual({
+      expected_facts: ['Zurich is listed', 'Prices in CHF'],
+      expected_response: '',
+    });
+    expect(
+      await screen.findByText('Expectations guidelines skipped: not labelled'),
+    ).toBeInTheDocument();
   });
 
   it('sends the selected built-ins with the run and none by default', async () => {

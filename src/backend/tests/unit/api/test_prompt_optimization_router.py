@@ -27,6 +27,7 @@ from src.api.prompt_optimization_router import (  # noqa: E402 - import follows 
     cancel_run,
     create_judge,
     delete_judge,
+    get_crew_labels,
     get_run,
     judge_registry_info,
     list_crew_evals,
@@ -43,6 +44,7 @@ from src.core.exceptions import (  # noqa: E402 - import follows module initiali
     NotFoundError,
 )
 from src.schemas.prompt_optimization import (  # noqa: E402 - import follows module initialization
+    CrewLabelsInfo,
     CrewOptimizationRequest,
     PromptOptimizationRequest,
 )
@@ -167,6 +169,14 @@ class TestEvalEndpoints:
         result = await list_crew_evals("crew1", group, MagicMock())
         assert result == {"evals": [{"trace_id": "t1"}]}
         service.list_crew_evals.assert_awaited_once_with("crew1", group)
+
+    @pytest.mark.asyncio
+    async def test_get_crew_labels_is_scoped_to_the_callers_workspace(self, service):
+        info = CrewLabelsInfo(suggestions=["German side only"])
+        service.get_crew_labels = AsyncMock(return_value=info)
+        group = _group()
+        assert await get_crew_labels("crew1", group, MagicMock()) is info
+        service.get_crew_labels.assert_awaited_once_with("crew1", group)
 
     @pytest.mark.asyncio
     async def test_add_eval_feedback_coerces_numeric_value(self, service):
