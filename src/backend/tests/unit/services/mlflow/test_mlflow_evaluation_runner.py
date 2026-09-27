@@ -144,29 +144,26 @@ class TestSaveEnvironmentVars:
 
 
 class TestSetEnvironmentVars:
-    """_set_environment_vars opens the scoped sp_auth window; restore closes it."""
+    """_set_environment_vars opens the sp_auth credential scope; restore closes it."""
 
     @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_window_presents_the_credential_then_restores(self, mock_construct):
         mock_construct.return_value = "https://example.databricks.com/serving-endpoints"
         runner = _make_runner()
         auth_ctx = _make_auth_ctx()
+        from src.services.mlflow.sp_auth import current_credentials
 
         with patch.dict(os.environ, {}, clear=True):
             old = runner._save_environment_vars()
             runner._set_environment_vars(auth_ctx)
             try:
-                assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
-                assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
-                assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
+                assert current_credentials().token == auth_ctx.token
+                assert not {"DATABRICKS_TOKEN", "DATABRICKS_HOST"} & set(os.environ)
                 for key in TestSaveEnvironmentVars._URLS:
                     assert os.environ[key] == mock_construct.return_value
             finally:
                 runner._restore_environment_vars(old, auth_ctx)
-            # Nothing of the credential outlives the call.
-            assert "DATABRICKS_TOKEN" not in os.environ
-            assert "DATABRICKS_HOST" not in os.environ
-            assert "DATABRICKS_AUTH_TYPE" not in os.environ
+            assert current_credentials() is None  # nothing outlives the call
             for key in TestSaveEnvironmentVars._URLS:
                 assert key not in os.environ
 

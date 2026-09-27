@@ -64,13 +64,9 @@ PLATFORM_INJECTED = frozenset(
 
 #: Credential-shaped literal writes that are genuinely needed, keyed by
 #: ``(path, unparsed target)``.
-_ALLOWED_LITERAL_WRITES = {
-    # MLflow reads Databricks auth ONLY from the environment. sp_auth._pinned is
-    # the single, scoped window that may write a token there: windows for
-    # different credentials are mutually exclusive, so a concurrent request
-    # never sees another's token, and the original env is restored on exit.
-    ("services/mlflow/sp_auth.py", "os.environ['DATABRICKS_TOKEN']"),
-}
+#: Empty: MLflow's Databricks token used to be the one exception, written into
+#: the env for a locked "window". ``sp_auth`` now scopes it to a ContextVar.
+_ALLOWED_LITERAL_WRITES: set[tuple[str, str]] = set()
 
 #: Writes with a computed key, and why each is not a credential.
 _DYNAMIC_WRITES = {
@@ -80,8 +76,6 @@ _DYNAMIC_WRITES = {
         "services/databricks/workspace/service.py",
         "os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR]",
     ),
-    # Restores SWAP_KEYS to what they were before the auth window opened.
-    ("services/mlflow/sp_auth.py", "os.environ[k]"),
     # Restores / sets _URL_ENV_KEYS (endpoint URLs) around an evaluation.
     ("services/mlflow/evaluation_runner.py", "os.environ[key]"),
     # Restores MLFLOW_EXPERIMENT_NAME / MLFLOW_EXPERIMENT_ID after GEPA.

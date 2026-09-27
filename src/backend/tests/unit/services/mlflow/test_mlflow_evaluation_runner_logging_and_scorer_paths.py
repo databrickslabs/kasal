@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from src.services.mlflow import sp_auth
 from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
 
 
@@ -92,11 +93,13 @@ def test_set_environment_vars_with_api_base():
         r._set_environment_vars(auth)
 
     try:
-        assert os.environ.get("DATABRICKS_HOST") == "https://myhost.databricks.com"
-        assert os.environ.get("DATABRICKS_TOKEN") == "tok123"
+        creds = sp_auth.current_credentials()
+        assert (creds.host, creds.token) == ("https://myhost.databricks.com", "tok123")
+        # Scoped, never exported into the shared process environment.
+        assert os.environ.get("DATABRICKS_TOKEN") != "tok123"
     finally:
         r._restore_environment_vars(old_env, auth)
-    assert os.environ.get("DATABRICKS_TOKEN") != "tok123"
+    assert sp_auth.current_credentials() is None
 
 
 def test_set_environment_vars_no_api_base():
@@ -111,7 +114,7 @@ def test_set_environment_vars_no_api_base():
         r._set_environment_vars(auth)
 
     try:
-        assert os.environ.get("DATABRICKS_HOST") == "https://myhost.databricks.com"
+        assert sp_auth.current_credentials().host == "https://myhost.databricks.com"
     finally:
         r._restore_environment_vars(old_env, auth)
 

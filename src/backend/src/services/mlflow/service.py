@@ -61,14 +61,20 @@ class MLflowService:
     async def set_enabled(self, enabled: bool) -> bool:
         ok = await self.repo.set_enabled(enabled=enabled, group_id=self.group_id)
         if ok:
-            # Drop the memoized parent-process setup so the toggle takes effect
-            # on the next dispatch instead of after the cache TTL.
-            from src.services.otel_tracing.mlflow_parent_setup import (
-                invalidate_parent_mlflow_cache,
-            )
-
-            invalidate_parent_mlflow_cache()
+            await self.session.commit()
+            self._invalidate_parent_setup()
         return ok
+
+    @staticmethod
+    def _invalidate_parent_setup() -> None:
+        """Drop the memoized parent-process setup so an enable toggle takes
+        effect on the next dispatch instead of after the cache TTL. Called
+        AFTER the commit, so the next dispatch reads the new value."""
+        from src.services.otel_tracing.mlflow_parent_setup import (
+            invalidate_parent_mlflow_cache,
+        )
+
+        invalidate_parent_mlflow_cache()
 
     # Evaluation toggle
     async def is_evaluation_enabled(self) -> bool:
@@ -78,6 +84,8 @@ class MLflowService:
         ok = await self.repo.set_evaluation_enabled(
             enabled=enabled, group_id=self.group_id
         )
+        if ok:
+            await self.session.commit()
         return ok
 
     async def get_settings(self) -> Dict[str, Any]:
@@ -192,13 +200,24 @@ class MLflowService:
 
         ``advanced`` holds only the Advanced fields the caller sent; a None value
         resets that field to its built-in default.
+
+        All-or-nothing: every field is validated BEFORE anything is written, and
+        the writes are committed together. A rejected field therefore leaves the
+        stored settings exactly as they were — previously each setter committed
+        on its own, so a bad local server URL still saved the fields before it.
         """
         if is_databricks_app() and experiment_name is not None:
             raise ValueError(
                 "Hosted trace destinations are managed by the installation"
             )
+        local_uri = (
+            self._validated_local_tracking_uri(local_tracking_uri)
+            if local_tracking_uri is not None
+            else None
+        )
+
         if enabled is not None:
-            await self.set_enabled(enabled)
+            await self.repo.set_enabled(enabled=enabled, group_id=self.group_id)
         if evaluation_enabled is not None:
             await self.repo.set_evaluation_enabled(
                 enabled=evaluation_enabled, group_id=self.group_id
@@ -211,13 +230,23 @@ class MLflowService:
             )
         if advanced:
             await self.repo.set_advanced(advanced, group_id=self.group_id)
-        if local_tracking_uri is not None:
-            await self._set_local_tracking_uri(local_tracking_uri)
+        if local_uri is not None:
+            await self.repo.set_local_tracking_uri(
+                local_uri or None, group_id=self.group_id
+            )
+        # The service is the transaction boundary. Commit HERE, before the
+        # provisioning below: it makes network calls (Databricks / the local
+        # server) that can take seconds, and on SQLite's shared connection an
+        # uncommitted write held across them blocks every other writer and can
+        # be discarded by another request's rollback (services/CLAUDE.md).
+        await self.session.commit()
+        if enabled is not None:
+            self._invalidate_parent_setup()
 
         # Provision the destination when tracing is enabled or renamed, so the
         # first run can use it. Hosted apps use their volume's namespace and
         # existing schema permissions; no experiment resource is required.
-        if experiment_name is not None or enabled is True or local_tracking_uri:
+        if experiment_name is not None or enabled is True or local_uri:
             await self._ensure_experiment_created()
         return await self.get_settings()
 
@@ -306,17 +335,21 @@ class MLflowService:
             await self.repo.get_local_tracking_uri(group_id=self.group_id)
         )
 
-    async def _set_local_tracking_uri(self, uri: str) -> None:
-        """Save it (an empty string clears it); only http(s), never inside Apps."""
+    @staticmethod
+    def _validated_local_tracking_uri(uri: str) -> str:
+        """``uri`` normalized for storage ("" clears it), or ValueError.
+
+        Validation only — nothing is written — so :meth:`update_settings` can
+        reject a bad value before touching any other field.
+        """
+        from src.services.mlflow import local
+
         value = uri.strip()
-        if value and is_databricks_app():
+        if not value:
+            return ""
+        if is_databricks_app():
             raise ValueError("A local MLflow server cannot be used in Databricks Apps")
-        if value and not value.startswith(("http://", "https://")):
-            raise ValueError(
-                "The local MLflow server must be an http(s) URL, "
-                "e.g. http://127.0.0.1:5555"
-            )
-        await self.repo.set_local_tracking_uri(value or None, group_id=self.group_id)
+        return local.validate_local_tracking_uri(value)
 
     async def configured_judge_model(self) -> Optional[str]:
         """The workspace's judge model key, or None when there is none.
@@ -717,8 +750,8 @@ class MLflowService:
                 from src.services.mlflow.sp_auth import single_auth_env
 
                 try:
-                    # Single-method auth (removes OAuth vars, pins auth_type=pat)
-                    # so MLflow's SDK client doesn't hit "oauth and pat".
+                    # Scoped single-method auth (sp_auth; no env writes) so
+                    # MLflow's SDK client doesn't hit "oauth and pat".
                     with single_auth_env(
                         host=auth_context.workspace_url, token=auth_context.token
                     ):

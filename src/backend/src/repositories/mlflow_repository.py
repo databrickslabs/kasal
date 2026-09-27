@@ -27,6 +27,10 @@ class MLflowRepository:
 
     The old columns on ``databricksconfig`` still exist — the migration copies
     rather than moves — but nothing reads them any more.
+
+    Writes FLUSH and never commit: :class:`MLflowService` owns the transaction.
+    This repository used to commit inside every setter, so a settings update
+    that failed validation on a later field had already saved the earlier ones.
     """
 
     def __init__(self, session: AsyncSession, *, default_enabled: bool = False):
@@ -55,8 +59,7 @@ class MLflowRepository:
             return cfg
         cfg = MLflowConfig(group_id=group_id, enabled=self.default_enabled)
         self.session.add(cfg)
-        await self.session.commit()
-        await self.session.refresh(cfg)
+        await self.session.flush()
         logger.info("Created MLflowConfig for group_id=%s", group_id)
         return cfg
 
@@ -67,7 +70,7 @@ class MLflowRepository:
     async def set_enabled(self, enabled: bool, group_id: Optional[str] = None) -> bool:
         cfg = await self._ensure(group_id)
         cfg.enabled = enabled
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     # Evaluation toggle helpers
@@ -80,7 +83,7 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         cfg.evaluation_enabled = enabled
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     async def get_evaluation_judge_model(
@@ -112,7 +115,7 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         cfg.experiment_name = (name or "").strip() or None
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     async def get_local_tracking_uri(
@@ -127,7 +130,7 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         setattr(cfg, "local_tracking_uri", (uri or "").strip().rstrip("/") or None)
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     async def set_evaluation_judge_model(
@@ -135,7 +138,7 @@ class MLflowRepository:
     ) -> bool:
         cfg = await self._ensure(group_id)
         setattr(cfg, "evaluation_judge_model", (model or "").strip() or None)
-        await self.session.commit()
+        await self.session.flush()
         return True
 
     async def get_advanced(
@@ -158,5 +161,5 @@ class MLflowRepository:
         for field in ("evaluation_max_rows", "optimization_judge_samples"):
             if field in values:
                 setattr(cfg, field, values[field])
-        await self.session.commit()
+        await self.session.flush()
         return True

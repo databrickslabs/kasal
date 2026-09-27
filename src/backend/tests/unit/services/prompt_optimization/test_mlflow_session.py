@@ -98,7 +98,7 @@ class TestResolveBackend:
 
 
 class TestMlflowSession:
-    def test_databricks_sets_and_restores_env(self, monkeypatch):
+    def test_databricks_scopes_credentials_without_touching_env(self, monkeypatch):
         monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
         monkeypatch.setenv("DATABRICKS_HOST", "old-host")
         auth = MagicMock()
@@ -110,12 +110,14 @@ class TestMlflowSession:
         fake_mlflow.get_tracking_uri.return_value = "prev"
         with patch.dict("sys.modules", {"mlflow": fake_mlflow}):
             with ms.mlflow_session(backend):
-                assert os.environ["DATABRICKS_TOKEN"] == "tok"
-                assert os.environ["DATABRICKS_HOST"] == "https://ws.example.com"
+                creds = sp_auth.current_credentials()
+                assert creds is not None
+                assert (creds.host, creds.token) == ("https://ws.example.com", "tok")
+                # Nothing of the credential reaches the shared process env.
+                assert "DATABRICKS_TOKEN" not in os.environ
+                assert os.environ["DATABRICKS_HOST"] == "old-host"
                 fake_mlflow.set_tracking_uri.assert_called_with("databricks")
-        # restored
-        assert os.environ["DATABRICKS_HOST"] == "old-host"
-        assert "DATABRICKS_TOKEN" not in os.environ
+        assert sp_auth.current_credentials() is None
 
     def test_local_sets_uri_no_env_swap(self):
         backend = ms.MLflowBackend(
@@ -129,79 +131,6 @@ class TestMlflowSession:
                 fake_mlflow.set_experiment.assert_called_with("kasal")
 
 
-class TestSpSingleAuth:
-    """The app SP must be presented as a SINGLE auth method (SP token, OAuth
-    env vars removed) so the SDK doesn't error 'oauth and pat'."""
-
-    def test_pins_pat_auth_when_only_token_present(self, monkeypatch):
-        # No OAuth SP creds but a PAT in the env: sp_single_auth cannot derive an
-        # SP bearer, but it MUST still pin DATABRICKS_AUTH_TYPE=pat so a bare
-        # WorkspaceClient() built in the window (MLflow get_trace) uses the PAT
-        # instead of the app-injected oauth-m2m. The token itself is untouched.
-        from src.services.mlflow import sp_auth
-
-        monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        monkeypatch.delenv("DATABRICKS_CLIENT_SECRET", raising=False)
-        monkeypatch.setenv("DATABRICKS_TOKEN", "pat")
-        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-        with sp_auth.sp_single_auth() as active:
-            assert active is True
-            assert os.environ["DATABRICKS_TOKEN"] == "pat"  # untouched
-            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"  # pinned
-        # restored after the window
-        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
-
-    def test_noop_without_any_creds(self, monkeypatch):
-        # Truly no creds (no OAuth, no token) is the only genuine no-op.
-        from src.services.mlflow import sp_auth
-
-        monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        monkeypatch.delenv("DATABRICKS_CLIENT_SECRET", raising=False)
-        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-        with sp_auth.sp_single_auth() as active:
-            assert active is False
-
-    def test_swaps_to_sp_token_and_removes_oauth(self, monkeypatch):
-        # sp_single_auth lives in mlflow.sp_auth. Patch derive_sp_bearer where the
-        # code calls it, or the real WorkspaceClient runs and hangs on I/O.
-        from src.services.mlflow import sp_auth
-
-        monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
-        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
-        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
-        monkeypatch.setenv("DATABRICKS_TOKEN", "stale-pat")
-        monkeypatch.setattr(sp_auth, "derive_sp_bearer", lambda *a: "sp-bearer")
-        with sp_auth.sp_single_auth() as active:
-            assert active is True
-            assert os.environ["DATABRICKS_TOKEN"] == "sp-bearer"
-            # The OAuth SP variables stay: the pinned auth type is what makes
-            # the SDK ignore them, and stripping them starved every concurrent
-            # reader of the process env (issue #8).
-            assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
-            assert os.environ["DATABRICKS_CLIENT_SECRET"] == "csec"
-            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
-        # restored
-        assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
-        assert os.environ["DATABRICKS_TOKEN"] == "stale-pat"
-
-    @pytest.mark.parametrize("has_pat", [False, True])
-    def test_fallback_when_bearer_cannot_be_derived(self, monkeypatch, has_pat):
-        from src.services.mlflow import sp_auth
-
-        monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
-        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
-        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
-        # Exercise both fallback paths independently of the developer's credentials.
-        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-        if has_pat:
-            monkeypatch.setenv("DATABRICKS_TOKEN", "test-pat")
-        monkeypatch.setattr(sp_auth, "derive_sp_bearer", lambda *a: None)
-        with sp_auth.sp_single_auth() as active:
-            assert active is has_pat
-            if has_pat:
-                assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
-
-
 class TestGrantHint:
     def test_permission_denied_detection(self):
         assert is_permission_denied(Exception("PERMISSION_DENIED: nope"))
@@ -213,115 +142,3 @@ class TestGrantHint:
         assert "ai_specialist.kasal" in hint
         assert "USE CATALOG ON CATALOG ai_specialist" in hint
         assert "MANAGE" in hint
-
-
-class TestPinsAreReferenceCounted:
-    """Windows overlap across worker threads; restoring independently left a
-    stale DATABRICKS_AUTH_TYPE=pat behind (issue #8)."""
-
-    def test_nested_windows_restore_the_original_only_once(self, monkeypatch):
-        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
-        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-        with sp_auth.single_auth_env(token="a"):
-            with sp_auth.single_auth_env(token="b"):
-                assert os.environ["DATABRICKS_TOKEN"] == "b"
-            # The inner exit must not restore the outer's intermediate state.
-            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
-            assert "DATABRICKS_TOKEN" in os.environ
-            assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"  # never popped
-        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
-        assert "DATABRICKS_TOKEN" not in os.environ
-
-    def test_windows_for_different_credentials_never_overlap(self, monkeypatch):
-        """A second credential WAITS: a concurrent MLflow call made for another
-        workspace or user can never see this window's token."""
-        import threading
-
-        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-        a_entered, release_a = threading.Event(), threading.Event()
-        b_entered = threading.Event()
-        b_saw: list = []
-
-        def window_a():
-            with sp_auth.single_auth_env(token="a"):
-                a_entered.set()
-                release_a.wait(5)
-
-        def window_b():
-            with sp_auth.single_auth_env(token="b"):
-                b_saw.append(os.environ.get("DATABRICKS_TOKEN"))
-                b_entered.set()
-
-        ta = threading.Thread(target=window_a)
-        ta.start()
-        assert a_entered.wait(5)
-        tb = threading.Thread(target=window_b)
-        tb.start()
-        # B is held while A's window is open, and A's token is untouched.
-        assert not b_entered.wait(0.3)
-        assert os.environ["DATABRICKS_TOKEN"] == "a"
-        release_a.set()
-        ta.join(5)
-        assert b_entered.wait(5)
-        tb.join(5)
-        assert b_saw == ["b"]
-        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
-        assert "DATABRICKS_TOKEN" not in os.environ
-
-    def test_windows_for_the_same_credential_overlap(self, monkeypatch):
-        import threading
-
-        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-        a_entered, b_done = threading.Event(), threading.Event()
-
-        def window_a():
-            with sp_auth.single_auth_env(token="same"):
-                a_entered.set()
-                b_done.wait(5)
-
-        thread = threading.Thread(target=window_a)
-        thread.start()
-        assert a_entered.wait(5)
-        with sp_auth.single_auth_env(token="same"):
-            pass
-        # B left while A is still active: the pin stays.
-        assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
-        b_done.set()
-        thread.join(5)
-        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
-        assert "DATABRICKS_TOKEN" not in os.environ
-
-    def test_pat_auth_env_shares_the_same_counter(self, monkeypatch):
-        """Local dev only: a PAT the developer exported is pinned, never written."""
-        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-        monkeypatch.setenv("DATABRICKS_TOKEN", "pat")
-        monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        monkeypatch.setattr("src.core.databricks_app.is_databricks_app", lambda: False)
-        with sp_auth.pat_auth_env() as active:
-            assert active is True
-            with sp_auth.single_auth_env(token="bearer"):
-                pass
-            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
-        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
-        assert os.environ["DATABRICKS_TOKEN"] == "pat"
-
-    def test_pat_auth_env_ignores_an_env_token_inside_apps(self, monkeypatch):
-        """Inside Databricks Apps a token in the shared env is nobody's: no pin."""
-        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
-        monkeypatch.setenv("DATABRICKS_TOKEN", "leaked")
-        monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
-        monkeypatch.setattr("src.core.databricks_app.is_databricks_app", lambda: True)
-        with sp_auth.pat_auth_env() as active:
-            assert active is False
-            assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
-
-    def test_derive_sp_bearer_names_its_auth_type(self):
-        with patch("databricks.sdk.WorkspaceClient") as wc:
-            wc.return_value.config.authenticate.return_value = {
-                "Authorization": "Bearer tok"
-            }
-            assert sp_auth.derive_sp_bearer("https://h", "cid", "sec") == "tok"
-        assert wc.call_args.kwargs["auth_type"] == "oauth-m2m"

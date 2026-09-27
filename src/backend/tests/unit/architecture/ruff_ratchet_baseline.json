@@ -665,7 +665,6 @@
   "src/services/mlflow/service.py::S110": 1,
   "src/services/mlflow/service.py::TRY400": 2,
   "src/services/mlflow/session.py::BLE001": 1,
-  "src/services/mlflow/sp_auth.py::G004": 1,
   "src/services/mlflow/tracing.py::BLE001": 6,
   "src/services/mlflow/tracing.py::G004": 4,
   "src/services/otel_tracing/db_exporter.py::BLE001": 1,

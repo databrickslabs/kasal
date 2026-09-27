@@ -121,8 +121,10 @@ const MLflowConfiguration: React.FC = () => {
             `write traces and register prompts, then redeploy the app.`,
         );
       }
-    } catch {
-      setError('Could not save MLflow settings.');
+    } catch (err) {
+      // A 400 (invalid field) or 403 (not a workspace admin) explains itself.
+      const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === 'string' && detail ? detail : 'Could not save MLflow settings.');
     } finally {
       setSaving(false);
     }
