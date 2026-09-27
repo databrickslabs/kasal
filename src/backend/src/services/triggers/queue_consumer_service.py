@@ -145,6 +145,10 @@ class TriggerQueueConsumerService:
                     session, snap["target"], snap["payload"], group_context
                 )
                 self._inject_event_context(config, execution_type)
+                from src.services.execution.config import run_freeze
+
+                # "auto" in the target becomes one enabled model for this run.
+                auto = await run_freeze.resolve(config, session, group_context)
                 run_name = await self._resolve_run_name(
                     session, snap["target"], execution_type, job_id
                 )
@@ -182,6 +186,7 @@ class TriggerQueueConsumerService:
                     trigger_type=TRIGGER_TYPE,
                     commit=True,
                 )
+                run_freeze.record(auto, job_id, group_context)
                 # Announce the run over SSE. The UI did not start this run, so
                 # this event is its FIRST sight of it — without the name here it
                 # renders a "Run <id>" placeholder forever.

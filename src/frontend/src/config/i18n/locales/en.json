@@ -414,6 +414,20 @@
       "description": "The decision model picks a model for each message",
       "picked": "Auto → {{model}}",
       "fellBack": "Auto → {{model}} (default)",
+      "fellBackBecause": "Auto → {{model}} (default: {{reason}})",
+      "reasons": {
+        "no_workspace": "no workspace",
+        "not_configured": "decision model not configured",
+        "no_key": "no decision model key",
+        "too_large": "request too large",
+        "timeout": "decision model timed out",
+        "unreachable": "decision model unreachable",
+        "provider_error": "decision model error",
+        "abstained": "decision model abstained",
+        "no_models": "no enabled models",
+        "too_many_models": "too many enabled models",
+        "empty_prompt": "empty request"
+      },
       "defaultModel": "the default model",
       "pickedDetail": "The decision model chose this model for the message.",
       "fellBackDetail": "The decision model did not choose, so the workspace default was used."

@@ -178,12 +178,21 @@ When the decision model is available to a workspace, the chat model selector off
 
 ### Where `auto` is resolved
 
-`auto` is a request, never a model. It is replaced by a concrete model key before anything calls a model, at two points:
+`auto` is a request, never a model. It is replaced by a concrete model key before anything calls a model:
 
-- **A chat message.** `POST /api/v1/dispatcher/dispatch` with `"model": "auto"`: the router calls `services/chat/auto_model.py` `resolve_dispatch_model` before intent detection, generation and the answer run, which all use the request's model.
-- **Every run.** `ExecutionService.create_execution` calls `services/execution/config/run_freeze.py` `freeze` before it names the run, writes the history row or starts the worker. `services/execution/config/auto_model.py` replaces `auto` in `CrewConfig.model`, in each agent's `llm` and `function_calling_llm` (a key or a `{"model": ...}` dict) and in a flow node's `data.llm`. One decision covers the whole run, so every `auto` gets the same model. This covers the Runs API, the chat answer run, scheduled and external runs.
+- **A chat message.** `POST /api/v1/dispatcher/dispatch` and `POST /api/v1/dispatcher/detect-intent` with `"model": "auto"`: the router calls `services/chat/auto_model.py` `resolve_dispatch_model` before intent detection, generation and the answer run, which all use the request's model.
+- **Every run.** One choke point, `services/execution/config/run_freeze.py`, called by every path that starts a run, before it names the run, writes the history row or starts the worker:
+  - `ExecutionService.create_execution` (the Runs API, the chat answer run, A2A `start_run`, deck refinement) calls `freeze`;
+  - the scheduler (`scheduling/scheduler.py`), queue triggers (`triggers/queue_consumer_service.py`) and the MCP `ask` tool (`external/invocation.py`) call `resolve`, since they write their own history row;
+  - `/flow-execution` (`flow_builder/flow_runner_service.py`) calls `resolve_mapping` on its dict config.
 
-After these points the execution history, the crew and flow subprocesses and anything exported from a run hold only real keys. A request that bypasses both and names `auto` anyway fails model lookup ("Model configuration not found for model: auto") rather than reaching the transport.
+  `services/execution/config/auto_model.py` walks the whole config and replaces `auto` in every model field: `CrewConfig.model`, an agent's `llm` (a key or a `{"model": ...}` dict) and `function_calling_llm`, a flow node's `data.llm`, `inputs.manager_llm` and `inputs.reasoning_llm`, a task's `llm_guardrail.llm_model`, and agents nested in `flow_config`. One decision covers the whole run, so every `auto` gets the same model. A schedule may store `"model": "auto"` on purpose: it is resolved at each run, not when the schedule is saved.
+
+After these points the execution history, the crew and flow subprocesses and anything exported from a run hold only real keys.
+
+### Safety net
+
+Should `auto` reach a model build anyway (a new entry point that skips `run_freeze`, a crew a flow loads from the database with `auto` saved on an agent), it is caught where every model key becomes an LLM: `LLMManager.configure_kasal_llm`, which both harnesses, `LLMManager.completion` and the manager and guardrail builders go through. There `model_selection.resolve_leaked_auto` builds the workspace default instead (the same rule as a fallback, below; the server default when the workspace has no enabled model) and logs a warning, `'auto' reached the LLM builder unresolved`, with the stack that names the path that leaked it. Two more guards make sure the bare string never becomes a model: the kernel's agent builder no longer falls back to the string `auto` when an LLM build fails, and the CrewAI harness refuses `auto` on any LLM argument rather than let CrewAI turn it into its own OpenAI client.
 
 Requests from the chat that call a model directly (prompt improvement, skill drafts, saving a crew from the conversation, slide edits) do not resolve Auto. The frontend sends no model for them (`concreteModel` in `features/chat/utils/autoModel.ts`), so they use the server default, as they do when no model is selected.
 
@@ -191,11 +200,11 @@ Requests from the chat that call a model directly (prompt improvement, skill dra
 
 `model_selection.py` `choose_model` sends one `choice` question over opaque indices:
 
-- **`state.request`**: the prompt as `{"text", "truncated", "length"}`. The text is capped at 2,000 characters: the first 1,500 and the last 500, joined by `[...]`, since a long paste often states the actual question at the end. For a chat message the prompt is the clean user message (`original_prompt`, without hidden steering text). For a run it is the run's `user_message`, else `inputs.user_request`, else `inputs.instruction`, else the first three task descriptions.
+- **`state.request`**: the prompt as `{"text", "truncated", "length"}`. The text is capped at 2,000 characters: the first three quarters and the last quarter, joined by `[...]`, since a long paste often states the actual question at the end. It is also cut to what fits the 20,000-byte state budget once the models are described. The budget counts `json.dumps` bytes, where a non-ASCII character costs 6 to 12, so a character cap alone made every long non-English prompt abstain; the excerpt now shrinks until it fits instead. For a chat message the prompt is the clean user message (`original_prompt`, without hidden steering text). For a run it is the run's `user_message`, else `inputs.user_request`, else `inputs.instruction`, else the first three task descriptions.
 - **`state.models`**: one entry per enabled model, built by `describe_model`: `name`, `provider`, `context_window`, `max_output_tokens`, `reasoning` (the style from `core/llm/model_capabilities.py`, or `null`), `reasoning_efforts` (the efforts the model accepts) and `extended_thinking`. The model key is not sent. The catalog has no vision, tool-support or cost data, so none is sent.
 - **`questions.model`**: the criteria `"0"` to `"n-1"` plus `none`. The instruction asks for a model capable enough for the request's complexity, context and output length, preferring the smaller or faster one when several are adequate, from the supplied metadata only.
 
-The request is skipped, and Auto falls back, when the workspace has no enabled model, more than 64, or the prompt is empty. The usual runtime limits still apply: over 20,000 bytes of state abstains.
+The request is skipped, and Auto falls back, when the workspace has no enabled model, more than 64, or the prompt is empty, or when the model descriptions alone fill the budget.
 
 ### From index to model
 
@@ -203,7 +212,23 @@ An accepted answer `"i"` maps to `models[i].key`, where `models` is the list Kas
 
 ### Fallback
 
-On `none`, an abstain (off, no key, over a limit, uncertain, timeout, HTTP or contract failure) or an error, Auto uses the workspace default: the server default model (`DEFAULT_ENGINE_MODEL`) when it is enabled for the workspace, else the first enabled model. This is the model the chat selector preselected before Auto existed. When the workspace has no enabled model, the model is removed from the request, and the run takes the server default exactly as when nothing was selected.
+On `none`, an abstain or an error, Auto uses the workspace default: the server default model (`DEFAULT_ENGINE_MODEL`) when it is enabled for the workspace, else the first enabled model. This is the model the chat selector preselected before Auto existed. When the workspace has no enabled model, the model is removed from the request, and the run takes the server default exactly as when nothing was selected.
+
+Every fallback records why, as a short code in `ModelSelection.reason` (`runtime.decide_with_reason` returns the runtime's; `decide` is unchanged for the other policies):
+
+| Code | Shown as | When |
+|---|---|---|
+| `no_models` | no enabled models | the workspace has none |
+| `too_many_models` | too many enabled models | more than 64 |
+| `empty_prompt` | empty request | nothing to decide on |
+| `no_workspace` | no workspace | no group context |
+| `not_configured` | decision model not configured | no Jev API URL |
+| `no_key` | no decision model key | the workspace has no `JEV_API_KEY` |
+| `too_large` | request too large | over the payload budget |
+| `timeout` | decision model timed out | the 6-second budget or an HTTP timeout |
+| `unreachable` | decision model unreachable | connection refused or failed |
+| `provider_error` | decision model error | any other HTTP or contract failure |
+| `abstained` | decision model abstained | `none`, or under the confidence gate |
 
 ### Tenancy
 
@@ -212,10 +237,10 @@ The candidates are exactly what `GET /api/v1/models/enabled` returns for the req
 ### What is recorded
 
 - **Telemetry.** `runtime.decide` emits the usual `DecisionEvaluatedEvent` with policy `model_selection` whenever the provider was called (see [Observability](#observability)).
-- **The run's trace.** Once a run's history row exists, `run_freeze.record` writes one trace row for it: `event_type` `decision_evaluated`, `event_context` `model_selection`, `output` `Auto picked <model>` or `Auto fell back to <model>`, and `trace_metadata` `{"policy", "requested", "model", "status"}`. It is written directly through `ExecutionTraceService` on a task of its own, because the run's event bridge is not listening yet. A chat message's pick is attributed to the answer run it starts when that run uses the picked model (`auto_model.selection_for`). A failed write logs a warning and never fails the run.
-- **The API response.** `POST /dispatcher/dispatch` and `POST /executions` return `model_selection`: `{"requested": "auto", "model": "<key>", "status": "selected" | "fallback"}`. It is absent (dispatch) or `null` (executions) when the request named a model.
-- **The chat.** The chat posts a run-activity step, "Auto → `<model>`" (with "(default)" on a fallback), to the session that sent the message.
-- **The server log.** `Auto model selection for workspace <id>: <model> (<status>)`, at info level.
+- **The run's trace.** Once a run's history row exists, `run_freeze.record` writes one trace row for it: `event_type` `decision_evaluated`, `event_context` `model_selection`, `output` `Auto picked <model>` or `Auto fell back to <model> (default: <reason>)`, and `trace_metadata` `{"policy", "requested", "model", "status", "reason"}`. It is written directly through `ExecutionTraceService` on a task of its own, because the run's event bridge is not listening yet, and on a private connection (`get_isolated_db_session`), like the other out-of-band trace writers. It used to share the routed session's connection: on SQLite that is one StaticPool connection for every session, so the request's session returning it rolled back the uncommitted row, and the write failed with "15 validation errors for ExecutionTraceItem ... MissingGreenlet". No row was ever saved. A chat message's pick is attributed to the answer run it starts when that run uses the picked model (`auto_model.selection_for`). A failed write logs a warning and never fails the run.
+- **The API response.** `POST /dispatcher/dispatch` and `POST /executions` return `model_selection`: `{"requested": "auto", "model": "<key>", "status": "selected" | "fallback", "reason": <code or null>}`. It is absent (dispatch) or `null` (executions) when the request named a model.
+- **The chat.** The chat posts a run-activity step to the session that sent the message: "Auto → `<model>`", or "Auto → `<model>` (default: decision model unreachable)" on a fallback. The reasons are i18n keys, `chat.autoModel.reasons.<code>`; an unknown code shows "(default)".
+- **The server log.** `Auto model selection for workspace <id>: <model> (<status>[: <reason>])`, at info level.
 - **Run history.** The run's stored `inputs.model` is the concrete model.
 
 ### Relation to the recommendation box
@@ -346,7 +371,7 @@ The trace view has no dedicated rendering for `decision_evaluated` rows. The cha
 - **One database session per decision.** The credential is not cached, so every decision opens an isolated session to read the opt-in and the key.
 - **The system URL is per process.** A saved URL takes effect in the process that saved it and in crew or flow subprocesses started afterwards. Other long-lived server processes keep the old value until they restart.
 - **No per-policy switch.** A workspace opts in to every policy at once.
-- **Auto is chat-only.** The Auto option is in the chat composer. The Agent Builder and Flow Builder model pickers, saved agents and schedules stay explicit. The Runs API accepts `"model": "auto"` (see [Model selection (Auto)](#model-selection-auto)). Auto does not pick an effort, and the catalog carries no cost data to prefer a cheaper model on.
+- **Auto is chat-only.** The Auto option is in the chat composer. The Agent Builder and Flow Builder model pickers, saved agents and schedules stay explicit in the UI. The Runs API, schedules, queue triggers, MCP `ask` and `/flow-execution` accept `"model": "auto"` (see [Model selection (Auto)](#model-selection-auto)). Auto does not pick an effort, and the catalog carries no cost data to prefer a cheaper model on.
 
 ## Adding another provider
 

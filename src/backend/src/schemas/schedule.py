@@ -47,7 +47,11 @@ class ScheduleBase(BaseModel):
     is_active: bool = Field(default=True, description="Whether the schedule is active")
     model: str = Field(
         default_factory=lambda: DEFAULT_ENGINE_MODEL,
-        description="Model to use for the job",
+        description=(
+            'Model to use for the job. "auto" is accepted on purpose: it is '
+            "resolved to one of the workspace's enabled models at each run, "
+            "not when the schedule is saved."
+        ),
     )
 
     @model_validator(mode="after")

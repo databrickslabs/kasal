@@ -85,12 +85,35 @@ export function resolveChatModel(args: Parameters<typeof pickChatModel>[0]): str
   return args.autoAvailable ? AUTO_MODEL : fallbackModelKey(args.models, args.serverDefault);
 }
 
-/** "Auto → model" for the run activity, or the fallback wording. */
+/** English defaults for why Auto fell back; the codes come from the backend. */
+const FALLBACK_REASONS: Record<string, string> = {
+  no_workspace: 'no workspace',
+  not_configured: 'decision model not configured',
+  no_key: 'no decision model key',
+  too_large: 'request too large',
+  timeout: 'decision model timed out',
+  unreachable: 'decision model unreachable',
+  provider_error: 'decision model error',
+  abstained: 'decision model abstained',
+  no_models: 'no enabled models',
+  too_many_models: 'too many enabled models',
+  empty_prompt: 'empty request',
+};
+
+/** "Auto → model" for the run activity, or the fallback wording with its reason. */
 export function modelSelectionLabel(selection: ModelSelection): string {
   const model = selection.model ?? tr('chat.autoModel.defaultModel', 'the default model');
-  return selection.status === 'selected'
-    ? tr('chat.autoModel.picked', 'Auto → {{model}}', { model })
-    : tr('chat.autoModel.fellBack', 'Auto → {{model}} (default)', { model });
+  if (selection.status === 'selected') {
+    return tr('chat.autoModel.picked', 'Auto → {{model}}', { model });
+  }
+  const code = selection.reason ?? '';
+  const fallback = FALLBACK_REASONS[code];
+  if (!fallback) return tr('chat.autoModel.fellBack', 'Auto → {{model}} (default)', { model });
+  const reason = tr(`chat.autoModel.reasons.${code}`, fallback);
+  return tr('chat.autoModel.fellBackBecause', 'Auto → {{model}} (default: {{reason}})', {
+    model,
+    reason,
+  });
 }
 
 export function modelSelectionDetail(selection: ModelSelection): string {

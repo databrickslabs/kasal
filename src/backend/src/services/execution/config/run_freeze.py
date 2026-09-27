@@ -7,6 +7,11 @@ Two steps, in this order, both in place on the config:
 
 ``ExecutionService.create_execution`` calls ``freeze`` first and ``record`` once
 the run's history row exists, so the run's trace shows what Auto picked.
+
+Paths that write their own history row (the scheduler, queue triggers, the MCP
+``ask`` tool, ``/flow-execution``) call ``resolve`` (step 1 only; they never
+snapshotted agent settings) or ``resolve_mapping`` for a dict config, and
+``record`` the same way.
 """
 
 from typing import Optional
@@ -20,6 +25,7 @@ from src.services.execution.config.agent_settings_snapshot import (
 )
 from src.services.execution.config.auto_model import (
     record_selection,
+    resolve_mapping_models,
     resolve_run_models,
     selection_for,
 )
@@ -35,6 +41,24 @@ async def freeze(
     resolved = await resolve_run_models(config, session, group_context)
     await snapshot_agent_settings(config, session, group_context)
     return selection_for(config, resolved)
+
+
+async def resolve(
+    config: CrewConfig,
+    session: Optional[AsyncSession],
+    group_context: Optional[GroupContext],
+) -> Optional[ModelSelection]:
+    """Step 1 only: replace every "auto" in ``config``. Returns the Auto pick."""
+    return await resolve_run_models(config, session, group_context)
+
+
+async def resolve_mapping(
+    config: dict,
+    session: Optional[AsyncSession],
+    group_context: Optional[GroupContext],
+) -> Optional[ModelSelection]:
+    """``resolve`` for a plain-dict run config."""
+    return await resolve_mapping_models(config, session, group_context)
 
 
 def record(

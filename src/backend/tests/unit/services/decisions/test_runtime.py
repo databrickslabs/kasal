@@ -154,3 +154,59 @@ def test_rejects_untrusted_response_shapes(field, value):
     response["answers"]["q"][field] = value
     with pytest.raises(ValueError):
         choices_from_response(response, QUESTIONS)
+
+
+class ConnectError(Exception):
+    """Named like httpx's, which the runtime reads by name."""
+
+
+class ReadTimeout(Exception):
+    """Named like httpx's."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error,reason",
+    [
+        (TimeoutError(), runtime.TIMEOUT),
+        (ReadTimeout(), runtime.TIMEOUT),
+        (ConnectError(), runtime.UNREACHABLE),
+        (RuntimeError("body"), runtime.PROVIDER_ERROR),
+    ],
+)
+async def test_provider_failures_say_why(gateway, error, reason):
+    gateway[1].side_effect = error
+    assert await runtime.decide_with_reason("test", {}, QUESTIONS, group_id="one") == (
+        None,
+        reason,
+    )
+
+
+@pytest.mark.asyncio
+async def test_abstain_reasons(gateway, monkeypatch):
+    credential, provider, _ = gateway
+    decide = runtime.decide_with_reason
+    provider.return_value = payload(0.5)
+    assert await decide("t", {}, QUESTIONS, group_id="one") == (None, runtime.ABSTAINED)
+    big = {"text": "x" * (runtime.MAX_PAYLOAD_BYTES + 1)}
+    assert await decide("t", big, QUESTIONS, group_id="one") == (
+        None,
+        runtime.TOO_LARGE,
+    )
+    with patch.object(runtime, "workspace_id", return_value=None):
+        assert await decide("t", {}, QUESTIONS) == (None, runtime.NO_WORKSPACE)
+    credential.return_value = None
+    assert await decide("t", {}, QUESTIONS, group_id="one") == (None, runtime.NO_KEY)
+    monkeypatch.setitem(engine_settings._snapshot, engine_settings.JEV_API_BASE, "")
+    assert await decide("t", {}, QUESTIONS, group_id="one") == (
+        None,
+        runtime.NOT_CONFIGURED,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_answer_has_no_reason(gateway):
+    answers, reason = await runtime.decide_with_reason(
+        "t", {}, QUESTIONS, group_id="one"
+    )
+    assert answers["q"].selected == "yes" and reason is None

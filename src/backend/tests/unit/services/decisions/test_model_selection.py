@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.services.decisions import model_selection
+from src.services.decisions import model_selection, runtime
 from src.services.decisions.contracts import Choice
 from src.services.decisions.model_selection import (
+    FALLBACK_REASONS,
     MAX_CANDIDATES,
     MAX_REQUEST_CHARS,
     ModelSelection,
@@ -18,9 +19,11 @@ from src.services.decisions.model_selection import (
     fallback_model,
     is_auto,
     request_excerpt,
+    resolve_leaked_auto,
     select_for_workspace,
     trace_row,
 )
+from src.services.decisions.runtime import encoded_size
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
@@ -103,8 +106,8 @@ class TestChooseModel:
         models = [model("key-alpha"), model("key-beta")]
         with patch.object(
             model_selection,
-            "decide",
-            new=AsyncMock(return_value=answer("1", ["0", "1", "none"])),
+            "decide_with_reason",
+            new=AsyncMock(return_value=(answer("1", ["0", "1", "none"]), None)),
         ) as decide:
             result = await choose_model(models, "hard proof", group_id="ws")
         assert result == ModelSelection("key-beta", "selected", result.duration_ms)
@@ -125,35 +128,48 @@ class TestChooseModel:
         models = [model("a"), model(DEFAULT_ENGINE_MODEL)]
         with patch.object(
             model_selection,
-            "decide",
-            new=AsyncMock(return_value=answer("none", ["0", "1", "none"])),
+            "decide_with_reason",
+            new=AsyncMock(return_value=(answer("none", ["0", "1", "none"]), None)),
         ):
             result = await choose_model(models, "hi", group_id="ws")
         assert (result.model, result.status) == (DEFAULT_ENGINE_MODEL, "fallback")
+        assert result.reason == "abstained"
 
     @pytest.mark.asyncio
     async def test_abstain_falls_back_to_the_default(self):
-        with patch.object(model_selection, "decide", new=AsyncMock(return_value=None)):
+        with patch.object(
+            model_selection,
+            "decide_with_reason",
+            new=AsyncMock(return_value=(None, "timeout")),
+        ):
             result = await choose_model([model("a")], "hi", group_id="ws")
-        assert (result.model, result.status) == ("a", "fallback")
+        assert (result.model, result.status, result.reason) == (
+            "a",
+            "fallback",
+            "timeout",
+        )
 
     @pytest.mark.asyncio
     async def test_over_the_cap_does_not_ask(self):
         models = [model(f"m{i}") for i in range(MAX_CANDIDATES + 1)]
-        with patch.object(model_selection, "decide", new=AsyncMock()) as decide:
+        with patch.object(
+            model_selection, "decide_with_reason", new=AsyncMock()
+        ) as decide:
             result = await choose_model(models, "hi", group_id="ws")
         decide.assert_not_awaited()
         assert (result.model, result.status) == ("m0", "fallback")
+        assert result.reason == "too_many_models"
 
     @pytest.mark.asyncio
     async def test_empty_prompt_or_no_models_does_not_ask(self):
-        with patch.object(model_selection, "decide", new=AsyncMock()) as decide:
-            assert (await choose_model([model("a")], "  ", group_id="ws")).status == (
-                "fallback"
-            )
+        with patch.object(
+            model_selection, "decide_with_reason", new=AsyncMock()
+        ) as decide:
+            blank = await choose_model([model("a")], "  ", group_id="ws")
             empty = await choose_model([], "hi", group_id="ws")
         decide.assert_not_awaited()
-        assert empty == ModelSelection(None, "fallback", empty.duration_ms)
+        assert (blank.status, blank.reason) == ("fallback", "empty_prompt")
+        assert empty == ModelSelection(None, "fallback", empty.duration_ms, "no_models")
 
 
 class TestThroughTheRuntime:
@@ -247,8 +263,8 @@ class TestSelectForWorkspace:
             ) as cls,
             patch.object(
                 model_selection,
-                "decide",
-                new=AsyncMock(return_value=answer("0", ["0", "none"])),
+                "decide_with_reason",
+                new=AsyncMock(return_value=(answer("0", ["0", "none"]), None)),
             ) as decide,
         ):
             result = await select_for_workspace(session, context, "hi")
@@ -263,29 +279,125 @@ class TestSelectForWorkspace:
     async def test_no_workspace_means_no_candidates_and_no_decision(self):
         with (
             patch("src.services.settings.models.ModelConfigService") as cls,
-            patch.object(model_selection, "decide", new=AsyncMock()) as decide,
+            patch.object(
+                model_selection, "decide_with_reason", new=AsyncMock()
+            ) as decide,
         ):
             result = await select_for_workspace(
                 Mock(), SimpleNamespace(primary_group_id=None), "hi"
             )
         cls.assert_not_called()
         decide.assert_not_awaited()
-        assert result == ModelSelection(None, "fallback", result.duration_ms)
+        assert result == ModelSelection(
+            None, "fallback", result.duration_ms, "no_models"
+        )
 
 
 def test_trace_row_shape():
-    row = trace_row(ModelSelection("m", "fallback", 12.7), "job-1", "ws")
+    row = trace_row(ModelSelection("m", "fallback", 12.7, "timeout"), "job-1", "ws")
     assert row["job_id"] == "job-1" and row["group_id"] == "ws"
     assert row["event_type"] == "decision_evaluated"
     assert row["event_context"] == "model_selection"
-    assert row["output"] == "Auto fell back to m"
+    assert row["output"] == "Auto fell back to m (default: decision model timed out)"
     assert row["trace_metadata"] == {
         "policy": "model_selection",
         "requested": "auto",
         "model": "m",
         "status": "fallback",
+        "reason": "timeout",
     }
     assert row["duration_ms"] == 12
     assert trace_row(ModelSelection("m", "selected"), "j", None)["output"] == (
         "Auto picked m"
     )
+    assert trace_row(ModelSelection("m", "fallback"), "j", None)["output"] == (
+        "Auto fell back to m"
+    )
+
+
+def test_every_reason_code_has_words():
+    from src.services.decisions import runtime
+
+    codes = {
+        value
+        for name, value in vars(runtime).items()
+        if name.isupper() and isinstance(value, str)
+    } | {model_selection.NO_MODELS, model_selection.TOO_MANY_MODELS}
+    codes.add(model_selection.EMPTY_PROMPT)
+    assert codes <= set(FALLBACK_REASONS)
+
+
+class TestNonAsciiBudget:
+    """The budget counts encoded bytes, so a non-English prompt is cut to fit."""
+
+    FIFTY_ONE = [model(f"databricks-model-{i}") for i in range(51)]
+
+    def test_excerpt_fits_the_encoded_budget(self):
+        excerpt = request_excerpt("数据" * 1500, max_bytes=3000)
+        assert excerpt["truncated"] is True
+        assert encoded_size(excerpt["text"]) <= 3000
+        assert excerpt["text"].startswith("数据")
+        assert excerpt["length"] == 3000
+
+    def test_ascii_under_the_cap_is_untouched(self):
+        assert request_excerpt("hello", max_bytes=100)["truncated"] is False
+
+    def test_nothing_fits_means_an_empty_excerpt(self):
+        assert request_excerpt("数据" * 10, max_bytes=2)["text"] == ""
+
+    @pytest.mark.asyncio
+    async def test_a_long_non_english_prompt_still_gets_a_decision(self):
+        prompts = ["Привет мир " * 400, "请总结这份报告" * 400, "🙂" * 1500]
+        for prompt in prompts:
+            with patch.object(
+                model_selection,
+                "decide_with_reason",
+                new=AsyncMock(return_value=(answer("0", ["0", "none"]), None)),
+            ) as decide:
+                result = await choose_model(self.FIFTY_ONE, prompt, group_id="ws")
+            assert result.status == "selected", prompt[:10]
+            state = decide.await_args.args[1]
+            assert encoded_size(state) <= runtime.MAX_PAYLOAD_BYTES
+            assert state["request"]["truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_the_real_runtime_does_not_abstain_on_size(self):
+        with (
+            patch("src.services.decisions.provider.is_configured", return_value=False),
+        ):
+            result = await choose_model(
+                self.FIFTY_ONE, "请总结这份报告" * 400, group_id="ws"
+            )
+        # Not configured, not too large: the size check passed.
+        assert result.reason == "not_configured"
+
+
+class TestLeakedAuto:
+    """The safety net at the LLM builder."""
+
+    @pytest.mark.asyncio
+    async def test_a_concrete_key_passes_through_untouched(self):
+        with patch.object(model_selection, "_enabled_models") as enabled:
+            assert await resolve_leaked_auto(Mock(), "m", "ws") == "m"
+        enabled.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_becomes_the_workspace_default_and_warns(self, caplog):
+        enabled = AsyncMock(return_value=[model("a"), model(DEFAULT_ENGINE_MODEL)])
+        with patch.object(model_selection, "_enabled_models", new=enabled):
+            with caplog.at_level("WARNING", logger=model_selection.logger.name):
+                key = await resolve_leaked_auto(Mock(), " AUTO ", "ws")
+        assert key == DEFAULT_ENGINE_MODEL
+        assert enabled.await_args.args[1].group_ids == ["ws"]
+        record = next(r for r in caplog.records if "unresolved" in r.getMessage())
+        # The stack names the path that leaked it.
+        assert record.stack_info and "test_model_selection" in record.stack_info
+
+    @pytest.mark.asyncio
+    async def test_no_enabled_model_means_the_server_default(self):
+        with patch.object(
+            model_selection, "_enabled_models", new=AsyncMock(return_value=[])
+        ):
+            assert await resolve_leaked_auto(Mock(), "auto", "ws") == (
+                DEFAULT_ENGINE_MODEL
+            )

@@ -37,6 +37,8 @@ export interface ModelSelection {
   model: string | null;
   /** `selected` by the decision model, or the workspace default on `fallback`. */
   status: 'selected' | 'fallback';
+  /** Why it fell back, e.g. `timeout` (see `chat.autoModel.reasons`). */
+  reason?: string | null;
 }
 
 export interface Execution {

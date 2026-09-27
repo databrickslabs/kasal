@@ -233,3 +233,18 @@ class TestTheBindingSwapsWhatIsBuilt:
         assert kasal.supports(Capability.AGENT_PLAN)
         assert crewai.supports(Capability.EXPORT)
         assert kasal.supports(Capability.EXPORT)
+
+
+class TestAutoNeverBecomesACrewAIModel:
+    """CrewAI turns a model-name string into its own (OpenAI) client, outside
+    Kasal's transport. "auto" is not a model, so it must never get that far."""
+
+    @pytest.mark.parametrize("key", ["llm", "manager_llm", "function_calling_llm"])
+    def test_auto_is_refused_on_every_llm_kwarg(self, key):
+        with pytest.raises(ValueError, match="auto"):
+            crew_build._wrap_llms({key: " Auto "})
+
+    def test_a_real_model_name_string_is_still_left_alone(self):
+        kwargs = {"llm": "gpt-4o"}
+        crew_build._wrap_llms(kwargs)
+        assert kwargs["llm"] == "gpt-4o"

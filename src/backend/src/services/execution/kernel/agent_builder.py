@@ -355,6 +355,12 @@ async def build_agent_llm(
         # Fallback to simple string if configuration fails
         logger.error(f"Error configuring LLM: {e}")
         llm = spec.get("llm", default_model)
+        from src.services.decisions.model_selection import is_auto
+
+        if is_auto(llm):
+            # A bare "auto" is not a model: CrewAI would build a native OpenAI
+            # client from it. configure_kasal_llm resolves it, so this failed.
+            raise
         logger.warning(f"Using string model name as fallback for agent {label}: {llm}")
 
     # In an execution subprocess, opt the LLM into streamed completions so the

@@ -862,20 +862,20 @@ class LLMManager:
             ValueError: If model configuration is not found or group_id is not provided
             Exception: For other configuration errors
         """
-        # SECURITY: Validate group_id is provided
-        if not group_id:
+        if not group_id:  # SECURITY: multi-tenant isolation
             raise ValueError(
                 "group_id is REQUIRED for configure_kasal_llm (multi-tenant isolation)"
             )
 
-        # Get model configuration using ModelConfigService
         from src.db.session import routed_scoped_session
+        from src.services.decisions.model_selection import resolve_leaked_auto
 
         async with routed_scoped_session() as session:
+            # "auto" is a request, never a model; see resolve_leaked_auto.
+            model_name = await resolve_leaked_auto(session, model_name, group_id)
             model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model_name)
 
-        # Check if model configuration was found
         if not model_config_dict:
             raise ValueError(f"Model {model_name} not found in the database")
 

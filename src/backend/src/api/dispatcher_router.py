@@ -106,6 +106,9 @@ async def detect_intent_only(
         if group_context.access_token:
             UserContext.set_user_token(group_context.access_token)
 
+    # As in /dispatch: "auto" never reaches intent detection's model call.
+    await resolve_dispatch_model(request, session, group_context)
+
     # Create service instance with injected session
     dispatcher_service = DispatcherService.create(session)
 

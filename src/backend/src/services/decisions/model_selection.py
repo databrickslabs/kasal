@@ -13,14 +13,15 @@ import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
 from time import monotonic
-from typing import Optional, Sequence, TypedDict
+from typing import Optional, Sequence, Tuple, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.llm.model_capabilities import allowed_efforts, model_capability
 from src.models.model_config import ModelConfig
+from src.services.decisions import runtime
 from src.services.decisions.policies import question
-from src.services.decisions.runtime import decide
+from src.services.decisions.runtime import decide_with_reason, encoded_size
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,31 @@ POLICY = "model_selection"
 #: The select helper's cap; more enabled models than this abstains.
 MAX_CANDIDATES = 64
 #: Only this much of the prompt is sent: the start (what is asked) and the end
-#: (where a long paste usually states the actual question).
+#: (where a long paste usually states the actual question). It is also cut to
+#: what fits the payload budget in ENCODED bytes, so a non-English prompt is
+#: shortened rather than abstaining (see ``request_excerpt``).
 MAX_REQUEST_CHARS = 2000
-_HEAD_CHARS = 1500
+
+#: Why Auto fell back, beside the runtime's reasons (``runtime.NO_KEY`` ...).
+NO_MODELS = "no_models"
+TOO_MANY_MODELS = "too_many_models"
+EMPTY_PROMPT = "empty_prompt"
+
+#: The reason as the trace row reads it. The chat has its own i18n keys
+#: (``chat.autoModel.reasons.*``) for the same codes.
+FALLBACK_REASONS = {
+    runtime.NO_WORKSPACE: "no workspace",
+    runtime.NOT_CONFIGURED: "decision model not configured",
+    runtime.NO_KEY: "no decision model key",
+    runtime.TOO_LARGE: "request too large",
+    runtime.TIMEOUT: "decision model timed out",
+    runtime.UNREACHABLE: "decision model unreachable",
+    runtime.PROVIDER_ERROR: "decision model error",
+    runtime.ABSTAINED: "decision model abstained",
+    NO_MODELS: "no enabled models",
+    TOO_MANY_MODELS: "too many enabled models",
+    EMPTY_PROMPT: "empty request",
+}
 
 INSTRUCTIONS = (
     "Choose the enabled model best suited to the request. It must be capable "
@@ -56,6 +79,7 @@ class SelectionResponse(TypedDict):
     requested: str
     model: Optional[str]
     status: str
+    reason: Optional[str]
 
 
 class RequestExcerpt(TypedDict):
@@ -71,34 +95,63 @@ class ModelSelection:
     """What Auto resolved to.
 
     ``status`` is ``selected`` when the decision model chose, ``fallback`` when
-    the workspace default was used instead. ``model`` is None only when the
-    workspace has no enabled model: the caller then sends no model, exactly as
-    when nothing was selected.
+    the workspace default was used instead, and ``reason`` then says why (a
+    key of ``FALLBACK_REASONS``). ``model`` is None only when the workspace has
+    no enabled model: the caller then sends no model, exactly as when nothing
+    was selected.
     """
 
     model: Optional[str]
     status: str
     duration_ms: float = 0.0
+    reason: Optional[str] = None
 
     def to_response(self) -> SelectionResponse:
-        return {"requested": AUTO_MODEL, "model": self.model, "status": self.status}
+        return {
+            "requested": AUTO_MODEL,
+            "model": self.model,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+    def summary(self) -> str:
+        """``Auto picked m``, or ``Auto fell back to m (default: <reason>)``."""
+        model = self.model or "the default model"
+        if self.status == "selected":
+            return f"Auto picked {model}"
+        why = FALLBACK_REASONS.get(self.reason or "")
+        return f"Auto fell back to {model}" + (f" (default: {why})" if why else "")
 
 
 def is_auto(value: object) -> bool:
     return isinstance(value, str) and value.strip().lower() == AUTO_MODEL
 
 
-def request_excerpt(prompt: Optional[str]) -> RequestExcerpt:
-    """The prompt as sent: capped at MAX_REQUEST_CHARS, head and tail kept."""
+def _cut(text: str, limit: int) -> str:
+    """At most ``limit`` characters of ``text``: three quarters head, the rest tail."""
+    if len(text) <= limit:
+        return text
+    head = limit * 3 // 4
+    return f"{text[:head]}\n[...]\n{text[len(text) - (limit - head):]}"
+
+
+def request_excerpt(
+    prompt: Optional[str], max_bytes: int = runtime.MAX_PAYLOAD_BYTES
+) -> RequestExcerpt:
+    """The prompt as sent: at most MAX_REQUEST_CHARS and ``max_bytes`` encoded.
+
+    The budget counts ``json.dumps`` bytes, where a non-ASCII character costs
+    6 to 12, so a character cap alone let a long non-English prompt overrun it
+    and abstain every time. The excerpt shrinks until it fits instead; it is
+    empty only when not even a few characters fit.
+    """
     text = str(prompt or "").strip()
-    if len(text) <= MAX_REQUEST_CHARS:
-        return {"text": text, "truncated": False, "length": len(text)}
-    tail = MAX_REQUEST_CHARS - _HEAD_CHARS
-    return {
-        "text": f"{text[:_HEAD_CHARS]}\n[...]\n{text[-tail:]}",
-        "truncated": True,
-        "length": len(text),
-    }
+    limit = min(len(text), MAX_REQUEST_CHARS)
+    excerpt = _cut(text, limit)
+    while excerpt and encoded_size(excerpt) > max_bytes:
+        limit = min(limit - 1, limit * max_bytes // encoded_size(excerpt))
+        excerpt = _cut(text, limit) if limit > 0 else ""
+    return {"text": excerpt, "truncated": excerpt != text, "length": len(text)}
 
 
 def describe_model(model: ModelConfig) -> dict[str, object]:
@@ -130,35 +183,72 @@ def fallback_model(models: Sequence[ModelConfig]) -> Optional[str]:
     return keys[0] if keys else None
 
 
+def _request_budget(described: list[dict[str, object]]) -> int:
+    """Encoded bytes left for the request text once the models are described."""
+    skeleton = {
+        "request": {"text": "", "truncated": True, "length": 10**9},
+        "models": described,
+    }
+    # +2: the skeleton already counts the empty text's quotes.
+    return runtime.MAX_PAYLOAD_BYTES - encoded_size(skeleton) + 2
+
+
+async def _ask(
+    models: Sequence[ModelConfig], prompt: Optional[str], group_id: Optional[str]
+) -> Tuple[Optional[str], Optional[str]]:
+    """``(key, None)`` when the decision model chose, else ``(None, reason)``."""
+    if not models:
+        return None, NO_MODELS
+    if len(models) > MAX_CANDIDATES:
+        return None, TOO_MANY_MODELS
+    if not str(prompt or "").strip():
+        return None, EMPTY_PROMPT
+    described = [describe_model(m) for m in models]
+    excerpt = request_excerpt(prompt, _request_budget(described))
+    if not excerpt["text"]:
+        return None, runtime.TOO_LARGE
+    answers, reason = await decide_with_reason(
+        POLICY,
+        {"request": excerpt, "models": described},
+        {
+            "model": question(
+                INSTRUCTIONS,
+                {
+                    **{str(i): f"Model {i}" for i in range(len(models))},
+                    "none": "The metadata cannot distinguish a suitable model",
+                },
+            )
+        },
+        group_id=group_id,
+    )
+    if answers is None:
+        return None, reason
+    choice = answers["model"].selected
+    if choice == "none":
+        return None, runtime.ABSTAINED
+    return str(models[int(choice)].key), None
+
+
 async def choose_model(
     models: Sequence[ModelConfig], prompt: Optional[str], *, group_id: Optional[str]
 ) -> ModelSelection:
     """Pick one of ``models`` for ``prompt``; fall back to the default on abstain."""
     started = monotonic()
-    default = fallback_model(models)
-    excerpt = request_excerpt(prompt)
-    selected: Optional[str] = None
-    if models and len(models) <= MAX_CANDIDATES and excerpt["text"]:
-        answers = await decide(
-            POLICY,
-            {"request": excerpt, "models": [describe_model(m) for m in models]},
-            {
-                "model": question(
-                    INSTRUCTIONS,
-                    {
-                        **{str(i): f"Model {i}" for i in range(len(models))},
-                        "none": "The metadata cannot distinguish a suitable model",
-                    },
-                )
-            },
-            group_id=group_id,
-        )
-        if answers is not None and answers["model"].selected != "none":
-            selected = str(models[int(answers["model"].selected)].key)
+    selected, reason = await _ask(models, prompt, group_id)
     elapsed = (monotonic() - started) * 1000
     if selected is not None:
         return ModelSelection(selected, "selected", elapsed)
-    return ModelSelection(default, "fallback", elapsed)
+    return ModelSelection(fallback_model(models), "fallback", elapsed, reason)
+
+
+async def _enabled_models(
+    session: AsyncSession, group_context: GroupContext
+) -> list[ModelConfig]:
+    """What ``GET /models/enabled`` returns for this group context."""
+    from src.services.settings.models import ModelConfigService
+
+    service = ModelConfigService(session, group_context.primary_group_id)
+    return list(await service.find_enabled_models_for_group(group_context))
 
 
 async def select_for_workspace(
@@ -173,36 +263,61 @@ async def select_for_workspace(
     group_id = group_context.primary_group_id if group_context is not None else None
     models: list[ModelConfig] = []
     if group_id and group_context is not None:
-        from src.services.settings.models import ModelConfigService
-
-        models = list(
-            await ModelConfigService(session, group_id).find_enabled_models_for_group(
-                group_context
-            )
-        )
+        models = await _enabled_models(session, group_context)
     selection = await choose_model(models, prompt, group_id=group_id)
     logger.info(
-        "Auto model selection for workspace %s: %s (%s)",
+        "Auto model selection for workspace %s: %s (%s%s)",
         group_id,
         selection.model,
         selection.status,
+        f": {selection.reason}" if selection.reason else "",
     )
     current_selection.set(selection)
     return selection
+
+
+async def workspace_default(session: AsyncSession, group_id: str) -> Optional[str]:
+    """The model Auto falls back to in ``group_id``, without asking anything."""
+    return fallback_model(
+        await _enabled_models(session, GroupContext(group_ids=[group_id]))
+    )
+
+
+async def resolve_leaked_auto(
+    session: AsyncSession, model_name: str, group_id: str
+) -> str:
+    """The safety net: "auto" at the LLM builder becomes the workspace default.
+
+    Every entry point resolves Auto before a model is built, so reaching this
+    is a bug in the path that called it. The warning carries the stack, which
+    names that path; the run still gets a real model instead of failing late
+    or, under the CrewAI harness, becoming a native OpenAI client.
+    """
+    if not is_auto(model_name):
+        return model_name
+    from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+    default = await workspace_default(session, group_id) or DEFAULT_ENGINE_MODEL
+    logger.warning(
+        "'auto' reached the LLM builder unresolved; using the workspace default "
+        "%s. Resolve it where the request enters (run_freeze); leaked by:",
+        default,
+        stack_info=True,
+    )
+    return default
 
 
 def trace_row(
     selection: ModelSelection, job_id: str, group_id: Optional[str]
 ) -> dict[str, object]:
     """The run's trace row for an Auto pick, in the decision rows' shape."""
-    verb = "picked" if selection.status == "selected" else "fell back to"
     return {
         "job_id": job_id,
         "event_source": "decision",
         "event_context": POLICY,
         "event_type": "decision_evaluated",
         "span_name": "kasal.decision.evaluate",
-        "output": f"Auto {verb} {selection.model or 'the default model'}",
+        "output": selection.summary(),
         "trace_metadata": {
             "policy": POLICY,
             **selection.to_response(),

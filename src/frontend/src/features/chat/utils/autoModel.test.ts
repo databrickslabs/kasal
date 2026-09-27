@@ -97,6 +97,13 @@ describe('the picked model in the run activity', () => {
     expect(modelSelectionLabel({ requested: 'auto', model: 'm', status: 'fallback' })).toBe('Auto → m (default)');
   });
 
+  it('says why Auto fell back, and ignores a reason it does not know', () => {
+    expect(modelSelectionLabel({ requested: 'auto', model: 'm', status: 'fallback', reason: 'unreachable' }))
+      .toBe('Auto → m (default: decision model unreachable)');
+    expect(modelSelectionLabel({ requested: 'auto', model: 'm', status: 'fallback', reason: 'new_code' }))
+      .toBe('Auto → m (default)');
+  });
+
   it('posts a trace step to the session that asked', () => {
     postModelSelection({ requested: 'auto', model: 'm', status: 'selected' }, 'session-7');
     const post = vi.mocked(useSessionStore.getState().addMessageToTargetSession);

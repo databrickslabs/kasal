@@ -190,6 +190,14 @@ class TestBuildAgentLlm:
             out = await build_agent_llm({"llm": "fallback-model"}, group_id="grp")
             assert out == "fallback-model"
 
+    @pytest.mark.asyncio
+    async def test_a_failed_auto_never_falls_back_to_the_string_auto(self):
+        """A harness handed the bare string would build a native client from it."""
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
+            MockLM.configure_kasal_llm = AsyncMock(side_effect=RuntimeError("boom"))
+            with pytest.raises(RuntimeError):
+                await build_agent_llm({"llm": "auto"}, group_id="grp")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reasoning = the MODEL's native reasoning budget on the agent's own LLM.
