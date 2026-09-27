@@ -147,7 +147,7 @@ async def trigger_evaluation(
     if not group_ctx or not group_ctx.primary_group_id:
         raise ForbiddenError("Group context required for MLflow operations")
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
-    info = await svc.trigger_evaluation(payload.job_id)
+    info = await svc.trigger_evaluation(payload.job_id, group_context=group_ctx)
     return MLflowEvaluateResponse(**info)
 
 

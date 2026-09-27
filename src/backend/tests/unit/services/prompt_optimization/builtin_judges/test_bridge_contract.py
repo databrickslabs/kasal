@@ -6,8 +6,9 @@ mlflow. When mlflow is upgraded and one fails, re-check the bridge against the
 new internals before changing the test — a silent drift would send judge calls
 to LiteLLM with environment credentials, or nowhere.
 
-Pinned to mlflow 3.16 (``uv.lock``). ``pyproject.toml`` allows ``>=3.11,<4``,
-so the version assertion is what catches an unreviewed minor upgrade.
+Pinned to mlflow 3.16: ``pyproject.toml`` requires ``>=3.16,<3.17`` because of
+this bridge, and the version assertion below catches an environment that
+drifted from it. Widen both together, after re-checking the internals.
 """
 
 import inspect
@@ -76,3 +77,17 @@ def test_builtin_judges_call_the_factory_synchronously_on_this_thread():
         with bridge.judge_route(route):
             Safety(model=bridge.placeholder_uri("k")).run(outputs="text")
     assert seen == [route]
+
+
+def test_evaluate_submits_scoring_from_the_calling_thread():
+    """Evaluation runs judges on ``evaluate``'s worker pool, and the route
+    reaches them only because the per-row score task is submitted to a
+    ``ThreadPoolExecutor`` from the thread that called ``evaluate`` (where
+    ``evaluation_judges.judging`` armed it; sp_auth's ``submit`` hook copies the
+    context). A plain ``threading.Thread`` in between would lose it."""
+    from mlflow.genai.evaluation import harness
+
+    source = inspect.getsource(harness._ScoreSubmitter.submit)
+    assert "self._pool.submit(" in source
+    loop_source = inspect.getsource(harness)
+    assert "pending.add(scorer_submitter.submit(idx))" in loop_source

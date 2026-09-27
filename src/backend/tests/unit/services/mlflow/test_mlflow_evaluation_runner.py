@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
+from src.services.prompt_optimization.builtin_judges.bridge import JudgeRoute
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -60,6 +61,8 @@ def _make_runner(**overrides):
         "prediction_text": "Paris is the capital of France.",
         "judge_model_route": "databricks/databricks-claude-sonnet-4",
         "judge_model_defaulted": False,
+        "judge_model": "judge-key",
+        "judge_route": JudgeRoute(loop=MagicMock(name="main-loop")),
     }
     defaults.update(overrides)
     return MLflowEvaluationRunner(**defaults)
@@ -1232,41 +1235,6 @@ class TestCompleteEvaluation:
 
 
 # ===========================================================================
-# TestJudgeModelUriConversion
-# ===========================================================================
-
-
-class TestJudgeModelUriConversion:
-    """Tests for the _to_scorer_model_uri logic inside complete_evaluation."""
-
-    def test_route_with_slash_converted(self):
-        """'provider/model' becomes 'provider:/model'."""
-        runner = _make_runner(judge_model_route="databricks/my-model")
-        # Directly test the conversion logic inline
-        route = runner.judge_model_route
-        if "/" in route and ":/" not in route:
-            provider, model = route.split("/", 1)
-            uri = f"{provider}:/" + model
-        else:
-            uri = route
-        assert uri == "databricks:/my-model"
-
-    def test_route_already_uri_format(self):
-        """'provider:/model' stays unchanged."""
-        route = "databricks:/already-uri"
-        if ":/" in route:
-            uri = route
-        else:
-            uri = route
-        assert uri == "databricks:/already-uri"
-
-    def test_route_none(self):
-        """None route returns None."""
-        runner = _make_runner(judge_model_route=None)
-        assert runner.judge_model_route is None
-
-
-# ===========================================================================
 # Additional coverage tests for complete_evaluation and missing lines
 # ===========================================================================
 
@@ -2320,13 +2288,11 @@ class TestCompleteEvaluationScorerRoutePaths:
             # Should not raise
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
 
-    def test_no_judge_model_route_scorer_has_no_model(self):
-        """When judge_model_route is None, scorer is instantiated without model arg."""
+    def _run(self, **runner_kwargs):
         import sys
 
         mock_mlflow, mock_tracking = self._setup_mocks()
         mock_mlflow.genai.scorers.Safety = MagicMock(return_value=MagicMock())
-
         with patch.dict(
             sys.modules,
             {
@@ -2335,18 +2301,42 @@ class TestCompleteEvaluationScorerRoutePaths:
                 "mlflow.genai": mock_mlflow.genai,
             },
         ):
-            runner = _make_runner(judge_model_route=None)  # no route → line 584
-            auth_ctx = _make_auth_ctx()
-
+            runner = _make_runner(**runner_kwargs)
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
             runner._discover_traces_and_build_dataset = MagicMock(return_value=([], []))
+            runner.complete_evaluation(run_id="run-1", auth_ctx=_make_auth_ctx())
+        return mock_mlflow
 
-            runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
+    def test_scorers_get_the_bridge_placeholder_and_run_under_the_route(self):
+        """Judges are built on ``openai:/kasal-judge--<key>`` and evaluate runs
+        inside ``judging(route)``, so their calls reach LLMManager."""
+        route = JudgeRoute(loop=MagicMock(name="main-loop"))
+        seen = []
+        with patch(
+            "src.services.mlflow.evaluation_judges.judging",
+            side_effect=lambda r: _recording(seen, r),
+        ):
+            mock_mlflow = self._run(judge_model="judge-key", judge_route=route)
+        mock_mlflow.genai.scorers.RelevanceToQuery.assert_called_with(
+            model="openai:/kasal-judge--judge-key"
+        )
+        assert seen == [route]
+        mock_mlflow.genai.evaluate.assert_called_once()
 
-        # Scorer should be instantiated without model kwarg
-        mock_mlflow.genai.scorers.RelevanceToQuery.assert_called_with()
+    def test_no_judge_model_evaluates_without_judges(self):
+        """No resolvable judge model: evaluate still runs, with no scorers."""
+        mock_mlflow = self._run(judge_model=None, judge_route=None)
+        mock_mlflow.genai.scorers.RelevanceToQuery.assert_not_called()
+        assert mock_mlflow.genai.evaluate.call_args.kwargs["scorers"] == []
+
+
+def _recording(seen, route):
+    from contextlib import nullcontext
+
+    seen.append(route)
+    return nullcontext()
 
 
 class TestCompleteEvaluationRemainingPaths:
