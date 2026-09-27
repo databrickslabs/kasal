@@ -135,6 +135,13 @@ class SkillDraftRequest(BaseModel):
     model: Optional[str] = Field(None, description="Model key from the chat picker")
 
 
+class SkillDraftStarted(BaseModel):
+    """A draft started in the background: poll ``/executions/{job_id}`` for the
+    result, read ``/traces/job/{job_id}`` for its LLM calls while it runs."""
+
+    job_id: str = Field(..., description="The run recording this draft")
+
+
 class SkillDraftResponse(BaseModel):
     """A proposed SKILL.md, already checked by the reference validator."""
 

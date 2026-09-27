@@ -613,6 +613,30 @@ describe('ChatContainer — one run-activity section per prompt', () => {
     expect(mockTimeline).toHaveBeenCalledWith('job-b', false, true);
   });
 
+  it('a skill being drafted opens its run activity live — the LLM request from its trace', () => {
+    // The drafting step carries the draft run's id before the model answers
+    // (runSkillDraft), so the activity reads that run's trace while it drafts.
+    mockTimeline.mockReturnValue({
+      processed: makeProcessedTraces([
+        makeEvent({ type: 'llm', description: 'LLM Request — served-model (812 chars)', traceId: 1 }),
+      ]),
+      loading: false,
+    });
+    render(
+      <ChatContainer
+        {...baseProps}
+        isGenerating
+        messages={[
+          userMsg('u1', '/skill release notes'),
+          trace('t1', 'Drafting skill', 'release notes', 'skill-job'),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Expand run activity'));
+    expect(mockTimeline).toHaveBeenLastCalledWith('skill-job', true, true);
+    expect(screen.getByText('LLM Request — served-model (812 chars)')).toBeInTheDocument();
+  });
+
   it('only the LATEST prompt section is live while running (Stop only there)', () => {
     const onStop = vi.fn();
     render(

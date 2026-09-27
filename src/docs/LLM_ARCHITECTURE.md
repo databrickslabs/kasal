@@ -114,6 +114,23 @@ Building an LLM for an agent runs down the layers in order:
 5. The engine sends it: trim the conversation if it approaches the window, clamp the output budget so `prompt + max_tokens` fits, run tool-call rounds, emit `LLMCallStartedEvent` / `LLMCallCompletedEvent`, accumulate usage. If the server still rejects the prompt as too long — the estimate is a chars-per-token guess, and JSON-escaped Cyrillic once measured 1.4 against the assumed 3.4 — the round is retried behind a compaction sized by the server's own count (`ContextCompactionEvent`, strategy `tool_result_stub_after_rejection`); only when nothing is left to stub does `LLMContextLengthExceededError` reach the executor.
 6. `usage_telemetry` sees the completion event and forwards token counts.
 
+## Tracing a standalone generation call
+
+A `completion()` made outside a crew, flow or chat run still emits step 5's events, but nothing writes them down unless a bridge is listening for that call. Generation services that should show up as run activity use the same pipeline as runs, not hand-written trace rows:
+
+1. Open a run first: `generation_run.open_run(...)` creates a RUNNING `executionhistory` row, so the job id exists before the model is called.
+2. Wrap the calls in `otel_tracing.generation_scope.generation_trace(job_id, group_context, lane, step)`. It registers a **scoped** `OTelEventBridge` (it only picks up events whose context carries this `generation_job_id`, so concurrent generations never mix) over a local `TracerProvider` with a `KasalDBSpanExporter`. Each `llm_call` / `llm_response` row carries the prompt, the response, the model, token usage and timing, and is stamped with the caller's group. `generation_step(label)` puts a sub-step (a retry, say) under its own task.
+3. Close the run with the answer as its result: `generation_run.close_run(...)`.
+
+Two callers do this today:
+
+| Caller | Start | Result key | Lane / step |
+|---|---|---|---|
+| Builder turns (Agent Builder, Flow Builder chat) | `POST /builder-generations/{crew,flow}` | `builder_result` | "Agent Builder" / "Create the crew plan" |
+| Skill drafts (`/skill …` or "create a skill …" in chat) | `POST /skills/drafts` | `skill_draft` | "Skills" / "Draft the skill"; a validation retry is "Fix validation errors" |
+
+Both answer `202` with the job id before any LLM work and run the generation in the background. The frontend polls `GET /executions/{job_id}` for the result (`api/execution/runResult.ts`) and puts the job id on the chat's activity step immediately, so expanding the run activity under the prompt shows the LLM request while the model is still working, then its response. `POST /skills/draft` still answers synchronously and is traced the same way; its `job_id` arrives with the draft.
+
 ## Anthropic prompt caching
 
 Every tool round resends the system prompt, the tool schemas and the whole conversation so far. Claude caches a prompt prefix only where the request marks it with `cache_control: {"type": "ephemeral"}`, so the transport places those markers itself, in `src/backend/src/core/llm/transport/prompt_cache.py`. `cache_mode()` picks the dialect per endpoint:
