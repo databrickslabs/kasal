@@ -389,3 +389,42 @@ class TestUCMVReevaluationTool:
         assert t._parse_dataset_ids("c, d") == ["c", "d"]
         assert t._parse_dataset_ids(["e"]) == ["e"]
         assert t._parse_dataset_ids(None) == []
+
+
+class TestToolIsAKasalTool:
+    """It subclassed crewai's BaseTool, so Kasal's Agent rejected it: attaching
+    it to a chat agent failed the whole run with "Input should be a valid
+    dictionary or instance of BaseTool"."""
+
+    def test_it_is_a_kasal_base_tool(self):
+        from src.services.tools.base import BaseTool
+
+        assert isinstance(UCMVReevaluationTool(), BaseTool)
+
+    def test_an_agent_can_be_built_with_it(self):
+        from src.services.execution.runtime import Agent
+
+        agent = Agent(
+            role="Analyst",
+            goal="Check measures",
+            backstory="Reviews extractions",
+            tools=[UCMVReevaluationTool()],
+        )
+        assert agent.tools[0].name == "UCMV Re-evaluation"
+
+
+def test_every_registered_tool_is_a_kasal_base_tool():
+    """Guards the whole catalogue: a tool on a foreign base class (crewai's)
+    breaks agent construction for every run that selects it."""
+    from src.services.tools.base import BaseTool
+    from src.services.tools.tool_factory import ToolFactory
+
+    implementations = ToolFactory({})._tool_implementations
+    # MCPTool is a marker (the MCP tools themselves come from MCPIntegration);
+    # it is never handed to an agent.
+    foreign = sorted(
+        name
+        for name, cls in implementations.items()
+        if name != "MCPTool" and not issubclass(cls, BaseTool)
+    )
+    assert not foreign, f"not Kasal BaseTool subclasses: {foreign}"
