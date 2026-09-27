@@ -464,40 +464,6 @@ class MQueryConnector(BaseInboundConnector):
 
         return relationships
 
-    def get_calculated_columns(
-        self, model: Optional[SemanticModel] = None
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Get calculated columns from all tables in a semantic model.
-
-        Args:
-            model: Specific model (uses first if not specified)
-
-        Returns:
-            Dict mapping table names to lists of calculated column info
-        """
-        target_model = model or (
-            self._semantic_models[0] if self._semantic_models else None
-        )
-        if not target_model:
-            return {}
-
-        result = {}
-        for table in target_model.tables:
-            calculated_cols = [col for col in table.columns if col.is_calculated]
-            if calculated_cols:
-                result[table.name] = [
-                    {
-                        "name": col.name,
-                        "data_type": col.data_type.value,
-                        "expression": col.expression,
-                        "is_hidden": col.is_hidden,
-                    }
-                    for col in calculated_cols
-                ]
-
-        return result
-
     def generate_summary_report(self) -> Dict[str, Any]:
         """
         Generate a summary report of extracted data.

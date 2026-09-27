@@ -323,27 +323,6 @@ class TestGetAllSchedules:
 # ---------------------------------------------------------------------------
 
 
-class TestGetScheduleById:
-    @pytest.mark.asyncio
-    async def test_found_returns_response(self):
-        svc = _make_service()
-        mock_sched = _make_schedule(id=5)
-        svc.repository.find_by_id = AsyncMock(return_value=mock_sched)
-        with patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
-            mock_resp.model_validate.return_value = MagicMock(id=5)
-            await svc.get_schedule_by_id(5)
-        svc.repository.find_by_id.assert_awaited_once_with(5)
-
-    @pytest.mark.asyncio
-    async def test_not_found_raises_not_found_error(self):
-        svc = _make_service()
-        svc.repository.find_by_id = AsyncMock(return_value=None)
-        from src.core.exceptions import NotFoundError
-
-        with pytest.raises(NotFoundError):
-            await svc.get_schedule_by_id(999)
-
-
 # ---------------------------------------------------------------------------
 # get_schedule_by_id_with_group_check
 # ---------------------------------------------------------------------------

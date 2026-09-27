@@ -10,9 +10,12 @@ was never how a crew ran). The authoritative, always-current reference is the
 OpenAPI schema the app generates from its own routers:
 
 ```text
-GET /docs          # Swagger UI
-GET /openapi.json  # the machine-readable schema
+GET /api-docs          # Swagger UI
+GET /api-openapi.json  # the machine-readable schema
 ```
+
+Both are served at the domain root (not under `/api/v1`) and only while
+`DOCS_ENABLED` is true.
 
 When those two disagree with this page, the schema is right. See
 [Keeping this page honest](#keeping-this-page-honest) for the check.
@@ -538,12 +541,27 @@ cd src/backend
 uv run python - <<'PY'
 from src.api import api_router
 from src.config.settings import settings
-for r in sorted(api_router.routes, key=lambda r: getattr(r, "path", "")):
-    for m in sorted(getattr(r, "methods", set()) - {"HEAD", "OPTIONS"}):
-        print(f"{m:7} {settings.API_V1_STR}{r.path}")
+
+
+def walk(routes, prefix=""):
+    for r in routes:
+        inner = getattr(r, "original_router", None)  # an included router
+        if inner is not None:
+            yield from walk(inner.routes, prefix + r.include_context.prefix)
+            continue
+        for m in getattr(r, "methods", None) or ():
+            if m not in ("HEAD", "OPTIONS"):
+                yield m, prefix + r.path
+
+
+for m, p in sorted(walk(api_router.routes), key=lambda x: (x[1], x[0])):
+    print(f"{m:7} {settings.API_V1_STR}{p}")
 PY
 ```
 
+FastAPI wraps each included router, so `api_router.routes` holds wrappers rather
+than routes; iterating it directly prints nothing, which reads as a clean check.
+
 Anything in this document that is not in that output does not exist. When they
-disagree, fix the document — and prefer sending people to `/docs`, which cannot
-drift.
+disagree, fix the document — and prefer sending people to `/api-docs`, which
+cannot drift.

@@ -277,35 +277,6 @@ class TestKPIDefinition:
         assert "YTD" in kpi_def.structures
         assert len(kpi_def.kpis) == 2
 
-    def test_get_expanded_filters_with_nested_structure(self):
-        """Test get_expanded_filters method with nested filters"""
-        kpi_def = KPIDefinition(
-            description="Test",
-            technical_name="test",
-            filters={
-                "time_filters": {
-                    "current_year": "Year = 2024",
-                    "current_month": "Month = 'January'",
-                },
-                "location_filters": {"region": "Region = 'West'"},
-            },
-            kpis=[],
-        )
-
-        expanded = kpi_def.get_expanded_filters()
-
-        assert len(expanded) == 3
-        assert expanded["current_year"] == "Year = 2024"
-        assert expanded["current_month"] == "Month = 'January'"
-        assert expanded["region"] == "Region = 'West'"
-
-    def test_get_expanded_filters_empty(self):
-        """Test get_expanded_filters with no filters"""
-        kpi_def = KPIDefinition(description="Test", technical_name="test", kpis=[])
-
-        expanded = kpi_def.get_expanded_filters()
-        assert expanded == {}
-
     def test_kpi_definition_with_structures(self):
         """Test KPIDefinition can store multiple structures"""
         kpi_def = KPIDefinition(

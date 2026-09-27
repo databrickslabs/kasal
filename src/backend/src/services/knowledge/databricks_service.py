@@ -606,37 +606,6 @@ class DatabricksKnowledgeService:
             logger.error(f"Error browsing volume files: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
-    def _get_file_type(self, filename: str) -> str:
-        """
-        Determine file type from extension.
-
-        Args:
-            filename: Name of the file
-
-        Returns:
-            File type string
-        """
-        ext = os.path.splitext(filename)[1].lower()
-        type_map = {
-            ".pdf": "pdf",
-            ".txt": "text",
-            ".md": "markdown",
-            ".json": "json",
-            ".csv": "csv",
-            ".doc": "word",
-            ".docx": "word",
-            ".xlsx": "excel",
-            ".xls": "excel",
-            ".py": "python",
-            ".js": "javascript",
-            ".ts": "typescript",
-            ".yaml": "yaml",
-            ".yml": "yaml",
-            ".xml": "xml",
-            ".html": "html",
-        }
-        return type_map.get(ext, "file")
-
     async def list_knowledge_files(
         self, execution_id: str, group_id: str
     ) -> List[Dict[str, Any]]:

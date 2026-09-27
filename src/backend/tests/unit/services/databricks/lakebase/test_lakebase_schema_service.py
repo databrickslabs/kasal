@@ -405,30 +405,6 @@ class TestSetSearchPathAsync:
             await service.set_search_path_async(mock_conn)
 
 
-class TestSetSearchPathSync:
-    """Tests for set_search_path_sync."""
-
-    @pytest.fixture
-    def service(self):
-        return LakebaseSchemaService()
-
-    def test_valid_schema(self, service):
-        mock_conn = MagicMock()
-        service.set_search_path_sync(mock_conn, schema="kasal")
-        mock_conn.execute.assert_called_once()
-
-    def test_invalid_schema_raises(self, service):
-        mock_conn = MagicMock()
-        with pytest.raises(ValueError):
-            service.set_search_path_sync(mock_conn, schema="drop-me")
-
-    def test_execute_failure_raises(self, service):
-        mock_conn = MagicMock()
-        mock_conn.execute.side_effect = RuntimeError("db error")
-        with pytest.raises(RuntimeError):
-            service.set_search_path_sync(mock_conn)
-
-
 class TestCreateTablesBatchSync:
     """Tests for _create_tables_batch_sync."""
 
@@ -488,35 +464,6 @@ class TestCreateTablesBatchSync:
         assert name == "broken_table"
         assert success is False
         assert "table exists" in error
-
-
-class TestCreateDocEmbeddingsSync:
-    """Tests for _create_doc_embeddings_sync."""
-
-    @pytest.fixture
-    def service(self):
-        return LakebaseSchemaService()
-
-    def test_executes_create_statement(self, service):
-        mock_engine = MagicMock()
-        mock_conn = MagicMock()
-
-        class SyncCtxMgr:
-            def __enter__(self):
-                return mock_conn
-
-            def __exit__(self, *args):
-                return False
-
-        mock_engine.begin.return_value = SyncCtxMgr()
-        service._create_doc_embeddings_sync(mock_engine)
-        # SET search_path + CREATE TABLE + idempotent column/index ensure
-        # (group_id, file_path, indexes, pgvector check, embedding column/index).
-        executed = " ".join(str(c.args[0]) for c in mock_conn.execute.call_args_list)
-        assert "SET search_path" in executed
-        assert "CREATE TABLE IF NOT EXISTS documentation_embeddings" in executed
-        assert "ADD COLUMN IF NOT EXISTS group_id" in executed
-        assert "ADD COLUMN IF NOT EXISTS file_path" in executed
 
 
 class TestCreateTablesSyncStream:

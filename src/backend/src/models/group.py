@@ -166,34 +166,4 @@ class GroupUser(Base):
 # Role hierarchy: admin > editor > operator
 
 
-def get_role_hierarchy(role: GroupUserRole) -> int:
-    """
-    Get the hierarchy level for a role.
-    Higher numbers = more permissions.
-
-    Returns:
-        int: Hierarchy level (3=admin, 2=editor, 1=operator)
-    """
-    hierarchy = {
-        GroupUserRole.ADMIN: 3,  # Full access including user/group management
-        GroupUserRole.EDITOR: 2,  # Can create/edit workflows, execute
-        GroupUserRole.OPERATOR: 1,  # Can execute and monitor only
-    }
-    return hierarchy.get(role, 0)
-
-
-def role_has_access(user_role: GroupUserRole, required_role: GroupUserRole) -> bool:
-    """
-    Check if user role has sufficient access level for the required role.
-
-    Args:
-        user_role: The user's current role
-        required_role: The minimum role required for the action
-
-    Returns:
-        bool: True if user has sufficient access
-    """
-    return get_role_hierarchy(user_role) >= get_role_hierarchy(required_role)
-
-
 # Legacy compatibility aliases removed - migration complete

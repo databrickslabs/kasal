@@ -173,18 +173,14 @@ async def test_saved_flow_load_authorizes_before_content_is_forwarded(
 async def test_missing_flow_id_never_selects_global_latest(caller):
     service = ExecutionService.__new__(ExecutionService)
     service.session = NS()
-    with (
-        patch.object(FlowService, "get_most_recent_flow", new=AsyncMock()) as latest,
-        patch(
-            "src.services.execution.status.ExecutionStatusService.create_execution",
-            new=AsyncMock(),
-        ) as write,
-    ):
+    with patch(
+        "src.services.execution.status.ExecutionStatusService.create_execution",
+        new=AsyncMock(),
+    ) as write:
         with pytest.raises(BadRequestError, match="Either flow_id or nodes"):
             await service.create_execution(
                 CrewConfig(execution_type="flow"), BackgroundTasks(), caller
             )
-        latest.assert_not_awaited()
         write.assert_not_awaited()
 
 

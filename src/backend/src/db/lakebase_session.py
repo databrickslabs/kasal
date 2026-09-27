@@ -58,17 +58,6 @@ _DISPOSED_CONNECTION_PHRASES = (
 )
 
 
-def _is_disposed_connection_error(exc: Exception) -> bool:
-    """Whether ``exc`` is the engine-disposed teardown race, not a real failure.
-
-    Deliberately phrase-based: the drivers do not share an exception type for
-    this, and asyncpg's ``InterfaceError`` also covers genuine protocol misuse
-    that must NOT be swallowed.
-    """
-    message = str(exc).lower()
-    return any(phrase in message for phrase in _DISPOSED_CONNECTION_PHRASES)
-
-
 # Token refresh interval: 50 minutes (tokens expire at 60 min, 10 min safety margin)
 TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
 

@@ -1,14 +1,13 @@
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
-
 """
 Base BackendFlow class for handling flow execution.
 
 Handles the creation and execution of CrewAI flows.
 """
-import json  # noqa: E402 - import follows module initialization
-import os  # noqa: E402 - import follows module initialization
-import uuid  # noqa: E402 - import follows module initialization
-from typing import (  # noqa: E402 - import follows module initialization
+
+import json
+import os
+import uuid
+from typing import (
     Any,
     Dict,
     List,
@@ -17,41 +16,33 @@ from typing import (  # noqa: E402 - import follows module initialization
     cast,
 )
 
-from src.core.llm.transport import (  # noqa: E402 - import follows module initialization
-    OpenAICompletion,
-)
-from src.core.logger import (  # noqa: E402 - import follows module initialization
+from src.core.logger import (
     LoggerManager,
 )
-from src.repositories.flow_repository import (  # noqa: E402 - import follows module initialization
+from src.repositories.flow_repository import (
     FlowRepository,
 )
-from src.services.flow_builder.conversation.interrupt import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.conversation.interrupt import (
     APPROVAL_CONFIG_KEY,
     interrupt_inputs,
 )
-from src.services.flow_builder.conversation.thread import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.conversation.thread import (
     thread_state_uuid,
 )
-from src.services.flow_builder.conversation.turn import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.conversation.turn import (
     close_turn_async,
     is_conversational,
     turn_inputs,
 )
-from src.services.flow_builder.exceptions import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.exceptions import (
     FlowPausedForApprovalException,
 )
 
 # Import the refactored modules
-from src.services.flow_builder.modules.flow_builder import (  # noqa: E402 - import follows module initialization
+from src.services.flow_builder.modules.flow_builder import (
     FlowBuilder,
 )
-from src.services.flow_builder.runtime import (  # noqa: E402 - import follows module initialization
-    Flow as CrewAIFlow,
-)
-from src.services.llm.manager import (  # noqa: E402 - import follows module initialization
-    LLMManager,
-)
+from src.services.flow_builder.runtime import Flow as CrewAIFlow
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -212,24 +203,6 @@ class BackendFlow:
             return self._flow_data
         except Exception as e:
             logger.error(f"Error loading flow data: {e}", exc_info=True)
-            raise
-
-    async def _get_llm(self) -> OpenAICompletion:
-        """
-        Get a properly configured LLM for CrewAI using LLMManager.
-        This ensures API keys are properly set from the database.
-        """
-        try:
-            # The engine default (the installed model inside Databricks Apps)
-            model_name = DEFAULT_ENGINE_MODEL
-            logger.info(f"Getting LLM model: {model_name} for flow execution")
-
-            # Use LLMManager to get a properly configured LLM
-            llm = await LLMManager.get_llm(model_name)
-            logger.info(f"Successfully configured LLM: {model_name}")
-            return llm
-        except Exception as e:
-            logger.error(f"Error configuring LLM: {e}", exc_info=True)
             raise
 
     async def flow(self) -> CrewAIFlow:

@@ -1,4 +1,3 @@
-import os
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -6,7 +5,6 @@ import pytest
 
 from src.repositories.flow_repository import FlowRepository
 from src.services.flow_builder.backend_flow import BackendFlow
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 @pytest.fixture(autouse=True)
@@ -233,60 +231,6 @@ class TestBackendFlow:
 
         with pytest.raises(Exception, match="Database error"):
             await flow.load_flow(repository=mock_repository)
-
-    # Test _get_llm method - lines 143-159
-    @pytest.mark.asyncio
-    async def test_get_llm_success(self):
-        """Test _get_llm method success."""
-        flow = BackendFlow()
-
-        mock_llm = Mock()
-
-        with patch(
-            "src.services.flow_builder.backend_flow.LLMManager"
-        ) as mock_llm_manager:
-            mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
-
-            # The engine default; the old DEFAULT_LLM_MODEL env var is ignored.
-            from src.services.flow_builder.backend_flow import DEFAULT_ENGINE_MODEL
-
-            with patch.dict(os.environ, {"DEFAULT_LLM_MODEL": "test-model"}):
-                result = await flow._get_llm()
-
-                assert result == mock_llm
-                mock_llm_manager.get_llm.assert_called_once_with(DEFAULT_ENGINE_MODEL)
-
-    @pytest.mark.asyncio
-    async def test_get_llm_default_model(self):
-        """Test _get_llm method with default model."""
-        flow = BackendFlow()
-
-        mock_llm = Mock()
-
-        with patch(
-            "src.services.flow_builder.backend_flow.LLMManager"
-        ) as mock_llm_manager:
-            mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
-
-            # Remove DEFAULT_LLM_MODEL from environment
-            with patch.dict(os.environ, {}, clear=True):
-                result = await flow._get_llm()
-
-                assert result == mock_llm
-                mock_llm_manager.get_llm.assert_called_once_with(DEFAULT_ENGINE_MODEL)
-
-    @pytest.mark.asyncio
-    async def test_get_llm_exception(self):
-        """Test _get_llm method with exception."""
-        flow = BackendFlow()
-
-        with patch(
-            "src.services.flow_builder.backend_flow.LLMManager"
-        ) as mock_llm_manager:
-            mock_llm_manager.get_llm = AsyncMock(side_effect=Exception("LLM error"))
-
-            with pytest.raises(Exception, match="LLM error"):
-                await flow._get_llm()
 
     # Test flow method - lines 161-190
     @pytest.mark.asyncio

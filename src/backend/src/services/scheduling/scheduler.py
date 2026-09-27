@@ -276,24 +276,6 @@ class SchedulerService:
             count=len(schedules),
         )
 
-    async def get_schedule_by_id(self, schedule_id: int) -> ScheduleResponse:
-        """
-        Get a schedule by ID.
-
-        Args:
-            schedule_id: ID of the schedule to retrieve
-
-        Returns:
-            ScheduleResponse if schedule found
-
-        Raises:
-            HTTPException: If schedule not found
-        """
-        schedule = await self.repository.find_by_id(schedule_id)
-        if not schedule:
-            raise NotFoundError(detail=f"Schedule with ID {schedule_id} not found")
-        return ScheduleResponse.model_validate(schedule)
-
     async def get_schedule_by_id_with_group_check(
         self, schedule_id: int, group_context: Optional[GroupContext] = None
     ) -> ScheduleResponse:

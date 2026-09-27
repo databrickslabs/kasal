@@ -863,10 +863,6 @@ class DatabricksAuth:
             await self._load_config()
         return self._workspace_host
 
-    def get_api_token(self) -> Optional[str]:
-        """Get the API token."""
-        return self._api_token
-
 
 # Global instance for easy access
 _databricks_auth = DatabricksAuth()
@@ -901,41 +897,6 @@ async def get_databricks_auth_headers(
         Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
     """
     return await _databricks_auth.get_auth_headers(mcp_server_url, user_token)
-
-
-def get_databricks_auth_headers_sync(
-    host: _OptStr = None, mcp_server_url: _OptStr = None, user_token: _OptStr = None
-) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    """
-    Synchronous version of get_databricks_auth_headers.
-
-    Args:
-        host: Optional host (for compatibility, ignored since we get it from config)
-        mcp_server_url: Optional MCP server URL
-        user_token: Optional user access token for OBO authentication
-
-    Returns:
-        Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
-    """
-    try:
-        import asyncio
-
-        # Check if there's already a running event loop
-        try:
-            asyncio.get_running_loop()
-            # If we're already in an async context, we can't use asyncio.run()
-            # This shouldn't happen in a sync function, but let's handle it gracefully
-            logger.warning("Sync function called from async context - returning error")
-            return None, "Cannot call sync version from async context"
-        except RuntimeError:
-            # No running loop, safe to create one
-            return asyncio.run(
-                get_databricks_auth_headers(host, mcp_server_url, user_token)
-            )
-
-    except Exception as e:
-        logger.error(f"Error in sync auth headers: {e}")
-        return None, str(e)
 
 
 async def validate_databricks_connection() -> Tuple[bool, Optional[str]]:

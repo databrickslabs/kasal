@@ -1130,26 +1130,6 @@ class TestInferSchemaTypes:
 # ===========================================================================
 
 
-class TestInferSchema:
-    def setup_method(self):
-        self.tool = MqueryConversionPipelineTool()
-
-    def test_returns_schema_string(self):
-        rows = [{"id": 1, "name": "Alice"}]
-        result = self.tool._infer_schema(["id", "name"], rows)
-        assert "BIGINT" in result
-        assert "STRING" in result
-
-    def test_date_in_schema(self):
-        rows = [{"dt": "2024-01-01"}]
-        result = self.tool._infer_schema(["dt"], rows)
-        assert "DATE" in result
-
-    def test_empty_rows(self):
-        result = self.tool._infer_schema(["col"], [])
-        assert "STRING" in result
-
-
 # ===========================================================================
 # _format_validation_report tests
 # ===========================================================================

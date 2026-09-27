@@ -405,41 +405,6 @@ class TestUnitOfMeasureConverter:
 
     # ========== get_supported_units Tests ==========
 
-    def test_get_supported_units_mass(self, converter):
-        """Test getting supported units for mass preset"""
-        units = converter.get_supported_units("mass")
-
-        assert len(units) > 0
-        assert "KG" in units
-        assert "G" in units
-        assert "LB" in units
-        assert "OZ" in units
-
-    def test_get_supported_units_length(self, converter):
-        """Test getting supported units for length preset"""
-        units = converter.get_supported_units("length")
-
-        assert len(units) > 0
-        assert "M" in units
-        assert "CM" in units
-        assert "IN" in units
-        assert "FT" in units
-
-    def test_get_supported_units_volume(self, converter):
-        """Test getting supported units for volume preset"""
-        units = converter.get_supported_units("volume")
-
-        assert len(units) > 0
-        assert "L" in units
-        assert "ML" in units
-        assert "GAL" in units
-
-    def test_get_supported_units_invalid_preset(self, converter):
-        """Test invalid preset returns empty list"""
-        units = converter.get_supported_units("invalid_preset")
-
-        assert units == []
-
     # ========== Integration Tests ==========
 
     def test_full_conversion_workflow_fixed(self, converter, kpi_with_fixed_uom):

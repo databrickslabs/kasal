@@ -86,24 +86,6 @@ async def test_update_user_permissions_success():
 # ---- assign_role ----
 
 
-@pytest.mark.asyncio
-async def test_assign_role_not_found():
-    svc = make_service()
-    svc.user_repo.get = AsyncMock(return_value=None)
-    result = await svc.assign_role("u1", "admin")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_assign_role_success():
-    svc = make_service()
-    user = make_user()
-    svc.user_repo.get = AsyncMock(return_value=user)
-    svc.user_repo.update = AsyncMock()
-    result = await svc.assign_role("u1", "admin")
-    assert result is user
-
-
 # ---- get_or_create_user_by_email ----
 
 
@@ -432,19 +414,6 @@ async def test_update_user_not_found_returns_none():
         svc = UserService(session)
         out = await svc.update_user("nope", UserUpdate())
         assert out is None
-
-
-@pytest.mark.asyncio
-async def test_assign_role_calls_update():
-    session = AsyncMock()
-    with patch("src.services.groups.users.UserRepository") as Repo:
-        repo = AsyncMock()
-        repo.get = AsyncMock(return_value=SimpleNamespace(id="u1"))
-        repo.update = AsyncMock()
-        Repo.return_value = repo
-        svc = UserService(session)
-        await svc.assign_role("u1", "ADMIN")
-        repo.update.assert_called_once()
 
 
 @pytest.mark.asyncio

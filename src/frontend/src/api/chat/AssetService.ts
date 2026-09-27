@@ -15,9 +15,6 @@ export interface ChatAsset {
   ref: string;
 }
 
-/** The reference the model writes into HTML; resolved when rendering. */
-export const assetRef = (id: string): string => `asset:${id}`;
-
 // One fetch per asset per page: the bytes are immutable by id, and a deck
 // re-renders its frames many times.
 const dataUrls = new Map<string, Promise<string>>();

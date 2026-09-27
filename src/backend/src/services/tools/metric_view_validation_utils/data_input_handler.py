@@ -78,17 +78,6 @@ class DataInputHandler:
             raise ValueError("measure_name cannot be None or empty")
         return self.table_mapping_parser.get_measure_by_name(measure_name)
 
-    def get_all_yaml_measures(self) -> List[Dict]:
-        """
-        Get all measures from the metrics view YAML.
-
-        Returns:
-            List of measure dictionaries (empty list if none found)
-        """
-        if self._yaml_measures_cache is None:
-            self._yaml_measures_cache = self.mv_parser.extract_measures()
-        return self._yaml_measures_cache
-
     def get_all_dax_measures(self) -> List[Dict]:
         """
         Get all DAX measures from the mapping JSON.

@@ -261,52 +261,6 @@ class TestFlowService:
             mock_repo.find_all.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_flows_by_crew_uuid(self, flow_service):
-        """Test getting flows by crew ID (UUID)."""
-        crew_id = uuid.uuid4()
-        mock_flows = [MockFlow(crew_id=crew_id)]
-
-        with patch(
-            "src.services.flow_builder.flow_service.FlowRepository"
-        ) as MockRepository:
-            mock_repo = AsyncMock()
-            MockRepository.return_value = mock_repo
-            mock_repo.find_by_crew_id.return_value = mock_flows
-
-            result = await flow_service.get_flows_by_crew(crew_id)
-
-            assert result == mock_flows
-            mock_repo.find_by_crew_id.assert_called_once_with(crew_id)
-
-    @pytest.mark.asyncio
-    async def test_get_flows_by_crew_string(self, flow_service):
-        """Test getting flows by crew ID (string)."""
-        crew_id = uuid.uuid4()
-        crew_id_str = str(crew_id)
-        mock_flows = [MockFlow(crew_id=crew_id)]
-
-        with patch(
-            "src.services.flow_builder.flow_service.FlowRepository"
-        ) as MockRepository:
-            mock_repo = AsyncMock()
-            MockRepository.return_value = mock_repo
-            mock_repo.find_by_crew_id.return_value = mock_flows
-
-            result = await flow_service.get_flows_by_crew(crew_id_str)
-
-            assert result == mock_flows
-            mock_repo.find_by_crew_id.assert_called_once_with(crew_id)
-
-    @pytest.mark.asyncio
-    async def test_get_flows_by_crew_invalid_uuid(self, flow_service):
-        """Test getting flows by crew ID with invalid UUID string."""
-        invalid_crew_id = "invalid-uuid"
-
-        result = await flow_service.get_flows_by_crew(invalid_crew_id)
-
-        assert result == []
-
-    @pytest.mark.asyncio
     async def test_update_flow_success(self, flow_service, flow_update_data, mock_flow):
         """Test successful flow update."""
         flow_id = uuid.uuid4()
@@ -609,28 +563,6 @@ class TestFlowService:
             # Verify that create was called
             mock_repo.create.assert_called_once()
             assert result == mock_flow
-
-    @pytest.mark.asyncio
-    async def test_crew_id_type_conversion(self, flow_service):
-        """Test that crew_id string conversion works properly."""
-        # Test with valid UUID string
-        valid_uuid_str = str(uuid.uuid4())
-        mock_flows = [MockFlow()]
-
-        with patch(
-            "src.services.flow_builder.flow_service.FlowRepository"
-        ) as MockRepository:
-            mock_repo = AsyncMock()
-            MockRepository.return_value = mock_repo
-            mock_repo.find_by_crew_id.return_value = mock_flows
-
-            result = await flow_service.get_flows_by_crew(valid_uuid_str)
-
-            # Should convert string to UUID and call repository
-            assert result == mock_flows
-            called_with_uuid = mock_repo.find_by_crew_id.call_args[0][0]
-            assert isinstance(called_with_uuid, uuid.UUID)
-            assert str(called_with_uuid) == valid_uuid_str
 
     @pytest.mark.asyncio
     async def test_error_logging_during_creation(self, flow_service, flow_create_data):

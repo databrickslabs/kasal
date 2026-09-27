@@ -69,15 +69,8 @@ _TOOL_API_KEY_NAMES: Dict[str, str] = {
 }
 
 # Import request-scoped session helper
-from src.db.session import (  # noqa: E402 - import follows module initialization
-    routed_scoped_session,
-)
 from src.schemas.tool import (  # noqa: E402 - import follows module initialization
     ToolResponse,
-    ToolUpdate,
-)
-from src.services.tools.tool_service import (  # noqa: E402 - import follows module initialization
-    ToolService,
 )
 from src.utils.encryption_utils import (  # noqa: E402 - import follows module initialization
     EncryptionUtils,
@@ -596,116 +589,6 @@ class ToolFactory:
             return loop.run_until_complete(async_func(*args, **kwargs))
         finally:
             loop.close()
-
-    def update_tool_config(
-        self, tool_identifier: Union[str, int], config_update: Dict[str, Any]
-    ) -> bool:
-        """
-        Update a tool's configuration through the service layer
-
-        Args:
-            tool_identifier: Either the tool's ID (int or str) or title (str)
-            config_update: Dictionary with configuration updates
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Get tool info
-            tool_info = self.get_tool_info(tool_identifier)
-            if not tool_info:
-                logger.error(
-                    f"Tool '{tool_identifier}' not found. Cannot update config."
-                )
-                return False
-
-            # Check if we're already in an event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're here, we're already in an event loop
-                logger.warning(
-                    "Already in event loop, using a workaround to update tool config"
-                )
-                # Create a new thread to run a new event loop
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        self._run_in_new_loop,
-                        self._update_tool_config_async,
-                        tool_identifier,
-                        tool_info,
-                        config_update,
-                    )
-                    return future.result()
-            except RuntimeError:
-                # No running event loop, safe to create a new one
-                loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(loop)
-                    return loop.run_until_complete(
-                        self._update_tool_config_async(
-                            tool_identifier, tool_info, config_update
-                        )
-                    )
-                finally:
-                    loop.close()
-        except Exception as e:
-            logger.error(f"Error updating tool configuration: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return False
-
-    async def _update_tool_config_async(
-        self,
-        tool_identifier: Union[str, int],
-        tool_info: Any,
-        config_update: Dict[str, Any],
-    ) -> bool:
-        """Async implementation of tool config update"""
-        # Get services using session factory
-
-        async with routed_scoped_session() as session:
-            # Create tool service with session
-            tool_service = ToolService(session)
-
-            # If we found by ID, use ID for update, otherwise use title
-            if (
-                isinstance(tool_identifier, (int, str))
-                and str(tool_identifier).isdigit()
-            ):
-                # Update by ID
-                tool_id = int(tool_identifier)
-
-                # Prepare update data
-                if hasattr(tool_info, "config") and isinstance(tool_info.config, dict):
-                    # Merge existing config with updates
-                    updated_config = {**tool_info.config, **config_update}
-                else:
-                    updated_config = config_update
-
-                update_data = ToolUpdate(config=updated_config)
-
-                # Update the tool using the service instance
-                await tool_service.update_tool(tool_id, update_data)
-                logger.info(f"Updated tool {tool_id} configuration via ToolService")
-
-                # Refresh available tools
-                await self._load_available_tools_async()
-                return True
-            else:
-                # Update by title
-                title = tool_info.title
-                # Update the tool using the service instance
-                await tool_service.update_tool_configuration_by_title(
-                    title, config_update
-                )
-                logger.info(f"Updated tool '{title}' configuration via ToolService")
-
-                # Refresh available tools
-                await self._load_available_tools_async()
-                return True
 
     def create_tool(
         self,
@@ -2261,18 +2144,6 @@ class ToolFactory:
             logger.error(traceback.format_exc())
             return None
 
-    def register_tool_implementation(self, tool_name: str, tool_class: Any) -> None:
-        """Register a tool implementation class for a given tool name"""
-        self._tool_implementations[tool_name] = tool_class
-        logger.info(f"Registered tool implementation for {tool_name}")
-
-    def register_tool_implementations(
-        self, implementations_dict: Dict[str, object]
-    ) -> None:
-        """Register multiple tool implementations at once"""
-        self._tool_implementations.update(implementations_dict)
-        logger.info(f"Registered {len(implementations_dict)} tool implementations")
-
     def cleanup(self) -> None:
         """
         Clean up resources used by the factory
@@ -2282,50 +2153,3 @@ class ToolFactory:
     def __del__(self) -> None:
         """Cleanup resources when the object is garbage collected"""
         self.cleanup()
-
-    async def cleanup_after_crew_execution(self) -> None:
-        """
-        Clean up resources after a crew execution.
-        This is intended to be called after a crew has finished its work.
-        """
-        logger.info("Cleaning up resources after crew execution")
-
-        # Make sure we run the cleanup safely with respect to event loops
-        try:
-            # Check if we're already in an event loop
-            try:
-                # We're in an event loop, need to run cleanup carefully
-                asyncio.get_running_loop()
-                logger.info("Running cleanup in existing event loop")
-
-                # Run cleanup in a way that won't block the current event loop
-                from concurrent.futures import ThreadPoolExecutor
-
-                with ThreadPoolExecutor() as pool:
-
-                    def run_cleanup() -> None:
-                        try:
-                            self.cleanup()
-                            logger.info("Cleanup completed in background thread")
-                        except Exception as e:
-                            logger.error(
-                                f"Error during cleanup in background thread: {str(e)}"
-                            )
-
-                    # Submit the cleanup task to run in a separate thread
-                    pool.submit(run_cleanup)
-
-            except RuntimeError:
-                # No running event loop, can clean up directly
-                logger.info("Running cleanup directly (no event loop)")
-                self.cleanup()
-
-            # Refresh available tools
-            await self._load_available_tools_async()
-
-            logger.info("Cleanup after crew execution completed")
-        except Exception as e:
-            logger.error(f"Error during cleanup after crew execution: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())

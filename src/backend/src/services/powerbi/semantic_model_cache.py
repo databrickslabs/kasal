@@ -105,18 +105,6 @@ class PowerBISemanticModelCacheService:
                 report_id=report_id,
             )
 
-    async def cleanup_old_caches(self, days_to_keep: int = 7) -> int:
-        """
-        Remove cache entries older than specified days.
-
-        Args:
-            days_to_keep: Number of days to keep cache entries
-
-        Returns:
-            Number of deleted entries
-        """
-        return await self.repository.delete_old_caches(days_to_keep)
-
     def build_metadata_dict(
         self,
         measures: list,

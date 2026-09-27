@@ -24,9 +24,7 @@ parse gate, which can only say the JSON did not validate. Specific feedback is
 the whole reason a retry does better than the first attempt.
 """
 
-from typing import Any, Dict, List, Literal, Optional
-
-from pydantic import BaseModel, Field
+from typing import Any, Dict
 
 #: JSON Schema for the envelope. A dict rather than a Pydantic class because the
 #: task config is serialized to JSON on its way into the crew subprocess — a
@@ -94,36 +92,3 @@ DEFAULT_DEEP_GATE: Dict[str, Any] = {
     ],
     "on_fail": "retry",
 }
-
-
-class GateRequirement(BaseModel):
-    """One check against the parsed output.
-
-    ``path`` is a dotted path into the object, where ``[*]`` fans out over a
-    list and applies the check to every element — ``findings[*].source`` means
-    "every finding has a non-empty source".
-    """
-
-    path: str = Field(description="Dotted path; [*] iterates a list.")
-    min_items: Optional[int] = None
-    max_items: Optional[int] = None
-    not_empty: Optional[bool] = None
-    min: Optional[float] = None
-    max: Optional[float] = None
-    min_length: Optional[int] = None
-    one_of: Optional[List[Any]] = None
-    matches: Optional[str] = Field(
-        default=None, description="Regex the value must match."
-    )
-
-
-class GateRule(BaseModel):
-    """A task's acceptance rule.
-
-    ``on_fail`` is per task on purpose: ``retry`` for investigation work,
-    ``degrade`` for anything the run can survive without, ``halt`` for a task
-    whose failure makes everything downstream meaningless.
-    """
-
-    require: List[GateRequirement] = Field(default_factory=list)
-    on_fail: Literal["retry", "degrade", "halt"] = "retry"

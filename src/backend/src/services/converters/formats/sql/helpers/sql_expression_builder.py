@@ -149,37 +149,6 @@ class SQLExpressionEngine:
             )
             return self._build_sum(column_name, table_name, context)
 
-    def build_filter(
-        self,
-        filter_expr: str,
-        table_name: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Build SQL filter expression (WHERE clause).
-
-        Args:
-            filter_expr: Filter expression to build
-            table_name: Source table name
-            context: Additional context
-
-        Returns:
-            SQL WHERE clause expression
-        """
-        if context is None:
-            context = {}
-
-        # Handle various filter formats
-        if not filter_expr or filter_expr.strip() == "":
-            return ""
-
-        # If it's already a valid SQL expression, return as-is
-        if self._is_valid_sql_filter(filter_expr):
-            return filter_expr
-
-        # Otherwise, build filter expression
-        return self._build_filter_expression(filter_expr, table_name, context)
-
     def build_case_when(
         self, conditions: List[Tuple[str, Any]], else_value: Any = None
     ) -> str:
@@ -276,46 +245,6 @@ class SQLExpressionEngine:
             return str(value)
         else:
             return str(value)
-
-    def _is_valid_sql_filter(self, expr: str) -> bool:
-        """Check if expression is already a valid SQL filter."""
-        # Simple heuristic: if it contains SQL operators, assume it's valid
-        sql_operators = [
-            "=",
-            "!=",
-            "<>",
-            ">",
-            "<",
-            ">=",
-            "<=",
-            "AND",
-            "OR",
-            "IN",
-            "LIKE",
-            "BETWEEN",
-        ]
-        expr_upper = expr.upper()
-        return any(op in expr_upper for op in sql_operators)
-
-    def _build_filter_expression(
-        self, filter_expr: str, table_name: str, context: Dict[str, Any]
-    ) -> str:
-        """Build filter expression from filter string."""
-        # Parse and build filter
-        # This is a simplified version - can be extended based on needs
-        quoted_table = self._quote_identifier(table_name)
-
-        # Handle simple column = value patterns
-        if "=" in filter_expr:
-            parts = filter_expr.split("=")
-            if len(parts) == 2:
-                col = parts[0].strip()
-                val = parts[1].strip()
-                quoted_col = self._quote_identifier(col)
-                return f"{quoted_table}.{quoted_col} = {self._format_value(val)}"
-
-        # Return as-is if we can't parse it
-        return filter_expr
 
     # ========================================================================
     # Aggregation Builders - Core SQL Functions

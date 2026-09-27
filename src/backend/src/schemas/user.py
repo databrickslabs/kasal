@@ -108,13 +108,6 @@ class UserInDB(UserBase):
 # Complex user auth schemas removed - using simplified auth
 
 
-# Response schemas
-class UserResponse(UserInDB):
-    """User response schema for API endpoints."""
-
-    pass
-
-
 # Group schemas (for backward compatibility)
 class GroupCreate(BaseModel):
     name: str

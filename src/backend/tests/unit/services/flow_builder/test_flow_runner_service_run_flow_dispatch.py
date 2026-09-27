@@ -104,45 +104,6 @@ class TestEmitErrorSpan:
 # ---------------------------------------------------------------------------
 
 
-class TestCreateFlowExecution:
-    """Tests for create_flow_execution (lines ~135-183)."""
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_success(self):
-        svc = _make_service()
-        mock_ex = _make_execution(exec_id=99, flow_id=uuid.uuid4())
-        svc.flow_execution_service.create_execution = AsyncMock(return_value=mock_ex)
-
-        result = await svc.create_flow_execution(
-            flow_id=str(uuid.uuid4()), job_id="job-x", config={"group_id": "g1"}
-        )
-        assert result["success"] is True
-        assert result["execution_id"] == 99
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_value_error(self):
-        svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(
-            side_effect=ValueError("bad uuid")
-        )
-
-        result = await svc.create_flow_execution(flow_id="not-a-uuid", job_id="job-y")
-        assert result["success"] is False
-        assert "bad uuid" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_generic_error(self):
-        svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(
-            side_effect=RuntimeError("db down")
-        )
-
-        result = await svc.create_flow_execution(
-            flow_id=str(uuid.uuid4()), job_id="job-z"
-        )
-        assert result["success"] is False
-
-
 # ---------------------------------------------------------------------------
 # run_flow – top-level routing
 # ---------------------------------------------------------------------------

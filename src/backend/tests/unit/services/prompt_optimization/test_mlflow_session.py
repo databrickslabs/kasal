@@ -162,9 +162,8 @@ class TestSpSingleAuth:
             assert active is False
 
     def test_swaps_to_sp_token_and_removes_oauth(self, monkeypatch):
-        # sp_single_auth now lives in mlflow.sp_auth (prompt_optimization.gepa.sp_auth
-        # is a back-compat shim). Patch derive_sp_bearer where the code calls it —
-        # the canonical module — or the real WorkspaceClient runs and hangs on I/O.
+        # sp_single_auth lives in mlflow.sp_auth. Patch derive_sp_bearer where the
+        # code calls it, or the real WorkspaceClient runs and hangs on I/O.
         from src.services.mlflow import sp_auth
 
         monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")

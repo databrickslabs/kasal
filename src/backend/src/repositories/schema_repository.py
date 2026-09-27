@@ -1,10 +1,8 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.expression import cast
 
 from src.core.base_repository import BaseRepository
 from src.models.schema import Schema
@@ -39,39 +37,6 @@ class SchemaRepository(BaseRepository[Schema, int]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    def find_by_name_sync(self, name: str) -> Optional[Schema]:
-        """
-        Find a schema by name (synchronous version).
-
-        Args:
-            name: Schema name to search for
-
-        Returns:
-            Schema if found, else None
-        """
-        # Check if we have a synchronous session
-        if hasattr(self.session, "execute"):
-            # Using a synchronous session
-            query = select(self.model).where(self.model.name == name)
-            sync_session: Any = self.session  # a sync Session at runtime
-            result = sync_session.execute(query)
-            found: Optional[Schema] = result.scalars().first()
-            return found
-        else:
-            # Log a warning if we're using an async session with sync method
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "find_by_name_sync called with an async session, this may not work as expected"
-            )
-            # Create a sync version of the query
-            query = select(self.model).where(self.model.name == name)
-            # Execute synchronously (will only work if session supports sync execution)
-            fallback_session: Any = self.session
-            fallback_result = fallback_session.execute(query)
-            fallback: Optional[Schema] = fallback_result.scalars().first()
-            return fallback
-
     async def find_by_type(self, schema_type: str) -> List[Schema]:
         """
         Find schemas by type.
@@ -85,102 +50,6 @@ class SchemaRepository(BaseRepository[Schema, int]):
         query = select(self.model).where(self.model.schema_type == schema_type)
         result = await self.session.execute(query)
         return list(result.scalars().all())
-
-    async def find_by_keyword(self, keyword: str) -> List[Schema]:
-        """
-        Find schemas that contain a specific keyword.
-
-        Args:
-            keyword: Keyword to search for
-
-        Returns:
-            List of schemas with the specified keyword
-        """
-        # Use database-specific json containment operators
-        # This handles both string arrays and JSON arrays
-        json_keyword = json.dumps(keyword)
-        query = select(self.model).where(
-            or_(
-                # Check if keywords contains the keyword as string
-                self.model.keywords.contains([keyword]),
-                # Check if keywords contains the keyword as json string
-                cast(self.model.keywords, JSONB).contains(json_keyword),
-                # Fallback for databases without JSONB support
-                func.json_contains(self.model.keywords, json_keyword),
-            )
-        )
-
-        try:
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
-        except Exception as e:
-            # Fallback to application-level filtering if database query fails
-            import logging
-
-            logging.getLogger(__name__).warning(
-                f"Database JSON query failed: {str(e)}. Using application filtering."
-            )
-
-            query = select(self.model)
-            result = await self.session.execute(query)
-            schemas = list(result.scalars().all())
-
-            # Filter at application level
-            return [
-                schema
-                for schema in schemas
-                if schema.keywords
-                and isinstance(schema.keywords, list)
-                and keyword in schema.keywords
-            ]
-
-    async def find_by_tool(self, tool: str) -> List[Schema]:
-        """
-        Find schemas that are associated with a specific tool.
-
-        Args:
-            tool: Tool name to search for
-
-        Returns:
-            List of schemas associated with the specified tool
-        """
-        # Use database-specific json containment operators
-        # This handles both string arrays and JSON arrays
-        json_tool = json.dumps(tool)
-        query = select(self.model).where(
-            or_(
-                # Check if tools contains the tool as string
-                self.model.tools.contains([tool]),
-                # Check if tools contains the tool as json string
-                cast(self.model.tools, JSONB).contains(json_tool),
-                # Fallback for databases without JSONB support
-                func.json_contains(self.model.tools, json_tool),
-            )
-        )
-
-        try:
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
-        except Exception as e:
-            # Fallback to application-level filtering if database query fails
-            import logging
-
-            logging.getLogger(__name__).warning(
-                f"Database JSON query failed: {str(e)}. Using application filtering."
-            )
-
-            query = select(self.model)
-            result = await self.session.execute(query)
-            schemas = list(result.scalars().all())
-
-            # Filter at application level
-            return [
-                schema
-                for schema in schemas
-                if schema.tools
-                and isinstance(schema.tools, list)
-                and tool in schema.tools
-            ]
 
     async def create(self, data: Dict[str, Any]) -> Schema:
         """

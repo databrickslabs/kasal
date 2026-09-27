@@ -406,68 +406,6 @@ class TestGetTraceMethods:
         assert total == 0
 
 
-class TestGetExecutionIdMethods:
-    """Tests for execution ID lookup methods."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create a mock async session."""
-        return AsyncMock()
-
-    @pytest.fixture
-    def repository(self, mock_session):
-        """Create a repository instance with mock session."""
-        return ExecutionTraceRepository(mock_session)
-
-    @pytest.mark.asyncio
-    async def test_get_execution_job_id_by_run_id(self, repository, mock_session):
-        """Test getting job_id by run_id."""
-        mock_result = MagicMock()
-        mock_result.scalar.return_value = "test-job-123"
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_execution_job_id_by_run_id(1)
-
-        assert result == "test-job-123"
-
-    @pytest.mark.asyncio
-    async def test_get_execution_job_id_by_run_id_not_found(
-        self, repository, mock_session
-    ):
-        """Test getting job_id by run_id when not found."""
-        mock_result = MagicMock()
-        mock_result.scalar.return_value = None
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_execution_job_id_by_run_id(999)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_execution_run_id_by_job_id(self, repository, mock_session):
-        """Test getting run_id by job_id."""
-        mock_result = MagicMock()
-        mock_result.scalar.return_value = 42
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_execution_run_id_by_job_id("test-job-123")
-
-        assert result == 42
-
-    @pytest.mark.asyncio
-    async def test_get_execution_run_id_by_job_id_not_found(
-        self, repository, mock_session
-    ):
-        """Test getting run_id by job_id when not found."""
-        mock_result = MagicMock()
-        mock_result.scalar.return_value = None
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_execution_run_id_by_job_id("nonexistent")
-
-        assert result is None
-
-
 class TestDeleteTraceMethods:
     """Tests for trace deletion methods."""
 

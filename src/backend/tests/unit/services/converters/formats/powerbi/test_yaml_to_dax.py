@@ -263,65 +263,6 @@ class TestDAXGenerator:
 
     # ========== Validate DAX Syntax Tests ==========
 
-    def test_validate_dax_syntax_valid_calculate(self, generator):
-        """Test validating valid CALCULATE syntax"""
-        dax_formula = (
-            'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "EMEA"))'
-        )
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is True
-        assert "valid" in message.lower() or "proper" in message.lower()
-
-    def test_validate_dax_syntax_simple_sum(self, generator):
-        """Test validating simple SUM"""
-        dax_formula = "SUM(Sales[Amount])"
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is True
-
-    def test_validate_dax_syntax_unbalanced_parentheses(self, generator):
-        """Test detecting unbalanced parentheses"""
-        dax_formula = "SUM(Sales[Amount]"
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is False
-        assert "parentheses" in message.lower()
-
-    def test_validate_dax_syntax_invalid_not_in(self, generator):
-        """Test detecting invalid NOT IN syntax"""
-        dax_formula = (
-            "CALCULATE(SUM(Sales[Amount]), Sales[Region] NOT IN ('EMEA', 'APAC'))"
-        )
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is False
-        assert "NOT IN" in message
-
-    def test_validate_dax_syntax_raw_and_outside_filter(self, generator):
-        """Test detecting raw AND outside FILTER"""
-        dax_formula = "SUM(Sales[Amount]) AND COUNT(Orders[ID])"
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is False
-        assert "AND" in message
-
-    def test_validate_dax_syntax_no_dax_functions(self, generator):
-        """Test detecting missing DAX functions"""
-        dax_formula = "amount * 1.2"
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is False
-        assert "function" in message.lower()
-
-    def test_validate_dax_syntax_no_column_references(self, generator):
-        """Test detecting missing column references"""
-        dax_formula = "SUM(100)"
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is False
-        assert "column" in message.lower()
-
     # ========== Process Definition Tests ==========
 
     def test_process_definition_simple(self, generator, simple_definition):
@@ -472,14 +413,3 @@ class TestDAXGenerator:
         assert "&&" in result
         assert "||" in result
         assert "Sales[status]" in result
-
-    def test_validate_dax_syntax_with_multiple_filters(self, generator):
-        """Test validating DAX with multiple FILTER functions"""
-        dax_formula = """CALCULATE(
-            SUM(Sales[Amount]),
-            FILTER(Sales, Sales[Region] = "EMEA"),
-            FILTER(Sales, Sales[Year] = 2023)
-        )"""
-        is_valid, message = generator.validate_dax_syntax(dax_formula)
-
-        assert is_valid is True

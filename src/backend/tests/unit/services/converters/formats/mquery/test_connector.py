@@ -344,25 +344,6 @@ def test_get_relationships_truncates_long_constraint_name():
 # ---------------------------------------------------------------------------
 
 
-def test_get_calculated_columns_empty_when_no_models():
-    """get_calculated_columns returns empty dict when no models loaded."""
-    conn = MQueryConnector(_make_config())
-    assert conn.get_calculated_columns() == {}
-
-
-def test_get_calculated_columns_returns_columns():
-    """get_calculated_columns returns dict with table name mapping."""
-    conn = MQueryConnector(_make_config())
-    conn._semantic_models = [
-        _make_semantic_model(tables=[_make_table("Sales", with_calculated_col=True)])
-    ]
-
-    result = conn.get_calculated_columns()
-    assert "Sales" in result
-    assert len(result["Sales"]) == 1
-    assert result["Sales"][0]["name"] == "Tax"
-
-
 # ---------------------------------------------------------------------------
 # generate_summary_report
 # ---------------------------------------------------------------------------

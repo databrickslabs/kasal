@@ -1,8 +1,7 @@
 """
 Execution logs — the Logs tab, end to end.
 
-    python logging  ->  queue    ->  writer  ->  execution_logs
-    engine printer  ->  capture  ->  ^
+    python logging  ->  queue  ->  writer  ->  execution_logs
 
 Division of labour, so this does not sprawl again:
 - ``src/core/logger.py`` owns LOGGERS (names, files, formatters). It knows

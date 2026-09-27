@@ -288,13 +288,6 @@ class ExecutionCheckpointResponse(BaseModel):
     )
 
 
-class ExecutionCheckpointListResponse(BaseModel):
-    """A list of checkpoints."""
-
-    checkpoints: List[ExecutionCheckpointResponse] = Field(default_factory=list)
-    total: int = Field(description="Number of checkpoints returned")
-
-
 class ResumeExecutionRequest(BaseModel):
     """Optional body for POST /executions/{id}/resume."""
 
@@ -305,15 +298,6 @@ class ResumeExecutionRequest(BaseModel):
             "everything after re-runs. Omit to continue from the first "
             "incomplete unit."
         ),
-    )
-
-
-class ResumeFromCheckpointRequest(BaseModel):
-    """Schema for requesting execution resume from checkpoint."""
-
-    flow_uuid: Optional[str] = Field(None, description="CrewAI state.id to resume from")
-    execution_id: Optional[int] = Field(
-        None, description="Execution ID to resume from (alternative to flow_uuid)"
     )
 
 

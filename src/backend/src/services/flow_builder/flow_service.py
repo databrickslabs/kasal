@@ -307,15 +307,6 @@ class FlowService:
             except Exception as e:
                 logger.error(f"Error deleting flow {flow.id}: {e}")
 
-    async def find_flow(self, flow_id: uuid.UUID) -> Optional[Flow]:
-        """One flow by id, or None.
-
-        Distinct from :meth:`get_flow`, which RAISES when missing. The crew/flow
-        runner needs the None so it can return a clean error payload to a caller
-        that is not an HTTP request — it used to build ``FlowRepository`` for that.
-        """
-        return await FlowRepository(self.session).get(flow_id)
-
     async def get_flows_by_ids(
         self, flow_ids: List[Union[uuid.UUID, str]]
     ) -> List[Flow]:
@@ -325,36 +316,6 @@ class FlowService:
         ``FlowRepository`` itself to resolve the flows it advertises.
         """
         return await FlowRepository(self.session).find_by_ids(flow_ids)
-
-    async def get_most_recent_flow(self) -> Optional[Flow]:
-        """The most recently authored flow, or None.
-
-        A fallback for a run that arrived without a flow id. Unscoped by design —
-        it exists for a single-tenant/dev path — so do NOT use it to resolve a
-        flow on behalf of a tenant.
-        """
-        return await FlowRepository(self.session).get_most_recent()
-
-    async def get_flows_by_crew(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
-        """
-        Get all flows for a specific crew.
-
-        Args:
-            crew_id: ID of the crew (UUID)
-
-        Returns:
-            List of flows for the crew
-        """
-        # Convert string to UUID if needed
-        if isinstance(crew_id, str):
-            try:
-                crew_id = uuid.UUID(crew_id)
-            except ValueError:
-                # Return empty list if the UUID is invalid
-                return []
-
-        repository = FlowRepository(self.session)
-        return await repository.find_by_crew_id(crew_id)
 
     async def update_flow(self, flow_id: uuid.UUID, flow_in: FlowUpdate) -> Flow:
         """
@@ -410,14 +371,6 @@ class FlowService:
         except Exception as e:
             logger.error(f"Error updating flow: {str(e)}")
             raise KasalError(detail=f"Error updating flow: {str(e)}")
-
-    async def _delete_execution_children(
-        self, execution_ids: list, job_ids: list
-    ) -> None:
-        """Delegates to the repository, which owns the cascade order."""
-        await FlowRepository(self.session).delete_execution_children(
-            execution_ids, job_ids
-        )
 
     async def force_delete_flow_with_executions(self, flow_id: uuid.UUID) -> bool:
         """

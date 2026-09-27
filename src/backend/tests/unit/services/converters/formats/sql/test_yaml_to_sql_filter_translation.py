@@ -46,14 +46,6 @@ class TestSQLGeneratorInit2:
         gen = SQLGenerator(dialect=SQLDialect.STANDARD)
         assert gen.dialect == SQLDialect.STANDARD
 
-    def test_quote_identifier_databricks(self):
-        gen = SQLGenerator(dialect=SQLDialect.DATABRICKS)
-        assert gen.quote_identifier("sales") == "`sales`"
-
-    def test_quote_identifier_standard(self):
-        gen = SQLGenerator(dialect=SQLDialect.STANDARD)
-        assert gen.quote_identifier("sales") == '"sales"'
-
 
 class TestGenerateSQLFromKBIDefinition2:
     @pytest.fixture

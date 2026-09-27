@@ -938,13 +938,6 @@ class CrewMemoryService:
         except Exception as context_error:
             logger.warning(f"Failed to set context on memory backend: {context_error}")
 
-    def restore_storage_directory(self) -> None:
-        """Restore original storage directory environment variable"""
-        if self._original_storage_dir is not None:
-            os.environ["CREWAI_STORAGE_DIR"] = self._original_storage_dir
-        elif "CREWAI_STORAGE_DIR" in os.environ:
-            del os.environ["CREWAI_STORAGE_DIR"]
-
 
 async def build_session_memory(
     group_id: str,

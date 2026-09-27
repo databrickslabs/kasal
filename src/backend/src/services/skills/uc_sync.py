@@ -239,14 +239,6 @@ class SkillUcSyncService:
 
     # ── import (pull): UC -> Kasal ───────────────────────────────────────────
 
-    async def import_skill(self, catalog: str, schema: str, skill_id: str) -> Any:
-        """Pull one UC skill into this workspace (download → parse → upsert)."""
-        headers, host = await self._auth()
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            return await self._import_one(
-                client, headers, host, catalog, schema, skill_id
-            )
-
     async def import_all_skills(
         self, catalog: str, schema: str
     ) -> List[Dict[str, Any]]:

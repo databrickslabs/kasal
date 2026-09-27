@@ -232,65 +232,6 @@ class UCMetricsAggregationBuilder:
 
         return main_expr, window_config
 
-    def build_constant_selection_measure(
-        self, kpi: KPI, kbi_specific_filters: List[str]
-    ) -> Tuple[str, List[Dict[str, str]]]:
-        """Build measure with constant selection (SAP BW pattern)
-
-        Constant selection fields are used for semi-additive measures where
-        aggregation should use the last value in a time period.
-
-        Args:
-            kpi: KPI with constant selection configuration
-            kbi_specific_filters: KBI-specific filter conditions
-
-        Returns:
-            Tuple of (measure_expression, window_config_list)
-
-        Example:
-            For inventory with constant_selection on fiscal_period:
-            - Takes last inventory value per period
-            - Window: {"order": "fiscal_period", "semiadditive": "last", "range": "current"}
-        """
-        aggregation_type = (
-            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
-        )
-        formula = kpi.formula or "1"
-        display_sign = getattr(kpi, "display_sign", 1)
-
-        # Build base aggregation
-        if aggregation_type == "SUM":
-            base_expr = f"SUM({formula})"
-        elif aggregation_type == "COUNT":
-            base_expr = f"COUNT({formula})"
-        elif aggregation_type == "AVERAGE":
-            base_expr = f"AVG({formula})"
-        elif aggregation_type == "MIN":
-            base_expr = f"MIN({formula})"
-        elif aggregation_type == "MAX":
-            base_expr = f"MAX({formula})"
-        else:
-            base_expr = f"SUM({formula})"
-
-        # Add FILTER clause if there are KBI-specific filters
-        if kbi_specific_filters:
-            filter_conditions = " AND ".join(kbi_specific_filters)
-            measure_expr = f"{base_expr} FILTER (\n            WHERE {filter_conditions}\n          )"
-        else:
-            measure_expr = base_expr
-
-        # Apply display_sign if it's -1
-        if display_sign == -1:
-            measure_expr = f"(-1) * {measure_expr}"
-
-        # Build window configuration for constant selection fields
-        window_config = []
-        for field in kpi.fields_for_constant_selection or []:
-            window_entry = {"order": field, "semiadditive": "last", "range": "current"}
-            window_config.append(window_entry)
-
-        return measure_expr, window_config
-
 
 # Convenience function for simple cases
 def detect_and_build_aggregation(kpi: KPI) -> str:

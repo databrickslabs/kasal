@@ -16,11 +16,8 @@ from src.schemas.chat_history import (
     ChatHistoryInDBBase,
     ChatHistoryListResponse,
     ChatHistoryResponse,
-    ChatHistoryUpdate,
     ChatSessionInfo,
     ChatSessionListResponse,
-    GetSessionRequest,
-    GetUserSessionsRequest,
     SaveMessageRequest,
 )
 
@@ -182,49 +179,6 @@ class TestChatHistoryCreate:
             generation_result={"crew": {"name": "x"}},
         )
         assert create.content == ""
-
-
-class TestChatHistoryUpdate:
-    """Test cases for ChatHistoryUpdate schema."""
-
-    def test_chat_history_update_all_optional(self):
-        """Test that all ChatHistoryUpdate fields are optional."""
-        update = ChatHistoryUpdate()
-        assert update.content is None
-        assert update.intent is None
-        assert update.confidence is None
-        assert update.generation_result is None
-
-    def test_chat_history_update_partial(self):
-        """Test ChatHistoryUpdate with partial fields."""
-        update_data = {"content": "Updated content", "intent": "generate_task"}
-        update = ChatHistoryUpdate(**update_data)
-        assert update.content == "Updated content"
-        assert update.intent == "generate_task"
-        assert update.confidence is None
-        assert update.generation_result is None
-
-    def test_chat_history_update_full(self):
-        """Test ChatHistoryUpdate with all fields."""
-        update_data = {
-            "content": "Fully updated content",
-            "intent": "generate_crew",
-            "confidence": "0.87",
-            "generation_result": {"crew_id": "crew-456", "status": "updated"},
-        }
-        update = ChatHistoryUpdate(**update_data)
-        assert update.content == "Fully updated content"
-        assert update.intent == "generate_crew"
-        assert update.confidence == "0.87"
-        assert update.generation_result == {"crew_id": "crew-456", "status": "updated"}
-
-    def test_update_content_empty_is_accepted(self):
-        """An update may set content to an empty string (e.g. a streaming append
-        that has not produced text yet, or attaching a result to a text-less
-        message). The old min_length=1 turned this into a spurious 422; content
-        stays Optional and now allows ""."""
-        update = ChatHistoryUpdate(content="")
-        assert update.content == ""
 
 
 class TestChatHistoryInDBBase:
@@ -509,132 +463,8 @@ class TestSaveMessageRequest:
                 SaveMessageRequest(**data)
 
 
-class TestGetSessionRequest:
-    """Test cases for GetSessionRequest schema."""
-
-    def test_valid_get_session_request(self):
-        """Test GetSessionRequest with all fields."""
-        data = {"page": 2, "per_page": 25}
-        request = GetSessionRequest(**data)
-        assert request.page == 2
-        assert request.per_page == 25
-
-    def test_get_session_request_defaults(self):
-        """Test GetSessionRequest with default values."""
-        request = GetSessionRequest()
-        assert request.page == 0
-        assert request.per_page == 50
-
-    def test_get_session_request_validation(self):
-        """Test GetSessionRequest field validation."""
-        # Valid values
-        request = GetSessionRequest(page=0, per_page=1)
-        assert request.page == 0
-        assert request.per_page == 1
-
-        request = GetSessionRequest(page=10, per_page=100)
-        assert request.page == 10
-        assert request.per_page == 100
-
-        # Invalid values
-        with pytest.raises(ValidationError):
-            GetSessionRequest(page=-1)  # page must be >= 0
-
-        with pytest.raises(ValidationError):
-            GetSessionRequest(per_page=0)  # per_page must be >= 1
-
-        with pytest.raises(ValidationError):
-            GetSessionRequest(per_page=101)  # per_page must be <= 100
-
-
-class TestGetUserSessionsRequest:
-    """Test cases for GetUserSessionsRequest schema."""
-
-    def test_valid_get_user_sessions_request(self):
-        """Test GetUserSessionsRequest with all fields."""
-        data = {"page": 1, "per_page": 10}
-        request = GetUserSessionsRequest(**data)
-        assert request.page == 1
-        assert request.per_page == 10
-
-    def test_get_user_sessions_request_defaults(self):
-        """Test GetUserSessionsRequest with default values."""
-        request = GetUserSessionsRequest()
-        assert request.page == 0
-        assert request.per_page == 20
-
-    def test_get_user_sessions_request_validation(self):
-        """Test GetUserSessionsRequest field validation."""
-        # Valid values
-        request = GetUserSessionsRequest(page=0, per_page=1)
-        assert request.page == 0
-        assert request.per_page == 1
-
-        request = GetUserSessionsRequest(page=5, per_page=50)
-        assert request.page == 5
-        assert request.per_page == 50
-
-        # Invalid values
-        with pytest.raises(ValidationError):
-            GetUserSessionsRequest(page=-1)  # page must be >= 0
-
-        with pytest.raises(ValidationError):
-            GetUserSessionsRequest(per_page=0)  # per_page must be >= 1
-
-        with pytest.raises(ValidationError):
-            GetUserSessionsRequest(per_page=51)  # per_page must be <= 50
-
-
 class TestSchemaIntegration:
     """Integration tests for chat history schema interactions."""
-
-    def test_chat_message_workflow(self):
-        """Test complete chat message workflow."""
-        # Create message
-        create_data = {
-            "session_id": "workflow-session",
-            "user_id": "workflow-user",
-            "message_type": "user",
-            "content": "Help me create an agent",
-            "intent": "generate_agent",
-        }
-        create_schema = ChatHistoryCreate(**create_data)
-
-        # Update message
-        update_data = {
-            "confidence": "0.95",
-            "generation_result": {"agent_id": "agent-123", "status": "created"},
-        }
-        update_schema = ChatHistoryUpdate(**update_data)
-
-        # Simulate database entity
-        now = datetime.now()
-        db_data = {
-            "id": "msg-workflow-1",
-            "session_id": create_schema.session_id,
-            "user_id": create_schema.user_id,
-            "message_type": create_schema.message_type,
-            "content": create_schema.content,
-            "intent": create_schema.intent,
-            "confidence": update_data["confidence"],
-            "generation_result": update_data["generation_result"],
-            "timestamp": now,
-            "group_id": "group-123",
-        }
-        response = ChatHistoryResponse(**db_data)
-
-        # Verify the complete workflow
-        assert create_schema.session_id == "workflow-session"
-        assert create_schema.intent == "generate_agent"
-        assert update_schema.confidence == "0.95"
-        assert response.id == "msg-workflow-1"
-        assert response.session_id == "workflow-session"
-        assert response.confidence == "0.95"
-        assert response.generation_result == {
-            "agent_id": "agent-123",
-            "status": "created",
-        }
-        assert response.timestamp == now
 
     def test_session_management_workflow(self):
         """Test session management workflow."""

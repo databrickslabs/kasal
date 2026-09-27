@@ -376,15 +376,3 @@ def trigger_for(registry: Dict[str, Dict[str, Any]], outcome: str) -> Optional[s
     """The one method that produces this outcome."""
     entry = (registry or {}).get(str(outcome)) or {}
     return entry.get("method")
-
-
-def identity_of(registry: Dict[str, Dict[str, Any]], crew: str) -> Optional[str]:
-    """The hash of the crew as it was when the flow was compiled."""
-    return ((registry or {}).get(str(crew)) or {}).get("identity")
-
-
-def methods_for_crews(method_crews: Dict[str, str], crew_names: Set[str]) -> Set[str]:
-    """The generated methods that run the given crews."""
-    return {
-        method for method, crew in (method_crews or {}).items() if crew in crew_names
-    }

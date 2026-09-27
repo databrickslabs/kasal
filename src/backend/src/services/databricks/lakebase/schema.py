@@ -578,13 +578,6 @@ class LakebaseSchemaService(BaseService):
                 self._ensure_doc_embeddings_columns_sync(conn)
         logger.info(f"Created {table_name} without its vector column")
 
-    def _create_doc_embeddings_sync(self, engine: Engine) -> None:
-        """Create documentation_embeddings and ensure its pgvector schema.
-
-        Thin wrapper kept for existing callers; the generic path does the work.
-        """
-        self._create_without_vector_sync(engine, "documentation_embeddings")
-
     def create_tables_sync_stream(
         self, engine: Engine
     ) -> Generator[Dict[str, Any], None, None]:
@@ -723,31 +716,6 @@ class LakebaseSchemaService(BaseService):
         try:
             safe_schema = _validate_identifier(schema, "schema name")
             await connection.execute(text(f"SET search_path TO {safe_schema}, public"))
-            logger.debug(f"Set search path to {schema}")
-        except Exception as e:
-            logger.error(f"Error setting search path: {e}")
-            raise
-
-    def set_search_path_sync(
-        self, connection: Connection, schema: str = "kasal"
-    ) -> None:
-        """
-        Set the search path for a database connection (sync version).
-
-        Args:
-            connection: Sync database connection
-            schema: Schema name to set as search path (default: kasal)
-
-        Raises:
-            ValueError: If schema name is not a valid identifier
-            Exception: If setting search path fails
-        """
-        try:
-            safe_schema = _validate_identifier(schema, "schema name")
-            # Match set_search_path_async: include public so the pgvector `vector`
-            # type (installed in public by CREATE EXTENSION) resolves for callers
-            # that create/alter vector columns on this connection.
-            connection.execute(text(f"SET search_path TO {safe_schema}, public"))
             logger.debug(f"Set search path to {schema}")
         except Exception as e:
             logger.error(f"Error setting search path: {e}")

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -77,53 +76,6 @@ class DatabricksConfigCreate(DatabricksConfigBase):
             )
 
         return self
-
-
-class DatabricksConfigUpdate(BaseModel):
-    """Schema for updating Databricks configuration.
-
-    Every DatabricksConfigBase field, each optional (a partial update). Declared
-    on BaseModel rather than narrowing the base's non-optional fields.
-    """
-
-    workspace_url: Optional[str] = None
-    warehouse_id: Optional[str] = None
-    catalog: Optional[str] = None
-    db_schema: Optional[str] = Field(None, alias="schema")
-    enabled: Optional[bool] = None
-
-    # AI Gateway
-    ai_gateway_enabled: Optional[bool] = None
-
-    # MLflow configuration
-    mlflow_enabled: Optional[bool] = None
-    mlflow_experiment_name: Optional[str] = None
-    # MLflow Evaluation configuration
-    evaluation_enabled: Optional[bool] = None
-    evaluation_judge_model: Optional[str] = None
-
-    # Volume configuration fields
-    volume_enabled: Optional[bool] = None
-    volume_path: Optional[str] = None
-    volume_file_format: Optional[str] = None
-    volume_create_date_dirs: Optional[bool] = None
-
-    # Knowledge source volume configuration
-    knowledge_volume_enabled: Optional[bool] = None
-    knowledge_volume_path: Optional[str] = None
-    knowledge_chunk_size: Optional[int] = None
-    knowledge_chunk_overlap: Optional[int] = None
-
-
-class DatabricksConfigInDB(DatabricksConfigBase):
-    """Base schema for Databricks configuration in the database."""
-
-    id: int
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class DatabricksConfigResponse(DatabricksConfigBase):

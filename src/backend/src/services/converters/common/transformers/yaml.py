@@ -121,11 +121,3 @@ class YAMLKPIParser:
             structures=structures,
             kpis=kbis,
         )
-
-    def get_all_kbis(self) -> List[tuple[KPIDefinition, KPI]]:
-        """Get all KBIs from all parsed definitions as (definition, kbi) tuples."""
-        all_kbis = []
-        for definition in self.parsed_definitions:
-            for kpi in definition.kpis:
-                all_kbis.append((definition, kpi))
-        return all_kbis

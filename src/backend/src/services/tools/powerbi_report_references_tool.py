@@ -1848,58 +1848,6 @@ class PowerBIReportReferencesTool(BaseTool):
 
         return json.dumps(result, indent=2)
 
-    def _format_matrix_output(
-        self,
-        _workspace_id: str,  # kept for API consistency with other format methods
-        report_id: str,
-        report_info: Dict[str, Any],
-        pages: List[Dict[str, Any]],
-        _visual_references: List[Dict[str, Any]],  # kept for API consistency
-        cross_ref: Dict[str, Any],
-    ) -> str:
-        """Format output as a usage matrix (measures vs pages)."""
-        output = []
-
-        output.append("# Power BI Report References Matrix\n")
-        output.append(f"**Report**: {report_info.get('name', report_id)}\n")
-
-        # Build matrix header
-        page_names = [p["displayName"] for p in pages]
-
-        # Measures matrix
-        output.append("## Measure Usage Matrix\n")
-        output.append("| Measure | " + " | ".join(page_names) + " |")
-        output.append("|---------|" + "|".join(["---"] * len(page_names)) + "|")
-
-        measure_pages = cross_ref.get("measure_pages", {})
-        for measure in sorted(measure_pages.keys()):
-            row = [measure]
-            for page_name in page_names:
-                if page_name in measure_pages[measure]:
-                    row.append("✓")
-                else:
-                    row.append("")
-            output.append("| " + " | ".join(row) + " |")
-
-        output.append("")
-
-        # Tables matrix
-        output.append("## Table Usage Matrix\n")
-        output.append("| Table | " + " | ".join(page_names) + " |")
-        output.append("|-------|" + "|".join(["---"] * len(page_names)) + "|")
-
-        table_pages = cross_ref.get("table_pages", {})
-        for table in sorted(table_pages.keys()):
-            row = [table]
-            for page_name in page_names:
-                if page_name in table_pages[table]:
-                    row.append("✓")
-                else:
-                    row.append("")
-            output.append("| " + " | ".join(row) + " |")
-
-        return "\n".join(output)
-
     # ========================================
     # MULTI-REPORT OUTPUT METHODS
     # ========================================

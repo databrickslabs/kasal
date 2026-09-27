@@ -61,12 +61,6 @@ class SQLGenerator:
 
         return configs.get(self.dialect, configs[SQLDialect.DATABRICKS])
 
-    def quote_identifier(self, identifier: str) -> str:
-        """Quote an identifier according to dialect"""
-        quote_start = self.dialect_config["quote_char"]
-        quote_end = self.dialect_config.get("quote_char_end", quote_start)
-        return f"{quote_start}{identifier}{quote_end}"
-
     def generate_sql_from_kbi_definition(
         self, definition: KPIDefinition, options: Optional[SQLTranslationOptions] = None
     ) -> SQLTranslationResult:

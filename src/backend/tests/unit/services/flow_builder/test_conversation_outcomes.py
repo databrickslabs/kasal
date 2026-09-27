@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, patch
 
 from src.services.flow_builder.conversation.outcomes import (
     build_registry,
-    identity_of,
     outcome_crews,
     outcome_descriptions,
     parse_outcome,
@@ -167,13 +166,6 @@ class TestRegistry:
         )
 
         assert trigger_for(registry, "compare") == "listener_0"
-
-    def test_it_carries_the_crew_the_outcome_was_described_against(self):
-        # A name is stable while everything behind it changes. The hash is what
-        # makes a stored answer safe to replay.
-        registry = build_registry({"listener_0": "compare"}, {"compare": "h1"})
-
-        assert identity_of(registry, "compare") == "h1"
 
     def test_an_unknown_outcome_triggers_nothing(self):
         assert trigger_for(build_registry({}, {}), "compare") is None

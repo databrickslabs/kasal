@@ -470,28 +470,6 @@ async def test_delete_all_flows_for_group_error_swallowed():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_flows_by_crew_invalid_uuid():
-    svc = make_service()
-    result = await svc.get_flows_by_crew("not-a-valid-uuid")
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_get_flows_by_crew_string_uuid():
-    svc = make_service()
-    crew_id = str(uuid.uuid4())
-
-    with patch("src.services.flow_builder.flow_service.FlowRepository") as MockRepo:
-        mock_repo = AsyncMock()
-        flow = make_flow(crew_id=crew_id)
-        mock_repo.find_by_crew_id = AsyncMock(return_value=[flow])
-        MockRepo.return_value = mock_repo
-
-        result = await svc.get_flows_by_crew(crew_id)
-        assert len(result) == 1
-
-
 # ---------------------------------------------------------------------------
 # update_flow - with nodes and edges
 # ---------------------------------------------------------------------------

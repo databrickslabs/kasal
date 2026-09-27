@@ -13,7 +13,6 @@ from pydantic import ValidationError
 
 from src.schemas.execution import (
     CrewConfig,
-    ExecutionBase,
     ExecutionCreateResponse,
     ExecutionNameGenerationRequest,
     ExecutionNameGenerationResponse,
@@ -608,68 +607,6 @@ class TestCrewConfigFlowFields:
         # The model_config has extra="allow", so this should work
         assert hasattr(config, "custom_field")
         assert config.custom_field == "custom_value"
-
-
-class TestExecutionBase:
-    """Test cases for ExecutionBase schema."""
-
-    def test_valid_execution_base(self):
-        """Test ExecutionBase with all required fields."""
-        now = datetime.now()
-        base_data = {
-            "execution_id": "exec_12345",
-            "status": "running",
-            "created_at": now,
-            "result": {"output": "test result"},
-            "error": None,
-            "run_name": "Test Execution",
-        }
-        execution = ExecutionBase(**base_data)
-        assert execution.execution_id == "exec_12345"
-        assert execution.status == "running"
-        assert execution.created_at == now
-        assert execution.result == {"output": "test result"}
-        assert execution.error is None
-        assert execution.run_name == "Test Execution"
-
-    def test_execution_base_missing_required_fields(self):
-        """Test ExecutionBase validation with missing required fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            ExecutionBase(execution_id="test")
-
-        errors = exc_info.value.errors()
-        missing_fields = [
-            error["loc"][0] for error in errors if error["type"] == "missing"
-        ]
-        assert "status" in missing_fields
-        assert "created_at" in missing_fields
-
-    def test_execution_base_optional_fields(self):
-        """Test ExecutionBase with optional fields as None."""
-        now = datetime.now()
-        base_data = {
-            "execution_id": "exec_minimal",
-            "status": "pending",
-            "created_at": now,
-        }
-        execution = ExecutionBase(**base_data)
-        assert execution.result is None
-        assert execution.error is None
-        assert execution.run_name is None
-
-    def test_execution_base_various_statuses(self):
-        """Test ExecutionBase with various status values."""
-        statuses = ["pending", "running", "completed", "failed", "cancelled"]
-        now = datetime.now()
-
-        for status in statuses:
-            base_data = {
-                "execution_id": f"exec_{status}",
-                "status": status,
-                "created_at": now,
-            }
-            execution = ExecutionBase(**base_data)
-            assert execution.status == status
 
 
 class TestExecutionResponse:

@@ -340,25 +340,6 @@ class CrewExecutor:
             )
         return metrics
 
-    def get_active_executions(self) -> Dict[str, Any]:
-        """
-        Get information about active executions.
-
-        Returns:
-            Dictionary of active execution information
-        """
-        return {
-            exec_id: {
-                "status": info["status"],
-                "start_time": info["start_time"].isoformat(),
-                "duration_seconds": (
-                    datetime.now() - info["start_time"]
-                ).total_seconds(),
-            }
-            for exec_id, info in self._active_executions.items()
-            if info["status"] == "RUNNING"
-        }
-
     def shutdown(self, wait: bool = True) -> None:
         """
         Shutdown the executor gracefully.
@@ -391,27 +372,3 @@ class CrewExecutor:
 
 # Global instance
 crew_executor = CrewExecutor()
-
-
-# Helper function for backwards compatibility
-async def run_crew_with_executor(
-    execution_id: str,
-    crew: Any,
-    inputs: Optional[Dict[str, Any]] = None,
-    timeout: Optional[float] = None,
-) -> Any:
-    """
-    Convenience function to run a crew using the global executor.
-
-    Args:
-        execution_id: Unique identifier for the execution
-        crew: The CrewAI crew to execute
-        inputs: Optional inputs for the crew
-        timeout: Optional timeout in seconds
-
-    Returns:
-        The crew execution result
-    """
-    return await crew_executor.run_crew(
-        execution_id=execution_id, crew=crew, inputs=inputs, timeout=timeout
-    )

@@ -59,11 +59,6 @@ def test_sql_generator_standard_dialect():
     assert gen.dialect_config["quote_char"] == '"'
 
 
-def test_quote_identifier():
-    gen = SQLGenerator(SQLDialect.DATABRICKS)
-    assert gen.quote_identifier("my_col") == "`my_col`"
-
-
 # ─── _estimate_complexity ─────────────────────────────────────────────────────
 
 

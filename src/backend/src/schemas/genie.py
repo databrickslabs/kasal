@@ -85,37 +85,6 @@ class GenieSpacesResponse(BaseModel):
         json_encoders = {datetime: lambda v: v.isoformat() if v else None}
 
 
-class GenieConversation(BaseModel):
-    """Schema for a Genie conversation."""
-
-    conversation_id: str = Field(..., description="Unique conversation identifier")
-    space_id: str = Field(..., description="Space ID for the conversation")
-    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
-    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
-    title: Optional[str] = Field(None, description="Conversation title")
-
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
-
-
-class GenieMessage(BaseModel):
-    """Schema for a Genie message."""
-
-    message_id: str = Field(..., description="Unique message identifier")
-    conversation_id: str = Field(..., description="Conversation ID")
-    content: str = Field(..., description="Message content")
-    role: Optional[str] = Field("user", description="Message role (user/assistant)")
-    status: Optional[GenieMessageStatus] = Field(None, description="Message status")
-    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
-    attachments: Optional[List[Dict[str, Any]]] = Field(
-        default_factory=list, description="Message attachments"
-    )
-
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
-        use_enum_values = True
-
-
 class GenieQueryResult(BaseModel):
     """Schema for a Genie query result."""
 

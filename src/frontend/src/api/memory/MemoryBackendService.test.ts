@@ -82,50 +82,6 @@ describe('MemoryBackendService', () => {
     });
   });
 
-  describe('saveConfig', () => {
-    it('should save config successfully', async () => {
-      const mockConfig: MemoryBackendConfig = {
-        backend_type: MemoryBackendType.DATABRICKS,
-        enable_short_term: true,
-        databricks_config: {
-          workspace_url: 'https://example.databricks.com',
-          endpoint_name: 'test-endpoint',
-          short_term_index: 'short_index',
-        },
-      };
-      const mockResponse = { success: true, message: 'Configuration saved' };
-      (apiClient.post as Mock).mockResolvedValue({ data: mockResponse });
-
-      const result = await MemoryBackendService.saveConfig(mockConfig);
-
-      expect(apiClient.post).toHaveBeenCalledWith('/memory-backend/config', mockConfig);
-      expect(result).toEqual(mockResponse);
-    });
-
-    it('should handle save errors', async () => {
-      const mockConfig: MemoryBackendConfig = {
-        backend_type: MemoryBackendType.DATABRICKS,
-        enable_short_term: true,
-      };
-      const mockError = new AxiosError('Save failed');
-      mockError.response = {
-        data: { detail: 'Database error' },
-        status: 500,
-        statusText: 'Internal Server Error',
-        headers: {},
-        config: { headers: {} } as any,
-      };
-      (apiClient.post as Mock).mockRejectedValue(mockError);
-
-      const result = await MemoryBackendService.saveConfig(mockConfig);
-
-      expect(result).toEqual({
-        success: false,
-        message: 'Database error',
-      });
-    });
-  });
-
   describe('saveDefaultConfig', () => {
     it('persists local cognitive tuning to the backend default/save-config endpoint', async () => {
       const mockConfig: MemoryBackendConfig = {

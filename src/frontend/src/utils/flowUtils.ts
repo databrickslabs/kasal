@@ -1,4 +1,4 @@
-import { Node, Edge } from 'reactflow';
+import { Node } from 'reactflow';
 
 /**
  * Calculates a position for a new node that doesn't overlap with existing nodes
@@ -26,26 +26,3 @@ export const calculateNonOverlappingPosition = (basePosition: { x: number; y: nu
   // If no existing tasks, use the base position
   return basePosition;
 };
-
-/**
- * Logs edge details for debugging purposes
- */
-export const logEdgeDetails = (edges: Edge[], message: string) => {
-  
-  // Group edges by type (agent-task, task-task)
-  // const _agentToTaskEdges = edges.filter(edge => 
-  //   edge.source.includes('agent') && edge.target.includes('task')
-  // );
-  
-  const taskToTaskEdges = edges.filter(edge => 
-    edge.source.includes('task') && edge.target.includes('task')
-  );
-  
-  
-  // Log a few example edges for debugging
-  if (taskToTaskEdges.length > 0) {
-    // Task-to-task edges exist
-  } else {
-    // No task-to-task edges
-  }
-}; 

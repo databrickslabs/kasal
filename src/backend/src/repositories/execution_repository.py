@@ -229,29 +229,6 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
         """
         return await self.update(execution_id, data)
 
-    async def update_execution_by_job_id(
-        self, job_id: str, data: Dict[str, Any]
-    ) -> Optional[ExecutionHistory]:
-        """
-        Update an existing execution by job_id.
-
-        Args:
-            job_id: Job ID of the execution to update
-            data: Dictionary with updated values
-
-        Returns:
-            Updated execution instance or None if not found
-        """
-        execution = await self.get_execution_by_job_id(job_id)
-        if not execution:
-            return None
-
-        for key, value in data.items():
-            setattr(execution, key, value)
-
-        await self.session.flush()
-        return execution
-
     async def update_execution_status(
         self,
         job_id: str,  # Renamed parameter for clarity
@@ -349,50 +326,6 @@ class ExecutionRepository(BaseRepository[ExecutionHistory]):
 
             logger.error(traceback.format_exc())
             raise
-
-    async def mark_execution_completed(
-        self, execution_id: int, result: Optional[Dict[str, Any]] = None
-    ) -> Optional[ExecutionHistory]:
-        """
-        Mark an execution as completed.
-
-        Args:
-            execution_id: ID of the execution to update
-            result: Optional result data
-
-        Returns:
-            Updated execution instance or None if not found
-        """
-        update_data = {
-            "status": ExecutionStatus.COMPLETED.value,
-            "completed_at": datetime.now(UTC),
-        }
-
-        if result:
-            update_data["result"] = result
-
-        return await self.update(execution_id, update_data)
-
-    async def mark_execution_failed(
-        self, execution_id: int, error: str
-    ) -> Optional[ExecutionHistory]:
-        """
-        Mark an execution as failed.
-
-        Args:
-            execution_id: ID of the execution to update
-            error: Error message
-
-        Returns:
-            Updated execution instance or None if not found
-        """
-        update_data = {
-            "status": ExecutionStatus.FAILED.value,
-            "error": error,
-            "completed_at": datetime.now(UTC),
-        }
-
-        return await self.update(execution_id, update_data)
 
 
 def get_execution_repository(session: AsyncSession) -> ExecutionRepository:

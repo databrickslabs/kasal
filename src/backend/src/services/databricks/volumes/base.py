@@ -63,18 +63,6 @@ class KasalCallback(ABC):
         """Execute the actual callback logic. Must be implemented by subclasses."""
         pass
 
-    def _log_output_info(self, output: Any) -> None:
-        """Helper method to log output information."""
-        logger.info(f"Output Type: {type(output)}")
-        if hasattr(output, "raw"):
-            logger.info(f"Output Content: {output.raw[:500]}...")
-        elif isinstance(output, (str, int, float, bool)):
-            logger.info(f"Output Content: {str(output)[:500]}...")
-        elif isinstance(output, dict):
-            logger.info(f"Output Content: {str(output)[:500]}...")
-        else:
-            logger.info(f"Output Content: {str(output)[:500]}...")
-
 
 class CallbackFailedError(Exception):
     """Exception raised when a callback fails after all retries."""

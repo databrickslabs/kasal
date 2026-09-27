@@ -54,33 +54,6 @@ class TestSQLGeneratorInit:
         assert generator.dialect_config["quote_char"] == '"'
 
 
-class TestSQLGeneratorQuoting:
-    """Tests for quote_identifier method"""
-
-    @pytest.fixture
-    def databricks_gen(self):
-        return SQLGenerator(dialect=SQLDialect.DATABRICKS)
-
-    @pytest.fixture
-    def standard_gen(self):
-        return SQLGenerator(dialect=SQLDialect.STANDARD)
-
-    def test_quote_identifier_databricks(self, databricks_gen):
-        """Test Databricks identifier quoting"""
-        result = databricks_gen.quote_identifier("table_name")
-        assert result == "`table_name`"
-
-    def test_quote_identifier_standard(self, standard_gen):
-        """Test Standard identifier quoting"""
-        result = standard_gen.quote_identifier("table_name")
-        assert result == '"table_name"'
-
-    def test_quote_identifier_with_special_chars(self, databricks_gen):
-        """Test quoting identifier with spaces"""
-        result = databricks_gen.quote_identifier("my table")
-        assert "`my table`" == result
-
-
 class TestSQLGeneratorEstimateComplexity:
     """Tests for _estimate_complexity"""
 
@@ -238,15 +211,9 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
         assert result.measures_count == 3
 
     def test_get_formatted_sql_output(self, generator, simple_definition):
-        """Test get_formatted_sql_output or get_all_sql_statements returns SQL text"""
+        """get_formatted_sql_output returns the generated SQL as text"""
         result = generator.generate_sql_from_kbi_definition(simple_definition)
-        # Use the actual method names available on SQLTranslationResult
-        if hasattr(result, "get_formatted_sql_output"):
-            output = result.get_formatted_sql_output()
-            assert isinstance(output, str)
-        elif hasattr(result, "get_all_sql_statements"):
-            output = result.get_all_sql_statements()
-            assert isinstance(output, (str, list))
+        assert isinstance(result.get_formatted_sql_output(), str)
 
     def test_filter_substitution(self, generator):
         """Test variable substitution in filters"""

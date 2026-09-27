@@ -75,9 +75,8 @@ class TestCrewLink:
         # A flow already records flow_id; crew_id on a flow row would be a
         # second, contradictory answer to "what definition was this built from".
         #
-        # flow_id is given explicitly because omitting it sends create_execution
-        # to get_most_recent_flow() — a real database read, which is not what
-        # this test is about and which fails under xdist.
+        # flow_id is given explicitly: a flow run without flow_id or nodes is
+        # rejected before anything is written.
         config = CrewConfig(
             execution_type="flow",
             crew_id=CREW_ID,

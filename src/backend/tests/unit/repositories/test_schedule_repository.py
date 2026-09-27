@@ -283,40 +283,6 @@ class TestScheduleRepositoryFindById:
         mock_async_session.execute.assert_called_once()
 
 
-class TestScheduleRepositoryFindByTenant:
-    """Test cases for find_by_tenant method."""
-
-    @pytest.mark.asyncio
-    async def test_find_by_tenant_success(
-        self, schedule_repository, mock_async_session, sample_schedules
-    ):
-        """Test successful schedule retrieval by tenant."""
-        tenant_schedules = [
-            schedule for schedule in sample_schedules if schedule.group_id == "group-1"
-        ]
-        mock_result = MockResult(tenant_schedules)
-        mock_async_session.execute.return_value = mock_result
-
-        result = await schedule_repository.find_by_tenant("group-1")
-
-        assert len(result) == len(tenant_schedules)
-        assert all(schedule.group_id == "group-1" for schedule in result)
-        mock_async_session.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_find_by_tenant_no_schedules(
-        self, schedule_repository, mock_async_session
-    ):
-        """Test find by tenant when no schedules found."""
-        mock_result = MockResult([])
-        mock_async_session.execute.return_value = mock_result
-
-        result = await schedule_repository.find_by_tenant("nonexistent-tenant")
-
-        assert result == []
-        mock_async_session.execute.assert_called_once()
-
-
 class TestScheduleRepositoryFindByGroup:
     """Test cases for find_by_group method."""
 
@@ -717,16 +683,6 @@ class TestScheduleRepositoryErrorHandling:
             await schedule_repository.find_all()
 
     @pytest.mark.asyncio
-    async def test_find_by_tenant_database_error(
-        self, schedule_repository, mock_async_session
-    ):
-        """Test find by tenant with database error."""
-        mock_async_session.execute.side_effect = Exception("Query timeout")
-
-        with pytest.raises(Exception, match="Query timeout"):
-            await schedule_repository.find_by_tenant("group-1")
-
-    @pytest.mark.asyncio
     async def test_find_due_schedules_database_error(
         self, schedule_repository, mock_async_session
     ):
@@ -755,29 +711,6 @@ class TestScheduleRepositoryEdgeCases:
 
             with pytest.raises(ValueError, match="Invalid cron expression"):
                 await schedule_repository.create(sample_schedule_data)
-
-    @pytest.mark.asyncio
-    async def test_find_by_tenant_vs_find_by_group_equivalence(
-        self, schedule_repository, mock_async_session, sample_schedules
-    ):
-        """Test that find_by_tenant and find_by_group return same results."""
-        group_schedules = [
-            schedule for schedule in sample_schedules if schedule.group_id == "group-1"
-        ]
-        mock_result = MockResult(group_schedules)
-        mock_async_session.execute.return_value = mock_result
-
-        # Find by tenant
-        tenant_result = await schedule_repository.find_by_tenant("group-1")
-
-        # Reset mock for second call
-        mock_async_session.execute.return_value = mock_result
-
-        # Find by group
-        group_result = await schedule_repository.find_by_group("group-1")
-
-        assert tenant_result == group_result
-        assert len(tenant_result) == len(group_schedules)
 
     @pytest.mark.asyncio
     async def test_update_empty_data(self, schedule_repository, mock_async_session):

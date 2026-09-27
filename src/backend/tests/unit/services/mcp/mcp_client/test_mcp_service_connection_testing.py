@@ -66,32 +66,6 @@ def mk_settings(id=1, global_enabled=True, individual_enabled=True):
 
 
 @pytest.mark.asyncio
-async def test_get_all_and_effective_and_enabled_and_global_lists(monkeypatch):
-    svc = MCPService(session=SimpleNamespace())
-    svc.server_repository = AsyncMock()
-
-    # get_all_servers masks api_key
-    s1 = mk_server(id=1, name="a", group_id=None)
-    s2 = mk_server(id=2, name="a", group_id="g1")
-    svc.server_repository.list = AsyncMock(return_value=[s1, s2])
-    out = await svc.get_all_servers()
-    assert out.count == 2 and out.servers[0].api_key == ""
-
-    # get_all_servers_effective dedups by name preferring group-specific
-    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[s1, s2])
-    eff = await svc.get_all_servers_effective(group_id="g1")
-    assert eff.count == 1 and eff.servers[0].group_id == "g1"
-
-    # get_enabled_servers and get_global_servers
-    svc.server_repository.find_enabled = AsyncMock(return_value=[s1])
-    en = await svc.get_enabled_servers()
-    assert en.count == 1 and en.servers[0].name == "a"
-    svc.server_repository.find_global_enabled = AsyncMock(return_value=[s1])
-    gl = await svc.get_global_servers()
-    assert gl.count == 1
-
-
-@pytest.mark.asyncio
 async def test_get_all_servers_effective_enabled_only_filter():
     """Regression: enabled_only=True excludes disabled servers; default keeps them."""
     svc = MCPService(session=SimpleNamespace())

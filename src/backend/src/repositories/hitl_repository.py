@@ -103,35 +103,6 @@ class HITLApprovalRepository:
         result = await self.session.execute(stmt)
         return result.scalars().first()
 
-    async def get_pending_for_execution(
-        self, execution_id: str, group_id: Optional[str] = None
-    ) -> Optional[HITLApproval]:
-        """
-        Get pending HITL approval for an execution.
-
-        Args:
-            execution_id: Job ID of the execution
-            group_id: Optional group ID for filtering
-
-        Returns:
-            Pending HITLApproval if found, None otherwise
-        """
-        if not self.session:
-            raise RuntimeError("HITLApprovalRepository requires a session")
-
-        filters = [
-            HITLApproval.execution_id == execution_id,
-            HITLApproval.status == HITLApprovalStatus.PENDING,
-        ]
-        if group_id:
-            filters.append(HITLApproval.group_id == group_id)
-
-        stmt = (
-            select(HITLApproval).where(*filters).order_by(desc(HITLApproval.created_at))
-        )
-        result = await self.session.execute(stmt)
-        return result.scalars().first()
-
     async def get_pending_for_group(
         self, group_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[List[HITLApproval], int]:

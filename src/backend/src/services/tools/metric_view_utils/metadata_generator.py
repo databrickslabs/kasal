@@ -76,14 +76,6 @@ class MetadataGenerator:
             }
         return result
 
-    def get_comment_override(self, table_key: str) -> str | None:
-        """Get per-table comment override."""
-        return self._comment_overrides.get(table_key)
-
-    def get_dimension_exclusions(self, table_key: str) -> set[str]:
-        """Get per-table dimension exclusions."""
-        return self._dimension_exclusions.get(table_key, set())
-
     def get_dimension_order(self, table_key: str) -> list[str]:
         """Get per-table dimension ordering."""
         return self._dimension_order.get(table_key, [])

@@ -283,29 +283,6 @@ class TestGetMetrics:
 # ---------------------------------------------------------------------------
 
 
-class TestGetActiveExecutions:
-    def test_returns_only_running(self, executor):
-        now = datetime.now()
-        executor._active_executions["r1"] = {"status": "RUNNING", "start_time": now}
-        executor._active_executions["c1"] = {"status": "COMPLETED", "start_time": now}
-
-        result = executor.get_active_executions()
-        assert "r1" in result
-        assert "c1" not in result
-
-    def test_includes_duration(self, executor):
-        past = datetime.now() - timedelta(seconds=5)
-        executor._active_executions["r2"] = {"status": "RUNNING", "start_time": past}
-
-        result = executor.get_active_executions()
-        assert result["r2"]["duration_seconds"] >= 5.0
-
-    def test_empty_when_no_active(self, executor):
-        executor._active_executions.clear()
-        result = executor.get_active_executions()
-        assert result == {}
-
-
 # ---------------------------------------------------------------------------
 # shutdown
 # ---------------------------------------------------------------------------
@@ -384,29 +361,6 @@ class TestCleanupOldExecutions:
 # ---------------------------------------------------------------------------
 # run_crew_with_executor helper function
 # ---------------------------------------------------------------------------
-
-
-class TestRunCrewWithExecutor:
-    @pytest.mark.asyncio
-    async def test_convenience_function(self):
-        mock_crew = MagicMock()
-        mock_crew.kickoff.return_value = "output"
-
-        from src.services.execution.thread_executor import run_crew_with_executor
-
-        # Patch the global executor to use our fresh one
-        fresh_ex = _fresh_executor()
-        with patch("src.services.execution.thread_executor.crew_executor", fresh_ex):
-            result = await run_crew_with_executor(
-                execution_id="conv-exec",
-                crew=mock_crew,
-                inputs={"k": "v"},
-            )
-        assert result == "output"
-        try:
-            fresh_ex._executor.shutdown(wait=False)
-        except Exception:
-            pass
 
 
 # ---------------------------------------------------------------------------

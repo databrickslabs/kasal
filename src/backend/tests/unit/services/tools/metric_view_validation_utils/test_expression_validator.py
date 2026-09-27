@@ -543,16 +543,6 @@ class TestEquivalentStatus:
         diff = "Aggregation mismatch: DAX aggregation SUMX has no matching UCMV SUM"
         assert v._is_expected_agg_mapping(diff)
 
-    def test_is_equivalent_ref_mapping(self):
-        """_is_expected_ref_mapping recognises table prefix differences."""
-        v = ExpressionValidator()
-        diff = "Reference mismatch (table.column): Missing in UCMV: {'fact.amount'}."
-        result_with_matching_cols = {
-            "databricks_parsed": {"references": {"source.amount"}},
-            "dax_parsed": {"references": {"fact.amount"}},
-        }
-        assert v._is_expected_ref_mapping(diff, result_with_matching_cols)
-
     def test_is_review_candidate_with_similarities(self):
         """Similarities list triggers REVIEW classification."""
         v = ExpressionValidator()

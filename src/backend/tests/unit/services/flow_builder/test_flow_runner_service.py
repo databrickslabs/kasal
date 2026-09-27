@@ -82,118 +82,6 @@ class TestFlowRunnerServiceInit:
             assert service.db == mock_db
 
 
-class TestCreateFlowExecution:
-    """Tests for create_flow_execution method."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create mock async session."""
-        return MagicMock(spec=AsyncSession)
-
-    @pytest.fixture
-    def service(self, mock_session):
-        """Create FlowRunnerService instance."""
-        with patch(
-            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
-        ) as mock_exec_service:
-            with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                svc = FlowRunnerService(mock_session)
-                svc.flow_execution_service = mock_exec_service.return_value
-                return svc
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_success(self, service):
-        """Test successful flow execution creation."""
-        mock_execution = MagicMock()
-        mock_execution.id = 1
-        mock_execution.flow_id = uuid.uuid4()
-        mock_execution.status = FlowExecutionStatus.PENDING
-
-        service.flow_execution_service.create_execution = AsyncMock(
-            return_value=mock_execution
-        )
-
-        result = await service.create_flow_execution(
-            flow_id="test-flow-123", job_id="job-123", config={"group_id": "group-1"}
-        )
-
-        assert result["success"] is True
-        assert result["job_id"] == "job-123"
-        assert result["execution_id"] == 1
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_with_uuid_flow_id(self, service):
-        """Test create_flow_execution with UUID flow_id"""
-        mock_execution = MagicMock()
-        mock_execution.id = 1
-        mock_execution.flow_id = uuid.uuid4()
-        mock_execution.status = "pending"
-
-        service.flow_execution_service.create_execution = AsyncMock(
-            return_value=mock_execution
-        )
-
-        flow_id = uuid.uuid4()
-        job_id = "test-job-id"
-        config = {"test": "config"}
-
-        result = await service.create_flow_execution(flow_id, job_id, config)
-
-        assert isinstance(result, dict)
-        assert result["success"] is True
-        assert "execution_id" in result
-        assert "job_id" in result
-        assert result["job_id"] == job_id
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_invalid_uuid(self, service):
-        """Test handling of invalid UUID format."""
-        service.flow_execution_service.create_execution = AsyncMock(
-            side_effect=ValueError("Invalid UUID")
-        )
-
-        result = await service.create_flow_execution(
-            flow_id="invalid-uuid", job_id="job-123"
-        )
-
-        assert result["success"] is False
-        assert "Invalid UUID" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_exception(self, service):
-        """Test handling of general exception."""
-        service.flow_execution_service.create_execution = AsyncMock(
-            side_effect=Exception("Database error")
-        )
-
-        result = await service.create_flow_execution(
-            flow_id="test-flow", job_id="job-123"
-        )
-
-        assert result["success"] is False
-        assert "Database error" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_create_flow_execution_with_none_config(self, service):
-        """Test create_flow_execution with None config"""
-        mock_execution = MagicMock()
-        mock_execution.id = 1
-        mock_execution.flow_id = uuid.uuid4()
-        mock_execution.status = "pending"
-
-        service.flow_execution_service.create_execution = AsyncMock(
-            return_value=mock_execution
-        )
-
-        flow_id = uuid.uuid4()
-        job_id = "test-job-id"
-
-        result = await service.create_flow_execution(flow_id, job_id, None)
-
-        assert isinstance(result, dict)
-        assert result["success"] is True
-
-
 class TestRunFlow:
     """Tests for run_flow method."""
 
@@ -964,12 +852,6 @@ class TestFlowRunnerServiceMethodSignatures:
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
                 return FlowRunnerService(mock_db)
 
-    def test_create_flow_execution_is_async(self, service):
-        """Test create_flow_execution method is async"""
-        assert hasattr(service, "create_flow_execution")
-        assert callable(service.create_flow_execution)
-        assert inspect.iscoroutinefunction(service.create_flow_execution)
-
     def test_run_flow_is_async(self, service):
         """Test run_flow method is async"""
         assert hasattr(service, "run_flow")
@@ -981,21 +863,6 @@ class TestFlowRunnerServiceMethodSignatures:
         assert hasattr(service, "get_flow_execution")
         assert callable(service.get_flow_execution)
         assert inspect.iscoroutinefunction(service.get_flow_execution)
-
-    def test_all_required_methods_exist(self, service):
-        """Test that all required methods exist"""
-        required_methods = [
-            "create_flow_execution",
-            "run_flow",
-            "get_flow_execution",
-            "get_flow_executions_by_flow",
-            "_run_dynamic_flow",
-            "_run_flow_execution",
-        ]
-
-        for method_name in required_methods:
-            assert hasattr(service, method_name)
-            assert callable(getattr(service, method_name))
 
 
 @pytest.mark.asyncio

@@ -14,13 +14,11 @@ from src.schemas.hitl import (  # Enums; Gate Configuration; Approval Schemas; A
     ExecutionHITLStatus,
     HITLActionResponse,
     HITLApprovalBase,
-    HITLApprovalCreate,
     HITLApprovalListResponse,
     HITLApprovalResponse,
     HITLApprovalStatusEnum,
     HITLApproveRequest,
     HITLGateConfig,
-    HITLGateNodeData,
     HITLRejectionActionEnum,
     HITLRejectRequest,
     HITLTimeoutActionEnum,
@@ -277,71 +275,6 @@ class TestHITLApprovalBase:
 # =============================================================================
 # Approval Create Tests
 # =============================================================================
-
-
-class TestHITLApprovalCreate:
-    """Test cases for HITLApprovalCreate schema."""
-
-    def test_minimal_create(self):
-        """Test HITLApprovalCreate with minimal required fields."""
-        data = {
-            "execution_id": "exec_12345",
-            "flow_id": "flow_67890",
-            "gate_node_id": "gate_001",
-            "crew_sequence": 1,
-            "group_id": "group_abc",
-        }
-        approval = HITLApprovalCreate(**data)
-        assert approval.execution_id == "exec_12345"
-        assert approval.flow_id == "flow_67890"
-        assert approval.gate_node_id == "gate_001"
-        assert approval.crew_sequence == 1
-        assert approval.group_id == "group_abc"
-        # Default gate_config should be applied
-        assert approval.gate_config.message == "Approval required to proceed"
-        assert approval.previous_crew_name is None
-        assert approval.previous_crew_output is None
-        assert approval.flow_state_snapshot is None
-
-    def test_full_create(self):
-        """Test HITLApprovalCreate with all fields."""
-        gate_config = HITLGateConfig(
-            message="Review the analysis results",
-            timeout_seconds=7200,
-            require_comment=True,
-        )
-        data = {
-            "execution_id": "exec_12345",
-            "flow_id": "flow_67890",
-            "gate_node_id": "gate_001",
-            "crew_sequence": 1,
-            "group_id": "group_abc",
-            "gate_config": gate_config,
-            "previous_crew_name": "Research Crew",
-            "previous_crew_output": "Research findings...",
-            "flow_state_snapshot": {"key": "value"},
-        }
-        approval = HITLApprovalCreate(**data)
-        assert approval.gate_config.message == "Review the analysis results"
-        assert approval.gate_config.timeout_seconds == 7200
-        assert approval.previous_crew_name == "Research Crew"
-        assert approval.previous_crew_output == "Research findings..."
-        assert approval.flow_state_snapshot == {"key": "value"}
-
-    def test_missing_group_id(self):
-        """Test that group_id is required."""
-        with pytest.raises(ValidationError) as exc_info:
-            HITLApprovalCreate(
-                execution_id="exec_12345",
-                flow_id="flow_67890",
-                gate_node_id="gate_001",
-                crew_sequence=1,
-            )
-        assert "group_id" in str(exc_info.value)
-
-    def test_inherits_from_base(self):
-        """Test that HITLApprovalCreate inherits from HITLApprovalBase."""
-        assert issubclass(HITLApprovalCreate, HITLApprovalBase)
 
 
 # =============================================================================
@@ -1048,44 +981,6 @@ class TestHITLWebhookPayload:
 # =============================================================================
 # Gate Node Data Tests
 # =============================================================================
-
-
-class TestHITLGateNodeData:
-    """Test cases for HITLGateNodeData schema."""
-
-    def test_default_values(self):
-        """Test HITLGateNodeData with default values."""
-        node_data = HITLGateNodeData()
-        assert node_data.label == "HITL Gate"
-        assert node_data.nodetype == "hitlGateNode"
-        assert node_data.gate_config is not None
-        assert node_data.gate_config.message == "Approval required to proceed"
-
-    def test_custom_values(self):
-        """Test HITLGateNodeData with custom values."""
-        gate_config = HITLGateConfig(
-            message="Custom approval message", timeout_seconds=1800
-        )
-        node_data = HITLGateNodeData(
-            label="Custom HITL Gate", nodetype="hitlGateNode", gate_config=gate_config
-        )
-        assert node_data.label == "Custom HITL Gate"
-        assert node_data.gate_config.message == "Custom approval message"
-        assert node_data.gate_config.timeout_seconds == 1800
-
-    def test_extra_fields_allowed(self):
-        """Test that extra fields are allowed for node data."""
-        node_data = HITLGateNodeData(extra_field="value", position={"x": 100, "y": 200})
-        # extra="allow" in model_config allows additional fields
-        assert hasattr(node_data, "extra_field") or True  # Schema allows extra
-
-    def test_serialization(self):
-        """Test HITLGateNodeData serialization."""
-        node_data = HITLGateNodeData(label="Test Gate")
-        data = node_data.model_dump()
-        assert data["label"] == "Test Gate"
-        assert data["nodetype"] == "hitlGateNode"
-        assert "gate_config" in data
 
 
 # =============================================================================

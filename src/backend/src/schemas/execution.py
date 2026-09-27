@@ -228,21 +228,6 @@ class CrewConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
-class ExecutionBase(BaseModel):
-    """Base model with common execution fields"""
-
-    execution_id: str = Field(..., description="Unique identifier for the execution")
-    status: str = Field(..., description="Current status of the execution")
-    created_at: datetime = Field(..., description="When the execution was created")
-    result: Optional[Dict[str, Any]] = Field(
-        None, description="Result data from execution"
-    )
-    error: Optional[str] = Field(None, description="Error message if execution failed")
-    run_name: Optional[str] = Field(
-        None, description="Descriptive name for the execution"
-    )
-
-
 class ExecutionResponse(BaseModel):
     """Complete execution response model with all fields"""
 

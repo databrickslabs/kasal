@@ -166,31 +166,6 @@ class TestActivateLakebaseInSubprocessCalled:
             mock_activate.assert_awaited_once()
 
 
-class TestGetExecutionInfo:
-    def test_none(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        assert ProcessFlowExecutor().get_execution_info("x") is None
-
-    def test_alive(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        e = ProcessFlowExecutor()
-        e._running_processes["e1"] = FakeProcess(pid=1, alive=True, exitcode=None)
-        i = e.get_execution_info("e1")
-        assert i["pid"] == 1 and i["is_alive"] is True
-        e._running_processes.pop("e1")
-
-    def test_dead(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        e = ProcessFlowExecutor()
-        e._running_processes["e2"] = FakeProcess(pid=2, alive=False, exitcode=0)
-        i = e.get_execution_info("e2")
-        assert i["is_alive"] is False and i["exitcode"] == 0
-        e._running_processes.pop("e2")
-
-
 class TestGetMetrics:
     def test_copy(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor

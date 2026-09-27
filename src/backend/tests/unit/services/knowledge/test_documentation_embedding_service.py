@@ -384,50 +384,6 @@ class TestGetDocumentationEmbeddings:
 # ===================================================================
 
 
-class TestUpdateDocumentationEmbedding:
-    """Tests for update_documentation_embedding method."""
-
-    @pytest.mark.asyncio
-    async def test_update_returns_updated_model(self):
-        """Update delegates to repository and returns updated model."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        updated_model = _make_doc_embedding_model(id=1, title="Updated Title")
-        mock_repo = MagicMock()
-        mock_repo.update = AsyncMock(return_value=updated_model)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            result = await svc.update_documentation_embedding(
-                1, {"title": "Updated Title"}
-            )
-
-        assert result.title == "Updated Title"
-        mock_repo.update.assert_awaited_once_with(1, {"title": "Updated Title"})
-
-    @pytest.mark.asyncio
-    async def test_update_returns_none_when_not_found(self):
-        """Update returns None when embedding not found."""
-        session = _make_mock_session()
-        svc = _make_service(session=session)
-
-        mock_repo = MagicMock()
-        mock_repo.update = AsyncMock(return_value=None)
-
-        with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            result = await svc.update_documentation_embedding(999, {"title": "X"})
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_update_raises_without_session(self):
-        """Update raises ValueError when no session."""
-        svc = _make_service(session=None)
-
-        with pytest.raises(ValueError, match="Session is required"):
-            await svc.update_documentation_embedding(1, {"title": "X"})
-
-
 # ===================================================================
 # delete_documentation_embedding
 # ===================================================================

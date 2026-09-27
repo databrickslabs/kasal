@@ -10,7 +10,6 @@ import re
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.base_service import BaseService
 
@@ -56,39 +55,6 @@ class LakebasePermissionService(BaseService):
         # Don't call super().__init__() as we don't need a session
         pass
 
-    async def grant_schema_permissions_async(
-        self, engine: AsyncEngine, user_email: str
-    ) -> None:
-        """
-        Grant schema permissions to a user asynchronously.
-
-        This method grants ALL privileges on the kasal and public schemas
-        to the specified user. Permission errors are logged as warnings
-        but do not cause the operation to fail.
-
-        Args:
-            engine: AsyncEngine connected to the Lakebase instance
-            user_email: Email/username of the user to grant permissions to
-
-        Note:
-            This method handles exceptions gracefully - permission errors
-            are logged but don't fail the migration process.
-        """
-        try:
-            safe_role = _quote_pg_role(user_email)
-            async with engine.begin() as conn:
-                # Grant all privileges on kasal schema
-                await conn.execute(text(f"GRANT ALL ON SCHEMA kasal TO {safe_role}"))
-                # Grant all privileges on public schema
-                await conn.execute(text(f"GRANT ALL ON SCHEMA public TO {safe_role}"))
-                logger.info(f"Granted schema permissions to {user_email}")
-        except Exception as grant_error:
-            # Log but don't fail - user might already have permissions
-            # or permissions might be set differently in the environment
-            logger.warning(
-                f"Permission grant warning for {user_email} (may be ok): {grant_error}"
-            )
-
     def grant_schema_permissions_sync(
         self, connection: Connection, user_email: str
     ) -> None:
@@ -119,49 +85,6 @@ class LakebasePermissionService(BaseService):
             # or permissions might be set differently in the environment
             logger.warning(
                 f"Permission grant warning for {user_email} (may be ok): {grant_error}"
-            )
-
-    async def grant_default_privileges_async(
-        self, engine: AsyncEngine, user_email: str
-    ) -> None:
-        """
-        Set default privileges for future objects asynchronously.
-
-        This method configures default privileges so that any tables or
-        sequences created in the kasal schema will automatically grant
-        ALL privileges to the specified user.
-
-        Args:
-            engine: AsyncEngine connected to the Lakebase instance
-            user_email: Email/username of the user to grant default privileges to
-
-        Note:
-            This method handles exceptions gracefully - privilege errors
-            are logged but don't fail the migration process.
-        """
-        try:
-            safe_role = _quote_pg_role(user_email)
-            async with engine.begin() as conn:
-                # Set default privileges for tables
-                await conn.execute(
-                    text(
-                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
-                        f"GRANT ALL ON TABLES TO {safe_role}"
-                    )
-                )
-                # Set default privileges for sequences
-                await conn.execute(
-                    text(
-                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
-                        f"GRANT ALL ON SEQUENCES TO {safe_role}"
-                    )
-                )
-                logger.info(f"Set default privileges for {user_email}")
-        except Exception as privilege_error:
-            # Log but don't fail - default privileges might be set differently
-            # or the user might not have permission to alter default privileges
-            logger.warning(
-                f"Default privilege warning for {user_email} (may be ok): {privilege_error}"
             )
 
     def grant_default_privileges_sync(
@@ -205,22 +128,6 @@ class LakebasePermissionService(BaseService):
             logger.warning(
                 f"Default privilege warning for {user_email} (may be ok): {privilege_error}"
             )
-
-    async def grant_all_permissions_async(
-        self, engine: AsyncEngine, user_email: str
-    ) -> None:
-        """
-        Grant all permissions (schema + default privileges) asynchronously.
-
-        This is a convenience method that combines schema permissions and
-        default privileges in a single call.
-
-        Args:
-            engine: AsyncEngine connected to the Lakebase instance
-            user_email: Email/username of the user to grant permissions to
-        """
-        await self.grant_schema_permissions_async(engine, user_email)
-        await self.grant_default_privileges_async(engine, user_email)
 
     def grant_all_permissions_sync(
         self, connection: Connection, user_email: str

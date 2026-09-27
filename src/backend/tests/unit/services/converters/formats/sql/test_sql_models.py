@@ -11,7 +11,6 @@ from src.services.converters.formats.sql.models import (
     SQLAggregationType,
     SQLDefinition,
     SQLDialect,
-    SQLJoinType,
     SQLMeasure,
     SQLQuery,
     SQLTranslationOptions,
@@ -41,17 +40,6 @@ class TestSQLAggregationType:
     def test_all_values_are_strings(self):
         for agg in SQLAggregationType:
             assert isinstance(agg.value, str)
-
-
-class TestSQLJoinType:
-    def test_inner_join(self):
-        assert SQLJoinType.INNER.value == "INNER JOIN"
-
-    def test_left_join(self):
-        assert SQLJoinType.LEFT.value == "LEFT JOIN"
-
-    def test_full_outer_join(self):
-        assert SQLJoinType.FULL.value == "FULL OUTER JOIN"
 
 
 class TestSQLQuery:
@@ -274,73 +262,6 @@ class TestSQLMeasure:
         expr = measure.to_sql_expression()
         assert "2 *" in expr
 
-    def test_to_case_statement_no_filters(self):
-        """Line 360: no filters returns to_sql_expression"""
-        measure = SQLMeasure(
-            name="Sales",
-            sql_expression="SUM(amount)",
-            aggregation_type=SQLAggregationType.SUM,
-            source_table="sales",
-        )
-        stmt = measure.to_case_statement()
-        assert stmt == measure.to_sql_expression()
-
-    def test_to_case_statement_with_filters(self):
-        """Lines 362-365: filters build a CASE WHEN statement"""
-        measure = SQLMeasure(
-            name="Filtered Sales",
-            sql_expression="SUM(amount)",
-            aggregation_type=SQLAggregationType.SUM,
-            source_table="sales",
-            filters=["region = 'West'", "status = 'Active'"],
-        )
-        stmt = measure.to_case_statement()
-        assert "CASE WHEN" in stmt
-        assert "THEN" in stmt
-        assert "ELSE NULL" in stmt
-
-
-class TestSQLDefinition:
-    """Cover SQLDefinition.get_full_table_name (lines 418-428)"""
-
-    def test_get_full_table_name_no_db_schema(self):
-        """Line 428: no database/schema -> just table name"""
-        defn = SQLDefinition(
-            description="Test",
-            technical_name="test",
-        )
-        assert defn.get_full_table_name("orders") == "orders"
-
-    def test_get_full_table_name_with_schema(self):
-        """Line 421-428: with schema -> schema.table"""
-        defn = SQLDefinition(
-            description="Test",
-            technical_name="test",
-            database_schema="myschema",
-        )
-        result = defn.get_full_table_name("orders")
-        assert result == "myschema.orders"
-
-    def test_get_full_table_name_with_database_and_schema(self):
-        """All three parts: catalog.schema.table"""
-        defn = SQLDefinition(
-            description="Test",
-            technical_name="test",
-            database="mydb",
-            database_schema="myschema",
-        )
-        result = defn.get_full_table_name("orders")
-        assert result == "mydb.myschema.orders"
-
-    def test_get_full_table_name_database_only(self):
-        defn = SQLDefinition(
-            description="Test",
-            technical_name="test",
-            database="mydb",
-        )
-        result = defn.get_full_table_name("orders")
-        assert result == "mydb.orders"
-
 
 class TestSQLTranslationResult:
     """Cover SQLTranslationResult methods (lines 476-540)"""
@@ -354,52 +275,6 @@ class TestSQLTranslationResult:
             sql_definition=sql_def,
             translation_options=options,
         )
-
-    def test_get_primary_query_no_queries(self):
-        """Line 478: no queries returns None"""
-        result = self.make_result()
-        assert result.get_primary_query() is None
-
-    def test_get_primary_query_with_query(self):
-        """Line 479: returns first query's SQL"""
-        q = SQLQuery(select_clause=["*"], from_clause="sales")
-        result = self.make_result(queries=[q])
-        sql = result.get_primary_query()
-        assert "SELECT" in sql
-
-    def test_get_primary_query_unformatted(self):
-        q = SQLQuery(select_clause=["*"], from_clause="sales")
-        result = self.make_result(queries=[q])
-        sql = result.get_primary_query(formatted=False)
-        assert "SELECT" in sql
-
-    def test_get_all_sql_statements_no_create_view(self):
-        """Lines 484-495: get_all_sql_statements without create_view"""
-        q = SQLQuery(select_clause=["*"], from_clause="sales")
-        result = self.make_result(queries=[q])
-        statements = result.get_all_sql_statements()
-        assert len(statements) == 1
-        assert "SELECT" in statements[0]
-
-    def test_get_all_sql_statements_with_create_view(self):
-        """Lines 487-491: create_view_statements=True"""
-        kpi = make_kpi()
-        q = SQLQuery(
-            select_clause=["*"],
-            from_clause="sales",
-            original_kbi=kpi,
-        )
-        sql_def = SQLDefinition(description="Test", technical_name="test")
-        options = SQLTranslationOptions(create_view_statements=True)
-        result = SQLTranslationResult(
-            sql_queries=[q],
-            sql_measures=[],
-            sql_definition=sql_def,
-            translation_options=options,
-        )
-        statements = result.get_all_sql_statements()
-        # Should have a CREATE VIEW statement and the query
-        assert any("CREATE OR REPLACE VIEW" in s for s in statements)
 
     def test_get_formatted_sql_output_no_queries(self):
         """Line 502: no queries returns comment"""
@@ -421,37 +296,6 @@ class TestSQLTranslationResult:
         assert "Generated SQL for" in output
         assert "SELECT" in output
         assert "Use an index" in output
-
-    def test_get_measures_summary_empty(self):
-        """Line 534-540: measures summary with empty measures"""
-        result = self.make_result()
-        summary = result.get_measures_summary()
-        assert summary["total_measures"] == 0
-        assert summary["aggregation_types"] == []
-
-    def test_get_measures_summary_with_measures(self):
-        """Lines 536-540: measures summary calculation"""
-        m1 = SQLMeasure(
-            name="Sales",
-            sql_expression="SUM(amount)",
-            aggregation_type=SQLAggregationType.SUM,
-            source_table="sales",
-            filters=["region = 'West'"],
-            group_by_columns=["region"],
-        )
-        m2 = SQLMeasure(
-            name="Orders",
-            sql_expression="COUNT(*)",
-            aggregation_type=SQLAggregationType.COUNT,
-            source_table="orders",
-        )
-        result = self.make_result(measures=[m1, m2])
-        summary = result.get_measures_summary()
-        assert summary["total_measures"] == 2
-        assert "SUM" in summary["aggregation_types"]
-        assert "COUNT" in summary["aggregation_types"]
-        assert summary["has_filters"] == 1
-        assert summary["has_grouping"] == 1
 
 
 class TestSQLQueryFormatSingleSelect:

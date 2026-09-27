@@ -223,24 +223,6 @@ class TestCrewPreparationExecute:
 # ---------------------------------------------------------------------------
 
 
-class TestShouldDisableMemoryForAgent:
-    def test_memory_explicitly_false(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert (
-            cp._should_disable_memory_for_agent({"role": "R", "memory": False}) is True
-        )
-
-    def test_memory_true_does_not_disable(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert (
-            cp._should_disable_memory_for_agent({"role": "R", "memory": True}) is False
-        )
-
-    def test_no_memory_key_does_not_disable(self):
-        cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._should_disable_memory_for_agent({"role": "R"}) is False
-
-
 # ---------------------------------------------------------------------------
 # CrewPreparation._find_agent_by_reference
 # ---------------------------------------------------------------------------

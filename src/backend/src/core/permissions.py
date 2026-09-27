@@ -119,16 +119,6 @@ def is_admin(role: Optional[str]) -> bool:
     return role is not None and role.lower() == "admin"
 
 
-def is_editor_or_above(role: Optional[str]) -> bool:
-    """Check if the role is editor or admin."""
-    return role is not None and role.lower() in ["admin", "editor"]
-
-
-def is_operator_or_above(role: Optional[str]) -> bool:
-    """Check if the role is operator, editor, or admin."""
-    return role is not None and role.lower() in ["admin", "editor", "operator"]
-
-
 def check_role_in_context(
     group_context: GroupContext, allowed_roles: List[str]
 ) -> bool:

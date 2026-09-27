@@ -143,37 +143,6 @@ class TestExecutionRepository:
         assert mock_session.execute.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_update_execution_by_job_id(self, mock_session, mock_execution):
-        """Test updating execution by job_id."""
-        repo = ExecutionRepository(mock_session)
-
-        # Mock get_execution_by_job_id
-        repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
-        mock_session.flush = AsyncMock()
-
-        update_data = {"status": ExecutionStatus.RUNNING.value}
-
-        result = await repo.update_execution_by_job_id("test-job-123", update_data)
-
-        assert result == mock_execution
-        assert mock_execution.status == ExecutionStatus.RUNNING.value
-        mock_session.flush.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_update_execution_by_job_id_not_found(self, mock_session):
-        """Test updating non-existent execution by job_id."""
-        repo = ExecutionRepository(mock_session)
-
-        # Mock get_execution_by_job_id to return None
-        repo.get_execution_by_job_id = AsyncMock(return_value=None)
-
-        update_data = {"status": ExecutionStatus.RUNNING.value}
-
-        result = await repo.update_execution_by_job_id("nonexistent-job", update_data)
-
-        assert result is None
-
-    @pytest.mark.asyncio
     async def test_update_execution_status(self, mock_session):
         """Test updating execution status."""
         repo = ExecutionRepository(mock_session)
@@ -248,50 +217,6 @@ class TestExecutionRepository:
         # Verify the update call includes serialized result
         update_call = mock_session.execute.call_args[0][0]
         assert update_call is not None
-
-    @pytest.mark.asyncio
-    async def test_mark_execution_completed(self, mock_session, mock_execution):
-        """Test marking execution as completed."""
-        repo = ExecutionRepository(mock_session)
-
-        # Mock the update method
-        repo.update = AsyncMock(return_value=mock_execution)
-
-        result_data = {"output": "completed successfully"}
-
-        result = await repo.mark_execution_completed(1, result_data)
-
-        assert result == mock_execution
-
-        # Verify update was called with correct data
-        update_call_args = repo.update.call_args[0]
-        assert update_call_args[0] == 1
-        update_data = update_call_args[1]
-        assert update_data["status"] == ExecutionStatus.COMPLETED.value
-        assert "completed_at" in update_data
-        assert update_data["result"] == result_data
-
-    @pytest.mark.asyncio
-    async def test_mark_execution_failed(self, mock_session, mock_execution):
-        """Test marking execution as failed."""
-        repo = ExecutionRepository(mock_session)
-
-        # Mock the update method
-        repo.update = AsyncMock(return_value=mock_execution)
-
-        error_message = "Execution failed due to timeout"
-
-        result = await repo.mark_execution_failed(1, error_message)
-
-        assert result == mock_execution
-
-        # Verify update was called with correct data
-        update_call_args = repo.update.call_args[0]
-        assert update_call_args[0] == 1
-        update_data = update_call_args[1]
-        assert update_data["status"] == ExecutionStatus.FAILED.value
-        assert update_data["error"] == error_message
-        assert "completed_at" in update_data
 
     @pytest.mark.asyncio
     async def test_update_execution_status_terminal_states(self, mock_session):

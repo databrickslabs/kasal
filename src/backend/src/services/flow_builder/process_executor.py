@@ -1767,19 +1767,6 @@ class ProcessFlowExecutor:
                 "[ProcessFlowExecutor] Logs are still available in flow.log file"
             )
 
-    def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
-        """Get information about a running execution."""
-        process = self._running_processes.get(execution_id)
-        if not process:
-            return None
-
-        return {
-            "execution_id": execution_id,
-            "pid": process.pid,
-            "is_alive": process.is_alive(),
-            "exitcode": process.exitcode,
-        }
-
     def get_metrics(self) -> Dict[str, int]:
         """Get executor metrics."""
         return self._metrics.copy()

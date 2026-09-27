@@ -155,19 +155,6 @@ class KbiFormulaParser:
 
         return var_names
 
-    def extract_dependencies(self, formula: str) -> Dict[str, List[str]]:
-        """
-        Extract all dependencies from formula
-
-        Returns:
-            Dictionary with keys: 'kbis', 'variables', 'columns'
-        """
-        return {
-            "kbis": self.extract_kbi_references(formula),
-            "variables": self.extract_variables(formula),
-            "columns": self._extract_column_references(formula),
-        }
-
     def _extract_kbi_references(self, formula: str) -> List[FormulaToken]:
         """Extract KBI reference tokens"""
         tokens = []
@@ -246,28 +233,6 @@ class KbiFormulaParser:
                 tokens.append(token)
 
         return tokens
-
-    def _extract_column_references(self, formula: str) -> List[str]:
-        """Extract column references from formula"""
-        # Get all identifiers
-        matches = re.finditer(self.IDENTIFIER_PATTERN, formula)
-
-        columns = []
-        kbi_refs = self.extract_kbi_references(formula)
-        var_refs = self.extract_variables(formula)
-        exclude = set(kbi_refs + var_refs)
-
-        for match in matches:
-            identifier = match.group(1)
-            if (
-                identifier
-                and identifier not in exclude
-                and not self._is_sql_keyword(identifier)
-                and not self._is_sql_function(identifier)
-            ):
-                columns.append(identifier)
-
-        return list(set(columns))  # Deduplicate
 
     def _is_sql_keyword(self, word: str) -> bool:
         """Check if word is a SQL keyword"""

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import subprocess
@@ -14,7 +13,6 @@ from src.utils.databricks_auth import (
     extract_user_token_from_request,
     get_auth_context,
     get_current_databricks_user,
-    get_databricks_auth_headers_sync,
     get_mcp_access_token,
     get_mcp_auth_headers,
     get_workspace_client,
@@ -768,12 +766,6 @@ class TestSimpleAccessors:
             == "https://h.com"
         )
 
-    def test_get_api_token(self):
-        assert _make_auth(api_token="tok").get_api_token() == "tok"
-
-    def test_get_api_token_none(self):
-        assert _make_auth(api_token=None).get_api_token() is None
-
 
 # ── validate_databricks_connection ─────────────────────
 
@@ -838,34 +830,6 @@ class TestValidateDatabricksConnection:
 
 
 # ── get_databricks_auth_headers_sync ───────────────────
-
-
-class TestGetDatabricksAuthHeadersSync:
-    def test_basic_call(self):
-        result = get_databricks_auth_headers_sync()
-        assert isinstance(result, tuple) and len(result) == 2
-
-    def test_from_async_context(self):
-        async def _inner():
-            return get_databricks_auth_headers_sync()
-
-        loop = asyncio.new_event_loop()
-        try:
-            headers, err = loop.run_until_complete(_inner())
-            assert headers is None
-            assert "Cannot call sync version from async context" in err
-        finally:
-            loop.close()
-
-    def test_exception_path(self):
-        """Lines 760-762: outer exception."""
-        with (
-            patch("asyncio.get_running_loop", side_effect=RuntimeError),
-            patch("asyncio.run", side_effect=Exception("async boom")),
-        ):
-            headers, err = get_databricks_auth_headers_sync()
-        assert headers is None
-        assert "async boom" in err
 
 
 class TestExtractUserToken:

@@ -135,42 +135,6 @@ class TestRecordUnit:
         assert ok is False
 
 
-class TestClear:
-    @pytest.mark.asyncio
-    async def test_removes_both_record_keys_and_the_status(self):
-        repo = FakeRepo(
-            {CHECKPOINT_KEY: {"units": {}}, LEGACY_CREW_KEY: {"completed": {}}}
-        )
-        repo_patch, db_patch, _ = install(repo)
-        with repo_patch, db_patch:
-            ok = await store.clear("job-1")
-
-        assert ok is True
-        assert repo.column is None
-        assert repo.status is None
-
-    @pytest.mark.asyncio
-    async def test_keeps_hitl_keys(self):
-        repo = FakeRepo({CHECKPOINT_KEY: {"units": {}}, "edited_config": {"a": 1}})
-        repo_patch, db_patch, _ = install(repo)
-        with repo_patch, db_patch:
-            await store.clear("job-1")
-
-        assert repo.column == {"edited_config": {"a": 1}}
-
-    @pytest.mark.asyncio
-    async def test_a_failure_is_swallowed(self, repo):
-        repo_patch, _, _ = install(repo)
-        with (
-            repo_patch,
-            patch(
-                "src.utils.asyncio_utils.execute_db_operation_smart",
-                side_effect=RuntimeError("db down"),
-            ),
-        ):
-            assert await store.clear("job-1") is False
-
-
 class TestReadRecord:
     @pytest.mark.asyncio
     async def test_normalises_on_read(self):

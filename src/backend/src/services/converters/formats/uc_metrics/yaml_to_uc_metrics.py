@@ -342,35 +342,6 @@ class UCMetricsGenerator:
 
         return "\n".join(lines)
 
-    def format_uc_metrics_yaml(self, uc_metrics: Dict[str, Any]) -> str:
-        """Format UC metrics as YAML string (single measure format)"""
-
-        lines = []
-
-        # Version and description
-        lines.append(f"version: {uc_metrics['version']}")
-        lines.append("")
-        lines.append(f"# --- {uc_metrics['description']} ---")
-        lines.append("")
-
-        # Source
-        if "source" in uc_metrics:
-            lines.append(f"source: {uc_metrics['source']}")
-            lines.append("")
-
-        # Filter (if present)
-        if "filter" in uc_metrics:
-            lines.append(f"filter: {uc_metrics['filter']}")
-            lines.append("")
-
-        # Measures
-        lines.append("measures:")
-        for measure in uc_metrics["measures"]:
-            lines.append(f"  - name: {measure['name']}")
-            lines.append(f"    expr: {measure['expr']}")
-
-        return "\n".join(lines)
-
     def _extract_dimension_fields_from_filters(self, filters: List[str]) -> List[str]:
         """Extract field names from filter conditions that can be used as dimensions"""
         import re

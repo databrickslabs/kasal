@@ -3,7 +3,7 @@ import uuid
 from typing import Any, List, Optional, Union, cast
 from uuid import UUID
 
-from sqlalchemy import BindParameter, bindparam, desc, func, select, text
+from sqlalchemy import BindParameter, bindparam, func, select, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,27 +68,6 @@ class FlowRepository(BaseRepository[Flow]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def find_by_crew_id(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
-        """
-        Find all flows for a specific crew.
-
-        Args:
-            crew_id: ID of the crew (UUID)
-
-        Returns:
-            List of flows associated with the crew
-        """
-        # Convert string to UUID if needed
-        if isinstance(crew_id, str):
-            try:
-                crew_id = uuid.UUID(crew_id)
-            except ValueError:
-                return []
-
-        query = select(self.model).where(self.model.crew_id == crew_id)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-
     async def find_by_ids(self, flow_ids: List[Union[uuid.UUID, str]]) -> List[Flow]:
         """Flows for a set of ids, in one query.
 
@@ -123,17 +102,6 @@ class FlowRepository(BaseRepository[Flow]):
         query = select(self.model)
         result = await self.session.execute(query)
         return list(result.scalars().all())
-
-    async def get_most_recent(self) -> Optional[Flow]:
-        """The newest flow by created_at, or None.
-
-        A fallback for starting a flow execution with no flow_id and no
-        nodes/edges supplied — it picks whatever was authored last.
-        """
-        result = await self.session.execute(
-            select(Flow).order_by(desc(Flow.created_at)).limit(1)
-        )
-        return result.scalars().first()
 
     async def list_for_groups(self, group_ids: List[str]) -> List[Flow]:
         """Flows visible to these groups, newest edit first."""
@@ -271,57 +239,6 @@ class FlowRepository(BaseRepository[Flow]):
         Postgres, dashless hex on SQLite.
         """
         return bindparam("flow_id", type_=PGUUID(as_uuid=True))
-
-    async def delete_with_executions(self, flow_id: uuid.UUID) -> bool:
-        """
-        Delete a flow and all its related execution records to handle foreign key constraints.
-
-        Args:
-            flow_id: UUID of the flow to delete
-
-        Returns:
-            True if flow was deleted, False if not found
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Check if the flow exists
-        flow = await self.get(flow_id)
-        if not flow:
-            logger.warning(f"Flow with ID {flow_id} not found for deletion")
-            return False
-
-        try:
-            # Delete all flow executions from executionhistory table
-            exec_delete_query = text("""
-            DELETE FROM executionhistory
-            WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """)
-            result = await self.session.execute(exec_delete_query, {"flow_id": flow_id})
-            deleted_count = cast("CursorResult[Any]", result).rowcount
-            if deleted_count > 0:
-                logger.info(
-                    f"Deleted {deleted_count} flow executions for flow {flow_id}"
-                )
-
-            # Now delete the flow
-            flow_delete_query = text("""
-            DELETE FROM flows WHERE id = :flow_id
-            """)
-            result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
-
-            # Flush all changes
-            await self.session.flush()
-
-            logger.info(f"Successfully deleted flow {flow_id} and all its executions")
-            return True
-
-        except Exception as e:
-            # Roll back on error
-            await self.session.rollback()
-            logger.error(f"Error during cascading deletion of flow {flow_id}: {str(e)}")
-            raise
 
     async def delete_all(self) -> None:
         """

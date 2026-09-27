@@ -484,29 +484,6 @@ class TestPowerBIJSONFieldParsing:
 # ─── cleanup_after_crew_execution ────────────────────────────────────────────
 
 
-class TestCleanupAfterCrewExecution:
-
-    @pytest.mark.asyncio
-    async def test_runs_in_running_event_loop(self):
-        """cleanup_after_crew_execution called when event loop is running."""
-        f = _make_factory()
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock):
-            await f.cleanup_after_crew_execution()
-
-    @pytest.mark.asyncio
-    async def test_handles_exception_gracefully(self):
-        """cleanup_after_crew_execution handles exceptions without raising."""
-        f = _make_factory()
-        with patch.object(
-            f,
-            "_load_available_tools_async",
-            new_callable=AsyncMock,
-            side_effect=Exception("Load fail"),
-        ):
-            # Should not propagate
-            await f.cleanup_after_crew_execution()
-
-
 # ─── _sync_load_available_tools ───────────────────────────────────────────────
 
 
@@ -582,84 +559,6 @@ class TestInitializeWithApiKeysService:
 
 
 # ─── _update_tool_config_async ───────────────────────────────────────────────
-
-
-class TestUpdateToolConfigAsync:
-
-    @pytest.mark.asyncio
-    async def test_update_by_integer_id(self):
-        """_update_tool_config_async with numeric id calls tool_service.update_tool."""
-        f = _make_factory()
-        info = _tool_info("SomeTool", 42, {"old": "val"})
-        f._available_tools["SomeTool"] = info
-
-        mock_session = AsyncMock()
-        mock_svc = MagicMock()
-        mock_svc.update_tool = AsyncMock(return_value=MagicMock())
-
-        with (
-            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch("src.services.tools.tool_factory.ToolService", return_value=mock_svc),
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-        ):
-            mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await f._update_tool_config_async(
-                tool_identifier="42", tool_info=info, config_update={"new": "val"}
-            )
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_update_by_title(self):
-        """_update_tool_config_async with title calls update_tool_configuration_by_title."""
-        f = _make_factory()
-        info = _tool_info("MyTitleTool", 99, {"x": "y"})
-        f._available_tools["MyTitleTool"] = info
-
-        mock_session = AsyncMock()
-        mock_svc = MagicMock()
-        mock_svc.update_tool_configuration_by_title = AsyncMock(
-            return_value=MagicMock()
-        )
-
-        with (
-            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch("src.services.tools.tool_factory.ToolService", return_value=mock_svc),
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-        ):
-            mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await f._update_tool_config_async(
-                tool_identifier="MyTitleTool",
-                tool_info=info,
-                config_update={"updated": "val"},
-            )
-
-        assert result is True
-
-    def test_update_tool_config_with_found_tool_via_new_loop(self):
-        """update_tool_config finds tool, creates new loop and calls async update."""
-        f = _make_factory()
-        info = _tool_info("SomeTool", 77, {})
-        f._available_tools["SomeTool"] = info
-
-        # Patch asyncio.get_running_loop to raise RuntimeError (no running loop)
-        # so it falls into the "create new loop" branch
-        with (
-            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
-            patch.object(
-                f,
-                "_update_tool_config_async",
-                new_callable=AsyncMock,
-                return_value=True,
-            ),
-        ):
-            result = f.update_tool_config("SomeTool", {"k": "v"})
-
-        assert result is True
 
 
 # ─── DallETool ────────────────────────────────────────────────────────────────
@@ -1042,71 +941,7 @@ class TestSerperDevToolWithApiKeysService:
 # ─── update_tool_config in running event loop ────────────────────────────────
 
 
-class TestUpdateToolConfigRunningLoop:
-
-    def test_update_tool_config_in_running_loop(self):
-        """update_tool_config uses thread pool when already in event loop."""
-        f = _make_factory()
-        info = _tool_info("TestTool", 10, {})
-        f._available_tools["TestTool"] = info
-
-        with (
-            patch("asyncio.get_running_loop", return_value=MagicMock()),
-            patch.object(f, "_run_in_new_loop", return_value=True) as mock_run,
-        ):
-            result = f.update_tool_config("TestTool", {"key": "val"})
-
-        assert result is True
-        mock_run.assert_called()
-
-    def test_update_tool_config_exception_returns_false(self):
-        """update_tool_config returns False on exception."""
-        f = _make_factory()
-        info = _tool_info("TestTool", 10, {})
-        f._available_tools["TestTool"] = info
-
-        with patch("asyncio.get_running_loop", side_effect=Exception("loop error")):
-            result = f.update_tool_config("TestTool", {"key": "val"})
-
-        assert result is False
-
-
 # ─── _update_tool_config_async: non-dict config path ─────────────────────────
-
-
-class TestUpdateToolConfigAsyncNonDictConfig:
-
-    @pytest.mark.asyncio
-    async def test_update_by_id_with_non_dict_config(self):
-        """_update_tool_config_async handles non-dict tool_info.config."""
-        f = _make_factory()
-        info = _tool_info("TestTool", 42, {})
-        info.config = "not-a-dict"  # Non-dict config
-
-        mock_session = AsyncMock()
-        mock_svc_instance = MagicMock()
-        mock_svc_instance.update_tool = AsyncMock(return_value=MagicMock())
-
-        with (
-            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch(
-                "src.services.tools.tool_factory.ToolService",
-                return_value=mock_svc_instance,
-            ),
-            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
-        ):
-            mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            result = await f._update_tool_config_async(
-                tool_identifier="42", tool_info=info, config_update={"new": "val"}
-            )
-
-        assert result is True
-        # Should use config_update directly (line 690)
-        call_args = mock_svc_instance.update_tool.call_args
-        update_data = call_args[0][1]  # Second positional arg is ToolUpdate
-        assert update_data.config == {"new": "val"}
 
 
 # ─── _sync_load_available_tools no longer preloads api keys ─────────────────

@@ -23,7 +23,6 @@ from src.services.a2ui.compose import (
     ComposeStream,
     compose_a2ui,
     guidance_for,
-    infer_deliverable,
     load_catalog,
     resolve_catalog,
     resolve_directives,
@@ -207,11 +206,6 @@ def _cfg_dict(cfg: Any) -> Dict[str, Any]:
         "catalog_json": getattr(cfg, "catalog_json", None),
         "style_json": getattr(cfg, "style_json", None),
     }
-
-
-def _infer_deliverable(query: str) -> Optional[str]:
-    """Best-effort deliverable key from the user's request (first keyword wins)."""
-    return infer_deliverable(query)
 
 
 def _resolve_catalog(cfg: Any, default_catalog: Dict[str, Any]) -> Dict[str, Any]:

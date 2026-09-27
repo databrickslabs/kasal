@@ -130,58 +130,6 @@ class FlowRunnerService:
         async with _smart_db_session() as session:
             yield session
 
-    async def create_flow_execution(
-        self,
-        flow_id: Union[uuid.UUID, str],
-        job_id: str,
-        config: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Create a new flow execution record and prepare for execution.
-
-        Args:
-            flow_id: The ID of the flow to execute
-            job_id: Job ID for tracking
-            config: Optional configuration for the execution
-
-        Returns:
-            Dictionary with execution details
-        """
-        logger.info(f"Creating flow execution for flow {flow_id}, job {job_id}")
-
-        try:
-            # Extract group_id from config for multi-tenant isolation
-            group_id = config.get("group_id") if config else None
-
-            # Create flow execution via service layer
-            flow_execution = await self.flow_execution_service.create_execution(
-                flow_id=flow_id, job_id=job_id, config=config, group_id=group_id
-            )
-
-            return {
-                "success": True,
-                "execution_id": flow_execution.id,
-                "job_id": job_id,
-                "flow_id": flow_execution.flow_id,
-                "status": flow_execution.status,
-            }
-        except ValueError as e:
-            logger.error(f"Invalid UUID format for flow_id: {flow_id}")
-            return {
-                "success": False,
-                "error": str(e),
-                "job_id": job_id,
-                "flow_id": flow_id,
-            }
-        except Exception as e:
-            logger.error(f"Error creating flow execution: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e),
-                "job_id": job_id,
-                "flow_id": flow_id,
-            }
-
     async def run_flow(
         self,
         flow_id: Optional[Union[uuid.UUID, str]],

@@ -77,18 +77,6 @@ class GenieRepository:
         transport = httpx.AsyncHTTPTransport(retries=3)
         self._client = httpx.AsyncClient(transport=transport, timeout=30.0)
 
-    def _build_headers(self) -> Dict[str, str]:
-        """Build authentication headers."""
-        headers = {"Content-Type": "application/json"}
-
-        if self.auth_config:
-            if self.auth_config.pat_token:
-                headers["Authorization"] = f"Bearer {self.auth_config.pat_token}"
-            if self.auth_config.user_token:
-                headers["X-Databricks-Genie-User-Token"] = self.auth_config.user_token
-
-        return headers
-
     async def _get_host(self) -> str:
         """
         Get Databricks host with auto-detection.

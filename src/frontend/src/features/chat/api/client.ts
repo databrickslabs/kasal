@@ -5,7 +5,7 @@ import apiClient, { config as kasalApiConfig } from '../../../shared/api/client'
 /*
  * The embedded Chat workspace reuses Kasal's shared axios client so it inherits
  * the same auth (`X-Forwarded-Email`) and tenant isolation (`group_id` from
- * `selectedGroupId`) as the rest of the app — see src/config/api/ApiConfig.ts.
+ * `selectedGroupId`) as the rest of the app — see src/shared/api/client.ts.
  *
  * The standalone chat app maintained its own client and per-user config; in the
  * integrated app that responsibility belongs to Kasal, so `updateClient` is a

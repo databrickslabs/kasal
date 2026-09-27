@@ -132,16 +132,3 @@ class CheckpointRecorder:
             )
         except Exception as exc:  # noqa: BLE001 — telemetry, never fatal
             logger.debug(f"[CHECKPOINT] could not announce unit write: {exc}")
-
-    def _clear(self) -> None:
-        """Drop the checkpoint after a successful run. Never raises."""
-        from src.services.execution.checkpointing import store
-        from src.services.tools.async_bridge import run_async_with_context
-
-        try:
-            run_async_with_context(store.clear(self._job_id), timeout=60)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"[CHECKPOINT] Failed to clear checkpoint for "
-                f"{self._job_id} (non-fatal): {e}"
-            )

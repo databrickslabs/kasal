@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,15 +10,6 @@ class GroupToolBase(BaseModel):
     config: Dict[str, Any] = Field(
         default_factory=dict, description="Group-scoped configuration"
     )
-
-
-class GroupToolCreate(GroupToolBase):
-    pass
-
-
-class GroupToolUpdate(BaseModel):
-    enabled: Optional[bool] = Field(default=None)
-    config: Optional[Dict[str, Any]] = Field(default=None)
 
 
 class GroupToolResponse(GroupToolBase):

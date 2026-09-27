@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,13 +42,6 @@ class PromptTemplateResponse(PromptTemplateBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class TemplateListResponse(BaseModel):
-    """Schema for list of prompt templates."""
-
-    templates: List[PromptTemplateResponse]
-    count: int
 
 
 class ResetResponse(BaseModel):

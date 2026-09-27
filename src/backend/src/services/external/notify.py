@@ -12,7 +12,7 @@ run that triggered it. Every failure here is swallowed and logged.
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +73,3 @@ async def _notify(job_id: str, status: str, result: Any) -> None:
             )
     except Exception as exc:  # noqa: BLE001
         logger.debug("[external] notification for %s skipped: %s", job_id, exc)
-
-
-def subscribers_exist(job_id: Optional[str]) -> bool:
-    """Cheap guard for callers that want to skip the scheduling entirely.
-
-    Deliberately optimistic — it does not query. The real filter is in
-    ``push.deliver``, which loads nothing when no config matches; this only
-    exists so a caller can avoid creating a task per status change if it wants.
-    """
-    return bool(job_id)

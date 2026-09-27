@@ -4,7 +4,7 @@ Generates SQL/DAX code for currency conversion based on KPI configuration.
 Supports both fixed and dynamic currency sources.
 """
 
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from ...base.models import KPI
 
@@ -204,36 +204,3 @@ class CurrencyConverter:
         has_target = bool(kbi.target_currency)
 
         return has_source and has_target
-
-    def get_required_joins(
-        self, kbis: List[KPI], exchange_rate_table: Optional[str] = None
-    ) -> List[str]:
-        """
-        Get required JOIN clauses for dynamic currency conversion.
-
-        Args:
-            kbis: List of KPIs that may need currency conversion
-            exchange_rate_table: Name of exchange rate table
-
-        Returns:
-            List of SQL JOIN clauses needed for currency conversion
-        """
-        exchange_table = exchange_rate_table or self.exchange_rate_table
-        joins = []
-
-        for kbi in kbis:
-            if kbi.currency_column and kbi.target_currency:
-                # Dynamic currency needs a JOIN
-                join_clause = f"""LEFT JOIN {exchange_table} AS er
-    ON er.from_currency = {kbi.source_table}.{kbi.currency_column}
-    AND er.to_currency = '{kbi.target_currency}'
-    AND er.effective_date = (
-        SELECT MAX(effective_date)
-        FROM {exchange_table}
-        WHERE from_currency = {kbi.source_table}.{kbi.currency_column}
-          AND to_currency = '{kbi.target_currency}'
-          AND effective_date <= CURRENT_DATE()
-    )"""
-                joins.append(join_clause)
-
-        return joins

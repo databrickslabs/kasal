@@ -326,35 +326,6 @@ class TestSQLAggregationBuilder:
 
     # ========== Conditional Aggregation Tests ==========
 
-    def test_build_conditional_aggregation_databricks(self, databricks_builder):
-        """Test building conditional aggregation with FILTER clause (Databricks)"""
-        base_agg = "SUM(`Sales`.`amount`)"
-        conditions = ["status = 'active'", "region = 'US'"]
-        result = databricks_builder.build_conditional_aggregation(
-            base_agg, conditions, "Sales"
-        )
-        assert "FILTER" in result
-        assert "WHERE" in result
-        assert "status = 'active'" in result
-        assert "region = 'US'" in result
-
-    def test_build_conditional_aggregation_standard(self, standard_builder):
-        """Test building conditional aggregation with CASE WHEN (Standard)"""
-        base_agg = 'SUM("Sales"."amount")'
-        conditions = ["status = 'active'"]
-        result = standard_builder.build_conditional_aggregation(
-            base_agg, conditions, "Sales"
-        )
-        assert "CASE WHEN" in result
-        assert "status = 'active'" in result
-        assert "ELSE NULL END" in result
-
-    def test_build_conditional_aggregation_no_conditions(self, standard_builder):
-        """Test building conditional aggregation without conditions"""
-        base_agg = 'SUM("Sales"."amount")'
-        result = standard_builder.build_conditional_aggregation(base_agg, [], "Sales")
-        assert result == base_agg
-
     # ========== Exception Handling Tests ==========
 
     def test_build_exception_handling_null_to_zero(self, standard_builder):

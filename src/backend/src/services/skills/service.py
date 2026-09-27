@@ -302,14 +302,6 @@ class SkillService:
             files=files,
         )
 
-    async def export_zip(
-        self, skill_id: int, group_context: GroupContext
-    ) -> Optional[bytes]:
-        skill = await self.get_skill(skill_id, group_context)
-        if not skill:
-            return None
-        return packaging.write_zip(skill)
-
     @staticmethod
     def validate(data: SkillCreate) -> SkillValidationResult:
         """Check a skill without saving it, for the authoring UI.

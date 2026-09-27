@@ -198,33 +198,6 @@ class TestSQLExpressionEngineWindowFunctions:
 
     # ========== build_filter Tests ==========
 
-    def test_build_filter_empty(self, databricks_engine):
-        """Test build_filter with empty expression"""
-        result = databricks_engine.build_filter("", "Sales")
-        assert result == ""
-
-    def test_build_filter_whitespace(self, databricks_engine):
-        """Test build_filter with whitespace expression"""
-        result = databricks_engine.build_filter("   ", "Sales")
-        assert result == ""
-
-    def test_build_filter_valid_sql(self, databricks_engine):
-        """Test build_filter returns valid SQL filter as-is"""
-        filter_expr = "status = 'active'"
-        result = databricks_engine.build_filter(filter_expr, "Sales")
-        assert result is not None
-        assert len(result) > 0
-
-    def test_build_filter_with_equals(self, databricks_engine):
-        """Test build_filter with equals operator"""
-        result = databricks_engine.build_filter("region = 'EMEA'", "Sales")
-        assert result is not None
-
-    def test_build_filter_with_context(self, databricks_engine):
-        """Test build_filter with context dict"""
-        result = databricks_engine.build_filter("status = 'active'", "Sales", {})
-        assert result is not None
-
     # ========== build_case_when Tests ==========
 
     def test_build_case_when_basic(self, databricks_engine):
@@ -316,33 +289,6 @@ class TestSQLExpressionEngineWindowFunctions:
         assert result == "FALSE"
 
     # ========== _is_valid_sql_filter Tests ==========
-
-    def test_is_valid_sql_filter_with_equals(self, databricks_engine):
-        """Test filter validity with equals"""
-        assert databricks_engine._is_valid_sql_filter("status = 'active'") is True
-
-    def test_is_valid_sql_filter_with_in(self, databricks_engine):
-        """Test filter validity with IN"""
-        assert (
-            databricks_engine._is_valid_sql_filter("region IN ('EMEA', 'APAC')") is True
-        )
-
-    def test_is_valid_sql_filter_with_like(self, databricks_engine):
-        """Test filter validity with LIKE"""
-        assert databricks_engine._is_valid_sql_filter("name LIKE '%test%'") is True
-
-    def test_is_valid_sql_filter_with_between(self, databricks_engine):
-        """Test filter validity with BETWEEN"""
-        assert (
-            databricks_engine._is_valid_sql_filter(
-                "date BETWEEN '2024-01-01' AND '2024-12-31'"
-            )
-            is True
-        )
-
-    def test_is_valid_sql_filter_greater_than(self, databricks_engine):
-        """Test filter validity with >"""
-        assert databricks_engine._is_valid_sql_filter("amount > 100") is True
 
     # ========== Unknown aggregation type fallback ==========
 

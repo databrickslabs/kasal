@@ -46,12 +46,6 @@ def capture(recorder):
     return persisted
 
 
-def capture_clear(recorder):
-    cleared = []
-    recorder._clear = lambda: cleared.append(True)
-    return cleared
-
-
 class TestCrewRecorder:
     def test_a_unit_is_a_task_keyed_by_position(self):
         crew = make_crew(3)
@@ -130,23 +124,19 @@ class TestCrewRecorder:
         """
         crew = make_crew(1)
         recorder = CrewTaskCheckpointRecorder("job-1", crew)
-        cleared = capture_clear(recorder)
 
         recorder._on_crew_completed(
             crew, CrewKickoffCompletedEvent(crew_name="c", output=None, total_tokens=0)
         )
-        assert cleared == []
 
     def test_another_crews_completion_is_ignored(self):
         crew = make_crew(1)
         recorder = CrewTaskCheckpointRecorder("job-1", crew)
-        cleared = capture_clear(recorder)
 
         recorder._on_crew_completed(
             make_crew(2),
             CrewKickoffCompletedEvent(crew_name="other", output=None, total_tokens=0),
         )
-        assert cleared == []
 
     def test_register_subscribes_on_the_bus(self):
         crew = make_crew(2)
@@ -241,9 +231,7 @@ class TestFlowRecorder:
         everything on the next resume.
         """
         recorder = FlowCrewCheckpointRecorder("job-1")
-        cleared = capture_clear(recorder)
         recorder.finish()
-        assert cleared == []
 
     def test_handler_is_fail_open(self):
         recorder = FlowCrewCheckpointRecorder("job-1")

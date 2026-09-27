@@ -117,22 +117,3 @@ class TestGetMeasureByName:
 # ---------------------------------------------------------------------------
 # get_measures_for_table()
 # ---------------------------------------------------------------------------
-
-
-class TestGetMeasuresForTable:
-    def test_returns_correct_measures(self, tmp_path):
-        parser = _parser_with_data(SAMPLE_MAPPINGS, tmp_path)
-        results = parser.get_measures_for_table("fact_sales")
-        names = {r["measure_name"] for r in results}
-        assert names == {"Total Sales", "Revenue"}
-
-    def test_returns_empty_for_unknown_table(self, tmp_path):
-        parser = _parser_with_data(SAMPLE_MAPPINGS, tmp_path)
-        results = parser.get_measures_for_table("unknown_table")
-        assert results == []
-
-    def test_triggers_lazy_load(self, tmp_path):
-        parser = _parser_with_data(SAMPLE_MAPPINGS, tmp_path)
-        results = parser.get_measures_for_table("fact_orders")
-        assert len(results) == 1
-        assert results[0]["measure_name"] == "Order Count"

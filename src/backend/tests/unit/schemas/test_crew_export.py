@@ -12,10 +12,7 @@ from src.schemas.crew_export import (
     DeploymentRequest,
     DeploymentResponse,
     DeploymentStatus,
-    DeploymentStatusResponse,
     DeploymentTarget,
-    EndpointInvokeRequest,
-    EndpointInvokeResponse,
     ExportFile,
     ExportFormat,
     ExportOptions,
@@ -340,93 +337,3 @@ class TestDeploymentResponse:
 
         assert response.model_version == "1"
         assert response.endpoint_url == "https://example.com/endpoint"
-
-
-class TestDeploymentStatusResponse:
-    """Tests for DeploymentStatusResponse schema."""
-
-    def test_required_fields(self):
-        """Test that required fields are enforced."""
-        with pytest.raises(ValidationError):
-            DeploymentStatusResponse()
-
-    def test_valid_response(self):
-        """Test valid response creation."""
-        response = DeploymentStatusResponse(
-            deployment_id="deploy-123",
-            endpoint_name="test-endpoint",
-            status=DeploymentStatus.READY,
-        )
-
-        assert response.deployment_id == "deploy-123"
-        assert response.status == DeploymentStatus.READY
-
-    def test_response_with_replicas(self):
-        """Test response with replica counts."""
-        response = DeploymentStatusResponse(
-            deployment_id="deploy-123",
-            endpoint_name="test-endpoint",
-            status=DeploymentStatus.IN_PROGRESS,
-            ready_replicas=1,
-            target_replicas=3,
-        )
-
-        assert response.ready_replicas == 1
-        assert response.target_replicas == 3
-
-
-class TestEndpointInvokeRequest:
-    """Tests for EndpointInvokeRequest schema."""
-
-    def test_required_inputs(self):
-        """Test that inputs is required."""
-        with pytest.raises(ValidationError):
-            EndpointInvokeRequest()
-
-    def test_valid_request(self):
-        """Test valid request creation."""
-        request = EndpointInvokeRequest(inputs={"topic": "AI trends"})
-
-        assert request.inputs == {"topic": "AI trends"}
-        assert request.stream is False
-        assert request.timeout is None
-
-    def test_request_with_options(self):
-        """Test request with streaming and timeout."""
-        request = EndpointInvokeRequest(
-            inputs={"topic": "AI"},
-            stream=True,
-            timeout=60,
-        )
-
-        assert request.stream is True
-        assert request.timeout == 60
-
-
-class TestEndpointInvokeResponse:
-    """Tests for EndpointInvokeResponse schema."""
-
-    def test_required_result(self):
-        """Test that result is required."""
-        with pytest.raises(ValidationError):
-            EndpointInvokeResponse()
-
-    def test_valid_response(self):
-        """Test valid response creation."""
-        response = EndpointInvokeResponse(result="Analysis complete")
-
-        assert response.result == "Analysis complete"
-
-    def test_response_with_metadata(self):
-        """Test response with metadata."""
-        response = EndpointInvokeResponse(
-            result="Done",
-            execution_time_seconds=12.5,
-            tokens_used=1500,
-            task_outputs=[{"task": "research", "output": "Research done"}],
-            metadata={"model": "llama"},
-        )
-
-        assert response.execution_time_seconds == 12.5
-        assert response.tokens_used == 1500
-        assert len(response.task_outputs) == 1

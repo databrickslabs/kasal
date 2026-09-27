@@ -14,8 +14,6 @@ from src.utils.user_context import (
     extract_group_context_from_request,
     extract_user_context_from_request,
     extract_user_token_from_request,
-    is_databricks_app_context,
-    user_context_middleware,
 )
 
 
@@ -604,80 +602,3 @@ class TestUserContextMiddleware:
             await middleware(scope, receive, send)
         # Context should be cleared
         assert UserContext.get_user_token() is None
-
-
-class TestLegacyUserContextMiddleware:
-    @pytest.mark.asyncio
-    async def test_legacy_middleware_sets_and_clears_context(self):
-        """Legacy user_context_middleware sets context and clears on completion."""
-        mock_request = MagicMock()
-        response = MagicMock()
-
-        async def call_next(req):
-            return response
-
-        with (
-            patch(
-                "src.utils.user_context.extract_group_context_from_request",
-                AsyncMock(return_value=None),
-            ),
-            patch(
-                "src.utils.user_context.extract_user_context_from_request",
-                return_value={},
-            ),
-        ):
-            result = await user_context_middleware(mock_request, call_next)
-
-        assert result is response
-        assert UserContext.get_user_token() is None
-
-    @pytest.mark.asyncio
-    async def test_legacy_middleware_handles_exception(self):
-        """Legacy user_context_middleware handles exception in call_next."""
-        mock_request = MagicMock()
-        response = MagicMock()
-
-        async def call_next(req):
-            return response
-
-        with (
-            patch(
-                "src.utils.user_context.extract_group_context_from_request",
-                AsyncMock(side_effect=Exception("group error")),
-            ),
-            patch(
-                "src.utils.user_context.extract_user_context_from_request",
-                return_value={},
-            ),
-        ):
-            result = await user_context_middleware(mock_request, call_next)
-
-        assert result is response
-
-
-class TestIsDatabricksAppContext:
-    def test_returns_false_when_no_context(self):
-        """Returns False when no user context set."""
-        UserContext.clear_context()
-        assert is_databricks_app_context() is False
-
-    def test_returns_true_with_databricks_headers(self):
-        """Returns True when databricks headers present."""
-        UserContext.set_user_context(
-            {
-                "access_token": "token",
-                "databricks_headers": {"X-Databricks-Cluster": "abc"},
-            }
-        )
-        assert is_databricks_app_context() is True
-        UserContext.clear_context()
-
-    def test_returns_false_without_access_token(self):
-        """Returns False when access_token missing from context."""
-        UserContext.set_user_context(
-            {
-                "databricks_headers": {"X-Databricks-Cluster": "abc"},
-            }
-        )
-        assert is_databricks_app_context() is False
-        UserContext.clear_context()

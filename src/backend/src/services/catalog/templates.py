@@ -31,15 +31,6 @@ class TemplateService:
 
     # Removed factory method - using dependency injection instead
 
-    async def find_all_templates(self) -> List[PromptTemplate]:
-        """
-        Find all prompt templates.
-
-        Returns:
-            List of prompt templates
-        """
-        return await self.find_all()
-
     async def find_all_templates_for_group(
         self, group_context: GroupContext
     ) -> List[PromptTemplate]:
@@ -124,18 +115,6 @@ class TemplateService:
             if template.group_id in group_context.group_ids
         ]
 
-    async def get_template_by_id(self, id: int) -> Optional[PromptTemplate]:
-        """
-        Get a prompt template by ID.
-
-        Args:
-            id: ID of the template to get
-
-        Returns:
-            PromptTemplate if found, else None
-        """
-        return await self.get(id)
-
     async def get_template_with_group_check(
         self, id: int, group_context: GroupContext
     ) -> Optional[PromptTemplate]:
@@ -185,18 +164,6 @@ class TemplateService:
         ):
             return template
         return None
-
-    async def find_template_by_name(self, name: str) -> Optional[PromptTemplate]:
-        """
-        Find a prompt template by name.
-
-        Args:
-            name: Name to search for
-
-        Returns:
-            PromptTemplate if found, else None
-        """
-        return await self.find_by_name(name)
 
     async def find_template_by_name_with_group(
         self, name: str, group_context: GroupContext
@@ -261,22 +228,6 @@ class TemplateService:
         except Exception:
             pass
         return None
-
-    async def create_new_template(
-        self, template_data: PromptTemplateCreate
-    ) -> PromptTemplate:
-        """
-        Create a new prompt template.
-
-        Args:
-            template_data: Data for the new template
-
-        Returns:
-            Created PromptTemplate
-        """
-        template = await self.create_template(template_data)
-        # Repository handles flush, session handles commit
-        return template
 
     async def create_template_with_group(
         self, template_data: PromptTemplateCreate, group_context: GroupContext

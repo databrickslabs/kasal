@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.services.converters.base.models import KPI, KPIDefinition, Structure
+from src.services.converters.base.models import KPIDefinition, Structure
 from src.services.converters.common.transformers.yaml import YAMLKPIParser
 
 
@@ -256,83 +256,7 @@ class TestYAMLKPIParser:
 
     # ========== get_all_kbis Tests ==========
 
-    def test_get_all_kbis_empty(self, parser):
-        """Test get_all_kbis returns empty list when no definitions"""
-        all_kbis = parser.get_all_kbis()
-
-        assert all_kbis == []
-
-    def test_get_all_kbis_single_definition(self, parser, temp_yaml_file):
-        """Test get_all_kbis with single definition"""
-        parser.parse_file(temp_yaml_file)
-        parser.parsed_definitions = [parser.parse_file(temp_yaml_file)]
-
-        all_kbis = parser.get_all_kbis()
-
-        assert len(all_kbis) == 1
-        definition, kpi = all_kbis[0]
-        assert isinstance(definition, KPIDefinition)
-        assert isinstance(kpi, KPI)
-
-    def test_get_all_kbis_multiple_definitions(self, parser, temp_yaml_directory):
-        """Test get_all_kbis with multiple definitions"""
-        parser.parse_directory(temp_yaml_directory)
-
-        all_kbis = parser.get_all_kbis()
-
-        # Should have 2 KBIs (one from each file)
-        assert len(all_kbis) == 2
-
-        # Each item should be a tuple of (definition, kpi)
-        for definition, kpi in all_kbis:
-            assert isinstance(definition, KPIDefinition)
-            assert isinstance(kpi, KPI)
-
-    def test_get_all_kbis_preserves_relationships(self, parser, temp_yaml_directory):
-        """Test get_all_kbis preserves definition-KBI relationships"""
-        parser.parse_directory(temp_yaml_directory)
-
-        all_kbis = parser.get_all_kbis()
-
-        # Check that each KBI comes from its parent definition
-        for definition, kpi in all_kbis:
-            assert kpi in definition.kpis
-
     # ========== Integration Tests ==========
-
-    def test_full_workflow_simple(self, parser, temp_yaml_file):
-        """Test complete workflow: parse file → get KBIs"""
-        # Parse file
-        definition = parser.parse_file(temp_yaml_file)
-
-        # Store in parser
-        parser.parsed_definitions = [definition]
-
-        # Get all KBIs
-        all_kbis = parser.get_all_kbis()
-
-        assert len(all_kbis) == 1
-        def_from_kbis, kpi = all_kbis[0]
-        assert def_from_kbis.technical_name == "test_def"
-        assert kpi.technical_name == "total_sales"
-
-    def test_full_workflow_directory(self, parser, temp_yaml_directory):
-        """Test complete workflow: parse directory → get all KBIs"""
-        # Parse directory
-        _ = parser.parse_directory(temp_yaml_directory)
-
-        # Definitions should be stored automatically
-        assert len(parser.parsed_definitions) == 2
-
-        # Get all KBIs
-        all_kbis = parser.get_all_kbis()
-
-        assert len(all_kbis) == 2
-
-        # Check KBIs are from correct definitions
-        kbi_names = {kpi.technical_name for _, kpi in all_kbis}
-        assert "total_sales" in kbi_names
-        assert "total_cost" in kbi_names
 
     def test_parse_kpi_with_all_fields(self, parser, tmp_path):
         """Test parsing KPI with all optional fields"""
