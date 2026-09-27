@@ -608,14 +608,14 @@ class SchedulerService:
                     if config.flow_config:
                         config_dict["flow_config"] = config.flow_config
 
-                # Convert to local time for database consistency with regular jobs
+                # Naive UTC, like every other executionhistory timestamp
                 if (
                     hasattr(execution_time, "tzinfo")
                     and execution_time.tzinfo is not None
                 ):
-                    execution_time_naive = execution_time.astimezone().replace(
-                        tzinfo=None
-                    )
+                    execution_time_naive = execution_time.astimezone(
+                        timezone.utc
+                    ).replace(tzinfo=None)
                 else:
                     execution_time_naive = execution_time
 

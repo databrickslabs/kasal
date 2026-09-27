@@ -585,7 +585,7 @@ class ExecutionService:
         ExecutionService.executions[execution_id] = {
             "execution_id": execution_id,
             "status": status,
-            "created_at": created_at or datetime.now(),  # Use timezone-naive datetime
+            "created_at": created_at or datetime.utcnow(),  # naive UTC, like the row
             "run_name": run_name,
             "output": "",
             "group_id": group_id,
@@ -920,7 +920,11 @@ class ExecutionService:
         """
         try:
             from src.repositories.execution_repository import ExecutionRepository
-            from src.services.execution.listing import full_row, summary_row
+            from src.services.execution.listing import (
+                full_row,
+                summary_row,
+                unpersisted_memory_rows,
+            )
 
             if self.session:
                 repo = ExecutionRepository(self.session)
@@ -950,25 +954,15 @@ class ExecutionService:
                 logger.error("[list_executions] No database session available")
                 db_executions = []
 
-            # Get in-memory executions that might not be in the database yet
-            memory_executions = {}
-            for execution_id, execution_data in ExecutionService.executions.items():
-                # Check if this execution is already in the list from the database
-                if not any(
-                    e.get("execution_id") == execution_id for e in db_executions
-                ):
-                    memory_executions[execution_id] = execution_data
-
-            # Combine results
-            results = db_executions.copy()
-            for execution_id, data in memory_executions.items():
-                execution_data = data.copy()
-                if not include_payload:
-                    for key in ("result", "inputs", "agents_yaml", "tasks_yaml"):
-                        execution_data.pop(key, None)
-                if "execution_id" not in execution_data:
-                    execution_data["execution_id"] = execution_id
-                results.append(execution_data)
+            memory_executions = await unpersisted_memory_rows(
+                self.session,
+                ExecutionService.executions,
+                db_executions,
+                group_ids,
+                user_email,
+                include_payload,
+            )
+            results = db_executions + memory_executions
 
             logger.debug(
                 f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)"
@@ -1545,7 +1539,7 @@ class ExecutionService:
                 # no longer populated from the request — Kasal has no planner, so the
                 # column default (False) applies to every new row.
                 "run_name": run_name,
-                "created_at": datetime.now(),  # Remove timezone to match database column type
+                "created_at": datetime.utcnow(),  # naive UTC, like the column default
                 "execution_type": (
                     execution_type.lower() if execution_type else "crew"
                 ),  # Track execution type
@@ -1663,7 +1657,7 @@ class ExecutionService:
                 execution_id=execution_id,
                 status=ExecutionStatus.RUNNING.value,
                 run_name=run_name,
-                created_at=datetime.now(),  # Remove timezone to match database column type
+                created_at=datetime.utcnow(),  # naive UTC, like the column default
                 group_id=group_context.primary_group_id if group_context else None,
                 group_email=group_context.group_email if group_context else None,
             )
@@ -1968,7 +1962,7 @@ class ExecutionService:
                 self._mask_inputs_sensitive_data(resume_inputs)
             ),
             "run_name": run_name,
-            "created_at": datetime.now(),
+            "created_at": datetime.utcnow(),
             "execution_type": execution_type,
             "resumed_from_execution_id": source.id,
         }
@@ -2024,7 +2018,7 @@ class ExecutionService:
             execution_id=new_execution_id,
             status=ExecutionStatus.RUNNING.value,
             run_name=run_name,
-            created_at=datetime.now(),
+            created_at=datetime.utcnow(),
             group_id=group_context.primary_group_id if group_context else None,
             group_email=group_context.group_email if group_context else None,
         )

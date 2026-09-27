@@ -745,6 +745,7 @@ class TestExecutionService:
             "created_at": datetime.now(),
             "run_name": "Memory Exec",
             "output": "",
+            "group_id": "group-1",
         }
 
         mock_db_execution = MagicMock()
@@ -759,9 +760,17 @@ class TestExecutionService:
         mock_db_execution.inputs = {}
         mock_db_execution.flow_id = None
 
-        with patch(
-            "src.repositories.execution_repository.ExecutionRepository"
-        ) as mock_repo_class:
+        with (
+            patch(
+                "src.repositories.execution_repository.ExecutionRepository"
+            ) as mock_repo_class,
+            patch(
+                "src.services.execution.listing.ExecutionHistoryRepository"
+            ) as history,
+        ):
+            history.return_value.get_execution_statuses_by_job_ids = AsyncMock(
+                return_value=[]
+            )
             mock_repo = MagicMock()
             mock_repo.get_execution_summaries = AsyncMock(
                 return_value=[mock_db_execution]
@@ -790,6 +799,7 @@ class TestExecutionService:
             "created_at": datetime.now(),
             "run_name": "Memory Only",
             "output": "",
+            "group_id": "group-1",
         }
 
         service = ExecutionService(session=None)
@@ -1267,7 +1277,7 @@ class TestExecutionWorkflowIntegration:
         # Add execution to memory
         execution_id = "memory-db-test"
         ExecutionService.add_execution_to_memory(
-            execution_id, "RUNNING", "Memory Test", datetime.now()
+            execution_id, "RUNNING", "Memory Test", datetime.now(), group_id="group-1"
         )
 
         # Verify it's in memory
@@ -1278,9 +1288,17 @@ class TestExecutionWorkflowIntegration:
         # Test listing executions includes both DB and memory
         mock_session = AsyncMock()
 
-        with patch(
-            "src.repositories.execution_repository.ExecutionRepository"
-        ) as mock_repo_class:
+        with (
+            patch(
+                "src.repositories.execution_repository.ExecutionRepository"
+            ) as mock_repo_class,
+            patch(
+                "src.services.execution.listing.ExecutionHistoryRepository"
+            ) as history,
+        ):
+            history.return_value.get_execution_statuses_by_job_ids = AsyncMock(
+                return_value=[]
+            )
             mock_repo = MagicMock()
             mock_repo.get_execution_summaries = AsyncMock(return_value=[])  # Empty DB
             mock_repo_class.return_value = mock_repo

@@ -737,6 +737,9 @@ class TestGetExecutionStatusDetail:
 # ---------------------------------------------------------------------------
 
 
+_LISTING_HISTORY = "src.services.execution.listing.ExecutionHistoryRepository"
+
+
 def _mock_execution_repo(repo_instance):
     """Helper to mock locally-imported ExecutionRepository."""
     return patch.dict(
@@ -801,25 +804,16 @@ class TestListExecutions:
 
     @pytest.mark.asyncio
     async def test_includes_memory_only_executions(self):
-        session = AsyncMock()
-        svc = make_service(session=session)
-
-        ExecutionService.executions["mem-only"] = {
-            "status": "RUNNING",
-            "run_name": "mem",
-        }
-
+        svc = make_service(session=AsyncMock())
+        # Scoped to its group (see test_run_registry_tenancy.py).
+        ExecutionService.executions["mem-only"] = {"status": "RUNNING", "group_id": "g"}
         mock_repo = AsyncMock()
         mock_repo.get_execution_summaries = AsyncMock(return_value=[])
-        with _mock_execution_repo(mock_repo):
-            results = await svc.list_executions()
-
-        mem_results = [
-            r
-            for r in results
-            if r.get("execution_id") == "mem-only" or r.get("status") == "RUNNING"
-        ]
-        assert len(mem_results) >= 1
+        history = MagicMock()
+        history.return_value.get_execution_statuses_by_job_ids = AsyncMock()
+        with _mock_execution_repo(mock_repo), patch(_LISTING_HISTORY, history):
+            results = await svc.list_executions(group_ids=["g"])
+        assert [r["execution_id"] for r in results] == ["mem-only"]
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
