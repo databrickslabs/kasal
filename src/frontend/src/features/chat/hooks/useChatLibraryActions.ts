@@ -10,6 +10,7 @@ import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { useAppStore } from '../store/appStore';
 import { useExecutionStore } from '../store/executionStore';
 import { GenerationCompleteData } from '../types/dispatcher';
+import { concreteModel } from '../utils/autoModel';
 
 export function useChatLibraryActions() {
 
@@ -62,7 +63,7 @@ export function useChatLibraryActions() {
         { isStreaming: true },
       );
       try {
-        const data = await synthesizeCrewFromConversation(sid, selectedModel || undefined);
+        const data = await synthesizeCrewFromConversation(sid, concreteModel(selectedModel));
         if (data.agents.length === 0 && data.tasks.length === 0) {
           updateMessage(thinkingId, {
             content:

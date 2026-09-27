@@ -49,9 +49,16 @@ class DecisionSettingsService:
     async def get(self) -> DecisionConfigResponse:
         row = await self.repository.get(self.group_id)
         key = await self.api_keys.find_by_name(JEV_KEY_NAME)
+        return self._response(
+            bool(row and row.enabled), bool(key and key.encrypted_value)
+        )
+
+    @staticmethod
+    def _response(enabled: bool, keyed: bool) -> DecisionConfigResponse:
         return DecisionConfigResponse(
-            enabled=bool(row and row.enabled),
-            api_key_configured=bool(key and key.encrypted_value),
+            enabled=enabled,
+            api_key_configured=keyed,
+            available=enabled and keyed and provider.is_configured(),
         )
 
     async def save(self, update: DecisionConfigUpdate) -> DecisionConfigResponse:
@@ -87,10 +94,7 @@ class DecisionSettingsService:
                 "Could not save decision model settings: the database rejected the "
                 "change. Check the server log."
             ) from exc
-        return DecisionConfigResponse(
-            enabled=update.enabled,
-            api_key_configured=bool(key and key.encrypted_value),
-        )
+        return self._response(update.enabled, bool(key and key.encrypted_value))
 
     async def credential(self) -> str | None:
         """The decrypted key when this workspace opted in, read on OUR session.

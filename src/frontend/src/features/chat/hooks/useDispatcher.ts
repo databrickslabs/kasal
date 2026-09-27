@@ -19,6 +19,7 @@ import {
 } from '../types/dispatcher';
 import { ChatMessage } from '../types/chat';
 import { generateId } from '../utils/markdown';
+import { postModelSelection } from '../utils/modelSelectionStep';
 import { reconcileSelectedSkills } from '../store/skillSelection';
 import { GenerationCompleteData } from '../types/dispatcher';
 
@@ -399,6 +400,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
           ...(skipContinuation ? { allow_continuation: false } : {}),
         }, message);
 
+        // Auto's pick joins the run activity before the answer streams in.
+        postModelSelection(result.model_selection, originSessionId);
         const content = getAssistantResponse(result);
         const resultType = getResultType(result);
 

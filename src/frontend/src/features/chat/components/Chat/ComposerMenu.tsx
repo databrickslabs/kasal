@@ -17,6 +17,7 @@ import { formatModelLabel } from '../../../../utils/modelDisplay';
  * grown inside it.
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import { SOURCE_MODES } from '../../utils/sourceModes';
 import McpPicker from './McpPicker';
@@ -27,6 +28,8 @@ import { useExecutionStore } from '../../store/executionStore';
 import EffortPicker from '../../../../shared/components/EffortPicker';
 import { effortLabel } from '../../../../types/workflow/effort';
 import { useChatEffortStore } from '../../../../store/chatEffort';
+import { useAppStore } from '../../store/appStore';
+import { AUTO_MODEL, isAutoModel } from '../../utils/autoModel';
 
 export type MemoryModeId = 'workspace' | 'session';
 export const MEMORY_MODES: { id: MemoryModeId; label: string; hint: string }[] = [
@@ -147,6 +150,10 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   attachmentCount,
   onAttachFiles,
 }) => {
+  const { t } = useTranslation();
+  // Auto (the decision model picks per message) is listed only when available.
+  const autoAvailable = useAppStore((s) => s.autoModelAvailable);
+  const autoLabel = t('chat.autoModel.label', { defaultValue: 'Auto' });
   const effort = useChatEffortStore(s => s.settings);
   const setEffort = useChatEffortStore(s => s.setSettings);
   const [open, setOpen] = useState(false);
@@ -179,7 +186,9 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   }, [open]);
 
   const activeSource = preferExisting ? SOURCE_MODES[1] : SOURCE_MODES[0];
-  const modelName = formatModelLabel(models.find((m) => m.key === selectedModel)?.name || selectedModel) || 'Default';
+  const modelName = isAutoModel(selectedModel)
+    ? autoLabel
+    : formatModelLabel(models.find((m) => m.key === selectedModel)?.name || selectedModel) || 'Default';
   const activeMemory = MEMORY_MODES[memoryEnabled ? 0 : 1];
 
   const badgeCount = attachmentCount + toolCount + skillCount;
@@ -188,6 +197,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   const visibleModels = modelQuery
     ? models.filter((m) => formatModelLabel(m.name || m.key).toLowerCase().includes(modelQuery) || m.key.toLowerCase().includes(modelQuery))
     : models;
+  const showAuto = autoAvailable && (!modelQuery || autoLabel.toLowerCase().includes(modelQuery));
 
   /** Pick handler shared by every radio-style option: apply, back to the main
    *  level (so the updated value is visible), refocus the input. */
@@ -237,7 +247,17 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
             </div>
           )}
           <div className="max-h-72 overflow-y-auto">
-            {visibleModels.length === 0 ? (
+            {showAuto && (
+              <Option
+                label={autoLabel}
+                desc={t('chat.autoModel.description', {
+                  defaultValue: 'The decision model picks a model for each message',
+                })}
+                active={isAutoModel(selectedModel)}
+                onClick={() => pick(() => onModelChange(AUTO_MODEL))}
+              />
+            )}
+            {visibleModels.length === 0 && !showAuto ? (
               <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                 No matching models
               </div>

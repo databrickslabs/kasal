@@ -12,6 +12,8 @@ class DecisionConfigUpdate(BaseModel):
 class DecisionConfigResponse(BaseModel):
     enabled: bool = False
     api_key_configured: bool = False
+    # Enabled, keyed and a provider URL set: the chat model selector offers Auto.
+    available: bool = False
 
 
 class DecisionRecommendationRequest(BaseModel):

@@ -21,6 +21,7 @@ import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { hasPendingAssets } from '../../utils/assetRefs';
 import { SLIDE_W, clearRefined, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
 import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx, sanitizeDeckDocument } from '../../utils/deckExport';
+import { concreteModel } from '../../utils/autoModel';
 
 /**
  * The deck studio: independent slide edits, merged into the latest deck.
@@ -93,7 +94,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const menuRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const selectedModel = useAppStore((s) => s.selectedModel);
-  const [editModel, setEditModel] = useState(() => model || selectedModel || '');
+  const [editModel, setEditModel] = useState(() => model || concreteModel(selectedModel) || '');
 
   const shown = Math.min(selected, Math.max(0, count - 1));
   const stage = useMemo(() => stageFor(viewSlides[shown] ?? ''), [viewSlides, shown]);

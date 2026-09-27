@@ -1,6 +1,6 @@
 # Models
 
-Kasal runs agents and crews on large language models from several providers. This page covers the model catalog, how to choose a model, the behavior with Agent Bricks and Genie, and Kasal's automatic model fallback.
+Kasal runs agents and crews on large language models from several providers. This page covers the model catalog, how to choose a model, letting the decision model choose one (Auto), the behavior with Agent Bricks and Genie, and Kasal's automatic model fallback.
 
 ## Supported providers
 
@@ -44,6 +44,38 @@ Tool-calling and structured-output caveats, all observed in the codebase and rec
 - Reasoning is the model's own thinking budget: turning on Reasoning for a crew sets `reasoning_effort` (`low`/`medium`/`high`) on each agent's LLM. It applies only to models that accept that parameter (currently the `gpt-5*` family and the o3/o4 families); for any other model the setting is dropped silently and the run is unaffected. Support comes from Kasal's model-capabilities registry, and whether a model uses it is that model's reasoning setting in Configuration → Models; the former `KASAL_REASONING_EFFORT_*` variables are gone.
 - Some endpoints only support the OpenAI Responses API and cannot be used through Kasal's chat-completions path; these are also pruned.
 - The internal generation services (agent, task, and crew generation) use the model the request names (the UI sends the one you chose), else the installed default model inside Databricks Apps, else `databricks-gemini-3-8-flash` (`DEFAULT_ENGINE_MODEL` in `src/backend/src/utils/model_config.py`). The former `AGENT_MODEL`, `CREW_MODEL` and `TASK_MODEL` environment variables are no longer read.
+
+## Auto (model selection)
+
+In the chat, the **Model** row of the composer's **+** menu can be set to **Auto**. With Auto, the [decision model](./DECISION_MODEL.md) picks the model for each message from the models your workspace has enabled, based on what the message asks for and on each model's context window, output limit and reasoning support.
+
+### When Auto appears
+
+Auto appears at the top of the model list only when the decision model is available to your workspace:
+
+1. A system administrator has set the **Jev API URL** (System administration → **Models** → **Decision model**).
+2. Your workspace has a `JEV_API_KEY` under **Configuration → API Keys**.
+3. A workspace administrator has turned on **Use a decision model** (Workspace settings → **Models** → **Decision model**).
+
+When all three are true, Auto is also the default: a new chat, or a chat where you never picked a model, starts on Auto. When any of them is missing, there is no Auto option and the selector works as before.
+
+### Choosing a model yourself
+
+Auto is a default, not a lock. Open the **+** menu, select **Model**, and pick any model: that model is used for every message until you change it, and your choice is remembered in this browser. Pick **Auto** again to hand the choice back. A model you picked before Auto existed also stays picked, unless it was the server's default model, which the selector used to fill in for you.
+
+### Seeing which model Auto picked
+
+After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) has the same pick as a `decision_evaluated` row, and the run's details show the model it ran on.
+
+### When the decision model cannot decide
+
+If the decision model is unreachable, slow, unsure, or has too many models to choose from (more than 64), Auto uses your workspace's default model: the server's default model when it is enabled for your workspace, otherwise the first enabled model. The activity step then reads "Auto → `<model>` (default)". Your message still runs; Auto never blocks it.
+
+A few chat actions that call a model directly, such as improving a prompt, drafting a skill, saving a crew from the conversation and editing one slide, do not use Auto. With Auto selected they run on the server's default model.
+
+### Turning Auto on (administrators)
+
+Auto needs no setting of its own: it follows the decision model. A system administrator sets the Jev API URL once for the deployment. Then, per workspace, someone who manages API keys adds `JEV_API_KEY`, and a workspace administrator turns on **Use a decision model**. Turning the decision model off removes Auto from the selector for that workspace. For what is sent to the provider and how each decision falls back, see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto) and [Configuration](./DECISION_MODEL.md#configuration) in the decision model guide.
 
 ## Agent Bricks and Genie
 

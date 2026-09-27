@@ -1,3 +1,4 @@
+import type { ModelSelection } from './execution';
 import type { EffortSettings } from '../../../types/workflow/effort';
 import type { ImageRef } from './chat';
 import type { PublicationInputSchema } from '../../../types/workflow/publication';
@@ -105,6 +106,8 @@ export interface DispatchResult {
   dispatcher: DispatcherResponse;
   generation_result: unknown;
   service_called: string | null;
+  /** Present when the message asked for Auto: the model it resolved to. */
+  model_selection?: ModelSelection;
 }
 
 export interface GeneratedAgent {

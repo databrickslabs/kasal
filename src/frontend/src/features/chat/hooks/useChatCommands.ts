@@ -17,6 +17,7 @@ import { GenerationCompleteData } from '../types/dispatcher';
 import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';
+import { concreteModel } from '../utils/autoModel';
 
 interface UseChatCommandsArgs {
   dispatcher: ReturnType<typeof import('./useDispatcher').useDispatcher>;
@@ -123,7 +124,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
         try {
           // The draft is a run: its job id lands on the step before the model
           // is called, so the activity opens the run's trace while it drafts.
-          await runSkillDraft(skillCmd, transcript, selectedModel || undefined, {
+          await runSkillDraft(skillCmd, transcript, concreteModel(selectedModel), {
             post,
             update: (id, updates) =>
               owner

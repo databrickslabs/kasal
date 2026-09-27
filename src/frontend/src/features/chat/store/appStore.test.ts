@@ -8,6 +8,7 @@ const fetchWorkspaces = vi.fn();
 const listSavedCrews = vi.fn();
 const listSavedFlows = vi.fn();
 const listChatPublished = vi.fn();
+const getDecisionConfig = vi.fn();
 
 vi.mock('../api/client', () => ({
   updateClient: (...args: unknown[]) => updateClient(...args),
@@ -25,6 +26,11 @@ vi.mock('../api/crews', () => ({
   listSavedCrews: (...args: unknown[]) => listSavedCrews(...args),
   listSavedFlows: (...args: unknown[]) => listSavedFlows(...args),
 }));
+vi.mock('../../../api/config/DecisionConfigService', () => ({
+  DecisionConfigService: {
+    getConfig: (...args: unknown[]) => getDecisionConfig(...args),
+  },
+}));
 vi.mock('../../../api/workflow/PublicationService', () => ({
   PublicationService: {
     listChatPublished: (...args: unknown[]) => listChatPublished(...args),
@@ -40,6 +46,10 @@ const THEME_STORAGE_KEY = 'APP_THEME';
 async function freshStore() {
   // Default fixtures are explicitly published; failure never exposes saved drafts.
   listChatPublished.mockResolvedValue(['c1', 'f1']);
+  // The decision model is off unless a test says otherwise: the old selector.
+  if (!getDecisionConfig.getMockImplementation()) {
+    getDecisionConfig.mockResolvedValue({ enabled: false, api_key_configured: false, available: false });
+  }
   vi.resetModules();
   const mod = await import('./appStore');
   const { useThemeStore } = await import('../../../store/theme');
@@ -213,6 +223,74 @@ describe('appStore', () => {
   // ---------------------------------------------------------------------------
   // loadModels branches
   // ---------------------------------------------------------------------------
+  describe('loadModels with Auto', () => {
+    const models = [
+      { id: 1, key: 'k1', name: 'M1' },
+      { id: 2, key: 'databricks-gemini-3-8-flash', name: 'Gemini 3.8 Flash' },
+    ];
+    const autoOn = () =>
+      getDecisionConfig.mockResolvedValue({ enabled: true, api_key_configured: true, available: true });
+    afterEach(() => getDecisionConfig.mockReset());
+
+    it('offers Auto and makes it the default when available', async () => {
+      autoOn();
+      const store = await freshStore();
+      fetchEnabledModels.mockResolvedValue(models);
+      await store.getState().loadModels();
+      expect(store.getState().autoModelAvailable).toBe(true);
+      expect(store.getState().selectedModel).toBe('auto');
+    });
+
+    it('treats a stored server default from before Auto as not chosen', async () => {
+      autoOn();
+      localStorage.setItem(MODEL_STORAGE_KEY, 'databricks-gemini-3-8-flash');
+      const store = await freshStore();
+      fetchEnabledModels.mockResolvedValue(models);
+      await store.getState().loadModels();
+      expect(store.getState().selectedModel).toBe('auto');
+    });
+
+    it('keeps an explicit choice when Auto is available', async () => {
+      autoOn();
+      const store = await freshStore();
+      fetchEnabledModels.mockResolvedValue(models);
+      store.getState().setSelectedModel('databricks-gemini-3-8-flash');
+      await store.getState().loadModels();
+      expect(store.getState().selectedModel).toBe('databricks-gemini-3-8-flash');
+      expect(localStorage.getItem('kasal-chat-model-explicit')).toBe('1');
+    });
+
+    it('keeps a pre-Auto stored model that is not the default', async () => {
+      autoOn();
+      localStorage.setItem(MODEL_STORAGE_KEY, 'k1');
+      const store = await freshStore();
+      fetchEnabledModels.mockResolvedValue(models);
+      await store.getState().loadModels();
+      expect(store.getState().selectedModel).toBe('k1');
+    });
+
+    it('hides Auto and falls back to the old default when unavailable', async () => {
+      localStorage.setItem(MODEL_STORAGE_KEY, 'auto');
+      getDecisionConfig.mockResolvedValue({ enabled: true, api_key_configured: false, available: false });
+      const store = await freshStore();
+      fetchEnabledModels.mockResolvedValue(models);
+      await store.getState().loadModels();
+      expect(store.getState().autoModelAvailable).toBe(false);
+      expect(store.getState().selectedModel).toBe('databricks-gemini-3-8-flash');
+      // The stored Auto is kept, so it returns when the decision model does.
+      expect(localStorage.getItem(MODEL_STORAGE_KEY)).toBe('auto');
+    });
+
+    it('treats a failed availability read as unavailable', async () => {
+      getDecisionConfig.mockRejectedValue(new Error('403'));
+      const store = await freshStore();
+      fetchEnabledModels.mockResolvedValue(models);
+      await store.getState().loadModels();
+      expect(store.getState().autoModelAvailable).toBe(false);
+      expect(store.getState().selectedModel).toBe('databricks-gemini-3-8-flash');
+    });
+  });
+
   describe('loadModels', () => {
     it('sets models and auto-selects first model when none selected', async () => {
       const store = await freshStore();

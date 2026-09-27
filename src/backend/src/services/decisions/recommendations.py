@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.llm.effort import EFFORT_PROFILES
 from src.schemas.decision_config import DecisionRecommendationResponse
+from src.services.decisions.model_selection import describe_model
 from src.services.decisions.policies import question
 from src.services.decisions.runtime import decide
 from src.services.settings.models import ModelConfigService
@@ -20,12 +21,10 @@ async def recommend(
     ).find_enabled_models_for_group(group_context)
     if not models or len(models) > 64:
         return DecisionRecommendationResponse()
+    # The same candidate description Auto model selection sends.
     candidates = [
         {
-            "name": m.name,
-            "provider": m.provider,
-            "context_window": m.context_window,
-            "max_output_tokens": m.max_output_tokens,
+            **describe_model(m),
             "supports_reasoning_effort": model_supports_reasoning_effort(
                 cast(str, m.key)
             ),
