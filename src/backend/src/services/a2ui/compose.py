@@ -466,6 +466,39 @@ def _deref(value: Any, data_model: Dict[str, Any]) -> Any:
     return value
 
 
+def normalize_tables(payload: dict) -> dict:
+    """Coerce every ``Table`` to the catalog shape: ``rows`` as a list of arrays.
+
+    Models borrow Chart's shape for tables — ``data: {"path": "/x"}`` bound to a
+    list of row OBJECTS — but the catalog's Table takes ``rows`` (row arrays
+    aligned to ``columns``) and has no ``data`` prop, so the renderer drew an
+    empty table. Rewrite in place: resolve ``rows`` (else ``data``), turn object
+    rows into arrays by ``columns`` (deriving columns from the first row's keys
+    when absent), and drop ``data``. Well-formed tables are left untouched.
+    """
+    data_model = payload.get("dataModel") or {}
+    for comp in payload.get("components") or []:
+        if not isinstance(comp, dict) or comp.get("component") != "Table":
+            continue
+        source = comp["rows"] if "rows" in comp else comp.get("data")
+        rows = _deref(source, data_model)
+        if not isinstance(rows, list):
+            continue
+        has_objects = any(isinstance(r, dict) for r in rows)
+        if "rows" in comp and "data" not in comp and not has_objects:
+            continue  # already catalog-shaped (literal or bound row arrays)
+        columns = _deref(comp.get("columns"), data_model)
+        if has_objects and not isinstance(columns, list):
+            first = next(r for r in rows if isinstance(r, dict))
+            columns = list(first.keys())
+            comp["columns"] = columns
+        comp["rows"] = [
+            [r.get(str(c)) for c in columns] if isinstance(r, dict) else r for r in rows
+        ]
+        comp.pop("data", None)
+    return payload
+
+
 def quiz_needs_work(payload: Any) -> bool:
     """True when a quiz surface is low quality — the model returned a *description*
     of a quiz, too few real questions, or malformed items (bad option lists / answer
@@ -939,7 +972,7 @@ def compose_a2ui(
                         "Reply with ONLY the corrected JSON object."
                     )
                 else:
-                    return _done(payload)
+                    return _done(normalize_tables(payload))
             else:
                 problem = (
                     json_error_of(raw_str)
