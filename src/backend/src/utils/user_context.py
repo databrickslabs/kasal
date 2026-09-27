@@ -373,18 +373,6 @@ class GroupContext:
         )
 
     @staticmethod
-    def is_personal_workspace_of(group_id: Optional[str], email: Optional[str]) -> bool:
-        """Whether ``group_id`` is this user's personal workspace, under either
-        form of its id. No lookup: both forms are functions of the email."""
-        if not group_id or not email:
-            return False
-        wanted = group_id.lower()
-        return any(
-            c.lower() == wanted
-            for c in GroupContext.personal_workspace_candidates(email)
-        )
-
-    @staticmethod
     def personal_workspace_id_of(user: Any, email: str) -> str:
         """Return the allocated identity; an unresolved allocation grants no scope."""
 
@@ -414,52 +402,6 @@ class GroupContext:
     def is_valid(self) -> bool:
         """Check if group context is valid."""
         return bool(self.group_ids and len(self.group_ids) > 0 and self.email_domain)
-
-    @staticmethod
-    async def _get_user_group_memberships(email: str) -> list:
-        """
-        Get list of group IDs that the user belongs to.
-        Auto-creates the user if they don't exist (proxy authentication).
-
-        Args:
-            email: User email address
-
-        Returns:
-            List of group IDs the user is a member of
-        """
-        try:
-            # Import here to avoid circular imports
-            from src.services.groups.groups import GroupService
-            from src.services.groups.users import UserService
-            from src.utils.asyncio_utils import execute_db_operation_smart
-
-            async def _lookup(session):
-                # Get or create the user
-                user_service = UserService(session)
-                user = await user_service.get_or_create_user_by_email(email)
-
-                if not user:
-                    logger.error(f"Failed to get or create user for email: {email}")
-                    return []
-
-                # Commit the session to ensure user and any groups are saved
-                await session.commit()
-
-                group_service = GroupService(session)
-                user_groups = await group_service.get_user_group_memberships(email)
-
-                # Commit any pending changes
-                await session.commit()
-
-                return [group.id for group in user_groups]
-
-            # Use the smart session which routes to Lakebase when active
-            # (where groups/users live) and falls back to local SQLite otherwise.
-            return await execute_db_operation_smart(_lookup)
-
-        except Exception as e:
-            logger.error(f"Error getting user group memberships for {email}: {e}")
-            return []
 
     @staticmethod
     async def _get_user_group_memberships_with_roles(email: str) -> tuple:
@@ -860,50 +802,3 @@ class UserContextMiddleware:
 
         finally:
             UserContext.clear_context()
-
-
-# Keep the old function for backward compatibility (used in tests)
-async def user_context_middleware(request: Request, call_next):
-    """Legacy BaseHTTPMiddleware-style dispatch function (kept for tests)."""
-    try:
-        try:
-            group_context = await extract_group_context_from_request(request)
-            if group_context:
-                UserContext.set_group_context(group_context)
-        except Exception:
-            pass
-
-        user_context = extract_user_context_from_request(request)
-        if user_context:
-            UserContext.set_user_context(user_context)
-            if "access_token" in user_context:
-                UserContext.set_user_token(user_context["access_token"])
-
-        response = await call_next(request)
-        return response
-    except Exception:
-        UserContext.clear_context()
-        return await call_next(request)
-    finally:
-        UserContext.clear_context()
-
-
-def is_databricks_app_context() -> bool:
-    """
-    Check if we're running in a Databricks App context.
-
-    This can be determined by checking if we have a user token
-    from the X-Forwarded-Access-Token header.
-
-    Returns:
-        True if running in Databricks App context, False otherwise
-    """
-    user_context = UserContext.get_user_context()
-    if not user_context:
-        return False
-
-    # Check if we have databricks-specific headers or forwarded token
-    return "access_token" in user_context and (
-        "databricks_headers" in user_context
-        or any("databricks" in key.lower() for key in user_context.keys())
-    )

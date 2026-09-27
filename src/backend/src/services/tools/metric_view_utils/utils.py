@@ -149,11 +149,3 @@ def yaml_scalar(value: str, width: int = 100) -> str:
     lines = value.split("\n")
     indented = "\n".join(f"  {line}" if line.strip() else "" for line in lines)
     return f"|-\n{indented}"
-
-
-def unflatten_table_name(flat_name: str, catalog: str = "", schema: str = "") -> str:
-    """Convert flattened table refs (catalog__schema__table) to 3-level names."""
-    prefix = f"{catalog}.{schema}."
-    remainder = flat_name[len(prefix) :] if flat_name.startswith(prefix) else flat_name
-    parts = remainder.split("__")
-    return ".".join(parts) if len(parts) >= 3 else flat_name

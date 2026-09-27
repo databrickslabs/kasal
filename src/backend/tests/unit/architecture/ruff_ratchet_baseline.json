@@ -904,9 +904,9 @@
   "src/utils/cron_utils.py::G004": 6,
   "src/utils/cron_utils.py::TRY400": 2,
   "src/utils/databricks_app_keys.py::BLE001": 1,
-  "src/utils/databricks_auth.py::BLE001": 26,
-  "src/utils/databricks_auth.py::G004": 48,
-  "src/utils/databricks_auth.py::TRY400": 16,
+  "src/utils/databricks_auth.py::BLE001": 25,
+  "src/utils/databricks_auth.py::G004": 47,
+  "src/utils/databricks_auth.py::TRY400": 15,
   "src/utils/databricks_mcp_cli.py::BLE001": 1,
   "src/utils/databricks_mcp_cli.py::G004": 1,
   "src/utils/databricks_mcp_cli.py::TRY400": 1,
@@ -921,8 +921,7 @@
   "src/utils/sensitive_data_utils.py::TRY400": 2,
   "src/utils/telemetry.py::BLE001": 2,
   "src/utils/telemetry.py::G004": 7,
-  "src/utils/user_context.py::BLE001": 8,
-  "src/utils/user_context.py::G004": 25,
-  "src/utils/user_context.py::S110": 1,
-  "src/utils/user_context.py::TRY400": 8
+  "src/utils/user_context.py::BLE001": 5,
+  "src/utils/user_context.py::G004": 23,
+  "src/utils/user_context.py::TRY400": 7
 }

@@ -140,12 +140,6 @@ class ModelCapability:
     source: str = ""
     note: str = ""
 
-    def supports_effort(self, value: str | None) -> bool:
-        """Whether ``value`` is an effort this model actually accepts."""
-        if not value:
-            return False
-        return str(value).strip().lower() in self.efforts
-
     def accepts(self, param: str) -> bool:
         """Whether this model accepts sampling parameter ``param``."""
         return param not in self.refuses
@@ -560,8 +554,3 @@ def refused_params(model_name: str | None) -> tuple[str, ...]:
     """
     capability = model_capability(model_name)
     return capability.refuses if capability else ()
-
-
-def accepts_param(model_name: str | None, param: str) -> bool:
-    """Whether ``model_name`` accepts sampling parameter ``param``."""
-    return param not in refused_params(model_name)

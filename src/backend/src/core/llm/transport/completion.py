@@ -171,18 +171,6 @@ def thinking_mode(model_name: str | None) -> str | None:
     return None
 
 
-def valid_thinking_efforts(model_name: str | None) -> tuple[str, ...]:
-    """Effort values ``model_name`` accepts — per model, never a global list.
-
-    There are five distinct scales across the seeded catalogue (Anthropic
-    adaptive takes low..max; gpt-5 takes minimal..high but rejects "none";
-    gpt-5-1 takes "none" but rejects "minimal"; the 5-2/5-4/5-6 line adds
-    "xhigh"; Gemini takes only low/medium/high). A single constant would be wrong
-    for most of them, which is why this delegates to the registry.
-    """
-    return allowed_efforts(model_name)
-
-
 # Kept under its old name: the Responses path strips hints unconditionally
 # (Databricks documents no cache_control there), and the Chat Completions path
 # goes through `chat_messages_for`, which strips them for non-Claude endpoints.

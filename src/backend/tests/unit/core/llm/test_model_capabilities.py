@@ -19,7 +19,6 @@ import pytest
 
 from src.core.llm.model_capabilities import (
     ReasoningStyle,
-    accepts_param,
     allowed_efforts,
     model_capability,
     reasoning_style,
@@ -135,13 +134,6 @@ class TestAllowedEfforts:
         }
         assert len(scales) == 4
 
-    def test_supports_effort_is_case_and_space_tolerant(self):
-        capability = model_capability("databricks-claude-opus-5")
-        assert capability is not None
-        assert capability.supports_effort(" HIGH ") is True
-        assert capability.supports_effort("minimal") is False
-        assert capability.supports_effort(None) is False
-
 
 class TestRefusedParams:
     """Ordinary sampling knobs are refused per model too — the reason the Edit
@@ -155,24 +147,8 @@ class TestRefusedParams:
             "presence_penalty",
         }
 
-    def test_manual_claude_accepts_temperature_but_not_penalties(self):
-        """The case that proves refusals are not inferable from the family: same
-        provider, same generation prefix, different answer."""
-        assert accepts_param("databricks-claude-sonnet-4-5", "temperature") is True
-        assert accepts_param("databricks-claude-sonnet-4-5", "top_p") is True
-        assert (
-            accepts_param("databricks-claude-sonnet-4-5", "frequency_penalty") is False
-        )
-
     def test_gpt5_also_refuses_stop(self):
         assert "stop" in refused_params("databricks-gpt-5")
-
-    @pytest.mark.parametrize(
-        "model", ["databricks-gemini-3-1-pro", "databricks-llama-4-maverick", None]
-    )
-    def test_models_that_refuse_nothing(self, model):
-        assert refused_params(model) == ()
-        assert accepts_param(model, "temperature") is True
 
 
 class TestNameMatching:

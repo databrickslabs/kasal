@@ -21,11 +21,6 @@ class LLMContextLengthExceededError(Exception):
         self.original_error_message = error_message
         super().__init__(self._get_error_message(error_message))
 
-    def _is_context_limit_error(self, error_message: str) -> bool:
-        return any(
-            phrase.lower() in error_message.lower() for phrase in CONTEXT_LIMIT_ERRORS
-        )
-
     def _get_error_message(self, error_message: str) -> str:
         return (
             f"LLM context length exceeded. Original error: {error_message}\n"

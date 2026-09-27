@@ -37,11 +37,6 @@ def get_job_output_queue() -> queue.Queue:
     return JobOutputQueue().get_queue()
 
 
-def get_dropped_log_count() -> int:
-    """Total log lines dropped because the queue was full (process lifetime)."""
-    return _dropped_total
-
-
 def _record_dropped_log(execution_id: str) -> None:
     """Count a dropped line; warn on the first drop and every Nth after."""
     global _dropped_total

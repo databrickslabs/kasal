@@ -97,72 +97,9 @@ class TestIsAdmin:
 # ---------------------------------------------------------------------------
 
 
-class TestIsEditorOrAbove:
-    """Tests for is_editor_or_above()."""
-
-    def test_true_for_admin(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert is_editor_or_above("admin") is True
-
-    def test_true_for_editor(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert is_editor_or_above("editor") is True
-
-    def test_false_for_operator(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert not is_editor_or_above("operator")
-
-    def test_false_for_none(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert not is_editor_or_above(None)
-
-    def test_case_insensitive_EDITOR(self):
-        from src.core.permissions import is_editor_or_above
-
-        assert is_editor_or_above("EDITOR") is True
-
-
 # ---------------------------------------------------------------------------
 # is_operator_or_above
 # ---------------------------------------------------------------------------
-
-
-class TestIsOperatorOrAbove:
-    """Tests for is_operator_or_above()."""
-
-    def test_true_for_admin(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("admin") is True
-
-    def test_true_for_editor(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("editor") is True
-
-    def test_true_for_operator(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("operator") is True
-
-    def test_false_for_none(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert not is_operator_or_above(None)
-
-    def test_false_for_unknown_role(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert not is_operator_or_above("viewer")
-
-    def test_case_insensitive_OPERATOR(self):
-        from src.core.permissions import is_operator_or_above
-
-        assert is_operator_or_above("OPERATOR") is True
 
 
 # ---------------------------------------------------------------------------

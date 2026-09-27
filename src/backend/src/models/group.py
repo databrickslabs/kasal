@@ -183,18 +183,4 @@ def get_role_hierarchy(role: GroupUserRole) -> int:
     return hierarchy.get(role, 0)
 
 
-def role_has_access(user_role: GroupUserRole, required_role: GroupUserRole) -> bool:
-    """
-    Check if user role has sufficient access level for the required role.
-
-    Args:
-        user_role: The user's current role
-        required_role: The minimum role required for the action
-
-    Returns:
-        bool: True if user has sufficient access
-    """
-    return get_role_hierarchy(user_role) >= get_role_hierarchy(required_role)
-
-
 # Legacy compatibility aliases removed - migration complete

@@ -15,7 +15,6 @@ from src.models.group import (
     GroupUserStatus,
     generate_uuid,
     get_role_hierarchy,
-    role_has_access,
 )
 
 # Import all required models to ensure relationships are loaded
@@ -399,27 +398,6 @@ class TestGroupRolePermissions:
         # Assert
         assert admin_level > editor_level
         assert editor_level > operator_level
-
-    def test_role_has_access_admin(self):
-        """Test that admin role has access to all roles."""
-        # Act & Assert
-        assert role_has_access(GroupUserRole.ADMIN, GroupUserRole.ADMIN)
-        assert role_has_access(GroupUserRole.ADMIN, GroupUserRole.EDITOR)
-        assert role_has_access(GroupUserRole.ADMIN, GroupUserRole.OPERATOR)
-
-    def test_role_has_access_editor(self):
-        """Test that editor role has appropriate access."""
-        # Act & Assert
-        assert not role_has_access(GroupUserRole.EDITOR, GroupUserRole.ADMIN)
-        assert role_has_access(GroupUserRole.EDITOR, GroupUserRole.EDITOR)
-        assert role_has_access(GroupUserRole.EDITOR, GroupUserRole.OPERATOR)
-
-    def test_role_has_access_operator(self):
-        """Test that operator role has limited access."""
-        # Act & Assert
-        assert not role_has_access(GroupUserRole.OPERATOR, GroupUserRole.ADMIN)
-        assert not role_has_access(GroupUserRole.OPERATOR, GroupUserRole.EDITOR)
-        assert role_has_access(GroupUserRole.OPERATOR, GroupUserRole.OPERATOR)
 
 
 class TestGenerateUuidFunction:
