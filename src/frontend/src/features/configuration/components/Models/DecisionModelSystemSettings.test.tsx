@@ -45,15 +45,32 @@ describe('DecisionModelSystemSettings', () => {
     expect(screen.getByText(/workspace's own JEV_API_KEY/)).toBeInTheDocument();
   });
 
-  it('saves the Jev API URL to the existing jev_api_base setting and refuses plain http', async () => {
+  it('accepts a plain http endpoint and warns that it is unencrypted', async () => {
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
+      settings({ jev_api_base: 'http://jev.internal:8080' }),
+    );
+    render(<DecisionModelSystemSettings />);
+    const field = await screen.findByLabelText('Jev API URL');
+
+    fireEvent.change(field, { target: { value: 'http://jev.internal:8080' } });
+    expect(screen.getByText(/Plain http is not encrypted/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        jev_api_base: 'http://jev.internal:8080',
+      }),
+    );
+  });
+
+  it('saves the Jev API URL to the existing jev_api_base setting and refuses non-http addresses', async () => {
     vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
       settings({ jev_api_base: 'https://jev.example.com' }),
     );
     render(<DecisionModelSystemSettings />);
     const field = await screen.findByLabelText('Jev API URL');
 
-    fireEvent.change(field, { target: { value: 'http://jev.example.com' } });
-    expect(screen.getByText('Must start with https://')).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: 'jev.example.com' } });
+    expect(screen.getByText('Must start with http:// or https://')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 
     fireEvent.change(field, { target: { value: ' https://jev.example.com ' } });

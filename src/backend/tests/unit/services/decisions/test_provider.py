@@ -25,11 +25,29 @@ async def test_transport_uses_bearer_and_structured_decisions(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_transport_rejects_insecure_endpoint(monkeypatch):
+async def test_transport_accepts_plain_http_endpoint(monkeypatch):
+    """A self-hosted Jev on a private network may be served over plain http."""
     monkeypatch.setitem(
         engine_settings._snapshot, engine_settings.JEV_API_BASE, "http://example.com"
     )
-    with pytest.raises(ValueError, match="HTTPS"):
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        return httpx.Response(200, json={"answers": {}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(provider.httpx, "AsyncClient", lambda **kwargs: client)
+    await provider.evaluate("key", {}, {})
+    assert str(seen[0].url) == "http://example.com/v1/systemone"
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_non_http_endpoint(monkeypatch):
+    monkeypatch.setitem(
+        engine_settings._snapshot, engine_settings.JEV_API_BASE, "ftp://example.com"
+    )
+    with pytest.raises(ValueError, match="http:// or https://"):
         await provider.evaluate("key", {}, {})
 
 

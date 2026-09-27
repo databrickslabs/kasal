@@ -30,8 +30,8 @@ async def evaluate(api_key: str, state: dict, questions: dict) -> dict:
         raise ValueError(
             "The Jev API URL is not configured (System administration → Models)"
         )
-    if not base.startswith("https://"):
-        raise ValueError("The Jev API URL must use HTTPS")
+    if not base.startswith(("https://", "http://")):
+        raise ValueError("The Jev API URL must be an http:// or https:// address")
     async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
         response = await client.post(
             f"{base}/v1/systemone",

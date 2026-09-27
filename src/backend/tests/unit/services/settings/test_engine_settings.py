@@ -121,7 +121,8 @@ class TestView:
     @pytest.mark.parametrize(
         "sent, message",
         [
-            ({"jev_api_base": "http://example.com"}, "https"),
+            ({"jev_api_base": "ftp://example.com"}, "http:// or https://"),
+            ({"jev_api_base": "jev.example.com"}, "http:// or https://"),
             ({"budgets": {"turbo": {"max_iter": 3}}}, "No run budget"),
             ({"budgets": {"chat": {"max_iter": 3}}}, "No run budget"),
             ({"budgets": {"deep": {"bogus": 3}}}, "Unknown budget field"),

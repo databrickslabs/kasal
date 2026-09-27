@@ -117,7 +117,8 @@
         "systemCaption": "Applies to every workspace. Each workspace admin still turns the decision model on for their workspace in its Models settings, with the workspace's own {{key}}.",
         "urlLabel": "{{name}} API URL",
         "urlHelp": "Where the {{name}} decisions API lives. Empty keeps the decision model off for every workspace.",
-        "urlHttps": "Must start with https://",
+        "urlScheme": "Must start with http:// or https://",
+        "urlUnencrypted": "Plain http is not encrypted: prompts and candidate content travel in clear text. Use it only on a private network.",
         "urlSaved": "{{label}} saved.",
         "urlSaveError": "Could not save the {{label}}.",
         "save": "Save"

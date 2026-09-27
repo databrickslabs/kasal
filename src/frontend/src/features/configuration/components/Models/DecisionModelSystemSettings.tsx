@@ -44,7 +44,8 @@ const DecisionModelSystemSettings: React.FC = () => {
   if (stored === undefined) return null;
 
   const trimmed = draft.trim();
-  const invalid = trimmed !== '' && !trimmed.startsWith('https://');
+  const invalid = trimmed !== '' && !/^https?:\/\/[^\s/]+/.test(trimmed);
+  const unencrypted = !invalid && trimmed.startsWith('http://');
   const changed = trimmed !== (stored ?? '');
   const urlLabel = t(`${K}.urlLabel`, { defaultValue: '{{name}} API URL', name: provider.name });
 
@@ -101,13 +102,20 @@ const DecisionModelSystemSettings: React.FC = () => {
           }}
           placeholder="https://jev.example.com"
           error={invalid}
+          color={unencrypted ? 'warning' : undefined}
+          FormHelperTextProps={unencrypted ? { sx: { color: 'warning.main' } } : undefined}
           helperText={
             invalid
-              ? t(`${K}.urlHttps`, { defaultValue: 'Must start with https://' })
-              : t(`${K}.urlHelp`, {
-                defaultValue: 'Where the {{name}} decisions API lives. Empty keeps the decision model off for every workspace.',
-                name: provider.name,
-              })
+              ? t(`${K}.urlScheme`, { defaultValue: 'Must start with http:// or https://' })
+              : unencrypted
+                ? t(`${K}.urlUnencrypted`, {
+                  defaultValue: 'Plain http is not encrypted: prompts and candidate content travel in clear text. '
+                    + 'Use it only on a private network.',
+                })
+                : t(`${K}.urlHelp`, {
+                  defaultValue: 'Where the {{name}} decisions API lives. Empty keeps the decision model off for every workspace.',
+                  name: provider.name,
+                })
           }
           inputProps={{ 'aria-label': urlLabel }}
           sx={{ flex: 1, maxWidth: 480 }}

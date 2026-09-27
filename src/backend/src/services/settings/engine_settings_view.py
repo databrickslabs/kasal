@@ -4,6 +4,7 @@ Keeps the router thin and EngineConfigService free of the budget/Jev rules.
 """
 
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from src.core.exceptions import BadRequestError
 from src.services.execution.config.budget_profile import (
@@ -78,8 +79,11 @@ async def update_view(
     values: Dict[str, str] = {}
     if "jev_api_base" in sent:
         url = (sent["jev_api_base"] or "").strip().rstrip("/")
-        if url and not url.startswith("https://"):
-            raise BadRequestError("The Jev API URL must use https://")
+        parsed = urlparse(url)
+        if url and (parsed.scheme not in ("http", "https") or not parsed.netloc):
+            raise BadRequestError(
+                "The Jev API URL must be an http:// or https:// address"
+            )
         values[es.JEV_API_BASE] = url
     if "agent_max_execution_time" in sent:
         value = sent["agent_max_execution_time"]
