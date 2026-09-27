@@ -1,5 +1,5 @@
 import os
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -97,7 +97,7 @@ class TestInit:
     """Tests for DatabricksService constructor and properties."""
 
     def test_init_sets_session_and_group_id(self):
-        """Lines 28-32: init stores session, repository, group_id, and _secrets_service=None."""
+        """Lines 28-32: init stores session, repository and group_id."""
         mock_session = MagicMock()
         with patch(
             "src.services.databricks.workspace.service.DatabricksConfigRepository"
@@ -107,7 +107,6 @@ class TestInit:
 
         assert service.session is mock_session
         assert service.group_id == "grp-123"
-        assert service._secrets_service is None
 
     def test_init_default_group_id_is_none(self):
         """group_id defaults to None when not provided."""
@@ -118,28 +117,6 @@ class TestInit:
             service = DatabricksService(session=MagicMock())
 
         assert service.group_id is None
-
-    def test_secrets_service_lazy_init(self):
-        """Lines 39-40: First access creates DatabricksSecretsService; second returns same."""
-        service = _make_service()
-        mock_secrets = MagicMock()
-
-        with patch(
-            "src.services.databricks.secrets.service.DatabricksSecretsService",
-            return_value=mock_secrets,
-        ):
-            result = service.secrets_service
-
-        assert result is mock_secrets
-        assert service._secrets_service is mock_secrets
-
-    def test_secrets_service_cached_after_first_access(self):
-        """After first init, subsequent accesses return the cached instance."""
-        service = _make_service()
-        cached = MagicMock()
-        service._secrets_service = cached
-
-        assert service.secrets_service is cached
 
 
 # ===========================================================================
@@ -429,125 +406,8 @@ class TestCheckPersonalTokenRequired:
 
 
 # ===========================================================================
-# check_apps_configuration (lines 209-224)
-# ===========================================================================
-
-
-class TestCheckAppsConfiguration:
-    """Tests for check_apps_configuration method."""
-
-    @pytest.mark.asyncio
-    async def test_no_config_returns_false(self):
-        """Lines 211-212: No config returns (False, '')."""
-        service = _make_service()
-        service.repository.get_active_config = AsyncMock(return_value=None)
-
-        result = await service.check_apps_configuration()
-
-        assert result == (False, "")
-
-    @pytest.mark.asyncio
-    async def test_enabled_with_token(self):
-        """Lines 215-219: Enabled config with personal token returns (True, token)."""
-        service = _make_service()
-        mock_config = MagicMock()
-        mock_config.is_enabled = True
-        service.repository.get_active_config = AsyncMock(return_value=mock_config)
-
-        mock_secrets = AsyncMock()
-        mock_secrets.get_personal_access_token = AsyncMock(return_value="pat-token")
-        service._secrets_service = mock_secrets
-
-        result = await service.check_apps_configuration()
-
-        assert result == (True, "pat-token")
-
-    @pytest.mark.asyncio
-    async def test_enabled_no_token(self):
-        """Lines 218-221: Enabled but no token returns (False, '')."""
-        service = _make_service()
-        mock_config = MagicMock()
-        mock_config.is_enabled = True
-        service.repository.get_active_config = AsyncMock(return_value=mock_config)
-
-        mock_secrets = AsyncMock()
-        mock_secrets.get_personal_access_token = AsyncMock(return_value=None)
-        service._secrets_service = mock_secrets
-
-        result = await service.check_apps_configuration()
-
-        assert result == (False, "")
-
-    @pytest.mark.asyncio
-    async def test_disabled_returns_false(self):
-        """Line 221: Config not enabled returns (False, '')."""
-        service = _make_service()
-        mock_config = MagicMock(spec=["is_active"])  # no is_enabled attribute
-        service.repository.get_active_config = AsyncMock(return_value=mock_config)
-
-        result = await service.check_apps_configuration()
-
-        assert result == (False, "")
-
-    @pytest.mark.asyncio
-    async def test_exception_returns_false(self):
-        """Lines 222-224: Exception returns (False, '') gracefully."""
-        service = _make_service()
-        service.repository.get_active_config = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
-
-        result = await service.check_apps_configuration()
-
-        assert result == (False, "")
-
-
-# ===========================================================================
 # setup_endpoint static method (lines 242-272)
 # ===========================================================================
-
-
-# ===========================================================================
-# from_session (line 296 -- with api_keys_service)
-# ===========================================================================
-
-
-class TestFromSession:
-    """Tests for from_session class method."""
-
-    def test_from_session_basic(self):
-        """Lines 286-298: from_session without api_keys_service."""
-        mock_session = MagicMock()
-        with patch(
-            "src.services.databricks.workspace.service.DatabricksConfigRepository"
-        ) as MockRepo:
-            MockRepo.return_value = AsyncMock()
-            service = DatabricksService.from_session(mock_session)
-
-        assert isinstance(service, DatabricksService)
-        assert service.session is mock_session
-
-    def test_from_session_with_api_keys_service(self):
-        """Line 296: from_session sets api_keys_service on secrets_service."""
-        mock_session = MagicMock()
-        mock_api_keys = MagicMock()
-        mock_secrets = MagicMock()
-
-        with patch(
-            "src.services.databricks.workspace.service.DatabricksConfigRepository"
-        ) as MockRepo:
-            MockRepo.return_value = AsyncMock()
-            with patch.object(
-                DatabricksService,
-                "secrets_service",
-                new_callable=PropertyMock,
-                return_value=mock_secrets,
-            ):
-                DatabricksService.from_session(
-                    mock_session, api_keys_service=mock_api_keys
-                )
-
-        mock_secrets.set_api_keys_service.assert_called_once_with(mock_api_keys)
 
 
 # ===========================================================================

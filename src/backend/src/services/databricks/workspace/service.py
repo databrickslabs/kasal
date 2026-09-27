@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,10 +17,6 @@ from src.services.databricks.workspace.host_guard import (
     validate_stored_workspace_url,
 )
 from src.utils.telemetry import KasalProduct, get_user_agent_header
-
-if TYPE_CHECKING:
-    from src.services.databricks.secrets.service import DatabricksSecretsService
-    from src.services.settings.api_keys import ApiKeysService
 
 logger = logging.getLogger(__name__)
 
@@ -52,20 +48,6 @@ class DatabricksService:
         self.repository = DatabricksConfigRepository(session)
         self.group_id = group_id
         self._user_token = user_token
-        # Don't create secrets_service here to avoid circular dependency
-        self._secrets_service: Optional["DatabricksSecretsService"] = None
-
-    @property
-    def secrets_service(self) -> "DatabricksSecretsService":
-        """Lazy load secrets_service to avoid circular dependency."""
-        if self._secrets_service is None:
-            # Import here to avoid circular imports at module level
-            from src.services.databricks.secrets.service import DatabricksSecretsService
-
-            self._secrets_service = DatabricksSecretsService(
-                self.session, group_id=self.group_id
-            )
-        return self._secrets_service
 
     @staticmethod
     def _apply_ai_gateway_env(enabled: bool) -> None:
@@ -472,65 +454,6 @@ class DatabricksService:
             raise KasalError(
                 detail=f"Error checking personal token requirement: {str(e)}"
             )
-
-    # Methods for Databricks token management
-
-    async def check_apps_configuration(self) -> Tuple[bool, str]:
-        """
-        Check if 'Databricks Apps Integration' is disabled but 'Databricks Settings' is enabled
-        and determine if a personal access token should be used.
-
-        Returns:
-            Tuple[bool, str]: (should_use_personal_token, personal_access_token)
-        """
-        try:
-            config = await self.repository.get_active_config(group_id=self.group_id)
-            if not config:
-                return False, ""
-
-            # Check if Databricks is enabled
-            if hasattr(config, "is_enabled") and config.is_enabled:
-                logger.info("Databricks is enabled, checking for personal access token")
-                token = await self.secrets_service.get_personal_access_token()
-                if token:
-                    return True, token
-
-            return False, ""
-        except Exception as e:
-            logger.error(f"Error checking Databricks apps configuration: {str(e)}")
-            return False, ""
-
-    @classmethod
-    def from_session(
-        cls,
-        session: AsyncSession,
-        api_keys_service: Optional["ApiKeysService"] = None,
-    ) -> "DatabricksService":
-        """
-        Create a service instance from a database session.
-
-        Args:
-            session: Database session
-            api_keys_service: Optional ApiKeysService instance
-
-        Returns:
-            DatabricksService: Service instance with all dependencies
-        """
-        from src.repositories.databricks_config_repository import (
-            DatabricksConfigRepository,
-        )
-
-        # Create repository
-        DatabricksConfigRepository(session)
-
-        # Create service
-        service = cls(session)
-
-        # Set the API keys service if provided
-        if api_keys_service:
-            service.secrets_service.set_api_keys_service(api_keys_service)
-
-        return service
 
     async def get_workspace_auth(
         self, host: str | None = None

@@ -2,8 +2,8 @@
 
 The routes this platform actually serves, grouped by domain.
 
-**This document is a map, not a contract.** The app exposes **444 routes across
-53 domains** — more than a hand-written page can carry without going stale, which
+**This document is a map, not a contract.** The app exposes **430 routes across
+52 domains** — more than a hand-written page can carry without going stale, which
 is exactly what happened to the previous version of this file (24 of its 63
 documented endpoints did not exist, including a `/crews/{id}/kickoff` pair that
 was never how a crew ran). The authoritative, always-current reference is the
@@ -462,7 +462,6 @@ in the OpenAPI schema rather than repeated here:
 | `converters` | 18 | Power BI conversion history, jobs and saved configurations, scoped to your group (mounted at `/api/v1/api/converters`); creating a template configuration (`is_template: true`), or updating or deleting one, is system-admin only |
 | `chat-history` | 16 | Chat sessions and their messages |
 | `prompt optimization` | 15 | GEPA prompt optimisation |
-| `databricks-secrets` | 14 | Secret scopes and values |
 | `powerbi` | 14 | Semantic models, business mappings, field synonyms, query |
 | `groups` | 12 | Teamspaces and membership |
 | `Human in the Loop` | 10 | Approval gates for tool calls |
