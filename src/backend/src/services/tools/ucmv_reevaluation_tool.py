@@ -29,9 +29,9 @@ import json
 import logging
 from typing import Any, Optional, Type
 
-from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils.utils import run_async
 
 logger = logging.getLogger(__name__)
