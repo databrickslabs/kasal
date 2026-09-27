@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.events.types import LLMCallCompletedEvent
-from src.core.llm.transport.served_model import served_model_if_different
 from src.core.llm.transport.completion import OpenAICompletion
+from src.core.llm.transport.served_model import served_model_if_different
 
 
 class TestTheDiffersRule:
