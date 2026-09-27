@@ -12,6 +12,7 @@ The environment variables that Kasal's backend, launch scripts and frontend read
 - [Execution and LLM tuning](#execution-and-llm-tuning)
 - [Chat, A2UI and generation](#chat-a2ui-and-generation)
 - [Configuration → Engines system settings](#configuration--engines-system-settings)
+- [Decision model](#decision-model)
 - [Settings that moved from environment variables to the UI](#settings-that-moved-from-environment-variables-to-the-ui)
 - [Memory, knowledge and recipes](#memory-knowledge-and-recipes)
 - [Event triggers](#event-triggers)
@@ -176,7 +177,6 @@ A system administrator sets these under **Configuration → Engines → System s
 
 | Setting | Default | What it does | Replaced |
 |---|---|---|---|
-| Jev API URL | Unset | Base URL of the Jev decisions API; it must use `https://`. Unset means Jev is not configured: decisions stay off for every workspace, the runtime reads no credentials, and an admin cannot enable Jev (the save is refused with `400`). When set, each workspace still opts in and stores its key as `JEV_API_KEY` under **Configuration → API Keys** | `JEV_API_BASE` |
 | Advanced → Agent time limit | `900` | Wall-clock seconds for one agent call when the agent sets none; `0` turns it off. An explicit `max_execution_time` on the agent wins | `KASAL_AGENT_MAX_EXECUTION_TIME` |
 | Advanced → Run budget (Deep research) | Built-in profile | Tool rounds and seconds per agent call, seconds per run, and guardrail retries for deep-mode runs. Each field must be at least 1, and **Reset to default** restores the built-in value. Only modes a run applies are shown; today that is deep | `KASAL_BUDGET_<MODE>_<FIELD>` |
 | Advanced → Memory maintenance | Sweep on, every `6` h, `5` workspaces per tick; `900` s between passes on one scope | The background memory sweep across all workspaces, and the throttle on the pass after a run | `KASAL_MEMORY_SWEEP`, `KASAL_MEMORY_SWEEP_INTERVAL_HOURS`, `KASAL_MEMORY_SWEEP_BATCH`, `KASAL_MEMORY_MAINTENANCE_INTERVAL` |
@@ -186,6 +186,19 @@ The settings are `engine_config` rows for engine `kasal`, read and written throu
 
 Two former variables are now constants in `src/backend/src/services/llm/manager.py`: the blocking-LLM thread pool (`LLM_MAX_CONCURRENCY = 64`, formerly `KASAL_LLM_MAX_CONCURRENCY`; the pool is sized at import, so a runtime setting could not apply) and the default extended-thinking budget (`10240` tokens, formerly `KASAL_THINKING_BUDGET_TOKENS`).
 
+
+## Decision model
+
+The decision model lets Kasal ask an external provider to make supported decisions (for example which published capability to route to) instead of using its built-in approach. Jev is the provider today. It is configured in **Models** at two levels:
+
+| Where | Who | Setting |
+|---|---|---|
+| System administration → **Models** → Decision model | System administrators | **Jev API URL**: base URL of the Jev decisions API; it must use `https://`. Unset keeps the decision model off for every workspace: the runtime reads no credentials and enabling it is refused with `400`. Stored as the `jev_api_base` system setting (an `engine_config` row for engine `kasal`, read through `GET`/`PATCH /api/v1/engine-config/settings`). Replaced `JEV_API_BASE` |
+| Workspace settings → **Models** → Decision model | Workspace administrators | **Use a decision model**: this workspace's opt-in, off by default. It needs the provider key, stored per workspace as `JEV_API_KEY` under **Configuration → API Keys**. Stored in `decision_config` (one row per workspace id, `GET`/`PUT /api/v1/decision-config`) |
+
+When on, relevant prompts and candidate content are sent to the decision model provider; unavailable or uncertain answers fall back to Kasal's existing approach. The opt-in, the key and the setting are all per workspace: nothing falls back to another workspace's key or setting.
+
+`decision_config.group_id` is a plain workspace id, not a foreign key to `groups`, because personal workspaces (`user_<email>`) have no `groups` row. Migration `20260927_decision_config_drop_group_fk` drops the key for Alembic users; existing installs are healed at startup by `src/backend/src/db/self_heal/tables.py`.
 
 ## Settings that moved from environment variables to the UI
 

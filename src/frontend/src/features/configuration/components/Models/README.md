@@ -12,6 +12,9 @@ The system consists of:
 
 1. **Frontend**:
    - `ModelConfiguration.tsx`: UI component for enabling/disabling models and viewing their properties
+   - `ModelsSection.tsx`: the Models settings section (the default export of this folder): the model list plus the Jev decisions card for its scope
+   - `JevConfiguration.tsx`: the workspace Jev decisions opt-in (Workspace settings → Models)
+   - `JevSystemSettings.tsx`: the deployment's Jev API URL (System administration → Models)
    - `ModelService.ts`: Service that communicates with the backend API
 
 2. **Backend**:

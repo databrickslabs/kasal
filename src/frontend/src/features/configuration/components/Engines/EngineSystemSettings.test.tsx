@@ -39,23 +39,10 @@ describe('EngineSystemSettings', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('saves the Jev API URL and refuses plain http', async () => {
-    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
-      settings({ jev_api_base: 'https://jev.example.com' }),
-    );
+  it('no longer edits the Jev API URL (it moved to System administration → Models)', async () => {
     render(<EngineSystemSettings />);
-    const field = await screen.findByLabelText('Jev API URL');
-
-    fireEvent.change(field, { target: { value: 'http://jev.example.com' } });
-    expect(screen.getByText('Must start with https://')).toBeInTheDocument();
-
-    fireEvent.change(field, { target: { value: ' https://jev.example.com ' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
-    await waitFor(() =>
-      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
-        jev_api_base: 'https://jev.example.com',
-      }),
-    );
+    await screen.findByText('Advanced');
+    expect(screen.queryByLabelText('Jev API URL')).not.toBeInTheDocument();
   });
 
   it('resets a run budget field to its default by sending null', async () => {

@@ -1,5 +1,6 @@
 """Table self-heal steps: checkfirst-create tables added after a DB shipped,
-plus the indexes the hot polling paths need.
+the indexes the hot polling paths need, and table-level constraint changes
+(the ``decision_config`` foreign key drop).
 
 ``init_db`` skips ``create_all`` once a database has any table, so a table
 added later never appears on an existing install unless a step here creates
@@ -13,6 +14,8 @@ import logging
 
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+from src.db.self_heal.dialect import _conn_is_sqlite
 
 logger = logging.getLogger(__name__)
 
@@ -152,3 +155,51 @@ async def _ensure_hot_polling_indexes(conn: AsyncConnection) -> None:
 
 async def _ensure_decision_config_table(conn: AsyncConnection) -> None:
     await ensure_table(conn, "src.models.decision_config", "DecisionConfig")
+
+
+async def _drop_decision_config_group_fk(conn: AsyncConnection) -> None:
+    """Drop ``decision_config.group_id -> groups.id`` on installs that have it.
+
+    Personal workspaces (``user_<email>``) have no ``groups`` row, so the key
+    made the decision-model switch impossible to save there. ``create_all`` never alters an
+    existing table, and migration ``20260927_decision_config_drop_group_fk``
+    only reaches Alembic users, so this is what heals SQLite, PostgreSQL and
+    Lakebase installs. Idempotent: it does nothing once no such key exists.
+    """
+    if _conn_is_sqlite(conn):
+        fks = (
+            await conn.exec_driver_sql("PRAGMA foreign_key_list(decision_config)")
+        ).fetchall()
+        # Row shape: (id, seq, table, from, to, on_update, on_delete, match).
+        if not any(row[2] == "groups" for row in fks):
+            return
+        # SQLite cannot drop a constraint in place: rebuild from the model,
+        # which no longer declares the key. Nothing references decision_config.
+        from src.models.decision_config import DecisionConfig
+
+        await conn.exec_driver_sql(
+            "ALTER TABLE decision_config RENAME TO decision_config__with_fk"
+        )
+        table = DecisionConfig.metadata.tables[DecisionConfig.__tablename__]
+        await conn.run_sync(lambda sync_conn: table.create(sync_conn))
+        await conn.exec_driver_sql(
+            "INSERT INTO decision_config (group_id, enabled) "
+            "SELECT group_id, enabled FROM decision_config__with_fk"
+        )
+        await conn.exec_driver_sql("DROP TABLE decision_config__with_fk")
+        logger.info("Dropped the decision_config -> groups foreign key (SQLite)")
+        return
+
+    names = (
+        await conn.exec_driver_sql(
+            "SELECT conname FROM pg_constraint "
+            "WHERE conrelid = to_regclass('decision_config') "
+            "AND confrelid = to_regclass('groups') AND contype = 'f'"
+        )
+    ).fetchall()
+    for (name,) in names:
+        quoted = name.replace('"', '""')
+        await conn.exec_driver_sql(
+            f'ALTER TABLE decision_config DROP CONSTRAINT "{quoted}"'
+        )
+        logger.info("Dropped the decision_config foreign key %s", name)

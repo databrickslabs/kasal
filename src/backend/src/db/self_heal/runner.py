@@ -34,6 +34,7 @@ from src.db.self_heal.data import (
 )
 from src.db.self_heal.dialect import _conn_is_sqlite
 from src.db.self_heal.tables import (
+    _drop_decision_config_group_fk,
     _ensure_a2a_agents_table,
     _ensure_a2a_push_configs_table,
     _ensure_chat_assets_table,
@@ -109,6 +110,7 @@ async def run_schema_self_heal(conn: AsyncConnection) -> None:
 
     steps = (
         _ensure_decision_config_table,
+        _drop_decision_config_group_fk,
         _ensure_documentation_embeddings_columns,
         _ensure_databricks_config_columns,
         _ensure_chat_assets_table,

@@ -26,7 +26,6 @@ import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useEventTriggersStore } from '../../../../store/eventTriggers';
 import HarnessSelector from './HarnessSelector';
 import EngineSystemSettings from './EngineSystemSettings';
-import JevConfiguration from './JevConfiguration';
 
 const EnginesConfiguration: React.FC = () => {
   const { inputMode, setInputMode } = useCrewExecutionStore(useShallow(state => ({
@@ -146,7 +145,6 @@ const EnginesConfiguration: React.FC = () => {
         {/* The DEFAULT harness. A run may name its own beside the model; this
             is what applies when it does not — scheduled and API runs. */}
         <HarnessSelector />
-        <JevConfiguration />
         <EngineSystemSettings />
 
         {/* Input variables collection */}

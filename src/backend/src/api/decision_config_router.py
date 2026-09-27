@@ -1,4 +1,4 @@
-"""The Jev switch applies only to the authenticated workspace."""
+"""The decision-model switch applies only to the authenticated workspace."""
 
 from fastapi import APIRouter
 
@@ -32,7 +32,7 @@ async def update_config(
     group_context: GroupContextDep,
 ) -> DecisionConfigResponse:
     if not is_workspace_admin(group_context):
-        raise ForbiddenError("Only workspace admins can configure Jev")
+        raise ForbiddenError("Only workspace admins can configure the decision model")
     group_id = group_context.primary_group_id or ""
     return await DecisionSettingsService(session, group_id).save(config)
 

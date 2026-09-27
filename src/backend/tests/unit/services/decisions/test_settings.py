@@ -138,7 +138,7 @@ async def test_cannot_enable_when_endpoint_not_configured(service, monkeypatch):
     service.api_keys.find_by_name.return_value = SimpleNamespace(
         encrypted_value="ciphertext"
     )
-    with pytest.raises(BadRequestError, match="Configuration → Engines"):
+    with pytest.raises(BadRequestError, match="System administration → Models"):
         await service.save(DecisionConfigUpdate(enabled=True))
     service.repository.save.assert_not_awaited()
     # Turning it OFF must always work.
