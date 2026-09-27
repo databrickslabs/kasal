@@ -72,7 +72,6 @@
   "src/services/mlflow/service.py::DATABRICKS_CLIENT_ID": 1,
   "src/services/mlflow/service.py::DATABRICKS_CLIENT_SECRET": 1,
   "src/services/mlflow/service.py::DATABRICKS_HOST": 1,
-  "src/services/mlflow/sp_auth.py::<dynamic>": 3,
   "src/services/mlflow/sp_auth.py::DATABRICKS_CLIENT_ID": 1,
   "src/services/mlflow/sp_auth.py::DATABRICKS_CLIENT_SECRET": 1,
   "src/services/mlflow/sp_auth.py::DATABRICKS_HOST": 1,

@@ -40,9 +40,10 @@ def create_databricks_experiment(
     was created without one, so an eagerly-created plain experiment would poison
     the name for tracing. Missing any of the three → plain experiment (dev/local).
 
-    Auth: presents the SP/PAT token as the SINGLE method via ``single_auth_env``
-    (removes OAuth env vars, pins ``auth_type=pat``) so MLflow's own SDK client
-    creation doesn't hit "more than one authorization method configured".
+    Auth: scopes the SP/PAT token to this call via ``single_auth_env`` (no
+    process-env writes; see ``sp_auth``), so MLflow's own SDK clients use it
+    as the single method rather than hitting "more than one authorization
+    method configured".
     """
     import mlflow
 

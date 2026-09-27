@@ -6,8 +6,8 @@ whichever backend is actually configured:
 * **Local MLflow server** (dev): the workspace's local server URL in
   Configuration → MLflow. Judges register on that server.
 * **Databricks managed MLflow** (deployed): a workspace is configured. Judges
-  register through ``databricks`` auth (the app SP), the same env-swap the
-  tracing + prompt-registry paths use, so they show up in the Databricks MLflow
+  register through ``databricks`` auth (the app SP), the same scoped
+  credential (``mlflow.sp_auth``) the tracing + prompt-registry paths use, so they show up in the Databricks MLflow
   UI under the crew-traces experiment.
 
 Split in two so the async DB/auth work happens on the event loop and only the
@@ -146,9 +146,9 @@ async def resolve_mlflow_backend(
 def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
     """Set tracking URI + experiment for ``backend`` for one op, then restore.
 
-    Blocking — run inside ``asyncio.to_thread``. For databricks it swaps
-    ``DATABRICKS_HOST``/``DATABRICKS_TOKEN`` (MLflow reads them from the env),
-    mirroring the tracing + prompt-registry auth.
+    Blocking — run inside ``asyncio.to_thread``. For databricks it scopes the
+    host + token to this call (``sp_auth.single_auth_env``; nothing is written
+    to the process env), mirroring the tracing + prompt-registry auth.
     """
     import mlflow
 
@@ -156,11 +156,11 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
 
     prev_uri = mlflow.get_tracking_uri()
     # On databricks, authenticate with the SP-derived bearer token as the SINGLE
-    # method (set DATABRICKS_TOKEN, remove the OAuth env vars) — otherwise the SDK
-    # errors "more than one authorization method configured: oauth and pat" and
-    # MLflow falls back to legacy auth, so the call is NOT made as the SP that
-    # holds the UC grant. backend.auth.token is the SP's own bearer, derived in
-    # _setup_mlflow_auth. The shared single_auth_env owns the env save/restore.
+    # method — otherwise the SDK errors "more than one authorization method
+    # configured: oauth and pat" and MLflow falls back to legacy auth, so the
+    # call is NOT made as the SP that holds the UC grant. backend.auth.token is
+    # the SP's own bearer, derived in _setup_mlflow_auth; single_auth_env scopes
+    # it to this context without touching os.environ.
     if backend.kind == "databricks":
         # Reading traces from a UC-backed experiment needs the SQL warehouse id
         # in the env; without it search_traces/get_trace raise "Could not resolve

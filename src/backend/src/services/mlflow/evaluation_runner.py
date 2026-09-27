@@ -462,11 +462,11 @@ class MLflowEvaluationRunner:
     def _set_environment_vars(self, auth_ctx: Any) -> None:
         """Present ``auth_ctx`` to MLflow for the rest of this call.
 
-        MLflow reads Databricks credentials only from the process environment.
-        The host and token go in through ``single_auth_env`` — the one scoped
-        window that may write a token there, exclusive per credential so a
-        concurrent evaluation for another workspace never sees this one's — and
-        are removed by :meth:`_restore_environment_vars`.
+        The host and token are scoped to this call through ``single_auth_env``
+        (a context-local credential, never written to the process environment,
+        so a concurrent evaluation for another identity neither waits for nor
+        sees this one's) and the scope is closed by
+        :meth:`_restore_environment_vars`. Must be closed on the same thread.
         """
         from contextlib import ExitStack
 

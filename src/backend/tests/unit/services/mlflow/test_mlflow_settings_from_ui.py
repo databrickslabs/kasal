@@ -133,16 +133,122 @@ class TestLocalTrackingServer:
         svc = self._svc(monkeypatch, "http://127.0.0.1:5555", hosted=True)
         assert await svc.configured_local_uri() is None
         with pytest.raises(ValueError, match="Databricks Apps"):
-            await svc._set_local_tracking_uri("http://127.0.0.1:5555")
+            svc._validated_local_tracking_uri("http://127.0.0.1:5555")
 
-    @pytest.mark.asyncio
-    async def test_save_validates_and_clears(self, monkeypatch):
+    def test_validation_normalizes_and_clears(self, monkeypatch):
         svc = self._svc(monkeypatch, None)
         with pytest.raises(ValueError, match="http"):
-            await svc._set_local_tracking_uri("file:///tmp/mlruns")
-        await svc._set_local_tracking_uri(" http://127.0.0.1:5555 ")
-        svc.repo.set_local_tracking_uri.assert_awaited_with(
+            svc._validated_local_tracking_uri("file:///tmp/mlruns")
+        assert (
+            svc._validated_local_tracking_uri(" http://127.0.0.1:5555/ ")
+            == "http://127.0.0.1:5555"
+        )
+        assert svc._validated_local_tracking_uri("") == ""
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "http://127.0.0.1:5555",
+            "http://localhost:5000",
+            "http://LOCALHOST:5000",
+            "http://[::1]:5555",
+            "http://127.0.0.2:8080",
+            "https://mlflow.example.com",
+            "https://mlflow.example.com:8443/base",
+        ],
+    )
+    def test_accepted_servers(self, monkeypatch, uri):
+        svc = self._svc(monkeypatch, None)
+        assert svc._validated_local_tracking_uri(uri) == uri
+
+    @pytest.mark.parametrize(
+        "uri, reason",
+        [
+            ("http://mlflow.example.com", "Plain http"),
+            ("http://10.0.0.5:5000", "Plain http"),
+            ("http://localhost.example.com", "Plain http"),
+            ("http://0.0.0.0:5000", "Plain http"),
+            ("https://user:pw@mlflow.example.com", "credentials"),
+            ("http://token@127.0.0.1:5555", "credentials"),
+            ("ftp://127.0.0.1", "http"),
+            ("databricks", "http"),
+            ("https://", "host"),
+            ("http://127.0.0.1:notaport", "Invalid"),
+        ],
+    )
+    def test_rejected_servers(self, monkeypatch, uri, reason):
+        svc = self._svc(monkeypatch, None)
+        with pytest.raises(ValueError, match=reason):
+            svc._validated_local_tracking_uri(uri)
+
+    @pytest.mark.asyncio
+    async def test_a_stored_value_that_breaks_the_rule_is_ignored(self, monkeypatch):
+        """Saved before the rule existed (or written straight to the DB): it
+        must not keep redirecting traces."""
+        svc = self._svc(monkeypatch, "http://attacker.example.com:5000")
+        assert await svc.configured_local_uri() is None
+
+
+class TestUpdateSettingsIsAllOrNothing:
+    """A rejected field must leave the stored settings untouched — the repository
+    used to commit per setter, so earlier fields were saved before a 400."""
+
+    def _svc(self, monkeypatch):
+        monkeypatch.setattr(mlflow_service_mod, "is_databricks_app", lambda: False)
+        session = MagicMock()
+        session.commit = AsyncMock()
+        svc = MLflowService(session, group_id="group-1")
+        svc.repo = MagicMock()
+        for setter in (
+            "set_enabled",
+            "set_evaluation_enabled",
+            "set_experiment_name",
+            "set_evaluation_judge_model",
+            "set_advanced",
+            "set_local_tracking_uri",
+        ):
+            setattr(svc.repo, setter, AsyncMock(return_value=True))
+        svc._ensure_experiment_created = AsyncMock()
+        svc.get_settings = AsyncMock(return_value={"saved": True})
+        return svc, session
+
+    @pytest.mark.asyncio
+    async def test_invalid_uri_writes_nothing(self, monkeypatch):
+        svc, session = self._svc(monkeypatch)
+        with pytest.raises(ValueError):
+            await svc.update_settings(
+                evaluation_enabled=True,
+                experiment_name="exp",
+                local_tracking_uri="http://evil.example.com",
+            )
+        svc.repo.set_evaluation_enabled.assert_not_awaited()
+        svc.repo.set_experiment_name.assert_not_awaited()
+        svc.repo.set_local_tracking_uri.assert_not_awaited()
+        session.commit.assert_not_awaited()
+        svc._ensure_experiment_created.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_valid_update_commits_once_before_provisioning(self, monkeypatch):
+        svc, session = self._svc(monkeypatch)
+        order: list = []
+        session.commit.side_effect = lambda: order.append("commit")
+        svc._ensure_experiment_created.side_effect = lambda: order.append("provision")
+        monkeypatch.setattr(svc, "_invalidate_parent_setup", lambda: None)
+        out = await svc.update_settings(
+            enabled=True, local_tracking_uri=" http://127.0.0.1:5555/ "
+        )
+        assert out == {"saved": True}
+        svc.repo.set_local_tracking_uri.assert_awaited_once_with(
             "http://127.0.0.1:5555", group_id="group-1"
         )
-        await svc._set_local_tracking_uri("")
-        svc.repo.set_local_tracking_uri.assert_awaited_with(None, group_id="group-1")
+        session.commit.assert_awaited_once()
+        assert order == ["commit", "provision"]
+
+    @pytest.mark.asyncio
+    async def test_empty_uri_clears(self, monkeypatch):
+        svc, _ = self._svc(monkeypatch)
+        await svc.update_settings(local_tracking_uri="")
+        svc.repo.set_local_tracking_uri.assert_awaited_once_with(
+            None, group_id="group-1"
+        )
+        svc._ensure_experiment_created.assert_not_awaited()

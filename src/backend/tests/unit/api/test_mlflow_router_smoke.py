@@ -5,14 +5,22 @@ import pytest
 from src.api.mlflow_router import (
     get_evaluation_status,
     get_mlflow_experiment_info,
+    get_mlflow_settings,
     get_mlflow_status,
     get_trace_deeplink,
     set_evaluation_status,
     set_mlflow_status,
     trigger_evaluation,
+    update_mlflow_settings,
 )
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-from src.schemas.mlflow import MLflowConfigUpdate, MLflowEvaluateRequest
+from src.schemas.mlflow import (
+    MLflowConfigUpdate,
+    MLflowEvaluateRequest,
+    MLflowSettingsUpdate,
+)
+
+_ADMIN = "src.api.mlflow_router.is_workspace_admin"
 
 
 class Group:
@@ -45,7 +53,10 @@ async def test_get_mlflow_status_requires_group():
 async def test_set_mlflow_status_true_false():
     session = AsyncMock()
     group_ctx = Group("g1")
-    with patch("src.api.mlflow_router.MLflowService") as svc_cls:
+    with (
+        patch(_ADMIN, return_value=True),
+        patch("src.api.mlflow_router.MLflowService") as svc_cls,
+    ):
         svc = AsyncMock()
         svc.set_enabled = AsyncMock(return_value=True)
         svc_cls.return_value = svc
@@ -66,7 +77,10 @@ async def test_set_mlflow_status_true_false():
 async def test_evaluation_status_get_set():
     session = AsyncMock()
     group_ctx = Group("g1")
-    with patch("src.api.mlflow_router.MLflowService") as svc_cls:
+    with (
+        patch(_ADMIN, return_value=True),
+        patch("src.api.mlflow_router.MLflowService") as svc_cls,
+    ):
         svc = AsyncMock()
         svc.is_evaluation_enabled = AsyncMock(return_value=False)
         svc.set_evaluation_enabled = AsyncMock(return_value=True)
@@ -124,3 +138,65 @@ async def test_get_experiment_info_and_trace_deeplink():
             session=session, group_ctx=group_ctx, job_id="jobx"
         )
         assert link["url"].startswith("http")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda s, g: update_mlflow_settings(
+            MLflowSettingsUpdate(local_tracking_uri="https://mlflow.example.com"),
+            session=s,
+            group_ctx=g,
+        ),
+        lambda s, g: set_mlflow_status(
+            MLflowConfigUpdate(enabled=True), session=s, group_ctx=g
+        ),
+        lambda s, g: set_evaluation_status(
+            MLflowConfigUpdate(enabled=True), session=s, group_ctx=g
+        ),
+    ],
+    ids=["patch-settings", "post-status", "post-evaluation-status"],
+)
+async def test_mlflow_writes_require_a_workspace_admin(call):
+    """Where traces go is an admin decision: a member gets 403 and nothing is
+    constructed, let alone saved."""
+    with (
+        patch(_ADMIN, return_value=False),
+        patch("src.api.mlflow_router.MLflowService") as svc_cls,
+    ):
+        with pytest.raises(ForbiddenError) as ei:
+            await call(AsyncMock(), Group("g1"))
+    assert ei.value.status_code == 403
+    svc_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mlflow_settings_stay_readable_by_members():
+    """The UI reads `enabled` for every member to show tracing affordances."""
+    with (
+        patch(_ADMIN, return_value=False),
+        patch("src.api.mlflow_router.MLflowService") as svc_cls,
+        patch("src.api.mlflow_router.MLflowSettings", side_effect=lambda **kw: kw),
+    ):
+        svc_cls.return_value.get_settings = AsyncMock(return_value={"enabled": True})
+        out = await get_mlflow_settings(session=AsyncMock(), group_ctx=Group("g1"))
+    assert out == {"enabled": True}
+
+
+@pytest.mark.asyncio
+async def test_admin_patch_reaches_the_service():
+    with (
+        patch(_ADMIN, return_value=True),
+        patch("src.api.mlflow_router.MLflowService") as svc_cls,
+        patch("src.api.mlflow_router.MLflowSettings", side_effect=lambda **kw: kw),
+    ):
+        svc_cls.return_value.update_settings = AsyncMock(return_value={"ok": 1})
+        out = await update_mlflow_settings(
+            MLflowSettingsUpdate(local_tracking_uri="http://127.0.0.1:5555"),
+            session=AsyncMock(),
+            group_ctx=Group("g1"),
+        )
+    assert out == {"ok": 1}
+    kwargs = svc_cls.return_value.update_settings.await_args.kwargs
+    assert kwargs["local_tracking_uri"] == "http://127.0.0.1:5555"

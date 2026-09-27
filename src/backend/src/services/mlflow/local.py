@@ -49,18 +49,75 @@ SUGGESTED_LOCAL_URI = "http://127.0.0.1:5555"
 REACHABILITY_TIMEOUT = 2.0
 
 
+#: Hostnames that name this machine without resolving anything.
+_LOOPBACK_NAMES = frozenset({"localhost"})
+
+
+def _is_loopback(host: str) -> bool:
+    import ipaddress
+
+    if host.lower() in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_local_tracking_uri(raw: str) -> str:
+    """``raw`` as a safe local MLflow server URL, or ValueError saying why not.
+
+    Traces carry prompts, outputs and tool results, so the destination is a
+    security decision, not a formatting one:
+
+    * **https anywhere; plain http only to this machine** (localhost,
+      127.0.0.0/8, ::1). Plain http to another host would ship every trace in
+      the clear, and an arbitrary http URL is exactly how a workspace member
+      redirected traces to a host of their choosing.
+    * **No credentials in the URL.** ``user:pass@`` would be stored in the
+      database and shown back in the Configuration form.
+    """
+    value = raw.strip().rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            "The local MLflow server must be an http(s) URL, "
+            "e.g. http://127.0.0.1:5555"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("The local MLflow server URL must not contain credentials")
+    try:
+        host = parsed.hostname
+        _ = parsed.port  # raises ValueError on a malformed port
+    except ValueError as exc:
+        raise ValueError(f"Invalid local MLflow server URL: {exc}") from exc
+    if not host:
+        raise ValueError("The local MLflow server URL must name a host")
+    if parsed.scheme == "http" and not _is_loopback(host):
+        raise ValueError(
+            "Plain http is only allowed for a server on this machine "
+            "(localhost, 127.0.0.1 or ::1); use https for any other host"
+        )
+    return value
+
+
 def local_tracking_uri(configured: Optional[str]) -> Optional[str]:
     """The OSS MLflow server to trace to, from Configuration → MLflow, or None.
 
-    Only an http(s) server counts (see the module docstring); anything else —
-    unset, a file store, a Databricks URI — means "no local server".
+    Only a URL :func:`validate_local_tracking_uri` accepts counts (see the
+    module docstring); anything else — unset, a file store, a Databricks URI, a
+    plain-http remote host saved before that rule existed — means "no local
+    server". The same rule is applied on read as on write so a value stored
+    before it (or written straight to the database) cannot redirect traces.
     """
     raw = (configured or "").strip()
-    if raw.startswith(("http://", "https://")):
-        return raw.rstrip("/")
-    if raw:
-        logger.debug("[mlflow-local] ignoring non-http tracking URI %r", raw)
-    return None
+    if not raw:
+        return None
+    try:
+        return validate_local_tracking_uri(raw)
+    except ValueError as exc:
+        logger.warning("[mlflow-local] ignoring local tracking URI: %s", exc)
+        return None
 
 
 def experiment_slug(teamspace: Optional[str]) -> str:

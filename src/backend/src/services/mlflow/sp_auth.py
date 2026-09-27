@@ -1,75 +1,223 @@
-"""App service-principal single-method auth for Databricks MLflow calls.
+"""Per-call Databricks credentials for MLflow — without touching ``os.environ``.
 
-THE one place SP-token auth lives. Consolidates logic that was triplicated
-across ``mlflow/service.py._setup_mlflow_auth``,
+THE one place MLflow's Databricks auth is decided. Consolidates logic that was
+triplicated across ``mlflow/service.py._setup_mlflow_auth``,
 ``prompt_optimization/gepa/sp_auth.py`` and
-``prompt_optimization/gepa/mlflow_session.py`` — a duplication that let the
-SAME bug (calling ``config.authenticate()`` as if it were a callable) ship in
-more than one copy. MLflow is used across the app (tracing, evaluation, prompt
-registry, judges), so this belongs in the MLflow service layer, not under
-prompt_optimization.
+``prompt_optimization/gepa/mlflow_session.py``. Callers (all of them
+``with``-blocks run in worker threads):
 
-Why "single method": on a Databricks App the platform injects the app service
-principal's OAuth credentials (``DATABRICKS_CLIENT_ID`` / ``DATABRICKS_CLIENT_SECRET``).
-Kasal's LLM auth path ALSO exports ``DATABRICKS_TOKEN`` (a PAT) for LLM SDK
-compatibility. With BOTH present the Databricks SDK refuses to choose —
+* ``mlflow/experiment_setup.py`` — experiment create on settings save;
+* ``mlflow/service.py`` — trace deep link (``get_experiment_by_name``);
+* ``mlflow/evaluation_runner.py`` — create_run / ``mlflow.genai.evaluate``;
+* ``prompt_optimization/gepa/mlflow_session.py`` — judges (they live in the
+  MLflow Prompt Registry / scorer store) and judge alignment;
+* ``prompt_optimization/crew_runner.py`` — prompt-registry registration and
+  the GEPA ``optimize_prompts`` call.
 
-    ValueError: validate: more than one authorization method configured:
-    oauth and pat
+Why this exists
+---------------
+MLflow has no per-call credential parameter for Databricks: every tracking,
+registry and trace-storage request resolves auth through
+``mlflow.utils.databricks_utils.get_databricks_host_creds``, which reads
+MLflow's legacy ``EnvironmentVariableConfigProvider`` and builds a bare
+``databricks.sdk.WorkspaceClient()`` — and MLflow builds more bare clients of
+its own (SQL-warehouse resolution in ``get_trace``, dspy judge alignment). All
+of them read the PROCESS environment.
 
-— and MLflow falls back to "legacy authentication", so the registry/tracing call
-is NOT made as the app SP that holds the Unity Catalog grant, yielding a
-misleading ``PERMISSION_DENIED`` (or ``Invalid Token``) even after the correct
-grant. The fix: present the SP's own bearer token as the method to use (set
-``DATABRICKS_TOKEN`` and pin ``DATABRICKS_AUTH_TYPE=pat``) for the duration of
-the call, restoring the original env afterwards.
+The previous implementation therefore wrote the caller's token into
+``os.environ`` and serialized every "window" behind one process-wide lock. A
+long GEPA or evaluation run held it for minutes, every other MLflow call for a
+different credential waited up to 60 s and then failed, and the token sat in the
+shared environment — visible to any thread, and inherited by any subprocess
+spawned meanwhile.
 
-This module is the ONLY place a token is written into ``os.environ``
-(``tests/unit/architecture/test_no_secrets_in_environ.py`` holds that line),
-because MLflow reads its credentials from nowhere else. Windows for different
-credentials are mutually exclusive (see ``_pinned``), so a token written for one
-request is never visible to a concurrent MLflow call made for another.
+The design now
+--------------
+The credential lives in a :class:`contextvars.ContextVar`, set for the duration
+of the ``with`` block and visible only to code running in that context. Three
+narrow hooks, installed once on first use, consult it BEFORE the environment:
 
-The OAuth variables are deliberately LEFT IN PLACE. The SDK raises "more than
-one authorization method" only when no auth type is chosen
-(``Config._validate``); an explicit ``DATABRICKS_AUTH_TYPE`` is enough. An
-earlier version also popped ``DATABRICKS_CLIENT_ID``/``SECRET`` from the
-process-global env for the whole window — and because these windows run on
-worker threads (a judge listing on Unity Catalog is many REST calls long),
-every concurrent reader saw ``spn_id=no, spn_cred=no``: the dispatcher and chat
-kickoff skipped MLflow tracing, a crew subprocess spawned in the window
-inherited the stripped env for its lifetime, and Lakebase engine creation
-failed with "cannot configure default credentials" (issue #8).
+1. ``databricks.sdk.config.Config._load_from_env`` — a ``Config`` built with no
+   explicit credential inside a scope gets the scope's host + token and
+   ``auth_type="pat"``. That also settles the Apps-specific problem this module
+   was first written for: with the platform's OAuth SP variables AND a token
+   present the SDK refuses "more than one authorization method"; an explicit
+   ``auth_type`` makes it use the token. A client given explicit credentials
+   (``derive_sp_bearer`` below) is left alone.
+2. MLflow's ``EnvironmentVariableConfigProvider.get_config`` — returns the
+   scope's host + token, so ``MlflowHostCreds`` (and MLflow's per-token
+   ``get_workspace_client`` cache key) carry this caller's identity.
+3. ``concurrent.futures.ThreadPoolExecutor.submit`` — work submitted from inside
+   a scope runs in a copy of the submitter's context, the same thing
+   ``asyncio.to_thread`` does. ``mlflow.genai.evaluate`` and
+   ``optimize_prompts`` fan out onto their own pools; without this their scorer
+   and predict threads would see no credential. Outside a scope ``submit`` is
+   untouched.
+
+Nothing is written to ``os.environ``, there is no lock, and two identities can
+run side by side for as long as they like: each sees only its own token.
+
+What it does NOT cover: a plain ``threading.Thread`` started inside a scope
+does not inherit it (Python threads start with an empty context) and falls back
+to the ambient environment — the app SP's own OAuth variables on Databricks
+Apps, which is the identity :func:`sp_single_auth` presents anyway. Non-secret
+MLflow state that is still process-global (``mlflow.set_tracking_uri``,
+``MLFLOW_TRACING_SQL_WAREHOUSE_ID``) is out of this module's scope.
 """
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from typing import Dict, Iterator, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Every Databricks auth env var the swap touches. Saved and restored as a unit
-#: so a call leaves the process env exactly as it found it.
-#:
-#: DATABRICKS_AUTH_TYPE matters: Databricks Apps inject it as "oauth-m2m". If we
-#: set DATABRICKS_TOKEN and drop CLIENT_ID/SECRET but leave AUTH_TYPE=oauth-m2m,
-#: any bare ``WorkspaceClient()`` built inside the window (e.g. MLflow's
-#: ``get_trace`` -> ``_resolve_sql_warehouse_id`` during ``optimize_prompts``)
-#: obeys oauth-m2m, finds no m2m creds, and dies with "cannot configure default
-#: credentials ... auth_type=oauth-m2m". Pinning it to "pat" makes the bare
-#: client use the token instead.
-SWAP_KEYS = (
-    "DATABRICKS_HOST",
-    "DATABRICKS_TOKEN",
-    "DATABRICKS_API_KEY",
-    "DATABRICKS_CLIENT_ID",
-    "DATABRICKS_CLIENT_SECRET",
-    "DATABRICKS_AUTH_TYPE",
+
+@dataclass(frozen=True)
+class ScopedCredentials:
+    """The Databricks identity MLflow calls in the current context use."""
+
+    host: Optional[str]
+    token: str
+
+    def __repr__(self) -> str:  # never print the token
+        return f"ScopedCredentials(host={self.host!r}, token=***)"
+
+
+_CREDENTIALS: contextvars.ContextVar[Optional[ScopedCredentials]] = (
+    contextvars.ContextVar("kasal_mlflow_databricks_credentials", default=None)
 )
+
+
+def current_credentials() -> Optional[ScopedCredentials]:
+    """The credential scoped to the current context, or None outside a scope."""
+    return _CREDENTIALS.get()
+
+
+# ---------------------------------------------------------------------------
+# Hooks — installed once, inert outside a scope
+# ---------------------------------------------------------------------------
+
+#: ``Config`` attributes that mean "the caller chose its credential"; a Config
+#: built with any of them is never overridden by the scope.
+_EXPLICIT_AUTH_ATTRS = (
+    "token",
+    "client_id",
+    "client_secret",
+    "auth_type",
+    "profile",
+    "username",
+    "password",
+    "azure_client_id",
+    "azure_client_secret",
+    "google_credentials",
+    "google_service_account",
+)
+
+_HOOKS_LOCK = threading.Lock()
+#: Set on every wrapper, so installation is idempotent by inspecting the live
+#: target rather than a flag — a module reloaded (or stubbed, in tests) since
+#: the last install simply gets hooked again.
+_MARK = "_kasal_scoped_credentials"
+
+
+def _mark(wrapper: Any, original: Any) -> Any:
+    wrapper.__wrapped__ = original
+    setattr(wrapper, _MARK, True)
+    return wrapper
+
+
+def _hook_sdk_config() -> None:
+    try:
+        from databricks.sdk.config import Config
+        from databricks.sdk.credentials_provider import DefaultCredentials
+    except ImportError:  # no SDK: nothing reads Databricks auth
+        return
+    original = Config._load_from_env
+    if getattr(original, _MARK, False):
+        return
+
+    def _load_from_env(self: Any) -> None:
+        creds = _CREDENTIALS.get()
+        if (
+            creds is not None
+            # A caller-supplied credentials_strategy is an explicit choice too.
+            and isinstance(self._credentials_strategy, DefaultCredentials)
+            and not any(a in self._inner for a in _EXPLICIT_AUTH_ATTRS)
+        ):
+            # attributes() names the ConfigAttribute descriptors on first call;
+            # before that a descriptor write lands under the key None.
+            self.attributes()
+            if creds.host and "host" not in self._inner:
+                self.host = creds.host
+            self.token = creds.token
+            self.auth_type = "pat"
+        original(self)
+
+    Config._load_from_env = _mark(_load_from_env, original)  # type: ignore[method-assign]
+
+
+def _hook_mlflow_env_provider() -> None:
+    try:
+        from mlflow.legacy_databricks_cli.configure import provider
+    except ImportError:  # MLflow not importable (yet): retried next scope
+        return
+    original = provider.EnvironmentVariableConfigProvider.get_config
+    if getattr(original, _MARK, False):
+        return
+
+    def get_config(self: Any) -> Any:
+        creds = _CREDENTIALS.get()
+        if creds is None or not creds.host:
+            return original(self)
+        return provider.DatabricksConfig.from_token(creds.host, creds.token)
+
+    provider.EnvironmentVariableConfigProvider.get_config = _mark(  # type: ignore[method-assign]
+        get_config, original
+    )
+
+
+def _hook_thread_pool_submit() -> None:
+    original = ThreadPoolExecutor.submit
+    if getattr(original, _MARK, False):
+        return
+
+    def submit(self: Any, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        if _CREDENTIALS.get() is None:
+            return original(self, fn, *args, **kwargs)
+        # A fresh copy per task: one Context cannot be entered by two threads.
+        return original(self, contextvars.copy_context().run, fn, *args, **kwargs)
+
+    ThreadPoolExecutor.submit = _mark(submit, original)  # type: ignore[method-assign]
+
+
+def install_hooks() -> None:
+    """Install the three read hooks (idempotent). Called on every scope entry."""
+    with _HOOKS_LOCK:
+        _hook_sdk_config()
+        _hook_mlflow_env_provider()
+        _hook_thread_pool_submit()
+
+
+@contextmanager
+def _scoped(host: Optional[str], token: str) -> Iterator[None]:
+    install_hooks()
+    handle = _CREDENTIALS.set(ScopedCredentials(host=host, token=token))
+    try:
+        yield
+    finally:
+        _CREDENTIALS.reset(handle)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[str]:
@@ -78,10 +226,9 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
     ``Config.authenticate()`` returns a ``{"Authorization": "Bearer <tok>"}``
     dict (a set of fresh auth headers) — NOT a callable. An earlier version
     called the result as ``adder(dummy)``, which raised ``TypeError: 'dict'
-    object is not callable``; that was swallowed, so this returned None, the
-    single-auth swap silently no-op'd, and the call fell back to the ambient PAT
-    — the ``403 Invalid Token`` on the UC prompts endpoint. Read the header out
-    of the dict.
+    object is not callable``; that was swallowed, so this returned None and the
+    call fell back to the ambient PAT — the ``403 Invalid Token`` on the UC
+    prompts endpoint. Read the header out of the dict.
 
     Returns None (caller falls back to ambient env) if creds are unusable.
     """
@@ -89,10 +236,7 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
         from databricks.sdk import WorkspaceClient
 
         # auth_type names the credentials passed, so neither a PAT in the env
-        # nor a pinned DATABRICKS_AUTH_TYPE from a concurrent window can
-        # redirect this client (issue #8: with the env pinned to "pat" and the
-        # PAT momentarily absent, the exchange failed with "cannot configure
-        # default credentials").
+        # nor an enclosing credential scope can redirect this client.
         w = WorkspaceClient(
             host=host,
             client_id=client_id,
@@ -103,145 +247,39 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
         bearer = headers.get("Authorization", "")
         return bearer[len("Bearer ") :] if bearer.startswith("Bearer ") else None
     except Exception as exc:  # noqa: BLE001 — caller falls back to ambient env
-        logger.warning(f"Could not derive SP bearer token: {exc}")
+        logger.warning("Could not derive SP bearer token: %s", exc)
         return None
-
-
-#: Guards every field below. A Condition, because a window whose credential
-#: differs from the active one WAITS for it to close rather than overwrite it.
-_PIN_COND = threading.Condition(threading.RLock())
-_PIN_DEPTH = 0
-#: The credential the open windows share (``None`` while none is open).
-_PIN_ACTIVE: Optional[Tuple[Optional[str], Optional[str]]] = None
-#: SWAP_KEYS as they were before the FIRST active window; restored by the last.
-_PIN_ORIGINAL: Dict[str, Optional[str]] = {}
-_PIN_THREAD = threading.local()
-#: Longest a window waits for another credential's window to close. A window
-#: that is never closed (a bug) must fail the next caller loudly rather than
-#: block every later MLflow call — and the process's exit — forever.
-_PIN_WAIT_SECONDS = 60.0
-
-#: Window key for the app service principal. SP bearers are minted per call, so
-#: two SP windows carry different token strings for the SAME identity — keying
-#: them by identity lets them overlap instead of queueing behind each other.
-_APP_SP = "app-service-principal"
-
-
-@contextmanager
-def _pinned(
-    *,
-    host: Optional[str] = None,
-    token: Optional[str] = None,
-    identity: Optional[str] = None,
-) -> Iterator[None]:
-    """Pin token auth for the duration of a window.
-
-    MLflow (and the bare ``WorkspaceClient()`` it builds) reads Databricks auth
-    ONLY from the process environment — there is no per-call credential. The
-    environment is shared by every workspace and user this server serves, so a
-    window is the only place a token may be written there, and windows for
-    DIFFERENT credentials are mutually exclusive: the second waits for the first
-    to close. Two concurrent requests therefore can never see each other's token.
-    Windows for the same credential overlap (reference counted), and a window
-    nested in one this thread already holds proceeds and restores on exit.
-
-    Blocking — callers run in worker threads (``asyncio.to_thread``), never on
-    the event loop.
-    """
-    global _PIN_DEPTH, _PIN_ACTIVE
-    key = (host, identity or token)
-    with _PIN_COND:
-        nested = getattr(_PIN_THREAD, "depth", 0) > 0
-        if not _PIN_COND.wait_for(
-            lambda: not (_PIN_DEPTH > 0 and not nested and _PIN_ACTIVE != key),
-            timeout=_PIN_WAIT_SECONDS,
-        ):
-            raise TimeoutError(
-                "Timed out waiting for another Databricks auth window to close; "
-                "an auth window was left open"
-            )
-        if _PIN_DEPTH == 0:
-            _PIN_ORIGINAL.clear()
-            _PIN_ORIGINAL.update({k: os.environ.get(k) for k in SWAP_KEYS})
-            _PIN_ACTIVE = key
-        outer = {k: os.environ.get(k) for k in SWAP_KEYS} if nested else None
-        _PIN_DEPTH += 1
-        _PIN_THREAD.depth = getattr(_PIN_THREAD, "depth", 0) + 1
-        if host is not None:
-            os.environ["DATABRICKS_HOST"] = host
-        if token is not None:
-            # The one sanctioned write of a token into os.environ: MLflow can
-            # only read it from there, and the exclusion above scopes it.
-            os.environ["DATABRICKS_TOKEN"] = token
-        # The SDK then uses DATABRICKS_TOKEN, skips its "more than one
-        # authorization method" validation, and a bare WorkspaceClient() built
-        # in the window (MLflow's get_trace warehouse resolution) uses the
-        # token rather than oauth-m2m.
-        os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
-    try:
-        yield
-    finally:
-        with _PIN_COND:
-            _PIN_DEPTH -= 1
-            _PIN_THREAD.depth -= 1
-            restore = _PIN_ORIGINAL if _PIN_DEPTH == 0 else outer
-            for k, value in (restore or {}).items():
-                if value is not None:
-                    os.environ[k] = value
-                elif k in os.environ:
-                    del os.environ[k]
-            if _PIN_DEPTH == 0:
-                _PIN_ORIGINAL.clear()
-                _PIN_ACTIVE = None
-                _PIN_COND.notify_all()
-
-
-@contextmanager
-def pat_auth_env() -> Iterator[bool]:
-    """Pin token auth as the app service principal for the duration.
-
-    Use around calls that internally build a bare ``WorkspaceClient()`` AND also
-    run other Databricks work — the GEPA ``optimize_prompts`` call is exactly
-    this: MLflow's per-eval ``get_trace`` resolves a SQL warehouse via a bare
-    client. Pinning ``auth_type=pat`` with the SP's own bearer disambiguates for
-    the bare client, the same disambiguation the explicit
-    ``WorkspaceClient(..., auth_type="pat")`` in ``databricks_auth`` uses.
-
-    This used to pin whatever ``DATABRICKS_TOKEN`` was already in the process
-    environment. Nothing puts one there any more (a token in the shared env
-    belongs to no workspace in particular), so the bearer is derived from the
-    platform SP credentials instead (or, in local dev only, a PAT the developer
-    exported). Yields ``False`` (no-op) where there is neither.
-    """
-    with sp_single_auth() as active:
-        yield active
 
 
 @contextmanager
 def single_auth_env(
     *, host: Optional[str] = None, token: Optional[str] = None
 ) -> Iterator[None]:
-    """Present ``token`` as the Databricks auth method for one call.
+    """Make ``token`` (at ``host``) the Databricks credential for this block.
 
-    Sets ``DATABRICKS_TOKEN`` (and ``DATABRICKS_HOST`` when given) and pins
-    ``DATABRICKS_AUTH_TYPE=pat``; the original :data:`SWAP_KEYS` come back when
-    the last overlapping window exits. The OAuth SP variables are NOT removed —
-    see the module docstring: the pinned auth type already makes the SDK ignore
-    them, and removing them starved every concurrent reader of the process env.
     Use when a bearer is ALREADY in hand (e.g. an ``AuthContext.token`` derived
-    earlier). For the derive-from-ambient-creds case, use :func:`sp_single_auth`.
+    earlier). Scoped to the current context and anything it submits to a thread
+    pool — never written to the process environment, never visible to a
+    concurrent call. Without a token this is a no-op (ambient auth applies).
+    For the derive-from-ambient-creds case, use :func:`sp_single_auth`.
+
+    The name is historical: this used to swap the process env.
     """
-    with _pinned(host=host, token=token):
+    if not token:
+        yield
+        return
+    with _scoped(host, token):
         yield
 
 
 @contextmanager
 def sp_single_auth() -> Iterator[bool]:
-    """Derive the app SP bearer from ambient OAuth creds and present it alone.
+    """Authenticate this block as the app service principal.
 
-    Yields ``True`` when the SP-token swap is active, ``False`` when it is a
-    no-op (no OAuth SP creds in the env — local dev / PAT-only), so those paths
-    are unaffected. Always restores the original env.
+    Derives the SP's bearer from the platform-injected OAuth credentials and
+    scopes it. Yields ``True`` when a credential is scoped, ``False`` when there
+    is none to scope (no OAuth SP creds and no local-dev PAT), so those paths
+    are unaffected.
     """
     host = os.environ.get("DATABRICKS_HOST")
     client_id = os.environ.get("DATABRICKS_CLIENT_ID")
@@ -252,25 +290,37 @@ def sp_single_auth() -> Iterator[bool]:
         if (host and client_id and client_secret)
         else None
     )
-
     if bearer:
         logger.info(
             "MLflow call: authenticating as the app service principal via its "
-            "bearer token (auth type pinned to 'pat'; OAuth creds left in place)."
+            "bearer token (scoped to this call)."
         )
-        with _pinned(token=bearer, identity=_APP_SP):
+        with _scoped(host, bearer):
             yield True
         return
 
-    # No SP bearer. In LOCAL DEV a PAT the developer exported is still pinned as
-    # the single method (nothing is written; the window only fixes the auth
-    # type), so a bare WorkspaceClient() built inside uses it. Inside Apps there
-    # is no such fallback: Kasal never puts a token in the shared environment.
+    # No SP bearer. In LOCAL DEV a PAT the developer exported is scoped as the
+    # single method, so a bare WorkspaceClient() built inside uses it even with
+    # stray OAuth variables around. Inside Apps there is no such fallback:
+    # local_dev_pat() returns None there.
     from src.utils.databricks_auth import local_dev_pat
 
-    if local_dev_pat():
-        with _pinned(identity="local-dev-pat"):
+    pat = local_dev_pat()
+    if pat:
+        with _scoped(host, pat):
             yield True
         return
 
     yield False
+
+
+@contextmanager
+def pat_auth_env() -> Iterator[bool]:
+    """Alias of :func:`sp_single_auth` for the GEPA ``optimize_prompts`` call.
+
+    MLflow's per-eval ``get_trace`` resolves a SQL warehouse via a bare
+    ``WorkspaceClient()``; on Apps the injected ``DATABRICKS_AUTH_TYPE=oauth-m2m``
+    made it fail. Inside the scope that client uses the SP bearer instead.
+    """
+    with sp_single_auth() as active:
+        yield active

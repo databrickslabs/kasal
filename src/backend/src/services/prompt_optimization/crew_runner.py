@@ -116,9 +116,9 @@ class CrewRunnerMixin:
                 # creds and a PAT (DATABRICKS_TOKEN, exported by the LLM auth
                 # path). The Databricks SDK refuses "oauth and pat" and MLflow
                 # falls back to legacy auth, so the registry call is not made as
-                # the granted SP → a misleading PERMISSION_DENIED. Present OAuth
-                # only for this call, and rebuild the client INSIDE that window
-                # so it picks up the single-method env.
+                # the granted SP → a misleading PERMISSION_DENIED. Scope the SP
+                # bearer to this call (sp_auth; no env writes) and build the
+                # client INSIDE the scope so it resolves that credential.
                 from src.services.mlflow.sp_auth import sp_single_auth
 
                 with sp_single_auth():
@@ -826,9 +826,9 @@ class CrewRunnerMixin:
             # resolves a SQL warehouse via a bare WorkspaceClient(). On Databricks
             # Apps the injected DATABRICKS_AUTH_TYPE=oauth-m2m makes that client
             # fail ("cannot configure default credentials ... auth_type=oauth-m2m")
-            # and stops the run mid-optimization. Pin token auth for the whole
-            # call so the bare client uses the PAT — without stripping the SP
-            # creds the crew's own LLM auth may still fall back to. No-op locally.
+            # and stops the run mid-optimization. Scope the SP bearer to the
+            # whole call (context-local, reaches MLflow's worker pools, never
+            # written to os.environ). No-op without SP creds.
             # optimize_prompts re-enables tracing per eval and calls
             # mlflow.get_trace(request_id, silent=True) to read each trace back.
             # On a Databricks App that read blocks/retries against trace storage

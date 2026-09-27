@@ -152,3 +152,20 @@ class TestJudgeModel:
         assert (
             await repo.get_evaluation_judge_model(group_id="g1") == "databricks:/judge"
         )
+
+
+class TestTheServiceOwnsTheTransaction:
+    """Setters flush, never commit: a rollback by the owner undoes them all, so
+    a settings update rejected part-way cannot leave half of it saved."""
+
+    @pytest.mark.asyncio
+    async def test_rollback_discards_every_write(self, repo, session):
+        await repo.set_enabled(True, group_id="g1")
+        await repo.set_experiment_name("exp", group_id="g1")
+        await repo.set_local_tracking_uri("http://127.0.0.1:5555", group_id="g1")
+        # Visible inside the transaction (flushed) ...
+        assert await repo.get_experiment_name(group_id="g1") == "exp"
+        await session.rollback()
+        # ... and gone once the owner rolls it back.
+        assert await _row_count(session) == 0
+        assert await repo.get_local_tracking_uri(group_id="g1") is None

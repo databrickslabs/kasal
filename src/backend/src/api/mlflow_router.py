@@ -1,7 +1,8 @@
 from fastapi import APIRouter
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.core.permissions import is_workspace_admin
+from src.dependencies.providers import GroupContextDep, SessionDep, WriteSessionDep
 from src.schemas.mlflow import (
     MLflowConfigResponse,
     MLflowConfigUpdate,
@@ -13,6 +14,19 @@ from src.schemas.mlflow import (
 from src.services.mlflow.service import MLflowService
 
 router = APIRouter(prefix="/mlflow", tags=["mlflow"])
+
+
+def _require_workspace_admin(group_ctx: GroupContextDep) -> None:
+    """Changing where a workspace's traces go is a workspace-admin decision.
+
+    Same rule as the Databricks configuration routes (``databricks_router``):
+    the MLflow settings choose the trace destination (a local server URL, the
+    experiment, the judge model), so a plain member must not be able to point
+    every run's prompts and outputs somewhere else. Reads stay open to members:
+    the UI reads ``enabled`` to decide whether to show tracing affordances.
+    """
+    if not is_workspace_admin(group_ctx):
+        raise ForbiddenError("Only workspace admins can change MLflow settings")
 
 
 @router.get("/settings", response_model=MLflowSettings)
@@ -32,12 +46,14 @@ async def get_mlflow_settings(
 
 @router.patch("/settings", response_model=MLflowSettings)
 async def update_mlflow_settings(
-    payload: MLflowSettingsUpdate, session: SessionDep, group_ctx: GroupContextDep
+    payload: MLflowSettingsUpdate, session: WriteSessionDep, group_ctx: GroupContextDep
 ) -> MLflowSettings:
     """Partial update; an omitted field is left alone. Returns the new state so
-    the UI never has to guess what the backend resolved to."""
+    the UI never has to guess what the backend resolved to. Workspace admins
+    only; an invalid field rejects the whole update (400) with nothing saved."""
     if not group_ctx or not group_ctx.primary_group_id:
         raise ForbiddenError("Group context required for MLflow operations")
+    _require_workspace_admin(group_ctx)
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
     sent = payload.model_dump(exclude_unset=True)
     advanced = {
@@ -71,11 +87,14 @@ async def get_mlflow_status(
 
 @router.post("/status", response_model=MLflowConfigResponse)
 async def set_mlflow_status(
-    payload: MLflowConfigUpdate, session: SessionDep, group_ctx: GroupContextDep
+    payload: MLflowConfigUpdate,
+    session: WriteSessionDep,
+    group_ctx: GroupContextDep,
 ) -> MLflowConfigResponse:
     # SECURITY: group_id is REQUIRED for MLflowService
     if not group_ctx or not group_ctx.primary_group_id:
         raise ForbiddenError("Group context required for MLflow operations")
+    _require_workspace_admin(group_ctx)
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
     ok = await svc.set_enabled(payload.enabled)
     if not ok:
@@ -98,11 +117,14 @@ async def get_evaluation_status(
 
 @router.post("/evaluation-status", response_model=MLflowConfigResponse)
 async def set_evaluation_status(
-    payload: MLflowConfigUpdate, session: SessionDep, group_ctx: GroupContextDep
+    payload: MLflowConfigUpdate,
+    session: WriteSessionDep,
+    group_ctx: GroupContextDep,
 ) -> MLflowConfigResponse:
     # SECURITY: group_id is REQUIRED for MLflowService
     if not group_ctx or not group_ctx.primary_group_id:
         raise ForbiddenError("Group context required for MLflow operations")
+    _require_workspace_admin(group_ctx)
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
     ok = await svc.set_evaluation_enabled(payload.enabled)
     if not ok:

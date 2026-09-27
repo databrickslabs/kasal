@@ -284,31 +284,21 @@ def engine_setting(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_leaked_databricks_auth_window(request):
-    """Fail a test that leaves a Databricks auth window (sp_auth._pinned) open.
+    """Fail a test that leaves a Databricks credential scope (sp_auth) open.
 
-    A window holds a process-wide lock and a token in os.environ until it closes.
-    Left open, every later MLflow call for a different credential in the same
-    worker waits on the lock, and the waiting threads keep the worker from
-    exiting. Reset the state here so the rest of the suite is unaffected.
+    A scope is context-local, so a leak cannot reach another request — but in
+    the test runner's main thread it would authenticate every later test's
+    MLflow/SDK client as the leaked identity. Reset it so the rest of the suite
+    is unaffected.
     """
     yield
     sp_auth = sys.modules.get("src.services.mlflow.sp_auth")
-    if sp_auth is None or not sp_auth._PIN_DEPTH:
+    if sp_auth is None or sp_auth.current_credentials() is None:
         return
-    with sp_auth._PIN_COND:
-        for key, value in sp_auth._PIN_ORIGINAL.items():
-            if value is not None:
-                os.environ[key] = value
-            else:
-                os.environ.pop(key, None)
-        sp_auth._PIN_ORIGINAL.clear()
-        sp_auth._PIN_DEPTH = 0
-        sp_auth._PIN_ACTIVE = None
-        sp_auth._PIN_THREAD.depth = 0
-        sp_auth._PIN_COND.notify_all()
+    sp_auth._CREDENTIALS.set(None)
     pytest.fail(
-        f"{request.node.nodeid} left a Databricks auth window open "
-        "(sp_auth._pinned); close it, e.g. via _restore_environment_vars",
+        f"{request.node.nodeid} left a Databricks credential scope open "
+        "(sp_auth); close it, e.g. via _restore_environment_vars",
         pytrace=False,
     )
 
