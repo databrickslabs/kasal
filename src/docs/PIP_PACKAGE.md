@@ -16,9 +16,8 @@ returns 401. Only do that while the server is bound to loopback: with
 `--host 0.0.0.0`, anyone who can reach the port acts as that user.
 
 First boot creates `~/.kasal/kasal.db` (SQLite) and seeds the model/tool
-catalog. The command sets `LOG_DIR` to `~/.kasal/logs`, but the app currently
-overrides it at import (`src/backend/src/main.py`), so logs land in a `logs/`
-directory inside the installed package. Options:
+catalog. Logs go to `~/.kasal/logs` (the command defaults `LOG_DIR` to
+`<data dir>/logs`, and the app keeps a `LOG_DIR` that is already set). Options:
 
 ```bash
 kasal --host 127.0.0.1 --port 9000 --data-dir /srv/kasal

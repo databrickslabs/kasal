@@ -75,7 +75,7 @@ There are three ways to start Kasal, and they don't share defaults. Use `run.sh`
 |---|---|---|---|
 | Intended use | Local development | Production / Databricks Apps entry point (`src/app.yaml` runs it) | Trying Kasal from an installed wheel |
 | Bind host | `KASAL_BIND_HOST`, default `127.0.0.1`; warns on any other host | `KASAL_BIND_HOST` if set; otherwise `0.0.0.0` inside Databricks Apps and `127.0.0.1` elsewhere | `--host`, default `127.0.0.1` |
-| Port | `KASAL_PORT`, default `8000` | `--port`, default `8000` | `--port`, default `8000` |
+| Port | `KASAL_PORT`, default `8000` | `--port`; default `DATABRICKS_APP_PORT` inside Databricks Apps, else `8000` | `--port`, default `8000` |
 | `LOCAL_DEV_AUTH` | Set to `true` unless you set it | Set to `true` by `--environment dev` unless you set it; otherwise not set, and refused inside Apps | Not set; export it yourself, or API calls return 401 (see the [pip package guide](./PIP_PACKAGE.md)) |
 | Default database | SQLite, `src/backend/app.db` (`./run.sh postgres` for PostgreSQL) | SQLite, `src/kasal.db`; inside Apps, the attached Lakebase resource | SQLite, `~/.kasal/kasal.db`; any `DATABASE_TYPE` or `SQLITE_DB_PATH` you export wins |
 | Frontend | None; run the Vite dev server on port 3000 | Serves the built `src/frontend_static` | Serves the UI bundled in the wheel |

@@ -29,20 +29,20 @@ Paths below are relative to the repository root. Boolean flags accept `true`/`fa
 
 Kasal reads configuration from three places:
 
-- **Process environment.** Most variables are read with `os.getenv` at the point of use, often at import time. Set them in your shell, in `run.sh`'s environment, or in `src/app.yaml` for a Databricks App.
+- **Process environment.** Only platform facts, the database connection, logging and process plumbing are still read from the environment, mostly in `src/backend/src/config/settings.py`, `src/backend/src/config/logging.py` and `src/backend/src/core/databricks_app.py`; the remaining reads elsewhere are frozen by a ratchet (see [Settings that moved from environment variables to the UI](#settings-that-moved-from-environment-variables-to-the-ui)). Set them in your shell, in `run.sh`'s environment, or in `src/app.yaml` for a Databricks App. Everything tunable is a setting in the UI.
 - **`src/backend/src/config/settings.py`.** The pydantic `Settings` class declares `env_file=".env"`, resolved against the **current working directory**, with case-sensitive names. A `.env` file (like the environment) only affects the fields in `Settings.ENV_FIELDS`: `DATABASE_TYPE`, `DATABASE_URI`, `SYNC_DATABASE_URI`, `SQLITE_DB_PATH`, `POSTGRES_*`, `DEBUG_MODE` and `KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS`. Nothing calls `load_dotenv`, so a `.env` file does **not** set any variable read with `os.getenv`. In particular, `LOCAL_DEV_AUTH` in `.env` has no effect: export it instead.
 - **Vite `.env` files in `src/frontend/`.** Only `VITE_*` variables reach the browser bundle.
 
 > [!IMPORTANT]
-> `src/backend/src/main.py` overwrites some variables at import time: `USE_NULLPOOL=true`, `CREWAI_DISABLE_TELEMETRY=true`, `SEED_DEBUG=True`, `LOG_DIR=<backend>/logs`, and `MLFLOW_TRACKING_URI=databricks` (a local MLflow server is set in Configuration → MLflow). Setting these yourself has no effect on the server process.
+> `src/backend/src/main.py` overwrites some variables at import time: `USE_NULLPOOL=true`, `CREWAI_DISABLE_TELEMETRY=true`, `SEED_DEBUG=True` and `MLFLOW_TRACKING_URI=databricks` (a local MLflow server is set in Configuration → MLflow). Setting these yourself has no effect on the server process. `LOG_DIR` is only defaulted there (to `src/backend/logs`), so a value you or the launcher set wins; `src/entrypoint.py` sets it to `src/backend/logs` and the pip `kasal` command defaults it to `~/.kasal/logs`.
 
 ## What is not configured here
 
 Models, embedders and judges are configured in the UI, not with environment variables. Model definitions are seeded from `src/backend/src/seeds/model_configs.py` into the database, enabled and selected per workspace in the UI's model configuration, and resolved at run time through `LLMManager` (`src/backend/src/services/llm/manager.py`). Embedder and memory backends, Databricks workspace settings, MLflow and judge models, and provider API keys (stored encrypted, then loaded into the execution environment) are set the same way. For more information, see the [models reference](./MODELS.md).
 
-A few model-name variables still exist as fallbacks when nothing is configured; they are listed under [Chat, A2UI and generation](#chat-a2ui-and-generation). Do not add new ones.
+No model-name variable is read any more: model endpoints, tool options, output caps and reasoning settings are per-model parameters in Configuration → Models (see [Execution and LLM tuning](#execution-and-llm-tuning)). Do not add new ones.
 
-The exported Databricks App template (`src/backend/src/services/export/templates/databricks_app/`) has its own variables (`CREW_MODE`, `CHAT_MAX_ITER`, `LOCAL_LLM_*`, `PG*` and others) and its own `.env.example`. They configure the exported app, not Kasal, and are out of scope here.
+The exported Databricks App template (`src/backend/src/services/export/templates/databricks_app/`) has its own variables (`CREW_MODE`, `CHAT_MAX_ITER`, `LOCAL_LLM_*`, `LAKEBASE_*`, `PG*` and others) and its own `.env.example`. They configure the exported app, not Kasal, and are out of scope here.
 
 ## Server and run.sh
 
@@ -61,7 +61,9 @@ The server variables are:
 
 `run.sh` changes into `src/backend` before it starts, whatever directory you call it from. It also exports these on your behalf: `DATABASE_TYPE` (see [Database](#database)), `LOCAL_DEV_AUTH=true` unless already set, `KASAL_LOG_LEVEL=INFO` and `KASAL_LOG_THIRD_PARTY=WARNING` unless already set, `USE_NULLPOOL=true` and `CREWAI_DISABLE_TELEMETRY=true`. Its `-q`, `-v`, `-d`, `--no-console` and `--no-file` flags set the logging variables described under [Logging](#logging).
 
-The production entrypoint `src/entrypoint.py` (used by `src/app.yaml`) takes `--db-type`, `--db-url`, `--port` (default `8000`), `--reload`, `--debug` and `--environment dev|prod` flags rather than variables. `--environment dev` makes it a local run like `run.sh`: it sets `KASAL_DEPLOYMENT_MODE=local` and `LOCAL_DEV_AUTH=true` (unless you set `LOCAL_DEV_AUTH` yourself); `prod`, or no flag, changes nothing. `--reload` restarts on changes under `src/backend/src`. It binds `KASAL_BIND_HOST` if set, otherwise `0.0.0.0` inside Databricks Apps (`DATABRICKS_APP_NAME` set) and `127.0.0.1` everywhere else. For how the three launchers differ, see [compare the launchers](./DEVELOPER_GUIDE.md#compare-the-launchers).
+The production entrypoint `src/entrypoint.py` (used by `src/app.yaml`) takes `--db-type`, `--db-url`, `--port` (default: `DATABRICKS_APP_PORT` inside Databricks Apps, else `8000`), `--reload`, `--debug` and `--environment dev|prod` flags rather than variables. `--environment dev` makes it a local run like `run.sh`: it sets `KASAL_DEPLOYMENT_MODE=local` and `LOCAL_DEV_AUTH=true` (unless you set `LOCAL_DEV_AUTH` yourself); `prod`, or no flag, changes nothing. `--reload` restarts on changes under `src/backend/src`. It binds `KASAL_BIND_HOST` if set, otherwise `0.0.0.0` inside Databricks Apps (`DATABRICKS_APP_NAME` set) and `127.0.0.1` everywhere else. For how the three launchers differ, see [compare the launchers](./DEVELOPER_GUIDE.md#compare-the-launchers).
+
+`src/deploy.py` takes its settings as flags too. The only variable it reads is `USER`, to name the default workspace directory (`/Workspace/Users/<user>/<app>`) when you pass no user or directory; it pins `VITE_API_URL` for the frontend build it runs, so a local `.env.local` cannot leak into the bundle.
 
 ## Local development identity
 
@@ -70,10 +72,11 @@ Every protected API route depends on `get_group_context` (`src/backend/src/depen
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `LOCAL_DEV_AUTH` | Unset (`run.sh` sets `true`) | Opt-in. When `1`/`true`/`yes`/`on`, `LocalDevAuthMiddleware` adds `X-Forwarded-Email` to any request that has no identity header. Ignored, with an error log, when `DATABRICKS_APP_NAME` is set or `ENVIRONMENT` is `production`/`prod` | `src/backend/src/main.py` |
-| `ENVIRONMENT` | Unset; treated as `development` where a default is needed | `production`/`prod` disables `LOCAL_DEV_AUTH` and the loopback SSE identity fallback. `development`/`dev`/`local` (the default) allows synthetic emails without a TLD and applies `ADMIN_EMAILS` | `src/backend/src/main.py`, `src/backend/src/dependencies/providers.py`, `src/backend/src/schemas/group.py`, `src/backend/src/services/groups/forwarded_identity.py` |
-| `ADMIN_EMAILS` | Empty | Comma-separated emails that get the admin role when first seen, in development only. Emails matching `admin@localhost`, `admin@` or `testadmin@` also do | `src/backend/src/services/groups/forwarded_identity.py` |
+| `ENVIRONMENT` | Unset; treated as `development` where a default is needed | Outside Databricks Apps only: `production`/`prod` disables `LOCAL_DEV_AUTH` and the loopback SSE identity fallback; `development`/`dev`/`local` (the default) also allows synthetic emails without a TLD. Inside Apps Kasal is always production and a different value is ignored with a warning. Consumed through `is_production()`/`is_local_dev()` by `src/backend/src/main.py`, `src/backend/src/dependencies/providers.py` and `src/backend/src/schemas/group.py` | `src/backend/src/core/databricks_app.py`, `src/backend/src/config/settings.py` |
 
 If you start uvicorn yourself instead of through `run.sh`, export `LOCAL_DEV_AUTH=true` or send an `X-Forwarded-Email` header, or every API call returns 401. In development the frontend sends `X-Forwarded-Email` itself (see `VITE_DEV_USER_EMAIL`), and native `EventSource` streams carry the identity as `_sse_email` / `_sse_group_id` query parameters, which the backend honors only on `/sse/` routes from a loopback client outside production. For more information, see the [security guide](./SECURITY.md).
+
+A user seen for the first time is always created as a regular user. The former `ADMIN_EMAILS` variable, and the development-only promotion of `admin@…` emails, are gone: workspace admin rights come from group membership.
 
 ## Database
 
@@ -94,6 +97,7 @@ The database variables are:
 | `DATABASE_TYPE` | `sqlite` | `sqlite` or `postgres`; selects how `DATABASE_URI` is assembled | `src/backend/src/config/settings.py` |
 | `SQLITE_DB_PATH` | `src/backend/app.db`, absolute (entrypoint: `src/kasal.db`; pip `kasal`: `~/.kasal/kasal.db`) | SQLite database file | `src/backend/src/config/settings.py`, `src/entrypoint.py` |
 | `DATABASE_URI` | Assembled from the fields above | Full async SQLAlchemy URI; when set, it wins over `DATABASE_TYPE` | `src/backend/src/config/settings.py` |
+| `SYNC_DATABASE_URI` | Assembled from the fields above | Synchronous URI for the few sync callers; `src/entrypoint.py` exports it alongside `DATABASE_URI` | `src/backend/src/config/settings.py` |
 | `POSTGRES_SERVER` | `localhost` | PostgreSQL host | `src/backend/src/config/settings.py` |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port | `src/backend/src/config/settings.py` |
 | `POSTGRES_USER` | `postgres` | PostgreSQL user | `src/backend/src/config/settings.py` |
@@ -115,10 +119,10 @@ Inside Databricks Apps the platform injects the app variables below. Kasal treat
 | `DATABRICKS_APP_NAME`, `DATABRICKS_APP_PORT`, `DATABRICKS_WORKSPACE_ID` | Unset | Injected by Databricks Apps; together with `DATABRICKS_HOST` they mark the process as hosted. `DATABRICKS_APP_NAME` alone also marks it as production for `LOCAL_DEV_AUTH` | `src/backend/src/core/databricks_app.py`, `src/backend/src/main.py` |
 | `KASAL_DEPLOYMENT_MODE` | Unset | `local` forces "not hosted" even when the app variables are present | `src/backend/src/core/databricks_app.py` |
 | `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` | Unset | The app service principal's OAuth credentials, injected by Databricks Apps. Used for service-principal calls when no user token applies | `src/backend/src/utils/databricks_auth.py`, `src/backend/src/utils/databricks_app_auth.py` |
-| `DATABRICKS_TOKEN`, `DATABRICKS_API_KEY` | Unset | Personal access token fallbacks for local runs and some legacy paths. The main auth path does not read them from the environment; configure a token in the UI instead | `src/backend/src/utils/databricks_auth.py` |
+| `DATABRICKS_TOKEN`, `DATABRICKS_API_KEY` | Unset | Personal access token fallback for a local, single-user run. Ignored inside Databricks Apps, where the environment is shared by every workspace and a token comes only from the workspace's API keys. Prefer configuring the token in the UI | `src/backend/src/utils/databricks_auth.py` |
 | `KASAL_SQL_WAREHOUSE_ID` | Empty | Default SQL warehouse, injected from the `sql-warehouse` app resource by `src/app.yaml` | `src/backend/src/core/databricks_app.py` |
 | `KASAL_OUTPUT_VOLUME` | Empty | Unity Catalog volume (`/Volumes/...`) for run outputs, injected from the `volume` app resource | `src/backend/src/core/databricks_app.py` |
-| `KASAL_DEFAULT_MODEL` | Empty | Default model endpoint, injected from the `serving-endpoint` app resource. Wins over `DEFAULT_LLM_MODEL` | `src/backend/src/core/databricks_app.py`, `src/backend/src/utils/model_config.py` |
+| `KASAL_DEFAULT_MODEL` | Empty | Default model endpoint, injected from the `serving-endpoint` app resource. The installed default model when no model is chosen in the UI | `src/backend/src/core/databricks_app.py` |
 | `DATABRICKS_ENABLE_AI_GATEWAY` | `false` | Routes LLM and embedding traffic through the AI Gateway instead of `/serving-endpoints`. Set by Kasal from the UI's Databricks configuration; do not set it by hand | `src/backend/src/utils/databricks_url_utils.py` |
 
 The workspace URL you save in the UI's Databricks configuration (`POST /databricks/config`) is validated on save: it must use `https`, and its host must equal the credentialed host, which is the installation host inside Databricks Apps and the auth context's workspace elsewhere. Kasal only ever sends a Databricks credential to that host, including from a tool's `databricks_host` argument. For more information, see [Databricks credential hosts](./SECURITY.md#databricks-credential-hosts).
@@ -127,12 +131,13 @@ For more information, see the [Databricks App installation guide](./databricks-a
 
 ## Security and API limits
 
-These control encryption, rate limiting and a few request-path caches:
+These control encryption and two development-only switches. The rate limit and the request-path caches are constants now (see [Settings that moved from environment variables to the UI](#settings-that-moved-from-environment-variables-to-the-ui)):
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `ENCRYPTION_KEY` | Unset | Fernet key for stored secrets. Resolution order: this variable, then the `kasal/kasal_encryption_key` secret provisioned by `src/deploy.py`, then a generated key that does not survive a restart (a warning is logged) | `src/backend/src/utils/encryption_utils.py` |
-| `KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS` | Empty | `1`/`true`/`yes` lets trigger webhooks target private or loopback addresses. Leave unset in production | `src/backend/src/services/triggers/queue_consumer_service.py` |
+| `KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS` | `false` | `true` lets trigger webhooks target private or loopback addresses (skips the SSRF check). A local-development convenience: forced off, with an error logged, inside Databricks Apps | `src/backend/src/config/settings.py` |
+| `DEBUG_MODE` | `false` | Enables the cross-workspace debug endpoints and uvicorn reload for `python -m src.main`. Forced off, with an error logged, inside Databricks Apps | `src/backend/src/config/settings.py` |
 
 ## Execution and LLM tuning
 
@@ -150,22 +155,21 @@ The execution and LLM variables are:
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `KASAL_RESPONSES_MAX_OUTPUT_TOKENS` | `16000` (falls back to `KASAL_CODEX_MAX_OUTPUT_TOKENS`) | Output-token cap for the Databricks Responses API adapter | `src/backend/src/services/llm/handlers/databricks_responses_llm.py` |
-| `KASAL_REASONING_EFFORT_DISABLED` | Empty | `1`/`true`/`yes` never sends a reasoning-effort parameter | `src/backend/src/utils/model_config.py` |
-| `KASAL_REASONING_EFFORT_MODELS` | Empty | Comma-separated extra model-name substrings that accept reasoning effort | `src/backend/src/utils/model_config.py` |
-| `KASAL_HARNESS` | Unset (`crewai`) | Harness a spawned run uses when neither the request nor the config chooses one. Normally set by Kasal for the child process | `src/backend/src/services/execution/harnesses/selection.py` |
-| `KASAL_ENGINE_STORAGE_DIR` | `~/.local/share/kasal_engine` | Engine-local storage such as flow checkpoints. `CREWAI_STORAGE_DIR` wins when set | `src/backend/src/utils/storage_paths.py` |
-| `VLLM_BASE_URL` | `http://localhost:8081/v1` | Base URL for models with the `vllm` provider | `src/backend/src/services/llm/manager.py` |
-| `VLLM_API_KEY` | `vllm` | API key sent to vLLM | `src/backend/src/services/llm/manager.py` |
-| `VLLM_SUPPORTS_TOOLS` | `true` | Uses the function-calling adapter for vLLM | `src/backend/src/services/llm/manager.py` |
-| `VLLM_TOOL_CHOICE` | `auto` | `tool_choice` sent to vLLM | `src/backend/src/services/llm/handlers/vllm.py` |
-| `KAT_BASE_URL` | `http://127.0.0.1:8082/v1` | Base URL for models with the `custom` provider (a self-hosted OpenAI-compatible server) | `src/backend/src/services/llm/manager.py` |
-| `KAT_API_KEY` | `local-no-auth` | API key for the `custom` provider | `src/backend/src/services/llm/manager.py` |
-| `OLLAMA_API_BASE` | `http://localhost:11434` | Ollama server for the Ollama embedder | `src/backend/src/services/execution/config/embedder_config_builder.py` |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model | `src/backend/src/services/execution/config/embedder_config_builder.py` |
-| `DEEPSEEK_ENDPOINT`, `KIMI_ENDPOINT`, `ANTHROPIC_API_BASE`, `GEMINI_API_BASE` | Provider public endpoint, or unset | Override a hosted provider's base URL | `src/backend/src/services/llm/manager.py` |
+| `KASAL_HARNESS` | Unset (`crewai`) | Harness a spawned run uses when neither the request nor the config chooses one. Normally set by Kasal for the child process | `src/backend/src/services/execution/harnesses/selection.py`, `src/backend/src/services/execution/harness_choice.py` |
+| `KASAL_ENGINE_STORAGE_DIR` | `~/.local/share/kasal_engine` locally, app-relative inside Databricks Apps | Engine-local storage such as flow checkpoints. `CREWAI_STORAGE_DIR` wins when set | `src/backend/src/utils/storage_paths.py` |
 
-Provider API keys such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SERPER_API_KEY` and `PERPLEXITY_API_KEY` are configured in the UI and stored encrypted; Kasal loads them into the execution environment itself. An exported shell value only acts as a fallback.
+Model endpoints and model options are no longer environment variables. Each is a per-model parameter set in **Configuration → Models** and stored on the model row (`params`); `src/backend/src/services/llm/endpoints.py` resolves them:
+
+| Per-model setting | Default without one | Replaced |
+|---|---|---|
+| Endpoint URL (`params.api_base`) | A hosted provider's public API. A self-hosted provider's usual local port (vLLM `http://localhost:8081/v1`, Ollama `http://localhost:11434`, custom `http://127.0.0.1:8082/v1`), outside Databricks Apps only; inside Apps a self-hosted model without an endpoint is refused | `VLLM_BASE_URL`, `KAT_BASE_URL`, `OLLAMA_API_BASE`, `ANTHROPIC_API_BASE`, `GEMINI_API_BASE`, `DEEPSEEK_ENDPOINT`, `KIMI_ENDPOINT` |
+| vLLM tool calling and tool choice (`params.supports_tools`, `params.tool_choice`) | On, `auto` | `VLLM_SUPPORTS_TOOLS`, `VLLM_TOOL_CHOICE` |
+| Output-token cap for the Databricks Responses API adapter (`params.output_token_cap`) | `16000` | `KASAL_RESPONSES_MAX_OUTPUT_TOKENS`, `KASAL_CODEX_MAX_OUTPUT_TOKENS` |
+| Reasoning effort | Support comes from the model-capabilities registry; whether a model uses it is its own reasoning setting | `KASAL_REASONING_EFFORT_DISABLED`, `KASAL_REASONING_EFFORT_MODELS` |
+
+The Ollama embedding fallback uses `nomic-embed-text` (formerly `OLLAMA_EMBED_MODEL`). The keys for self-hosted servers (`VLLM_API_KEY`, `KAT_API_KEY`) are API keys in **Configuration → API Keys**, not environment variables.
+
+Provider API keys such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SERPER_API_KEY` and `PERPLEXITY_API_KEY` are configured in the UI and stored encrypted per workspace, and Kasal passes them explicitly to the call that needs them. They are never read from, or written to, the process environment, which every workspace on the server shares: an exported shell value has no effect. `src/backend/tests/unit/architecture/test_no_secrets_in_environ.py` guards the write side.
 
 ## Chat, A2UI and generation
 
@@ -216,7 +220,7 @@ A Databricks App sets only the variables its deployment injects, so every tunabl
 
 Some former variables are now fixed in code, because nothing in Databricks Apps sets them and none is worth a Configuration field: the rate limit (`600/minute`, in memory), the group-membership cache (30 s), the SSE heartbeat (15 s), the LiteLLM response cache (in memory, 1 h), the local development identity (`dev@localhost`), the API docs (on locally, off in Apps), CORS (the local dev-server origins outside Apps, none inside), seeding (always) and the project name, version and API prefix. `KASAL_OTEL_TRACING`, `KASAL_DEBUG_TRACES`, `BACKEND_CORS_ORIGINS`, `DB_FILE_PATH` and `INSTRUCTOR_MODEL_NAME` were never used and are gone. `Settings` (`src/backend/src/config/settings.py`) reads the environment only for the fields in its `ENV_FIELDS` allow-list: the database connection, which the Apps launcher and local development set, and two development switches that Apps refuses.
 
-The architecture test `src/backend/tests/unit/architecture/test_env_reads_stay_in_config.py` keeps it this way: outside `config/settings.py`, `config/logging.py` and `core/databricks_app.py`, a file may not gain an environment read, and none of the variables above may be read again.
+The architecture test `src/backend/tests/unit/architecture/test_env_reads_stay_in_config.py` keeps it this way: outside `config/settings.py`, `config/logging.py` and `core/databricks_app.py`, a file may not gain an environment read beyond its count in `env_read_baseline.json`, and the retired settings the test names (the moved `A2UI_*`, `CHAT_*`, `KASAL_EVENT_TRIGGERS_*`, `WORKFLOW_RECIPE_*`, memory, knowledge, tool and budget variables, and `JEV_API_BASE`) may not be read again. For how the ratchet runs and how to lower its baseline, see [ratchets](./continuous-integration.md#ratchets).
 
 ## Memory, knowledge and recipes
 
@@ -238,13 +242,16 @@ Logs go to the console and to `src/backend/logs/`. `run.sh --help` lists every p
 
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
-| `KASAL_LOG_LEVEL` | `INFO` | Global level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` or `OFF` | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
+| `KASAL_LOG_LEVEL` | `INFO` (falls back to `LOG_LEVEL`) | Global level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` or `OFF` | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
 | `KASAL_LOG_APP` | Follows the global level | Level for Kasal's own loggers | `src/backend/src/config/logging.py` |
 | `KASAL_LOG_THIRD_PARTY` | `WARNING` | Level for third-party libraries | `src/backend/src/config/logging.py` |
 | `KASAL_LOG_CONSOLE`, `KASAL_LOG_FILE` | `true` | Console and file output | `src/backend/src/config/logging.py` |
-| `KASAL_LOG_<DOMAIN>` | Global level | Per-domain level, for example `KASAL_LOG_CREW`, `KASAL_LOG_FLOW`, `KASAL_LOG_LLM`, `KASAL_LOG_DATABASE` | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
+| `KASAL_LOG_<DOMAIN>` | Global level | Per-domain level: `KASAL_LOG_CREW`, `KASAL_LOG_SYSTEM`, `KASAL_LOG_LLM`, `KASAL_LOG_API`, `KASAL_LOG_DATABASE`, `KASAL_LOG_SCHEDULER`, and `KASAL_LOG_FLOW` for flow subprocesses | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py`, `src/backend/src/services/execution/subprocess_bootstrap.py` |
 | `KASAL_DEBUG_ALL` | `false` | Debug for every logger, including SQL | `src/backend/src/config/logging.py`, `src/backend/src/db/session.py` |
 | `SQL_DEBUG` | `false` | Logs every SQL statement; slow | `src/backend/src/db/session.py` |
+| `LOG_DIR` | `src/backend/logs` | Directory for log files. See the note under [How configuration is loaded](#how-configuration-is-loaded) for which launcher sets it | `src/backend/src/config/logging.py`, `src/backend/src/core/logger.py` |
+
+Inside Databricks Apps (`DATABRICKS_APP_NAME` or `DATABRICKS_RUNTIME_VERSION` set) console logging is always on, so logs reach the app's log view.
 
 ## Observability, MLflow and OpenTelemetry
 
@@ -253,13 +260,13 @@ Workspace MLflow and telemetry settings are configured in the UI. These variable
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `MLFLOW_TRACKING_URI` | Forced to `databricks` | Not a way to configure MLflow: `main.py` overwrites it so nothing writes a local `mlruns/`. A local MLflow server is set per workspace in **Configuration → MLflow → Local MLflow server** | `src/backend/src/main.py` |
-| `MLFLOW_CREW_TRACES_EXPERIMENT` | Derived from the workspace | Experiment for crew traces on a local server | `src/backend/src/services/mlflow/local.py` |
 | `MLFLOW_TRACING_SQL_WAREHOUSE_ID` | Unset (`src/app.yaml`: the `sql-warehouse` resource) | Warehouse for trace storage in Unity Catalog | `src/backend/src/services/prompt_optimization/gepa/mlflow_session.py` |
-| `MLFLOW_EVAL_MAX_ROWS` | `200` | Row cap for an evaluation run | `src/backend/src/services/mlflow/evaluation_runner.py` |
-| `MLFLOW_EVAL_JUDGE_MODEL`, `GEPA_JUDGE_MODEL` | Unset | Fallback judge models when none is configured in the UI | `src/backend/src/services/mlflow/service.py`, `src/backend/src/services/prompt_optimization/gepa/judge_model.py` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Unset | OTLP collector; Databricks Apps injects it when app telemetry is enabled | `src/backend/src/core/logger.py` |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | `OTEL_EXPORTER_OTLP_ENDPOINT` | Dedicated OTLP endpoint for logs | `src/backend/src/core/logger.py` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | OTLP protocol | `src/backend/src/core/logger.py` |
 | `OTEL_SERVICE_NAME` | `kasal` | Service name on exported logs | `src/backend/src/core/logger.py` |
+
+The crew-traces experiment, the evaluation row cap, the evaluation and optimization judge models and the judge sample count are set per workspace in **Configuration → MLflow** (the former `MLFLOW_CREW_TRACES_EXPERIMENT`, `MLFLOW_EVAL_MAX_ROWS`, `MLFLOW_EVAL_JUDGE_MODEL`, `GEPA_JUDGE_MODEL` and `GEPA_JUDGE_SAMPLES`). A prompt optimization run with no judge chosen in the dialog or in Configuration → MLflow is refused rather than judged by the model under optimization.
 
 For more information, see [MLflow tracing setup](./mlflow-tracing-setup.md) and [prompt optimization setup](./prompt-optimization-setup.md).
 
@@ -270,7 +277,7 @@ The frontend reads these at build or dev-server time from the environment or fro
 | Variable | Default | What it does | Read in |
 |---|---|---|---|
 | `VITE_KASAL_PORT` | `KASAL_PORT`, else `8000` | Port of the local backend in development: the `/api` proxy target and the port the API client and chat streams call. Not used in a build | `src/frontend/vite.config.ts`, `src/frontend/src/shared/api/backendOrigin.ts` |
-| `VITE_API_URL` | `http://localhost:<VITE_KASAL_PORT>/api/v1` in dev, `/api/v1` in a build | Overrides the base URL of the backend API. You do not need it to change the port | `src/frontend/src/shared/api/client.ts` |
+| `VITE_API_URL` | `http://localhost:<VITE_KASAL_PORT>/api/v1` in dev, `/api/v1` in a build | Overrides the base URL of the backend API. You do not need it to change the port. `src/deploy.py` pins it for the build it runs | `src/frontend/src/shared/api/client.ts` |
 | `VITE_KASAL_API_URL` | `/api/v1` | API base for the chat app store | `src/frontend/src/features/chat/store/appStore.ts` |
 | `VITE_DEV_USER_EMAIL` | `dev@localhost` | Email the dev server sends as `X-Forwarded-Email`, and as `_sse_email` on loopback event streams. Development builds only | `src/frontend/src/shared/api/client.ts`, `src/frontend/src/shared/api/sseContext.ts` |
 | `ANALYZE` | Unset | `true` opens a bundle-size report after `vite build` | `src/frontend/vite.config.ts` |
@@ -291,15 +298,16 @@ These only matter for tests and CI:
 
 Kasal sets these itself, mostly for spawned crew and flow subprocesses. Do not set them:
 
-- `CREW_SUBPROCESS_MODE`, `FLOW_SUBPROCESS_MODE`, `KASAL_EXECUTION_ID`, `LAKEBASE_ACTIVE`: mark and configure a child interpreter.
+- `KASAL_EXECUTION_ID`, `KASAL_HARNESS`: mark and configure a child interpreter. A child keeps only an allow-list of the parent's environment (`child_environment` in `src/backend/src/core/databricks_app.py`).
 - `KASAL_LOCKED_ENTRYPOINT`: guards against re-executing `src/entrypoint.py`.
-- `USE_NULLPOOL`, `LOG_DIR`, `CREWAI_DISABLE_TELEMETRY`, `CREWAI_VERBOSE`, `PYTHONUNBUFFERED`: forced by `main.py`, `run.sh` or the subprocess bootstrap.
-- `DATABRICKS_ENABLE_AI_GATEWAY`, and `DATABRICKS_HOST`/`DATABRICKS_TOKEN` inside a run: set from the UI configuration and the caller's credentials before a run starts.
+- `USE_NULLPOOL`, `CREWAI_DISABLE_TELEMETRY`, `CREWAI_VERBOSE`, `PYTHONUNBUFFERED`, `MLFLOW_DISABLE_TELEMETRY`, `OTEL_SDK_DISABLED`: forced by `main.py`, `run.sh`, the subprocess bootstrap or the MLflow setup.
+- `DATABRICKS_AUTH_TYPE` and the `DATABRICKS_BASE_URL`/`DATABRICKS_API_BASE`/`DATABRICKS_ENDPOINT` URL variables: set and restored around a single MLflow or evaluation call.
+- `DATABRICKS_ENABLE_AI_GATEWAY` and, inside a run, `DATABRICKS_HOST`: set from the UI configuration before a run starts. `DATABRICKS_HOST`/`DATABRICKS_TOKEN` are also set for the length of one MLflow call from the caller's credentials, and restored afterwards (`src/backend/src/services/mlflow/sp_auth.py`).
 - `DATABASE_URL`: set by `src/entrypoint.py`; the backend reads `DATABASE_URI`.
 
 ## Recommended: a backend env example file
 
-There is no backend `.env.example`. Adding one generated from this page, covering the server, database, local identity, logging and observability groups, would give new developers a single place to start. Because `.env` only feeds `Settings` fields, it should say which variables must be exported instead. Moving the remaining `os.getenv` defaults into `Settings` would make both this page and that file easier to keep accurate.
+There is no backend `.env.example`. One would now be small: the `Settings.ENV_FIELDS` database and development variables (the only ones a `.env` file can set), plus `LOCAL_DEV_AUTH`, `KASAL_BIND_HOST`/`KASAL_PORT` and the logging variables, which must be exported instead. Everything else is a platform fact injected by Databricks Apps or a setting in the UI.
 
 ## See also
 

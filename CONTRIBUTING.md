@@ -122,7 +122,10 @@ uv run python run_tests.py              # All tests, then every lint step
 uv run python run_tests.py --skip-lint  # Tests only
 uv run python run_tests.py --lint-only  # black, isort, ruff, mypy baseline, import-linter
 uv run python run_tests.py --coverage --html-coverage  # With coverage report
+uv run pytest -q tests/unit/architecture  # Architecture rules and ratchets
 ```
+
+**Ratchets:** file size (800-line target, 1500 ceiling), function size (200 lines), five ruff rules (`BLE001`, `S110`, `TRY400`, `G004`, `B904`), environment reads and exception text in HTTP errors are held by shrink-only baselines in `src/backend/tests/unit/architecture/`. A count may not grow. When your change lowers one, the test fails until you record the gain with the owning test's `--update`, for example `uv run python tests/unit/architecture/test_size_ratchet.py --update`; commit the updated JSON with your change. `--update` never raises a baseline. The import-linter `ignore_imports` lists in `src/backend/pyproject.toml`, the mypy baseline and the ESLint `--max-warnings` cap work the same way: remove entries or lower the number as you fix things, never add. See [ratchets](src/docs/continuous-integration.md#ratchets).
 
 ### 3. Critical Development Standards
 
@@ -271,7 +274,7 @@ There is no end-to-end suite (no Cypress or Playwright script).
 ## Commits and Pull Requests
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/): `feat(scope): ...`, `fix(scope): ...`, `docs: ...`, `refactor: ...`, `test: ...`, `chore: ...`.
-- Keep files small: target 800 lines, and never grow a file that is already over 1500.
+- Keep files small: target 800 lines, never grow a file that is already over 1500, and keep functions under 200 lines. The size ratchet enforces this in CI.
 - CI runs the backend tests, backend lint, the PostgreSQL migration check, the frontend tests, lint and build, CodeQL, a secret scan and a dependency audit. See [continuous integration](src/docs/continuous-integration.md) for what gates a pull request.
 
 ## Contribution Checklist
@@ -281,7 +284,7 @@ Before submitting your contribution:
 - [ ] **Setup**: Development environment working correctly
 - [ ] **Architecture**: Follows established Repository → Service → API pattern
 - [ ] **Testing**: 80%+ test coverage with meaningful tests
-- [ ] **Code Quality**: `run_tests.py --lint-only` passes (Black, isort, Ruff, the mypy no-new-errors gate, import-linter)
+- [ ] **Code Quality**: `run_tests.py --lint-only` passes (Black, isort, Ruff, the mypy no-new-errors gate, import-linter), and so does `pytest tests/unit/architecture` (ratchet baselines lowered with `--update` where you reduced a count)
 - [ ] **Database**: Includes an Alembic migration and a self-heal step for model changes
 - [ ] **Documentation**: Updates relevant docs and includes docstrings
 - [ ] **Type Safety**: Full type hints in Python, strict TypeScript

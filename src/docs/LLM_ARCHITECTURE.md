@@ -74,7 +74,7 @@ Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 |-------|----------------|
 | `DatabricksRetryLLM` | Retry and backoff (with longer waits for rate limits), OBO token refresh, cross-model fallback, and Databricks message sanitization — empty assistant content, Llama message format, Gemini system-prompt merging and `$ref` resolution. |
 | `DatabricksResponsesLLM` | The native OpenAI Responses API for Databricks-hosted OpenAI endpoints, served under a different base URL than chat completions. Preserves the `phase` field on assistant output items across turns, without which Codex degrades into early text-only responses. |
-| `VLLMFunctionCallingLLM` | Self-hosted vLLM: states `tool_choice="auto"` explicitly when tools are offered, rather than inheriting whatever the endpoint defaults to. Overridable per deployment with `VLLM_TOOL_CHOICE`. |
+| `VLLMFunctionCallingLLM` | Self-hosted vLLM: states `tool_choice="auto"` explicitly when tools are offered, rather than inheriting whatever the endpoint defaults to. Overridable per model with the **Tool choice** field in Configuration → Models (`params.tool_choice`). |
 
 Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it: a handler named for the GPT-OSS models sat in the tree long after those models were pruned.
 
