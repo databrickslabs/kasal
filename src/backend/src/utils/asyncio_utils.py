@@ -138,6 +138,41 @@ async def execute_db_operation_smart(
                     return result
             except Exception as e:
                 last_error = e
+                # A connection the Lakebase server closed under a long-idle run (an
+                # 18-min UCMV reconciliation does no DB I/O while the LLM works) is
+                # handed back UN-PINGED — pool_pre_ping is off for the do_connect
+                # token pattern — so the next checkout can be the SAME dead
+                # connection and the retry fails identically. On that specific
+                # "connection is closed" error, dispose the factory so the next
+                # attempt rebuilds a fresh engine/connection. Without this, a run
+                # that finished its work and deployed its UCMVs fails to persist its
+                # terminal status and a real success is reported as a failure.
+                from src.db.lakebase_session import _is_disposed_connection_error
+
+                if _is_disposed_connection_error(e):
+                    try:
+                        from src.db.lakebase_session import (
+                            _is_crew_thread,
+                            dispose_lakebase_factory,
+                            dispose_thread_local_lakebase_factory,
+                        )
+
+                        # Scope the dispose to THIS thread's factory in crew/flow
+                        # subprocess threads; only touch the shared global factory
+                        # off those threads (where there is no concurrent traffic
+                        # to disrupt mid-flight).
+                        if _is_crew_thread():
+                            await dispose_thread_local_lakebase_factory()
+                        else:
+                            await dispose_lakebase_factory()
+                        logger.warning(
+                            "Lakebase connection was closed; disposed the factory so "
+                            "the next retry reconnects fresh."
+                        )
+                    except Exception as disp_err:  # noqa: BLE001 — best-effort
+                        logger.debug(
+                            f"Lakebase factory dispose after closed connection skipped: {disp_err}"
+                        )
                 if attempt < max_retries - 1:
                     delay = backoff_delays[attempt]
                     logger.warning(

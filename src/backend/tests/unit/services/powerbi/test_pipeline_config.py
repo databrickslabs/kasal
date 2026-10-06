@@ -416,18 +416,25 @@ class TestGeoSwitchDecomposition:
 
 
 class TestReportIdAutoDiscovery:
-    """PROP-7: discover the report bound to the dataset when none supplied."""
+    """PROP-7: discover the report bound to the dataset when none supplied.
+
+    ``discover_report_id`` itself lives in the sibling ``report_discovery``
+    module (split out of ``pipeline_config.py``, which is over the file-size
+    ceiling) — imported and re-exported by ``pipeline_config`` for callers,
+    but tested directly against its owning module here so patching
+    ``requests`` actually reaches the code under test.
+    """
 
     def _discover(self, reports, dataset_id="ds1", status=200):
         from unittest.mock import MagicMock, patch
 
-        from src.services.powerbi import pipeline_config as gc
+        from src.services.powerbi import report_discovery as rd
 
         resp = MagicMock(status_code=status)
         resp.json.return_value = {"value": reports}
-        with patch.object(gc, "requests") as rq:
+        with patch.object(rd, "requests") as rq:
             rq.get.return_value = resp
-            return gc.discover_report_id("tok", "ws", dataset_id)
+            return rd.discover_report_id("tok", "ws", dataset_id)
 
     def test_matches_dataset_case_insensitive(self):
         rid = self._discover([{"id": "r2", "name": "SC Report", "datasetId": "DS1"}])
@@ -447,3 +454,141 @@ class TestReportIdAutoDiscovery:
 
     def test_api_failure_returns_none(self):
         assert self._discover([], status=403) is None
+
+    def test_exported_from_pipeline_config_too(self):
+        """Callers importing it as `pipeline_config.discover_report_id` (the
+        established pattern for every sibling module in this package) must
+        get the exact same function."""
+        from src.services.powerbi import pipeline_config as gc
+        from src.services.powerbi import report_discovery as rd
+
+        assert gc.discover_report_id is rd.discover_report_id
+
+    def test_prefers_admin_scan_payload_over_the_classic_rest_call(self):
+        """Real bug found live on otc_management: a Service-Account-only
+        caller gets a bare 401 from the classic `.../reports` endpoint, but
+        that same account's Admin-Scanner-fetched `scan_result` (a DIFFERENT,
+        tenant-admin-scoped token, already fetched for admin_tables — no
+        extra call) carries the report/dataset binding directly. The scan
+        payload must be tried FIRST and, when it resolves, the classic REST
+        call must not even be attempted."""
+        from unittest.mock import patch
+
+        from src.services.powerbi import report_discovery as rd
+
+        scan_result = {
+            "workspaces": [
+                {
+                    "reports": [
+                        {"id": "r-real", "name": "OTC Management Dashboard", "datasetId": "ds1"},
+                        {"id": "r-usage", "name": "Usage Metrics Report", "datasetId": "ds1"},
+                    ]
+                }
+            ]
+        }
+        with patch.object(rd, "requests") as rq:
+            result = rd.discover_report_id(
+                "tok", "ws", "ds1", scan_result=scan_result
+            )
+            rq.get.assert_not_called()
+        assert result == "r-real"
+
+    def test_falls_back_to_classic_rest_call_when_scan_has_no_match(self):
+        from unittest.mock import MagicMock, patch
+
+        from src.services.powerbi import report_discovery as rd
+
+        scan_result = {"workspaces": [{"reports": []}]}
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {
+            "value": [{"id": "r-rest", "name": "Real Report", "datasetId": "ds1"}]
+        }
+        with patch.object(rd, "requests") as rq:
+            rq.get.return_value = resp
+            result = rd.discover_report_id(
+                "tok", "ws", "ds1", scan_result=scan_result
+            )
+        assert result == "r-rest"
+
+    def test_falls_back_when_scan_result_is_none(self):
+        assert self._discover(
+            [{"id": "r1", "name": "R", "datasetId": "ds1"}], dataset_id="ds1"
+        ) == "r1"
+
+    def test_malformed_scan_result_does_not_raise(self):
+        from unittest.mock import patch
+
+        from src.services.powerbi import report_discovery as rd
+
+        with patch.object(rd, "requests") as rq:
+            rq.get.side_effect = Exception("network unreachable")
+            result = rd.discover_report_id(
+                "tok", "ws", "ds1", scan_result={"workspaces": "not-a-list"}
+            )
+        # Malformed scan_result is swallowed, falls through to the classic
+        # call, which also fails — must still return None, never raise.
+        assert result is None
+
+
+class TestMappingOnlyTablesExternalSources(object):
+    """A table with real measures but no lakehouse-native SQL — whether
+    because Fabric never scanned it, or because it scanned to a non-warehouse
+    connector (Excel/SharePoint/Dataflow/AAS) — should still get a draft
+    mapping_only_tables entry rather than a silent skip, so the only thing
+    left for the user to do is land the data at the proposed source_table.
+    """
+
+    def test_table_not_in_admin_scan_still_gets_a_draft(self):
+        """Existing behavior: a table missing from the admin scan entirely."""
+        measures = [
+            {"measure_name": "M", "table_name": "unscanned_table", "dax_expression": "SUM(unscanned_table[X])"}
+        ]
+        mapping = gc.derive_mapping_only_tables(measures, admin_tables={})
+        assert "unscanned_table" in mapping
+        assert mapping["unscanned_table"]["dimensions"] == []
+        assert mapping["unscanned_table"]["aggregate_columns"] == []
+
+    def test_scanned_external_source_gets_a_draft_too(self):
+        """New: the table WAS scanned (Fabric knows its M-Query) but that
+        M-Query is a non-warehouse connector — previously excluded entirely
+        because it's technically 'in' admin_tables, just unresolvable."""
+        measures = [
+            {
+                "measure_name": "Testing Status",
+                "table_name": "KBIs Testing Status",
+                "dax_expression": "SUM('KBIs Testing Status'[Value])",
+            }
+        ]
+        admin_tables = {
+            "KBIs Testing Status": {
+                "mquery_expression": (
+                    'let Source = Excel.Workbook(Web.Contents('
+                    '"https://example.sharepoint.com/x.xlsx"), null, true) in Source'
+                ),
+                "columns": [{"name": "Value"}],
+            }
+        }
+        mapping = gc.derive_mapping_only_tables(measures, admin_tables)
+        assert "KBIs Testing Status" in mapping
+        entry = mapping["KBIs Testing Status"]
+        assert "testing_status" in entry["source_table"]
+        assert entry["dimensions"] == []
+        assert entry["aggregate_columns"] == []
+        assert "external source" in entry["_hint"]
+
+    def test_a_genuinely_resolved_warehouse_table_is_not_flagged(self):
+        """A table that scanned to real warehouse SQL must NOT be treated as
+        mapping-only — this mechanism is only for tables with no other path."""
+        measures = [
+            {"measure_name": "M", "table_name": "Fact_OTC", "dax_expression": "SUM(Fact_OTC[X])"}
+        ]
+        admin_tables = {
+            "Fact_OTC": {
+                "mquery_expression": (
+                    'let Source = Databricks.Catalogs() in Source'
+                ),
+                "columns": [{"name": "X"}],
+            }
+        }
+        mapping = gc.derive_mapping_only_tables(measures, admin_tables)
+        assert "Fact_OTC" not in mapping

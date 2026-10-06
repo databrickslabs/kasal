@@ -32,6 +32,8 @@ import { DatabricksService } from '../../../../api/databricks/DatabricksService'
 import SkillEditor from './SkillEditor';
 import SkillFileViewer from './SkillFileViewer';
 import SkillPublishDialog from './SkillPublishDialog';
+import DomainContextSkillDialog from './DomainContextSkillDialog';
+import { isDomainContextSkill } from './skillTemplates';
 
 /**
  * Agent Skills — authoring, upload, enablement.
@@ -52,6 +54,8 @@ const SkillsConfiguration: React.FC = () => {
   const [toast, setToast] = useState<string | null>(null);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  // UCMV domain-context skills get their own form: { skill } edits, {} creates.
+  const [domainDialog, setDomainDialog] = useState<{ skill?: Skill } | null>(null);
   const [viewing, setViewing] = useState<{ skill: Skill; path: string } | null>(
     null,
   );
@@ -243,6 +247,16 @@ const SkillsConfiguration: React.FC = () => {
           >
             Import
           </Button>
+          <Tooltip title="Business vocabulary and calendar of a Power BI model, fed to the UC Metric View Generator">
+            <Button
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={() => setDomainDialog({})}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              New domain context
+            </Button>
+          </Tooltip>
           <Button
             size="small"
             startIcon={<AddIcon />}
@@ -320,6 +334,11 @@ const SkillsConfiguration: React.FC = () => {
                       {skill.global_enabled && (
                         <Chip size="small" color="primary" label="All agents" />
                       )}
+                      {isDomainContextSkill(skill) && (
+                        <Tooltip title="Fed to the UC Metric View Generator as its domain context, for agents this skill is attached to.">
+                          <Chip size="small" color="secondary" variant="outlined" label="UCMV domain context" />
+                        </Tooltip>
+                      )}
                     </Stack>
 
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -389,6 +408,10 @@ const SkillsConfiguration: React.FC = () => {
                     <IconButton
                       size="small"
                       onClick={() => {
+                        if (isDomainContextSkill(skill)) {
+                          setDomainDialog({ skill });
+                          return;
+                        }
                         setEditing(skill);
                         setEditorOpen(true);
                       }}
@@ -429,6 +452,20 @@ const SkillsConfiguration: React.FC = () => {
         skill={editing}
         onClose={() => setEditorOpen(false)}
         onSave={handleSave}
+      />
+
+      <DomainContextSkillDialog
+        open={Boolean(domainDialog)}
+        skill={domainDialog?.skill ?? null}
+        onClose={() => setDomainDialog(null)}
+        onSaved={(saved) => {
+          setSkills((prev) =>
+            prev.some((s) => s.id === saved.id)
+              ? prev.map((s) => (s.id === saved.id ? saved : s))
+              : [...prev, saved],
+          );
+          setToast(`${saved.name} saved. Attach it in the Skills section of the agent that runs the UC Metric View Generator.`);
+        }}
       />
 
       <SkillFileViewer

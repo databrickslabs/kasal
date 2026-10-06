@@ -32,3 +32,4 @@ export function switchSettingsTeamspace(groupId: string, section: SettingsSectio
   useGroupStore.getState().setCurrentGroup(groupId);
   reload();
 }
+

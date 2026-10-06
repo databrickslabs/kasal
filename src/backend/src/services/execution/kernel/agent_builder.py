@@ -48,6 +48,9 @@ from src.services.execution.kernel.agent_security import (  # noqa: E402 - impor
 from src.services.execution.kernel.agent_skills import (  # noqa: E402 - import follows module initialization
     inject_skills,
 )
+from src.services.execution.kernel.skill_tool_context import (  # noqa: E402 - import follows module initialization
+    AGENT_ATTR as SKILL_TOOL_CONTEXT_ATTR,
+)
 
 logger = LoggerManager.get_instance().crew
 
@@ -539,7 +542,14 @@ async def build_agent(
     # Logged unconditionally, including the zero case. Whether a skill attached
     # is the first question asked of a run that ignored one, and inferring it
     # from the absence of a line is how three rounds of debugging went past it.
-    attached = await inject_skills(agent_kwargs, spec, group_id=group_id, label=label)
+    skill_tool_context: Dict[str, str] = {}
+    attached = await inject_skills(
+        agent_kwargs,
+        spec,
+        group_id=group_id,
+        label=label,
+        tool_context=skill_tool_context,
+    )
     logger.info(
         f"[skills] agent '{label}': requested={spec.get('skills') or []} "
         f"attached={attached} tools={[getattr(t, 'name', '?') for t in agent_kwargs.get('tools') or []]}"
@@ -574,4 +584,8 @@ async def build_agent(
     # Pydantic validation (e.g. _agent_key for crew, _kasal_memory_disabled for flow).
     for attr, value in (custom_attrs or {}).items():
         object.__setattr__(agent, attr, value)
+    # Skill text for tool parameters, carried to the task's tools — those are
+    # built after the agent (see kernel/skill_tool_context.py).
+    if skill_tool_context:
+        object.__setattr__(agent, SKILL_TOOL_CONTEXT_ATTR, skill_tool_context)
     return agent

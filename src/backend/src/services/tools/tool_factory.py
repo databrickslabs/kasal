@@ -69,15 +69,6 @@ except ImportError:
     GmailTool = None
     logging.warning("Could not import GmailTool")
 
-try:
-    from .powerbi_analysis_tool import PowerBIAnalysisTool
-except ImportError:
-    try:
-        from .powerbi_analysis_tool import PowerBIAnalysisTool
-    except ImportError:
-        PowerBIAnalysisTool = None
-        logging.warning("Could not import PowerBIAnalysisTool")
-
 # MCPTool - Import from mcp_adapter
 try:
     from src.services.tools.mcp_adapter import MCPTool
@@ -93,20 +84,6 @@ except ImportError as e:
     PowerBIConnectorTool = None
     MeasureConversionPipelineTool = None
     logging.warning(f"Could not import converter tools: {e}")
-
-# M-Query Conversion Pipeline Tool
-try:
-    from .mquery_conversion_pipeline_tool import MqueryConversionPipelineTool
-except ImportError as e:
-    MqueryConversionPipelineTool = None
-    logging.warning(f"Could not import MqueryConversionPipelineTool: {e}")
-
-# Power BI Relationships Tool
-try:
-    from .powerbi_relationships_tool import PowerBIRelationshipsTool
-except ImportError as e:
-    PowerBIRelationshipsTool = None
-    logging.warning(f"Could not import PowerBIRelationshipsTool: {e}")
 
 # Power BI Hierarchies Tool
 try:
@@ -133,27 +110,6 @@ except ImportError as e:
     PowerBIReportReferencesTool = None
     logging.warning(f"Could not import PowerBIReportReferencesTool: {e}")
 
-# Power BI Semantic Model Fetcher Tool
-try:
-    from .powerbi_semantic_model_fetcher_tool import PowerBISemanticModelFetcherTool
-except ImportError as e:
-    PowerBISemanticModelFetcherTool = None
-    logging.warning(f"Could not import PowerBISemanticModelFetcherTool: {e}")
-
-# Power BI Semantic Model DAX Generator Tool
-try:
-    from .powerbi_semantic_model_dax_tool import PowerBISemanticModelDaxTool
-except ImportError as e:
-    PowerBISemanticModelDaxTool = None
-    logging.warning(f"Could not import PowerBISemanticModelDaxTool: {e}")
-
-# Power BI Metadata Reducer Tool
-try:
-    from .powerbi_metadata_reducer_tool import PowerBIMetadataReducerTool
-except ImportError as e:
-    PowerBIMetadataReducerTool = None
-    logging.warning(f"Could not import PowerBIMetadataReducerTool: {e}")
-
 # Power BI DAX Executor Tool
 try:
     from .powerbi_dax_executor_tool import PowerBIDaxExecutorTool
@@ -163,22 +119,10 @@ except Exception as e:
 
 # UC Metric View Tools
 try:
-    from .dax_to_sql_translator_tool import DaxToSqlTranslatorTool
-except ImportError as e:
-    DaxToSqlTranslatorTool = None
-    logging.warning(f"Could not import DaxToSqlTranslatorTool: {e}")
-
-try:
     from .uc_metric_view_generator_tool import UCMetricViewGeneratorTool
 except ImportError as e:
     UCMetricViewGeneratorTool = None
     logging.warning(f"Could not import UCMetricViewGeneratorTool: {e}")
-
-try:
-    from .pbi_measure_allocator_tool import PbiMeasureAllocatorTool
-except ImportError as e:
-    PbiMeasureAllocatorTool = None
-    logging.warning(f"Could not import PbiMeasureAllocatorTool: {e}")
 
 try:
     from .metric_view_deployer_tool import MetricViewDeployerTool
@@ -198,12 +142,11 @@ except ImportError as e:
     UCMVReevaluationTool = None
     logging.warning(f"Could not import UCMVReevaluationTool: {e}")
 
-# Config Generator Tool
 try:
-    from .config_generator_tool import ConfigGeneratorTool
+    from .ucmv_drift_monitor_tool import UCMVDriftMonitorTool
 except ImportError as e:
-    ConfigGeneratorTool = None
-    logging.warning(f"Could not import ConfigGeneratorTool: {e}")
+    UCMVDriftMonitorTool = None
+    logging.warning(f"Could not import UCMVDriftMonitorTool: {e}")
 
 # Pipeline Config Generator Tool (API-direct, no LLM)
 try:
@@ -293,8 +236,6 @@ class ToolFactory:
             # rescue a tool the map does not know.
             "Remote Agent": A2AAgentTool,
             "A2AAgentTool": A2AAgentTool,
-            "Power BI Comprehensive Analysis Tool": PowerBIAnalysisTool,  # New display name
-            "PowerBIAnalysisTool": PowerBIAnalysisTool,  # Keep old name for backward compatibility
         }
 
         # Add MCPTool if it was successfully imported
@@ -308,14 +249,6 @@ class ToolFactory:
             self._tool_implementations["Measure Conversion Pipeline"] = (
                 MeasureConversionPipelineTool
             )
-        if MqueryConversionPipelineTool is not None:
-            self._tool_implementations["M-Query Conversion Pipeline"] = (
-                MqueryConversionPipelineTool
-            )
-        if PowerBIRelationshipsTool is not None:
-            self._tool_implementations["Power BI Relationships Tool"] = (
-                PowerBIRelationshipsTool
-            )
         if PowerBIHierarchiesTool is not None:
             self._tool_implementations["Power BI Hierarchies Tool"] = (
                 PowerBIHierarchiesTool
@@ -328,31 +261,13 @@ class ToolFactory:
             self._tool_implementations["Power BI Report References Tool"] = (
                 PowerBIReportReferencesTool
             )
-        if PowerBISemanticModelFetcherTool is not None:
-            self._tool_implementations["Power BI Semantic Model Fetcher"] = (
-                PowerBISemanticModelFetcherTool
-            )
-        if PowerBISemanticModelDaxTool is not None:
-            self._tool_implementations["Power BI Semantic Model DAX Generator"] = (
-                PowerBISemanticModelDaxTool
-            )
-        if PowerBIMetadataReducerTool is not None:
-            self._tool_implementations["Power BI Metadata Reducer"] = (
-                PowerBIMetadataReducerTool
-            )
         if PowerBIDaxExecutorTool is not None:
             self._tool_implementations["Power BI DAX Executor"] = PowerBIDaxExecutorTool
 
         # UC Metric View tools
-        if DaxToSqlTranslatorTool is not None:
-            self._tool_implementations["DAX to SQL Translator"] = DaxToSqlTranslatorTool
         if UCMetricViewGeneratorTool is not None:
             self._tool_implementations["UC Metric View Generator"] = (
                 UCMetricViewGeneratorTool
-            )
-        if PbiMeasureAllocatorTool is not None:
-            self._tool_implementations["PBI Measure Allocator"] = (
-                PbiMeasureAllocatorTool
             )
         if MetricViewDeployerTool is not None:
             self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
@@ -362,8 +277,8 @@ class ToolFactory:
             )
         if UCMVReevaluationTool is not None:
             self._tool_implementations["UCMV Re-evaluation"] = UCMVReevaluationTool
-        if ConfigGeneratorTool is not None:
-            self._tool_implementations["Config Generator"] = ConfigGeneratorTool
+        if UCMVDriftMonitorTool is not None:
+            self._tool_implementations["UCMV Drift Monitor"] = UCMVDriftMonitorTool
         if PipelineConfigGeneratorTool is not None:
             self._tool_implementations["Pipeline Config Generator"] = (
                 PipelineConfigGeneratorTool
@@ -1147,65 +1062,9 @@ class ToolFactory:
                             f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config"
                         )
 
-                    # Inject key execution input values into tool_config if not already present.
-                    # This ensures tools like the DAX Generator get user_question reliably
-                    # instead of depending on the LLM agent to pass it at runtime.
-                    # Context enrichment fields are also injected so dynamic crew inputs
-                    # (active_filters, business_mappings, etc.) reach the LLM generation stage.
-                    _empty_values = (None, {}, [], "")
-                    for input_key in [
-                        "user_question",
-                        "active_filters",
-                        "business_mappings",
-                        "field_synonyms",
-                        "visible_tables",
-                        "conversation_history",
-                        "context_knowledge",
-                        "reference_dax",
-                    ]:
-                        if input_key in execution_inputs and (
-                            input_key not in tool_config
-                            or tool_config.get(input_key) in _empty_values
-                        ):
-                            tool_config[input_key] = execution_inputs[input_key]
-                            logger.info(
-                                f"[ToolFactory] Injected '{input_key}' from execution_inputs "
-                                f"into {tool_name} config"
-                            )
-
                     # Remove execution_inputs from tool_config after placeholder resolution
                     # Tool constructors don't accept this key and will raise TypeError
                     tool_config.pop("execution_inputs", None)
-
-            # Parse JSON strings for PowerBI context enrichment fields (DAX Generator + Analysis Tool)
-            if "Power BI" in tool_name and (
-                "Analysis" in tool_name or "DAX" in tool_name
-            ):
-                import json
-
-                json_fields = [
-                    "business_mappings",
-                    "field_synonyms",
-                    "active_filters",
-                    "visible_tables",
-                    "conversation_history",
-                ]
-                for field in json_fields:
-                    if field in tool_config and isinstance(tool_config[field], str):
-                        try:
-                            # Try to parse the JSON string
-                            tool_config[field] = json.loads(tool_config[field])
-                            logger.info(
-                                f"[ToolFactory] Parsed {field} JSON string into dict/list"
-                            )
-                        except json.JSONDecodeError as e:
-                            logger.warning(
-                                f"[ToolFactory] Failed to parse {field} as JSON: {e}. Keeping as string."
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"[ToolFactory] Unexpected error parsing {field}: {e}"
-                            )
 
             logger.info(
                 f"[ToolFactory] {tool_name} config (after merge): {mask_sensitive_fields(tool_config)}"
@@ -2172,140 +2031,6 @@ class ToolFactory:
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool
 
-            elif tool_name == "Power BI Comprehensive Analysis Tool":
-                # Create Power BI Comprehensive Analysis Tool with Power BI and LLM configuration
-                # This tool converts business questions into DAX queries and executes them with intelligent self-correction
-                tool_args = {}
-
-                try:
-                    # Extract PowerBI config from tool_config (merged base + override)
-                    if tool_config and isinstance(tool_config, dict):
-                        # Power BI Configuration
-                        tool_args["workspace_id"] = tool_config.get("workspace_id")
-                        tool_args["dataset_id"] = tool_config.get("dataset_id")
-                        tool_args["report_id"] = tool_config.get(
-                            "report_id"
-                        )  # Optional: for auto-extracting default filters
-
-                        # Service Principal Authentication
-                        tool_args["tenant_id"] = tool_config.get("tenant_id")
-                        tool_args["client_id"] = tool_config.get("client_id")
-                        tool_args["client_secret"] = tool_config.get("client_secret")
-
-                        # Service Account Authentication
-                        tool_args["username"] = tool_config.get("username")
-                        tool_args["password"] = tool_config.get("password")
-                        tool_args["auth_method"] = tool_config.get("auth_method")
-
-                        # OAuth Authentication (alternative)
-                        tool_args["access_token"] = tool_config.get("access_token")
-
-                        # LLM Configuration for DAX generation
-                        tool_args["llm_workspace_url"] = tool_config.get(
-                            "llm_workspace_url"
-                        )
-                        tool_args["llm_token"] = tool_config.get("llm_token")
-                        tool_args["llm_model"] = tool_config.get(
-                            "llm_model", "databricks-claude-sonnet-4-5"
-                        )
-
-                        # Options
-                        tool_args["include_visual_references"] = tool_config.get(
-                            "include_visual_references", True
-                        )
-                        tool_args["skip_system_tables"] = tool_config.get(
-                            "skip_system_tables", True
-                        )
-                        tool_args["output_format"] = tool_config.get(
-                            "output_format", "markdown"
-                        )
-                        tool_args["enable_info_columns"] = tool_config.get(
-                            "enable_info_columns", False
-                        )
-                        tool_args["max_dax_retries"] = tool_config.get(
-                            "max_dax_retries", 5
-                        )
-
-                        # User Question (pre-configured question from frontend)
-                        tool_args["user_question"] = tool_config.get("user_question")
-
-                        # Context Enrichment Parameters (Microsoft Copilot-style)
-                        tool_args["business_mappings"] = tool_config.get(
-                            "business_mappings"
-                        )
-                        tool_args["field_synonyms"] = tool_config.get("field_synonyms")
-                        tool_args["active_filters"] = tool_config.get("active_filters")
-                        tool_args["session_id"] = tool_config.get("session_id")
-                        tool_args["visible_tables"] = tool_config.get("visible_tables")
-                        tool_args["conversation_history"] = tool_config.get(
-                            "conversation_history"
-                        )
-
-                    # Allow tool_config_override to override specific fields
-                    if isinstance(tool_config_override, dict):
-                        for key in [
-                            "workspace_id",
-                            "dataset_id",
-                            "report_id",
-                            "tenant_id",
-                            "client_id",
-                            "client_secret",
-                            "username",
-                            "password",
-                            "auth_method",
-                            "access_token",
-                            "llm_workspace_url",
-                            "llm_token",
-                            "llm_model",
-                            "include_visual_references",
-                            "skip_system_tables",
-                            "output_format",
-                            "user_question",
-                            "enable_info_columns",
-                            "max_dax_retries",
-                            "business_mappings",
-                            "field_synonyms",
-                            "active_filters",
-                            "session_id",
-                            "visible_tables",
-                            "conversation_history",
-                        ]:
-                            if key in tool_config_override:
-                                tool_args[key] = tool_config_override[key]
-
-                    # Filter out None values
-                    tool_args = {k: v for k, v in tool_args.items() if v is not None}
-
-                except Exception as e:
-                    logger.error(f"Error extracting PowerBI Analysis config: {e}")
-                    tool_args = {}
-
-                logger.info(
-                    f"Creating Power BI Comprehensive Analysis Tool with workspace_id: {tool_args.get('workspace_id')}, "
-                    f"dataset_id: {tool_args.get('dataset_id')}, "
-                    f"tenant_id: {'***' if tool_args.get('tenant_id') else None}, "
-                    f"has_access_token: {bool(tool_args.get('access_token'))}, "
-                    f"llm_configured: {bool(tool_args.get('llm_workspace_url'))}, "
-                    f"user_question: {tool_args.get('user_question', 'NOT SET')}"
-                )
-
-                # Log context enrichment parameters
-                business_mappings = tool_args.get("business_mappings")
-                field_synonyms = tool_args.get("field_synonyms")
-                active_filters = tool_args.get("active_filters")
-                logger.info("[TOOL_FACTORY] Context enrichment parameters:")
-                logger.info(
-                    f"[TOOL_FACTORY]   business_mappings: type={type(business_mappings).__name__}, value={str(business_mappings)[:100] if business_mappings else 'None'}"
-                )
-                logger.info(
-                    f"[TOOL_FACTORY]   field_synonyms: type={type(field_synonyms).__name__}, value={str(field_synonyms)[:100] if field_synonyms else 'None'}"
-                )
-                logger.info(
-                    f"[TOOL_FACTORY]   active_filters: type={type(active_filters).__name__}, value={str(active_filters)[:100] if active_filters else 'None'}"
-                )
-
-                return tool_class(**tool_args)
-
             elif tool_name in ("A2AAgentTool", "Remote Agent"):
                 # One entry can produce several tools (one per attached remote),
                 # so this returns a list. Built in a sibling module because this
@@ -2390,117 +2115,6 @@ class ToolFactory:
                 except Exception as e:
                     logger.error(
                         f"[ToolFactory] ✗ Failed to create Measure Conversion Pipeline: {e}"
-                    )
-                    import traceback
-
-                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
-                    raise
-
-            # M-Query Conversion Pipeline
-            elif tool_name == "M-Query Conversion Pipeline":
-                # MqueryConversionPipelineTool accepts configuration directly
-                tool_config["result_as_answer"] = result_as_answer
-
-                # Enhanced logging to track tool configuration
-                logger.info(
-                    "[ToolFactory] Creating M-Query Conversion Pipeline with merged config"
-                )
-                logger.info(
-                    f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}"
-                )
-                logger.info(
-                    f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}"
-                )
-
-                # Verify that Service Principal credentials are present before creating the tool
-                has_admin_api_creds = bool(
-                    tool_config.get("workspace_id")
-                    and tool_config.get("client_id")
-                    and tool_config.get("tenant_id")
-                    and tool_config.get("client_secret")
-                )
-                logger.info(
-                    f"[ToolFactory]   - Power BI Admin API credentials present: {has_admin_api_creds}"
-                )
-
-                # Create the tool with the merged configuration
-                try:
-                    tool_instance = tool_class(**tool_config)
-                    logger.info(
-                        "[ToolFactory] ✓ Successfully created M-Query Conversion Pipeline tool instance"
-                    )
-                    return tool_instance
-                except Exception as e:
-                    logger.error(
-                        f"[ToolFactory] ✗ Failed to create M-Query Conversion Pipeline: {e}"
-                    )
-                    import traceback
-
-                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
-                    raise
-
-            # Power BI Relationships Tool
-            elif tool_name == "Power BI Relationships Tool":
-                # PowerBIRelationshipsTool accepts configuration directly
-                tool_config["result_as_answer"] = result_as_answer
-
-                # Enhanced logging to track tool configuration
-                logger.info(
-                    "[ToolFactory] Creating Power BI Relationships Tool with merged config"
-                )
-                logger.info(
-                    f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}..."
-                )
-                logger.info(
-                    f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}"
-                )
-                logger.info(
-                    f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}"
-                )
-
-                # Verify that Service Principal credentials are present
-                has_sp_creds = bool(
-                    tool_config.get("workspace_id")
-                    and tool_config.get("dataset_id")
-                    and tool_config.get("client_id")
-                    and tool_config.get("tenant_id")
-                    and tool_config.get("client_secret")
-                )
-                logger.info(
-                    f"[ToolFactory]   - Service Principal credentials present: {has_sp_creds}"
-                )
-
-                # Create the tool with the merged configuration
-                try:
-                    tool_instance = tool_class(**tool_config)
-                    logger.info(
-                        "[ToolFactory] ✓ Successfully created Power BI Relationships Tool instance"
-                    )
-                    return tool_instance
-                except Exception as e:
-                    logger.error(
-                        f"[ToolFactory] ✗ Failed to create Power BI Relationships Tool: {e}"
                     )
                     import traceback
 
@@ -2619,7 +2233,7 @@ class ToolFactory:
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise
 
-            # For all other tools (ScrapeWebsiteTool, ImageGenerationTool, DAX Generator, etc.)
+            # For all other tools (ScrapeWebsiteTool, ImageGenerationTool, etc.)
             else:
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):

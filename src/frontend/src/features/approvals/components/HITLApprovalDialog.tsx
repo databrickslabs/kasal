@@ -44,6 +44,7 @@ import {
   HITLRejectionAction,
 } from '../../../api/execution/HITLService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../../executions/components/UCMVResultViewer';
+import BIArtifactsView from '../../executions/components/BIArtifactsView';
 import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../../tools/components/configuration/GenieSpaceConfigSelector';
 import { runService } from '../../../api/execution/ExecutionHistoryService';
 import SaveIcon from '@mui/icons-material/Save';
@@ -100,6 +101,124 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   // UCMV edit state
   const [editedUCMV, setEditedUCMV] = useState<UCMVResult | null>(null);
   const [editedGenieConfig, setEditedGenieConfig] = useState<GenieSpaceConfig | null>(null);
+
+  // Parse the (potentially ~1 MB) previous_crew_output ONCE per output change.
+  // This used to be JSON.parse'd inline several times inside renderContent, which
+  // re-runs on every keystroke in the comment / rejection-reason fields — so each
+  // character reparsed a ~1 MB blob multiple times AND re-rendered the heavy
+  // UCMVResultViewer, making the fields unusable to type in. Memoized on the raw
+  // string, keystrokes no longer touch it.
+  const parsedPreviousOutput = useMemo<Record<string, unknown> | null>(() => {
+    const raw = approval?.previous_crew_output;
+    if (!raw) return null;
+    try {
+      const p = JSON.parse(raw);
+      return p && typeof p === 'object' ? (p as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }, [approval?.previous_crew_output]);
+
+  // Memoized on executionId so typing in the comment / reason field does NOT
+  // re-render this heavy fetch-backed panel (UCMV/config viewers) on every
+  // keystroke — that made the comment box laggy.
+  const biArtifactsNode = useMemo(
+    () => (executionId ? <BIArtifactsView jobId={executionId} /> : null),
+    [executionId],
+  );
+
+  // Config-gen's extracted arrays (measures_json/mquery_json/relationships_json)
+  // are STRIPPED from the gate's 'ui' payload, so to download the real JSON we
+  // re-fetch the FULL approval on click (getApproval without view=ui) and save
+  // each array as its own file.
+  const downloadExtractedConfigJson = useCallback(async () => {
+    if (!approval) return;
+    try {
+      const full = await HITLService.getApproval(approval.id);
+      const raw = full.previous_crew_output;
+      if (!raw) return;
+      const cfg = JSON.parse(raw) as Record<string, unknown>;
+      const files: Array<[string, unknown]> = [
+        ['measures.json', cfg.measures_json],
+        ['mquery.json', cfg.mquery_json],
+        ['relationships.json', cfg.relationships_json],
+        ['pipeline_config.json', cfg.proposed_config],
+      ];
+      files
+        .filter(([, v]) => v != null)
+        .forEach(([name, v], i) =>
+          setTimeout(() => {
+            const blob = new Blob([JSON.stringify(v, null, 2)], {
+              type: 'application/json;charset=utf-8',
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name as string;
+            a.click();
+            URL.revokeObjectURL(url);
+          }, i * 150),
+        );
+    } catch {
+      /* best-effort: the raw step-output download remains as the fallback */
+    }
+  }, [approval]);
+
+  // The rendered "Previous Crew Output" body, memoized so typing a comment does
+  // NOT re-render the UCMVResultViewer / Genie config editor beneath it. Depends
+  // only on the parsed output and the edit drafts — never on comment/reason.
+  const previousOutputContent = useMemo<React.ReactNode>(() => {
+    const parsed = parsedPreviousOutput;
+    if (parsed && isUCMVResult(parsed)) {
+      return (
+        <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 500, overflow: 'auto', bgcolor: 'background.default' }}>
+          <UCMVResultViewer
+            result={(editedUCMV ?? parsed) as unknown as UCMVResult}
+            editable
+            onResultChange={setEditedUCMV}
+          />
+        </Paper>
+      );
+    }
+    if (parsed && 'space_title' in parsed && 'text_instructions' in parsed) {
+      const genieConfig = editedGenieConfig ?? (parsed as unknown as GenieSpaceConfig);
+      return (
+        <Paper variant="outlined" sx={{ p: 2, maxHeight: 600, overflow: 'auto', bgcolor: 'background.default' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            Review and edit the auto-generated Genie Space configuration before approving:
+          </Typography>
+          <GenieSpaceConfigSelector
+            value={genieConfig}
+            onChange={(config) => setEditedGenieConfig(config)}
+          />
+        </Paper>
+      );
+    }
+    if (parsed && 'proposed_config' in parsed) {
+      return (
+        <Box>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center', mb: 1 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Extracted config:
+            </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={downloadExtractedConfigJson}
+              title="Download measures.json / mquery.json / relationships.json / pipeline_config.json"
+            >
+              Download extracted JSON
+            </Button>
+          </Box>
+          <CrewOutputRenderer content={approval?.previous_crew_output ?? ''} maxHeight={320} />
+        </Box>
+      );
+    }
+    return (
+      <CrewOutputRenderer content={approval?.previous_crew_output ?? ''} maxHeight={320} />
+    );
+  }, [parsedPreviousOutput, editedUCMV, editedGenieConfig, approval?.previous_crew_output, downloadExtractedConfigJson]);
 
   // Tool-call gates: denying just lets the agent continue without the tool, so
   // a reason is optional context. For task_review (and flow gates) the reason
@@ -473,6 +592,14 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
 
         <Divider sx={{ my: 2 }} />
 
+        {/* The crew's own answer is often a markdown SUMMARY, not the structured
+            JSON — so parsing previous_crew_output can't surface the config/UCMV
+            downloads. Fetch the real artifacts from conversion_history by
+            execution_id instead (config-gen JSON + "Review & edit config" here at
+            the gate; UCMV YAML/SQL once that step has run). Renders nothing when
+            there are none. */}
+        {biArtifactsNode}
+
         {/* Output still lazy-loading (status omits it; fetched via getApproval) */}
         {outputLoading && !approval.previous_crew_output && (
           <Box mb={2} display="flex" alignItems="center" gap={1}>
@@ -549,44 +676,7 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
                 </IconButton>
               </Box>
             </Box>
-            {(() => {
-              // Try to detect UCMV result shape for structured rendering
-              try {
-                const parsed = JSON.parse(approval.previous_crew_output);
-                if (isUCMVResult(parsed)) {
-                  return (
-                    <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 500, overflow: 'auto', bgcolor: 'background.default' }}>
-                      <UCMVResultViewer
-                        result={editedUCMV ?? parsed}
-                        editable
-                        onResultChange={setEditedUCMV}
-                      />
-                    </Paper>
-                  );
-                }
-                // Detect Genie Space Config output (has space_title + text_instructions)
-                if (parsed && typeof parsed === 'object' && 'space_title' in parsed && 'text_instructions' in parsed) {
-                  const genieConfig = editedGenieConfig ?? (parsed as GenieSpaceConfig);
-                  return (
-                    <Paper variant="outlined" sx={{ p: 2, maxHeight: 600, overflow: 'auto', bgcolor: 'background.default' }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                        Review and edit the auto-generated Genie Space configuration before approving:
-                      </Typography>
-                      <GenieSpaceConfigSelector
-                        value={genieConfig}
-                        onChange={(config) => setEditedGenieConfig(config)}
-                      />
-                    </Paper>
-                  );
-                }
-              } catch { /* not JSON, fall through to raw display */ }
-              return (
-                <CrewOutputRenderer
-                  content={approval.previous_crew_output}
-                  maxHeight={320}
-                />
-              );
-            })()}
+            {previousOutputContent}
 
             {/* Full-screen view of the crew output */}
             <Dialog
@@ -627,15 +717,13 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
           const configKeys = ['join_key_map', 'enrichment_joins', 'switch_decompositions', 'filter_sets', 'measure_resolutions'];
           let configData: Record<string, unknown> | null = null;
 
-          // Try parsing previous_crew_output as JSON containing config keys
-          try {
-            const parsed = JSON.parse(approval.previous_crew_output);
-            if (parsed?.proposed_config) {
-              configData = parsed.proposed_config;
-            } else if (configKeys.some(k => k in (parsed || {}))) {
-              configData = parsed;
-            }
-          } catch { /* not JSON, skip */ }
+          // Reuse the memoized parse (no re-parse on keystroke).
+          const parsed = parsedPreviousOutput as Record<string, unknown> | null;
+          if (parsed?.proposed_config) {
+            configData = parsed.proposed_config as Record<string, unknown>;
+          } else if (parsed && configKeys.some(k => k in parsed)) {
+            configData = parsed;
+          }
 
           if (!configData) return null;
 
@@ -799,12 +887,10 @@ const HITLApprovalDialog: React.FC<HITLApprovalDialogProps> = ({
   };
 
   // Detect UCMV output to size dialog appropriately
-  const hasUCMVOutput = useMemo(() => {
-    if (!approval?.previous_crew_output) return false;
-    try {
-      return isUCMVResult(JSON.parse(approval.previous_crew_output));
-    } catch { return false; }
-  }, [approval?.previous_crew_output]);
+  const hasUCMVOutput = useMemo(
+    () => (parsedPreviousOutput ? isUCMVResult(parsedPreviousOutput) : false),
+    [parsedPreviousOutput],
+  );
 
   if (embedded) return <Box sx={{ height: '100%', width: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', color: 'text.primary', bgcolor: 'transparent',
     '& .MuiButton-root': { textTransform: 'none', borderRadius: '12px', color: 'text.primary', borderColor: 'divider', boxShadow: 'none' },

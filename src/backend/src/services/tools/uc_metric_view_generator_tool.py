@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import urllib.parse
-from typing import Any, Optional, Type
+from typing import Any, ClassVar, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -36,9 +36,100 @@ class UCMetricViewGeneratorSchema(BaseModel):
     scan_data_json: Optional[str] = Field(
         None, description="JSON string of PBI scan data (optional, for enrichment)"
     )
+    visual_usage_index: Optional[str] = Field(
+        None,
+        description=(
+            "JSON string of {original_measure_name: [{page, visual_type, role}, ...]} "
+            "(from Pipeline Config Generator's report-definition parse) — tags each "
+            "translated measure with where it's actually used in the report."
+        ),
+    )
     config_json: Optional[str] = Field(
         None,
         description="JSON pipeline config overrides (join_key_map, fact_join_map, etc.)",
+    )
+    refinement_feedback: Optional[str] = Field(
+        None,
+        description=(
+            "Iterative-reconciliation feedback from a prior cycle (JSON): the "
+            "build_refinement_feedback list [{measure, pct_aligned, "
+            "sample_mismatches}] or a {measure: hint} dict. When present with LLM "
+            "fallback on, the DAX translator is told which measures mismatched "
+            "Power BI last cycle so it fixes them. Set by the reconciliation loop; "
+            "not usually supplied by hand."
+        ),
+    )
+    naming_config: Optional[str] = Field(
+        None,
+        description=(
+            "JSON of per-model naming/period vocabulary for the metadata lint and "
+            "calendar period-folding — CCH/Total-SC values are the defaults, so this "
+            'is only needed for other models. Shape: {"lint": {"scenario_suffixes": '
+            '[...], "unit_suffixes": [...], "dimension_alias_groups": [[...]], '
+            '"min_description_len": int}, "period": {"column_overrides": '
+            '{"latest_month_label": "IsCurrentMonth", ...}}}.'
+        ),
+    )
+    domain_context: Optional[str] = Field(
+        None,
+        description=(
+            "OPTIONAL free text (not JSON): the model's domain knowledge — "
+            "business/metric vocabulary, naming conventions, fiscal-calendar "
+            "quirks (e.g. 4-4-5), cost-accounting terms — fed verbatim into the "
+            "DAX→SQL translation prompt so the LLM translates with the model's "
+            "business semantics. Normally filled from a Skill attached to the "
+            "agent (Configuration → Skills, tagged kasal-tool-param: "
+            "domain_context); a value here is kept after the skill text. Only "
+            "used when LLM fallback is on."
+        ),
+    )
+    implicit_column_measures: Optional[str] = Field(
+        None,
+        description=(
+            "JSON string of {table: [{name, original_name, raw_expr, comment, "
+            "used_in_visuals, ...}, ...]} (from Pipeline Config Generator) — raw "
+            "columns with PBI's own implicit aggregation that are drawn/filtered "
+            "directly in a report visual with no named DAX measure behind them."
+        ),
+    )
+    enable_reconciliation: Optional[bool] = Field(
+        False,
+        description=(
+            "When true (and warehouse_id + reference_years + Power BI credentials "
+            "are provided), run the iterative loop: after each generation cycle, "
+            "deploy the metric view and reconcile it cell-by-cell against the live "
+            "Power BI model, feeding mismatches back to refine failing measures. "
+            "Deploys once per cycle. Without the prerequisites, generation is "
+            "single-pass as usual."
+        ),
+    )
+    max_reconciliation_cycles: Optional[int] = Field(
+        5, description="Max iterative reconciliation cycles (when enabled)."
+    )
+    reconciliation_target_pct: Optional[float] = Field(
+        100.0,
+        description="Stop early once overall cell alignment reaches this percentage.",
+    )
+    reference_years: Optional[str] = Field(
+        None,
+        description="Fiscal years to reconcile, as a JSON array or comma list "
+        '(e.g. "[2025, 2026]" or "2025,2026"). OPTIONAL — if omitted, '
+        "reconciliation compares across all years.",
+    )
+    warehouse_id: Optional[str] = Field(
+        None,
+        description="Databricks SQL warehouse ID — required for reconciliation "
+        "(deploys + queries the metric view).",
+    )
+    prune_non_visual_measures: Optional[bool] = Field(
+        False,
+        description=(
+            "Triage: when true AND a visual-usage index is available, skip "
+            "measures that are not shown or filtered in any report visual, "
+            "directly or through a dependency chain (legacy/unused measures). "
+            "Base/implicit column measures are always kept. No-op without visual "
+            "usage data (nothing would be considered used)."
+        ),
     )
     catalog: Optional[str] = Field(None, description="Target UC catalog name")
     schema_name: Optional[str] = Field(None, description="Target UC schema name")
@@ -48,6 +139,15 @@ class UCMetricViewGeneratorSchema(BaseModel):
     )
     use_llm_fallback: bool = Field(
         False, description="Enable LLM fallback for unmatched DAX patterns (opt-in)"
+    )
+    validate_against_pbi: bool = Field(
+        False,
+        description=(
+            "Opt-in: run the rec#4 validation loop against Power BI. Requires "
+            "access_token + workspace_id + dataset_id; compares each measure/view "
+            "against PBI EVALUATE. Off by default so a normal generation run makes "
+            "no live network calls."
+        ),
     )
     translation_mode: Optional[str] = Field(
         None,
@@ -123,6 +223,9 @@ class UCMetricViewGeneratorTool(BaseTool):
     )
     args_schema: Type[BaseModel] = UCMetricViewGeneratorSchema
     _default_config: dict = PrivateAttr(default_factory=dict)
+    #: Parameters a skill attached to the agent may fill (Configuration → Skills,
+    #: tagged ``kasal-tool-param``) — see execution/kernel/skill_tool_context.py.
+    skill_context_params: ClassVar[Tuple[str, ...]] = ("domain_context",)
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
@@ -141,12 +244,24 @@ class UCMetricViewGeneratorTool(BaseTool):
             "mquery_json",
             "relationships_json",
             "scan_data_json",
+            "visual_usage_index",
+            "implicit_column_measures",
             "config_json",
+            "naming_config",
+            "domain_context",
+            "refinement_feedback",
+            "enable_reconciliation",
+            "max_reconciliation_cycles",
+            "reconciliation_target_pct",
+            "reference_years",
+            "warehouse_id",
+            "prune_non_visual_measures",
             "catalog",
             "schema_name",
             "inner_dim_joins",
             "unflatten_tables",
             "use_llm_fallback",
+            "validate_against_pbi",
             "translation_mode",
             "llm_model",
             "llm_workspace_url",
@@ -185,6 +300,69 @@ class UCMetricViewGeneratorTool(BaseTool):
         def _get(key):
             return kwargs.get(key) or self._default_config.get(key)
 
+        # Iterative reconciliation: when requested (and not already inside the
+        # loop), delegate to the generate→deploy→reconcile→refine orchestrator. It
+        # calls this same tool with reconciliation off (guarded by _in_recon_loop),
+        # so there is no recursion. Falls through to single-pass if prerequisites
+        # (warehouse_id / Power BI creds) are missing.
+        #
+        # Enablement is DERIVED, not just the explicit flag: not every UI surface
+        # renders the enable_reconciliation checkbox (the generic tool-config form
+        # shows only text fields), so a warehouse_id — meaningful for nothing but
+        # reconciliation in this tool — is itself the request to reconcile. Without
+        # this, an operator fills the field and reconciliation silently never runs.
+        # reference_years is OPTIONAL (empty = compare all years), so it is NOT a
+        # prerequisite; only the warehouse is. run_from_generator still validates
+        # and degrades to single-pass if the warehouse/creds cannot be resolved.
+        # Surfaced in the output (and persisted to history) whenever reconciliation
+        # was WANTED but did not run, so a single-pass is never silent — the UI and
+        # the saved result name the exact reason. None when recon ran or was never
+        # requested.
+        _recon_skipped = None
+        _recon_requested = _get("enable_reconciliation") or _get("warehouse_id")
+        if _recon_requested and not kwargs.get("_in_recon_loop"):
+            # Reconciliation needs BOTH sides: a Databricks SQL warehouse (to
+            # deploy + query the view) AND a Power BI connection + credentials (to
+            # pull the ground-truth numbers). A warehouse alone is NOT enough — with
+            # no PBI creds the loop deploys the view then fails every one on
+            # "pbi_workspace_id is required", which surfaces as a generic "deploy
+            # failed". Name exactly what is missing so the UI/history says why.
+            from src.services.tools.metric_view_utils.reconciliation_prereqs import (
+                missing_reconciliation_inputs,
+            )
+
+            _missing = missing_reconciliation_inputs(_get)
+            if _missing:
+                _recon_skipped = (
+                    "Reconciliation was requested but did NOT run — missing: "
+                    f"{'; '.join(_missing)}. Fill these in the UC Metric View "
+                    "Generator's Reconciliation tab to enable the live cell-by-cell "
+                    "Power BI check; generation ran single-pass."
+                )
+                logger.warning(f"[UCMV] {_recon_skipped}")
+            else:
+                try:
+                    from src.services.tools.ucmv_iterative_recon import (
+                        run_from_generator,
+                    )
+
+                    _loop_out = run_from_generator(self, kwargs)
+                    if _loop_out is not None:
+                        return json.dumps(_loop_out)
+                    _recon_skipped = (
+                        "Reconciliation was requested but did NOT run — the warehouse "
+                        "or Power BI credentials could not be resolved; generation ran "
+                        "single-pass."
+                    )
+                    logger.warning(f"[UCMV] {_recon_skipped}")
+                except (
+                    Exception
+                ) as e:  # noqa: BLE001 — never let the loop break generation
+                    _recon_skipped = f"Reconciliation was requested but FAILED: {e}"
+                    logger.warning(
+                        f"[UCMV] {_recon_skipped} — falling back to single-pass."
+                    )
+
         # JSON inputs (measures/mquery/config/relationships/scan) are injected into
         # _default_config by the flow handoff. A capable agent, told to "call the
         # tool with ALL inputs", often passes its OWN placeholder for these (e.g.
@@ -196,8 +374,12 @@ class UCMetricViewGeneratorTool(BaseTool):
             "measures_json",
             "mquery_json",
             "config_json",
+            "naming_config",
+            "refinement_feedback",
             "relationships_json",
             "scan_data_json",
+            "visual_usage_index",
+            "implicit_column_measures",
         )
 
         def _get_json(key):
@@ -228,6 +410,8 @@ class UCMetricViewGeneratorTool(BaseTool):
         mquery_raw = _get_json("mquery_json") or "[]"
         relationships_raw = _get_json("relationships_json")
         scan_raw = _get_json("scan_data_json")
+        visual_usage_raw = _get_json("visual_usage_index")
+        implicit_column_measures_raw = _get_json("implicit_column_measures")
         config_raw = _get_json("config_json") or "{}"
         # Diagnostic: what arrived via flow injection/kwargs BEFORE any API-mode
         # extraction or DB fallback runs below, and whether the DB fallback ends
@@ -245,8 +429,36 @@ class UCMetricViewGeneratorTool(BaseTool):
             "preinject_config_json_chars": (
                 len(config_raw) if isinstance(config_raw, str) else None
             ),
+            # Same shape as the three above, added after visual usage tags and
+            # the PBI<->UCMV mapping showed up empty in a run where
+            # config/measures/mquery all arrived intact — this is what tells
+            # the difference between "the flow handoff dropped this one field"
+            # and "Pipeline Config Generator's own report-definition extraction
+            # legitimately came back empty this run" (both look like 0
+            # annotations downstream, only this shows which one happened).
+            "preinject_visual_usage_index_chars": (
+                len(visual_usage_raw) if isinstance(visual_usage_raw, str) else None
+            ),
+            "preinject_implicit_column_measures_chars": (
+                len(implicit_column_measures_raw)
+                if isinstance(implicit_column_measures_raw, str)
+                else None
+            ),
             "db_fallback_fired_for": [],
             "db_fallback_extraction_id": None,
+            # Cuts through speculation about WHY the DB fallback did/didn't
+            # fire, without needing live debugger access: shows exactly what
+            # this tool instance saw on self.trace_context (set by
+            # attach_tools_trace_context via attach_execution_trace_context)
+            # at the moment it ran. Compare job_id here against Pipeline
+            # Config Generator's own "trace_context_seen" on the SAME run —
+            # a mismatch (or a None on either side) is the actual root cause,
+            # not something inferable from the narrative "Final Answer" text.
+            "trace_context_seen": (
+                dict(getattr(self, "trace_context", None) or {})
+                if isinstance(getattr(self, "trace_context", None), dict)
+                else getattr(self, "trace_context", None)
+            ),
         }
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
@@ -286,13 +498,29 @@ class UCMetricViewGeneratorTool(BaseTool):
             isinstance(relationships_raw, str)
             and relationships_raw.strip() in ("", "[]", "null")
         )
+        # Visual usage can be absent even when measures/mquery arrived — the flow
+        # handoff drops it independently, and it is NOT persisted as its own
+        # column. Trigger the extraction lookup for it too, so it can be
+        # re-derived from the persisted report_definition below.
+        _vu_raw_missing = (not visual_usage_raw) or (
+            isinstance(visual_usage_raw, str)
+            and visual_usage_raw.strip() in ("", "{}", "[]", "null")
+        )
         if (
             measures_raw == "[]"
             or mquery_raw == "[]"
             or config_raw == "{}"
             or _rel_raw_missing
+            or _vu_raw_missing
         ):
-            _job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+            try:
+                from src.services.execution.kernel.trace_context import (
+                    resolve_tool_execution_id,
+                )
+
+                _job_id = resolve_tool_execution_id(self)
+            except Exception:
+                _job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
             if not _job_id:
                 logger.info(
                     "[UCMV] DB fallback: no job_id on trace_context — cannot look up powerbi_extraction"
@@ -374,6 +602,34 @@ class UCMetricViewGeneratorTool(BaseTool):
                                 "[UCMV] DB fallback: rebuilt relationships_json "
                                 f"({len(_db_relationships)} relationships)"
                             )
+                        # Visual usage has no column of its own, but the raw
+                        # report_definition IS persisted — re-derive the index from
+                        # it when the handoff dropped it, so used_in_visuals / the
+                        # "Used on" column / the visual-usage triage don't silently
+                        # vanish on an empty handoff.
+                        _db_report_def = getattr(_extraction, "report_definition", None)
+                        if _vu_raw_missing and _db_report_def:
+                            try:
+                                from src.services.powerbi.visual_usage import (
+                                    derive_visual_usage_index,
+                                )
+
+                                _rebuilt_vu = derive_visual_usage_index(_db_report_def)
+                                if _rebuilt_vu:
+                                    visual_usage_raw = json.dumps(_rebuilt_vu)
+                                    _diag["db_fallback_fired_for"].append(
+                                        "visual_usage_index"
+                                    )
+                                    logger.info(
+                                        "[UCMV] DB fallback: re-derived "
+                                        f"visual_usage_index ({len(_rebuilt_vu)} "
+                                        "field(s)) from persisted report_definition"
+                                    )
+                            except Exception as _vu_err:  # noqa: BLE001
+                                logger.warning(
+                                    "[UCMV] DB fallback: visual_usage re-derive "
+                                    f"failed: {_vu_err}"
+                                )
                 except Exception as _db_err:
                     _diag["db_fallback_error"] = str(_db_err)
                     logger.warning(f"[UCMV] DB fallback failed: {_db_err}")
@@ -440,6 +696,19 @@ class UCMetricViewGeneratorTool(BaseTool):
                 # the prior regex-primary behaviour.
                 "translation_mode": _get("translation_mode") or "llm_first",
             }
+            # Customer-supplied domain context (free text) → the DAX→SQL
+            # translation prompt, so the LLM translates with the model's business
+            # semantics. Advisory and fail-open; only meaningful when LLM fallback
+            # is on, which is why it rides llm_config.
+            _dc = _get("domain_context")
+            if isinstance(_dc, str) and _dc.strip():
+                llm_config["domain_context"] = _dc.strip()
+            # Time-intelligence is translated ONLY inside the reconciliation loop
+            # (which validates the numbers); otherwise the DAX-LLM declines it so no
+            # unvalidated prior-year/YTD math ships. This generation is the in-loop
+            # one when _in_recon_loop is set.
+            if kwargs.get("_in_recon_loop"):
+                llm_config["reconciliation_active"] = True
 
         def _parse_json_input(raw, default):
             """Parse a JSON input; treat empty/blank as the default (never error)."""
@@ -450,6 +719,21 @@ class UCMetricViewGeneratorTool(BaseTool):
                 return default
             return json.loads(s)
 
+        # Iterative-reconciliation feedback → DAX LLM. Normalised to
+        # {measure -> hint} and only used when LLM fallback is on.
+        _rf_raw = _get_json("refinement_feedback")
+        if _rf_raw and llm_config is not None:
+            try:
+                from src.services.tools.metric_view_utils.reconciliation import (
+                    feedback_to_prompt_map,
+                )
+
+                _fb_map = feedback_to_prompt_map(_parse_json_input(_rf_raw, None))
+                if _fb_map:
+                    llm_config["refinement_feedback_by_measure"] = _fb_map
+            except Exception as e:  # noqa: BLE001 — feedback is advisory
+                logger.warning(f"[UCMV] Could not parse refinement_feedback: {e}")
+
         try:
             measures = _parse_json_input(measures_raw, [])
             mquery_entries = _parse_json_input(mquery_raw, [])
@@ -457,40 +741,118 @@ class UCMetricViewGeneratorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
+        # Cross-fact UNION sources are emitted ONLY inside the reconciliation loop,
+        # where PBI validates the numbers cell-by-cell. This generation IS the
+        # in-loop one when `_in_recon_loop` is set (the iterative runner re-invokes
+        # the tool with it). Off → no combined sources, no silently-wrong cross-fact
+        # numbers (see cross_table_source_planner).
+        if kwargs.get("_in_recon_loop"):
+            config["reconciliation_active"] = True
+
+        # Per-model naming/period vocabulary for the metadata lint + calendar
+        # period-folding (defaults are CCH/Total-SC; only other models need it).
+        # Lands under config["naming_config"] where the pipeline (lint) and
+        # JoinDetector (period) read it.
+        _naming_raw = _get_json("naming_config")
+        if _naming_raw:
+            try:
+                _nc = _parse_json_input(_naming_raw, {})
+                if isinstance(_nc, dict) and _nc:
+                    config["naming_config"] = _nc
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[UCMV] Failed to parse naming_config: {e}")
+
+        # Implicit visual-column measures (from Pipeline Config Generator) ride
+        # inside `config`, same bucket shape as switch_decompositions — merge
+        # rather than overwrite in case config_json already carried one (e.g.
+        # a manually-supplied config in a standalone/JSON-mode run).
+        if implicit_column_measures_raw:
+            try:
+                _icm = _parse_json_input(implicit_column_measures_raw, {})
+                if isinstance(_icm, dict) and _icm:
+                    config.setdefault("implicit_column_measures", {})
+                    for _tbl, _entries in _icm.items():
+                        config["implicit_column_measures"].setdefault(_tbl, []).extend(
+                            _entries
+                        )
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[UCMV] Failed to parse implicit_column_measures: {e}")
+
+        # Carry-forward overrides from the reconciliation loop: measures that
+        # already reconciled in a PRIOR cycle arrive as manual_overrides so
+        # table_processor reuses their SQL verbatim and drops them from the LLM
+        # batch — only the measures that MISSED are re-translated on a refine
+        # cycle. Same bucket shape / merge semantics as the blocks above.
+        _mo_raw = _get("manual_overrides")
+        if _mo_raw:
+            try:
+                _mo = (
+                    _parse_json_input(_mo_raw, {})
+                    if isinstance(_mo_raw, str)
+                    else _mo_raw
+                )
+                if isinstance(_mo, dict) and _mo:
+                    config.setdefault("manual_overrides", {})
+                    for _tbl, _entries in _mo.items():
+                        if isinstance(_entries, list):
+                            config["manual_overrides"].setdefault(_tbl, []).extend(
+                                _entries
+                            )
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"[UCMV] Failed to parse manual_overrides: {e}")
+
+        # Capture the ORIGINAL source expression per table BEFORE the M→SQL LLM
+        # recovery below rewrites it, so the UI can show the FULL raw Power Query M
+        # (not just the derived Source SQL) and audit which transformation steps it
+        # carries. Keyed by PBI table_name; mapped to the emit table_key later.
+        _raw_source_by_name: dict = {}
+        if isinstance(mquery_entries, list):
+            for _e in mquery_entries:
+                if isinstance(_e, dict) and _e.get("table_name"):
+                    _raw_source_by_name[str(_e["table_name"])] = str(
+                        _e.get("transpiled_sql") or ""
+                    )
+
         # ── Raw Power Query M → SQL source recovery (opt-in) ────────────────
         # When a table's source is raw M (`let ... in ...`) with no embedded
         # native SQL, MQueryParser cannot extract a FROM clause → the table is
         # neither a fact nor has a source → 0 views. If LLM fallback is enabled,
         # rewrite those entries' transpiled_sql to a Spark SQL SELECT the parser
         # CAN read. Fail-open: entries the LLM can't translate are left as-is.
+        # Hoisted so the post-emit safety net can tell "no raw-M tables" from "raw-M
+        # tables whose LLM source-recovery produced nothing" (the shape of an LLM
+        # failure — provider routing / FMAPI throttle / timeout — that otherwise
+        # reads as a silent 0 views).
+        _raw_m_count = 0
+        _raw_m_recovered = 0
         if use_llm and isinstance(mquery_entries, list) and mquery_entries:
             try:
                 from src.services.tools.metric_view_utils.mquery_parser import (
                     looks_like_raw_mquery,
                 )
 
-                raw_m_count = sum(
+                _raw_m_count = sum(
                     1
                     for e in mquery_entries
                     if isinstance(e, dict)
                     and looks_like_raw_mquery(e.get("transpiled_sql") or "")
                 )
-                if raw_m_count:
+                if _raw_m_count:
                     from src.services.tools.metric_view_utils.mquery_llm_fallback import (
                         recover_sources_with_llm,
                     )
 
                     logger.info(
-                        f"[UCMV] {raw_m_count} raw M-Query table(s) detected; attempting M→SQL LLM recovery"
+                        f"[UCMV] {_raw_m_count} raw M-Query table(s) detected; attempting M→SQL LLM recovery"
                     )
-                    mquery_entries, _recovered = _run_async(
+                    mquery_entries, _raw_m_recovered = _run_async(
                         recover_sources_with_llm(
                             mquery_entries,
                             model=(_get("llm_model") or "databricks-claude-sonnet-4-5"),
                         )
                     )
                     logger.info(
-                        f"[UCMV] M→SQL recovery: {_recovered}/{raw_m_count} table(s) recovered"
+                        f"[UCMV] M→SQL recovery: {_raw_m_recovered}/{_raw_m_count} table(s) recovered"
                     )
             except Exception as _m_err:
                 logger.warning(
@@ -572,10 +934,195 @@ class UCMetricViewGeneratorTool(BaseTool):
         )
         pipeline.run()
 
+        # Tag each measure with WHERE it's actually seen in the report (PROP-8)
+        # — mutates pipeline.all_specs in place, so it must run before emission
+        # to reach the YAML comment, migration report, and JSON output alike.
+        visual_usage_annotated = 0
+        # Hoisted so the none_allocated catch-all can reuse it to annotate its own
+        # (freshly-translated) measures with the same visual reference.
+        visual_usage_obj: dict | None = None
+        if visual_usage_raw:
+            try:
+                _parsed_vu = (
+                    json.loads(visual_usage_raw)
+                    if isinstance(visual_usage_raw, str)
+                    else visual_usage_raw
+                )
+                visual_usage_obj = _parsed_vu if isinstance(_parsed_vu, dict) else None
+                if isinstance(visual_usage_obj, dict):
+                    from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                        annotate_visual_usage,
+                    )
+
+                    visual_usage_annotated = annotate_visual_usage(
+                        pipeline.all_specs, visual_usage_obj
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to parse/apply visual_usage_index: {e}")
+
+        # Backtrace: propagate that direct usage DOWN the measure-dependency
+        # graph so sub-KPIs feeding a visual-placed KPI are surfaced too
+        # (indirect_visual_usage, kept separate from the direct tag). Runs after
+        # the direct pass and before emission; fail-open.
+        indirect_visual_annotated = 0
+        try:
+            from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                annotate_indirect_visual_usage,
+            )
+
+            indirect_visual_annotated = annotate_indirect_visual_usage(
+                pipeline.all_specs
+            )
+        except Exception as e:
+            logger.warning(f"Failed to derive indirect visual usage: {e}")
+
+        # TRIAGE (opt-in): drop measures with no direct AND no indirect visual
+        # usage, so a report's legacy/unused measures are not translated-noise in
+        # the output. Gated on BOTH the flag AND real visual data (direct
+        # annotation count > 0) — without a visual-usage index every measure looks
+        # unused and we must NOT prune (we'd drop the whole model). Base/implicit
+        # column measures are always kept (see prune_non_visual_measures).
+        measures_pruned_non_visual = 0
+        if _get("prune_non_visual_measures") and visual_usage_annotated > 0:
+            try:
+                from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                    prune_non_visual_measures,
+                )
+
+                measures_pruned_non_visual = prune_non_visual_measures(
+                    pipeline.all_specs
+                )
+                logger.info(
+                    f"[UCMVGenerator] Visual-usage triage pruned "
+                    f"{measures_pruned_non_visual} measure(s) not reachable from any "
+                    "visual (directly or via dependency chain)."
+                )
+            except Exception as e:
+                logger.warning(f"Visual-usage pruning skipped: {e}")
+
+        # Reconciliation framework input (priority 3): a deterministic
+        # PBI-measure <-> UCMV-measure mapping draft per fact table. Reads
+        # each measure's used_in_visuals, so it runs after the annotation
+        # above — but unlike that step, ordering relative to emission doesn't
+        # matter here: this is its own output key, not embedded in the
+        # YAML/report.
+        pbi_ucmv_mapping: dict = {}
+        try:
+            from src.services.tools.metric_view_utils.pbi_ucmv_mapping import (
+                derive_pbi_ucmv_mapping,
+            )
+
+            pbi_ucmv_mapping = derive_pbi_ucmv_mapping(pipeline.all_specs)
+        except Exception as e:
+            logger.warning(f"Failed to derive pbi_ucmv_mapping: {e}")
+
+        # Live-connection flag: which views are backed by a live connection to a
+        # semantic model (M-Query AnalysisServices.Database) rather than a
+        # warehouse table — the transpiler can't resolve those, so surface WHICH
+        # semantic model/table to parse. {view_name: {server, database, table}}.
+        live_connections: dict = {}
+        try:
+            from src.services.powerbi.live_connection import derive_live_connections
+
+            live_connections = derive_live_connections(
+                pipeline.all_specs, getattr(pipeline, "_mquery_expressions", {})
+            )
+            if live_connections:
+                logger.info(
+                    f"[UCMVGenerator] {len(live_connections)} view(s) on a live "
+                    "semantic-model connection (flagged for manual parse)"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to derive live_connections: {e}")
+
         # Emit YAML + SQL
         yaml_output = pipeline.emit_all_yaml(catalog=catalog, schema=schema)
         sql_output = pipeline.emit_all_sql(catalog=catalog, schema=schema)
         results = pipeline.get_results()
+
+        # Full raw Power Query M per view (same table_key space as sql_output) so
+        # the UI can show the FULL M statement alongside the derived Source SQL,
+        # plus an audit of transformation steps the M carries that may NOT be
+        # reflected in that SQL (filters, group-by, joins, …) — so the loss is
+        # visible, not silent. Prefer the pre-recovery original M; fall back to
+        # the parsed source expression.
+        source_mquery: dict = {}
+        source_transform_todos: dict = {}
+        try:
+            from src.services.tools.metric_view_utils.mquery_transform_audit import (
+                audit_mquery_transformations,
+            )
+
+            for _tk, _ti in (pipeline.mquery_tables or {}).items():
+                _raw = (
+                    _raw_source_by_name.get(getattr(_ti, "table_name", ""))
+                    or getattr(_ti, "raw_transpiled_sql", "")
+                    or getattr(_ti, "full_sql", "")
+                )
+                if _raw:
+                    source_mquery[_tk] = _raw
+                    _todos = audit_mquery_transformations(_raw)
+                    if _todos:
+                        source_transform_todos[_tk] = _todos
+        except Exception as _sm_err:  # noqa: BLE001 — display aid, never fatal
+            logger.warning(f"[UCMV] source_mquery/audit build failed: {_sm_err}")
+
+        # Safety net: when LLM translation is ON but nothing came through, say WHY
+        # loudly instead of returning a silent empty result. A total 0-view yield —
+        # or raw-M tables that recovered NONE of their sources — is the exact shape
+        # of the subprocess LLM failure (provider routing / FMAPI rate-limit /
+        # timeout) that otherwise reads as "the tool just produced nothing".
+        llm_translation_warning = None
+        if use_llm:
+            _view_count = len(yaml_output or {})
+            if _raw_m_count and not _raw_m_recovered:
+                llm_translation_warning = (
+                    f"LLM source recovery produced nothing for all {_raw_m_count} raw "
+                    "Power Query table(s), so they yielded no views. This is almost "
+                    "always the DAX/M LLM calls failing — provider routing, an FMAPI "
+                    "rate-limit/throttle, or the subprocess timing out — NOT an empty "
+                    "model. Check the run log for 'LLM Provider NOT provided' or "
+                    "throttling and re-run; if it timed out, lower the DAX LLM batch "
+                    "size/concurrency or raise the subprocess limit."
+                )
+            elif _view_count == 0:
+                llm_translation_warning = (
+                    "0 metric views were generated with LLM translation enabled. If "
+                    "measures were present, the DAX→SQL LLM calls likely failed "
+                    "(provider routing / FMAPI throttle / timeout) rather than the "
+                    "model being empty — check the run log and re-run."
+                )
+            if llm_translation_warning:
+                logger.warning(f"[UCMV] {llm_translation_warning}")
+
+        # Catch-all so no reference measure is silently dropped: gather every
+        # measure that never landed on a fact view into a synthetic
+        # `none_allocated_measures` view — best-effort translated where possible,
+        # the rest documented as comments with DAX + reason (visual/formatting/
+        # slicer artifacts are labelled as such, since Genie/analytics don't use
+        # them). Merged into yaml_output AFTER validation below so it is not
+        # validated as a deployable view (it spans multiple facts by design).
+        none_allocated_yaml = None
+        try:
+            from src.services.tools.metric_view_utils.none_allocated_emitter import (
+                build_none_allocated_yaml,
+            )
+
+            # Reconcile against the FULL extracted measure set (all 138), not a
+            # downstream-derived subset, so nothing can slip through the gap
+            # between "extracted" and "allocated".
+            none_allocated_yaml = build_none_allocated_yaml(
+                measures if isinstance(measures, list) else pipeline.mapping,
+                pipeline.all_specs,
+                yaml_output,  # rendered real views: covered == actually in the export
+                pipeline.translator,
+                pipeline._PBI_ARTIFACT_PATTERNS,
+                visual_usage_index=visual_usage_obj,
+            )
+        except Exception as _na_err:
+            logger.warning(
+                f"[UCMVGenerator] none_allocated_measures emit skipped: {_na_err}"
+            )
 
         # Run validation (optional — compares DAX structure vs generated SQL)
         validation_results = {}
@@ -708,9 +1255,81 @@ class UCMetricViewGeneratorTool(BaseTool):
                     f"Tables/measures may be MISSING — every measure marked TODO: verify."
                 )
 
+        # Count only the real generated views; the catch-all worklist is added
+        # next and must not inflate views_generated.
+        _generated_view_count = len(yaml_output) if isinstance(yaml_output, dict) else 0
+        # Surface the catch-all as its own downloadable file
+        # (none_allocated_measures.yaml), alongside the real views.
+        if none_allocated_yaml:
+            yaml_output = {
+                **yaml_output,
+                "none_allocated_measures": none_allocated_yaml,
+            }
+
+        # Source-layer views (rec#3), PBI-only ingestion tasks (S8) and the
+        # PBI-validation hook (rec#4). Each fail-open, each its own output key —
+        # the bridge lives in source_artifacts so this tool doesn't carry the glue.
+        source_layer_ddl: dict = {}
+        pbi_only_ingestion_tasks: list = []
+        pbi_validation_report: dict = {}
+        try:
+            from src.services.tools.metric_view_utils.source_artifacts import (
+                build_source_layer,
+                detect_pbi_only_tables,
+                run_pbi_validation,
+            )
+
+            _mq_exprs = getattr(pipeline, "_mquery_expressions", {}) or {}
+            source_layer_ddl = build_source_layer(
+                pipeline.all_specs,
+                mquery_tables,
+                config,
+                catalog,
+                schema,
+                mquery_expressions=_mq_exprs,
+            )
+            pbi_only_ingestion_tasks = detect_pbi_only_tables(
+                _mq_exprs, catalog, schema
+            )
+            # rec#4: only build a live PBI callback when explicitly opted in (and
+            # creds are present) — otherwise run_pbi_validation reports "skipped"
+            # and makes no network calls.
+            _evaluate_fn = None
+            if _get("validate_against_pbi"):
+                from src.services.tools.metric_view_utils.source_artifacts import (
+                    build_pbi_evaluate_fn,
+                )
+
+                _evaluate_fn = build_pbi_evaluate_fn(
+                    _get("access_token"),
+                    _get("workspace_id"),
+                    _get("dataset_id"),
+                    base_url=_get("pbi_api_base_url"),
+                )
+            pbi_validation_report = run_pbi_validation(
+                pipeline.all_specs, yaml_output, evaluate_fn=_evaluate_fn
+            )
+            if source_layer_ddl or pbi_only_ingestion_tasks:
+                logger.info(
+                    f"[UCMVGenerator] source layer: {len(source_layer_ddl)} view(s); "
+                    f"PBI-only ingestion tasks: {len(pbi_only_ingestion_tasks)}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[UCMVGenerator] source-layer/ingestion/validation step skipped: {e}"
+            )
+
         output = {
             "yaml": yaml_output,
             "sql": sql_output,
+            # Full raw Power Query M per view (keyed like `sql`) + an audit of the
+            # transformation steps it carries that may not be reflected in that SQL.
+            "source_mquery": source_mquery,
+            "source_transform_todos": source_transform_todos,
+            # Loud, specific reason when LLM translation was on but produced nothing
+            # — so an LLM failure (provider/throttle/timeout) never reads as a silent
+            # 0-view result. None when translation produced views.
+            "llm_translation_warning": llm_translation_warning,
             "stats": results["stats"],
             "migration_report": results.get("migration_report", ""),
             "limitations": results.get("limitations", {}),
@@ -727,7 +1346,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             # Present when 0 views generated: actionable "why + what to do" so a
             # thin-report run is never a silent empty result.
             "zero_view_diagnosis": zero_view_diagnosis,
-            "views_generated": len(yaml_output) if isinstance(yaml_output, dict) else 0,
+            "views_generated": _generated_view_count,
             "specs_summary": {
                 k: {
                     "view_name": v.get("view_name"),
@@ -741,6 +1360,49 @@ class UCMetricViewGeneratorTool(BaseTool):
             "untranslatable_items": self._build_untranslatable_items(
                 results.get("specs", {})
             ),
+            # How many measures got a non-empty used_in_visuals — a sanity
+            # count, not the data itself (that's on each measure in `specs`/
+            # `yaml`/the migration report). 0 with a non-empty
+            # visual_usage_index means nothing in scope matched any page's
+            # projections/filters, which is a real (if unusual) result, not
+            # necessarily a bug.
+            "visual_usage_annotated_count": visual_usage_annotated,
+            # How many measures gained INDIRECT usage (a visual-placed measure
+            # references them transitively) — backtraced sub-KPIs.
+            "indirect_visual_usage_count": indirect_visual_annotated,
+            # How many measures were pruned by visual-usage triage (opt-in via
+            # prune_non_visual_measures) — not shown/filtered in any visual,
+            # directly or via a dependency chain. 0 when triage is off or there
+            # was no visual-usage data to triage on.
+            "measures_pruned_non_visual": measures_pruned_non_visual,
+            # {view_name: mapping_candidates_yaml_text} — the reconciliation
+            # framework's (dqa/kpi_reconciliation) input, deterministically
+            # derived instead of hand-authored. A DRAFT: binding: fields are
+            # left TODO (see pbi_ucmv_mapping.py's own docstring for why),
+            # and every measure's pbi_kind should be spot-checked before
+            # trusting it for reconciliation.
+            "pbi_ucmv_mapping": pbi_ucmv_mapping,
+            # Non-null ONLY when reconciliation was requested but did not run
+            # (missing reference_years/warehouse, unresolved creds, or an error).
+            # Names the reason so a single-pass is never silent — the UI renders
+            # it as a warning.
+            "reconciliation_skipped": _recon_skipped,
+            # {view_name: {server, database, table}} — views backed by a live
+            # connection to a semantic model; the UI flags these as a note
+            # telling the team which model/table to parse to complete them.
+            "live_connections": live_connections,
+            # rec#3: one CREATE VIEW per PBI table reproducing the physical read
+            # (native-query SQL / passthrough + calc columns) the metric views sit
+            # on. {table: {ddl, todo_steps, error}}.
+            "source_layer_ddl": source_layer_ddl,
+            # S8: tables sourced from Excel/SharePoint/Web/typed literals — need an
+            # ingestion snapshot, not a SQL translation. [{table, uc_target, kind,
+            # recommended_approach, snapshot_loader_stub}].
+            "pbi_only_ingestion_tasks": pbi_only_ingestion_tasks,
+            # rec#4: validation-loop hook. "skipped" until a live PBI EVALUATE
+            # callback (service-account executeQueries) is wired; the mechanism is
+            # ready in pbi_validation.
+            "pbi_validation": pbi_validation_report,
             "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
@@ -777,6 +1439,13 @@ class UCMetricViewGeneratorTool(BaseTool):
                     catalog=catalog,
                     schema=schema,
                     untranslatable_items=output.get("untranslatable_items") or [],
+                    pbi_ucmv_mapping=output.get("pbi_ucmv_mapping") or {},
+                    live_connections=output.get("live_connections") or {},
+                    source_layer_ddl=output.get("source_layer_ddl") or {},
+                    pbi_only_ingestion_tasks=output.get("pbi_only_ingestion_tasks")
+                    or [],
+                    pbi_validation=output.get("pbi_validation") or {},
+                    reconciliation_skipped=output.get("reconciliation_skipped"),
                 )
             )
         except Exception as _hist_err:
@@ -818,6 +1487,10 @@ class UCMetricViewGeneratorTool(BaseTool):
                         # Labeled DRAFT CREATE VIEW scaffold for cross-fact / multi-stage
                         # (proposal artifact, never an emitted measure).
                         "source_view_sql_draft": m.get("source_view_sql_draft"),
+                        "used_in_visuals": m.get("used_in_visuals") or [],
+                        # Backtraced usage: a visual-placed KPI references this
+                        # non-emitted measure — surfaced in the review panel too.
+                        "indirect_visual_usage": m.get("indirect_visual_usage") or [],
                     }
                 )
         items.sort(key=lambda x: x.get("referenced_by", 0), reverse=True)
@@ -1180,6 +1853,12 @@ class UCMetricViewGeneratorTool(BaseTool):
         catalog: Optional[str],
         schema: Optional[str],
         untranslatable_items: Optional[list] = None,
+        pbi_ucmv_mapping: Optional[dict] = None,
+        live_connections: Optional[dict] = None,
+        source_layer_ddl: Optional[dict] = None,
+        pbi_only_ingestion_tasks: Optional[list] = None,
+        pbi_validation: Optional[dict] = None,
+        reconciliation_skipped: Optional[str] = None,
     ) -> None:
         """Persist the full raw DAX extract to conversion_history (fail-open).
 
@@ -1194,6 +1873,11 @@ class UCMetricViewGeneratorTool(BaseTool):
         also persisted so re-evaluation can later answer "which measures failed,
         and at what capability level?" and decide whether a retry can gain
         anything — without re-hitting the PowerBI API.
+
+        ``pbi_ucmv_mapping`` (per-view PBI<->UCMV reconciliation mapping draft) is
+        persisted in ``output_data`` alongside ``yaml``/``sql`` so the
+        "Download Mapping" artifact is retrievable by ``execution_id`` after the
+        run, not only from the transient tool result.
         """
 
         def _capability_fp() -> str:
@@ -1220,8 +1904,18 @@ class UCMetricViewGeneratorTool(BaseTool):
             view_count = len(yaml_output) if isinstance(yaml_output, dict) else 0
             # measure_count reflects extracted DAX when present, else views built.
             measure_count = raw_dax_count or view_count
+            try:
+                from src.services.execution.kernel.trace_context import (
+                    resolve_tool_execution_id,
+                )
+
+                _hist_exec_id = resolve_tool_execution_id(self)
+            except Exception:
+                _hist_exec_id = (getattr(self, "trace_context", None) or {}).get(
+                    "job_id"
+                )
             history_data = ConversionHistoryCreate(
-                execution_id=(getattr(self, "trace_context", None) or {}).get("job_id"),
+                execution_id=_hist_exec_id,
                 source_format="powerbi_dax",
                 target_format="uc_metrics",
                 input_data={
@@ -1241,6 +1935,28 @@ class UCMetricViewGeneratorTool(BaseTool):
                     # Re-evaluation inputs: WHICH measures failed, and at WHAT
                     # capability level. A later sweep re-tries only these.
                     "untranslatable_items": untranslatable_items or [],
+                    # Per-view PBI<->UCMV reconciliation mapping draft
+                    # ({view_name: mapping_candidates_yaml_text}, from
+                    # pbi_ucmv_mapping.py). Persisted alongside yaml/sql so the
+                    # "Download Mapping" artifact is retrievable by execution_id
+                    # (GET /conversion-history), not only from the live tool
+                    # result the UI happens to hold in-session.
+                    "pbi_ucmv_mapping": pbi_ucmv_mapping or {},
+                    # Live-connection flag (which semantic model/table to parse),
+                    # persisted so the UI note is retrievable by execution_id.
+                    "live_connections": live_connections or {},
+                    # Source-layer DDL (rec#3): {table: {ddl, todo_steps, error}}
+                    # — persisted so the UI can show the base views a run proposes.
+                    "source_layer_ddl": source_layer_ddl or {},
+                    # PBI-only ingestion tasks (S8): tables needing a snapshot
+                    # loader rather than a SQL source.
+                    "pbi_only_ingestion_tasks": pbi_only_ingestion_tasks or [],
+                    # Validation-loop status (rec#4): skipped/ran/error + detail.
+                    "pbi_validation": pbi_validation or {},
+                    # Reason reconciliation did not run when it was requested
+                    # (persisted so it is retrievable by execution_id, not just
+                    # in the live result).
+                    "reconciliation_skipped": reconciliation_skipped,
                 },
                 output_summary=(
                     f"Generated {view_count} UC metric view(s)"
@@ -1608,8 +2324,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         # 1b. Measure DAX fallback — the Execute Queries / XMLA path above is
         # frequently rejected for Service-Account (ROPC) tokens, yielding zero
         # measures. Recover via (a) Fabric TMDL (which an SA CAN read) and, if a
-        # client_secret is available, (b) a Service-Principal retry. Mirrors the
-        # Semantic Model Fetcher's TMDL→SP DAX strategy.
+        # client_secret is available, (b) a Service-Principal retry.
         if not result.get("measures"):
             recovered = self._extract_measures_fallback(
                 workspace_id=workspace_id,
@@ -1668,7 +2383,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         # no fact table is detected and the generator emits 0 views even when
         # measures were extracted. Recover the table source expressions via
         # Fabric TMDL (SA-readable) or a Service-Principal retry, mirroring the
-        # measure fallback and the Semantic Model Fetcher.
+        # measure fallback.
         if not result.get("mquery"):
             recovered_mq = self._extract_mquery_fallback(
                 workspace_id=workspace_id,

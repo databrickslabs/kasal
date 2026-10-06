@@ -78,7 +78,9 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
+import queue as queue_mod
 import signal
+import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
@@ -1359,6 +1361,24 @@ class ProcessFlowExecutor:
                 {"status": "FAILED", "execution_id": execution_id, "error": str(e)}
             )
         finally:
+            # CRITICAL: flush the result THROUGH the queue's feeder thread before
+            # the hard os._exit(0) below. mp.Queue.put() is asynchronous — it only
+            # hands the object to a background feeder thread that writes it to the
+            # OS pipe. os._exit(0) terminates immediately without running that
+            # thread to completion, so a large result (one that cannot fit the
+            # ~64 KB pipe buffer in a single write) is silently discarded and the
+            # parent sees an empty queue → a FALSE "Process ended without producing
+            # result" even though the flow succeeded and already persisted its
+            # result to the database. close() + join_thread() waits for the feeder
+            # to finish; the parent drains the queue concurrently (see
+            # _wait_for_result, which now reads BEFORE join), so a full pipe cannot
+            # deadlock this.
+            try:
+                result_queue.close()
+                result_queue.join_thread()
+            except Exception:
+                pass
+
             # CRITICAL: Explicitly exit the subprocess after putting result in queue
             # Without this, the process stays alive waiting for background threads/tasks
             # This prevents zombie subprocess accumulation
@@ -1659,38 +1679,70 @@ class ProcessFlowExecutor:
         This runs in a thread pool executor.
         """
         try:
-            # Wait for process to finish
-            process.join(timeout=timeout)
+            # Drain the result WHILE the child is still alive, BEFORE joining it.
+            # mp.Queue delivers via a background feeder thread that writes to a
+            # small (~64 KB) OS pipe; a large result only lands once the reader
+            # drains the pipe. The old order (join first, then read) deadlocked the
+            # child's feeder on a full pipe for large results, so the child's
+            # os._exit discarded them and this method reported a false "ended
+            # without producing result". Reading first lets the feeder flush the
+            # whole payload regardless of size.
+            result = None
+            deadline = (time.monotonic() + timeout) if timeout else None
+            while True:
+                try:
+                    result = result_queue.get(timeout=1.0)
+                    break
+                except queue_mod.Empty:
+                    if not process.is_alive():
+                        # Child has exited. Attempt one final read in case the
+                        # feeder flushed the last bytes just before exit.
+                        try:
+                            result = result_queue.get(timeout=1.0)
+                        except queue_mod.Empty:
+                            result = None
+                        break
+                    if deadline is not None and time.monotonic() > deadline:
+                        logger.warning(
+                            f"Flow process {process.pid} for {execution_id} still running after timeout"
+                        )
+                        process.terminate()
+                        process.join(timeout=5)
+                        if process.is_alive():
+                            process.kill()
+                            process.join()
+                        raise TimeoutError(
+                            f"Flow execution timed out after {timeout} seconds"
+                        )
 
+            # Result drained (or the child is gone). Reap the process. It should
+            # exit promptly now that the queue has been emptied; force-reap if a
+            # very large payload left the feeder lingering.
+            process.join(timeout=10)
             if process.is_alive():
-                # Timeout occurred
-                logger.warning(
-                    f"Flow process {process.pid} for {execution_id} still running after timeout"
-                )
                 process.terminate()
                 process.join(timeout=5)
                 if process.is_alive():
                     process.kill()
                     process.join()
-                raise TimeoutError(f"Flow execution timed out after {timeout} seconds")
 
-            # Get result from queue
-            if not result_queue.empty():
-                result = result_queue.get(timeout=1)
+            if result is not None:
                 return result
-            else:
-                # No result in queue - process ended without producing result
-                # This typically happens when the process was stopped/killed
-                exit_code = process.exitcode
-                logger.info(
-                    f"[_wait_for_result] Process {process.pid} ended without result. Exit code: {exit_code}. This is normal if the flow was stopped."
-                )
-                return {
-                    "status": "FAILED",
-                    "execution_id": execution_id,
-                    "error": "Process ended without producing result (may have been stopped)",
-                    "exit_code": exit_code,
-                }
+
+            # No result even after draining and the process is gone. This is a
+            # genuine early death (crash/kill before put), NOT the large-result
+            # race above. The parent (flow_execution_runner) additionally falls
+            # back to the DB-persisted status before declaring the run failed.
+            exit_code = process.exitcode
+            logger.info(
+                f"[_wait_for_result] Process {process.pid} ended without result. Exit code: {exit_code}. This is normal if the flow was stopped."
+            )
+            return {
+                "status": "FAILED",
+                "execution_id": execution_id,
+                "error": "Process ended without producing result (may have been stopped)",
+                "exit_code": exit_code,
+            }
 
         except Exception as e:
             logger.error(f"Error waiting for flow result: {e}")

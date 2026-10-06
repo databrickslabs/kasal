@@ -81,16 +81,25 @@ class AgentConfig:
                 except Exception as init_error:
                     logger.warning(f"Error initializing ToolFactory: {init_error}")
 
-            # Use crew_tool_configs if provided, otherwise agent_data.tool_configs.
-            effective_tool_configs = (
-                crew_tool_configs
-                if crew_tool_configs is not None
-                else (
-                    agent_data.tool_configs
-                    if hasattr(agent_data, "tool_configs")
-                    else None
-                )
+            # Merge the agent's OWN saved tool_configs (base layer) with the
+            # crew/task/flow overrides in crew_tool_configs (which win per
+            # tool-id). This was previously EITHER/OR: when the flow supplied any
+            # crew/task tool_config, the agent's own config was dropped entirely,
+            # so tool parameters a user set while editing the agent in Agent
+            # Builder (e.g. workspace_id/dataset_id on the UC Metric View
+            # generator) were silently ignored at flow-execution time and the
+            # tool fell back to seeded defaults. Merging keeps the existing
+            # precedence (a crew/task entry still overrides the agent for the same
+            # tool) while surfacing agent-level config for every tool the flow
+            # does not override.
+            agent_own_configs = getattr(agent_data, "tool_configs", None)
+            agent_own_configs = (
+                agent_own_configs if isinstance(agent_own_configs, dict) else {}
             )
+            override_configs = (
+                crew_tool_configs if isinstance(crew_tool_configs, dict) else {}
+            )
+            effective_tool_configs = {**agent_own_configs, **override_configs} or None
 
             # Gather tool IDS from the agent's own list, else from the flow graph
             # (flow-specific sources). The shared builder creates the instances.

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import queue
 import sys
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -56,13 +57,27 @@ class FakeQueue:
     def get(self, timeout=None):
         if self._items:
             return self._items.pop(0)
-        raise Exception("Empty")
+        # Match a real multiprocessing.Queue: an empty get(timeout=...) raises
+        # queue.Empty (NOT a bare Exception), which _wait_for_result catches to
+        # keep polling while the child is alive.
+        raise queue.Empty
 
     def get_nowait(self):
         return self.get()
 
     def put(self, item):
         self._items.append(item)
+
+    # The child now flushes the result queue before os._exit; the parent closes
+    # queues on cleanup. No-ops here so those calls are exercised harmlessly.
+    def close(self):
+        pass
+
+    def join_thread(self):
+        pass
+
+    def cancel_join_thread(self):
+        pass
 
 
 class FakeContext:
@@ -206,6 +221,35 @@ class TestGetMetrics:
             assert v == 0
 
 
+class _TimeoutProc:
+    """A process that stays alive so _wait_for_result hits its deadline. If
+    ``die_on_terminate`` it dies on terminate() (→ no kill); otherwise it
+    survives terminate and must be killed."""
+
+    def __init__(self, die_on_terminate=True):
+        self.pid = 1
+        self.exitcode = None
+        self._alive = True
+        self._die_on_terminate = die_on_terminate
+        self.terminate_calls = 0
+        self.kill_calls = 0
+
+    def is_alive(self):
+        return self._alive
+
+    def join(self, timeout=None):
+        pass
+
+    def terminate(self):
+        self.terminate_calls += 1
+        if self._die_on_terminate:
+            self._alive = False
+
+    def kill(self):
+        self.kill_calls += 1
+        self._alive = False
+
+
 class TestWaitForResult:
     def test_queue(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
@@ -217,36 +261,79 @@ class TestWaitForResult:
             == "COMPLETED"
         )
 
+    def test_drains_large_result_while_child_still_alive(self):
+        """The fix: the result must be read even when the child is still alive
+        when we start polling (a large payload is delivered on a later poll).
+        The old code joined first, so the child's os._exit discarded the payload
+        and this returned a false 'ended without producing result'."""
+        from src.services.flow_builder.process_executor import ProcessFlowExecutor
+
+        class _SlowQueue:
+            def __init__(self):
+                self.n = 0
+
+            def get(self, timeout=None):
+                self.n += 1
+                if self.n < 3:
+                    raise queue.Empty
+                return {"status": "COMPLETED", "result": {"big": "payload"}}
+
+        class _Proc:
+            pid = 1
+            exitcode = 0
+
+            def __init__(self):
+                self._alive = True
+
+            def is_alive(self):
+                return self._alive
+
+            def join(self, timeout=None):
+                self._alive = False
+
+            def terminate(self):
+                self._alive = False
+
+            def kill(self):
+                self._alive = False
+
+        r = ProcessFlowExecutor()._wait_for_result("e1", _Proc(), _SlowQueue(), 10)
+        assert r["status"] == "COMPLETED"
+        assert r["result"] == {"big": "payload"}
+
     def test_empty(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
+        # Child already dead, nothing on the queue → genuine failure with exit code.
         r = ProcessFlowExecutor()._wait_for_result("e1", FakeProcess(), FakeQueue(), 10)
         assert r["status"] == "FAILED" and "exit_code" in r
 
     def test_timeout_term(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
-        p = MagicMock()
-        p.is_alive.side_effect = [True, True, False]
-        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 1)
-        assert r["status"] == "FAILED"
-        p.terminate.assert_called_once()
+        p = _TimeoutProc(die_on_terminate=True)
+        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 0.05)
+        assert r["status"] == "FAILED" and "timed out" in r["error"]
+        assert p.terminate_calls == 1 and p.kill_calls == 0
 
     def test_timeout_kill(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
-        p = MagicMock()
-        p.is_alive.side_effect = [True, True, True]
-        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 1)
-        assert r["status"] == "FAILED"
-        p.kill.assert_called_once()
+        p = _TimeoutProc(die_on_terminate=False)
+        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 0.05)
+        assert r["status"] == "FAILED" and "timed out" in r["error"]
+        assert p.kill_calls == 1
 
     def test_exc(self):
         from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
+        # An error while reaping (join) after the result was drained → FAILED.
         p = MagicMock()
+        p.is_alive.return_value = False
         p.join.side_effect = RuntimeError("boom")
-        r = ProcessFlowExecutor()._wait_for_result("e1", p, FakeQueue(), 10)
+        r = ProcessFlowExecutor()._wait_for_result(
+            "e1", p, FakeQueue([{"status": "COMPLETED"}]), 10
+        )
         assert r["status"] == "FAILED" and "boom" in r["error"]
 
 

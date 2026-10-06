@@ -421,6 +421,16 @@ const useShortcuts = ({
         return;
       }
 
+      // While the user is typing in a text field, keys belong to that field, not
+      // to the canvas. Without this, single-key shortcuts still fire while you
+      // rename a session/crew/flow or type an approval comment — Backspace/Delete
+      // ran onClearCanvas/onDeleteSelected ("Canvas cleared: removed N nodes…")
+      // and every keystroke re-rendered the canvas, which is the typing lag.
+      if (isInputFocused) {
+        console.log('useShortcuts - Input focused, letting the field handle the key');
+        return;
+      }
+
       // Build current key combination including modifiers
       const currentCombination: string[] = [];
       if (event.ctrlKey || event.metaKey) currentCombination.push('Control');

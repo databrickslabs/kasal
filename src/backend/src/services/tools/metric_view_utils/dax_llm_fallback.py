@@ -109,12 +109,34 @@ CRITICAL SQL rules for every "sql_expr" (see skill corpus §0 for detail):
    Only source and declared join aliases are valid namespaces. If a measure needs a
    table that is neither source nor a declared join, set success=false with
    dax_class="architecture_change" and explain the source-view change needed — do
-   NOT fabricate a cross-table subquery."""
+   NOT fabricate a cross-table subquery.
+3. DAX BLANK inequality semantics: DAX `col <> "X"` is TRUE for BLANK rows, but
+   SQL `col <> 'X'` DROPS NULLs (so the filter silently returns 0). Preserve DAX
+   semantics with the NULL-aware form: `(source.col IS NULL OR source.col <> 'X')`.
+   (`col = "X"` needs no such guard — both DAX and SQL exclude the blank/NULL row.)
+4. Group-then-aggregate (SUMMARIZE + DISTINCTCOUNT): a measure that groups by a
+   score and counts distinct ids per group, then sums, is counting DISTINCT
+   (score, id) PAIRS — emit
+   `COUNT(DISTINCT CASE WHEN <cond> THEN concat(CAST(source.score AS STRING),'|',CAST(source.id AS STRING)) END)`,
+   never a row-level SUM or a product of counts.
+5. TIME-INTELLIGENCE — prior year/period, YTD, QTD, MTD and the DAX functions
+   SAMEPERIODLASTYEAR, DATEADD, PARALLELPERIOD, PREVIOUSYEAR, TOTALYTD/DATESYTD —
+   is expressible as a WINDOW FUNCTION over the period column (single-source, no
+   subquery, no new table):
+     - prior period:  LAG(SUM(source.<x>)) OVER (ORDER BY source.<period>)
+     - prior year:    LAG(SUM(source.<x>), <periods_per_year>) OVER (ORDER BY source.<period>)
+     - YTD:           SUM(SUM(source.<x>)) OVER (PARTITION BY source.<year> ORDER BY source.<period>)
+   Use the period/fiscal column shown in the context (e.g. fiscper, fiscal_year); a
+   declared calendar self-join on a prior-period key (e.g. date_py) is also legal.
+   See the skill corpus WINDOW.md / UNSUPPORTED.md. WHETHER to translate it this
+   run is set by the "Time-intelligence" directive in the user message — a window
+   over the wrong period count is silently wrong, so it is only enabled when PBI
+   reconciliation is validating; when that directive says NOT validated, decline
+   it (success=false, architecture_change)."""
 
 # The JSON output contract (shared by corpus + fallback prompts). Adds the
 # 7-category `dax_class` provenance label alongside the existing fields.
-_OUTPUT_CONTRACT = (
-    """
+_OUTPUT_CONTRACT = """
 Classify each measure into exactly one `dax_class`:
 - "translatable_direct": a direct aggregation / simple expression
 - "composed": references other measures via MEASURE()
@@ -132,9 +154,7 @@ ALWAYS respond with valid JSON (no markdown code blocks):
   "confidence": "high"/"medium"/"low",
   "explanation": "brief explanation of the translation",
   "error": "reason if success=false" or null
-}"""
-    + _SQL_RULES
-)
+}""" + _SQL_RULES
 
 # Corpus-backed system prompt when skills are vendored; terse otherwise. The
 # corpus is the STABLE prefix that gets cache_control:ephemeral at call time.
@@ -157,8 +177,7 @@ else:
 # instead of re-sent per measure — Databricks silently drops Anthropic prompt
 # caching, so per-measure calls pay the full corpus every time). It must return a
 # JSON ARRAY, one object per measure, echoing the measure name so results map back.
-_BATCH_OUTPUT_CONTRACT = (
-    """
+_BATCH_OUTPUT_CONTRACT = """
 
 You are given SEVERAL DAX measures in one request. Respond with a SINGLE valid
 JSON ARRAY (no markdown code fences), containing exactly one object per measure
@@ -175,9 +194,7 @@ you were given:
   }
 ]
 Include EVERY measure exactly once. Do not merge, skip, or invent measures.
-Classify each into exactly one dax_class (same definitions as above)."""
-    + _SQL_RULES
-)
+Classify each into exactly one dax_class (same definitions as above).""" + _SQL_RULES
 
 # Corpus-backed batch system prompt (corpus sent ONCE per batch call).
 if _SKILL_CORPUS:
@@ -200,12 +217,54 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def _domain_context_block(domain_context: str) -> str:
+    """Render the optional customer-supplied domain-context block.
+
+    Free text (vocabulary, business rules, fiscal-calendar quirks, cost-accounting
+    terms). Goes in the VARIABLE user message like ``table_context``, so the
+    cached skill-corpus prefix stays reusable. Empty string when none supplied.
+    """
+    if not domain_context:
+        return ""
+    return (
+        "\n## Domain context (customer-supplied — authoritative business "
+        f"semantics for this model)\n{domain_context}\n"
+    )
+
+
+def _time_intel_directive(enabled: bool) -> str:
+    """Per-run time-intelligence gate.
+
+    Time-intelligence (prior year/period, YTD/QTD) is expressible as a window
+    function, but a window over the wrong period count is silently wrong — so we
+    only let the model translate it when the reconciliation loop is ACTIVE to
+    validate the numbers cell-by-cell. Off → decline it (an honest TODO beats an
+    unvalidated prior-year figure).
+    """
+    if enabled:
+        return (
+            "\n## Time-intelligence: ENABLED this run (PBI reconciliation will "
+            "validate the numbers)\nTranslate prior-year/period, YTD, QTD, MTD and "
+            "SAMEPERIODLASTYEAR / DATEADD / PARALLELPERIOD / TOTALYTD via a WINDOW "
+            "function over the period/fiscal column shown in the context (rule 5) — "
+            "do NOT decline them.\n"
+        )
+    return (
+        "\n## Time-intelligence: NOT validated this run\nIf a measure needs "
+        "prior-year/period, YTD/QTD or period-shift semantics (SAMEPERIODLASTYEAR, "
+        "DATEADD, PARALLELPERIOD, TOTALYTD, …), DECLINE it: success=false, "
+        'dax_class="architecture_change". Do NOT emit unvalidated period math.\n'
+    )
+
+
 def _build_user_prompt(
     measure_name: str,
     dax_expression: str,
     base_names: set[str],
     original_to_snake: dict[str, str],
     table_context: str = "",
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> str:
     """Build the user prompt with context.
 
@@ -214,14 +273,19 @@ def _build_user_prompt(
     It goes in the VARIABLE user message (not the cached skill prefix) so the
     LLM emits real column/join names instead of guessing — while the corpus
     stays cacheable. Stable within a table, so cheap relative to the corpus.
+
+    ``domain_context`` is optional customer-supplied business context, appended
+    the same way (see ``_domain_context_block``).
     """
     available_measures = ", ".join(
         sorted(base_names)[:50]
     )  # cap at 50 for token efficiency
     ctx_block = f"\n## Fact table context\n{table_context}\n" if table_context else ""
+    dc_block = _domain_context_block(domain_context)
+    ti_block = _time_intel_directive(time_intel_enabled)
 
     return f"""Translate this DAX measure to Spark SQL for a UC Metric View.
-{ctx_block}
+{ctx_block}{dc_block}{ti_block}
 ## Measure
 Name: {measure_name}
 
@@ -233,6 +297,7 @@ Name: {measure_name}
 
 ## Instructions
 - Use ONLY the source columns / join aliases listed in the fact table context above; do not invent column names.
+- Honour the domain context above (terminology, business rules, calendar) when interpreting the measure's intent.
 - If referencing another measure, use MEASURE(snake_case_name)
 - Column references: source.column_name (fact) or alias.column_name (joined dimension)
 - Return JSON with success, sql_expr, dax_class, confidence, explanation"""
@@ -266,6 +331,9 @@ def _build_batch_user_prompt(
     measures: list[TranslationResult],
     base_names: set[str],
     table_context: str = "",
+    feedback: dict | None = None,
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> str:
     """Build ONE user prompt covering all measures in a batch.
 
@@ -277,16 +345,28 @@ def _build_batch_user_prompt(
     """
     available_measures = ", ".join(sorted(base_names)[:50])
     ctx_block = f"\n## Fact table context\n{table_context}\n" if table_context else ""
+    dc_block = _domain_context_block(domain_context)
+    ti_block = _time_intel_directive(time_intel_enabled)
     lines = []
     for i, m in enumerate(measures, start=1):
-        lines.append(f"{i}. name: {m.original_name}\n   DAX: {m.dax_expression}")
+        entry = f"{i}. name: {m.original_name}\n   DAX: {m.dax_expression}"
+        # Reconciliation feedback (iterative loop): a prior cycle's SQL for this
+        # measure did NOT match Power BI — show the model where it diverged so it
+        # corrects THIS measure rather than repeating the same translation.
+        # Feedback may be keyed by the PBI measure name (original_name) or the
+        # UCMV measure name (measure_name) — reconciliation reports the latter.
+        _fb = feedback or {}
+        hint = _fb.get(m.original_name) or _fb.get(m.measure_name)
+        if hint:
+            entry += f"\n   PREVIOUS ATTEMPT MISMATCHED POWER BI — FIX IT: {hint}"
+        lines.append(entry)
     measures_block = "\n".join(lines)
     # Retrieval: inject deep UCMV-legal references for the long-tail DAX functions
     # this batch uses (skips functions already taught deeply in the cached prefix).
     # Goes in the VARIABLE user message so the corpus prefix stays cacheable.
     func_refs = render_function_refs(m.dax_expression for m in measures)
     return f"""Translate the following {len(measures)} DAX measures to Spark SQL for a UC Metric View, using the shared fact-table context below.
-{ctx_block}
+{ctx_block}{dc_block}{ti_block}
 ## Available MEASURE() references (already translated)
 {available_measures}
 {func_refs}
@@ -295,6 +375,7 @@ def _build_batch_user_prompt(
 
 ## Instructions
 - Use ONLY the source columns / join aliases listed in the fact table context above; do not invent column names.
+- Honour the domain context above (terminology, business rules, calendar) when interpreting each measure's intent.
 - If referencing another measure, use MEASURE(snake_case_name)
 - Column references: source.column_name (fact) or alias.column_name (joined dimension)
 - Return a JSON ARRAY with one object per measure, echoing "measure_name" exactly as given."""
@@ -487,6 +568,8 @@ async def translate_with_llm(
     model: str = "databricks-claude-sonnet-4-5",
     cache: OrderedDict | None = None,
     table_context: str = "",
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> TranslationResult:
     """Attempt LLM translation of a single untranslatable measure.
 
@@ -525,6 +608,8 @@ async def translate_with_llm(
         base_names,
         original_to_snake,
         table_context=table_context,
+        domain_context=domain_context,
+        time_intel_enabled=time_intel_enabled,
     )
 
     # Inject a deep, UCMV-legal reference for the long-tail DAX functions THIS
@@ -618,6 +703,9 @@ async def translate_batch_with_llm(
     model: str = "databricks-claude-sonnet-4-5",
     topo_priority: dict[str, int] | None = None,
     table_context: str = "",
+    feedback: dict | None = None,
+    domain_context: str = "",
+    time_intel_enabled: bool = False,
 ) -> list[TranslationResult]:
     """Attempt LLM translation of a batch of untranslatable measures.
 
@@ -711,7 +799,14 @@ async def translate_batch_with_llm(
                 need_llm.append(m)
 
         if need_llm:
-            prompt = _build_batch_user_prompt(need_llm, snap_names, table_context)
+            prompt = _build_batch_user_prompt(
+                need_llm,
+                snap_names,
+                table_context,
+                feedback,
+                domain_context,
+                time_intel_enabled,
+            )
             # Budget output for the whole batch (each measure ~a few hundred tokens).
             batch_max_tokens = min(len(need_llm) * 400 + 800, 16000)
             response = await _call_llm(
@@ -736,6 +831,8 @@ async def translate_batch_with_llm(
                             model=model,
                             cache=run_cache,
                             table_context=table_context,
+                            domain_context=domain_context,
+                            time_intel_enabled=time_intel_enabled,
                         )
                         for m in need_llm
                     )

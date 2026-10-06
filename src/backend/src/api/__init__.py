@@ -65,6 +65,7 @@ from src.api.tasks_router import router as tasks_router
 from src.api.template_generation_router import router as template_generation_router
 from src.api.templates_router import router as templates_router
 from src.api.tools_router import router as tools_router
+from src.api.ucmv_learning_router import router as ucmv_learning_router
 from src.api.triggers_router import router as triggers_router
 from src.api.ui_config_router import router as ui_config_router
 from src.api.users_router import router as users_router
@@ -139,6 +140,7 @@ api_router.include_router(database_management_router)
 api_router.include_router(genie_router)
 api_router.include_router(kpi_conversion_router)
 api_router.include_router(converter_router)
+api_router.include_router(ucmv_learning_router)
 api_router.include_router(agentbricks_router)
 api_router.include_router(hitl_router)
 api_router.include_router(sse_router)
@@ -191,6 +193,7 @@ __all__ = [
     "genie_router",
     "kpi_conversion_router",
     "converter_router",
+    "ucmv_learning_router",
     "agentbricks_router",
     "mlflow_router",
     "hitl_router",

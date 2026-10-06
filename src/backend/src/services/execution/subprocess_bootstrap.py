@@ -213,10 +213,6 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         "src.services.agent_builder.execution_runner",  # Add execution runner logger
         "src.services.knowledge.databricks_service",  # Add knowledge service logger for search debugging
         "src.services.tools.tool_factory",  # Tool factory creation + config injection logs
-        "src.services.tools.powerbi_analysis_tool",  # Add PowerBI tool logger
-        "src.services.tools.powerbi_semantic_model_dax_tool",  # DAX Generator tool logs
-        "src.services.tools.powerbi_metadata_reducer_tool",  # Metadata Reducer tool logs
-        "src.services.tools.powerbi_semantic_model_fetcher_tool",  # Fetcher tool logs
         "src.services.tools.databricks_jobs_tool",  # Add Databricks jobs tool logger
         "src.services.agent_builder.task_adapter",  # Task tool resolution logs
         "src.services.agent_builder.agent_adapter",  # Agent tool resolution logs
@@ -234,11 +230,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         if any(
             t in logger_name
             for t in [
-                "powerbi_analysis_tool",
                 "databricks_jobs_tool",
-                "powerbi_semantic_model_dax_tool",
-                "powerbi_metadata_reducer_tool",
-                "powerbi_semantic_model_fetcher_tool",
                 "tool_factory",
             ]
         ):

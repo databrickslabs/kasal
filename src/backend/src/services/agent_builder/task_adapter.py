@@ -393,11 +393,9 @@ async def create_task(
                             "GenieTool",
                             "SerperDevTool",
                             "DatabricksKnowledgeSearchTool",
-                            "PowerBIAnalysisTool",
                             "Power BI Field Parameters & Calculation Groups Tool",
                             "Power BI Hierarchies Tool",
                             "Power BI Report References Tool",
-                            "M-Query Conversion Pipeline",
                             "Measure Conversion Pipeline",
                         ]
                         if tool_name in debug_tools:

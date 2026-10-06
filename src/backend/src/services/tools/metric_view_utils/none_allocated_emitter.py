@@ -1,0 +1,276 @@
+"""Catch-all emitter — guarantees no reference measure is silently dropped.
+
+Every measure in the pipeline's ``mapping`` that never landed on a fact view's
+spec (neither translated into ``spec.measures`` nor already documented in
+``spec.untranslatable``) is gathered into a single synthetic
+``none_allocated_measures`` view:
+
+- **best-effort translated** where the DAX translator can (so "whatever we can
+  translate" IS translated), and
+- otherwise emitted as a **documented comment** (original DAX + reason) via the
+  same ``emit_yaml`` path every other view uses.
+
+Purely-visual / formatting / slicer-dispatch measures have no metric-view (and
+no Genie / analytical) form, so they are still listed — under an explicit
+reason — rather than translated. Net effect: nothing disappears without a
+trace. The measures span multiple fact tables, so ``source:`` is a placeholder
+and the file is a reconciliation worklist, not a deployable view.
+"""
+
+from __future__ import annotations
+
+from src.services.tools.metric_view_utils.data_classes import (
+    MetricViewSpec,
+    TranslationResult,
+)
+from src.services.tools.metric_view_utils.utils import to_snake_case
+from src.services.tools.metric_view_utils.yaml_emitter import emit_yaml
+
+_VIEW_KEY = "none_allocated_measures"
+# Deliberately not a real 3-level name: these measures reference columns across
+# several facts, so there is no single source. Flags it as a worklist.
+_PLACEHOLDER_SOURCE = "TODO.none_allocated.measures_span_multiple_facts"
+
+
+def _covered_names(all_specs: dict, emitted_yaml) -> set:
+    """Measures that ACTUALLY made it into the exported YAML — as an emitted
+    measure or a documented comment — in both PBI and snake_case form.
+
+    Gated on the rendered text, not on spec membership: a measure can sit on a
+    spec's ``untranslatable`` list yet never render (e.g. a dimension spec with 0
+    measures, which ``emit_yaml`` drops to ""). Counting those as "covered" would
+    let them fall through the catch-all. We use the specs only for the exact name
+    FORMS (emitted snake name / original PBI name) and confirm each against the
+    rendered YAML.
+    """
+    blob = (
+        "\n".join(emitted_yaml.values())
+        if isinstance(emitted_yaml, dict)
+        else "\n".join(emitted_yaml or [])
+    )
+    covered: set = set()
+    for spec in all_specs.values():
+        for m in spec.measures:
+            nm = getattr(m, "measure_name", "") or ""
+            if nm and nm in blob:  # `- name: <snake>` actually emitted
+                covered.add(m.original_name)
+                covered.add(to_snake_case(m.original_name))
+        for m in spec.untranslatable:
+            on = m.original_name or ""
+            if on and on in blob:  # documented as a `#  - <PBI name>` comment
+                covered.add(on)
+                covered.add(to_snake_case(on))
+    return covered
+
+
+def _entry_fields(m: dict) -> tuple[str, str, str]:
+    """(name, original_name, dax) tolerant of the two entry shapes this receives:
+    the pipeline ``mapping`` (measure_name / dax_expression) and the raw extracted
+    measures / ``measures_with_dax`` (name / expression)."""
+    name = m.get("measure_name") or m.get("name") or m.get("original_name") or ""
+    orig = m.get("original_name") or m.get("measure_name") or m.get("name") or ""
+    dax = m.get("dax_expression") or m.get("expression") or m.get("raw_expr") or ""
+    return name, orig, dax
+
+
+def build_none_allocated_spec(
+    reference_measures: list[dict],
+    all_specs: dict,
+    emitted_yaml,
+    translator,
+    artifact_patterns,
+) -> MetricViewSpec | None:
+    """Build the synthetic catch-all spec, or ``None`` if nothing is orphaned.
+
+    ``reference_measures`` is the FULL extracted measure set (e.g. the run's
+    ``measures_with_dax`` — all 138 for OTC), so coverage does not depend on how
+    measures were grouped or allocated downstream: a holder-table / dispatcher /
+    DCC-score measure is still caught here instead of vanishing.
+
+    ``emitted_yaml`` is the rendered YAML of the real views (dict view->text or a
+    list of texts); a reference measure is treated as already covered only when it
+    actually appears there — so a measure on a spec that emitted nothing still
+    lands in the catch-all instead of being silently dropped.
+
+    ``artifact_patterns`` is the pipeline's compiled ``_PBI_ARTIFACT_PATTERNS``
+    regex; a DAX that matches it is labelled a visual/formatting/slicer artifact
+    (documented, not translated).
+    """
+    covered = _covered_names(all_specs, emitted_yaml)
+    measures: list[TranslationResult] = []
+    untranslatable: list[TranslationResult] = []
+    seen: set = set()
+
+    for m in reference_measures:
+        name, orig, dax = _entry_fields(m)
+        if not orig:
+            continue
+        if orig in covered or to_snake_case(orig) in covered or orig in seen:
+            continue
+        seen.add(orig)
+
+        is_artifact = bool(artifact_patterns.search(dax)) if dax else False
+
+        # M10: a measure the column allocator flagged as referencing a column
+        # that exists in NO table is broken in the PBI model itself — document
+        # it, never emit it as a valid measure (any SQL would be invalid).
+        broken = m.get("_allocation_broken")
+        if broken:
+            untranslatable.append(
+                TranslationResult(
+                    measure_name=to_snake_case(orig),
+                    original_name=orig,
+                    sql_expr=None,
+                    is_translatable=False,
+                    skip_reason=(
+                        "TODO — not emitted (broken in PBI): "
+                        + str(broken.get("reason", "references a non-existent column"))
+                    ),
+                    dax_expression=dax,
+                    confidence="none",
+                    category="broken_reference",
+                )
+            )
+            continue
+
+        # M6 cross-fact ratio: columns span two facts with no single owner.
+        # Document with the contributing facts + shared grain rather than a
+        # vague "spans multiple facts", so a reviewer can build a shared-grain
+        # view/column instead of dropping it.
+        cross = m.get("_allocation_cross_fact")
+
+        # Normalise the keys translate() reads, so both entry shapes work.
+        translate_input = {
+            **m,
+            "measure_name": name,
+            "original_name": orig,
+            "dax_expression": dax,
+        }
+        try:
+            res = translator.translate(translate_input, _VIEW_KEY)
+        except Exception as e:  # translator must never break the catch-all
+            res = TranslationResult(
+                measure_name=to_snake_case(orig),
+                original_name=orig,
+                sql_expr=None,
+                is_translatable=False,
+                skip_reason=f"translation error: {e}",
+                dax_expression=dax,
+                confidence="low",
+                category="unassigned",
+            )
+
+        if res.is_translatable and res.sql_expr:
+            # "whatever we can translate" — a real, best-effort measure.
+            measures.append(res)
+        else:
+            # Documented, never dropped. Tag the visual/formatting/slicer ones so
+            # it is obvious WHY they aren't measures (Genie/analytics don't use
+            # them), instead of a generic "no matching pattern".
+            if is_artifact and "artifact" not in (res.skip_reason or "").lower():
+                reason = res.skip_reason or ""
+                res.skip_reason = (reason + " · " if reason else "") + (
+                    "visual/formatting/slicer artifact — no Genie/analytical form"
+                )
+            if cross:
+                reason = res.skip_reason or ""
+                res.skip_reason = (reason + " · " if reason else "") + str(
+                    cross.get("reason", "cross-fact ratio")
+                )
+            res.is_translatable = False
+            if not res.dax_expression:
+                res.dax_expression = dax
+            untranslatable.append(res)
+
+    if not measures and not untranslatable:
+        return None
+
+    translated_count = len(measures)  # real translations, before any placeholder
+
+    # emit_yaml drops a view with zero measures (returns ""), which would throw
+    # away the documented block. When nothing translated, add one clearly-labelled
+    # placeholder measure so the view — and every documented orphan in it — still
+    # emits. It is obviously not a KPI (COUNT over a placeholder source).
+    if not measures:
+        measures.append(
+            TranslationResult(
+                measure_name="_documented_only_placeholder",
+                original_name="_documented_only_placeholder",
+                sql_expr="COUNT(1)",
+                is_translatable=True,
+                skip_reason="",
+                dax_expression="",
+                confidence="low",
+                category="base",
+                explanation=(
+                    "Placeholder — nothing in this catch-all was translatable; "
+                    "every real measure is documented as a comment below."
+                ),
+            )
+        )
+
+    comment = (
+        f"NONE-ALLOCATED MEASURES ({_VIEW_KEY}) — catch-all so nothing is dropped.\n"
+        "PBI measures that did not land on any fact view are gathered here: the ones "
+        "we could translate are emitted as measures below (best-effort); the rest are "
+        "documented as comments with their DAX + reason. Visual / formatting / slicer "
+        "measures are listed with that reason — they have no metric-view or Genie form.\n"
+        "These reference columns across multiple facts, so `source:` is a placeholder — "
+        "treat this file as a reconciliation worklist, not a deployable view.\n"
+        f"{translated_count} best-effort translated · {len(untranslatable)} documented."
+    )
+    return MetricViewSpec(
+        fact_table_key=_VIEW_KEY,
+        source_table=_PLACEHOLDER_SOURCE,
+        view_name=_VIEW_KEY,
+        comment=comment,
+        joins=[],
+        dimensions=[],
+        measures=measures,
+        untranslatable=untranslatable,
+        base_measure_count=0,
+        dax_measure_count=translated_count,
+    )
+
+
+def build_none_allocated_yaml(
+    reference_measures: list[dict],
+    all_specs: dict,
+    emitted_yaml,
+    translator,
+    artifact_patterns,
+    visual_usage_index: dict | None = None,
+) -> str | None:
+    """Emit the catch-all view's YAML text, or ``None`` when nothing is orphaned
+    (or emission fails — the caller treats this as best-effort).
+
+    ``visual_usage_index`` (optional) lets the catch-all's own measures carry the
+    same visual reference the real views do: its measures are translated fresh
+    here, so they miss the pipeline's annotation pass. When supplied, we stamp
+    DIRECT usage on them and re-run the INDIRECT backtrace over the combined
+    spec set — so an orphaned sub-KPI referenced by a visual-placed KPI still
+    gets its "· Indirectly used via …" comment. Fail-open.
+    """
+    spec = build_none_allocated_spec(
+        reference_measures, all_specs, emitted_yaml, translator, artifact_patterns
+    )
+    if spec is None:
+        return None
+    if visual_usage_index:
+        try:
+            from src.services.tools.metric_view_utils.visual_usage_annotator import (
+                annotate_indirect_visual_usage,
+                annotate_visual_usage,
+            )
+
+            annotate_visual_usage({spec.fact_table_key: spec}, visual_usage_index)
+            # Combined graph so both directions reach the catch-all: its measures
+            # as roots (direct usage → their deps) and as targets (referenced by
+            # a visual-placed measure in a real view). Dedup-safe on re-run.
+            annotate_indirect_visual_usage({**all_specs, spec.fact_table_key: spec})
+        except Exception:
+            pass
+    try:
+        return emit_yaml(spec)
+    except Exception:
+        return None

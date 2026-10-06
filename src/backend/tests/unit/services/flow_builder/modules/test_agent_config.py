@@ -100,6 +100,81 @@ class TestAgentConfig:
         mock_tool_factory.initialize.assert_called_once()
         mock_build.assert_called_once()
 
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
+    @pytest.mark.asyncio
+    async def test_agent_tool_configs_survive_when_flow_has_other_configs(
+        self, mock_tool_factory_class, mock_agent_data, mock_tool_factory
+    ):
+        """The bug fix: an agent's OWN tool config must reach the tool even when
+        the flow passes crew/task configs for OTHER tools. Previously the agent
+        config was dropped wholesale whenever crew_tool_configs was non-None."""
+        mock_tool_factory_class.return_value = mock_tool_factory
+        mock_agent_data.tool_configs = {"86": {"workspace_id": "agentWS"}}
+
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ) as mock_build:
+            await AgentConfig.configure_agent_and_tools(
+                mock_agent_data,
+                crew_tool_configs={"MCP_SERVERS": [{"name": "srv"}]},
+            )
+
+        passed = mock_build.call_args.kwargs["tool_configs"]
+        # Agent's own tool config survives; the flow's unrelated config is added.
+        assert passed["86"] == {"workspace_id": "agentWS"}
+        assert passed["MCP_SERVERS"] == [{"name": "srv"}]
+
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
+    @pytest.mark.asyncio
+    async def test_crew_config_overrides_agent_config_per_tool(
+        self, mock_tool_factory_class, mock_agent_data, mock_tool_factory
+    ):
+        """Precedence is preserved: when the flow DOES configure the same tool,
+        the crew/task entry wins for that tool-id (existing behavior)."""
+        mock_tool_factory_class.return_value = mock_tool_factory
+        mock_agent_data.tool_configs = {
+            "86": {"workspace_id": "agentWS"},
+            "99": {"x": 1},
+        }
+
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ) as mock_build:
+            await AgentConfig.configure_agent_and_tools(
+                mock_agent_data,
+                crew_tool_configs={"86": {"workspace_id": "crewWS"}},
+            )
+
+        passed = mock_build.call_args.kwargs["tool_configs"]
+        assert passed["86"] == {"workspace_id": "crewWS"}  # crew wins for tool 86
+        assert passed["99"] == {"x": 1}  # agent-only tool preserved
+
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
+    @pytest.mark.asyncio
+    async def test_agent_config_used_when_no_flow_configs(
+        self, mock_tool_factory_class, mock_agent_data, mock_tool_factory
+    ):
+        """With no crew/task configs, the agent's own tool config is used."""
+        mock_tool_factory_class.return_value = mock_tool_factory
+        mock_agent_data.tool_configs = {"86": {"workspace_id": "agentWS"}}
+
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ) as mock_build:
+            await AgentConfig.configure_agent_and_tools(
+                mock_agent_data, crew_tool_configs=None
+            )
+
+        assert mock_build.call_args.kwargs["tool_configs"] == {
+            "86": {"workspace_id": "agentWS"}
+        }
+
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_no_agent_data(self):
         """Test agent configuration with no agent data."""

@@ -158,7 +158,9 @@ class MetricViewDeployerTool(BaseTool):
             polls += 1
 
         if state == "SUCCEEDED":
-            return {"success": True, "state": state}
+            # Carry the raw payload so callers that need the result set (e.g. the
+            # post-deploy DESCRIBE guard rail) can read result.data_array.
+            return {"success": True, "state": state, "data": data}
 
         err = data.get("status", {}).get("error", {})
         return {
@@ -166,6 +168,132 @@ class MetricViewDeployerTool(BaseTool):
             "state": state,
             "error": err.get("message", f"State: {state}"),
         }
+
+    # ── Post-deploy schema guard rail ────────────────────────────────────────
+    # The migration playbook warns that a truncated YAML deploys with no error as
+    # a metric view exposing NO measures. After each deploy we DESCRIBE the view
+    # and confirm the measures/dimensions declared in the YAML actually landed.
+
+    @staticmethod
+    def _declared_names_from_yaml(yaml_content: str) -> tuple:
+        """Return (measure_names, dimension_names) declared in a metric-view YAML,
+        lower-cased for case-insensitive comparison with DESCRIBE output.
+
+        Returns empty sets on unparseable YAML — the caller then skips the check
+        rather than raising."""
+        import yaml as _yaml
+
+        try:
+            spec = _yaml.safe_load(yaml_content)
+        except Exception:  # noqa: BLE001 — bad YAML → skip check, never break deploy
+            return set(), set()
+        if not isinstance(spec, dict):
+            return set(), set()
+
+        def _names(items) -> set:
+            out: set = set()
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict):
+                        nm = it.get("name")
+                        if isinstance(nm, str) and nm.strip():
+                            out.add(nm.strip().lower())
+            return out
+
+        return _names(spec.get("measures")), _names(spec.get("dimensions"))
+
+    @staticmethod
+    def _parse_describe_json_columns(data: dict) -> Optional[tuple]:
+        """Parse a ``DESCRIBE TABLE EXTENDED <view> AS JSON`` result into
+        (deployed_measure_names, deployed_dimension_names), lower-cased.
+
+        The SQL Statement API returns the JSON document as a single string cell in
+        result.data_array; metric-view measure columns carry ``"is_measure": true``.
+        Returns None if the shape is not what we expect (caller skips the check)."""
+        try:
+            rows = (data or {}).get("result", {}).get("data_array") or []
+            if not rows or not rows[0] or not rows[0][0]:
+                return None
+            doc = json.loads(rows[0][0])
+        except Exception:  # noqa: BLE001
+            return None
+        cols = doc.get("columns")
+        if not isinstance(cols, list):
+            return None
+        measures: set = set()
+        dims: set = set()
+        for c in cols:
+            if not isinstance(c, dict):
+                continue
+            nm = c.get("name")
+            if not isinstance(nm, str) or not nm.strip():
+                continue
+            (measures if c.get("is_measure") else dims).add(nm.strip().lower())
+        return measures, dims
+
+    @staticmethod
+    def _compare_schema(
+        declared_measures: set,
+        declared_dimensions: set,
+        deployed_measures: set,
+        deployed_dimensions: set,
+    ) -> dict:
+        """Compare declared (YAML) vs deployed (DESCRIBE) names. Flags the
+        truncation failure: declared measures exist but NONE landed in the view."""
+        missing_measures = sorted(declared_measures - deployed_measures)
+        missing_dimensions = sorted(declared_dimensions - deployed_dimensions)
+        truncated = bool(declared_measures) and not (
+            declared_measures & deployed_measures
+        )
+        result: dict = {
+            "schema_verified": not missing_measures and not missing_dimensions,
+            "declared_measures": len(declared_measures),
+            "deployed_measures": len(deployed_measures),
+            "declared_dimensions": len(declared_dimensions),
+            "deployed_dimensions": len(deployed_dimensions),
+        }
+        if missing_measures:
+            result["missing_measures"] = missing_measures
+        if missing_dimensions:
+            result["missing_dimensions"] = missing_dimensions
+        if truncated:
+            result["truncated"] = True
+        return result
+
+    def _verify_deployed_schema(
+        self,
+        yaml_content: str,
+        view_name: str,
+        workspace_url: str,
+        warehouse_id: str,
+        headers: dict,
+    ) -> Optional[dict]:
+        """DESCRIBE the just-created metric view and confirm its declared
+        measures/dimensions landed. Returns a schema-check dict, or None if the
+        check could not run. Never raises — a failed check must not fail an
+        otherwise-successful deploy."""
+        declared_m, declared_d = self._declared_names_from_yaml(yaml_content)
+        if not declared_m and not declared_d:
+            return None  # nothing to verify (or unparseable YAML)
+        describe = self._execute_sql_sync(
+            f"DESCRIBE TABLE EXTENDED {view_name} AS JSON",
+            workspace_url,
+            warehouse_id,
+            headers,
+        )
+        if not describe.get("success"):
+            return {
+                "schema_verified": None,
+                "note": "DESCRIBE failed; schema not verified",
+            }
+        parsed = self._parse_describe_json_columns(describe.get("data", {}))
+        if parsed is None:
+            return {
+                "schema_verified": None,
+                "note": "DESCRIBE output not parseable; schema not verified",
+            }
+        deployed_m, deployed_d = parsed
+        return self._compare_schema(declared_m, declared_d, deployed_m, deployed_d)
 
     def _run(self, **kwargs: Any) -> str:  # noqa: C901
         def _get(key):
@@ -385,7 +513,32 @@ class MetricViewDeployerTool(BaseTool):
                     ddl, workspace_url, warehouse_id, headers
                 )
                 if result["success"]:
-                    results[table_key] = {"status": "deployed", "view_name": view_name}
+                    entry: dict = {"status": "deployed", "view_name": view_name}
+                    try:
+                        schema_check = self._verify_deployed_schema(
+                            yaml_content,
+                            view_name,
+                            workspace_url,
+                            warehouse_id,
+                            headers,
+                        )
+                    except (
+                        Exception
+                    ) as e:  # noqa: BLE001 — guard rail must never break a good deploy
+                        schema_check = {
+                            "schema_verified": None,
+                            "note": f"schema check error: {e}",
+                        }
+                    if schema_check is not None:
+                        entry["schema_check"] = schema_check
+                        if schema_check.get("truncated"):
+                            entry["status"] = "deployed_incomplete"
+                            entry["message"] = (
+                                f"Metric view deployed but exposes 0 of "
+                                f"{schema_check['declared_measures']} declared measures "
+                                f"— YAML likely truncated"
+                            )
+                    results[table_key] = entry
                 else:
                     results[table_key] = {
                         "status": "error",
@@ -406,6 +559,11 @@ class MetricViewDeployerTool(BaseTool):
                     ),
                     "deployed": sum(
                         1 for r in results.values() if r.get("status") == "deployed"
+                    ),
+                    "deployed_incomplete": sum(
+                        1
+                        for r in results.values()
+                        if r.get("status") == "deployed_incomplete"
                     ),
                     "errors": sum(
                         1 for r in results.values() if r.get("status") == "error"

@@ -13,6 +13,7 @@ from typing import Any
 
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
 from .dependency_graph import build_dependency_graph
+from .implicit_column_builder import build_implicit_measures
 from .m_transform_folder import MTransformFolder
 from .pbi_parameter_resolver import PbiParameterResolver
 from .sql_post_processor import SqlPostProcessor
@@ -684,7 +685,7 @@ def process_table(
             if _nm and _nm not in _seen_alias:
                 _seen_alias.add(_nm)
                 _join_aliases.append(_nm)
-        for alias in (getattr(table_info, "dim_source_tables", None) or {}):
+        for alias in getattr(table_info, "dim_source_tables", None) or {}:
             if alias not in _seen_alias:
                 _seen_alias.add(alias)
                 _join_aliases.append(alias)
@@ -718,6 +719,22 @@ def process_table(
                     # Fact-table schema/join context so the LLM uses real column
                     # and alias names instead of guessing.
                     table_context=_table_context,
+                    # Reconciliation feedback from a prior iterative-loop cycle:
+                    # {original_measure_name -> mismatch hint}. Absent on the first
+                    # pass and in non-iterative runs.
+                    feedback=(ctx.llm_config or {}).get(
+                        "refinement_feedback_by_measure"
+                    ),
+                    # Optional customer-supplied domain context (vocabulary,
+                    # business rules, fiscal-calendar quirks). Same for every
+                    # measure on the table, so it rides the per-batch prompt.
+                    domain_context=(ctx.llm_config or {}).get("domain_context", ""),
+                    # Time-intelligence is only translated when reconciliation is
+                    # active to validate it; otherwise the model declines it (no
+                    # unvalidated prior-year/YTD math).
+                    time_intel_enabled=bool(
+                        (ctx.llm_config or {}).get("reconciliation_active")
+                    ),
                 )
             )
             llm_translated = []
@@ -947,8 +964,13 @@ def process_table(
                                 )
                         break
 
-    # ── Step 7: Merge: base + DAX translated + SWITCH decomposed ──────
-    all_measures = base_measures + translated + switch_measures
+    # Step 6d: implicit visual-column measures (see implicit_column_builder.py).
+    implicit_measures = build_implicit_measures(
+        ctx.config.get("implicit_column_measures", {}).get(table_key, []), base_names
+    )
+
+    # ── Step 7: Merge: base + DAX translated + SWITCH decomposed + implicit ──
+    all_measures = base_measures + translated + switch_measures + implicit_measures
 
     # Expand calculation groups if configured (Agent 8)
     calc_expanded = expand_calculation_groups(
@@ -1418,6 +1440,7 @@ def process_table(
     # ── Build comment block ───────────────────────────────────────────
     t_count = len(translated)
     sw_count = len(switch_measures)
+    ic_count = len(implicit_measures)
     u_count = len(untranslatable)
     table_short = table_key.replace("fact_", "").replace("FT_", "").replace("Fact_", "")
     comment_lines = [
@@ -1435,6 +1458,13 @@ def process_table(
             else ""
         ),
         *([] if sw_count == 0 else [f"{sw_count} SWITCH-decomposed measures"]),
+        *(
+            []
+            if ic_count == 0
+            else [
+                f"{ic_count} aggregated-column measures (visual-only, no PBI measure)"
+            ]
+        ),
         f"{u_count} untranslatable DAX measures (documented below)",
     ]
 
@@ -1484,6 +1514,7 @@ def process_table(
         base_measure_count=len(base_measures),
         dax_measure_count=len(translated),
         switch_measure_count=len(switch_measures),
+        implicit_measure_count=len(implicit_measures),
         source_filter=source_filter,
         source_sql=source_sql,
     )

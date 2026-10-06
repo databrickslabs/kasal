@@ -25,23 +25,80 @@ So the bundle holds SERVICES now. Two things made that safe to do:
 """
 
 import logging
-from typing import Any, Dict
+from contextlib import asynccontextmanager
+from typing import Any, Callable, Dict
 
 logger = logging.getLogger(__name__)
 
 
-def build_flow_data_access(session) -> Dict[str, Any]:
-    """The ``repositories`` bundle for a ``BackendFlow``, keyed as before.
+@asynccontextmanager
+async def _short_lived_session():
+    """A fresh, routed, auto-committing session for ONE data-access call.
 
-    The keys are unchanged (``flow``/``task``/``agent``/``crew``/
-    ``execution_history``) so the 17 read sites downstream keep working; what they
-    receive is the owning SERVICE rather than that domain's repository.
+    The flow subprocess runs for many minutes doing LLM work with no DB traffic.
+    A session HELD across that idle stretch has its connection dropped by the
+    Lakebase/network idle timeout (pool_pre_ping is off for the do_connect token
+    pattern), so the next operation on it fails and a successful run is mislabelled
+    FAILED. Giving every data-access call its OWN short-lived session means the run
+    holds no idle connection — under NullPool (the subprocess default, main.py) each
+    call gets a fresh connection, so an idle timeout has nothing to drop.
+    """
+    from src.db.database_router import get_smart_db_session
 
-    Args:
-        session: the session this run owns — the subprocess's own, already routed.
+    gen = get_smart_db_session().__aiter__()
+    session = await gen.__anext__()
+    try:
+        yield session
+    except BaseException:
+        await gen.aclose()
+        raise
+    else:
+        try:
+            await gen.__anext__()  # commit-on-success + close
+        except StopAsyncIteration:
+            pass
 
-    Returns:
-        Mapping of key -> service (or, for ``flow``, this domain's repository).
+
+class _ShortLivedDataAccess:
+    """A data-access handle whose every async method call runs on its OWN fresh,
+    short-lived session (see ``_short_lived_session``). ``build(session)``
+    constructs the real service/repository for that single call.
+
+    The consumers only ever ``await <handle>.<method>(...)`` (``get`` / by-id
+    lookups — verified across flow_processors + backend_flow), so a generic method
+    proxy preserves the bundle's interface exactly while removing the long-held
+    session that the idle timeout was killing.
+    """
+
+    def __init__(self, build: Callable[[Any], Any]):
+        self._build = build
+
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            # Don't synthesize dunders (repr/copy/pickle/awaitable checks).
+            raise AttributeError(name)
+        build = self._build
+
+        async def _call(*args, **kwargs):
+            async with _short_lived_session() as session:
+                return await getattr(build(session), name)(*args, **kwargs)
+
+        _call.__name__ = name
+        return _call
+
+
+def build_flow_data_access(session: Any = None) -> Dict[str, Any]:
+    """The ``repositories`` bundle for a ``BackendFlow``, keyed as before
+    (``flow``/``task``/``agent``/``crew``/``execution_history``).
+
+    Each entry is a SHORT-LIVED-session handle: every call opens its own fresh
+    session rather than sharing one held across the whole run. This is the durable
+    fix for the long-run connection death — the flow never holds a DB connection
+    idle while the crews do their (minutes-long, DB-idle) LLM work, so the idle
+    timeout has nothing to drop and the mid-run reads + terminal writes succeed.
+
+    ``session`` is accepted for call-site compatibility but intentionally NOT held
+    (that is the whole point); callers may stop passing it.
     """
     from src.repositories.flow_repository import FlowRepository
     from src.services.catalog.agents import AgentService
@@ -52,10 +109,10 @@ def build_flow_data_access(session) -> Dict[str, Any]:
     return {
         # flow_builder's own data — no cross-domain hop, and FlowService would be a
         # circular import from here.
-        "flow": FlowRepository(session),
+        "flow": _ShortLivedDataAccess(lambda s: FlowRepository(s)),
         # Other domains: through their services.
-        "task": TaskService(session),
-        "agent": AgentService(session),
-        "crew": CrewService(session),
-        "execution_history": ExecutionService(session),
+        "task": _ShortLivedDataAccess(lambda s: TaskService(s)),
+        "agent": _ShortLivedDataAccess(lambda s: AgentService(s)),
+        "crew": _ShortLivedDataAccess(lambda s: CrewService(s)),
+        "execution_history": _ShortLivedDataAccess(lambda s: ExecutionService(s)),
     }

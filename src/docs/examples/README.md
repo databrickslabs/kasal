@@ -41,12 +41,6 @@ Ready-to-import JSON definitions for the Power BI → Unity Catalog Metric View 
 | `crew_pbi_visual_ucmv_mapper.json` | 94 | Map PBI visuals to UC Metric View metric views |
 | `crew_databricks_dashboard_creator.json` | 95 | Create Databricks AI/BI (Lakeview) dashboard |
 
-### Analysis
-
-| File | Tool | Purpose |
-|------|------|---------|
-| `crew_pbi_analyst_qa.json` | 72 | Natural language queries against Power BI datasets |
-
 ### Combined pipelines (single import)
 
 | File | Crews | Purpose |

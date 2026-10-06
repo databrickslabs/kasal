@@ -703,8 +703,9 @@ class LLMManager:
 
         # Read the resolved transport params off the configured LLM so we reuse
         # the exact auth/base/model resolution (OBO/PAT/SPN) without forking it.
+        _resolved_model = getattr(llm, "model", None) or model
         call_kwargs: Dict[str, Any] = {
-            "model": getattr(llm, "model", None) or model,
+            "model": _resolved_model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -712,6 +713,39 @@ class LLMManager:
             val = getattr(llm, attr, None)
             if val:
                 call_kwargs[attr] = val
+        # litellm derives the provider from a "<provider>/" prefix on the model.
+        # configure_kasal_llm encodes it there (e.g. "databricks/<model>"), but if
+        # the model row's provider didn't map to a prefixing branch — or the LLM
+        # came back without a .model and we fell to the bare `model` arg — the name
+        # reaches litellm UNPREFIXED and it raises "LLM Provider NOT provided. You
+        # passed model=<bare>". That killed every DAX→SQL translation in the
+        # crew/flow subprocess (raw-M tables → 0 views → deploy_failed → timeout).
+        # Pin the provider explicitly so the call still routes with the auth/base
+        # already resolved above. This cached path serves only Databricks models in
+        # kasal (its sole caller is the DAX→SQL / M→SQL fallback), so default to
+        # databricks when the configured LLM doesn't name its own provider.
+        if _resolved_model and "/" not in str(_resolved_model):
+            _recovered_provider = str(
+                getattr(llm, "custom_llm_provider", None)
+                or getattr(llm, "provider", None)
+                or "databricks"
+            )
+            call_kwargs["custom_llm_provider"] = _recovered_provider
+            # Log the trigger loudly: configure_kasal_llm normally encodes the
+            # provider as a prefix, so a bare model here means it resolved a
+            # non-prefixing provider (or returned an LLM with no .model) for a model
+            # that needs one. The guard keeps the call working; this line captures
+            # WHY, so a recurrence is diagnosable without the (now-deleted) run log.
+            logger.warning(
+                "[LLM] completion_with_usage: model '%s' arrived WITHOUT a provider "
+                "prefix (llm=%s, requested=%s) — pinned custom_llm_provider=%s so "
+                "litellm can route. Root-cause configure_kasal_llm's provider "
+                "resolution for this model if this repeats.",
+                _resolved_model,
+                type(llm).__name__,
+                model,
+                _recovered_provider,
+            )
         # Merge telemetry headers with any caller-supplied ones.
         headers = dict(getattr(llm, "extra_headers", None) or {})
         if extra_headers:

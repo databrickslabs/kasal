@@ -50,6 +50,7 @@ async def inject_skills(
     *,
     group_id: Optional[str],
     label: str = "",
+    tool_context: Optional[Dict[str, str]] = None,
 ) -> int:
     """Give this agent its skills. Returns how many were attached.
 
@@ -58,6 +59,10 @@ async def inject_skills(
     ``backstory``, which the default system prompt embeds. Same rule the security
     preamble follows, and for the same reason: a block written to a field the
     model never sees is indistinguishable from no skills at all.
+
+    Skills tagged for a TOOL parameter (``kasal-tool-param``) are also fed into
+    the agent's tools here; pass ``tool_context`` to receive that
+    ``{param: text}`` so the caller can carry it to tools built later (a task's).
 
     Never raises. A database it cannot reach costs the agent its skills, not its
     run.
@@ -96,6 +101,7 @@ async def inject_skills(
     agent_kwargs[field] = (agent_kwargs.get(field) or "") + "\n\n" + section
 
     _add_skill_tools(agent_kwargs, group_ids)
+    _feed_tool_params(agent_kwargs, skills, tool_context, label)
 
     logger.info(
         "[skills] attached %d skill(s) to agent '%s' via %s: %s",
@@ -105,6 +111,31 @@ async def inject_skills(
         ", ".join(s.name for s in skills),
     )
     return len(skills)
+
+
+def _feed_tool_params(
+    agent_kwargs: Dict[str, Any],
+    skills: List[Any],
+    tool_context: Optional[Dict[str, str]],
+    label: str,
+) -> None:
+    """Hand tool-parameter skills to the tools that read them. Never raises."""
+    try:
+        from src.services.execution.kernel.skill_tool_context import (
+            apply_tool_context,
+            collect_tool_context,
+        )
+
+        context = collect_tool_context(skills)
+        if not context:
+            return
+        apply_tool_context(agent_kwargs.get("tools") or [], context, label=label)
+        if tool_context is not None:
+            tool_context.update(context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[skills] could not feed tool parameters for '%s': %s", label, exc
+        )
 
 
 def _add_skill_tools(agent_kwargs: Dict[str, Any], group_ids: List[str]) -> None:

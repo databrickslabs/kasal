@@ -608,36 +608,6 @@ export const TOOL_SECURITY_INFO: Record<string, {
       'Query monitoring and resource limits'
     ],
     deploymentContext: 'Single-tenant with API key service'
-  },
-  'Power BI Comprehensive Analysis Tool': {
-    riskLevel: 'MEDIUM',
-    description: 'Answer business questions via intelligent DAX generation with self-correction',
-    risks: [
-      'Automatic DAX query execution against Power BI semantic models',
-      'Up to 5 retry attempts with LLM-based self-correction',
-      'Measure hallucination detection may flag legitimate queries',
-      'Extended execution time for complex queries with retries'
-    ],
-    mitigations: [
-      'Measure validation prevents incorrect data from being returned',
-      'Configurable retry limit (max_dax_retries: 1-10)',
-      'Enhanced logging for debugging and monitoring',
-      'Service Principal or OAuth authentication required'
-    ],
-    singleTenantRiskLevel: 'LOW',
-    singleTenantRisks: [
-      'DAX query execution with up to 5 automatic retries',
-      'Power BI data access limited by authentication method',
-      'LLM-generated queries may require validation'
-    ],
-    singleTenantMitigations: [
-      'Service Principal or OAuth authentication required',
-      'Measure hallucination detection validates queries',
-      'Enhanced logging tracks all retry attempts',
-      'Configurable retry limits for performance control',
-      'Read-only access to Power BI semantic models'
-    ],
-    deploymentContext: 'Single-tenant with Power BI Execute Queries API and optional LLM integration'
   }
 };
 

@@ -12,6 +12,13 @@ from src.services.flow_builder.mcp_assignments import (
     apply_flow_mcp_assignments,
     flow_task_tool_ids,
 )
+
+# Re-exported for stable import paths (callers and tests import these from here).
+from src.services.flow_builder.modules.stale_task_config import (  # noqa: F401
+    load_current_crew_tasks as _load_current_crew_tasks,
+    recover_mcp_from_current_tasks,
+    resync_tool_configs_from_current_task,
+)
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 
@@ -22,43 +29,6 @@ def _to_uuid(value) -> UUID:
     if isinstance(value, str):
         return UUID(value)
     raise ValueError(f"Cannot convert {type(value)} to UUID")
-
-
-def recover_mcp_from_current_tasks(
-    effective_tool_configs, flow_task_id, flow_task_name, current_tasks
-):
-    """Recover a missing MCP_SERVERS config from the crew's CURRENT task(s).
-
-    A flow's startingPoint/listener task IDs are captured at save time, but crew
-    edits mint NEW task rows (and re-checking a tool only updates the current
-    task). So the flow can point at a stale task whose tool_configs no longer has
-    the MCP server the user added — silently yielding zero MCP tools in the flow
-    while the crew (which uses the current task) works fine.
-
-    When MCP_SERVERS is absent from effective_tool_configs, merge it from the
-    crew's current task: an exact task-name match, or — if the crew has a single
-    task — that task. Mutates and returns ``effective_tool_configs``.
-
-    Args:
-        effective_tool_configs: dict merged from crew-level + flow-task-level configs
-        flow_task_id: the (possibly stale) task ID the flow references
-        flow_task_name: name of the flow's task (for matching)
-        current_tasks: list of (task_id, task_name, tool_configs) for the crew's
-            CURRENT tasks (from crew.task_ids)
-    """
-    cfg = effective_tool_configs if isinstance(effective_tool_configs, dict) else {}
-    if "MCP_SERVERS" in cfg:
-        return cfg
-    single = len(current_tasks) == 1
-    for tid, tname, tcfg in current_tasks:
-        if str(tid) == str(flow_task_id):
-            continue
-        if not isinstance(tcfg, dict) or "MCP_SERVERS" not in tcfg:
-            continue
-        if single or (flow_task_name and tname == flow_task_name):
-            cfg.update(tcfg)
-            break
-    return cfg
 
 
 # Initialize logger - use flow logger for flow execution
@@ -388,44 +358,41 @@ class FlowProcessorManager:
                             if isinstance(task_data.tool_configs, dict):
                                 effective_tool_configs.update(task_data.tool_configs)
 
-                        # Recover MCP from the crew's CURRENT task if the flow points
-                        # at a stale task that lost it (see recover_mcp_from_current_tasks).
-                        if "MCP_SERVERS" not in effective_tool_configs and task_repo:
+                        # A flow's task IDs are frozen at save time, but crew edits
+                        # mint NEW task rows — so the flow can run a STALE task whose
+                        # tool_configs still holds old values (warehouse_id, dataset_id,
+                        # enable_reconciliation, MCP_SERVERS, …) while the crew is
+                        # correct. Re-sync the LIVE config from the crew's current task
+                        # (full config, not just MCP), then back-fill MCP as before.
+                        if task_repo:
                             try:
-                                current_task_ids = (
-                                    getattr(crew_data, "task_ids", None) or []
+                                current_tasks = await _load_current_crew_tasks(
+                                    crew_data, task_repo
                                 )
-                                current_tasks = []
-                                for cur_tid in current_task_ids:
-                                    if str(cur_tid) == str(task_id):
-                                        continue
-                                    cur_task = await task_repo.get(str(cur_tid))
-                                    if cur_task is not None:
-                                        current_tasks.append(
-                                            (
-                                                cur_tid,
-                                                getattr(cur_task, "name", None),
-                                                getattr(cur_task, "tool_configs", None),
-                                            )
-                                        )
-                                before = "MCP_SERVERS" in effective_tool_configs
+                                flow_task_name = getattr(task_data, "name", None)
+                                before_cfg = dict(effective_tool_configs)
+                                effective_tool_configs = (
+                                    resync_tool_configs_from_current_task(
+                                        effective_tool_configs,
+                                        task_id,
+                                        flow_task_name,
+                                        current_tasks,
+                                    )
+                                )
                                 effective_tool_configs = recover_mcp_from_current_tasks(
                                     effective_tool_configs,
                                     task_id,
-                                    getattr(task_data, "name", None),
+                                    flow_task_name,
                                     current_tasks,
                                 )
-                                if (
-                                    not before
-                                    and "MCP_SERVERS" in effective_tool_configs
-                                ):
+                                if effective_tool_configs != before_cfg:
                                     logger.info(
-                                        f"Recovered MCP_SERVERS for stale flow task {task_id} "
-                                        f"from crew {crew_id}'s current task(s)"
+                                        f"Re-synced tool_configs for stale flow task "
+                                        f"{task_id} from crew {crew_id}'s current task(s)"
                                     )
-                            except Exception as _mcp_rec_err:
+                            except Exception as _resync_err:
                                 logger.warning(
-                                    f"MCP recovery from current crew task failed: {_mcp_rec_err}"
+                                    f"tool_config re-sync from current crew task failed: {_resync_err}"
                                 )
 
                         logger.info(
@@ -918,6 +885,41 @@ class FlowProcessorManager:
                         ):
                             if isinstance(task_data.tool_configs, dict):
                                 effective_tool_configs.update(task_data.tool_configs)
+
+                        # Same stale-task drift as the starting-point path: crew edits
+                        # mint new task rows, so re-sync the live config (warehouse_id,
+                        # dataset_id, enable_reconciliation, MCP_SERVERS, …) from the
+                        # crew's current task before building the agent.
+                        if task_repo:
+                            try:
+                                current_tasks = await _load_current_crew_tasks(
+                                    crew_data, task_repo
+                                )
+                                flow_task_name = getattr(task_data, "name", None)
+                                before_cfg = dict(effective_tool_configs)
+                                effective_tool_configs = (
+                                    resync_tool_configs_from_current_task(
+                                        effective_tool_configs,
+                                        task_id,
+                                        flow_task_name,
+                                        current_tasks,
+                                    )
+                                )
+                                effective_tool_configs = recover_mcp_from_current_tasks(
+                                    effective_tool_configs,
+                                    task_id,
+                                    flow_task_name,
+                                    current_tasks,
+                                )
+                                if effective_tool_configs != before_cfg:
+                                    logger.info(
+                                        f"Re-synced tool_configs for stale listener task "
+                                        f"{task_id} from crew {crew_id}'s current task(s)"
+                                    )
+                            except Exception as _resync_err:
+                                logger.warning(
+                                    f"tool_config re-sync from current crew task failed: {_resync_err}"
+                                )
 
                         logger.info(
                             f"Listener task {task_id} "

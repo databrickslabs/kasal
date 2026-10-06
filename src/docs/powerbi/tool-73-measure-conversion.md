@@ -111,7 +111,6 @@ Tool 73 is Phase 1 of the full migration. Its output (`measures_json`) feeds dir
 
 - [Power BI integration hub](./README.md)
 - [Authentication and service principal setup](./01-authentication-setup.md)
-- [Tool 74 - M-Query conversion pipeline](./tool-74-mquery-conversion.md)
 - [Tool 86 - UC Metric View generator](./tool-86-uc-metric-view-generator.md)
 - [End-to-end UCMV migration guide](./ucmv-migration-guide.md)
 

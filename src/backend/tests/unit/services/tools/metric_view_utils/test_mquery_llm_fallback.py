@@ -167,3 +167,38 @@ class TestRecoverSourcesWithLlm:
     def test_empty_input(self):
         out, n = self._run(recover_sources_with_llm([]))
         assert out == [] and n == 0
+
+    def test_identical_m_sources_are_deduped_to_one_call(self):
+        # Two tables with the SAME raw M → translated once, both entries recovered.
+        entries = [
+            {"table_name": "FT_A", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
+            {"table_name": "FT_B", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
+        ]
+        fake = json.dumps(
+            {"success": True, "source_sql": "SELECT * FROM a.b", "source_table": "a.b"}
+        )
+        mock = AsyncMock(return_value={"content": fake})
+        with patch.object(mllm, "_call_llm", new=mock):
+            out, n = self._run(recover_sources_with_llm(entries))
+        assert mock.call_count == 1  # de-duplicated
+        assert n == 2  # both entries rewritten
+        assert out[0]["transpiled_sql"] == "SELECT * FROM a.b"
+        assert out[1]["transpiled_sql"] == "SELECT * FROM a.b"
+
+    def test_order_is_preserved_across_concurrent_recovery(self):
+        # Interleaved raw-M / SQL entries keep their positions after concurrent run.
+        entries = [
+            {"table_name": "A", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
+            {"table_name": "B", "transpiled_sql": EMBEDDED_SQL, "validation_passed": "Yes"},
+            {"table_name": "C", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
+        ]
+        fake = json.dumps({"success": True, "source_sql": "SELECT * FROM x.y"})
+        with patch.object(
+            mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})
+        ):
+            out, n = self._run(recover_sources_with_llm(entries))
+        assert n == 2
+        assert [e["table_name"] for e in out] == ["A", "B", "C"]
+        assert out[0]["transpiled_sql"] == "SELECT * FROM x.y"
+        assert out[1]["transpiled_sql"] == EMBEDDED_SQL  # untouched
+        assert out[2]["transpiled_sql"] == "SELECT * FROM x.y"

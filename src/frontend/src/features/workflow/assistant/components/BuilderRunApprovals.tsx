@@ -1,7 +1,11 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { HITLService, type HITLApprovalResponse } from '../../../../api/execution/HITLService';
 import ApprovalCard, { type ApprovalData } from '../../../chat/components/Cards/ApprovalCard';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
+
+// Lazy so the heavy result-viewer chain (ConverterService/apiClient) isn't pulled
+// into this module at import time — it broke the approvals test suite's load.
+const BIArtifactsView = lazy(() => import('../../../executions/components/BIArtifactsView'));
 
 function approvalData(approval: HITLApprovalResponse): ApprovalData {
   const config = approval.gate_config || {};
@@ -83,6 +87,11 @@ export default function BuilderRunApprovals({ jobId, running }: { jobId: string;
   };
 
   return <div aria-label="Run approvals">
+    {/* Inline at the gate: the real config-gen/UCMV artifacts (downloads +
+        "Review & edit config") from conversion_history by job_id — the crew's
+        answer here is a markdown SUMMARY, so "Review output" alone can't offer
+        them. Renders nothing when the run has no such artifacts. */}
+    {approvals.length > 0 && <Suspense fallback={null}><BIArtifactsView jobId={jobId} /></Suspense>}
     {approvals.map(approval => <div key={approval.id}>
       <ApprovalCard messageId={`builder-hitl-${approval.id}`} data={decisions[approval.id] || approvalData(approval)} onDecision={data => {
         if (!alive.current) return;

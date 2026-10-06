@@ -28,3 +28,21 @@ describe('Catalog request normalization', () => {
     }));
   });
 });
+
+describe('Clone (Save as new crew)', () => {
+  it('cloneCrew POSTs to the deep-clone endpoint with the new name', async () => {
+    await CrewService.cloneCrew('catalog-42', 'My Copy');
+    expect(api.post).toHaveBeenCalledWith('/crews/catalog-42/clone', { name: 'My Copy' });
+  });
+
+  it('cloneCrew sends null when no name is given (backend defaults to "… (copy)")', async () => {
+    await CrewService.cloneCrew('catalog-42');
+    expect(api.post).toHaveBeenCalledWith('/crews/catalog-42/clone', { name: null });
+  });
+
+  it('duplicateCrew routes through the clone endpoint (independent copy, not a shared-row re-POST)', async () => {
+    await CrewService.duplicateCrew('catalog-42', 'Dup');
+    expect(api.post).toHaveBeenCalledWith('/crews/catalog-42/clone', { name: 'Dup' });
+    expect(api.post).not.toHaveBeenCalledWith('/crews', expect.anything());
+  });
+});

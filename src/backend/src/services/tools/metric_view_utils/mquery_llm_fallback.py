@@ -18,6 +18,7 @@ never blocks the tables that parsed fine.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -27,6 +28,13 @@ from collections import OrderedDict
 logger = logging.getLogger(__name__)
 
 _RUN_CACHE_MAX = 128
+
+# Max concurrent M→SQL LLM calls during source recovery. Raw-M tables are
+# independent, so they are translated concurrently (not one-at-a-time) to cut
+# wall-clock time on models with many raw-M tables; the bound keeps us under the
+# serving endpoint's rate limit. Identical M expressions are also de-duplicated
+# so a repeated source is only translated once.
+_MQUERY_LLM_CONCURRENCY = 6
 
 _SYSTEM_PROMPT = """You are an expert at reading Power Query M (the "let ... in" language used by \
 Power BI / Fabric dataflows) and extracting the underlying data source as Spark SQL for Databricks \
@@ -196,46 +204,71 @@ async def recover_sources_with_llm(
     an LLM-derived SQL SELECT so MQueryParser can read them. Entries that already
     look like SQL, or that the LLM can't translate, are left unchanged.
 
-    Returns (updated_entries, recovered_count). Processed sequentially to avoid
-    rate limiting; fail-open per entry.
+    Returns (updated_entries, recovered_count). Raw-M tables are translated
+    CONCURRENTLY (bounded by ``_MQUERY_LLM_CONCURRENCY``) with identical M
+    expressions de-duplicated to one call; fail-open per entry. Entry ORDER is
+    preserved.
     """
     from .mquery_parser import looks_like_raw_mquery
 
-    cache: OrderedDict = OrderedDict()
-    recovered = 0
-    out: list[dict] = []
-    for entry in mquery_entries or []:
+    entries = list(mquery_entries or [])
+
+    # Collect raw-M entries to translate, keyed by content hash so an M source
+    # that repeats across tables is only sent to the LLM once.
+    entry_hash: dict[int, str] = {}
+    to_translate: dict[str, tuple[str, str]] = {}  # hash -> (table_name, sql)
+    for i, entry in enumerate(entries):
         if not isinstance(entry, dict):
-            out.append(entry)
             continue
         sql = (entry.get("transpiled_sql") or "").strip()
         table_name = entry.get("table_name") or ""
         if not sql or not table_name or not looks_like_raw_mquery(sql):
-            out.append(entry)
             continue
-        try:
-            res = await translate_mquery_to_sql(
-                table_name, sql, model=model, cache=cache
+        h = _content_hash(sql)
+        entry_hash[i] = h
+        to_translate.setdefault(h, (table_name, sql))
+
+    if not to_translate:
+        return entries, 0
+
+    sem = asyncio.Semaphore(_MQUERY_LLM_CONCURRENCY)
+
+    async def _translate_one(h: str, table_name: str, sql: str) -> tuple[str, dict]:
+        async with sem:
+            try:
+                return h, await translate_mquery_to_sql(table_name, sql, model=model)
+            except Exception as e:  # noqa: BLE001 — fail-open
+                logger.warning("[MQUERY_LLM] recovery failed for %s: %s", table_name, e)
+                return h, {"success": False, "error": str(e)}
+
+    results = await asyncio.gather(
+        *(_translate_one(h, t, s) for h, (t, s) in to_translate.items())
+    )
+    by_hash = dict(results)
+
+    recovered = 0
+    out: list[dict] = []
+    for i, entry in enumerate(entries):
+        res = by_hash.get(entry_hash.get(i, ""))
+        if res and res.get("success") and res.get("source_sql"):
+            out.append(
+                {
+                    **entry,
+                    "transpiled_sql": res["source_sql"],
+                    "validation_passed": "Yes",
+                }
             )
-        except Exception as e:  # noqa: BLE001 — fail-open
-            logger.warning("[MQUERY_LLM] recovery failed for %s: %s", table_name, e)
-            out.append(entry)
-            continue
-        if res.get("success") and res.get("source_sql"):
-            new_entry = {
-                **entry,
-                "transpiled_sql": res["source_sql"],
-                "validation_passed": "Yes",
-            }
-            out.append(new_entry)
             recovered += 1
         else:
             out.append(entry)
 
     if recovered:
         logger.info(
-            "[MQUERY_LLM] Recovered SQL source for %d/%d raw-M table(s)",
+            "[MQUERY_LLM] Recovered SQL source for %d/%d raw-M table(s) "
+            "(concurrency=%d, %d unique source(s))",
             recovered,
-            len(mquery_entries or []),
+            len(entries),
+            _MQUERY_LLM_CONCURRENCY,
+            len(to_translate),
         )
     return out, recovered

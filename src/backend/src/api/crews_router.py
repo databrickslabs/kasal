@@ -9,7 +9,12 @@ from pydantic import ValidationError
 from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEntityError
 from src.core.permissions import check_role_in_context
 from src.dependencies.providers import GroupContextDep, SessionDep
-from src.schemas.crew import CrewCreate, CrewResponse, CrewUpdate
+from src.schemas.crew import (
+    CrewCloneRequest,
+    CrewCreate,
+    CrewResponse,
+    CrewUpdate,
+)
 from src.schemas.crew_feedback import (
     CrewFeedbackCreateRequest,
     CrewFeedbackResponse,
@@ -208,6 +213,41 @@ async def create_crew(
     except ValidationError as e:
         logger.error(f"Validation error: {e.errors()}")
         raise UnprocessableEntityError(str(e))
+
+
+@router.post(
+    "/{crew_id}/clone",
+    response_model=CrewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def clone_crew(
+    crew_id: UUID,
+    body: CrewCloneRequest,
+    service: Annotated[CrewService, Depends(get_crew_service)],
+    group_context: GroupContextDep,
+):
+    """Clone a crew into a new, independent crew ("Save as new crew").
+
+    Duplicates the crew's agents and tasks (new rows) and rebuilds the canvas with
+    the clone's IDs, so editing the copy never changes the original. Only editors
+    and admins can create crews.
+
+    Args:
+        crew_id: ID of the crew to clone
+        body: Clone options (new name; defaults to "<original> (copy)")
+        service: Crew service injected by dependency
+        group_context: Group context from headers
+
+    Returns:
+        The newly created crew
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can create crews")
+
+    crew = await service.clone_with_group(crew_id, body.name, group_context)
+    if not crew:
+        raise NotFoundError(f"Crew {crew_id} not found")
+    return _crew_to_response(crew)
 
 
 @router.post("/debug")

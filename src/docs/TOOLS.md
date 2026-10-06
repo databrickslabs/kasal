@@ -47,11 +47,11 @@ The icon field in `tools.py` groups tools into the categories below. Names are e
 | development | SerperDevTool |
 | web | ScrapeWebsiteTool |
 | search | PerplexityTool, DatabricksKnowledgeSearchTool |
-| database | GenieTool, DatabricksJobsTool, Power BI Comprehensive Analysis Tool, Power BI Semantic Model Fetcher, Power BI Semantic Model DAX Generator, Power BI Metadata Reducer, Power BI DAX Executor, Genie Space Generator, Databricks Dashboard Creator |
+| database | GenieTool, DatabricksJobsTool, Power BI DAX Executor, Genie Space Generator, Databricks Dashboard Creator |
 | databricks | AgentBricksTool |
 | communication | Gmail |
 | integration | MCPTool |
-| transform | Measure Conversion Pipeline, M-Query Conversion Pipeline, Power BI Relationships Tool, Power BI Hierarchies Tool, Power BI Field Parameters & Calculation Groups Tool, Power BI Report References Tool, DAX to SQL Translator, UC Metric View Generator, PBI Measure Allocator, Metric View Deployer, Config Generator, Pipeline Config Generator, Metric View Validator, UCMV Genie Space Config Generator, PBI Visual-UCMV Mapper |
+| transform | Measure Conversion Pipeline, Power BI Hierarchies Tool, Power BI Field Parameters & Calculation Groups Tool, Power BI Report References Tool, DAX to SQL Translator, UC Metric View Generator, PBI Measure Allocator, Metric View Deployer, Config Generator, Pipeline Config Generator, Metric View Validator, UCMV Genie Space Config Generator, PBI Visual-UCMV Mapper |
 
 ## Genie
 

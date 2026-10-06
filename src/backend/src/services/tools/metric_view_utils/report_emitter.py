@@ -229,6 +229,43 @@ def emit_migration_report(
             )
     lines.append("")
 
+    # ── Business Usage (Visual References) ─────────────────────────────────
+    # Which report page(s)/visual(s) actually draw or filter on each translated
+    # measure (PROP-8) — separates measures business users actually see from
+    # ones that exist only as building blocks for other measures. Populated
+    # from TranslationResult.used_in_visuals (visual_usage_annotator); silently
+    # empty (no section at all) when no visual_usage_index was supplied, e.g.
+    # the run had no report_id — that's a normal degrade, not an error.
+    _any_usage = any(
+        getattr(m, "used_in_visuals", None)
+        for spec in all_specs.values()
+        for m in spec.measures
+    )
+    if _any_usage:
+        lines.append("## Business Usage (Visual References)")
+        lines.append("")
+        lines.append(
+            "Where each deployed measure is actually seen in the report — a "
+            "measure with no rows here still deployed correctly, it just isn't "
+            "drawn/filtered by any visual directly (common for an intermediate "
+            "measure other measures build on)."
+        )
+        lines.append("")
+        lines.append("| Table | Measure | Pages | Roles |")
+        lines.append("|-------|---------|-------|-------|")
+        for table_key, spec in sorted(all_specs.items()):
+            for m in spec.measures:
+                usage = getattr(m, "used_in_visuals", None)
+                if not usage:
+                    continue
+                pages = sorted({o.get("page", "") for o in usage if o.get("page")})
+                roles = sorted({o.get("role", "") for o in usage if o.get("role")})
+                lines.append(
+                    f"| {table_key} | {m.measure_name} "
+                    f"| {', '.join(pages)} | {', '.join(roles)} |"
+                )
+        lines.append("")
+
     # ── M:N Relationships ─────────────────────────────────────────────────
 
     if _lim.get("m2n_relationships"):

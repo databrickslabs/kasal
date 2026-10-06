@@ -94,6 +94,20 @@ def _mock_exec_sql(success=True, state="SUCCEEDED"):
     }
 
 
+def _describe_result(measures, dimensions):
+    """Build a mock _execute_sql_sync return for `DESCRIBE ... AS JSON`: the JSON
+    document sits as a single string cell in result.data_array, with measure
+    columns flagged is_measure=true."""
+    cols = [{"name": d, "is_measure": False} for d in dimensions]
+    cols += [{"name": m, "is_measure": True} for m in measures]
+    doc = json.dumps({"columns": cols})
+    return {
+        "success": True,
+        "state": "SUCCEEDED",
+        "data": {"result": {"data_array": [[doc]]}},
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dry run tests
 # ---------------------------------------------------------------------------
@@ -314,7 +328,11 @@ class TestDeployment:
         return _mock_auth(workspace_url)
 
     def test_execute_sql_success_returns_deployed(self):
-        """Mock _execute_sql_sync returns SUCCEEDED and _check_dangerous_sql passes → status deployed."""
+        """Mock _execute_sql_sync returns SUCCEEDED and _check_dangerous_sql passes → status deployed.
+
+        The flow now runs three statements: CREATE SCHEMA, the metric-view DDL,
+        then a DESCRIBE for the post-deploy schema guard rail (SAMPLE_YAML declares
+        one dimension + one measure, so the DESCRIBE fires)."""
         tool = MetricViewDeployerTool()
         auth = self._make_auth_mock()
 
@@ -330,6 +348,9 @@ class TestDeployment:
                 side_effect=[
                     {"success": True, "state": "SUCCEEDED"},  # schema
                     {"success": True, "state": "SUCCEEDED"},  # DDL
+                    _describe_result(  # DESCRIBE guard rail
+                        measures=["total_revenue"], dimensions=["region"]
+                    ),
                 ],
             ),
         ):
@@ -340,7 +361,9 @@ class TestDeployment:
             )
 
         data = json.loads(result)
-        assert data["deployment_results"]["fact_sales"]["status"] == "deployed"
+        entry = data["deployment_results"]["fact_sales"]
+        assert entry["status"] == "deployed"
+        assert entry["schema_check"]["schema_verified"] is True
 
     def test_execute_sql_http_error_returns_error(self):
         """_execute_sql_sync returns HTTP 404 → status error."""
@@ -444,3 +467,130 @@ class TestSummaryStats:
         data = json.loads(result)
         assert data["summary"]["errors"] == 2
         assert data["summary"]["deployed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Post-deploy schema guard rail (DESCRIBE vs YAML)
+# ---------------------------------------------------------------------------
+
+
+class TestDeclaredNamesFromYaml:
+    def test_extracts_measures_and_dimensions_lowercased(self):
+        m, d = MetricViewDeployerTool._declared_names_from_yaml(SAMPLE_YAML)
+        assert m == {"total_revenue"}
+        assert d == {"region"}
+
+    def test_unparseable_yaml_returns_empty_sets(self):
+        m, d = MetricViewDeployerTool._declared_names_from_yaml(":\n  bad: [unclosed")
+        assert m == set() and d == set()
+
+    def test_non_mapping_yaml_returns_empty_sets(self):
+        m, d = MetricViewDeployerTool._declared_names_from_yaml("- just\n- a\n- list")
+        assert m == set() and d == set()
+
+
+class TestParseDescribeJsonColumns:
+    def test_splits_measures_from_dimensions(self):
+        data = _describe_result(
+            measures=["Total_Revenue"], dimensions=["Region", "product"]
+        )["data"]
+        parsed = MetricViewDeployerTool._parse_describe_json_columns(data)
+        assert parsed is not None
+        measures, dims = parsed
+        assert measures == {"total_revenue"}
+        assert dims == {"region", "product"}
+
+    def test_missing_columns_key_returns_none(self):
+        assert (
+            MetricViewDeployerTool._parse_describe_json_columns(
+                {"result": {"data_array": [["{}"]]}}
+            )
+            is None
+        )
+
+    def test_empty_result_returns_none(self):
+        assert (
+            MetricViewDeployerTool._parse_describe_json_columns(
+                {"result": {"data_array": []}}
+            )
+            is None
+        )
+
+
+class TestCompareSchema:
+    def test_full_match_is_verified(self):
+        out = MetricViewDeployerTool._compare_schema(
+            {"a", "b"}, {"x"}, {"a", "b"}, {"x"}
+        )
+        assert out["schema_verified"] is True
+        assert "truncated" not in out
+
+    def test_missing_measure_flagged_not_truncated(self):
+        out = MetricViewDeployerTool._compare_schema({"a", "b"}, {"x"}, {"a"}, {"x"})
+        assert out["schema_verified"] is False
+        assert out["missing_measures"] == ["b"]
+        assert out.get("truncated") is not True
+
+    def test_all_measures_missing_is_truncated(self):
+        out = MetricViewDeployerTool._compare_schema({"a", "b"}, {"x"}, set(), {"x"})
+        assert out["truncated"] is True
+        assert out["deployed_measures"] == 0
+
+
+class TestPostDeployGuardRail:
+    def _auth(self):
+        return _mock_auth()
+
+    def _deploy(self, tool, describe_ret):
+        with (
+            patch.object(tool, "_authenticate", return_value=self._auth()),
+            patch(
+                "src.services.tools.metric_view_utils.yaml_emitter._check_dangerous_sql",
+                return_value=True,
+            ),
+            patch.object(
+                tool,
+                "_execute_sql_sync",
+                side_effect=[
+                    {"success": True, "state": "SUCCEEDED"},  # schema
+                    {"success": True, "state": "SUCCEEDED"},  # DDL
+                    describe_ret,  # DESCRIBE
+                ],
+            ),
+        ):
+            return json.loads(
+                tool._run(
+                    yaml_specs_json=json.dumps({"fact_sales": SAMPLE_YAML}),
+                    warehouse_id="wh-123",
+                    dry_run=False,
+                )
+            )
+
+    def test_truncated_view_flagged_deployed_incomplete(self):
+        """DDL succeeds but DESCRIBE shows zero of the declared measures →
+        the view is measureless; status must be deployed_incomplete."""
+        tool = MetricViewDeployerTool()
+        data = self._deploy(tool, _describe_result(measures=[], dimensions=["region"]))
+        entry = data["deployment_results"]["fact_sales"]
+        assert entry["status"] == "deployed_incomplete"
+        assert entry["schema_check"]["truncated"] is True
+        assert "truncated" in entry["message"].lower()
+        assert data["summary"]["deployed_incomplete"] == 1
+        assert data["summary"]["deployed"] == 0
+
+    def test_complete_view_verified(self):
+        tool = MetricViewDeployerTool()
+        data = self._deploy(
+            tool, _describe_result(measures=["total_revenue"], dimensions=["region"])
+        )
+        entry = data["deployment_results"]["fact_sales"]
+        assert entry["status"] == "deployed"
+        assert entry["schema_check"]["schema_verified"] is True
+
+    def test_describe_failure_does_not_break_deploy(self):
+        """A failed/garbled DESCRIBE must leave the successful deploy intact."""
+        tool = MetricViewDeployerTool()
+        data = self._deploy(tool, {"success": False, "state": "FAILED"})
+        entry = data["deployment_results"]["fact_sales"]
+        assert entry["status"] == "deployed"
+        assert entry["schema_check"]["schema_verified"] is None

@@ -14,7 +14,6 @@ See `src/docs/powerbi/ucmv-pipeline-architecture.md` for the end-to-end stage ma
 | `ucmv_output.json` | UC Metric View Generator (JSON mode) | UCMV pipeline flow, 2026-06-11 |
 | `genie_space_config.json` | UCMV Genie Space Config Generator (Tool 93) | `flow_genie_space_gen`, 2026-06-11 |
 | `visual_mappings.json` | PBI Visual-UCMV Mapper (Tool 94) | `flow_dashboard_deployer`, 2026-06-11 |
-| `reduced_model_context.json` | Power BI Metadata Reducer (Tool 81, strategy=llm) | analyst crew, 2026-06-11 |
 
 ## Comparison rules
 
@@ -26,7 +25,6 @@ See `src/docs/powerbi/ucmv-pipeline-architecture.md` for the end-to-end stage ma
   `schema_name`.
 - `visual_mappings.json`: per-visual `visual_id`, `visual_type`, `ucmv_view`, `dimensions`,
   `measures`; every `sql` uses `MEASURE()` syntax against the mapped view.
-- `reduced_model_context.json`: `status`, `reduction_summary` table/measure selections,
   `cache_saved: true`.
 
 **Do NOT compare (environment-specific or LLM free-text — expected to vary):**

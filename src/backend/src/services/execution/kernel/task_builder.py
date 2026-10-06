@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
+from src.services.execution.kernel.skill_tool_context import apply_agent_tool_context
 from src.services.execution.kernel.guardrail_stack import build_guardrail_stack
 from src.services.execution.kernel.output_contract import (
     apply_output_schema,
@@ -88,6 +89,10 @@ async def build_task_args(
             f"Task {task_key}: configured GenieTool spaceId '{applied_space}' "
             "from the selected Genie MCP server"
         )
+    # Skill text the agent resolved for a tool parameter (e.g. the UCMV
+    # generator's domain_context) — task tools are built after the agent, so
+    # inject_skills could not reach them.
+    apply_agent_tool_context(task_args["tools"], agent)
 
     # Code-based guardrail (may re-route to llm_guardrail when it is actually an
     # LLM guardrail stored under the 'guardrail' key).

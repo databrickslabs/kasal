@@ -5,6 +5,8 @@ This module handles dynamic creation of flow methods (starting points, listeners
 """
 
 import asyncio
+import os
+import traceback
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,10 +26,14 @@ from .flow_conditions import state_snapshot
 logger = LoggerManager.get_instance().flow
 
 # Per-crew kickoff timeout for flow execution. Large Power BI models (hundreds of
-# measures, dozens of fact tables + opt-in LLM DAX translation) can legitimately
-# take longer than the original 10 min. Bumped to 20 min as headroom; the DAX LLM
-# fallback is also now bounded-concurrent so it finishes far faster than before.
-CREW_KICKOFF_TIMEOUT_SECONDS = 1200.0
+# measures, dozens of fact tables + opt-in LLM DAX translation + reconciliation
+# cycles) can legitimately take a long time. The M→SQL recovery and DAX LLM
+# fallback are bounded-concurrent so they finish far faster than before, but the
+# heaviest reconciliation runs on the most complex models still need headroom —
+# so this defaults to 40 min and is overridable via env for extreme cases.
+CREW_KICKOFF_TIMEOUT_SECONDS = float(
+    os.getenv("KASAL_FLOW_CREW_TIMEOUT_SECONDS", "2400")
+)
 
 
 def extract_final_answer(results) -> str:
@@ -1035,6 +1041,15 @@ class FlowMethodFactory:
                 logger.error(
                     f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
                 )
+                # Diagnostic: the full stack of the TimeoutError names its true
+                # source (a run/agent max_execution_time deadline vs a DB
+                # operation hanging on a dropped idle connection) — the one thing
+                # the status logs don't reveal. Needed to fix the long-run timeout
+                # precisely instead of guessing.
+                logger.error(
+                    "Starting-point crew timeout — originating traceback:\n%s",
+                    traceback.format_exc(),
+                )
                 raise TimeoutError(
                     f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS / 60:.0f} minutes"
                 )
@@ -1480,25 +1495,56 @@ class FlowMethodFactory:
                 import json as _json
 
                 def _extract_json(raw: str) -> dict | None:
-                    """Try to extract a JSON dict from a string (handles agent narrative wrapping)."""
+                    """Extract the first complete top-level JSON object from a
+                    string that may wrap it in agent narrative ("Here is the
+                    full output: {...}").
+
+                    Balanced-brace scan from the first ``{``, string-literal
+                    aware, instead of a fixed-nesting-depth regex. The prior
+                    regex (``\\{[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}``) only tolerates
+                    ONE level of nested braces, so on a 3+-level-deep tool
+                    payload (config_json's own switch_decompositions ->
+                    {table: [{...}, ...]} is already 3 levels) it silently
+                    matched an INNER sub-object instead of the real top-level
+                    one — confirmed live: on a Pipeline Config Generator
+                    result it extracted {"Fact_OTC": [...]} instead of the
+                    full {"proposed_config": ..., "measures_json": ...,
+                    "mquery_json": ...} payload, so has_ucmv_handoff /
+                    is_bare_pipeline_config both read False below and the
+                    flow handoff silently injected nothing into the next
+                    crew at all — the measures_json/mquery_json/config_json
+                    UCMV received were empty defaults, not the real data.
+                    """
                     if not raw or not isinstance(raw, str):
                         return None
-                    s = raw.strip()
-                    # Direct JSON
-                    if s.startswith("{"):
-                        try:
-                            return _json.loads(s)
-                        except _json.JSONDecodeError:
-                            pass
-                    # Extract JSON from "Final Answer: {...}" or narrative wrapping
-                    import re as _re
-
-                    match = _re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", s)
-                    if match:
-                        try:
-                            return _json.loads(match.group(0))
-                        except _json.JSONDecodeError:
-                            pass
+                    start = raw.find("{")
+                    if start == -1:
+                        return None
+                    depth = 0
+                    in_string = False
+                    escape = False
+                    for i in range(start, len(raw)):
+                        ch = raw[i]
+                        if in_string:
+                            if escape:
+                                escape = False
+                            elif ch == "\\":
+                                escape = True
+                            elif ch == '"':
+                                in_string = False
+                            continue
+                        if ch == '"':
+                            in_string = True
+                        elif ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                candidate = raw[start : i + 1]
+                                try:
+                                    return _json.loads(candidate)
+                                except _json.JSONDecodeError:
+                                    return None
                     return None
 
                 # Build a list of all parsed outputs from flow state + current results
@@ -1532,7 +1578,33 @@ class FlowMethodFactory:
                 try:
                     injected_count = 0
                     for agent in agents:
-                        for tool in agent.tools or []:
+                        for _raw_tool in agent.tools or []:
+                            # Under the CrewAI harness, `agent.tools` holds
+                            # `KasalToolAdapter` wrappers (harnesses/crewai/tools.py)
+                            # — the real Kasal tool with `_default_config` sits on
+                            # `.kasal_tool`, not on the adapter itself. Without this
+                            # unwrap, `hasattr(tool, "_default_config")` is always
+                            # False under CrewAI (the default harness), so this
+                            # whole injection loop silently no-ops: UCMV never
+                            # receives the previous crew's config/measures/mquery
+                            # and falls back to its own weaker direct-API
+                            # extraction, which skips fx_OTCKPI resolution and
+                            # measure re-homing.
+                            # Only unwrap when the inner object genuinely carries a
+                            # real dict `_default_config` — a plain MagicMock() tool
+                            # fixture (no `spec=`) auto-fabricates a truthy
+                            # `.kasal_tool` child mock too, and unconditionally
+                            # preferring it would shadow a mock's own directly-set
+                            # `_default_config` in tests that predate the CrewAI
+                            # harness.
+                            _inner = getattr(_raw_tool, "kasal_tool", None)
+                            tool = (
+                                _inner
+                                if isinstance(
+                                    getattr(_inner, "_default_config", None), dict
+                                )
+                                else _raw_tool
+                            )
                             if not hasattr(tool, "_default_config") or not isinstance(
                                 tool._default_config, dict
                             ):
@@ -1615,6 +1687,8 @@ class FlowMethodFactory:
                                         "measures_json",
                                         "mquery_json",
                                         "relationships_json",
+                                        "visual_usage_index",
+                                        "implicit_column_measures",
                                     ):
                                         payload = prev_data.get(_hk)
                                         if not payload:
@@ -1779,6 +1853,15 @@ class FlowMethodFactory:
                 elapsed_time = time.time() - start_time if "start_time" in dir() else 0
                 logger.error(
                     f"❌ Listener crew execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
+                )
+                # Diagnostic: the full stack of the TimeoutError names its true
+                # source (a run/agent max_execution_time deadline vs a DB
+                # operation hanging on a dropped idle connection) — the one thing
+                # the status logs don't reveal. Needed to fix the long-run timeout
+                # precisely instead of guessing.
+                logger.error(
+                    "Listener crew timeout — originating traceback:\n%s",
+                    traceback.format_exc(),
                 )
                 raise TimeoutError("Listener crew execution timed out")
             except Exception as e:

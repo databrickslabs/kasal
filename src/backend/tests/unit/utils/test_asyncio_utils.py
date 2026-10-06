@@ -523,3 +523,107 @@ class TestExecuteDbOperationSmart:
             assert mock_sleep.await_count == 2
             mock_sleep.assert_any_await(0.5)
             mock_sleep.assert_any_await(1.0)
+
+
+class TestExecuteDbOperationSmartClosedConnection:
+    """A Lakebase connection the server closed under a long-idle run must not
+    fail the whole operation: the retry disposes the stale factory and reconnects
+    fresh. This is what keeps a long UCMV reconciliation run's terminal status
+    write (success) from being reported as a failure."""
+
+    @pytest.mark.asyncio
+    async def test_disposes_factory_and_retries_on_closed_connection(self):
+        from src.utils.asyncio_utils import execute_db_operation_smart
+
+        calls = {"n": 0}
+
+        async def op(_session):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise Exception(
+                    "cannot call Transaction.commit(): the underlying connection is closed"
+                )
+            return "ok"
+
+        class _FakeSessionCtx:
+            async def __aenter__(self):
+                return Mock(spec=AsyncSession)
+
+            async def __aexit__(self, *a):
+                return False
+
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.db.lakebase_session.get_lakebase_session",
+                return_value=_FakeSessionCtx(),
+            ),
+            patch("src.db.lakebase_state.record_successful_connection"),
+            patch("src.db.lakebase_state.is_fallback_allowed", return_value=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("src.db.lakebase_session._is_crew_thread", return_value=True),
+            patch(
+                "src.db.lakebase_session.dispose_thread_local_lakebase_factory",
+                new=AsyncMock(),
+            ) as mock_dispose,
+            patch("src.utils.asyncio_utils.asyncio.sleep", new=AsyncMock()),
+        ):
+            result = await execute_db_operation_smart(op)
+
+        assert result == "ok"
+        assert calls["n"] == 2  # failed once, retried, succeeded
+        mock_dispose.assert_awaited()  # stale factory disposed before the retry
+
+    @pytest.mark.asyncio
+    async def test_non_closed_error_does_not_dispose(self):
+        from src.utils.asyncio_utils import execute_db_operation_smart
+
+        async def op(_session):
+            return "fine"
+
+        class _FakeSessionCtx:
+            async def __aenter__(self):
+                return Mock(spec=AsyncSession)
+
+            async def __aexit__(self, *a):
+                return False
+
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.db.lakebase_session.get_lakebase_session",
+                return_value=_FakeSessionCtx(),
+            ),
+            patch("src.db.lakebase_state.record_successful_connection"),
+            patch("src.db.lakebase_state.is_fallback_allowed", return_value=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("src.db.lakebase_session._is_crew_thread", return_value=True),
+            patch(
+                "src.db.lakebase_session.dispose_thread_local_lakebase_factory",
+                new=AsyncMock(),
+            ) as mock_dispose,
+        ):
+            result = await execute_db_operation_smart(op)
+
+        assert result == "fine"
+        mock_dispose.assert_not_awaited()  # clean run never disposes

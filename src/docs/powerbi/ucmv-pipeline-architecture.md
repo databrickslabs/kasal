@@ -3,7 +3,7 @@
 How a Power BI semantic model becomes deployable Unity Catalog **Metric Views**
 (UCMVs), stage by stage, with the code location of each step. This is the
 "how it all fits together" reference — start here before diving into an
-individual tool doc (`tool-72-*.md` … `tool-90-*.md`).
+individual tool doc (`tool-*.md`).
 
 ## The shape of the problem
 
@@ -25,12 +25,11 @@ SQL** and **M → source SQL** — feeding one YAML emitter.
 Power BI REST / scan
         │
         ▼
-1. EXTRACTION          powerbi_semantic_model_fetcher_tool (79), _dax_tool,
-   (tools 72, 78–81)   powerbi_metadata_reducer_tool (81), report_references (78)
-        │              → raw measures (DAX), tables (M), relationships, report bindings
-        ▼
-2. CONFIG GENERATION   pipeline_config_generator_tool (90)  ── the handoff builder
-   (tool 90)           → emits UCMV config: measures_json + mquery_json + report_id
+1+2. EXTRACTION +     pipeline_config_generator_tool (90)  ── calls the PBI APIs
+   CONFIG GENERATION   directly (Admin Scanner / Fabric TMDL, Execute Queries,
+   (tool 90)           report definition) and builds the handoff
+        │              → measures_json (DAX) + mquery_json (M) + relationships_json
+        │                + report bindings; report_references (78) is optional
         │
         ▼
 3. UCMV GENERATION     uc_metric_view_generator_tool (86)
@@ -59,11 +58,8 @@ Pulls the model out of Power BI via REST / the scan API.
 
 | What | Tool file | Doc |
 |------|-----------|-----|
-| Semantic-model fetch (tables, measures, M) | `powerbi_semantic_model_fetcher_tool.py` | tool-79 |
-| DAX per measure | `powerbi_semantic_model_dax_tool.py` | tool-80 |
-| Metadata reduce (trim to what matters) | `powerbi_metadata_reducer_tool.py` | tool-81 |
+| Model extraction (tables, measures + DAX, M, relationships) | `pipeline_config_generator_tool.py` | tool-90 |
 | Report → measure references | `powerbi_report_references_tool.py` | tool-78 |
-| Relationships | `powerbi_relationships_tool.py` | tool-75 |
 
 **`report_id` is the key quality lever.** When a `report_id` is supplied (or
 auto-discovered — `pipeline_config_generator_tool.py::discover_report_id`), the

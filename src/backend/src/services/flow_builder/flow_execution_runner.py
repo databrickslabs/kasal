@@ -311,6 +311,21 @@ async def run_flow_in_process(
                 )
                 final_status = None  # Don't update status
                 final_message = None
+            elif current_status and current_status.upper() == "COMPLETED":
+                # The subprocess ran the flow to completion and persisted
+                # COMPLETED + its result to the DB (flow_runner_service), then the
+                # parent watchdog reported no IPC result. For a large result this
+                # is a FALSE failure: the child's os._exit discarded the queued
+                # payload before the feeder thread flushed it (the queue path is
+                # hardened in process_executor, but this DB fallback guarantees a
+                # completed run is never overwritten with FAILED). Preserve the
+                # persisted success instead of clobbering it.
+                logger.warning(
+                    f"Flow execution {execution_id} reported no IPC result but DB "
+                    "shows COMPLETED - preserving success (large-result queue race)."
+                )
+                final_status = None  # Don't update status; DB already COMPLETED
+                final_message = None
             else:
                 final_status = ExecutionStatus.FAILED.value
                 final_message = result.get("error", "Process execution failed")

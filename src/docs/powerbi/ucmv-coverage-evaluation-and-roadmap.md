@@ -45,7 +45,7 @@ that holds the M-Queries and physical tables is a *separate dataset*, not the on
 these runs extracted. So the highest-value fix is **not** to manually re-supply the
 missing sources; it is to **extract the underlying model's `dataset_id`** (which has
 everything, like SC did). Kasal already extracts by `dataset_id` via `executeQueries`
-(`powerbi_semantic_model_dax_tool.py`), so this is largely an *input* choice today
+(`pipeline_config_generator_tool.py`), so this is largely an *input* choice today
 and an *automation* opportunity tomorrow:
 
 - **Today (operational):** point the run at the upstream model's `dataset_id`

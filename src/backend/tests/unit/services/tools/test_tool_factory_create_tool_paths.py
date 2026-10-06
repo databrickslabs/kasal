@@ -372,26 +372,6 @@ class TestCreateTool:
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("user_token") == "factory-token"
 
-    def test_powerbi_json_fields_parsed_for_analysis_tool(self):
-        """JSON strings in context enrichment fields should be parsed for Power BI Analysis tool."""
-        import json as json_mod
-
-        f = _make_factory()
-        bm = json_mod.dumps({"Revenue": "sum of sales"})
-        info = _make_tool_info(
-            "Power BI Comprehensive Analysis Tool",
-            99,
-            config={"business_mappings": bm},
-        )
-        f._available_tools["Power BI Comprehensive Analysis Tool"] = info
-        mock_cls = MagicMock(return_value=MagicMock())
-        f._tool_implementations["Power BI Comprehensive Analysis Tool"] = mock_cls
-
-        f.create_tool("Power BI Comprehensive Analysis Tool")
-        call_kwargs = mock_cls.call_args[1]
-        # The JSON string should have been parsed into a dict
-        assert isinstance(call_kwargs.get("business_mappings"), dict)
-
     def test_create_tool_by_integer_id(self):
         f = _make_factory()
         info = _make_tool_info("ScrapeWebsiteTool", 77)
@@ -879,52 +859,6 @@ class TestDatabricksKnowledgeSearchToolCreation:
 
         call_kwargs = mock_cls.call_args.kwargs
         assert call_kwargs.get("group_id") == "ks-group"
-
-
-# ============================================================================
-# PowerBIAnalysisTool creation path (generic fallthrough)
-# ============================================================================
-
-
-class TestPowerBIAnalysisToolCreation:
-
-    def test_creates_powerbi_analysis_tool(self):
-        f = _make_factory(config={"group_id": "g"})
-        info = _make_tool_info(
-            "Power BI Comprehensive Analysis Tool",
-            30,
-            config={
-                "workspace_id": "ws1",
-                "dataset_id": "ds1",
-            },
-        )
-        f._available_tools["Power BI Comprehensive Analysis Tool"] = info
-        mock_cls = MagicMock(return_value=MagicMock())
-        f._tool_implementations["Power BI Comprehensive Analysis Tool"] = mock_cls
-
-        result = f.create_tool("Power BI Comprehensive Analysis Tool")
-
-        assert result is not None
-
-    def test_powerbi_analysis_workspace_id_passed(self):
-        f = _make_factory(config={"group_id": "g"})
-        info = _make_tool_info(
-            "Power BI Comprehensive Analysis Tool",
-            30,
-            config={
-                "workspace_id": "my-workspace",
-                "dataset_id": "my-dataset",
-                "tenant_id": "my-tenant",
-            },
-        )
-        f._available_tools["Power BI Comprehensive Analysis Tool"] = info
-        mock_cls = MagicMock(return_value=MagicMock())
-        f._tool_implementations["Power BI Comprehensive Analysis Tool"] = mock_cls
-
-        f.create_tool("Power BI Comprehensive Analysis Tool")
-
-        call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("workspace_id") == "my-workspace"
 
 
 # ============================================================================

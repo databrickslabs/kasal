@@ -61,7 +61,9 @@ def _powerbi_schema_classes():
 def test_discovers_powerbi_schemas():
     """Sanity: the scan actually finds the PBI tool schemas."""
     found = list(_powerbi_schema_classes())
-    assert len(found) >= 10, f"expected >=10 PBI schemas, found {len(found)}"
+    # 6 PBI-facing tool schemas after the 2026-10 tool clean-up (report refs,
+    # visual mapper, hierarchies, field params, DAX executor, …).
+    assert len(found) >= 5, f"expected >=5 PBI schemas, found {len(found)}"
 
 
 @pytest.mark.parametrize(

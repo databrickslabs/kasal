@@ -1167,3 +1167,58 @@ async def test_saved_flow_missing_nodes_cannot_start_empty_execution():
     with pytest.raises(ValueError, match="no nodes"):
         await hydrate_saved_flow(flow, config)
     assert config == {}
+
+
+# ── _smart_db_session: soft-complete a held session whose connection the server
+#    closed during a long, DB-idle flow run (the UCMV reconciliation failure) ──
+
+
+def _closed_conn_session_gen():
+    """Async generator mimicking get_smart_db_session: yields a session, then
+    raises a 'connection is closed' error on commit-time cleanup."""
+
+    async def _gen():
+        yield MagicMock(name="held_session")
+        raise RuntimeError(
+            "cannot call Transaction.commit(): the underlying connection is closed"
+        )
+
+    return _gen()
+
+
+@pytest.mark.asyncio
+async def test_smart_db_session_soft_completes_on_closed_connection():
+    from src.services.flow_builder import flow_runner_service as frs
+
+    with (
+        patch.object(frs, "get_smart_db_session", side_effect=_closed_conn_session_gen),
+        patch(
+            "src.db.lakebase_session._is_disposed_connection_error", return_value=True
+        ),
+        patch("src.db.lakebase_session._is_crew_thread", return_value=False),
+        patch(
+            "src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()
+        ) as disp,
+    ):
+        # Body succeeds; the exit-commit hits the closed connection → soft-complete
+        # (no raise) because soft_complete_on_closed=True.
+        async with frs._smart_db_session(soft_complete_on_closed=True) as session:
+            assert session is not None
+        disp.assert_awaited_once()  # dead factory disposed so next acquire reconnects
+
+
+@pytest.mark.asyncio
+async def test_smart_db_session_propagates_closed_connection_without_soft_flag():
+    from src.services.flow_builder import flow_runner_service as frs
+
+    with (
+        patch.object(frs, "get_smart_db_session", side_effect=_closed_conn_session_gen),
+        patch(
+            "src.db.lakebase_session._is_disposed_connection_error", return_value=True
+        ),
+    ):
+        # Default (soft_complete_on_closed=False) keeps strict semantics: the
+        # closed-connection commit error propagates.
+        with pytest.raises(RuntimeError, match="connection is closed"):
+            async with frs._smart_db_session() as session:
+                assert session is not None

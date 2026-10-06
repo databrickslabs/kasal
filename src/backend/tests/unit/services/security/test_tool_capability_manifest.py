@@ -65,7 +65,7 @@ class TestAssessTrifecta:
         assert result.has_trifecta
 
     def test_trifecta_detected_power_bi_plus_mcp(self):
-        result = assess_trifecta(["PowerBIAnalysisTool", "MCPTool"])
+        result = assess_trifecta(["Power BI DAX Executor", "MCPTool"])
         assert result.has_trifecta
 
     def test_sensitive_tools_list_populated(self):

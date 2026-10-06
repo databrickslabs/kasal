@@ -30,6 +30,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ClearIcon from '@mui/icons-material/Clear';
 import { usePowerBIOAuth } from '../../../../hooks/usePowerBIOAuth';
+import { PowerBIReconConnectionFields } from './PowerBIReconConnectionFields';
+import { UCMVDomainContextHint } from './UCMVDomainContextHint';
 
 // Authentication method type
 export type PowerBIAuthMethod = 'service_principal' | 'service_account' | 'user_oauth';
@@ -65,27 +67,46 @@ export interface UCMetricViewGeneratorConfig {
   llm_model?: string;
   llm_workspace_url?: string;
   llm_token?: string;
+  // Reconciliation & quality
+  warehouse_id?: string;
+  reference_years?: string;
+  enable_reconciliation?: boolean;
+  max_reconciliation_cycles?: number;
+  reconciliation_target_pct?: number;
+  prune_non_visual_measures?: boolean;
+  naming_config?: string;
+  domain_context?: string;
   // Index signature for compatibility
-  [key: string]: string | boolean | undefined;
+  [key: string]: string | boolean | number | undefined;
 }
 
 interface UCMetricViewGeneratorConfigSelectorProps {
   value: UCMetricViewGeneratorConfig;
   onChange: (config: UCMetricViewGeneratorConfig) => void;
   disabled?: boolean;
+  /** Skills of the agent running this task — shows which domain-context skill applies. */
+  agentId?: string | number;
+  agentSkills?: string[];
+  agentName?: string;
 }
 
 export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGeneratorConfigSelectorProps> = ({
   value = {},
   onChange,
-  disabled = false
+  disabled = false,
+  agentId,
+  agentSkills,
+  agentName
 }) => {
   // OAuth hook for User OAuth authentication
   const { accessToken, isAuthenticated, signIn, signOut, userEmail, isLoading: oauthLoading, error: oauthError } = usePowerBIOAuth({
     clientId: value.oauth_client_id || ''
   });
 
-  const handleFieldChange = (field: keyof UCMetricViewGeneratorConfig, fieldValue: string | boolean) => {
+  // Local validation state for naming_config JSON field
+  const [namingConfigError, setNamingConfigError] = React.useState<string>('');
+
+  const handleFieldChange = (field: keyof UCMetricViewGeneratorConfig, fieldValue: string | boolean | number) => {
     onChange({
       ...value,
       [field]: fieldValue
@@ -731,6 +752,192 @@ export const UCMetricViewGeneratorConfigSelector: React.FC<UCMetricViewGenerator
                 />
               </>
             )}
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* Domain context — authored as a Skill on the agent, fed to this tool */}
+      <Accordion sx={{ mt: 1 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2">Domain context (Skills)</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <UCMVDomainContextHint
+            agentId={agentId}
+            agentSkills={agentSkills}
+            agentName={agentName}
+            inlineValue={value.domain_context}
+            onClearInline={() => onChange({ ...value, domain_context: undefined })}
+            disabled={disabled}
+          />
+        </AccordionDetails>
+      </Accordion>
+
+      {/* Reconciliation & Metadata Lint */}
+      <Accordion sx={{ mt: 1 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="subtitle2">
+            Reconciliation &amp; Metadata Lint
+            {value.enable_reconciliation ? ' (enabled)' : ''}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Databricks SQL warehouse ID"
+              value={value.warehouse_id || ''}
+              onChange={(e) => handleFieldChange('warehouse_id', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              helperText="Required for reconciliation (queries the deployed metric view)."
+            />
+
+            <TextField
+              label="Reference years"
+              value={value.reference_years || ''}
+              onChange={(e) => handleFieldChange('reference_years', e.target.value)}
+              disabled={disabled}
+              fullWidth
+              size="small"
+              placeholder="[2025, 2026]"
+              helperText="Optional — the fiscal year(s) to compare cell-by-cell, e.g. [2025, 2026]. Leave blank to compare across all years."
+            />
+
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={value.enable_reconciliation || false}
+                  onChange={(e) => handleFieldChange('enable_reconciliation', e.target.checked)}
+                  disabled={disabled}
+                  size="small"
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2">Reconcile against Power BI (iterative)</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    After each generation cycle, deploy the metric view and compare it cell-by-cell against
+                    the live Power BI model; feed mismatches back to the model to refine. Requires a
+                    Databricks SQL warehouse and Power BI credentials (workspace&nbsp;ID, dataset&nbsp;ID,
+                    and authentication — entered below in JSON mode). Reference years are optional.
+                  </Typography>
+                </Box>
+              }
+            />
+
+            {value.enable_reconciliation && (
+              <Box sx={{ pl: 3, display: 'flex', flexDirection: 'column', gap: 2, borderLeft: '2px solid', borderColor: 'divider' }}>
+                {mode === 'json' ? (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'rgb(156, 39, 176)' }}>
+                      Power BI connection (reconciliation ground truth)
+                    </Typography>
+                    <PowerBIReconConnectionFields value={value} onChange={onChange} disabled={disabled} />
+                  </Box>
+                ) : (
+                  <Alert severity="info" variant="outlined">
+                    <Typography variant="caption">
+                      Reconciliation uses the Power BI credentials from the <strong>Power BI Workspace
+                      Configuration</strong> above (workspace&nbsp;ID, dataset&nbsp;ID, and authentication).
+                    </Typography>
+                  </Alert>
+                )}
+                <TextField
+                  label="Max reconciliation cycles"
+                  type="number"
+                  value={value.max_reconciliation_cycles ?? 5}
+                  onChange={(e) => {
+                    const parsed = parseInt(e.target.value, 10);
+                    if (!isNaN(parsed)) handleFieldChange('max_reconciliation_cycles', Math.min(10, Math.max(1, parsed)));
+                  }}
+                  disabled={disabled}
+                  fullWidth
+                  size="small"
+                  inputProps={{ min: 1, max: 10 }}
+                />
+                <TextField
+                  label="Target cell-alignment %"
+                  type="number"
+                  value={value.reconciliation_target_pct ?? 100}
+                  onChange={(e) => {
+                    const parsed = parseFloat(e.target.value);
+                    if (!isNaN(parsed)) handleFieldChange('reconciliation_target_pct', Math.min(100, Math.max(0, parsed)));
+                  }}
+                  disabled={disabled}
+                  fullWidth
+                  size="small"
+                  inputProps={{ min: 0, max: 100, step: 1 }}
+                  helperText="Stop early once overall cell alignment reaches this percentage."
+                />
+              </Box>
+            )}
+
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={value.prune_non_visual_measures || false}
+                  onChange={(e) => handleFieldChange('prune_non_visual_measures', e.target.checked)}
+                  disabled={disabled}
+                  size="small"
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2">Only translate measures shown in a visual (triage)</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Skip measures not drawn or filtered in any report visual — directly or through a
+                    dependency chain — so legacy/unused measures don&apos;t clutter the output. Base
+                    column aggregates are always kept. No effect unless the report&apos;s visual-usage
+                    data is available.
+                  </Typography>
+                </Box>
+              }
+            />
+
+            <TextField
+              label="Naming / period config (JSON, optional)"
+              value={value.naming_config || ''}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw.trim() === '') {
+                  setNamingConfigError('');
+                } else {
+                  try {
+                    JSON.parse(raw);
+                    setNamingConfigError('');
+                  } catch {
+                    setNamingConfigError('Invalid JSON — fix before saving.');
+                  }
+                }
+                handleFieldChange('naming_config', raw);
+              }}
+              disabled={disabled}
+              fullWidth
+              multiline
+              rows={9}
+              size="small"
+              error={!!namingConfigError}
+              placeholder={`{
+  "lint": {
+    "scenario_suffixes": ["actual", "budget", "forecast", "py"],
+    "unit_suffixes": ["hours", "cases", "hl"],
+    "dimension_alias_groups": [["comp_code", "company_code"]]
+  },
+  "period": {
+    "column_overrides": { "latest_month_label": "IsCurrentMonth" }
+  }
+}`}
+              helperText={
+                namingConfigError ||
+                'Optional — leave blank to use the built-in defaults. Per-model vocabulary for ' +
+                'the metadata lint (scenario/unit suffixes, dimension alias groups) and the calendar ' +
+                'period-folding (column_overrides). The greyed example shows the exact shape; type over it.'
+              }
+              InputProps={{
+                sx: { fontFamily: 'monospace', fontSize: '0.75rem' }
+              }}
+            />
           </Box>
         </AccordionDetails>
       </Accordion>

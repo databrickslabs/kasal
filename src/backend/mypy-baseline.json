@@ -10213,61 +10213,6 @@
       "count": 1
     },
     {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Incompatible types in assignment (expression has type \"Match[str] | None\", variable has type \"Match[str]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str | Any, str]\", target has type \"dict[Any, dict[str, Any]]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, list[str | Any]]\", target has type \"dict[Any, dict[str, Any]]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Incompatible types in assignment (expression has type \"dict[str, str]\", target has type \"dict[Any, dict[str, Any]]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Need type annotation for \"categories\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Need type annotation for \"column_overrides\" (hint: \"column_overrides: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Need type annotation for \"filter_sets\" (hint: \"filter_sets: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Need type annotation for \"switch_decomps\" (hint: \"switch_decomps: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/config_generator_tool.py",
-      "message": "Value expression in dictionary comprehension has incompatible type \"list[dict[Any, Any]]\"; expected type \"dict[str, Any]\"  [misc]",
-      "count": 1
-    },
-    {
       "file": "src/services/tools/databricks_dashboard_creator_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
@@ -10688,46 +10633,6 @@
       "count": 1
     },
     {
-      "file": "src/services/tools/metadata_reduction/dax_skeleton_builder.py",
-      "message": "Need type annotation for \"placeholders\" (hint: \"placeholders: list[<type>] = ...\")  [var-annotated]",
-      "count": 3
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/dax_skeleton_builder.py",
-      "message": "Returning Any from function declared to return \"list[str]\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/fuzzy_scorer.py",
-      "message": "Argument \"key\" to \"sort\" of \"list\" has incompatible type \"Callable[[dict[str, object]], object]\"; expected \"Callable[[dict[str, object]], SupportsDunderLT[Any] | SupportsDunderGT[Any]]\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/fuzzy_scorer.py",
-      "message": "Incompatible return value type (got \"object\", expected \"SupportsDunderLT[Any] | SupportsDunderGT[Any]\")  [return-value]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/fuzzy_scorer.py",
-      "message": "Returning Any from function declared to return \"list[Any]\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/measure_resolver.py",
-      "message": "Need type annotation for \"resolved_types\" (hint: \"resolved_types: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/question_preprocessor.py",
-      "message": "Function is missing a return type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/metadata_reduction/question_preprocessor.py",
-      "message": "Returning Any from function declared to return \"QuestionIntent\"  [no-any-return]",
-      "count": 2
-    },
-    {
       "file": "src/services/tools/metric_view_deployer_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 2
@@ -11123,61 +11028,6 @@
       "count": 1
     },
     {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Item \"None\" of \"Any | None\" has no attribute \"value\"  [union-attr]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"converter_version\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"error_message\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"execution_time_ms\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"extra_metadata\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Missing named argument \"warnings\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/mquery_conversion_pipeline_tool.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/pbi_measure_allocator_tool.py",
-      "message": "Argument \"key\" to \"max\" has incompatible type overloaded function; expected \"Callable[[Any], SupportsDunderLT[Any] | SupportsDunderGT[Any]]\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pbi_measure_allocator_tool.py",
-      "message": "Need type annotation for \"by_table\" (hint: \"by_table: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/pbi_measure_allocator_tool.py",
-      "message": "Need type annotation for \"ref_counts\" (hint: \"ref_counts: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
       "file": "src/services/tools/pbi_visual_ucmv_mapper_tool.py",
       "message": "Function is missing a return type annotation  [no-untyped-def]",
       "count": 3
@@ -11283,101 +11133,6 @@
       "count": 1
     },
     {
-      "file": "src/services/tools/powerbi_analysis_tool.py",
-      "message": "Argument 1 to \"len\" has incompatible type \"Any | None\"; expected \"Sized\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_tool.py",
-      "message": "Need type annotation for \"dax_attempts\" (hint: \"dax_attempts: list[<type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_tool.py",
-      "message": "Need type annotation for \"model_context\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_tool.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_tool.py",
-      "message": "Value of type \"Any | None\" is not indexable  [index]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/dax_generation.py",
-      "message": "\"PowerBIDaxGenerationMixin\" has no attribute \"_auto_wrap_with_report_filters\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/dax_generation.py",
-      "message": "\"PowerBIDaxGenerationMixin\" has no attribute \"_build_enriched_semantic_context\"  [attr-defined]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/dax_generation.py",
-      "message": "Argument \"response\" to \"_emit_llm_trace\" of \"PowerBIDaxGenerationMixin\" has incompatible type \"str | tuple[str, str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/dax_generation.py",
-      "message": "Argument 1 to \"_extract_dax_from_llm_response\" of \"PowerBIDaxGenerationMixin\" has incompatible type \"str | tuple[str, str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/dax_generation.py",
-      "message": "Need type annotation for \"clean_lines\" (hint: \"clean_lines: list[<type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/dax_generation.py",
-      "message": "Returning Any from function declared to return \"str | None\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/model_fetch.py",
-      "message": "\"PowerBIModelFetchMixin\" has no attribute \"_execute_dax_query\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/model_fetch.py",
-      "message": "\"PowerBIModelFetchMixin\" has no attribute \"_parse_tmdl_for_measures_and_tables\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/model_fetch.py",
-      "message": "Need type annotation for \"model_context\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/model_fetch.py",
-      "message": "Returning Any from function declared to return \"list[dict[str, Any]] | None\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/report_refs.py",
-      "message": "Need type annotation for \"measure_locations\" (hint: \"measure_locations: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/report_refs.py",
-      "message": "Need type annotation for \"measures\" (hint: \"measures: set[<type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_analysis_utils/tmdl.py",
-      "message": "Incompatible types in assignment (expression has type \"list[str] | str\", variable has type \"str\")  [assignment]",
-      "count": 1
-    },
-    {
       "file": "src/services/tools/powerbi_auth_utils.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
       "count": 1
@@ -11453,71 +11208,6 @@
       "count": 1
     },
     {
-      "file": "src/services/tools/powerbi_metadata_reducer_tool.py",
-      "message": "Argument 1 to \"_extract_json_from_response\" of \"PowerBIMetadataReducerTool\" has incompatible type \"str | tuple[str, str]\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_metadata_reducer_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_metadata_reducer_tool.py",
-      "message": "List comprehension has incompatible type List[tuple[Any, Any, Any]]; expected List[tuple[Any, Any]]  [misc]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_metadata_reducer_tool.py",
-      "message": "Returning Any from function declared to return \"dict[Any, Any] | None\"  [no-any-return]",
-      "count": 3
-    },
-    {
-      "file": "src/services/tools/powerbi_metadata_reducer_tool.py",
-      "message": "Returning Any from function declared to return \"dict[str, Any]\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_metadata_reducer_tool.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Argument \"include_inactive\" to \"_extract_relationships\" of \"PowerBIRelationshipsTool\" has incompatible type \"Any | None\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Argument \"skip_system_tables\" to \"_extract_relationships\" of \"PowerBIRelationshipsTool\" has incompatible type \"Any | None\"; expected \"bool\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Argument \"target_catalog\" to \"_extract_relationships\" of \"PowerBIRelationshipsTool\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Argument \"target_schema\" to \"_extract_relationships\" of \"PowerBIRelationshipsTool\" has incompatible type \"Any | None\"; expected \"str\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Need type annotation for \"cardinality_counts\" (hint: \"cardinality_counts: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_relationships_tool.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
       "file": "src/services/tools/powerbi_report_references_tool.py",
       "message": "Function is missing a type annotation  [no-untyped-def]",
       "count": 1
@@ -11534,111 +11224,6 @@
     },
     {
       "file": "src/services/tools/powerbi_report_references_tool.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Argument \"response\" to \"_emit_llm_trace\" of \"PowerBISemanticModelDaxTool\" has incompatible type \"str | tuple[str, str]\"; expected \"str | None\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Argument 1 to \"_extract_dax_from_llm_response\" of \"PowerBISemanticModelDaxTool\" has incompatible type \"str | tuple[str, str]\"; expected \"str\"  [arg-type]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Argument 1 to \"len\" has incompatible type \"Any | dict[Any, Any] | None\"; expected \"Sized\"  [arg-type]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Incompatible types in assignment (expression has type \"str\", variable has type \"None\")  [assignment]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Missing named argument \"converter_version\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Missing named argument \"measure_count\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Missing named argument \"warnings\" for \"ConversionHistoryCreate\"  [call-arg]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Unpacked dict entry 0 has incompatible type \"Any | dict[Any, Any] | None\"; expected \"SupportsKeysAndGetItem[Any, Any]\"  [dict-item]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Value of type \"Any | None\" is not indexable  [index]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_dax_tool.py",
-      "message": "Value of type \"object\" is not indexable  [index]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "\"Collection[Any]\" has no attribute \"append\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "\"Collection[Any]\" has no attribute \"values\"  [attr-defined]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "Argument 1 to \"_parse_llm_json\" of \"PowerBISemanticModelFetcherTool\" has incompatible type \"str | tuple[str, str]\"; expected \"str\"  [arg-type]",
-      "count": 3
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "Function is missing a type annotation  [no-untyped-def]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "Need type annotation for \"default_filters\" (hint: \"default_filters: dict[<type>, <type>] = ...\")  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "Need type annotation for \"model_context\"  [var-annotated]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "Returning Any from function declared to return \"list[dict[str, Any]] | None\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
-      "message": "Returning Any from function declared to return \"list[dict[str, Any]]\"  [no-any-return]",
-      "count": 2
-    },
-    {
-      "file": "src/services/tools/powerbi_semantic_model_fetcher_tool.py",
       "message": "Returning Any from function declared to return \"str\"  [no-any-return]",
       "count": 1
     },
@@ -11694,11 +11279,6 @@
     },
     {
       "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[ConfigGeneratorTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[DatabricksDashboardCreatorTool]\")  [assignment]",
       "count": 1
     },
@@ -11710,11 +11290,6 @@
     {
       "file": "src/services/tools/tool_factory.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[DatabricksKnowledgeSearchTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[DaxToSqlTranslatorTool]\")  [assignment]",
       "count": 1
     },
     {
@@ -11754,17 +11329,7 @@
     },
     {
       "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[MqueryConversionPipelineTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PBIVisualUCMVMapperTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PbiMeasureAllocatorTool]\")  [assignment]",
       "count": 1
     },
     {
@@ -11775,11 +11340,6 @@
     {
       "file": "src/services/tools/tool_factory.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PipelineConfigGeneratorTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PowerBIAnalysisTool]\")  [assignment]",
       "count": 1
     },
     {
@@ -11804,27 +11364,7 @@
     },
     {
       "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PowerBIMetadataReducerTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PowerBIRelationshipsTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
       "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PowerBIReportReferencesTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PowerBISemanticModelDaxTool]\")  [assignment]",
-      "count": 1
-    },
-    {
-      "file": "src/services/tools/tool_factory.py",
-      "message": "Incompatible types in assignment (expression has type \"None\", variable has type \"type[PowerBISemanticModelFetcherTool]\")  [assignment]",
       "count": 1
     },
     {

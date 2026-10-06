@@ -5,6 +5,7 @@ import { Box, Typography, IconButton, Tooltip, useTheme, CircularProgress } from
 import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { FlowConfiguration } from '../../../../types/workflow/flow';
@@ -95,6 +96,10 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
         return {
           borderColor: theme.palette.error.main,
         };
+      case 'warning':
+        return {
+          borderColor: theme.palette.warning.main,
+        };
       case 'pending':
         return {
           opacity: 0.7,
@@ -117,6 +122,9 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
         return <CheckCircleIcon sx={{ ...iconStyle, color: theme.palette.success.main }} />;
       case 'failed':
         return <ErrorIcon sx={{ ...iconStyle, color: theme.palette.error.main }} />;
+      case 'warning':
+        // Late timeout: finished, outputs saved — orange, not red.
+        return <WarningAmberIcon sx={{ ...iconStyle, color: theme.palette.warning.main }} />;
       case 'pending':
         return <PlayArrowIcon sx={{ ...iconStyle, color: theme.palette.text.secondary, opacity: 0.5 }} />;
       default:

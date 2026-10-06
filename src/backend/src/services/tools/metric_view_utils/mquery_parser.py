@@ -82,7 +82,9 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
     """
     if not mquery or not isinstance(mquery, str):
         return ("unknown", "empty source expression")
-    m = mquery
+    # Classify on the ACTIVE source only — a disabled `// …Excel.Workbook…` or
+    # `// Source = Sql.Database(…)` comment must not decide the category.
+    m = strip_m_comments(mquery)
     mu = m.upper()
     if re.search(r"Table\.FromRows\s*\(\s*Json\.Document\s*\(\s*Binary\.Decompress", m):
         return (
@@ -141,6 +143,167 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
     return ("unknown", "unrecognized M source shape")
 
 
+def strip_m_comments(mquery: str) -> str:
+    """Remove M ``//`` line and ``/* */`` block comments, preserving newlines.
+
+    String-literal aware: a ``//`` or ``/*`` INSIDE a double-quoted M string is
+    left untouched — critical because a ``Value.NativeQuery(src, "<SQL>")`` source
+    carries the whole SQL as a string literal (which may legitimately contain
+    ``/``), and that text is exactly what we must keep. M escapes a quote inside a
+    string by doubling it (``""``), which this honours.
+
+    Why this matters: a Power BI table migrated off Synapse routinely keeps the old
+    ``// Source = Sql.Database(…)`` / ``//… Source{[Schema=…,Item=…]}`` lines as
+    disabled comments above the live source. Parsing those as code makes the
+    resolver read a stale table (OTC Fact_NPS resolved to the commented
+    ``datalake…cust_exp_fact_data_v2`` instead of its real ``Value.NativeQuery``
+    source). Stripping first is the generic fix.
+    """
+    if not mquery or "//" not in mquery and "/*" not in mquery:
+        return mquery
+    out: list[str] = []
+    i, n, in_str = 0, len(mquery), False
+    while i < n:
+        c = mquery[i]
+        if in_str:
+            if c == '"':
+                if i + 1 < n and mquery[i + 1] == '"':  # "" = escaped quote
+                    out.append('""')
+                    i += 2
+                    continue
+                in_str = False
+            out.append(c)
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and mquery[i + 1] == "/":
+            j = mquery.find("\n", i)
+            if j == -1:
+                break
+            i = j  # keep the newline for the next iteration
+            continue
+        if c == "/" and i + 1 < n and mquery[i + 1] == "*":
+            j = mquery.find("*/", i + 2)
+            if j == -1:
+                break
+            i = j + 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+# Bracket pairs used when scanning M call arguments (parens, records, lists).
+_M_OPEN = frozenset("([{")
+_M_CLOSE = frozenset(")]}")
+
+
+def _skip_m_string(s: str, i: int) -> int:
+    """Given ``s[i] == '"'``, return the index just past the closing quote.
+
+    Honours M's doubled-quote escape (``""`` is a literal quote, not a terminator).
+    """
+    n = len(s)
+    i += 1
+    while i < n:
+        if s[i] == '"':
+            if i + 1 < n and s[i + 1] == '"':
+                i += 2
+                continue
+            return i + 1
+        i += 1
+    return n
+
+
+def _unescape_m_native_sql(sql: str) -> str:
+    """Turn a Power Query native-SQL string literal back into plain SQL text.
+
+    M encodes control characters as ``#(lf)`` / ``#(cr)`` / ``#(tab)`` and escapes
+    embedded double quotes by doubling them. This restores newlines/tabs verbatim
+    so the SQL's derived columns, window functions and filters read exactly as the
+    author wrote them (the whole point of S4: nothing is discarded)."""
+    sql = re.sub(r"#\(lf\)", "\n", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"#\(cr\)", "\r", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"#\(tab\)", "\t", sql, flags=re.IGNORECASE)
+    return sql.replace('""', '"')
+
+
+def extract_native_query_sql(mquery: str) -> str | None:
+    """Extract the full SQL from a ``Value.NativeQuery(<src>, "<SQL>", …)`` M source.
+
+    The old path (``extract_source_table``) pulled only the FROM table name out of
+    a native query, discarding everything the query actually computes — derived
+    columns (``TO_DATE(concat(...)) fiscper_date``), window functions
+    (``COUNT(...) OVER (PARTITION BY ...)``), CASE remaps and WHERE filters. Those
+    columns/filters exist only inside this SQL, not in any base table, so dropping
+    them made the generated view unbuildable. This returns the embedded SQL
+    verbatim (M escapes un-done) so it can be used as the view's source directly.
+
+    Returns ``None`` when the M has no ``Value.NativeQuery`` or the string argument
+    can't be located — the caller then falls back to ``source_table``. Generic:
+    argument-boundary aware (brackets + string literals), so the connector's own
+    quoted host/catalog arguments and the record commas inside
+    ``{[Name="…",Kind="Database"]}`` never fool the SQL-argument scan.
+    """
+    if not mquery or not isinstance(mquery, str):
+        return None
+    m = strip_m_comments(mquery)
+    idx = m.find("Value.NativeQuery")
+    if idx < 0:
+        return None
+    p = m.find("(", idx)
+    if p < 0:
+        return None
+    # Walk the first argument (the connector source expression) to the top-level
+    # comma that begins the SQL string argument. Track all bracket kinds + strings.
+    i, depth, n = p + 1, 1, len(m)
+    found_comma = False
+    while i < n:
+        c = m[i]
+        if c == '"':
+            i = _skip_m_string(m, i)
+            continue
+        if c in _M_OPEN:
+            depth += 1
+        elif c in _M_CLOSE:
+            depth -= 1
+            if depth == 0:
+                return None  # closed NativeQuery before any SQL arg
+        elif c == "," and depth == 1:
+            i += 1
+            found_comma = True
+            break
+        i += 1
+    if not found_comma:
+        return None
+    while i < n and m[i].isspace():
+        i += 1
+    if i >= n or m[i] != '"':
+        return None
+    start = i
+    end = _skip_m_string(m, i)
+    sql = _unescape_m_native_sql(m[start + 1 : end - 1]).strip()
+    return sql or None
+
+
+def native_query_as_subquery(mquery: str, alias: str = "_src") -> str | None:
+    """Wrap a native query's SQL as a derived-table source: ``(<SQL>\\n) AS <alias>``.
+
+    For callers that need the native query in a ``FROM`` position (a fact/dim source
+    or a join source) rather than as a standalone view body. Returns ``None`` when
+    there is no native query to wrap. The alias is validated to ``[A-Za-z_]\\w*``.
+    """
+    sql = extract_native_query_sql(mquery)
+    if not sql:
+        return None
+    safe_alias = alias if re.match(r"^[A-Za-z_]\w*$", alias) else "_src"
+    return f"(\n{sql}\n) AS {safe_alias}"
+
+
 # 3-level UC name: catalog.schema.table (identifiers, optionally back-quoted).
 _FQN_RE = re.compile(
     r"([A-Za-z_][\w]*|`[^`]+`)\."
@@ -173,6 +336,11 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
     """
     if not mquery or not isinstance(mquery, str):
         return None
+    # Drop disabled `// Source = …` / `/* */` lines before any pattern match, so a
+    # stale commented-out source (common after a Synapse→Databricks migration)
+    # can't be read as the live one. String-literal aware, so a NativeQuery's
+    # embedded SQL survives intact.
+    mquery = strip_m_comments(mquery)
 
     # Parameter-driven source: resolve the let block to literal SQL first, then pull
     # the FROM target out of the resolved SQL. Only when expressions are supplied.
@@ -460,8 +628,19 @@ def resolve_mquery_with_context(
 class MQueryParser:
     """Parse MQuery conversion report (JSON or Excel) and extract table structure per table."""
 
-    def parse_json(self, json_path) -> dict[str, TableInfo]:
-        """Parse mquery_transpilation JSON — accepts file path, raw list, or JSON string."""
+    def parse_json(
+        self, json_path, mquery_expressions: dict | None = None
+    ) -> dict[str, TableInfo]:
+        """Parse mquery_transpilation JSON — accepts file path, raw list, or JSON string.
+
+        ``mquery_expressions`` (optional) maps ``table_name -> raw Power Query M``
+        (as in ``proposed_config.table_mquery_expressions``). When supplied, each
+        table's ``TableInfo.native_query_sql`` is filled from its
+        ``Value.NativeQuery`` source (S4) so downstream source-SQL emission can use
+        the native query verbatim instead of ``SELECT * FROM <source_table>``, which
+        loses the query's derived columns and filters. Strictly additive: absent →
+        prior behaviour unchanged.
+        """
         if isinstance(json_path, (list, dict)):
             entries = json_path
         elif isinstance(json_path, str):
@@ -489,6 +668,12 @@ class MQueryParser:
                     continue
             info = self._parse_sql(table_name, sql)
             info.raw_transpiled_sql = sql
+            if mquery_expressions:
+                raw_m = mquery_expressions.get(table_name)
+                if raw_m:
+                    native_sql = extract_native_query_sql(raw_m)
+                    if native_sql:
+                        info.native_query_sql = native_sql
             tables[table_name] = info
             # ── Diagnostics: make silent fact/source failures visible ──
             if not info.is_fact:

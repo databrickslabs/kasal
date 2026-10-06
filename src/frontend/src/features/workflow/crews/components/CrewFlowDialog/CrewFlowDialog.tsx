@@ -667,6 +667,32 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
+  // Duplicate a crew as a new catalog entry. Like delete, this updates local
+  // state in place (prepending the returned crew) rather than calling loadCrews,
+  // so the panel doesn't blank to a spinner. The copy's name is derived from the
+  // source with a "(copy)" suffix, made unique against the crews already loaded
+  // so the POST doesn't 409 on a name clash.
+  const uniqueCopyName = (baseName: string): string => {
+    const taken = new Set(crews.map((c) => c.name));
+    let candidate = `${baseName} (copy)`;
+    for (let n = 2; taken.has(candidate); n += 1) {
+      candidate = `${baseName} (copy ${n})`;
+    }
+    return candidate;
+  };
+
+  const handleDuplicateCrew = async (event: React.MouseEvent, crew: CrewResponse) => {
+    event.stopPropagation();
+    try {
+      const created = await CrewService.duplicateCrew(String(crew.id), uniqueCopyName(crew.name));
+      setCrews((current) => [created, ...current]);
+      setError(null);
+    } catch (error) {
+      console.error('Error duplicating crew:', error);
+      setError('Failed to duplicate crew');
+    }
+  };
+
   const handleExportFlow = async (event: React.MouseEvent, flow: FlowResponse) => {
     event.stopPropagation();
     try {
@@ -1585,6 +1611,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                               published={publishedCrewIds.has(String(crew.id))}
                               onPublished={isPublished => setPublished('crew', String(crew.id), isPublished)}
                               onOptimize={() => setOptimizeCrew(crew)}
+                              onDuplicate={event => handleDuplicateCrew(event, crew)}
                               onExport={event => handleExportCrew(event, crew)}
                               onDelete={event => handleDeleteCrew(event, crew.id)}
                             />
