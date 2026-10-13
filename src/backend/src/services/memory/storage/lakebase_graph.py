@@ -3,8 +3,8 @@ table.
 
 The production store. Two tables named after the configured memory table
 (``<table>_entities`` / ``<table>_facts``): pgvector with an HNSW index for the
-embeddings, a stored ``tsvector`` with a GIN index for keyword search, and a
-join for the one-hop expansion. No graph database — Lakebase stays the only
+embeddings and a stored ``tsvector`` with a GIN index for keyword search. No
+graph database — Lakebase stays the only
 production data store.
 
 ``group_id`` is on every statement; it is the tenant boundary, as in
@@ -37,7 +37,6 @@ from src.services.memory.engine.graph_types import (
     DEFAULT_STRICT_MIN_SIMILARITY,
     FACT_EPISODIC,
     FACT_PROCEDURAL,
-    HOP_KINDS,
     MAX_STANDING,
     Entity,
     ExtractedFact,
@@ -45,7 +44,6 @@ from src.services.memory.engine.graph_types import (
     drop_weak,
     entity_key,
     fact_kind,
-    hop_entities,
     keyword_tokens,
     rank_hits,
 )
@@ -77,9 +75,6 @@ _FACT_COLUMNS = (
     "f.source, f.metadata, f.created_at, f.valid_to, f.superseded_by, e.name, "
     "f.kind"
 )
-
-# Seeds whose entities the one-hop expansion follows.
-_HOP_SEEDS = 3
 
 # Table pairs whose DDL has run in this process (see ``_session``).
 _ready: set[str] = set()
@@ -203,6 +198,9 @@ class LakebaseGraphStore:
 
     def list_entities(self, limit: int = 500) -> list[Entity]:
         return self._run_sync(self.alist_entities(limit))
+
+    def retire_fact(self, fact_id: str) -> bool:
+        return self._run_sync(self.aretire_fact(fact_id))
 
     def count(self) -> int:
         return self._run_sync(self.acount())
@@ -351,9 +349,10 @@ class LakebaseGraphStore:
         limit: int = 10,
         min_similarity: float = 0.0,
     ) -> list[tuple[Fact, float | None]]:
-        """Current facts for a query: fused vector + keyword seeds, then the
-        other facts about the seeds' entities. ``(fact, similarity)``, with
-        ``None`` for a fact reached by the hop rather than matched."""
+        """Current facts that match a query, ranked by fusing the vector and
+        keyword rankings. What did not match is not returned: following a
+        matched fact's entity to its other facts was tried, and every such
+        "related" fact in real runs was noise. ``(fact, similarity)``."""
         if limit <= 0 or not query_embedding:
             return []
         where, params = self._read_where()
@@ -399,24 +398,6 @@ class LakebaseGraphStore:
             out: list[tuple[Fact, float | None]] = [
                 (by_id[fid], sim) for fid, sim in seeds if fid in by_id
             ]
-            room = limit - len(out)
-            entity_ids = sorted(hop_entities([fact for fact, _ in out[:_HOP_SEEDS]]))
-            if room > 0 and entity_ids:
-                neighbours = await self._select_facts(
-                    session,
-                    f"{where} AND (f.subject_id = ANY(:entity_ids) "
-                    "OR f.object_id = ANY(:entity_ids)) AND NOT (f.id = ANY(:ids)) "
-                    "AND f.kind = ANY(:hop_kinds)",
-                    {
-                        **params,
-                        "entity_ids": entity_ids,
-                        "ids": seed_ids,
-                        "n": room,
-                        "hop_kinds": list(HOP_KINDS),
-                    },
-                    "ORDER BY f.created_at DESC LIMIT :n",
-                )
-                out.extend((fact, None) for fact in neighbours)
             return out
 
     async def _keyword_ids(
@@ -532,6 +513,18 @@ class LakebaseGraphStore:
                 )
             ).fetchall()
         return [Entity(id=str(r[0]), name=str(r[1]), type=str(r[2])) for r in rows]
+
+    async def aretire_fact(self, fact_id: str) -> bool:
+        """Stop recalling one fact, on request. It is closed, not deleted."""
+        async with self._session() as session:
+            result = await session.execute(
+                sql(
+                    f"UPDATE {self.facts} SET valid_to = NOW() "
+                    "WHERE id = :id AND group_id = :group_id AND valid_to IS NULL"
+                ),
+                {"id": fact_id, "group_id": self.group_id},
+            )
+            return int(getattr(result, "rowcount", 0) or 0) > 0
 
     async def acount(self) -> int:
         async with self._session() as session:

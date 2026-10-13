@@ -238,6 +238,14 @@ class TestReadSql:
         assert (params["procedural"], params["group_id"]) == ("procedural", "grp")
 
     @pytest.mark.asyncio
+    async def test_retiring_a_fact_closes_it_for_this_tenant_only(self):
+        done, calls = await _run(lambda store: store.aretire_fact("f1"))
+        sql, params = calls[0]
+        assert done is True
+        assert "SET valid_to = NOW()" in sql and "group_id = :group_id" in sql
+        assert params == {"id": "f1", "group_id": "grp"}
+
+    @pytest.mark.asyncio
     async def test_reset_deletes_only_this_tenant(self):
         _, calls = await _run(lambda store: store.areset())
         assert [sql for sql, _ in calls] == [

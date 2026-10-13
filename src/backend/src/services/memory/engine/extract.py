@@ -12,6 +12,7 @@ Never raises: no LLM, a malformed reply, a failed call — each means "no facts"
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 
 from .analyze import extract_json_object
@@ -48,14 +49,21 @@ _SYSTEM_PROMPT = (
     "conversation. Reply with ONE JSON object and no other text:\n"
     '{"facts": [{"kind": "semantic", "subject": "...", "subject_type": "...", '
     '"relation": "...", "object": "...", "object_type": null, "single": false, '
-    '"statement": "..."}], "note": "", "note_subject": "", '
+    '"qualifiers": {}, "standing_evidence": "", "statement": "..."}], '
+    '"note": "", "note_subject": "", '
     '"note_subject_type": ""}\n'
     "The text is usually one exchange: a `User:` part, then an `Assistant:` "
     "part. A fact has a kind, and each kind has ONE source:\n"
     '1. kind "procedural" — how the assistant should respond in EVERY '
-    "conversation: a standing preference or instruction about format, "
-    'language, tone or method ("answer in tables", "always cite '
-    'sources"). ONLY from what the User says.\n'
+    "conversation from now on: a standing preference or instruction about "
+    "format, language, tone, sources or method. ONLY from what the User says, "
+    "and ONLY when the user says it holds beyond this request — with words "
+    'such as "always", "from now on", "in general", "by default", "never", "I '
+    'prefer". Copy those exact words into "standing_evidence". An instruction '
+    'about THIS request — "check only from postgres", "just the titles", "use '
+    'the web for this one" — is not procedural and is not a fact of any kind: '
+    "do not extract it. When unsure, leave it out: a wrong standing rule "
+    "changes every later answer.\n"
     '2. kind "semantic" — what the User states about themselves, their '
     "organisation, systems, datasets and projects: role, employer, decisions, "
     "properties. ONLY from what the User says. Never take 1 or 2 from the "
@@ -98,7 +106,14 @@ _SYSTEM_PROMPT = (
     "employer, a deadline, a preferred output format, a figure for one "
     'period), use a specific relation for it (e.g. "preferred_output_format") '
     'and set "single": true, so a later value replaces this one.\n'
-    "- object: the value, a short phrase.\n"
+    "- object: the value, a short phrase. When it is a named thing, it is the "
+    "BARE NAME and nothing else — no parentheses, no dates, no role, never two "
+    'things in one object. What qualifies the relation goes in "qualifiers", '
+    'short strings keyed by what they are: {"role": "Solutions Architect", '
+    '"from": "Feb 2016", "to": "2023"} for a job, {"field": "Business '
+    'Computing"} for a degree. So "worked at Acme as an engineer from 2016 to '
+    '2023" is object "Acme", object_type "organization", with those '
+    "qualifiers — not an object that contains them.\n"
     "- statement: one self-contained sentence stating the fact, understandable "
     "without the text.\n"
     "- You may be given facts ALREADY IN MEMORY as `subject | relation | "
@@ -115,8 +130,58 @@ def _clean(value: object, cap: int) -> str:
     return " ".join(str(value or "").split())[:cap].strip()
 
 
-def parse_facts(payload: object) -> list[ExtractedFact]:
-    """Validate an extraction reply. Malformed entries are dropped, not raised."""
+_TRAILING_PARENS = re.compile(r"^(?P<name>[^()]+?)\s*\((?P<detail>[^()]*)\)\s*$")
+_MAX_QUALIFIERS = 6
+
+
+def _grounded(evidence: object, user_text: str | None) -> bool:
+    """Whether ``evidence`` — the words that make a preference a standing one —
+    was given, and (when the user's text is known) really is in it."""
+    quote = " ".join(str(evidence or "").lower().split())
+    if not quote:
+        return False
+    if user_text is None:
+        return True
+    return quote in " ".join(user_text.lower().split())
+
+
+def user_part(text: str) -> str | None:
+    """What the user said in a ``User: … Assistant: …`` exchange; ``None`` for
+    a text that is not one (a task result)."""
+    match = re.match(r"\s*User:\s*(?P<said>.*?)(?:\s+Assistant:|$)", text, re.DOTALL)
+    return match["said"] if match else None
+
+
+def _bare_name(text: str) -> tuple[str, str]:
+    """``("AWS", "Solutions Architect, 2023-2024")`` from
+    ``"AWS (Solutions Architect, 2023-2024)"``; the text itself otherwise."""
+    match = _TRAILING_PARENS.match(text)
+    if match and entity_key(match["name"]):
+        return match["name"].strip(), match["detail"].strip()
+    return text, ""
+
+
+def _qualifiers(value: object) -> dict[str, str]:
+    """A small ``{what: value}`` map of short strings; anything else is dropped."""
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, item in value.items():
+        name, text = relation_key(key), _clean(item, 80)
+        if name and text and len(out) < _MAX_QUALIFIERS:
+            out[name] = text
+    return out
+
+
+def parse_facts(payload: object, user_text: str | None = None) -> list[ExtractedFact]:
+    """Validate an extraction reply. Malformed entries are dropped, not raised.
+
+    ``user_text`` is what the user actually said, when known. A standing
+    preference is only accepted with words from it that say it holds beyond
+    this request: "check only from postgres", said about one lookup, was once
+    stored as a standing rule, and a later news request then refused to search
+    the web.
+    """
     items = payload.get("facts") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         return []
@@ -143,9 +208,18 @@ def parse_facts(payload: object) -> list[ExtractedFact]:
             if findings > MAX_FINDINGS_PER_WRITE:
                 continue
         elif kind == FACT_PROCEDURAL and about_user:
-            pass
+            if not _grounded(item.get("standing_evidence"), user_text):
+                continue  # a one-off instruction is not a fact of any kind
         else:
             kind = FACT_SEMANTIC
+        qualifiers = _qualifiers(item.get("qualifiers"))
+        if item.get("object_type"):
+            # A model that still writes "AWS (Solutions Architect, 2023-2024)"
+            # would mint a new entity per job; the name is what precedes the
+            # parenthesis, and what is inside it qualifies the relation.
+            obj, detail = _bare_name(obj)
+            if detail and not qualifiers:
+                qualifiers = {"detail": detail}
         identity = (entity_key(subject), relation, entity_key(obj))
         if identity in seen:
             continue
@@ -161,6 +235,7 @@ def parse_facts(payload: object) -> list[ExtractedFact]:
                 single=is_single_valued(relation, item.get("single") is True),
                 statement=statement,
                 kind=kind,
+                qualifiers=qualifiers,
             )
         )
         if len(facts) >= MAX_FACTS_PER_WRITE:
@@ -223,7 +298,7 @@ def extract_turn(
             ]
         )
         payload = extract_json_object(str(raw or ""))
-        return parse_facts(payload), parse_note(payload)
+        return parse_facts(payload, user_part(content)), parse_note(payload)
     except Exception:  # noqa: BLE001 — extraction must never break a write
         logger.warning("memory fact extraction failed; nothing stored", exc_info=True)
         return [], None

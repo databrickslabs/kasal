@@ -221,7 +221,7 @@ A teamspace can store an entity-and-fact graph instead of whole records. It is o
 | Resolve | `storage/*_graph.py` | An entity is found by its normalised name (`entity_key`: case, accents and punctuation folded), created on first mention. The person speaking is always the entity `user` |
 | Dedupe | `storage/*_graph.py` | A fact whose subject, relation and object already exist as a current fact is not stored again. A partial unique index enforces it across processes |
 | Replace | `storage/*_graph.py` | For a single-valued relation, a new value closes the current one (`valid_to`, `superseded_by`). No model call |
-| Recall | `engine/graph_memory.py` | One embedding and one search: vector and keyword rankings fused by reciprocal rank, then the other current facts about the top matches' entities. No model call |
+| Recall | `engine/graph_memory.py` | One embedding and one search: vector and keyword rankings fused by reciprocal rank, with standing preferences in front. No model call |
 
 **Kind.** The ontology (entity types, relations) says what things are. Kind is the other axis: it decides where an item may come from, when it is recalled and how long it lives. It is a column on every fact (`kind`, in `engine/graph_types.py`), and both stores apply one policy per kind:
 
@@ -236,7 +236,13 @@ The extractor assigns the kind and `parse_facts` enforces the source: nothing ab
 
 **Why two floors.** Measured on `nomic-embed-text` with real runs: correct matches for facts the user stated score as low as 0.53, while a dataset finding scored 0.57 against an unrelated Swiss-news request and a note 0.54. No single number separates those. A wrong fact about the user is harmless context; a finding or a note recalled for an unrelated request is a false memory — so those two kinds need 0.6, where right matches measured 0.61–0.84. Notes are embedded without their date, and are never written as "the user asked… the assistant produced…": shared text is what made unrelated notes look alike (0.61 between a Lebanese-news note and a Swiss-news request, in the first wording).
 
-**The one-hop expansion** starts only from `semantic` and `finding` matches, returns only those kinds, and never goes through the `user` entity. Nearly every fact touches `user`, so following it returned facts about an unrelated project for a revenue request.
+**Only what matches is recalled.** Recall returns standing preferences plus the facts that matched the request — nothing "related". An earlier version followed a matched fact's entity to its other facts. In real runs every such addition was noise: a revenue request came back with facts about an unrelated project through the `user` entity, and a Swiss-news request that matched "based in Zurich, Switzerland" came back with that person's whole career. It was removed.
+
+**A standing preference needs the user's own words.** A `procedural` fact is applied to every later run, so a wrong one changes every later answer. "check only from postgres", said about one lookup, was once stored as a standing rule and a later news request refused to search the web. The extractor must now quote the words that make it standing ("always", "from now on", "I prefer"), and `parse_facts` drops it unless that quote is in what the user actually said. An instruction about one request is not stored as any kind of fact.
+
+**Entity names are bare.** A named thing is stored under its name alone; what qualifies the relation (a role, a period, a field of study) is kept as `qualifiers` on the fact. "AWS (Solutions Architect, 2023–2024)" as an entity would be a different node for every job. `parse_facts` also splits a trailing parenthesis off an entity name when the model writes one anyway.
+
+**Forgetting.** `DELETE /memory-backend/graph/facts/{id}` (the **Forget** button on each fact) retires one fact: it stops being recalled and stays listed under replaced facts.
 
 **Vocabulary.** Entity types and seed relations are prescribed in `engine/graph_types.py`. The seed relations carry their own single-valued flag (`works_at`, `deadline_is`, `status_is` are single; `prefers`, `uses` are not). The extractor may coin a relation and says whether it is single-valued; an unknown entity type collapses to `concept`.
 

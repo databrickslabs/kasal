@@ -11,7 +11,7 @@ The vocabulary is PRESCRIBED and small. A model left to invent types and
 relations sprawls (one 49-record store carried 246 distinct tags); the
 extractor is steered to these and anything else collapses onto a default.
 
-The data model follows Graphiti (github.com/getzep/graphiti, Apache-2.0):
+The data model follows the Graphiti project (Apache-2.0; see src/docs/MEMORY.md):
 typed entities, fact edges with a validity window, invalidate-not-delete.
 """
 
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
@@ -87,8 +86,6 @@ USER_KINDS = (FACT_PROCEDURAL, FACT_SEMANTIC)
 #: most 0.57 (a dataset finding against a Swiss-news request).
 STRICT_KINDS = (FACT_FINDING, FACT_EPISODIC)
 DEFAULT_STRICT_MIN_SIMILARITY = 0.6
-#: Kinds the one-hop expansion starts from and returns.
-HOP_KINDS = (FACT_SEMANTIC, FACT_FINDING)
 #: Procedural facts put in front of every recall.
 MAX_STANDING = 5
 
@@ -121,6 +118,10 @@ class ExtractedFact:
     object_type: str | None = None  # set when the object is itself an entity
     single: bool = False
     kind: str = FACT_SEMANTIC
+    #: What qualifies the relation without being a thing itself: a role, a
+    #: period, a field of study. Kept off the entity's name, where it would
+    #: turn "AWS" into a different node per job.
+    qualifiers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -179,6 +180,8 @@ class GraphStore(Protocol):
     ) -> list[Fact]: ...
 
     def standing_facts(self, limit: int = MAX_STANDING) -> list[Fact]: ...
+
+    def retire_fact(self, fact_id: str) -> bool: ...
 
     def list_entities(self, limit: int = 500) -> list[Entity]: ...
 
@@ -262,26 +265,6 @@ def drop_weak(
         for fact_id, similarity, kind in hits
         if kind not in STRICT_KINDS or similarity >= strict_min_similarity
     ]
-
-
-def hop_entities(seeds: Sequence[Fact]) -> set[str]:
-    """The entities worth expanding from ``seeds`` — never the user, and never
-    from a run note.
-
-    Nearly every fact touches the ``user`` entity, so following it is not
-    "related facts", it is the whole store: a request for Nestlé's revenue
-    once came back with facts about an unrelated project that way. A note says
-    what a run produced; what it mentions is not what the request is about.
-    """
-    entities: set[str] = set()
-    for fact in seeds:
-        if fact.kind not in HOP_KINDS:
-            continue
-        if entity_key(fact.subject) != USER_ENTITY:
-            entities.add(fact.subject_id)
-        if fact.object_id and entity_key(fact.object) != USER_ENTITY:
-            entities.add(fact.object_id)
-    return entities
 
 
 def rank_hits(

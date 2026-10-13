@@ -10,7 +10,8 @@ events, so a run's trace shows its reads and writes.
   is embedded and handed to the store, which resolves its entities, skips what
   it already holds, and closes the value a single-valued fact replaces.
 * ``recall`` — one embedding, one search: vector and keyword seeds fused by
-  rank, then one hop to the other facts about the seeds' entities. No model
+  rank; standing preferences are put in front. Nothing is added that did
+  not match the request. No model
   call on the read path.
 
 Recalled facts are returned as ``MemoryRecord`` (kind ``semantic``), because
@@ -258,7 +259,11 @@ class GraphMemory:
                         else extracted.statement
                     ),
                     source=source,
-                    metadata=base_metadata,
+                    metadata=(
+                        {**base_metadata, "qualifiers": extracted.qualifiers}
+                        if extracted.qualifiers
+                        else base_metadata
+                    ),
                 )
             except Exception as exc:
                 event_bus.emit(
@@ -320,7 +325,7 @@ class GraphMemory:
         mode: str = "auto",
         report: bool = True,
     ) -> list[MemoryRecord]:
-        """Facts relevant to ``query``, best first, then their neighbours.
+        """Standing preferences, then the facts that match ``query``, best first.
 
         ``score_threshold`` is the cosine floor for this call when given;
         ``scope`` and ``mode`` are accepted for ``Memory.recall`` parity — the

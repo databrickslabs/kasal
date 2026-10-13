@@ -107,6 +107,49 @@ class TestParseFacts:
         assert parsed[0].subject_type == "concept" and parsed[0].object_type is None
 
 
+class TestEntityNames:
+    """An entity is named by its bare name. "AWS (Solutions Architect,
+    2023-2024)" as an entity makes a different AWS node for every job."""
+
+    def _job(self, obj, **extra):
+        item = fact(
+            "Dana", "worked_at", obj, "Dana worked there.", object_type="organization"
+        )
+        (parsed,) = parse_facts({"facts": [{**item, **extra}]})
+        return parsed
+
+    def test_qualifiers_stay_off_the_entity_name(self):
+        parsed = self._job(
+            "Acme", qualifiers={"Role": "Engineer", "from": "2016", "to": 2023}
+        )
+        assert parsed.object == "Acme"
+        assert parsed.qualifiers == {"role": "Engineer", "from": "2016", "to": "2023"}
+
+    def test_a_parenthesis_on_an_entity_becomes_a_qualifier(self):
+        parsed = self._job("AWS (Solutions Architect, ~2023 – ~2024)")
+        assert parsed.object == "AWS"
+        assert parsed.qualifiers == {"detail": "Solutions Architect, ~2023 – ~2024"}
+
+    def test_two_jobs_at_one_company_name_the_same_entity(self):
+        first, second = self._job("AWS (engineer, 2019)"), self._job(
+            "AWS (architect, 2023)"
+        )
+        assert first.object == second.object == "AWS"
+
+    def test_a_plain_value_keeps_its_parenthesis(self):
+        (parsed,) = parse_facts(
+            {
+                "facts": [
+                    fact("Acme", "revenue_fy2025", "USD 4.2 bn (reported)", "It was.")
+                ]
+            }
+        )
+        assert parsed.object == "USD 4.2 bn (reported)" and parsed.qualifiers == {}
+
+    def test_malformed_qualifiers_are_dropped(self):
+        assert self._job("Acme", qualifiers="since 2016").qualifiers == {}
+
+
 class TestExtractFacts:
     def test_no_llm_or_short_text_extracts_nothing(self):
         assert extract_facts(None, "The user works at Acme, remember that.") == []

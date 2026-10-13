@@ -103,7 +103,10 @@ class TestSearch:
         _add(store, "user", "works_at", "Acme", "The user works at Acme.")
         assert _search(store, "latest news from Lebanon today") == []
 
-    def test_one_hop_adds_other_facts_about_the_matched_entity(self, store):
+    def test_only_what_matches_is_recalled(self, store):
+        """Following a matched fact's entity to its other facts was tried: a
+        Swiss-news request matched "based in Zurich, Switzerland" and came back
+        with that person's whole career."""
         _add(
             store,
             "Atlas",
@@ -121,48 +124,9 @@ class TestSearch:
             kind="project",
             object_type="person",
         )
-        _add(
-            store, "Zephyr", "status_is", "paused", "Zephyr is paused.", kind="project"
-        )
         hits = _search(store, "Atlas deadline", min_similarity=0.5)
-        assert [(f.statement, sim is None) for f, sim in hits] == [
-            ("The Atlas deadline is 30 July.", False),
-            ("Dana runs it.", True),  # reached by the hop, not matched
-        ]
-
-    def test_the_hop_never_goes_through_the_user(self, store):
-        """Nearly everything touches ``user``; following it returned facts about
-        an unrelated project for a Nestlé revenue request."""
-        _add(
-            store,
-            "user",
-            "works_at",
-            "Acme",
-            "The user works at Acme.",
-            object_type="organization",
-        )
-        _add(store, "user", "prefers", "tables", "Likes tabular output.")
-        _add(
-            store,
-            "Kasal",
-            "owned_by",
-            "user",
-            "Kasal belongs to them.",
-            kind="project",
-            object_type="person",
-        )
-        _add(
-            store,
-            "Acme",
-            "located_in",
-            "Zurich",
-            "Headquartered in Zurich.",
-            kind="organization",
-        )
-        hits = _search(store, "the user works at Acme", min_similarity=0.6)
-        assert [f.statement for f, _ in hits] == [
-            "The user works at Acme.",
-            "Headquartered in Zurich.",  # via Acme, not via the user
+        assert [(f.statement, sim is not None) for f, sim in hits] == [
+            ("The Atlas deadline is 30 July.", True)
         ]
 
     def test_no_embedding_means_no_recall(self, store):

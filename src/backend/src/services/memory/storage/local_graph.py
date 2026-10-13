@@ -3,7 +3,7 @@
 The development counterpart of ``lakebase_graph``: the same two tables, in the
 same ``memory.db`` the record store uses. Embeddings are float32 blobs searched
 with a numpy cosine; keyword search is FTS5 with its built-in BM25. No new
-dependency and no graph database — one hop is a WHERE clause.
+dependency and no graph database.
 
 Scoped by the writing memory's root scope (``/<group_id>``), the tenant
 boundary, exactly as the record store is.
@@ -26,7 +26,6 @@ from src.services.memory.engine.graph_types import (
     DEFAULT_STRICT_MIN_SIMILARITY,
     FACT_EPISODIC,
     FACT_PROCEDURAL,
-    HOP_KINDS,
     MAX_STANDING,
     Entity,
     ExtractedFact,
@@ -34,7 +33,6 @@ from src.services.memory.engine.graph_types import (
     drop_weak,
     entity_key,
     fact_kind,
-    hop_entities,
     keyword_tokens,
     rank_hits,
 )
@@ -87,9 +85,6 @@ _FACT_COLUMNS = (
     "f.source, f.metadata, f.created_at, f.valid_to, f.superseded_by, e.name, "
     "f.kind"
 )
-
-# Seeds whose entities the one-hop expansion follows.
-_HOP_SEEDS = 3
 
 
 def _now() -> str:
@@ -263,9 +258,10 @@ class LocalGraphStore:
         limit: int = 10,
         min_similarity: float = 0.0,
     ) -> list[tuple[Fact, float | None]]:
-        """Current facts for a query: fused vector + keyword seeds, then the
-        other facts about the seeds' entities. ``(fact, similarity)``, with
-        ``None`` for a fact reached by the hop rather than matched."""
+        """Current facts that match a query, ranked by fusing the vector and
+        keyword rankings. What did not match is not returned: following a
+        matched fact's entity to its other facts was tried, and every such
+        "related" fact in real runs was noise. ``(fact, similarity)``."""
         if limit <= 0 or not query_embedding:
             return []
         where, params = self._read_where()
@@ -292,12 +288,6 @@ class LocalGraphStore:
         out: list[tuple[Fact, float | None]] = [
             (by_id[fid], sim) for fid, sim in seeds if fid in by_id
         ]
-        room = limit - len(out)
-        if room > 0:
-            entity_ids = hop_entities([fact for fact, _ in out[:_HOP_SEEDS]])
-            out.extend(
-                (fact, None) for fact in self._facts_about(entity_ids, seed_ids, room)
-            )
         return out
 
     @staticmethod
@@ -363,24 +353,6 @@ class LocalGraphStore:
         marks = ",".join("?" * len(fact_ids))
         return self._select_facts(f"f.id IN ({marks})", list(fact_ids), "")
 
-    def _facts_about(
-        self, entity_ids: set[str], exclude: list[str], limit: int
-    ) -> list[Fact]:
-        if not entity_ids:
-            return []
-        where, params = self._read_where()
-        ents = ",".join("?" * len(entity_ids))
-        skip = ",".join("?" * len(exclude))
-        ids = list(entity_ids)
-        return self._select_facts(
-            # Related FACTS only: a note is recalled on its own match, and
-            # standing preferences are already in front of every recall.
-            f"{where} AND (f.subject_id IN ({ents}) OR f.object_id IN ({ents})) "
-            f"AND f.id NOT IN ({skip}) AND f.kind IN (?, ?)",
-            [*params, *ids, *ids, *exclude, *HOP_KINDS],
-            f"ORDER BY f.created_at DESC LIMIT {int(limit)}",
-        )
-
     def _select_facts(self, where: str, params: list[object], tail: str) -> list[Fact]:
         with self._lock:
             rows = self._conn.execute(
@@ -440,6 +412,18 @@ class LocalGraphStore:
             [*params, FACT_PROCEDURAL],
             f"ORDER BY f.created_at DESC LIMIT {int(limit)}",
         )
+
+    def retire_fact(self, fact_id: str) -> bool:
+        """Stop recalling one fact, on request. It is closed, not deleted, so
+        what memory used to hold stays answerable."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE graph_facts SET valid_to = ? "
+                "WHERE id = ? AND scope = ? AND valid_to IS NULL",
+                (_now(), fact_id, self.scope),
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
 
     def count(self) -> int:
         with self._lock:

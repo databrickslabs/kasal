@@ -322,6 +322,7 @@ TABLES = {
         single=True,
     ),
     "kind": "procedural",
+    "standing_evidence": "always",
 }
 
 
@@ -338,7 +339,7 @@ class TestKinds:
 
     def test_standing_preferences_come_before_what_matched(self, tmp_path):
         mem = _memory(tmp_path, [TABLES, ATLAS])
-        mem.remember("User: answer in tables; Atlas is due 30 July. Assistant: ok.")
+        mem.remember("User: always use tables; Atlas is due 30 July. Assistant: ok.")
         kinds = [r.kind for r in mem.recall("When is the Atlas deadline?")]
         assert kinds == ["procedural", "semantic"]
 
@@ -347,6 +348,7 @@ class TestKinds:
             **TABLES,
             "object": "prose",
             "statement": "The user wants answers as prose.",
+            "standing_evidence": "from now on",
         }
         mem = _memory(tmp_path, [TABLES], [prose])
         mem.remember("User: always answer me in tables please. Assistant: will do.")
@@ -354,6 +356,25 @@ class TestKinds:
         assert [r.content for r in mem.recall("anything at all")] == [
             "The user wants answers as prose."
         ]
+
+    def test_an_instruction_for_one_request_is_not_a_standing_rule(self, tmp_path):
+        """ "check only from postgres", said about one lookup, became "PostgreSQL
+        only, no web lookups" for every run — and a later news request refused
+        to search the web."""
+        one_off = {
+            **fact(
+                "user", "preferred_data_source", "PostgreSQL only", "Postgres only."
+            ),
+            "kind": "procedural",
+        }
+        turn = "User: look up Dana Keller, check only from postgres. Assistant: ok."
+        for evidence in ("", "always", "from now on"):  # none given, or not said
+            mem = _memory(
+                tmp_path / (evidence or "none"),
+                [{**one_off, "standing_evidence": evidence}],
+            )
+            assert mem.remember(turn) is None
+            assert mem.recall("gather latest swiss news from today") == []
 
     def test_a_finding_needs_a_closer_match_than_a_user_fact(self, tmp_path):
         """A Swiss-news request once recalled a dataset finding at 0.57."""
@@ -419,7 +440,7 @@ class TestRunLayerSeams:
         it: the block called it background and gave the finding no date."""
         mem = _memory(tmp_path, {"facts": [REVENUE, TABLES]}, min_similarity=0.0)
         mem.storage.strict_min_similarity = 0.0
-        mem.remember("User: revenue of nestle in 2025, in tables. Assistant: 89.5 bn.")
+        mem.remember("User: nestle 2025 revenue; always in tables. Assistant: 89.5 bn.")
         block = build_memory_preamble(mem, "Nestlé FY2025 sales")
         assert block.startswith("What memory already holds for this request")
         assert "call a tool only for what it does not cover" in block
