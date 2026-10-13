@@ -10,6 +10,10 @@
   index. Production. ``lakebase_schema`` self-heals its table, ``pg_codec``
   coerces values to and from its columns, ``bridge_loop`` is the one event
   loop its sync→async bridge runs on.
+* ``local_graph`` / ``lakebase_graph`` — graph memory's entity and fact
+  tables, in the same SQLite file and the same Lakebase instance.
+  ``graph_factory`` derives one from the record backend a run resolved;
+  ``graph_browse`` is the memory browser's read of it.
 """
 
 from src.services.memory.storage.adapter import EngineStorageAdapter
