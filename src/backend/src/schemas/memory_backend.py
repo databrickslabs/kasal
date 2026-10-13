@@ -9,7 +9,7 @@ schemas no longer split memory into short-term / long-term / entity tiers.
 import re as _re
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -191,6 +191,16 @@ class MemoryTuningConfig(BaseModel):
     llm_consolidation_enabled: Optional[bool] = Field(
         None,
         description="Merge clusters of near-duplicate memories between runs (default on).",
+    )
+
+    graph_memory: Optional[bool] = Field(
+        None,
+        description=(
+            "Store extracted facts in an entity graph instead of whole records "
+            "(default off). A write extracts durable facts and a newer value "
+            "replaces the one it contradicts; recall is one search plus the "
+            "facts about the matched entities."
+        ),
     )
 
     # LLM override for memory analysis.
@@ -453,3 +463,48 @@ class MemoryBackendConfig(BaseModel):
             }
         }
     }
+
+
+class MemoryGraphEntity(BaseModel):
+    """One entity in a teamspace's graph memory."""
+
+    id: str
+    name: str
+    type: str
+
+
+class MemoryGraphFact(BaseModel):
+    """One fact: ``subject --relation--> object`` and the sentence stating it.
+    ``valid_to`` set means a newer fact (``superseded_by``) replaced it."""
+
+    id: str
+    subject_id: str
+    subject: str
+    relation: str
+    object_id: Optional[str] = None
+    object: str
+    statement: str
+    source: Optional[str] = None
+    created_at: Optional[datetime] = None
+    valid_to: Optional[datetime] = None
+    superseded_by: Optional[str] = None
+    execution_id: Optional[str] = None
+    kind: str = Field(
+        "semantic",
+        description=(
+            "procedural (a standing preference, always recalled), semantic (a "
+            "fact the user stated), finding (a fact a run established) or "
+            "episodic (a run note)."
+        ),
+    )
+
+
+class MemoryGraphResponse(BaseModel):
+    """The memory browser's ontology view."""
+
+    backend: str
+    enabled: bool = Field(
+        description="Whether graph memory is switched on for this teamspace."
+    )
+    entities: List[MemoryGraphEntity] = Field(default_factory=list)
+    facts: List[MemoryGraphFact] = Field(default_factory=list)

@@ -167,7 +167,11 @@ def remember_async(
 
     def _write() -> None:
         try:
-            if _already_remembered(mem, text, own=pending):
+            # A fact store dedupes per fact, on its key — comparing the whole
+            # turn against one-sentence facts would only spend an embedding.
+            if getattr(
+                mem, "extracts_facts", False
+            ) is not True and _already_remembered(mem, text, own=pending):
                 return
             mem.remember(
                 text[:4000],
