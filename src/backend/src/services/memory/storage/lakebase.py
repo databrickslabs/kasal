@@ -22,11 +22,12 @@ import os
 import re
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from typing import Any, Coroutine, TypeVar, cast
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
@@ -616,6 +617,11 @@ class LakebaseStorageBackend:
             instance_name=self.instance_name, group_id=self.group_id
         ) as session:
             yield session
+
+    def open_session(self) -> AbstractAsyncContextManager[AsyncSession]:
+        """This backend's Lakebase session, for the graph store beside it — so
+        memory keeps ONE place that reaches Lakebase."""
+        return self._session()
 
     def _tenant_where(
         self, workspace_wide: bool | None = None
