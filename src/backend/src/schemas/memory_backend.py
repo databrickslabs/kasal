@@ -489,6 +489,10 @@ class MemoryGraphFact(BaseModel):
     valid_to: Optional[datetime] = None
     superseded_by: Optional[str] = None
     execution_id: Optional[str] = None
+    qualifiers: Dict[str, str] = Field(
+        default_factory=dict,
+        description="What qualifies the relation: a role, a period, a field.",
+    )
     kind: str = Field(
         "semantic",
         description=(
@@ -508,3 +512,11 @@ class MemoryGraphResponse(BaseModel):
     )
     entities: List[MemoryGraphEntity] = Field(default_factory=list)
     facts: List[MemoryGraphFact] = Field(default_factory=list)
+
+
+class MemoryGraphForgetResponse(BaseModel):
+    """Result of asking memory to stop recalling one fact."""
+
+    forgotten: bool = Field(
+        description="False when the fact was not found or was already retired."
+    )

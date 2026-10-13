@@ -362,6 +362,8 @@ export interface MemoryGraphFact {
   valid_to?: string | null;
   superseded_by?: string | null;
   execution_id?: string | null;
+  /** What qualifies the relation: a role, a period, a field of study. */
+  qualifiers?: Record<string, string>;
   /** procedural (standing, always recalled), semantic (the user stated it),
    *  finding (a run established it) or episodic (a run note). */
   kind?: 'procedural' | 'semantic' | 'finding' | 'episodic';

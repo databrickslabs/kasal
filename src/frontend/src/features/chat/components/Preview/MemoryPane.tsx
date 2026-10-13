@@ -261,7 +261,12 @@ const MemoryPane: React.FC<{ runId: string }> = ({ runId }) => {
           </div>
         ) : (
           <div className="mt-3">
-            <OntologyPanel entities={graph.entities} facts={graph.facts} height={380} />
+            <OntologyPanel
+              entities={graph.entities}
+              facts={graph.facts}
+              height={380}
+              onChanged={memory.refresh}
+            />
           </div>
         )
       ) : memory.records.length === 0 ? (

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryOntologyView } from './MemoryOntologyView';
 
-const api = vi.hoisted(() => ({ get: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), delete: vi.fn() }));
 vi.mock('../../../shared/api/client', () => ({ apiClient: api }));
 vi.mock('./ConceptForceGraph', () => ({
   ConceptForceGraph: ({
@@ -41,6 +41,7 @@ const graph = {
 describe('MemoryOntologyView', () => {
   beforeEach(() => {
     api.get.mockReset();
+    api.delete.mockReset();
   });
 
   it('says how to turn graph memory on when it is off', async () => {
@@ -69,6 +70,18 @@ describe('MemoryOntologyView', () => {
     expect(screen.getByText('Dana owns Atlas.')).toBeInTheDocument();
     expect(screen.queryByText('The user prefers tables.')).not.toBeInTheDocument();
     expect(screen.getByText('Facts about the pinned entities (1)')).toBeInTheDocument();
+  });
+
+  it('forgets a fact on request and reloads', async () => {
+    api.get.mockResolvedValue({ data: graph });
+    api.delete.mockResolvedValue({ data: { forgotten: true } });
+    render(<MemoryOntologyView />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Forget: The user prefers tables.' }),
+    );
+    await screen.findByText('Atlas is due 30 July.');
+    expect(api.delete).toHaveBeenCalledWith('/memory-backend/graph/facts/pref');
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 
   it('reports a failed load', async () => {

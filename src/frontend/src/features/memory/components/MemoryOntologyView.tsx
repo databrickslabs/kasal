@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
   Divider,
@@ -16,6 +17,7 @@ import {
 } from '@mui/material';
 import ArrowRightAltIcon from '@mui/icons-material/ArrowRightAlt';
 
+import { MemoryBackendService } from '../../../api/memory/MemoryBackendService';
 import { apiClient } from '../../../shared/api/client';
 import type {
   MemoryGraphEntity,
@@ -29,6 +31,7 @@ import {
   KIND_LABELS,
   ONTOLOGY_LABELS,
   ontologyGraph,
+  qualifierText,
   visibleFacts,
 } from './ontologyData';
 
@@ -38,12 +41,29 @@ interface PanelProps {
   entities: MemoryGraphEntity[];
   facts: MemoryGraphFact[];
   height?: number;
+  /** Called after a fact was forgotten, to reload what is shown. */
+  onChanged?: () => void;
 }
 
 /** The graph and the fact list for a given set of facts — the whole teamspace
  *  in the Memory Browser, one run's in the chat's run memory pane. */
-export const OntologyPanel: React.FC<PanelProps> = ({ entities, facts: allFacts, height }) => {
+export const OntologyPanel: React.FC<PanelProps> = ({
+  entities,
+  facts: allFacts,
+  height,
+  onChanged,
+}) => {
   const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const [failed, setFailed] = useState<string | null>(null);
+  const forget = async (factId: string) => {
+    try {
+      await MemoryBackendService.forgetGraphFact(factId);
+      setFailed(null);
+      onChanged?.();
+    } catch {
+      setFailed('Could not forget that fact.');
+    }
+  };
   const [showReplaced, setShowReplaced] = useState(false);
 
   const graph = useMemo(() => ontologyGraph(entities, allFacts), [entities, allFacts]);
@@ -92,6 +112,11 @@ export const OntologyPanel: React.FC<PanelProps> = ({ entities, facts: allFacts,
           label={`Show replaced facts (${replacedCount})`}
         />
       </Stack>
+      {failed && (
+        <Alert severity="error" sx={{ mb: 1 }}>
+          {failed}
+        </Alert>
+      )}
       <Stack spacing={1}>
         {facts.map((fact) => (
           <Box
@@ -125,6 +150,22 @@ export const OntologyPanel: React.FC<PanelProps> = ({ entities, facts: allFacts,
               {!isCurrent(fact) && <Chip size="small" color="warning" label="replaced" />}
             </Stack>
             )}
+            {isCurrent(fact) && onChanged && (
+              <Button
+                size="small"
+                color="inherit"
+                sx={{ float: 'right', mt: -0.5, textTransform: 'none', opacity: 0.7 }}
+                onClick={() => void forget(fact.id)}
+                aria-label={`Forget: ${fact.statement}`}
+              >
+                Forget
+              </Button>
+            )}
+            {qualifierText(fact) && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                {qualifierText(fact)}
+              </Typography>
+            )}
             <Typography variant="body2" sx={{ mt: 0.75 }}>
               {fact.statement}
             </Typography>
@@ -138,6 +179,7 @@ export const OntologyPanel: React.FC<PanelProps> = ({ entities, facts: allFacts,
 export const MemoryOntologyView: React.FC = () => {
   const [data, setData] = useState<MemoryGraphResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +197,7 @@ export const MemoryOntologyView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   if (error) return <Alert severity="error">{error}</Alert>;
   if (!data) {
@@ -173,7 +215,13 @@ export const MemoryOntologyView: React.FC = () => {
       </Alert>
     );
   }
-  return <OntologyPanel entities={data.entities} facts={data.facts} />;
+  return (
+    <OntologyPanel
+      entities={data.entities}
+      facts={data.facts}
+      onChanged={() => setReloadKey((key) => key + 1)}
+    />
+  );
 };
 
 export default MemoryOntologyView;

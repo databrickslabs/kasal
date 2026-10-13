@@ -22,6 +22,12 @@ from src.services.memory.storage.graph_factory import graph_enabled, graph_store
 from src.utils.memory_paths import local_memory_store_dir
 
 
+def _qualifiers(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}
+
+
 def _store_for(config: MemoryBackendConfig, group_id: str) -> GraphStore | None:
     root_scope = f"/{group_id}"
     lakebase = config.lakebase_config
@@ -46,6 +52,24 @@ def _store_for(config: MemoryBackendConfig, group_id: str) -> GraphStore | None:
     from src.services.memory.storage.local_graph import LocalGraphStore
 
     return LocalGraphStore(db_path, scope=root_scope)
+
+
+def forget_fact(
+    config: MemoryBackendConfig | None, group_id: str, fact_id: str
+) -> bool:
+    """Stop recalling one fact of ``group_id``'s graph. It is closed, not
+    deleted — the browser still lists it under replaced facts. This is how a
+    user removes something memory got wrong, such as a standing rule extracted
+    from a one-off instruction."""
+    if config is None:
+        return False
+    store = _store_for(config, group_id)
+    if store is None:
+        return False
+    try:
+        return store.retire_fact(fact_id)
+    finally:
+        store.close()
 
 
 def graph_snapshot(
@@ -88,6 +112,7 @@ def graph_snapshot(
                     else None
                 ),
                 kind=f.kind,
+                qualifiers=_qualifiers(f.metadata.get("qualifiers")),
             )
             for f in facts
         ],

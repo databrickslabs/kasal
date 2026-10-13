@@ -30,6 +30,18 @@ export const valueNodeId = (fact: MemoryGraphFact): string => `value:${fact.id}`
 
 const relationLabel = (relation: string): string => relation.replace(/_/g, ' ');
 
+// A node is drawn big enough to hold its label, so a long label makes a big
+// node whatever it stands for. Labels are cut here; the list has the full text.
+const MAX_NODE_LABEL = 26;
+export const nodeLabel = (text: string): string =>
+  text.length > MAX_NODE_LABEL ? `${text.slice(0, MAX_NODE_LABEL - 1).trimEnd()}…` : text;
+
+/** "role: Engineer · from: 2016" — what qualifies a fact's relation. */
+export const qualifierText = (fact: MemoryGraphFact): string =>
+  Object.entries(fact.qualifiers ?? {})
+    .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${value}`)
+    .join(' · ');
+
 /**
  * The ontology as a graph: every CURRENT fact is an edge labelled with its
  * relation, from its subject to its object. An object that is an entity is that
@@ -53,7 +65,7 @@ export function ontologyGraph(
       // A run note hangs off what it is about as a small dated node; its
       // sentence is in the list below, too long to draw.
       const text = isNote(fact) ? `note ${fact.statement.split(':')[0]}` : fact.object;
-      values.push({ id: valueNodeId(fact), label: text, count: 1, avgImportance: 0 });
+      values.push({ id: valueNodeId(fact), label: nodeLabel(text), count: 1, avgImportance: 0 });
       pairs.set(valueNodeId(fact), {
         source: fact.subject_id,
         target: valueNodeId(fact),
@@ -77,7 +89,7 @@ export function ontologyGraph(
     .filter((entity) => counts.has(entity.id))
     .map((entity) => ({
       id: entity.id,
-      label: entity.name,
+      label: nodeLabel(entity.name),
       count: counts.get(entity.id) ?? 0,
       avgImportance: 0,
     }));

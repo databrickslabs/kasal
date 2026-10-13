@@ -178,5 +178,13 @@ export class MemoryBackendService {
     }
   }
 
-
+  /**
+   * Ask graph memory to stop recalling one fact. It is retired, not deleted.
+   */
+  static async forgetGraphFact(factId: string): Promise<boolean> {
+    const response = await apiClient.delete<{ forgotten: boolean }>(
+      `/memory-backend/graph/facts/${encodeURIComponent(factId)}`,
+    );
+    return response.data.forgotten;
+  }
 }

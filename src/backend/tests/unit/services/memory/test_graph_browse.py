@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.api.memory_backend.records_router import get_memory_graph
+from src.api.memory_backend.records_router import (
+    forget_memory_fact,
+    get_memory_graph,
+)
 from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendType,
@@ -99,3 +102,31 @@ async def test_endpoint_reads_the_callers_teamspace(store_dir):
     response = await get_memory_graph(group_context, service, limit=10)
     service.get_active_config.assert_awaited_once_with("grp")
     assert len(response.facts) == 3
+
+
+@pytest.mark.asyncio
+async def test_forgetting_a_fact_retires_it_without_deleting_it(store_dir):
+    _write(store_dir)
+    service = AsyncMock()
+    service.get_active_config.return_value = _config()
+    group_context = type("Ctx", (), {"primary_group_id": "grp", "group_ids": ["grp"]})()
+    owner = next(
+        f
+        for f in graph_browse.graph_snapshot(_config(), "grp").facts
+        if f.object == "Dana"
+    )
+
+    response = await forget_memory_fact(owner.id, group_context, service)
+    assert response.forgotten is True
+    after = {f.id: f for f in graph_browse.graph_snapshot(_config(), "grp").facts}
+    assert after[owner.id].valid_to is not None  # still listed, as history
+    again = await forget_memory_fact(owner.id, group_context, service)
+    assert again.forgotten is False
+
+
+def test_a_fact_of_another_teamspace_cannot_be_forgotten(store_dir):
+    _write(store_dir, scope="/other")
+    store = LocalGraphStore(store_dir / "memory.db", embedder=embed, scope="/other")
+    theirs, *_rest = store.list_facts()
+    store.close()
+    assert graph_browse.forget_fact(_config(), "grp", theirs.id) is False

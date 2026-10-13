@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { MemoryGraphFact } from '../../../types/config/memoryBackend';
-import { factsForRun, ONTOLOGY_LABELS, ontologyGraph, visibleFacts } from './ontologyData';
+import {
+  factsForRun,
+  nodeLabel,
+  ONTOLOGY_LABELS,
+  ontologyGraph,
+  qualifierText,
+  visibleFacts,
+} from './ontologyData';
 
 const entities = [
   { id: 'atlas', name: 'Atlas', type: 'project' },
@@ -100,4 +107,20 @@ it('draws a run note as a dated node on what it is about', () => {
   expect(nodes.map((n) => n.label)).toEqual(['Atlas', 'note 13 Oct 2026']);
   expect(edges).toEqual([{ source: 'atlas', target: 'value:n', weight: 1, label: 'run note' }]);
   expect(visibleFacts([note], new Set(['value:n']), false)).toEqual([note]);
+});
+
+describe('node labels and qualifiers', () => {
+  it('cuts a long label so a long value is not the biggest node', () => {
+    const long = 'Notre Dame University, Lebanon (Business Computing, Sep 2001 – Jan 2005)';
+    expect(nodeLabel(long)).toBe('Notre Dame University, Le…');
+    expect(nodeLabel('Cloudera')).toBe('Cloudera');
+    const { nodes } = ontologyGraph(entities, [fact({ id: 'x', object: long })]);
+    expect(nodes.map((n) => n.label.length <= 26)).toEqual([true, true]);
+  });
+
+  it('reads qualifiers as a short caption', () => {
+    const job = fact({ qualifiers: { role: 'Engineer', from: 'Feb 2016', valid_to: '2023' } });
+    expect(qualifierText(job)).toBe('role: Engineer · from: Feb 2016 · valid to: 2023');
+    expect(qualifierText(fact({}))).toBe('');
+  });
 });
