@@ -13,6 +13,7 @@ How Kasal gives agents a memory: what a memory record is, how it is written and 
 - [When maintenance runs](#when-maintenance-runs)
 - [Schema management](#schema-management)
 - [Memory browser](#memory-browser)
+- [Graph memory](#graph-memory)
 - [Settings](#settings)
 - [Known limits](#known-limits)
 - [Rules for adding behavior](#rules-for-adding-behavior)
@@ -29,6 +30,7 @@ How Kasal gives agents a memory: what a memory record is, how it is written and 
 | `engine/` | The `Memory` object | `memory.py` (`remember` / `recall`, every tuning knob as a declared field), `types.py` (`MemoryRecord`), `analyze.py` (what the memory LLM says about a record), `recall_planner.py` (distillation and exploration), `consolidation.py` (the save-time merge) |
 | `run/` | A run's memory | `crew_memory.py` builds a `Memory` for Chat, Agent Builder and Flow Builder alike; `recall.py` injects the context block before a task; `persist.py` writes the result after it, through the `pending.py` overlay and the `write_hygiene.py` screen |
 | `maintenance/` | Between runs | `passes.py` (dedupe, merge, the combined pass and its throttle), `supersession.py`, `forgetting.py`, `sweep.py` |
+| `engine/graph_*.py`, `engine/extract.py`, `storage/*_graph.py` | Graph memory | The alternative to records, behind a teamspace switch — see [Graph memory](#graph-memory) |
 | `text.py` | Shared | The boilerplate strip and the token-set similarity both sides use |
 
 A record's path through a run: `run.recall` asks `engine.Memory.recall`, which searches `storage` — the task runs — `run.persist` hands the output to `engine.Memory.remember`, which labels it, folds it into a near-duplicate if one exists, and saves it through `storage`. Later, `maintenance` tidies what accumulated.
@@ -205,6 +207,68 @@ The browser, and the chat's memory pane beside a finished run, can be scoped to 
 - **Recalled** — the records the run read: the `record_ids` on its `memory_retrieval` traces.
 
 Both views read the run's memory rows through `GET /traces/job/{job_id}?event_type_prefix=memory_` so a long run's writes, which land last, are not cut off by the default trace page.
+
+## Graph memory
+
+A teamspace can store an entity-and-fact graph instead of whole records. It is off by default; **Configuration > Memory > Store memory as a fact graph** (`MemoryTuningConfig.graph_memory`) turns it on. The data model follows [Graphiti](https://github.com/getzep/graphiti) (Apache-2.0) — typed entities, fact edges with a validity window, replaced facts invalidated and never deleted — implemented on the stores Kasal already runs, with no graph database.
+
+**What changes.** A write extracts zero or more durable facts from the turn or task output and stores those; the turn itself is not stored. A fact is `subject --relation--> object` plus the one sentence that states it. Most turns contain nothing durable and write nothing. Recall searches facts only: existing records stay in the store and in the Records view, but are not recalled while graph memory is on.
+
+| Step | Where | What it does |
+|------|-------|--------------|
+| Extract | `engine/extract.py` | One memory-LLM call per write. Facts are taken from the **user's words only** — the assistant's reply is context, never a source — and cover preferences, standing instructions, decisions, and properties of the user and their systems, datasets and projects. The extractor is shown up to 40 facts already in memory and told not to repeat them, and to reuse a fact's relation name when its value changes. The same call returns the run note (below) |
+| Skip a repeat | `engine/graph_memory.py` | One exchange reaches memory twice (the chat agent's own persist, then the conversation recorder once the answer settles). The second arrival is recognised by its text and skipped before it costs a model call |
+| Resolve | `storage/*_graph.py` | An entity is found by its normalised name (`entity_key`: case, accents and punctuation folded), created on first mention. The person speaking is always the entity `user` |
+| Dedupe | `storage/*_graph.py` | A fact whose subject, relation and object already exist as a current fact is not stored again. A partial unique index enforces it across processes |
+| Replace | `storage/*_graph.py` | For a single-valued relation, a new value closes the current one (`valid_to`, `superseded_by`). No model call |
+| Recall | `engine/graph_memory.py` | One embedding and one search: vector and keyword rankings fused by reciprocal rank, with standing preferences in front. No model call |
+
+**Kind.** The ontology (entity types, relations) says what things are. Kind is the other axis: it decides where an item may come from, when it is recalled and how long it lives. It is a column on every fact (`kind`, in `engine/graph_types.py`), and both stores apply one policy per kind:
+
+| Kind | Holds | May come from | Recalled | Lifetime |
+|------|-------|---------------|----------|----------|
+| `procedural` | Standing preferences and instructions: how the assistant should respond in every conversation | The user's words only | Always — up to 5, in front of every recall | Until the user changes it |
+| `semantic` | Facts about the user and their work: role, employer, projects, decisions | The user's words only | On a match (cosine 0.5) | Until replaced |
+| `finding` | Facts a run established about a named entity: `Nestlé --revenue_fy2025--> CHF 89.5 bn` | The run's answer, at most 5 per write | On a strong match (0.6) | Until replaced |
+| `episodic` | One run note: what a run produced, as *subject: main findings*, attached to the one thing it is mainly about | The run, only when it left no finding | On a strong match (0.6) | Stops being recalled after *Keep run and chat memories (days)* (`episodic_ttl_days`, default 180) |
+
+The extractor assigns the kind and `parse_facts` enforces the source: nothing about the user can be a finding, and only the user holds a procedural fact. A finding is semantic memory in every other respect — it is typed by the ontology and a corrected value replaces the old one — but it is only as good as the source the run read, so it is kept distinguishable and needs the closer match. News of the day, forecasts and opinions are not findings; such a run leaves a note. The record kinds recall consumers read (`MemoryRecord.kind`) map from these: a finding reads as `semantic`, with its own kind in `metadata["kind"]`.
+
+**Why two floors.** Measured on `nomic-embed-text` with real runs: correct matches for facts the user stated score as low as 0.53, while a dataset finding scored 0.57 against an unrelated Swiss-news request and a note 0.54. No single number separates those. A wrong fact about the user is harmless context; a finding or a note recalled for an unrelated request is a false memory — so those two kinds need 0.6, where right matches measured 0.61–0.84. Notes are embedded without their date, and are never written as "the user asked… the assistant produced…": shared text is what made unrelated notes look alike (0.61 between a Lebanese-news note and a Swiss-news request, in the first wording).
+
+**Only what matches is recalled.** Recall returns standing preferences plus the facts that matched the request — nothing "related". An earlier version followed a matched fact's entity to its other facts. In real runs every such addition was noise: a revenue request came back with facts about an unrelated project through the `user` entity, and a Swiss-news request that matched "based in Zurich, Switzerland" came back with that person's whole career. It was removed.
+
+**A standing preference needs the user's own words.** A `procedural` fact is applied to every later run, so a wrong one changes every later answer. "check only from postgres", said about one lookup, was once stored as a standing rule and a later news request refused to search the web. The extractor must now quote the words that make it standing ("always", "from now on", "I prefer"), and `parse_facts` drops it unless that quote is in what the user actually said. An instruction about one request is not stored as any kind of fact.
+
+**Entity names are bare.** A named thing is stored under its name alone; what qualifies the relation (a role, a period, a field of study) is kept as `qualifiers` on the fact. "AWS (Solutions Architect, 2023–2024)" as an entity would be a different node for every job. `parse_facts` also splits a trailing parenthesis off an entity name when the model writes one anyway.
+
+**Forgetting.** `DELETE /memory-backend/graph/facts/{id}` (the **Forget** button on each fact) retires one fact: it stops being recalled and stays listed under replaced facts.
+
+**Vocabulary.** Entity types and seed relations are prescribed in `engine/graph_types.py`. The seed relations carry their own single-valued flag (`works_at`, `deadline_is`, `status_is` are single; `prefers`, `uses` are not). The extractor may coin a relation and says whether it is single-valued; an unknown entity type collapses to `concept`.
+
+**Storage.** Two tables beside the record table: `graph_entities` / `graph_facts` in the teamspace's SQLite file (FTS5 with BM25 for keywords), and `<memory_table>_entities` / `<memory_table>_facts` in Lakebase (pgvector HNSW, a stored `tsvector` with a GIN index). `LakebaseGraphStore` creates its tables on first use and takes its session from `LakebaseStorageBackend.open_session`, so memory still has one place that reaches Lakebase.
+
+**Stopping rules.** The floors above are the only gates (`DEFAULT_MIN_SIMILARITY`, overridden by the *Relevance threshold* knob when set, and `DEFAULT_STRICT_MIN_SIMILARITY`). Keyword hits only re-rank facts that cleared their floor. The blended score, the recall score floor, the relative cut-off, recall planning, save-time consolidation and the maintenance passes do not apply to graph memory.
+
+**Scoping.** `group_id` on every statement, as for records. With the chat "Workspace memory" switch off, reads are confined to the session's own facts; dedupe and replacement stay teamspace-wide.
+
+**Browser.** The Memory Browser's **Ontology** view (`MemoryOntologyView.tsx`, `GET /memory-backend/graph`) shows entities sized by their current facts, an edge wherever a fact links two entities, and the fact list, with replaced facts on request.
+
+**Limits.**
+
+- Entities are matched by normalised name only. "Databricks" and "Databricks Inc." are two entities.
+- Lakebase keyword ranking is Postgres full-text (`ts_rank_cd`), not true BM25.
+- The floors (0.5, and 0.6 for findings and notes) were measured on `nomic-embed-text` only. Another embedder has another cosine scale.
+- Whether a preference is `procedural` (always recalled) or `semantic` (recalled on a match) is the extractor's call.
+- A finding is what a run read on a given day. It carries the run and the date it was stored, not a verified source, and it does not expire.
+- Only the first 1,400 characters of an answer reach the extractor, so findings come from the top of a long answer.
+- A question repeated in other words can leave a second, near-identical run note.
+- A relation the extractor coins under two names ("employer", "works_at") is two relations, so the second does not replace the first. Showing the extractor the known facts reduces this; it does not prevent it.
+- Expired run notes stop being recalled but are not deleted.
+- The repeat check is per process: a crew subprocess and the server do not see each other's recent exchanges.
+- Every graph-memory write logs one `[graph-memory] write (…): N fact(s) extracted, M stored` line to `crew.log`; an empty extraction and a write that never ran are otherwise indistinguishable.
+- The Memory Browser dialog's per-run Saved / Recalled views read the record table and do not list facts. The chat's Run memory pane does: with graph memory on it shows the facts and notes a run saved or recalled.
+- The record store's concept views (Concepts, Graph) do not include facts.
 
 ## Settings
 

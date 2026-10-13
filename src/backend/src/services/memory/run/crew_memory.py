@@ -523,7 +523,15 @@ class CrewMemoryService:
         )
         memory_kwargs["storage"] = adapted_storage
         try:
-            crew_kwargs["memory"] = Memory(**memory_kwargs)
+            from src.services.memory.storage import graph_factory
+
+            crew_kwargs["memory"] = (
+                graph_factory.build_graph_memory(
+                    storage, memory_kwargs, memory_config, self.config
+                )
+                if graph_factory.graph_enabled(memory_config)
+                else Memory(**memory_kwargs)
+            )
             logger.info(
                 "Configured unified Memory with %s storage (crew=%s)",
                 memory_config.backend_type.value,

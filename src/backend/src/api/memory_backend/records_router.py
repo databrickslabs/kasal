@@ -5,12 +5,18 @@ The ``/records`` pair is backend-agnostic: it reads the group's active
 ``record_browsers``.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
 from src.core.exceptions import BadRequestError
 from src.dependencies.providers import GroupContextDep, require_group_id
+from src.schemas.memory_backend import (
+    MemoryGraphForgetResponse,
+    MemoryGraphResponse,
+)
+from src.services.memory.storage.graph_browse import forget_fact, graph_snapshot
 from src.utils.databricks_auth import extract_user_token_from_request
 
 from .dependencies import MemoryBackendServiceDep, logger
@@ -165,6 +171,36 @@ async def list_memory_records(
         "offset": offset,
         "limit": limit,
     }
+
+
+@router.get("/graph", response_model=MemoryGraphResponse)
+async def get_memory_graph(
+    group_context: GroupContextDep,
+    service: MemoryBackendServiceDep,
+    limit: int = Query(
+        500, ge=1, le=5000, description="Maximum number of facts to return."
+    ),
+) -> MemoryGraphResponse:
+    """The teamspace's graph memory: entities, and the facts between them
+    (replaced facts included, marked by ``valid_to``). Empty with
+    ``enabled: false`` when graph memory is switched off."""
+    group_id = require_group_id(group_context)
+    active = await service.get_active_config(group_id)
+    return await asyncio.to_thread(graph_snapshot, active, group_id, limit)
+
+
+@router.delete("/graph/facts/{fact_id}", response_model=MemoryGraphForgetResponse)
+async def forget_memory_fact(
+    fact_id: str,
+    group_context: GroupContextDep,
+    service: MemoryBackendServiceDep,
+) -> MemoryGraphForgetResponse:
+    """Stop recalling one fact in the caller's teamspace. The fact is retired,
+    not deleted: it stays listed under replaced facts."""
+    group_id = require_group_id(group_context)
+    active = await service.get_active_config(group_id)
+    forgotten = await asyncio.to_thread(forget_fact, active, group_id, fact_id)
+    return MemoryGraphForgetResponse(forgotten=forgotten)
 
 
 @router.delete("/records")

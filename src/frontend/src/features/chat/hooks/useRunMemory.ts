@@ -20,6 +20,12 @@ import {
   recordsForRun,
   runTraceFacts,
 } from '../../memory/components/memoryData';
+import { factsForRun } from '../../memory/components/ontologyData';
+import type {
+  MemoryGraphEntity,
+  MemoryGraphFact,
+  MemoryGraphResponse,
+} from '../../../types/config/memoryBackend';
 
 export type MemoryMode = RunMemoryMode;
 
@@ -33,6 +39,9 @@ export interface RunMemory {
   records: MemoryRecord[];
   index: DerivedIndex;
   edges: { source: string; target: string; weight: number }[];
+  /** Set when the teamspace stores a fact graph: the run's facts under the
+   *  active mode, and the entities to draw them with. */
+  graph: { entities: MemoryGraphEntity[]; facts: MemoryGraphFact[] } | null;
   refresh: () => void;
 }
 
@@ -42,6 +51,7 @@ export function useRunMemory(runId: string): RunMemory {
   const [backend, setBackend] = useState('');
   const [allRecords, setAllRecords] = useState<MemoryRecord[]>([]);
   const [traceFacts, setTraceFacts] = useState<RunTraceFacts>(EMPTY_RUN_TRACE_FACTS);
+  const [graphData, setGraphData] = useState<MemoryGraphResponse | null>(null);
   const [mode, setMode] = useState<MemoryMode>('saved');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -55,7 +65,7 @@ export function useRunMemory(runId: string): RunMemory {
         // memory traces — the two sources the browser dialog uses, fetched
         // together. The traces are the ONLY thing that scopes records to the
         // run; there is no time window to feed a runs list into.
-        const [recordsResp, tracesResp] = await Promise.all([
+        const [recordsResp, tracesResp, graphResp] = await Promise.all([
           apiClient.get<RecordsResponse>('/memory-backend/records', {
             params: { limit: BULK_FETCH, offset: 0 },
           }),
@@ -67,11 +77,17 @@ export function useRunMemory(runId: string): RunMemory {
               params: { limit: 15000, event_type_prefix: 'memory_' },
             })
             .catch(() => ({ data: { traces: [] as MemoryTrace[] } })),
+          // Graph memory, when the teamspace uses it. A failure here must not
+          // cost the record view, so it reads as "not a graph teamspace".
+          apiClient
+            .get<MemoryGraphResponse>('/memory-backend/graph', { params: { limit: 2000 } })
+            .catch(() => ({ data: null })),
         ]);
         if (cancelled) return;
         setAllRecords(recordsResp.data.records || []);
         setBackend(recordsResp.data.backend || '');
         setTraceFacts(runTraceFacts(tracesResp.data?.traces));
+        setGraphData(graphResp.data?.enabled ? graphResp.data : null);
       } catch (err: unknown) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -96,6 +112,14 @@ export function useRunMemory(runId: string): RunMemory {
   const index = useMemo(() => deriveIndex(records), [records]);
   const edges = useMemo(() => coOccurrenceEdges(index), [index]);
   const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
+  const graph = useMemo(
+    () =>
+      graphData && {
+        entities: graphData.entities,
+        facts: factsForRun(graphData.facts, mode, traceFacts, runId),
+      },
+    [graphData, mode, traceFacts, runId],
+  );
 
-  return { loading, error, backend, mode, setMode, records, index, edges, refresh };
+  return { loading, error, backend, mode, setMode, records, index, edges, graph, refresh };
 }

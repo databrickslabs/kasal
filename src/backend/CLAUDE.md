@@ -228,6 +228,15 @@ Rules that are easy to get wrong:
   their workspace and endpoint from it, so the row must keep parsing.
 - **The "Disabled Configuration"** (all memory types off) is honoured as "no
   memory" — the run proceeds without recall or persistence.
+- **Graph memory is a second kind of memory object, not a second system.**
+  With Memory Tuning `graph_memory` on, `CrewMemoryService` builds
+  `engine.GraphMemory` (facts in `storage/*_graph.py`) instead of `Memory`. It
+  answers to the same `remember` / `recall`, so `run/recall.py`, `run/persist.py`
+  and the CrewAI harness are unchanged. The run layer tells them apart by
+  `extracts_facts is True` — compare with `is True`, because `getattr` on a test
+  double returns a truthy mock. `LakebaseGraphStore` never opens a session: it
+  is handed `LakebaseStorageBackend.open_session`. See "Graph memory" in
+  `src/docs/MEMORY.md`.
 
 ## Testing Requirements
 

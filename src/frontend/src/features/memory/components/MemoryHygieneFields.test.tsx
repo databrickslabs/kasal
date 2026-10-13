@@ -22,6 +22,9 @@ describe('MemoryHygieneFields', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Merge near-duplicate memories between runs' }));
     expect(update).toHaveBeenLastCalledWith({ llm_consolidation_enabled: false });
 
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Store memory as a fact graph' }));
+    expect(update).toHaveBeenLastCalledWith({ graph_memory: true });
+
     fireEvent.mouseDown(screen.getByLabelText('Write screening'));
     fireEvent.click(within(screen.getByRole('listbox')).getByText(/Annotate/));
     expect(update).toHaveBeenLastCalledWith({ write_screening: 'annotate' });

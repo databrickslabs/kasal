@@ -8,6 +8,8 @@
  */
 import React, { useMemo, useState } from 'react';
 import { ConceptForceGraph } from '../../../memory/components/ConceptForceGraph';
+import { OntologyPanel } from '../../../memory/components/MemoryOntologyView';
+import { isNote } from '../../../memory/components/ontologyData';
 import { MemoryRecordMarkdown } from '../../../memory/components/MemoryRecordMarkdown';
 import {
   formatRelative,
@@ -159,6 +161,20 @@ const MemoryPane: React.FC<{ runId: string }> = ({ runId }) => {
     return memory.records.filter((r) => r.id && ids.has(r.id));
   }, [memory.records, memory.index, pinned]);
 
+  // The fact view, when the teamspace stores a graph — unless this run predates
+  // the switch and has records but no facts, which the record view still shows.
+  const graph =
+    memory.graph && (memory.graph.facts.length > 0 || memory.records.length === 0)
+      ? memory.graph
+      : null;
+  const graphEntityCount = useMemo(
+    () =>
+      new Set(
+        (graph?.facts ?? []).flatMap((f) => (f.object_id ? [f.subject_id, f.object_id] : [f.subject_id])),
+      ).size,
+    [graph],
+  );
+
   const togglePin = (id: string) =>
     setPinned((prev) => {
       const next = new Set(prev);
@@ -186,12 +202,22 @@ const MemoryPane: React.FC<{ runId: string }> = ({ runId }) => {
     <div className="mx-auto w-full max-w-4xl p-4 sm:p-5">
       {/* Stats + backend badge */}
       <div data-testid="memory-stats" className="flex flex-wrap items-center gap-2">
-        <Stat label="Records" value={memory.records.length} />
-        <Stat label="Concepts" value={memory.index.categories.size} />
-        <Stat
-          label="Avg importance"
-          value={memory.records.length ? memory.index.avgImportance.toFixed(2) : '—'}
-        />
+        {graph ? (
+          <>
+            <Stat label="Facts" value={graph.facts.filter((f) => !isNote(f)).length} />
+            <Stat label="Entities" value={graphEntityCount} />
+            <Stat label="Run notes" value={graph.facts.filter(isNote).length} />
+          </>
+        ) : (
+          <>
+            <Stat label="Records" value={memory.records.length} />
+            <Stat label="Concepts" value={memory.index.categories.size} />
+            <Stat
+              label="Avg importance"
+              value={memory.records.length ? memory.index.avgImportance.toFixed(2) : '—'}
+            />
+          </>
+        )}
         {memory.backend && memory.backend.toLowerCase() !== 'default' && (
           <span
             className="ml-auto text-[10.5px] rounded-full px-2 py-1"
@@ -213,18 +239,37 @@ const MemoryPane: React.FC<{ runId: string }> = ({ runId }) => {
           ]}
           onChange={(id) => memory.setMode(id as MemoryMode)}
         />
-        <Segmented
-          aria-label="Memory view"
-          value={view}
-          options={[
-            { id: 'graph', label: 'Graph' },
-            { id: 'records', label: 'Records' },
-          ]}
-          onChange={(id) => setView(id as View)}
-        />
+        {!graph && (
+          <Segmented
+            aria-label="Memory view"
+            value={view}
+            options={[
+              { id: 'graph', label: 'Graph' },
+              { id: 'records', label: 'Records' },
+            ]}
+            onChange={(id) => setView(id as View)}
+          />
+        )}
       </div>
 
-      {memory.records.length === 0 ? (
+      {graph ? (
+        graph.facts.length === 0 ? (
+          <div className="mt-6 text-[13px]" style={{ color: 'var(--text-muted)' }}>
+            {memory.mode === 'recalled'
+              ? 'This run recalled no facts from memory.'
+              : 'Nothing saved by this run. Graph memory keeps durable facts about you and your work, and one note for a run that produced something — small talk and plain questions leave neither.'}
+          </div>
+        ) : (
+          <div className="mt-3">
+            <OntologyPanel
+              entities={graph.entities}
+              facts={graph.facts}
+              height={380}
+              onChanged={memory.refresh}
+            />
+          </div>
+        )
+      ) : memory.records.length === 0 ? (
         <div className="mt-6 text-[13px]" style={{ color: 'var(--text-muted)' }}>
           {memory.mode === 'recalled'
             ? 'This run recalled nothing from memory.'

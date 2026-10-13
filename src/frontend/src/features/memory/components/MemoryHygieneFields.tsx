@@ -89,6 +89,24 @@ const MemoryHygieneFields: React.FC<Props> = ({ tuning, update }) => {
           </Typography>
         </Grid>
 
+        <Grid item xs={12}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={tuning.graph_memory ?? D.graph_memory}
+                onChange={(e) => update({ graph_memory: e.target.checked })}
+              />
+            }
+            label="Store memory as a fact graph"
+          />
+          <Typography variant="caption" color="text.secondary" display="block">
+            Off by default. A write extracts durable facts about the user and their work
+            instead of saving the whole turn, and a newer value replaces the one it
+            contradicts. Recall becomes one search plus the facts about the matched
+            entities. Existing records are kept but no longer recalled while this is on.
+          </Typography>
+        </Grid>
+
         <Grid item xs={12} md={6}>
           <FormControlLabel
             control={

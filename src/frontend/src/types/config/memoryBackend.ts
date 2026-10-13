@@ -58,6 +58,8 @@ export interface MemoryTuningConfig {
   importance_floor?: number;
   supersession_enabled?: boolean;
   llm_consolidation_enabled?: boolean;
+  /** Store extracted facts in an entity graph instead of whole records. */
+  graph_memory?: boolean;
 
   // LLM override for memory analysis.
   memory_llm_model?: string;
@@ -170,6 +172,7 @@ export const MEMORY_TUNING_DEFAULTS: Required<
     | 'importance_floor'
     | 'supersession_enabled'
     | 'llm_consolidation_enabled'
+    | 'graph_memory'
   >
 > = {
   semantic_weight: 0.6,
@@ -195,6 +198,7 @@ export const MEMORY_TUNING_DEFAULTS: Required<
   importance_floor: 0.4,
   supersession_enabled: true,
   llm_consolidation_enabled: true,
+  graph_memory: false,
 };
 
 // Validation helpers
@@ -335,4 +339,39 @@ export interface ManualConfig {
   memory_index: string;
   document_index: string;
   embedding_model: string;
+}
+
+// Graph memory (the Memory Browser's ontology view).
+export interface MemoryGraphEntity {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface MemoryGraphFact {
+  id: string;
+  subject_id: string;
+  subject: string;
+  relation: string;
+  object_id?: string | null;
+  object: string;
+  statement: string;
+  source?: string | null;
+  created_at?: string | null;
+  /** Set when a newer fact (superseded_by) replaced this one. */
+  valid_to?: string | null;
+  superseded_by?: string | null;
+  execution_id?: string | null;
+  /** What qualifies the relation: a role, a period, a field of study. */
+  qualifiers?: Record<string, string>;
+  /** procedural (standing, always recalled), semantic (the user stated it),
+   *  finding (a run established it) or episodic (a run note). */
+  kind?: 'procedural' | 'semantic' | 'finding' | 'episodic';
+}
+
+export interface MemoryGraphResponse {
+  backend: string;
+  enabled: boolean;
+  entities: MemoryGraphEntity[];
+  facts: MemoryGraphFact[];
 }

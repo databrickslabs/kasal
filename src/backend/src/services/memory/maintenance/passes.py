@@ -308,6 +308,10 @@ def run_memory_maintenance(memory: Any, scope: str | None = None) -> dict[str, i
     runs last because it is the only pass that consumes supersession's output:
     a record retired in step 3 starts its retention window here.
     """
+    if getattr(memory, "extracts_facts", False) is True:
+        # Graph memory dedupes and supersedes at write time, on the fact's key;
+        # these passes exist to tidy whole records and would misread facts.
+        return {key: 0 for key in _SKIPPED if key != "skipped"}
     stats = dict(consolidate_memory(memory, scope=scope))
     merge_stats = merge_similar_memories(memory, scope=scope)
     supersede_stats = supersede_outdated_facts(memory, scope=scope)
