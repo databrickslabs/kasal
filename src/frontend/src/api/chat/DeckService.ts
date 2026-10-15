@@ -1,5 +1,6 @@
 import { useExecutionStore } from '../../features/chat/store/executionStore';
 import { apiClient } from '../../shared/api/client';
+import type { EffortSettings } from '../../types/workflow/effort';
 
 const BASE = '/decks';
 
@@ -22,6 +23,8 @@ export interface SlideRefineRequest {
   position?: string;
   /** Model key from the chat picker. */
   model?: string | null;
+  /** Run effort, as the chat sends it; omitted keeps the model's own settings. */
+  execution_effort?: EffortSettings;
 }
 
 /** One `<section class="slide">`, or `error` when no slide came back. */

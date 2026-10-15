@@ -29,6 +29,16 @@ describe('slide agent execution', () => {
     expect((await result).section).toContain('New');
   });
 
+  it('sends the chosen effort with the run it starts', async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: { status: 'COMPLETED', result: { section: '<section class="slide">New</section>' } } });
+    const result = DeckService.refineSlide({ mode: 'refine', instruction: 'Tighten', slide: 'old', execution_effort: { tier: 'high' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(apiClient.post).toHaveBeenCalledWith('/decks/slides/refine/start', expect.objectContaining({
+      execution_effort: { tier: 'high' },
+    }), expect.anything());
+    expect((await result).section).toContain('New');
+  });
+
   it('retries interrupted reads without launching another agent', async () => {
     vi.mocked(apiClient.get).mockRejectedValueOnce(new Error('network'))
       .mockResolvedValueOnce({ data: { status: 'FAILED', error: 'Browser unavailable' } });

@@ -44,6 +44,9 @@ async def start_slide_refinement(
         prompt=prompt,
         original_prompt=prompt,
         model=body.model,
+        # Rides in the run's inputs like a chat turn's effort: CrewConfig stamps
+        # it on the agent, and the agent build applies it to the agent's LLM.
+        execution_effort=body.execution_effort,
         tools=tools,
         mcp_servers=body.mcp_servers,
         agentbricks_endpoints=body.agentbricks_endpoints,
