@@ -267,7 +267,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                     metadata["execution_id"] = run_id
                 remember_async(
                     memory,
-                    format_turn_for_memory(question, content),
+                    format_turn_for_memory(question, content, memory),
                     source="chat",
                     metadata=metadata,
                 )

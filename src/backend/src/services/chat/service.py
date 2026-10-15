@@ -1172,7 +1172,7 @@ class LightAgentService:
 
                     remember_async(
                         _agent_memory,
-                        format_turn_for_memory(prompt, answer),
+                        format_turn_for_memory(prompt, answer, _agent_memory),
                         source="chat",
                         agent_role=role,
                         metadata={"execution_id": execution_id},

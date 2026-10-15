@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 
 from .analyze import extract_json_object
 from .graph_types import (
@@ -37,11 +38,13 @@ from .graph_types import (
 
 logger = logging.getLogger(__name__)
 
-_TEXT_CHAR_CAP = 4000
-MAX_FACTS_PER_WRITE = 8
+# Matches what the write path hands a fact store (see run/persist.py): the
+# extractor can only find what it is shown.
+_TEXT_CHAR_CAP = 13000
+MAX_FACTS_PER_WRITE = 12
 _MIN_TEXT_CHARS = 20
 
-MAX_FINDINGS_PER_WRITE = 5
+MAX_FINDINGS_PER_WRITE = 8
 
 _SYSTEM_PROMPT = (
     "You maintain an AI assistant's long-term memory as a graph of facts. Read "
@@ -52,8 +55,10 @@ _SYSTEM_PROMPT = (
     '"qualifiers": {}, "standing_evidence": "", "statement": "..."}], '
     '"note": "", "note_subject": "", '
     '"note_subject_type": ""}\n'
-    "The text is usually one exchange: a `User:` part, then an `Assistant:` "
-    "part. A fact has a kind, and each kind has ONE source:\n"
+    "The text is one exchange — a `User:` part, then an `Assistant:` part — "
+    "or a task and its outcome — a `Task:` part, then a `Result:` part, with "
+    "no user words in it, so only findings and a note can come from it. A fact "
+    "has a kind, and each kind has ONE source:\n"
     '1. kind "procedural" — how the assistant should respond in EVERY '
     "conversation from now on: a standing preference or instruction about "
     "format, language, tone, sources or method. ONLY from what the User says, "
@@ -82,14 +87,22 @@ _SYSTEM_PROMPT = (
     '(object_type system); subject "orders", relation "holds", object '
     '"customer orders with city and status". A count that changes (rows, '
     "totals as of today) belongs inside a statement, never as its own fact.\n"
+    "When the answer compares several named things — campaigns, products, "
+    "regions, teams — each one is an entity: one fact links it to what it "
+    'belongs to, with its measures as qualifiers (e.g. subject "Spring '
+    'Promo" (project), relation "run_by", object "Acme" (organization), '
+    'qualifiers {"roas": "4.1x", "budget": "USD 5k", "cpa": "USD 31"}), and '
+    "the answer's conclusion is a fact of its own (Acme, \"best_campaign_by_"
+    'roas", Spring Promo). Prefer the things the user asked about, then the '
+    "best and worst.\n"
     "NOT facts of any kind: what was asked or done in this exchange; errors "
     "and failed attempts; news of the day and headlines; forecasts, guidance "
     "and opinions; anything the answer is unsure of; generated artefacts such "
     'as code, slides or HTML. Most texts contain nothing durable — then "facts" '
     "is [].\n"
     'The note: only when "facts" holds NO finding and the exchange still did '
-    "work worth referring back to (a news briefing, a report, a build, a query "
-    'result), set "note" to at most 30 words: the subject as a short noun '
+    "work worth referring back to (a news briefing, a build, an exploration "
+    'that established nothing specific), set "note" to at most 30 words: the subject as a short noun '
     'phrase, a colon, then the main findings — e.g. "Swiss news roundup: '
     'court president ousted; tax vote campaign opens". Write only the subject '
     'and findings: never "the user asked" or "the assistant produced", and no '
@@ -288,7 +301,7 @@ def extract_turn(
         return [], None
     user = content[:_TEXT_CHAR_CAP]
     if known:
-        lines = "\n".join(f"- {f.subject} | {f.relation} | {f.object}" for f in known)
+        lines = "\n".join(_known_line(f) for f in known)
         user = f"{_KNOWN_HEADER}\n{lines}\n\nTEXT:\n{user}"
     try:
         raw = call(
@@ -298,10 +311,37 @@ def extract_turn(
             ]
         )
         payload = extract_json_object(str(raw or ""))
-        return parse_facts(payload, user_part(content)), parse_note(payload)
+        said = user_part(content)
+        facts = parse_facts(payload, said)
+        return (facts if said is not None else _task_kinds(facts)), parse_note(payload)
     except Exception:  # noqa: BLE001 — extraction must never break a write
         logger.warning("memory fact extraction failed; nothing stored", exc_info=True)
         return [], None
+
+
+def _known_line(fact: Fact) -> str:
+    """``subject | relation | object {qualifiers}`` — with the qualifiers, so
+    the extractor can tell a repeat from a corrected measure."""
+    qualifiers = fact.metadata.get("qualifiers") if fact.metadata else None
+    detail = (
+        " {" + ", ".join(f"{k}: {v}" for k, v in qualifiers.items()) + "}"
+        if isinstance(qualifiers, dict) and qualifiers
+        else ""
+    )
+    return f"- {fact.subject} | {fact.relation} | {fact.object}{detail}"
+
+
+def _task_kinds(facts: list[ExtractedFact]) -> list[ExtractedFact]:
+    """A task's result holds no user words: nothing from it may claim to be
+    what the user said. A fact about a named thing is what the run found; a
+    preference or a fact about the user is dropped."""
+    kept: list[ExtractedFact] = []
+    for fact in facts:
+        if fact.kind == FACT_FINDING:
+            kept.append(fact)
+        elif fact.kind == FACT_SEMANTIC and entity_key(fact.subject) != USER_ENTITY:
+            kept.append(replace(fact, kind=FACT_FINDING))
+    return kept
 
 
 def extract_facts(
