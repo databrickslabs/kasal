@@ -4,6 +4,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from src.core.llm.effort import EffortSettings
+
 #: A slide is a self-contained <section>; anything near this size is not one.
 MAX_SLIDE_CHARS = 60_000
 
@@ -35,6 +37,12 @@ class SlideRefineRequest(BaseModel):
     )
     position: str = Field("", max_length=40, description='Where it sits, e.g. "3 of 8"')
     model: Optional[str] = Field(None, description="Model key from the chat picker")
+    # The same settings the chat sends with a run. The agent run (/start)
+    # applies them to the slide editor's LLM; the one-shot /refine call, like
+    # the capability lists below, does not use them.
+    execution_effort: Optional[EffortSettings] = Field(
+        None, description="Run effort; absent keeps the model's own settings"
+    )
     tools: Optional[List[str]] = None
     mcp_servers: List[str] = Field(default_factory=list)
     agentbricks_endpoints: List[str] = Field(default_factory=list)

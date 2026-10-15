@@ -1,5 +1,6 @@
 """The decks router: one endpoint, revising one slide."""
 
+import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
@@ -114,5 +115,58 @@ def test_start_slide_edit_returns_run_id_and_forwards_capabilities(monkeypatch):
     body, session, context = start.call_args.args
     assert body.mcp_servers == ["browser"]
     assert body.agentbricks_endpoints == ["researcher"]
+    # An older client sends no effort: the run keeps the model's own settings.
+    assert body.execution_effort is None
     assert session == "SESSION"
     assert context.group_ids == ["g1"]
+
+
+def test_start_slide_edit_forwards_a_validated_effort(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from src.core.llm.effort import EffortSettings
+    from src.services.decks import agent_refine
+
+    start = AsyncMock(return_value={"job_id": "agent-run"})
+    monkeypatch.setattr(agent_refine, "start_slide_refinement", start)
+    response = _client(monkeypatch, AsyncMock()).post(
+        "/decks/slides/refine/start",
+        json={
+            "mode": "refine",
+            "instruction": "Tighten",
+            "slide": "current",
+            "execution_effort": {"tier": "high", "max_iter": 12},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = start.call_args.args[0]
+    assert body.execution_effort == EffortSettings(tier="high", max_iter=12)
+
+
+@pytest.mark.parametrize(
+    "effort",
+    [
+        {"tier": "ultra"},
+        {"tier": "low", "max_iter": 0},
+        {"tier": "high", "budget": 5},
+        "high",
+    ],
+)
+def test_an_invalid_effort_is_rejected_by_the_schema(monkeypatch, effort):
+    from unittest.mock import AsyncMock
+
+    from src.services.decks import agent_refine
+
+    start = AsyncMock(return_value={"job_id": "agent-run"})
+    monkeypatch.setattr(agent_refine, "start_slide_refinement", start)
+    response = _client(monkeypatch, AsyncMock()).post(
+        "/decks/slides/refine/start",
+        json={
+            "mode": "refine",
+            "instruction": "x",
+            "slide": "s",
+            "execution_effort": effort,
+        },
+    )
+    assert response.status_code == 422
+    start.assert_not_awaited()
