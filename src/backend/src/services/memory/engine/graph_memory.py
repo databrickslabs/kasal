@@ -235,7 +235,17 @@ class GraphMemory:
         # Facts where the run established some; a note only where it did not.
         if note and not any(f.kind == FACT_FINDING for f in extracted_facts):
             extracted_facts = [*extracted_facts, _dated(note)]
-        for extracted in extracted_facts:
+        # One embedding request for the whole write: an answer comparing a
+        # dozen things should not cost a dozen round trips. A note is embedded
+        # WITHOUT its date — every note shares that prefix, and shared text is
+        # what makes unrelated records look alike.
+        vectors = self._embed_all(
+            [
+                f.object if f.kind == FACT_EPISODIC else f.statement
+                for f in extracted_facts
+            ]
+        )
+        for extracted, vector in zip(extracted_facts, vectors):
             start = time.perf_counter()
             event_bus.emit(
                 self,
@@ -249,14 +259,7 @@ class GraphMemory:
             try:
                 fact = self.storage.add_fact(
                     extracted,
-                    # A note is embedded WITHOUT its date: every note shares
-                    # that prefix, and shared text is what makes unrelated
-                    # records look alike.
-                    self.storage.embed(
-                        extracted.object
-                        if extracted.kind == FACT_EPISODIC
-                        else extracted.statement
-                    ),
+                    vector,
                     source=source,
                     metadata=(
                         {**base_metadata, "qualifiers": extracted.qualifiers}
@@ -307,6 +310,19 @@ class GraphMemory:
                 except Exception:
                     logger.exception("memory save hook %r failed", hook)
         return stored
+
+    def _embed_all(self, texts: list[str]) -> list[list[float]]:
+        """All of a write's embeddings in one request; one at a time if the
+        embedder will not take a batch."""
+        if not texts:
+            return []
+        try:
+            return self.storage.embed_many(texts)
+        except Exception:  # noqa: BLE001 — a batch failure must not lose the write
+            logger.debug(
+                "batch embedding failed; embedding one at a time", exc_info=True
+            )
+            return [self.storage.embed(text) for text in texts]
 
     def add_save_hook(self, hook: SaveHook) -> None:
         """Called with the facts a write stored — how a chat run's trace gets

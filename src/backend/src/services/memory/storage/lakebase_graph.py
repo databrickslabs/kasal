@@ -49,7 +49,7 @@ from src.services.memory.engine.graph_types import (
     qualifiers_of,
     rank_hits,
 )
-from src.services.memory.storage.adapter import embed_text
+from src.services.memory.storage.adapter import embed_text, embed_texts
 from src.services.memory.storage.bridge_loop import get_bridge_loop
 from src.services.memory.storage.pg_codec import (
     loads_or_empty,
@@ -170,6 +170,9 @@ class LakebaseGraphStore:
 
     def embed(self, text: str) -> list[float]:
         return embed_text(self.embedder, text)
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        return embed_texts(self.embedder, texts)
 
     # ------------------------------------------------------------------
     # sync surface (the memory layer is synchronous; see bridge_loop)

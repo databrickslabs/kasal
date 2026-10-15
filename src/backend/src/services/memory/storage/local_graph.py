@@ -38,7 +38,7 @@ from src.services.memory.engine.graph_types import (
     qualifiers_of,
     rank_hits,
 )
-from src.services.memory.storage.adapter import embed_text
+from src.services.memory.storage.adapter import embed_text, embed_texts
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,9 @@ class LocalGraphStore:
 
     def embed(self, text: str) -> list[float]:
         return embed_text(self.embedder, text)
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        return embed_texts(self.embedder, texts)
 
     # ------------------------------------------------------------------
     # write

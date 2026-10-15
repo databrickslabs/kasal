@@ -291,11 +291,10 @@ class TestFindings:
         (parsed,) = parse_facts({"facts": [sneaky]})
         assert parsed.kind == "semantic"
 
-    def test_findings_are_capped_per_write(self):
-        from src.services.memory.engine.extract import (
-            MAX_FINDINGS_PER_WRITE,
-            parse_facts,
-        )
+    def test_a_comparison_is_not_cut_short(self):
+        """Neither Graphiti nor Mem0 caps facts per write; a cap of 8 cost
+        products their link to the company that sells them."""
+        from src.services.memory.engine.extract import parse_facts
 
         many = [
             {
@@ -308,9 +307,37 @@ class TestFindings:
                 ),
                 "kind": "finding",
             }
-            for i in range(8)
+            for i in range(30)
         ]
-        assert len(parse_facts({"facts": many})) == MAX_FINDINGS_PER_WRITE
+        assert len(parse_facts({"facts": many})) == 30
+
+    def test_one_embedding_request_per_write(self, tmp_path):
+        mem = _memory(tmp_path, {"facts": [REVENUE, ATLAS]})
+        calls = []
+        original = mem.storage.embedder
+        mem.storage.embedder = lambda texts: (
+            calls.append(len(texts)),
+            original(texts),
+        )[1]
+        mem.remember(
+            "User: Atlas is due 30 July; nestle 2025 revenue? Assistant: 89.5 bn."
+        )
+        assert calls == [2] and mem.storage.count() == 2
+
+    def test_a_write_survives_an_embedder_that_cannot_batch(self, tmp_path):
+        mem = _memory(tmp_path, {"facts": [REVENUE, ATLAS]})
+        original = mem.storage.embedder
+
+        def one_at_a_time(texts):
+            if len(texts) > 1:
+                raise RuntimeError("batch not supported")
+            return original(texts)
+
+        mem.storage.embedder = one_at_a_time
+        mem.remember(
+            "User: Atlas is due 30 July; nestle 2025 revenue? Assistant: 89.5 bn."
+        )
+        assert mem.storage.count() == 2
 
 
 TABLES = {

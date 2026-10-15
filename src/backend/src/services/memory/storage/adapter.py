@@ -66,6 +66,44 @@ def embed_text(embedder: Any, text: str) -> list[float]:
     return list(vector)
 
 
+#: Texts per embedding request. A transport limit, not a cap on facts:
+#: embedding endpoints bound the size of one request, so a large write is sent
+#: in several requests and every text is still embedded.
+EMBED_BATCH = 64
+
+
+def embed_texts(embedder: object, texts: list[str]) -> list[list[float]]:
+    """Embed ``texts`` in as few requests as the endpoint allows — every shape
+    ``embed_text`` accepts takes a list."""
+    if len(texts) > EMBED_BATCH:
+        return [
+            vector
+            for start in range(0, len(texts), EMBED_BATCH)
+            for vector in embed_texts(embedder, texts[start : start + EMBED_BATCH])
+        ]
+    if not texts:
+        return []
+    if embedder is None:
+        raise ValueError("No embedder available to embed text")
+    target = (
+        embedder.get("config", {}).get("embedder", embedder)
+        if isinstance(embedder, dict)
+        else embedder
+    )
+    if callable(target):
+        result = target(list(texts))
+    elif hasattr(target, "embed_documents"):
+        result = target.embed_documents(list(texts))
+    else:
+        raise TypeError(f"Unsupported embedder type: {type(target).__name__}")
+    vectors = [list(vector) for vector in (result or [])]
+    if len(vectors) != len(texts):
+        raise RuntimeError(
+            f"Embedder returned {len(vectors)} vectors for {len(texts)} texts"
+        )
+    return vectors
+
+
 def build_litellm_embedder(provider_config: Optional[dict]) -> Any:
     """Turn an EmbedderConfigBuilder provider dict into an embedding callable.
 

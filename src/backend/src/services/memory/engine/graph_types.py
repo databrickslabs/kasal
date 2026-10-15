@@ -169,6 +169,8 @@ class GraphStore(Protocol):
 
     def embed(self, text: str) -> list[float]: ...
 
+    def embed_many(self, texts: list[str]) -> list[list[float]]: ...
+
     def add_fact(
         self,
         fact: ExtractedFact,
