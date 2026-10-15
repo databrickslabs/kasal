@@ -6,6 +6,7 @@ import DeckPresentation from '../Chat/DeckPresentation';
 import ThumbnailRail from './ThumbnailRail';
 import SlideInstructionBar from './SlideInstructionBar';
 import DeckModelPicker from './DeckModelPicker';
+import DeckEffortPicker from './DeckEffortPicker';
 import { useDeckHistory } from './useDeckHistory';
 import { createDeckStudioStore, useDeckState, type DeckStudioStore } from './deckStudioStore';
 import RunProgress from '../Chat/RunProgress';
@@ -22,6 +23,7 @@ import { hasPendingAssets } from '../../utils/assetRefs';
 import { SLIDE_W, clearRefined, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
 import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx, sanitizeDeckDocument } from '../../utils/deckExport';
 import { concreteModel } from '../../utils/autoModel';
+import { DEFAULT_EFFORT, type EffortSettings } from '../../../../types/workflow/effort';
 
 /**
  * The deck studio: independent slide edits, merged into the latest deck.
@@ -95,6 +97,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const importRef = useRef<HTMLInputElement>(null);
   const selectedModel = useAppStore((s) => s.selectedModel);
   const [editModel, setEditModel] = useState(() => model || concreteModel(selectedModel) || '');
+  const [editEffort, setEditEffort] = useState<EffortSettings>(DEFAULT_EFFORT);
 
   const shown = Math.min(selected, Math.max(0, count - 1));
   const stage = useMemo(() => stageFor(viewSlides[shown] ?? ''), [viewSlides, shown]);
@@ -165,7 +168,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     };
     setActivities(all => ({ ...all, [target]: { startedAt, step: pending } }));
     try {
-      const res = await DeckService.refineSlide({ ...plan.request, model: editModel || null }, (id) => {
+      const res = await DeckService.refineSlide({ ...plan.request, model: editModel || null, execution_effort: editEffort }, (id) => {
         jobId = id;
         updateActivity(pending);
       });
@@ -427,7 +430,10 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
                 latestStep={activity.step} jobId={activity.jobId} onSelectStep={setActivityStep} />}
             </div>}
             <SlideInstructionBar
-              controls={<DeckModelPicker value={editModel} onChange={setEditModel} disabled={working.has(shown) || structureSaving} />}
+              controls={<>
+                <DeckModelPicker value={editModel} onChange={setEditModel} disabled={working.has(shown) || structureSaving} />
+                <DeckEffortPicker value={editEffort} onChange={setEditEffort} model={editModel} disabled={working.has(shown) || structureSaving} />
+              </>}
               slideNumber={barMode.kind === 'fill' ? barMode.at + 1 : shown + 1}
               mode={barMode.kind}
               working={working.has(shown) || structureSaving}

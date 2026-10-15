@@ -9,6 +9,8 @@ import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
 import { downloadDeckHtml } from '../../utils/deckExport';
 import { useThemeStore } from '../../../../store/theme';
+import { useChatEffortStore } from '../../../../store/chatEffort';
+import { DEFAULT_EFFORT } from '../../../../types/workflow/effort';
 
 // The picker reads the shared models store, which loads through this.
 vi.mock('../../../../api/config/EnabledModelsService', async (importOriginal) => ({
@@ -86,6 +88,32 @@ describe('DeckStudio', () => {
     await waitFor(() => expect(picker).not.toBeDisabled());
     expect(picker).toHaveValue('edit-model');
     expect(useAppStore.getState().selectedModel).toBe('chat-model');
+  });
+
+  it('sends an edit-local effort that starts at the app default and locks while its slide runs', async () => {
+    const close = vi.fn();
+    const runs = [deferred<{ section: string }>(), deferred<{ section: string }>()];
+    refineSlide.mockReturnValueOnce(runs[0].promise).mockReturnValueOnce(runs[1].promise);
+    render(<DeckStudio code={DECK} messageId="m1" onClose={close} />);
+    const effort = screen.getByRole('combobox', { name: 'Slide edit effort' });
+    expect(effort).toHaveValue(DEFAULT_EFFORT.tier);
+    submitSlide(1);
+    expect(refineSlide).toHaveBeenLastCalledWith(
+      expect.objectContaining({ execution_effort: DEFAULT_EFFORT }), expect.any(Function),
+    );
+    expect(effort).toBeDisabled();
+    await act(async () => runs[0].resolve({ section: slide('Cover updated') }));
+    await waitFor(() => expect(effort).toBeEnabled());
+    fireEvent.keyDown(effort, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.change(effort, { target: { value: 'high' } });
+    submitSlide(2);
+    expect(refineSlide).toHaveBeenLastCalledWith(
+      expect.objectContaining({ execution_effort: { tier: 'high' } }), expect.any(Function),
+    );
+    await act(async () => runs[1].resolve({ section: slide('Two updated') }));
+    expect(effort).toHaveValue('high');
+    expect(useChatEffortStore.getState().settings).toEqual(DEFAULT_EFFORT);
   });
 
   it('allows the workspace default when writing a new slide', async () => {
