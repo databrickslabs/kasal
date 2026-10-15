@@ -228,13 +228,13 @@ A teamspace can store an entity-and-fact graph instead of whole records. It is o
 | Kind | Holds | May come from | Recalled | Lifetime |
 |------|-------|---------------|----------|----------|
 | `procedural` | Standing preferences and instructions: how the assistant should respond in every conversation | The user's words only | Always — up to 5, in front of every recall | Until the user changes it |
-| `semantic` | Facts about the user and their work: role, employer, projects, decisions | The user's words only | On a match (cosine 0.5) | Until replaced |
-| `finding` | Facts a run established about a named entity: `Nestlé --revenue_fy2025--> CHF 89.5 bn` | The run's answer, at most 5 per write | On a strong match (0.6) | Until replaced |
-| `episodic` | One run note: what a run produced, as *subject: main findings*, attached to the one thing it is mainly about | The run, only when it left no finding | On a strong match (0.6) | Stops being recalled after *Keep run and chat memories (days)* (`episodic_ttl_days`, default 180) |
+| `semantic` | Facts about the user and their work: role, employer, projects, decisions | The user's words only | On a match (see *Recall rule*) | Until replaced |
+| `finding` | Facts a run established about a named entity: `Nestlé --revenue_fy2025--> CHF 89.5 bn`; when an answer compares several named things, each is an entity with its measures as qualifiers | The run's answer, at most 8 per write | On a match (see *Recall rule*) | Until replaced; a corrected measure replaces it |
+| `episodic` | One run note: what a run produced, as *subject: main findings*, attached to the one thing it is mainly about | The run, only when it left no finding | On a closer match (0.6) | Stops being recalled after *Keep run and chat memories (days)* (`episodic_ttl_days`, default 180) |
 
 The extractor assigns the kind and `parse_facts` enforces the source: nothing about the user can be a finding, and only the user holds a procedural fact. A finding is semantic memory in every other respect — it is typed by the ontology and a corrected value replaces the old one — but it is only as good as the source the run read, so it is kept distinguishable and needs the closer match. News of the day, forecasts and opinions are not findings; such a run leaves a note. The record kinds recall consumers read (`MemoryRecord.kind`) map from these: a finding reads as `semantic`, with its own kind in `metadata["kind"]`.
 
-**Why two floors.** Measured on `nomic-embed-text` with real runs: correct matches for facts the user stated score as low as 0.53, while a dataset finding scored 0.57 against an unrelated Swiss-news request and a note 0.54. No single number separates those. A wrong fact about the user is harmless context; a finding or a note recalled for an unrelated request is a false memory — so those two kinds need 0.6, where right matches measured 0.61–0.84. Notes are embedded without their date, and are never written as "the user asked… the assistant produced…": shared text is what made unrelated notes look alike (0.61 between a Lebanese-news note and a Swiss-news request, in the first wording).
+**Recall rule.** A fact must reach a cosine of 0.52 (`DEFAULT_MIN_SIMILARITY`; the *Relevance threshold* knob overrides it), a run note 0.6 (`DEFAULT_STRICT_MIN_SIMILARITY`), and every match must be within 0.09 of the best one (`DEFAULT_RECALL_CLIFF`). Fixed floors alone could not separate right from wrong on `nomic-embed-text`: right facts for "what was the most effective marketing campaign" scored 0.53–0.60 while wrong facts for other requests scored up to 0.62. Relative to the best match they separate. On every case measured on 15 Oct 2026 (12 requests, 21 right facts) the rule kept 15 right facts where fixed floors per kind kept 12, letting the same number of wrong ones through. Notes keep the closer floor because a note recalled for an unrelated request is a false memory of what a run did. Notes are embedded without their date and written as *subject: findings*, never "the user asked… the assistant produced…": shared text is what made unrelated notes look alike.
 
 **Only what matches is recalled.** Recall returns standing preferences plus the facts that matched the request — nothing "related". An earlier version followed a matched fact's entity to its other facts. In real runs every such addition was noise: a revenue request came back with facts about an unrelated project through the `user` entity, and a Swiss-news request that matched "based in Zurich, Switzerland" came back with that person's whole career. It was removed.
 
@@ -248,7 +248,9 @@ The extractor assigns the kind and `parse_facts` enforces the source: nothing ab
 
 **Storage.** Two tables beside the record table: `graph_entities` / `graph_facts` in the teamspace's SQLite file (FTS5 with BM25 for keywords), and `<memory_table>_entities` / `<memory_table>_facts` in Lakebase (pgvector HNSW, a stored `tsvector` with a GIN index). `LakebaseGraphStore` creates its tables on first use and takes its session from `LakebaseStorageBackend.open_session`, so memory still has one place that reaches Lakebase.
 
-**Stopping rules.** The floors above are the only gates (`DEFAULT_MIN_SIMILARITY`, overridden by the *Relevance threshold* knob when set, and `DEFAULT_STRICT_MIN_SIMILARITY`). Keyword hits only re-rank facts that cleared their floor. The blended score, the recall score floor, the relative cut-off, recall planning, save-time consolidation and the maintenance passes do not apply to graph memory.
+**What reaches the extractor.** A fact store keeps only what it extracts, so it is shown far more of a run than a record store keeps: up to 12,000 characters of the answer (`_FACT_ANSWER_CHARS` in `run/persist.py`), against 1,400 for records. With the record budget, a Genie answer that opened with a paragraph of method never showed the extractor a figure and came back as a one-line note. JSON output — a tool's response handed back as the answer — is rendered as `key: value` lines with empty values dropped and nested JSON opened (`text.readable_output`), so ids, nulls and escape sequences do not crowd out the content; nothing there knows any tool's field names. A crew task's output arrives as `Task: <description> Result: <output>`, and only findings and a note are taken from it, since it holds no user words. At most 12 facts per write, 8 of them findings.
+
+**Corrections.** The same fact (subject, relation, object) arriving with different qualifiers is a corrected measure: it replaces the old one, which is closed and points at it. A restatement without qualifiers, or with the same ones, is a repeat and changes nothing. The decision is `plan_write` in `graph_types`, shared by both stores.
 
 **Scoping.** `group_id` on every statement, as for records. With the chat "Workspace memory" switch off, reads are confined to the session's own facts; dedupe and replacement stay teamspace-wide.
 
@@ -258,16 +260,17 @@ The extractor assigns the kind and `parse_facts` enforces the source: nothing ab
 
 - Entities are matched by normalised name only. "Databricks" and "Databricks Inc." are two entities.
 - Lakebase keyword ranking is Postgres full-text (`ts_rank_cd`), not true BM25.
-- The floors (0.5, and 0.6 for findings and notes) were measured on `nomic-embed-text` only. Another embedder has another cosine scale.
+- The recall rule (0.52, 0.6 for notes, within 0.09 of the best) was measured on `nomic-embed-text` only, on twelve requests. Another embedder has another cosine scale. A generic question still pulls weak matches when nothing matches it well: "where do I work" also recalled a contact's employer at the same score as the right fact.
 - Whether a preference is `procedural` (always recalled) or `semantic` (recalled on a match) is the extractor's call.
 - A finding is what a run read on a given day. It carries the run and the date it was stored, not a verified source, and it does not expire.
-- Only the first 1,400 characters of an answer reach the extractor, so findings come from the top of a long answer.
+- Only the first 12,000 characters of an answer reach the extractor.
 - A question repeated in other words can leave a second, near-identical run note.
 - A relation the extractor coins under two names ("employer", "works_at") is two relations, so the second does not replace the first. Showing the extractor the known facts reduces this; it does not prevent it.
 - Expired run notes stop being recalled but are not deleted.
 - The repeat check is per process: a crew subprocess and the server do not see each other's recent exchanges.
 - Every graph-memory write logs one `[graph-memory] write (…): N fact(s) extracted, M stored` line to `crew.log`; an empty extraction and a write that never ran are otherwise indistinguishable.
-- The Memory Browser dialog's per-run Saved / Recalled views read the record table and do not list facts. The chat's Run memory pane does: with graph memory on it shows the facts and notes a run saved or recalled.
+- A run's Saved / Recalled facts are shown in the chat's Run memory pane and in the Memory Browser dialog's Ontology tab when a run is selected; the dialog's Records, Concepts and Graph tabs read the record table only.
+- A recall made by the agent itself (the CrewAI engine's chat agent) is reported as the run's Memory Read, so Recalled lists it.
 - The record store's concept views (Concepts, Graph) do not include facts.
 
 ## Settings
