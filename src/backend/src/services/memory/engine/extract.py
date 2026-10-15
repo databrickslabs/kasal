@@ -41,10 +41,13 @@ logger = logging.getLogger(__name__)
 # Matches what the write path hands a fact store (see run/persist.py): the
 # extractor can only find what it is shown.
 _TEXT_CHAR_CAP = 13000
-MAX_FACTS_PER_WRITE = 12
 _MIN_TEXT_CHARS = 20
 
-MAX_FINDINGS_PER_WRITE = 8
+# No cap on the facts one write may produce — neither Graphiti nor Mem0 has
+# one, and every cap tried here (5, 8, 16) cost real facts: products lost their
+# link to the company that sells them. What keeps a write proportionate is the
+# prompt — keep the conclusions and the things they name, never copy a table
+# the source can still be asked for — and the model's own output limit.
 
 _SYSTEM_PROMPT = (
     "You maintain an AI assistant's long-term memory as a graph of facts. Read "
@@ -79,22 +82,34 @@ _SYSTEM_PROMPT = (
     "when it is specific and will still be true later: a figure for a closed "
     "period, a date, an owner, a location, a definition. Example: subject "
     '"Acme", relation "revenue_fy2025", object "USD 4.2 bn", single true. Put '
-    "the period in the relation when the value belongs to one. At most "
-    f"{MAX_FINDINGS_PER_WRITE}, the ones the user asked about first. The "
+    "the period in the relation when the value belongs to one. Keep what the "
+    "answer concludes and the things it names; do not copy a whole table "
+    "row by row — the source can be asked again. The "
     "user's OWN systems and datasets count, as the run discovered them: which "
     "tables a database has, what a table holds, what its key columns are — "
     'e.g. subject "orders" (dataset), relation "part_of", object "postgres" '
     '(object_type system); subject "orders", relation "holds", object '
     '"customer orders with city and status". A count that changes (rows, '
     "totals as of today) belongs inside a statement, never as its own fact.\n"
-    "When the answer compares several named things — campaigns, products, "
-    "regions, teams — each one is an entity: one fact links it to what it "
-    'belongs to, with its measures as qualifiers (e.g. subject "Spring '
-    'Promo" (project), relation "run_by", object "Acme" (organization), '
-    'qualifiers {"roas": "4.1x", "budget": "USD 5k", "cpa": "USD 31"}), and '
-    "the answer's conclusion is a fact of its own (Acme, \"best_campaign_by_"
-    'roas", Spring Promo). Prefer the things the user asked about, then the '
-    "best and worst.\n"
+    "Findings form ONE connected graph, not a list:\n"
+    "- Every finding connects, directly or through other findings, to the "
+    "thing the request is about. Leave out a side fact that would connect to "
+    "nothing else.\n"
+    "- When the answer compares several named things — campaigns, products, "
+    "tables, regions — each is an entity linked to what it belongs to (e.g. "
+    'subject "Spring Promo" (project), relation "run_by", object "Acme" '
+    "(organization)); that link comes first, for every one of them. Its "
+    'measures are qualifiers ON that link ({"roas": "4.1x", "budget": "USD '
+    "5k\"}), never facts of their own. The answer's conclusion is a fact of its own "
+    '(Acme, "best_campaign_by_roas", Spring Promo).\n'
+    "- A value that several things can SHARE — a category, a supplier, a "
+    "channel, a region, a segment — is an entity, so the things that share it "
+    'connect (product "Desk Lamp", relation "in_category", object "Home '
+    'office" (concept)). Numbers, amounts and dates are not shared things: '
+    "they stay qualifiers or plain values.\n"
+    "- When the answer says how the things relate to EACH OTHER — one joins, "
+    "feeds, depends on, replaced or competes with another — that link is a "
+    "fact too.\n"
     "NOT facts of any kind: what was asked or done in this exchange; errors "
     "and failed attempts; news of the day and headlines; forecasts, guidance "
     "and opinions; anything the answer is unsure of; generated artefacts such "
@@ -133,7 +148,7 @@ _SYSTEM_PROMPT = (
     "object`. Never output one of them again, in any wording. Output a fact "
     "only when it is new, or when it changes one of them — and then reuse that "
     "fact's subject and relation exactly, so the new value replaces the old.\n"
-    f"- At most {MAX_FACTS_PER_WRITE} facts. Invent nothing."
+    "- Invent nothing."
 )
 
 _KNOWN_HEADER = "ALREADY IN MEMORY:"
@@ -200,7 +215,6 @@ def parse_facts(payload: object, user_text: str | None = None) -> list[Extracted
         return []
     facts: list[ExtractedFact] = []
     seen: set[tuple[str, str, str]] = set()
-    findings = 0
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -217,9 +231,7 @@ def parse_facts(payload: object, user_text: str | None = None) -> list[Extracted
         about_user = entity_key(subject) == USER_ENTITY
         kind = str(item.get("kind") or "").strip().lower()
         if kind == FACT_FINDING and not about_user:
-            findings += 1
-            if findings > MAX_FINDINGS_PER_WRITE:
-                continue
+            pass
         elif kind == FACT_PROCEDURAL and about_user:
             if not _grounded(item.get("standing_evidence"), user_text):
                 continue  # a one-off instruction is not a fact of any kind
@@ -251,8 +263,6 @@ def parse_facts(payload: object, user_text: str | None = None) -> list[Extracted
                 qualifiers=qualifiers,
             )
         )
-        if len(facts) >= MAX_FACTS_PER_WRITE:
-            break
     return facts
 
 

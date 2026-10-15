@@ -2,7 +2,6 @@
 tolerant reading of an extraction reply."""
 
 from src.services.memory.engine.extract import (
-    MAX_FACTS_PER_WRITE,
     extract_facts,
     parse_facts,
 )
@@ -109,14 +108,31 @@ class TestParseFacts:
         assert len(parse_facts(payload)) == 1
         assert parse_facts(None) == [] and parse_facts({"facts": "x"}) == []
 
-    def test_unknown_types_collapse_and_count_is_capped(self):
+    def test_unknown_types_collapse_and_nothing_is_capped(self):
         many = [
             fact("user", "uses", f"tool {i}", f"Uses tool {i}.", kind="gadget")
-            for i in range(20)
+            for i in range(150)
         ]
         parsed = parse_facts({"facts": many})
-        assert len(parsed) == MAX_FACTS_PER_WRITE
+        assert len(parsed) == 150
         assert parsed[0].subject_type == "concept" and parsed[0].object_type is None
+
+    def test_a_large_write_is_embedded_in_several_requests_and_completely(self):
+        from src.services.memory.storage.adapter import EMBED_BATCH, embed_texts
+
+        sizes = []
+
+        def embedder(texts):
+            sizes.append(len(texts))
+            return [[float(len(t)), 1.0] for t in texts]
+
+        texts = [f"fact {i}" for i in range(EMBED_BATCH * 2 + 5)]
+        vectors = embed_texts(embedder, texts)
+        assert sizes == [EMBED_BATCH, EMBED_BATCH, 5]
+        assert len(vectors) == len(texts) and vectors[-1] == [
+            float(len(texts[-1])),
+            1.0,
+        ]
 
 
 class TestEntityNames:
