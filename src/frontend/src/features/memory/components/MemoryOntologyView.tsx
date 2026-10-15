@@ -25,7 +25,9 @@ import type {
   MemoryGraphResponse,
 } from '../../../types/config/memoryBackend';
 import { ConceptForceGraph } from './ConceptForceGraph';
+import type { RunMemoryMode, RunTraceFacts } from './memoryData';
 import {
+  factsForRun,
   isCurrent,
   isNote,
   KIND_LABELS,
@@ -176,7 +178,15 @@ export const OntologyPanel: React.FC<PanelProps> = ({
   );
 };
 
-export const MemoryOntologyView: React.FC = () => {
+/** One run's slice of the graph: the facts it saved or the facts it recalled,
+ *  by the same evidence the record views use. */
+export interface OntologyRunScope {
+  id: string;
+  mode: RunMemoryMode;
+  trace: RunTraceFacts;
+}
+
+export const MemoryOntologyView: React.FC<{ run?: OntologyRunScope }> = ({ run }) => {
   const [data, setData] = useState<MemoryGraphResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -215,12 +225,22 @@ export const MemoryOntologyView: React.FC = () => {
       </Alert>
     );
   }
+  const facts = run ? factsForRun(data.facts, run.mode, run.trace, run.id) : data.facts;
   return (
-    <OntologyPanel
-      entities={data.entities}
-      facts={data.facts}
-      onChanged={() => setReloadKey((key) => key + 1)}
-    />
+    <>
+      {run && facts.length === 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {run.mode === 'recalled'
+            ? 'This run recalled no facts from memory.'
+            : 'This run saved no facts or notes.'}
+        </Alert>
+      )}
+      <OntologyPanel
+        entities={data.entities}
+        facts={facts}
+        onChanged={() => setReloadKey((key) => key + 1)}
+      />
+    </>
   );
 };
 

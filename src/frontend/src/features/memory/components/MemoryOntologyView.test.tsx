@@ -84,6 +84,21 @@ describe('MemoryOntologyView', () => {
     expect(api.get).toHaveBeenCalledTimes(2);
   });
 
+  it('scoped to a run, shows only what that run recalled', async () => {
+    api.get.mockResolvedValue({ data: graph });
+    const trace = { recalledIds: new Set(['own']), savedIds: new Set<string>(), savedContents: [] };
+    render(<MemoryOntologyView run={{ id: 'run-1', mode: 'recalled', trace }} />);
+    expect(await screen.findByText('Dana owns Atlas.')).toBeInTheDocument();
+    expect(screen.queryByText('Atlas is due 30 July.')).not.toBeInTheDocument();
+  });
+
+  it('says so when a run recalled nothing', async () => {
+    api.get.mockResolvedValue({ data: graph });
+    const trace = { recalledIds: new Set<string>(), savedIds: new Set<string>(), savedContents: [] };
+    render(<MemoryOntologyView run={{ id: 'run-1', mode: 'recalled', trace }} />);
+    expect(await screen.findByText('This run recalled no facts from memory.')).toBeInTheDocument();
+  });
+
   it('reports a failed load', async () => {
     api.get.mockRejectedValue(new Error('down'));
     render(<MemoryOntologyView />);

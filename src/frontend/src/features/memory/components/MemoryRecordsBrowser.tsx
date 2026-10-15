@@ -1131,7 +1131,15 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
               </Box>
             )}
 
-            {viewMode === 'ontology' && <MemoryOntologyView />}
+            {viewMode === 'ontology' && (
+              <MemoryOntologyView
+                run={
+                  selectedRunId && selectedRunId !== ALL_RUNS
+                    ? { id: selectedRunId, mode: memoryMode, trace: traceFacts }
+                    : undefined
+                }
+              />
+            )}
 
             {viewMode === 'graph' && (
               <Box>
