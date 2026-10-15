@@ -376,15 +376,13 @@ class TestKinds:
             assert mem.remember(turn) is None
             assert mem.recall("gather latest swiss news from today") == []
 
-    def test_a_finding_needs_a_closer_match_than_a_user_fact(self, tmp_path):
-        """A Swiss-news request once recalled a dataset finding at 0.57."""
+    def test_a_finding_is_recalled_on_the_same_floor_as_a_user_fact(self, tmp_path):
+        """Only run notes need the stricter match: right campaign findings for
+        "what was the most effective marketing campaign" scored 0.53-0.60."""
         mem = _memory(tmp_path, {"facts": [REVENUE]}, min_similarity=0.0)
         mem.remember("User: provide me the revenue of nestle in 2025. Assistant: 89.5.")
-        query = "Nestlé FY2025 sales"  # related, but far from identical
         mem.storage.strict_min_similarity = 0.99
-        assert mem.recall(query) == []
-        mem.storage.strict_min_similarity = 0.3
-        assert len(mem.recall(query)) == 1
+        assert len(mem.recall("Nestlé FY2025 sales")) == 1
 
     def test_only_the_user_can_hold_a_standing_preference(self):
         from src.services.memory.engine.extract import parse_facts
@@ -461,27 +459,21 @@ class TestRunLayerSeams:
             build_memory_preamble(mem, "When is the Atlas deadline?")
         assert stages == [("selected", 1)]
 
-    def test_a_matched_fact_is_not_cut_by_the_relative_cliff(self, tmp_path):
-        """Seeds carry a similarity and hop neighbours do not; the record
-        store's cliff would drop the weaker seed and keep the neighbours."""
-        strong = fact(
-            "Atlas",
-            "owned_by",
-            "Dana",
-            "Atlas deadline owner Atlas deadline.",
-            kind="project",
-        )
-        weak = fact(
-            "Atlas",
-            "deadline_is",
-            "30 July",
-            "The Atlas deadline moved to 30 July.",
-            kind="project",
-        )
-        mem = _memory(tmp_path, [strong, weak], min_similarity=0.2)
+    def test_a_direct_recall_is_reported_as_what_the_run_read(self, tmp_path):
+        """The CrewAI engine's agent calls recall itself, with no recall block
+        to report the selection. Reported as a search, Recalled stayed empty."""
+        mem = _memory(tmp_path, [ATLAS])
         mem.remember(TURN)
-        block = build_memory_preamble(mem, "Atlas deadline")
-        assert "moved to 30 July" in block
+        stages = []
+        with event_bus.scoped_handlers():
+
+            @event_bus.on(MemoryQueryCompletedEvent)
+            def _collect(source, event):
+                if source is mem:
+                    stages.append((event.stage, [r.id for r in event.results]))
+
+            (recalled,) = mem.recall("When is the Atlas deadline?")
+        assert stages == [("selected", [recalled.id])]
 
     def test_maintenance_leaves_a_fact_store_alone(self, tmp_path):
         mem = _memory(tmp_path, [ATLAS])

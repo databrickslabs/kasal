@@ -78,6 +78,53 @@ class TestWrite:
         assert current == ["active"]
 
 
+class TestCorrections:
+    """The same fact with different qualifiers is a corrected measure."""
+
+    def _campaign(self, store, qualifiers):
+        (parsed,) = parse_facts(
+            {
+                "facts": [
+                    fact(
+                        "Spring Promo",
+                        "run_by",
+                        "Acme",
+                        "Spring Promo is run by Acme.",
+                        object_type="organization",
+                        kind="project",
+                    )
+                ]
+            }
+        )
+        return store.add_fact(
+            parsed,
+            store.embed(parsed.statement),
+            metadata={"qualifiers": qualifiers} if qualifiers else None,
+        )
+
+    def test_a_corrected_measure_replaces_the_old_one(self, store):
+        old = self._campaign(store, {"roas": "4.10x"})
+        new = self._campaign(store, {"roas": "4.36x"})
+        facts = {f.id: f for f in store.list_facts(include_retired=True)}
+        assert facts[old.id].valid_to is not None
+        assert facts[old.id].superseded_by == new.id
+        assert [f.metadata["qualifiers"] for f in store.list_facts()] == [
+            {"roas": "4.36x"}
+        ]
+
+    def test_the_same_measure_again_is_a_repeat(self, store):
+        assert self._campaign(store, {"roas": "4.36x"})
+        assert self._campaign(store, {"roas": "4.36x"}) is None
+        assert store.count() == 1
+
+    def test_a_terser_restatement_keeps_the_detail(self, store):
+        assert self._campaign(store, {"roas": "4.36x"})
+        assert self._campaign(store, None) is None
+        assert [f.metadata["qualifiers"] for f in store.list_facts()] == [
+            {"roas": "4.36x"}
+        ]
+
+
 class TestSearch:
     def test_retired_facts_are_never_recalled(self, store):
         _add(

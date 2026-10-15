@@ -17,8 +17,10 @@ typed entities, fact edges with a validity window, invalidate-not-delete.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
@@ -80,12 +82,21 @@ FACT_KINDS = (FACT_PROCEDURAL, FACT_SEMANTIC, FACT_FINDING, FACT_EPISODIC)
 
 #: Kinds the user alone can be the source of.
 USER_KINDS = (FACT_PROCEDURAL, FACT_SEMANTIC)
-#: Kinds that need the stricter match. A wrong fact about the user is harmless
-#: context; a finding or a note recalled for an unrelated request is a false
-#: memory. Measured on nomic-embed-text: right matches 0.61-0.84, wrong ones at
-#: most 0.57 (a dataset finding against a Swiss-news request).
-STRICT_KINDS = (FACT_FINDING, FACT_EPISODIC)
+#: Kinds that need the stricter match: a note recalled for an unrelated request
+#: is a false memory of what a run did. Facts — the user's and the ones runs
+#: found — share the base floor (``GraphMemory`` default 0.52) and the cut
+#: below. Measured on nomic-embed-text: notes from other runs reached 0.54
+#: against an unrelated request, right notes 0.64 and up.
+STRICT_KINDS = (FACT_EPISODIC,)
 DEFAULT_STRICT_MIN_SIMILARITY = 0.6
+#: Keep only matches within this of the best one. A fixed floor alone cannot
+#: separate right from wrong on this embedder: right facts for "what was the
+#: most effective marketing campaign" scored 0.53-0.60 while wrong facts for
+#: other requests scored up to 0.62. Relative to the best match they separate:
+#: on every case measured that day (21 right facts, 12 requests) floor + cut
+#: kept 15 right facts where fixed floors per kind kept 12, with the same
+#: number of wrong ones let through.
+DEFAULT_RECALL_CLIFF = 0.09
 #: Procedural facts put in front of every recall.
 MAX_STANDING = 5
 
@@ -267,11 +278,50 @@ def drop_weak(
     ]
 
 
+def qualifiers_of(metadata: object) -> dict[str, str]:
+    """The qualifiers stored in a fact's metadata (JSON text or a dict)."""
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata or "{}")
+        except ValueError:
+            return {}
+    value = metadata.get("qualifiers") if isinstance(metadata, dict) else None
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}
+
+
+def plan_write(
+    current: Sequence[tuple[str, str, object]],
+    object_key: str,
+    qualifiers: dict[str, str],
+    single: bool,
+) -> tuple[bool, list[str]]:
+    """Whether to store a new fact, and which current facts it retires.
+
+    ``current`` is ``(id, object_key, metadata)`` for the current facts with the
+    new fact's subject and relation. Shared by both stores so they cannot drift.
+
+    * Same value, same qualifiers — or the new one has none — is a repeat:
+      nothing is written, and a terser restatement never wipes the detail.
+    * Same value, different qualifiers is a correction ("Spring Promo, ROAS
+      4.36x" re-measured): the new fact replaces the old one.
+    * A single-valued relation replaces whatever value it held.
+    """
+    same = [(fid, meta) for fid, key, meta in current if key == object_key]
+    if same and (
+        not qualifiers or any(qualifiers_of(meta) == qualifiers for _, meta in same)
+    ):
+        return False, []
+    return True, [fid for fid, key, _ in current if single or key == object_key]
+
+
 def rank_hits(
     vector_hits: list[tuple[str, float]],
     keyword_ids: list[str],
     limit: int,
     min_similarity: float,
+    cliff: float = DEFAULT_RECALL_CLIFF,
 ) -> list[tuple[str, float]]:
     """The seed facts of a search, best first, as ``(fact_id, similarity)``.
 
@@ -287,6 +337,10 @@ def rank_hits(
     similarity = {fid: sim for fid, sim in vector_hits if sim >= min_similarity}
     if not similarity:
         return []
+    # ...and must be close to the best match: nearest is not near, and neither
+    # is "above the floor" when something else matches far better.
+    best = max(similarity.values())
+    similarity = {fid: sim for fid, sim in similarity.items() if sim >= best - cliff}
     vector_ranked = [fid for fid, _ in vector_hits if fid in similarity]
     keyword_ranked = [fid for fid in keyword_ids if fid in similarity]
     order = fuse(vector_ranked, keyword_ranked)

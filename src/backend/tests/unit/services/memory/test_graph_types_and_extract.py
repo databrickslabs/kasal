@@ -38,11 +38,23 @@ class TestRanking:
     def test_fuse_prefers_items_ranked_by_both(self):
         assert fuse(["a", "b", "c"], ["c", "a"])[:2] == ["a", "c"]
 
-    def test_floor_is_the_only_gate_and_keywords_only_rerank(self):
-        seeds = rank_hits([("a", 0.9), ("b", 0.6), ("c", 0.2)], ["c", "b"], 5, 0.5)
+    def test_the_floor_gates_and_keywords_only_rerank(self):
+        seeds = rank_hits([("a", 0.9), ("b", 0.85), ("c", 0.2)], ["c", "b"], 5, 0.5)
         # c matched a keyword but is below the floor: never a seed.
         assert [fid for fid, _ in seeds] == ["b", "a"]
-        assert dict(seeds) == {"a": 0.9, "b": 0.6}
+        assert dict(seeds) == {"a": 0.9, "b": 0.85}
+
+    def test_a_match_far_below_the_best_is_cut(self):
+        """Above the floor is not enough when something matches far better."""
+        seeds = rank_hits([("a", 0.80), ("b", 0.75), ("c", 0.62)], [], 5, 0.52)
+        assert [fid for fid, _ in seeds] == ["a", "b"]
+
+    def test_close_matches_all_survive_when_none_is_strong(self):
+        """The campaign case: right facts at 0.53-0.60, nothing higher."""
+        seeds = rank_hits(
+            [("s2", 0.60), ("s0", 0.53), ("s1", 0.53), ("x", 0.45)], [], 5, 0.52
+        )
+        assert [fid for fid, _ in seeds] == ["s2", "s0", "s1"]
 
     def test_nothing_above_the_floor_returns_nothing(self):
         assert rank_hits([("a", 0.3)], ["a"], 5, 0.5) == []
@@ -148,6 +160,54 @@ class TestEntityNames:
 
     def test_malformed_qualifiers_are_dropped(self):
         assert self._job("Acme", qualifiers="since 2016").qualifiers == {}
+
+
+class TestTaskResults:
+    """A crew task's output holds no user words."""
+
+    def test_only_findings_come_from_a_task_result(self):
+        from src.services.memory.engine.extract import extract_turn
+
+        llm = ScriptedLLM(
+            {
+                "facts": [
+                    {
+                        **fact("user", "prefers", "tables", "Tables.", kind="person"),
+                        "kind": "procedural",
+                        "standing_evidence": "always",
+                    },
+                    fact("user", "works_at", "Acme", "The user works at Acme."),
+                    fact(
+                        "Spring Promo",
+                        "run_by",
+                        "Acme",
+                        "Acme ran it.",
+                        kind="project",
+                        object_type="organization",
+                    ),
+                ]
+            }
+        )
+        facts, _ = extract_turn(
+            llm,
+            "Task: find the best campaign. Result: Spring Promo, run by Acme, always wins.",
+        )
+        assert [(f.subject, f.kind) for f in facts] == [("Spring Promo", "finding")]
+
+    def test_known_facts_are_shown_with_their_qualifiers(self):
+        from src.services.memory.engine.extract import _known_line
+        from src.services.memory.engine.graph_types import Fact
+
+        known = Fact(
+            id="f",
+            subject_id="s",
+            subject="Spring Promo",
+            relation="run_by",
+            object="Acme",
+            statement="",
+            metadata={"qualifiers": {"roas": "4.36x"}},
+        )
+        assert _known_line(known) == "- Spring Promo | run_by | Acme {roas: 4.36x}"
 
 
 class TestExtractFacts:

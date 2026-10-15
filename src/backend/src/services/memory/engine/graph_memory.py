@@ -88,12 +88,11 @@ def clear_recent_texts() -> None:
         _recent_texts.clear()
 
 
-# Cosine a fact must reach to seed a recall. Short single-sentence facts embed
-# more sharply than the long transcripts the record store held, so one floor on
-# the raw cosine replaces the blended floor, the relative cliff and the
-# per-embedder table that store needed. Memory Tuning ``relevance_threshold``
-# overrides it per teamspace.
-DEFAULT_MIN_SIMILARITY = 0.5
+# Cosine a fact must reach to be recalled at all; run notes need more, and every
+# match must also be close to the best one (see ``graph_types``: STRICT_KINDS,
+# DEFAULT_RECALL_CLIFF). Measured on nomic-embed-text only. Memory Tuning
+# ``relevance_threshold`` overrides it per teamspace.
+DEFAULT_MIN_SIMILARITY = 0.52
 
 # Same value ``Memory`` emits, so traces treat both stores alike.
 _SOURCE_TYPE = "unified_memory"
@@ -392,6 +391,12 @@ class GraphMemory:
                     limit=limit,
                     score_threshold=floor,
                     query_time_ms=(time.perf_counter() - start) * 1000,
+                    # What this returns is what the caller puts in its prompt —
+                    # there is no later selection — so it is reported as the
+                    # READ ("Memory Read", what a run's Recalled view lists).
+                    # Reported as a search, a CrewAI agent recalling for itself
+                    # left Recalled empty.
+                    stage="selected",
                     source_type=_SOURCE_TYPE,
                 ),
             )

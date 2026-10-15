@@ -137,43 +137,80 @@ class TestWriteSql:
     async def test_a_fact_already_current_is_not_inserted(self):
         stored, calls = await _run(
             lambda store: store.aadd_fact(_fact(), [0.1, 0.2, 0.3, 0.4]),
-            results=[_result(), _result([("ent-1",)]), _result([("f-old", "30 july")])],
+            results=[
+                _result(),
+                _result([("ent-1",)]),
+                _result([("f-old", "30 july", "{}")]),
+            ],
         )
         assert stored is None
         assert not any("INSERT INTO crew_memory_facts" in sql for sql, _ in calls)
 
     @pytest.mark.asyncio
-    async def test_single_valued_fact_closes_the_value_it_replaces(self):
+    async def test_single_valued_fact_closes_the_value_it_replaces_first(self):
+        """The close precedes the insert: a correction keeps the old key, and
+        only one current copy of a key may exist."""
         stored, calls = await _run(
             lambda store: store.aadd_fact(_fact(), [0.1, 0.2, 0.3, 0.4]),
             results=[
                 _result(),
                 _result([("ent-1",)]),
-                _result([("f-old", "15 june")]),
+                _result([("f-old", "15 june", "{}")]),
                 _result(),
                 _result(),
             ],
         )
-        update_sql, update_params = calls[-1]
+        (update_sql, update_params), (insert_sql, _) = calls[-2], calls[-1]
         assert "SET valid_to = NOW(), superseded_by = :winner" in update_sql
         assert update_params == {
             "winner": stored.id,
             "group_id": "grp",
             "ids": ["f-old"],
         }
+        assert insert_sql.startswith("INSERT INTO crew_memory_facts")
 
     @pytest.mark.asyncio
-    async def test_losing_an_insert_race_stores_nothing_and_retires_nothing(self):
+    async def test_a_corrected_measure_replaces_the_fact_it_corrects(self):
+        old = '{"qualifiers": {"roas": "4.10x"}}'
         stored, calls = await _run(
-            lambda store: store.aadd_fact(_fact(), [0.1, 0.2, 0.3, 0.4]),
+            lambda store: store.aadd_fact(
+                _fact(single=False),
+                [0.1, 0.2, 0.3, 0.4],
+                metadata={"qualifiers": {"roas": "4.36x"}},
+            ),
             results=[
                 _result(),
                 _result([("ent-1",)]),
-                _result([("f-old", "15 june")]),
-                _result(rowcount=0),
+                _result([("f-old", "30 july", old)]),
+                _result(),
+                _result(),
             ],
         )
-        assert stored is None and "UPDATE" not in calls[-1][0]
+        assert stored is not None
+        assert calls[-2][1]["ids"] == ["f-old"]
+
+    @pytest.mark.asyncio
+    async def test_losing_an_insert_race_rolls_the_close_back(self):
+        lakebase_graph.reset_graph_schema_cache()
+        lakebase_graph._ready.add("crew_memory_facts")
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                _result(),
+                _result([("ent-1",)]),
+                _result([("f-old", "15 june", "{}")]),
+                _result(),
+                _result(rowcount=0),
+            ]
+        )
+        ctx = _ctx(session)
+        stored = await _store(session, open_session=lambda: ctx).aadd_fact(
+            _fact(), [0.1, 0.2, 0.3, 0.4]
+        )
+        assert stored is None
+        # The session saw an exception, so its owner rolls the close back.
+        exc_type = ctx.__aexit__.call_args[0][0]
+        assert exc_type is not None and exc_type.__name__ == "_LostRace"
 
 
 class TestReadSql:
@@ -211,7 +248,7 @@ class TestReadSql:
         assert hits == [] and len(calls) == 2  # no fetch, no hop
 
     @pytest.mark.asyncio
-    async def test_notes_and_findings_need_a_closer_match_than_a_user_fact(self):
+    async def test_a_run_note_needs_a_closer_match_than_a_fact(self):
         """0.55 seeds a fact but not a note: a note from an unrelated run is a
         false memory of what happened."""
         _, calls = await _run(
@@ -228,7 +265,7 @@ class TestReadSql:
                 _result(),
             ],
         )
-        assert calls[2][1]["ids"] == ["fact"]
+        assert calls[2][1]["ids"] == ["found", "fact"]
 
     @pytest.mark.asyncio
     async def test_standing_facts_are_this_tenants_procedural_facts(self):

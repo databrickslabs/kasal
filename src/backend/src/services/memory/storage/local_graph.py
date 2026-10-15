@@ -34,6 +34,8 @@ from src.services.memory.engine.graph_types import (
     entity_key,
     fact_kind,
     keyword_tokens,
+    plan_write,
+    qualifiers_of,
     rank_hits,
 )
 from src.services.memory.storage.adapter import embed_text
@@ -156,11 +158,14 @@ class LocalGraphStore:
     ) -> Fact | None:
         """Store ``fact``. ``None`` when the store already holds it.
 
-        One transaction: resolve the entities, skip a fact already current,
-        insert, and — for a single-valued relation — close the value it
-        replaces, pointing at the new one.
+        One transaction: resolve the entities, decide with ``plan_write``
+        (repeat, correction, or a value a single-valued relation replaces),
+        close what the new fact replaces — pointing at it — and insert. The
+        close comes first: a correction keeps the old fact's key, and only one
+        current copy of a key may exist.
         """
         object_key = entity_key(fact.object)
+        qualifiers = qualifiers_of(metadata)
         with self._lock:
             subject_id = self._entity(fact.subject, fact.subject_type)
             object_id = (
@@ -169,15 +174,25 @@ class LocalGraphStore:
                 else None
             )
             current = self._conn.execute(
-                "SELECT id, object_key FROM graph_facts WHERE scope = ? "
+                "SELECT id, object_key, metadata FROM graph_facts WHERE scope = ? "
                 "AND subject_id = ? AND relation = ? AND valid_to IS NULL",
                 (self.scope, subject_id, fact.relation),
             ).fetchall()
-            if any(row[1] == object_key for row in current):
+            write, retire = plan_write(
+                [(str(r[0]), str(r[1]), r[2]) for r in current],
+                object_key,
+                qualifiers,
+                fact.single,
+            )
+            if not write:
                 self._conn.commit()
                 return None
             fact_id = str(uuid.uuid4())
             now = _now()
+            self._conn.executemany(
+                "UPDATE graph_facts SET valid_to = ?, superseded_by = ? WHERE id = ?",
+                [(now, fact_id, old) for old in retire],
+            )
             try:
                 self._conn.execute(
                     "INSERT INTO graph_facts (id, scope, session_id, subject_id, "
@@ -206,18 +221,12 @@ class LocalGraphStore:
                     ),
                 )
             except sqlite3.IntegrityError:  # another process wrote it first
-                self._conn.rollback()
+                self._conn.rollback()  # and the close above with it
                 return None
             self._conn.execute(
                 "INSERT INTO graph_facts_fts (statement, fact_id) VALUES (?, ?)",
                 (fact.statement, fact_id),
             )
-            if fact.single and current:
-                self._conn.executemany(
-                    "UPDATE graph_facts SET valid_to = ?, superseded_by = ? "
-                    "WHERE id = ?",
-                    [(now, fact_id, row[0]) for row in current],
-                )
             self._conn.commit()
         return Fact(
             id=fact_id,

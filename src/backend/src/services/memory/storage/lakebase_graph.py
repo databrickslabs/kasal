@@ -45,6 +45,8 @@ from src.services.memory.engine.graph_types import (
     entity_key,
     fact_kind,
     keyword_tokens,
+    plan_write,
+    qualifiers_of,
     rank_hits,
 )
 from src.services.memory.storage.adapter import embed_text
@@ -78,6 +80,10 @@ _FACT_COLUMNS = (
 
 # Table pairs whose DDL has run in this process (see ``_session``).
 _ready: set[str] = set()
+
+
+class _LostRace(Exception):
+    """Another writer stored the same fact first; the transaction is undone."""
 
 
 def reset_graph_schema_cache() -> None:
@@ -224,12 +230,31 @@ class LakebaseGraphStore:
     ) -> Fact | None:
         """Store ``fact``. ``None`` when the store already holds it.
 
-        One transaction: resolve the entities, skip a fact already current,
-        insert, and — for a single-valued relation — close the value it
-        replaces, pointing at the new one.
+        One transaction: resolve the entities, decide with ``plan_write``
+        (repeat, correction, or a value a single-valued relation replaces),
+        close what the new fact replaces — pointing at it — and insert. The
+        close comes first: a correction keeps the old fact's key, and only one
+        current copy of a key may exist. Losing an insert race rolls the close
+        back with it.
         """
         object_key = entity_key(fact.object)
         fact_id = str(uuid.uuid4())
+        try:
+            return await self._add_fact(
+                fact, embedding, source, metadata, object_key, fact_id
+            )
+        except _LostRace:
+            return None
+
+    async def _add_fact(
+        self,
+        fact: ExtractedFact,
+        embedding: list[float] | None,
+        source: str | None,
+        metadata: dict[str, object] | None,
+        object_key: str,
+        fact_id: str,
+    ) -> Fact | None:
         async with self._session() as session:
             subject_id = await self._entity(session, fact.subject, fact.subject_type)
             object_id = (
@@ -240,7 +265,7 @@ class LakebaseGraphStore:
             current = (
                 await session.execute(
                     sql(
-                        f"SELECT id, object_key FROM {self.facts} "
+                        f"SELECT id, object_key, metadata FROM {self.facts} "
                         "WHERE group_id = :group_id AND subject_id = :subject_id "
                         "AND relation = :relation AND valid_to IS NULL"
                     ),
@@ -251,8 +276,23 @@ class LakebaseGraphStore:
                     },
                 )
             ).fetchall()
-            if any(row[1] == object_key for row in current):
+            write, retire = plan_write(
+                [(str(r[0]), str(r[1]), r[2]) for r in current],
+                object_key,
+                qualifiers_of(metadata),
+                fact.single,
+            )
+            if not write:
                 return None
+            if retire:
+                await session.execute(
+                    sql(
+                        f"UPDATE {self.facts} SET valid_to = NOW(), "
+                        "superseded_by = :winner "
+                        "WHERE group_id = :group_id AND id = ANY(:ids)"
+                    ),
+                    {"winner": fact_id, "group_id": self.group_id, "ids": retire},
+                )
             inserted = await session.execute(
                 sql(
                     f"INSERT INTO {self.facts} (id, group_id, session_id, "
@@ -281,20 +321,9 @@ class LakebaseGraphStore:
                 },
             )
             if not int(getattr(inserted, "rowcount", 0) or 0):
-                return None  # another writer stored it first
-            if fact.single and current:
-                await session.execute(
-                    sql(
-                        f"UPDATE {self.facts} SET valid_to = NOW(), "
-                        "superseded_by = :winner "
-                        "WHERE group_id = :group_id AND id = ANY(:ids)"
-                    ),
-                    {
-                        "winner": fact_id,
-                        "group_id": self.group_id,
-                        "ids": [str(row[0]) for row in current],
-                    },
-                )
+                # Another writer stored it first. Raising rolls the session
+                # back, so the close above is undone with the insert.
+                raise _LostRace
         return Fact(
             id=fact_id,
             subject_id=subject_id,
