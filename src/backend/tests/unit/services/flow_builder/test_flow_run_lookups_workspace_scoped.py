@@ -44,6 +44,7 @@ from src.models.task import Task
 # Imported here so a broken child entry fails as an import error, not as an
 # opaque traceback from a spawned interpreter.
 from src.services.flow_builder import process_executor  # noqa: F401
+from src.utils.encryption_utils import EncryptionUtils
 from src.utils.user_context import GroupContext
 
 BACKEND = pathlib.Path(__file__).resolve().parents[4]
@@ -288,7 +289,13 @@ def runs(tmp_path_factory):
     launched = {}
     for name, context in SCENARIOS.items():
         workdir = tmp_path_factory.mktemp(name)
-        _database(workdir / "app.db")
+        # Tool configs are encrypted on write: seed with the key pair the child
+        # finds under its HOME, so it can decrypt what the parent stored.
+        key_dir = workdir / ".backendcrew" / "keys"
+        key_dir.mkdir(parents=True)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(EncryptionUtils, "get_key_directory", lambda: key_dir)
+            _database(workdir / "app.db")
         out = workdir / "child.json"
         process = subprocess.Popen(
             [sys.executable, "-c", CHILD, str(out)],
