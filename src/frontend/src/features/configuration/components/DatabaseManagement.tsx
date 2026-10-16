@@ -352,9 +352,7 @@ const DatabaseManagement: React.FC = () => {
       setLakebaseConfig(response.data);
       setSuccess('Lakebase configuration saved successfully!');
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.detail || 'Failed to save Lakebase configuration'
-        : 'Failed to save Lakebase configuration';
+      const errorMessage = apiErrorMessage(err, 'Failed to save Lakebase configuration');
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -625,9 +623,7 @@ const DatabaseManagement: React.FC = () => {
       // Reload database info to reflect the backend change in the General tab
       await loadDatabaseInfo();
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.detail || 'Failed to disable Lakebase'
-        : 'Failed to disable Lakebase';
+      const errorMessage = apiErrorMessage(err, 'Failed to disable Lakebase');
       setError(errorMessage);
       // Revert the UI state on error
       setLakebaseBackend('lakebase');
@@ -1148,9 +1144,7 @@ const DatabaseManagement: React.FC = () => {
                                 await migrateLakebase(true, migrateData);
                               }
                             } catch (err: unknown) {
-                              const errorMessage = isErrorWithResponse(err)
-                                ? err.response?.data?.detail || 'Failed to connect to instance. Please verify the instance name and ensure it is running.'
-                                : 'Failed to connect to instance. Please verify the instance name and ensure it is running.';
+                              const errorMessage = apiErrorMessage(err, 'Failed to connect to instance. Please verify the instance name and ensure it is running.');
                               setError(errorMessage);
                             } finally {
                               setLoading(false);
@@ -1400,7 +1394,7 @@ const DatabaseManagement: React.FC = () => {
                   if (isErrorWithResponse(err)) {
                     setHousekeepingResult({
                       success: false,
-                      error: err.response?.data?.detail || err.response?.data?.error || err.message || 'Housekeeping failed',
+                      error: apiErrorMessage(err, err.message || 'Housekeeping failed'),
                     });
                   } else {
                     setHousekeepingResult({ success: false, error: 'Housekeeping failed' });
@@ -1626,9 +1620,7 @@ const DatabaseManagement: React.FC = () => {
                       setError(pf?.remediation?.summary || response.data.message || 'Lakebase did not connect: preflight diagnostics did not pass. Run diagnostics for details.');
                     }
                   } catch (err: unknown) {
-                    const errorMessage = isErrorWithResponse(err)
-                      ? err.response?.data?.detail || 'Failed to enable Lakebase'
-                      : 'Failed to enable Lakebase';
+                    const errorMessage = apiErrorMessage(err, 'Failed to enable Lakebase');
                     setError(errorMessage);
                   } finally {
                     setLoading(false);
