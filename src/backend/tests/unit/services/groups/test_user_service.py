@@ -240,37 +240,55 @@ async def test_existing_user_is_not_promoted_when_no_admin_exists():
 
     assert result is user
     assert not _granted_admin(svc.user_repo)
+    svc.user_repo.grant_first_system_admin.assert_not_awaited()
+
+
+# The repository's conditional UPDATEs are tested against real databases in
+# tests/unit/repositories/test_user_repository_admin_guards.py.
 
 
 @pytest.mark.asyncio
-async def test_handle_first_user_new_user_first():
+async def test_handle_first_user_asks_the_repository_to_promote_the_first_user():
     svc = make_service()
     user = make_user(is_system_admin=False)
-    svc.user_repo.count = AsyncMock(return_value=1)  # Only this user
-    svc.user_repo.update = AsyncMock()
+    svc.user_repo.grant_first_system_admin = AsyncMock(return_value=True)
 
     await svc._handle_first_user_admin_setup(user)
-    assert _granted_admin(svc.user_repo)
+
+    svc.user_repo.grant_first_system_admin.assert_awaited_once_with("u1")
 
 
 @pytest.mark.asyncio
-async def test_handle_first_user_new_user_not_first():
-    svc = make_service()
-    user = make_user(is_system_admin=False)
-    svc.user_repo.count = AsyncMock(return_value=5)  # Multiple users
-    svc.user_repo.update = AsyncMock()
-
-    await svc._handle_first_user_admin_setup(user)
-    svc.user_repo.update.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_handle_first_user_exception_swallowed():
+async def test_handle_first_user_error_is_logged_at_error(caplog):
     svc = make_service()
     user = make_user()
-    svc.user_repo.count = AsyncMock(side_effect=Exception("count error"))
-    # Should not raise
-    await svc._handle_first_user_admin_setup(user)
+    svc.user_repo.grant_first_system_admin = AsyncMock(
+        side_effect=Exception("db error")
+    )
+
+    with caplog.at_level("ERROR", logger="src.services.groups.users"):
+        await svc._handle_first_user_admin_setup(user)  # sign-in continues
+
+    assert any(
+        r.levelname == "ERROR" and "NOT granted" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_race_recovered_user_gets_the_bootstrap_check():
+    """A row found created by a concurrent request is re-checked."""
+    svc = make_service()
+    recovered = make_user(email="race@example.com")
+    svc.user_repo.get_by_email = AsyncMock(side_effect=[None, recovered])
+    svc.user_repo.get_by_username = AsyncMock(return_value=None)
+    svc.user_repo.create = AsyncMock(side_effect=Exception("UNIQUE constraint failed"))
+    svc.session = AsyncMock()
+    svc.session.expunge_all = MagicMock()
+    svc.user_repo.grant_first_system_admin = AsyncMock(return_value=False)
+
+    assert await svc.get_or_create_user_by_email("race@example.com") is recovered
+    svc.user_repo.grant_first_system_admin.assert_awaited_once_with("u1")
 
 
 # ---- the last system admin is protected ----
@@ -286,7 +304,7 @@ async def test_last_admin_cannot_be_demoted():
 
     svc = make_service()
     svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
-    svc.user_repo.count_system_admins = AsyncMock(return_value=1)
+    svc.user_repo.revoke_system_admin_unless_last = AsyncMock(return_value=False)
     svc.user_repo.update = AsyncMock()
 
     with pytest.raises(ConflictError, match="last system administrator"):
@@ -297,15 +315,16 @@ async def test_last_admin_cannot_be_demoted():
 
 
 @pytest.mark.asyncio
-async def test_admin_can_be_demoted_while_another_admin_remains():
+async def test_admin_is_demoted_through_the_atomic_guard():
     svc = make_service()
     svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
-    svc.user_repo.count_system_admins = AsyncMock(return_value=2)
+    svc.user_repo.revoke_system_admin_unless_last = AsyncMock(return_value=True)
     svc.user_repo.update = AsyncMock()
 
     await svc.update_user_permissions("u1", _permission_update(is_system_admin=False))
 
-    svc.user_repo.update.assert_awaited_once_with("u1", {"is_system_admin": False})
+    svc.user_repo.revoke_system_admin_unless_last.assert_awaited_once_with("u1")
+    svc.user_repo.update.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -313,14 +332,16 @@ async def test_last_admin_keeps_other_permission_changes():
     """Only removing admin is refused; the last admin's other flags can change."""
     svc = make_service()
     svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
-    svc.user_repo.count_system_admins = AsyncMock(return_value=1)
     svc.user_repo.update = AsyncMock()
 
     await svc.update_user_permissions(
         "u1", _permission_update(is_personal_workspace_manager=False)
     )
 
-    svc.user_repo.update.assert_awaited_once()
+    svc.user_repo.update.assert_awaited_once_with(
+        "u1", {"is_personal_workspace_manager": False}
+    )
+    svc.user_repo.revoke_system_admin_unless_last.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -329,7 +350,7 @@ async def test_last_admin_cannot_be_deleted():
 
     svc = make_service()
     svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
-    svc.user_repo.count_system_admins = AsyncMock(return_value=1)
+    svc.user_repo.revoke_system_admin_unless_last = AsyncMock(return_value=False)
     svc.user_repo.delete = AsyncMock()
 
     with pytest.raises(ConflictError, match="last system administrator"):
@@ -501,12 +522,11 @@ async def test_get_or_create_user_by_email_create_new_and_first_user_admin():
             id="u2", email="new@x.com", personal_group_id="user_new"
         )
         repo.create = AsyncMock(return_value=created)
-        repo.count = AsyncMock(return_value=1)  # first user
-        repo.update = AsyncMock()
+        repo.grant_first_system_admin = AsyncMock(return_value=True)
         Repo.return_value = repo
 
         svc = UserService(session)
         out = await svc.get_or_create_user_by_email("new@x.com")
         assert out is created
-        # Should grant admin to first user
-        repo.update.assert_called()
+        # A newly created user goes through the first-admin bootstrap
+        repo.grant_first_system_admin.assert_awaited_once_with("u2")

@@ -159,19 +159,22 @@ class UserService:
         # Return updated user
         return await self.user_repo.get(user_id)
 
-    async def _refuse_removing_last_admin(self, user: User, action: str) -> None:
-        """Raise ConflictError when ``user`` is the only system administrator.
+    async def _revoke_admin_unless_last(self, user: User, action: str) -> None:
+        """Clear ``user``'s system-admin flag, or raise ConflictError if it is the last.
 
         Nothing promotes a user when no admin is left, so the installation would
-        have no one who can manage users, teamspaces or global settings.
+        have no one who can manage users, teamspaces or global settings. The
+        repository checks and writes in one statement, so two admins removing
+        each other at once cannot both succeed.
         """
         if not getattr(user, "is_system_admin", False):
             return
-        if await self.user_repo.count_system_admins() <= 1:
+        if not await self.user_repo.revoke_system_admin_unless_last(user.id):
             raise ConflictError(
                 f"Cannot {action} the last system administrator. "
                 "Make another user a system administrator first."
             )
+        logger.info("System admin removed from user %s", user.id)
 
     async def update_user_permissions(
         self, user_id: str, permission_update: UserPermissionUpdate
@@ -187,16 +190,14 @@ class UserService:
             exclude_unset=True, exclude_none=True
         )
         if update_data.get("is_system_admin") is False:
-            await self._refuse_removing_last_admin(user, "remove admin rights from")
-        if "is_system_admin" in update_data:
-            logger.info(
-                "System admin set to %s for user %s",
-                update_data["is_system_admin"],
-                user_id,
-            )
+            await self._revoke_admin_unless_last(user, "remove admin rights from")
+            update_data.pop("is_system_admin")
+        elif update_data.get("is_system_admin") is True:
+            logger.info("System admin granted to user %s", user_id)
 
         # Update user permissions
-        await self.user_repo.update(user_id, update_data)
+        if update_data:
+            await self.user_repo.update(user_id, update_data)
 
         # Return updated user
         return await self.user_repo.get(user_id)
@@ -369,7 +370,10 @@ class UserService:
                         logger.info(
                             f"Successfully retrieved user created by concurrent request: {email}"
                         )
-                        # The request that created the row ran the bootstrap.
+                        # Re-check: the request that inserted the row may not
+                        # have reached its bootstrap, and it is safe to repeat
+                        # (it only ever promotes the first user).
+                        await self._handle_first_user_admin_setup(existing_user)
                         return existing_user
                     else:
                         logger.error(
@@ -388,46 +392,40 @@ class UserService:
     async def _handle_first_user_admin_setup(self, user: User) -> None:
         """Make the first user of a fresh install its system administrator.
 
-        Called only when a user row has just been created. It fires when that
-        row is the only one in the users table, which is the install's first
-        sign-in. It never promotes an existing user: when an installation has
-        users but no admin, nobody is promoted on their next request, and
-        ``_refuse_removing_last_admin`` keeps the API from reaching that state.
+        Called when a user row has just been created (or found created by a
+        concurrent request). It promotes ``user`` only while no system admin
+        exists and ``user`` is the earliest row in the users table, in one
+        conditional UPDATE, so two first sign-ins at once still leave exactly
+        the first one admin. It never promotes anyone else: an installation
+        with users but no admin stays that way (SECURITY.md describes the
+        recovery), and ``_revoke_admin_unless_last`` keeps the API from
+        reaching that state.
 
         Args:
             user: The user that was just created
         """
         try:
-            total_users = await self.user_repo.count()
-
-            # If this is the only user (count = 1 after creation), make them system admin
-            if total_users == 1:
+            if await self.user_repo.grant_first_system_admin(user.id):
                 logger.info(
-                    f"First user in system detected. Granting system admin privileges to {user.email}"
+                    "First user of this installation: granted system admin to %s",
+                    user.email,
                 )
-
-                # Grant system admin permission
-                await self.user_repo.update(
-                    user.id,
-                    {
-                        "is_system_admin": True,
-                        "is_personal_workspace_manager": True,  # System admins also get personal workspace access
-                    },
-                )
-
-                logger.info(f"Granted system admin privileges to {user.email}")
-
-        except Exception as e:
-            # Log the error but don't fail user creation
-            logger.error(f"Error during first user admin setup: {e}")
-            # Don't raise the exception - allow user creation to continue
+        except Exception:
+            # Sign-in continues, but the install may now have no system admin.
+            logger.exception(
+                "First system admin was NOT granted to %s; restore one as "
+                "described under 'The first system admin' in SECURITY.md",
+                user.email,
+            )
 
     async def delete_user(self, user_id: str) -> bool:
         """Delete a user"""
         user = await self.user_repo.get(user_id)
         if not user:
             return False
-        await self._refuse_removing_last_admin(user, "delete")
+        # Revoked first, atomically, so two admins deleting each other cannot
+        # both pass; the delete below runs in the same transaction.
+        await self._revoke_admin_unless_last(user, "delete")
 
         # First, remove user from all groups (to avoid foreign key constraint violations)
         from src.services.groups.groups import GroupService
