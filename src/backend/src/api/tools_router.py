@@ -13,7 +13,7 @@ from src.core.exceptions import (
     BadRequestError,
     ForbiddenError,
 )
-from src.core.permissions import check_role_in_context, require_admin
+from src.core.permissions import check_role_in_context, is_system_admin, require_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.tool import (
     ToggleResponse,
@@ -170,7 +170,8 @@ async def update_tool(
 ) -> ToolResponse:
     """
     Update an existing tool with group isolation.
-    Only Editors and Admins can update tools.
+    Only Editors and Admins can update tools; a global tool (no group) only
+    a system admin (enforced in ToolService, so every caller gets it).
 
     Uses dependency injection to get ToolService with repository.
 
@@ -198,7 +199,8 @@ async def delete_tool(
 ) -> None:
     """
     Delete a tool with group isolation.
-    Only Editors and Admins can delete tools.
+    Only Editors and Admins can delete tools; a global tool (no group) only
+    a system admin (enforced in ToolService).
 
     Args:
         tool_id: ID of the tool to delete
@@ -301,7 +303,6 @@ async def update_tool_configuration(
 
 
 @router.patch("/{tool_id}/global-availability", response_model=ToolResponse)
-@require_admin()
 async def set_global_availability(
     tool_id: int,
     payload: Dict[str, Any],
@@ -312,16 +313,12 @@ async def set_global_availability(
 
     Rejects if the tool is group-scoped (must be a base tool with group_id=None).
     """
+    # System admins only: a base tool is every workspace's tool.
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can change global tool availability")
     if "enabled" not in payload or not isinstance(payload["enabled"], bool):
         raise BadRequestError("'enabled' boolean is required")
 
-    # Ensure the tool exists and is a base (global) tool
-    tool = await service.get_tool_by_id(tool_id)
-    if getattr(tool, "group_id", None) is not None:
-        raise BadRequestError("Not a global tool")
-
-    # Update enabled on the base tool
-    updated = await service.update_tool(
-        tool_id, ToolUpdate(enabled=bool(payload["enabled"]))
+    return await service.set_global_availability(
+        tool_id, payload["enabled"], group_context
     )
-    return updated

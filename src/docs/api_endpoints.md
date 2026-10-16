@@ -352,10 +352,10 @@ Note the trailing slash on the collection routes.
 | `GET` | `/tools/global` | Globally available tools |
 | `POST` | `/tools/` | Create a tool |
 | `GET` | `/tools/{tool_id}` | Get a tool |
-| `PUT` | `/tools/{tool_id}` | Update a tool |
-| `DELETE` | `/tools/{tool_id}` | Delete a tool |
+| `PUT` | `/tools/{tool_id}` | Update a tool (a global tool: system admins only) |
+| `DELETE` | `/tools/{tool_id}` | Delete a tool (a global tool: system admins only) |
 | `PATCH` | `/tools/{tool_id}/toggle-enabled` | Enable / disable — **not** `/enable` or `/disable` |
-| `PATCH` | `/tools/{tool_id}/global-availability` | Make available to every teamspace |
+| `PATCH` | `/tools/{tool_id}/global-availability` | Make available to every teamspace (system admins only) |
 | `GET` | `/tools/configurations/all` | Every tool configuration |
 | `GET` | `/tools/configurations/{tool_name}` | One tool's configuration |
 | `PUT` | `/tools/configurations/{tool_name}` | Update it |

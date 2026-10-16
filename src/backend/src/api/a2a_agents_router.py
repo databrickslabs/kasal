@@ -19,7 +19,7 @@ from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, Body, Depends, status
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-from src.core.permissions import check_role_in_context, get_effective_role
+from src.core.permissions import check_role_in_context, is_system_admin
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.models.a2a_agent import A2AAgent
 from src.schemas.a2a_agent import (
@@ -50,23 +50,13 @@ ServiceDep = Annotated[A2AAgentService, Depends(get_service)]
 
 
 def _is_global_admin(group_context: Optional[GroupContext]) -> bool:
-    """Whether the caller may manage GLOBAL remote agents.
+    """Whether the caller may manage GLOBAL remote agents: system admins only.
 
     The same gate ``mcp_router`` uses, and the same reasoning: a global row is
     available to every workspace, so changing one is system administration.
+    A workspace admin's role does not reach it.
     """
-    try:
-        role = get_effective_role(group_context) if group_context else None
-        if role and role.lower() == "admin":
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    return bool(
-        group_context is not None
-        and getattr(
-            getattr(group_context, "current_user", None), "is_system_admin", False
-        )
-    )
+    return is_system_admin(group_context) if group_context is not None else False
 
 
 def _require_global_admin(group_context: Optional[GroupContext]) -> None:
@@ -170,7 +160,7 @@ async def delete_agent(
 ) -> None:
     """Remove a global agent, and every workspace's opt-in along with it."""
     _require_global_admin(group_context)
-    if not await service.delete_agent(agent_id):
+    if not await service.delete_agent(agent_id, group_context):
         raise NotFoundError(f"No global remote agent {agent_id}.")
 
 
@@ -186,7 +176,9 @@ async def set_global_availability(
     Withdrawing cascades immediately, whatever workspaces had enabled.
     """
     _require_global_admin(group_context)
-    agent = await service.set_global_availability(agent_id, _enabled_flag(payload))
+    agent = await service.set_global_availability(
+        agent_id, _enabled_flag(payload), group_context
+    )
     if not agent:
         raise NotFoundError(f"No global remote agent {agent_id}.")
     return _to_response(agent)

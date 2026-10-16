@@ -4,10 +4,12 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import (
+    BadRequestError,
     ForbiddenError,
     KasalError,
     NotFoundError,
 )
+from src.core.permissions import is_system_admin
 from src.repositories.group_tool_repository import GroupToolRepository
 from src.repositories.tool_repository import ToolRepository
 from src.schemas.tool import (
@@ -57,6 +59,14 @@ def _filter_personal_workspace_tools(
         for t in tools
         if getattr(t, "title", None) not in PERSONAL_WORKSPACE_ONLY_TOOLS
     ]
+
+
+def _require_system_admin_for_global(tool: Any, group_context: GroupContext) -> None:
+    """A tool with no group is every workspace's tool, so only a system admin
+    may change or delete it. Workspaces change their own copy instead (the
+    toggle and configuration paths create one)."""
+    if getattr(tool, "group_id", None) is None and not is_system_admin(group_context):
+        raise ForbiddenError(detail="Only system admins can change global tools")
 
 
 class ToolService:
@@ -376,35 +386,23 @@ class ToolService:
             logger.error(f"Failed to create tool: {str(e)}")
             raise KasalError(detail=f"Failed to create tool: {str(e)}")
 
-    async def update_tool(self, tool_id: int, tool_data: ToolUpdate) -> ToolResponse:
-        """
-        Update an existing tool.
-
-        Args:
-            tool_id: ID of tool to update
-            tool_data: Tool data for update
-
-        Returns:
-            ToolResponse of the updated tool
-
-        Raises:
-            HTTPException: If tool not found or update fails
-        """
-        # Check if tool exists
+    async def set_global_availability(
+        self, tool_id: int, enabled: bool, group_context: GroupContext
+    ) -> ToolResponse:
+        """System admin: make a global tool available to every workspace, or
+        withdraw it. Refuses a workspace's own tool."""
+        if not is_system_admin(group_context):
+            raise ForbiddenError(
+                detail="Only system admins can change global tool availability"
+            )
         tool = await self.repository.get(tool_id)
         if not tool:
-            logger.warning(f"Tool with ID {tool_id} not found for update")
             raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
-
-        try:
-            # Update tool
-            update_data = tool_data.model_dump(exclude_unset=True)
-            updated_tool = await self.repository.update(tool_id, update_data)
-            await self._invalidate_enabled_tools_cache()
-            return ToolResponse.model_validate(updated_tool)
-        except Exception as e:
-            logger.error(f"Failed to update tool: {str(e)}")
-            raise KasalError(detail=f"Failed to update tool: {str(e)}")
+        if tool.group_id is not None:
+            raise BadRequestError(detail="Not a global tool")
+        updated_tool = await self.repository.update(tool_id, {"enabled": enabled})
+        await self._invalidate_enabled_tools_cache()
+        return ToolResponse.model_validate(updated_tool)
 
     async def update_tool_with_group_check(
         self, tool_id: int, tool_data: ToolUpdate, group_context: GroupContext
@@ -439,6 +437,7 @@ class ToolService:
                 raise NotFoundError(
                     detail=f"Tool with ID {tool_id} not found"
                 )  # Return 404 not 403 to avoid information leakage
+        _require_system_admin_for_global(tool, group_context)
 
         try:
             # Update tool
@@ -449,34 +448,6 @@ class ToolService:
         except Exception as e:
             logger.error(f"Failed to update tool: {str(e)}")
             raise KasalError(detail=f"Failed to update tool: {str(e)}")
-
-    async def delete_tool(self, tool_id: int) -> bool:
-        """
-        Delete a tool by ID.
-
-        Args:
-            tool_id: ID of tool to delete
-
-        Returns:
-            True if deleted successfully
-
-        Raises:
-            HTTPException: If tool not found or deletion fails
-        """
-        # Check if tool exists
-        tool = await self.repository.get(tool_id)
-        if not tool:
-            logger.warning(f"Tool with ID {tool_id} not found for deletion")
-            raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
-
-        try:
-            # Delete tool
-            await self.repository.delete(tool_id)
-            await self._invalidate_enabled_tools_cache()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to delete tool: {str(e)}")
-            raise KasalError(detail=f"Failed to delete tool: {str(e)}")
 
     async def delete_tool_with_group_check(
         self, tool_id: int, group_context: GroupContext
@@ -510,6 +481,7 @@ class ToolService:
                 raise NotFoundError(
                     detail=f"Tool with ID {tool_id} not found"
                 )  # Return 404 not 403 to avoid information leakage
+        _require_system_admin_for_global(tool, group_context)
 
         try:
             # Delete tool
@@ -519,37 +491,6 @@ class ToolService:
         except Exception as e:
             logger.error(f"Failed to delete tool: {str(e)}")
             raise KasalError(detail=f"Failed to delete tool: {str(e)}")
-
-    async def toggle_tool_enabled(self, tool_id: int) -> ToggleResponse:
-        """
-        Toggle the enabled status of a tool.
-
-        Args:
-            tool_id: ID of tool to toggle
-
-        Returns:
-            ToggleResponse with message and current enabled state
-
-        Raises:
-            HTTPException: If tool not found or toggle fails
-        """
-        try:
-            # Toggle tool enabled status using repository
-            tool = await self.repository.toggle_enabled(tool_id)
-            await self._invalidate_enabled_tools_cache()
-            if not tool:
-                logger.warning(f"Tool with ID {tool_id} not found for toggle")
-                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
-
-            status_text = "enabled" if tool.enabled else "disabled"
-            return ToggleResponse(
-                message=f"Tool {status_text} successfully", enabled=tool.enabled
-            )
-        except KasalError:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to toggle tool: {str(e)}")
-            raise KasalError(detail=f"Failed to toggle tool: {str(e)}")
 
     async def toggle_tool_enabled_with_group_check(
         self, tool_id: int, group_context: GroupContext
@@ -677,41 +618,6 @@ class ToolService:
         except Exception as e:
             logger.error(f"Error getting tool config for '{tool_name}': {str(e)}")
             return None
-
-    async def update_tool_configuration_by_title(
-        self, title: str, config: Dict[str, Any]
-    ) -> ToolResponse:
-        """
-        Update configuration for a tool identified by its title.
-
-        Args:
-            title: Title of the tool to update
-            config: New configuration dictionary
-
-        Returns:
-            ToolResponse of the updated tool
-
-        Raises:
-            HTTPException: If tool not found or update fails
-        """
-        try:
-            updated_tool = await self.repository.update_configuration_by_title(
-                title, config
-            )
-            await self._invalidate_enabled_tools_cache()
-            if not updated_tool:
-                logger.warning(
-                    f"Tool with title '{title}' not found for configuration update"
-                )
-                raise NotFoundError(detail=f"Tool with title '{title}' not found")
-            return ToolResponse.model_validate(updated_tool)
-        except KasalError:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to update tool configuration by title: {str(e)}")
-            raise KasalError(
-                detail=f"Failed to update tool configuration by title: {str(e)}"
-            )
 
     async def get_all_tool_configurations_for_group(
         self, group_context: GroupContext
