@@ -70,8 +70,12 @@ class TestCrewAnnouncesBeforeTeardown:
 
 
 class TestFlowAnnouncesBeforeTeardown:
+    #: The flow's announcement: the status write flow_builder/run_outcome decides.
+    ANNOUNCE = r"update_status\(\s+job_id=execution_id, \*\*announcement"
+
     def test_it_announces_at_all(self):
-        assert "Announced COMPLETED for" in FLOW_SOURCE
+        assert re.search(self.ANNOUNCE, FLOW_SOURCE)
+        assert "announcement = early_announcement(result)" in FLOW_SOURCE
 
     @pytest.mark.parametrize(
         "teardown",
@@ -79,7 +83,7 @@ class TestFlowAnnouncesBeforeTeardown:
         ids=["event-bus-flush", "final-flush"],
     )
     def test_the_announcement_precedes_teardown(self, teardown):
-        announce = _index_of(FLOW_SOURCE, r'message="Flow execution completed"')
+        announce = _index_of(FLOW_SOURCE, self.ANNOUNCE)
         assert announce < _index_of(FLOW_SOURCE, teardown)
 
     def test_it_uses_the_shared_uppercase_status(self):
@@ -88,7 +92,14 @@ class TestFlowAnnouncesBeforeTeardown:
         Mixing the two is how a finished run once ended up sitting at a
         lowercase "running" that nothing recognised as terminal.
         """
-        announce = _index_of(FLOW_SOURCE, r'message="Flow execution completed"')
-        window = FLOW_SOURCE[announce - 600 : announce]
-        assert "ExecutionStatus.COMPLETED.value" in window
-        assert "FlowExecutionStatus" not in window
+        from src.services.flow_builder.run_outcome import early_announcement
+
+        failed = {"status": "failed", "error": "boom"}
+        assert early_announcement({"result": "answer"})["status"] == "COMPLETED"
+        assert early_announcement(failed)["status"] == "FAILED"
+
+    def test_it_is_fail_open(self):
+        """A late announcement must never fail a run that actually succeeded."""
+        announce = _index_of(FLOW_SOURCE, self.ANNOUNCE)
+        window = FLOW_SOURCE[announce : announce + 1200]
+        assert "Early completion announcement" in window
