@@ -9,8 +9,9 @@ from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
+from src.core.permissions import can_clear_workspace_history
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.execution_trace import (
     DeleteTraceResponse,
@@ -489,7 +490,12 @@ async def delete_all_traces(
     service: ExecutionTraceServiceDep, group_context: GroupContextDep
 ) -> DeleteTraceResponse:
     """
-    Delete all execution traces for the current group.
+    Delete all execution traces in the selected workspace.
+
+    Allowed roles: admin, or anyone in their own personal workspace, the same
+    rule as wiping the run history (DELETE /executions/history). It needs one
+    selected workspace, so one request cannot clear every workspace the
+    caller belongs to.
 
     Args:
         group_context: Group context from headers for authorization
@@ -497,4 +503,8 @@ async def delete_all_traces(
     Returns:
         DeleteTraceResponse with information about deleted traces
     """
+    if not can_clear_workspace_history(group_context):
+        raise ForbiddenError("Only admins can delete all traces")
+    if len(group_context.group_ids or []) != 1:
+        raise BadRequestError("Select a workspace before deleting its traces")
     return await service.delete_all_traces_for_group(group_context)

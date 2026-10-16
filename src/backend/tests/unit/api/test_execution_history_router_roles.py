@@ -5,6 +5,7 @@ admin action and needs one selected workspace. Deleting a single run needs
 editor or admin. Operators run and monitor; they delete nothing.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -21,13 +22,23 @@ from tests.unit.api.conftest import register_exception_handlers
 _DELETED = DeleteResponse(message="deleted")
 
 
+_PERSONAL = "user_3c9e1f7a2b4d4e6f8a0b1c2d3e4f5a6b"
+
+
 def _client(role, group_ids=("team_1",)):
     service = AsyncMock()
     service.delete_all_executions.return_value = _DELETED
     service.delete_execution.return_value = _DELETED
     service.delete_execution_by_job_id.return_value = _DELETED
     context = GroupContext(
-        group_ids=list(group_ids), group_email="member@example.com", user_role=role
+        group_ids=list(group_ids),
+        group_email="member@example.com",
+        user_role=role,
+        current_user=SimpleNamespace(
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+            personal_group_id=_PERSONAL,
+        ),
     )
 
     app = FastAPI()
@@ -62,6 +73,16 @@ def test_admin_wipes_the_selected_workspace():
 
     assert response.status_code == 200
     service.delete_all_executions.assert_awaited_once_with(group_ids=["team_1"])
+
+
+def test_a_user_clears_their_own_personal_history():
+    """In the personal workspace the user is an editor, and its only member."""
+    client, service = _client(None, group_ids=(_PERSONAL,))
+
+    response = client.delete("/executions/history")
+
+    assert response.status_code == 200
+    service.delete_all_executions.assert_awaited_once_with(group_ids=[_PERSONAL])
 
 
 def test_wipe_needs_one_selected_workspace():

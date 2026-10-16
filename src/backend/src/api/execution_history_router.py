@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from src.config.settings import settings
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
-from src.core.permissions import check_role_in_context
+from src.core.permissions import can_clear_workspace_history, check_role_in_context
 from src.dependencies.providers import GroupContextDep, RequestEmailDep, SessionDep
 from src.schemas.execution_history import (
     DeleteResponse,
@@ -304,8 +304,9 @@ async def delete_all_executions(
     """
     Delete all executions and their associated data in the selected workspace.
 
-    Allowed roles: admin. This also deletes the workspace's traces, logs and
-    workflow-recipe library, the same bar as deleting every crew.
+    Allowed roles: admin, or anyone in their own personal workspace. This also
+    deletes the workspace's traces, logs and workflow-recipe library, the same
+    bar as deleting every crew.
 
     It needs one selected workspace: with none, the scope is every workspace
     the caller belongs to, and one request must not wipe them all. A
@@ -315,7 +316,7 @@ async def delete_all_executions(
     Returns:
         DeleteResponse with information about the deleted data
     """
-    if not check_role_in_context(group_context, ["admin"]):
+    if not can_clear_workspace_history(group_context):
         raise ForbiddenError("Only admins can delete the whole run history")
     if job_id is not None:
         raise BadRequestError("Use DELETE /executions/{job_id} to delete one run")

@@ -40,6 +40,8 @@ import { AgentYaml, TaskYaml } from '../../../types/workflow/crewPayload';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { usePermissionStore } from '../../../store/permissions';
+import { useGroupStore } from '../../../store/groups';
+import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../store/user';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
@@ -76,9 +78,13 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
   const { userRole } = usePermissions();
-  // Wiping the whole history (runs, traces, logs, recipes) is an admin action.
+  // Wiping the whole history (runs, traces, logs, recipes) is an admin action,
+  // and every user may clear their own personal workspace.
   const isSystemAdmin = usePermissionStore(state => state.isSystemAdmin);
-  const canDeleteAllRuns = userRole === 'admin' || isSystemAdmin;
+  const currentGroupId = useGroupStore(state => state.currentGroupId);
+  const personalGroupId = usePersonalGroupId();
+  const canDeleteAllRuns = userRole === 'admin' || isSystemAdmin
+    || isPersonalWorkspaceId(currentGroupId, personalGroupId);
   const dark = useThemeStore(state => state.isDarkMode);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const {

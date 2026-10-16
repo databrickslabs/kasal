@@ -178,6 +178,18 @@ def is_personal_scope(group_context: GroupContext) -> bool:
     return list(group_context.group_ids or []) == [personal_id]
 
 
+def can_clear_workspace_history(group_context: GroupContext) -> bool:
+    """Whether the caller may wipe the scope's whole run or trace history.
+
+    An admin of the scope may, and so may anyone in their own personal
+    workspace: there they are its only member, even when their role there is
+    editor.
+    """
+    return check_role_in_context(group_context, ["admin"]) or is_personal_scope(
+        group_context
+    )
+
+
 def is_workspace_admin(group_context: GroupContext) -> bool:
     """
     Check if the user is an admin of their current workspace.
