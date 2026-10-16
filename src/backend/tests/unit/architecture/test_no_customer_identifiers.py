@@ -1,11 +1,11 @@
 """Customer, tenant and personal identifiers stay out of the tracked tree.
 
-The repository is public. A review found one customer's name, catalog and
+The repository is public. A review found one customer's name, catalogs and
 schema prefixes, Power BI workspace / tenant / dataset / report GUIDs, a
-developer's personal catalog, named workspaces and short secret prefixes in
-tracked files. They were replaced with placeholders (``acme_*``, ``main``,
-``00000000-0000-0000-0000-00000000000N``, ``example.*``); this test keeps them
-from coming back.
+workspace user id, a developer's personal catalog, named workspaces and short
+secret prefixes in tracked files. They were replaced with placeholders
+(``acme_*``, ``main``, ``00000000-0000-0000-0000-00000000000N``, ``example.*``);
+this test keeps them from coming back.
 
 It must not leak what it guards, so it holds salted SHA-256 fingerprints, never
 the values, and a failure names the file and line, never the value (CI logs of
@@ -14,11 +14,14 @@ a public repository are public too).
 How a file is checked: the text is lower-cased and split into tokens (runs of
 letters and digits joined by ``_`` or ``-``). Every run of up to
 ``_MAX_PARTS`` consecutive parts of a token is joined with ``_`` and
-fingerprinted, so ``x_y`` is caught inside ``a__x_y_z`` and as ``X-Y``. File
-paths are checked the same way.
+fingerprinted, so ``x_y`` is caught inside ``a__x_y_z`` and as ``X-Y``. Short
+values that could be part of an ordinary name live in ``_BANNED_WHOLE`` and
+match only a whole token. File paths are checked the same way.
 
 To guard another value, print its fingerprint locally and add it to
-``_BANNED`` with a comment naming its KIND only — never commit the value::
+``_BANNED`` (or ``_BANNED_WHOLE``) with a comment naming its KIND only — never
+commit the value. A value of more than ``_MAX_PARTS`` parts can never match;
+guard a distinctive run of it instead::
 
     uv run python tests/unit/architecture/test_no_customer_identifiers.py <value>
 """
@@ -46,13 +49,19 @@ _SKIP_SUFFIXES = ("package-lock.json", "uv.lock")
 #: Salted fingerprints of removed identifiers, grouped by kind.
 _BANNED = frozenset(
     {
-        # customer name (2 variants)
+        # customer name: abbreviations (2) and full-name forms (4)
         "9bdd4b9afdf17bbc171702b7",
         "4a081279a98242442a2fe9b2",
-        # customer catalog (3 variants)
+        "5522a78f70e5977741f85878",
+        "00a4f22f57082e7d0532bade",
+        "e9344ac5ea76b7f9de91be93",
+        "5419bc318e11049362a1f089",
+        # customer catalogs (5 variants, two catalogs)
         "817a60ff00ababe3294452e9",
         "d653f4cdf708bca3c8c90502",
         "e583a0dc3caa1e6f4052af31",
+        "122d6fd01d1b746d6bd8c085",
+        "1acca95d3d66acec30aba613",
         # customer schema prefixes
         "86cca71678a451e2001239c3",
         "2fad3c7b824e656f45e0d862",
@@ -68,8 +77,9 @@ _BANNED = frozenset(
         "b625774110e84ec6c8cc2a46",
         "8e6026649d648a699ea4c74c",
         "40ba05b708b1687e7c622a34",
-        # request id captured from a live workspace
+        # request id and user id captured from a live workspace
         "22ebde13584cd59727758bba",
+        "b429f3ec07808f2028cdb1ed",
         # secret fragments
         "c4da6e00ed7d861ccaa20694",
         "b981bd8abe364ca70ace47e1",
@@ -79,6 +89,14 @@ _BANNED = frozenset(
         # named workspaces
         "449a380003eeb5d1bc1d794a",
         "38e226745dad2fe2a83a3bc0",
+    }
+)
+
+#: Matched only when they are the WHOLE token, never a part of a longer name.
+_BANNED_WHOLE = frozenset(
+    {
+        # customer short name (3 letters)
+        "e3cea51ec0b9b7056fbad97a",
     }
 )
 
@@ -97,15 +115,29 @@ def _windows(token: str):
 class _Matcher:
     """Caches the verdict per distinct token; most tokens repeat across files."""
 
-    def __init__(self, banned: frozenset[str] = _BANNED) -> None:
+    def __init__(
+        self,
+        banned: frozenset[str] = _BANNED,
+        banned_whole: frozenset[str] = _BANNED_WHOLE,
+    ) -> None:
         self._banned = banned
+        self._banned_whole = banned_whole
         self._seen: dict[str, str | None] = {}
 
     def banned(self, token: str) -> str | None:
         if token not in self._seen:
-            self._seen[token] = next(
-                (fp for w in _windows(token) if (fp := fingerprint(w)) in self._banned),
-                None,
+            whole = fingerprint("_".join(_SEP.split(token)))
+            self._seen[token] = (
+                whole
+                if whole in self._banned_whole
+                else next(
+                    (
+                        fp
+                        for w in _windows(token)
+                        if (fp := fingerprint(w)) in self._banned
+                    ),
+                    None,
+                )
             )
         return self._seen[token]
 
@@ -157,6 +189,16 @@ def test_matcher_catches_spelling_and_embedding_variants():
     assert matcher.hits("docs/zq_tenant_example.json")
 
 
+def test_whole_token_values_do_not_match_inside_longer_names():
+    matcher = _Matcher(frozenset(), frozenset({fingerprint("qzx")}))
+    text = (
+        "Example QZX Ltd\n"  # whole token, any case
+        "qzx_sales qzx-sales aqzxb\n"  # part of a longer token: not a match
+        "sha512-abQZXcd==\n"
+    )
+    assert [n for n, _ in matcher.hits(text)] == [1]
+
+
 def test_placeholders_are_not_banned():
     placeholders = "acme_prod.acme_datamart_fm main.test_schema example.com"
     assert _Matcher().hits(placeholders + " 00000000-0000-0000-0000-000000000001") == []
@@ -182,6 +224,16 @@ def test_no_removed_identifier_in_tracked_files():
 
 
 if __name__ == "__main__":
+    status = 0
     for value in sys.argv[1:]:
-        normalised = "_".join(_SEP.split(value.lower()))
-        print(f"{fingerprint(normalised)}  ({len(_SEP.split(normalised))} parts)")
+        parts = [p for p in _SEP.split(value.lower()) if p]
+        if len(parts) > _MAX_PARTS:
+            print(
+                f"refused: {len(parts)} parts; the matcher only sees runs of "
+                f"{_MAX_PARTS} or fewer, so fingerprint a distinctive run instead",
+                file=sys.stderr,
+            )
+            status = 1
+            continue
+        print(f"{fingerprint('_'.join(parts))}  ({len(parts)} parts)")
+    sys.exit(status)

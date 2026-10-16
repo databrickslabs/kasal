@@ -34,7 +34,7 @@ function renderDialog(aggregatedSourceTasks: typeof twoTaskCrew[]) {
       onClose={vi.fn()}
       onSave={vi.fn()}
       aggregatedSourceTasks={aggregatedSourceTasks as never}
-      targetTasks={[{ id: 't9', name: 'Send Email to Nehme Tomhe' }] as never}
+      targetTasks={[{ id: 't9', name: 'Send Email to Jane Example' }] as never}
     />,
   );
 }
