@@ -736,26 +736,6 @@ class UCMetricViewGeneratorTool(BaseTool):
         }
         output_json = json.dumps(output, indent=2)
 
-        # Write to /tmp so the Validator tool can find it as a fallback
-        # (in case flow injection into _default_config fails for any reason).
-        try:
-            import glob as _glob
-
-            # Clean up old UCMV tmp files to avoid stale data
-            for _old in _glob.glob("/tmp/ucmv_latest_*.json"):
-                try:
-                    os.unlink(_old)
-                except OSError:
-                    pass
-            _tmp_path = f"/tmp/ucmv_latest_{os.getpid()}.json"
-            with open(_tmp_path, "w") as _f:
-                _f.write(output_json)
-            logger.info(
-                f"[UCMVGenerator] Wrote output to {_tmp_path} for validator fallback"
-            )
-        except Exception as _tmp_err:
-            logger.debug(f"[UCMVGenerator] Could not write /tmp fallback: {_tmp_err}")
-
         # ── Durable raw DAX persistence (Lakebase / conversion_history) ──────
         try:
             _run_async(

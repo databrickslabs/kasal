@@ -65,16 +65,16 @@ class ExecutionTraceService:
         return await self.repository.outputs_containing(job_id, needle)
 
     async def latest_output_for_span_prefix(
-        self, prefix: str, *, group_ids: Sequence[str]
+        self, prefix: str, *, group_ids: Sequence[str], job_id: Optional[str] = None
     ) -> Optional[str]:
         """The most recent trace ``output`` in ``group_ids`` whose ``span_name``
-        starts with ``prefix``.
+        starts with ``prefix``; with ``job_id``, from that run only.
 
         Serves the PowerBI/UCMV tools, which hand a later step the output of an
         earlier one. Scoped to the caller's groups; no groups, no result.
         """
         return await self.repository.latest_output_for_span_prefix(
-            prefix, group_ids=group_ids
+            prefix, group_ids=group_ids, job_id=job_id
         )
 
     async def get_event_shape_by_job_id(self, job_id: str) -> List[Any]:

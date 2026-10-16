@@ -700,7 +700,7 @@
   "src/services/tools/metric_view_validation_utils/expression_validator.py::Any": 8,
   "src/services/tools/metric_view_validation_utils/pipeline.py::Any": 3,
   "src/services/tools/metric_view_validator_tool.py::Any": 4,
-  "src/services/tools/mquery_conversion_pipeline_tool.py::Any": 29,
+  "src/services/tools/mquery_conversion_pipeline_tool.py::Any": 28,
   "src/services/tools/pbi_measure_allocator_tool.py::Any": 2,
   "src/services/tools/pbi_visual_ucmv_mapper_tool.py::Any": 3,
   "src/services/tools/perplexity_tool.py::Any": 4,

@@ -98,26 +98,30 @@ class ExecutionHistoryRepository:
         await self.session.flush()
 
     async def latest_result_with_keys(
-        self, keys: List[str], *, group_ids: Sequence[str]
+        self,
+        keys: List[str],
+        *,
+        group_ids: Sequence[str],
+        job_id: Optional[str] = None,
     ) -> Optional[dict]:
         """The most recent run IN ``group_ids`` whose ``result`` dict holds ALL of ``keys``.
 
         Serves the UCMV validator's fallback lookup. ``group_ids`` is required and
         an empty scope returns None: this read used to span every tenant, so one
         workspace's run picked up another's metric-view YAML (audit V3-1).
-        Filtering the decoded dict (not ``result::text LIKE``) checks real keys
-        and works on every dialect.
+        ``job_id`` narrows it to that one run. Filtering the decoded dict (not
+        ``result::text LIKE``) checks real keys and works on every dialect.
         """
         if not group_ids:
             return None
+        stmt = select(ExecutionHistory.result).where(
+            ExecutionHistory.result.isnot(None),
+            ExecutionHistory.group_id.in_(list(group_ids)),
+        )
+        if job_id is not None:
+            stmt = stmt.where(ExecutionHistory.job_id == job_id)
         result = await self.session.execute(
-            select(ExecutionHistory.result)
-            .where(
-                ExecutionHistory.result.isnot(None),
-                ExecutionHistory.group_id.in_(list(group_ids)),
-            )
-            .order_by(ExecutionHistory.created_at.desc())
-            .limit(50)
+            stmt.order_by(ExecutionHistory.created_at.desc()).limit(50)
         )
         for (data,) in result.all():
             if isinstance(data, str):
@@ -159,36 +163,6 @@ class ExecutionHistoryRepository:
                 if len(out) >= limit:
                     break
         return out
-
-    async def latest_checkpoint_containing(
-        self, key: str, *, group_ids: Sequence[str]
-    ) -> Optional[dict]:
-        """The most recent run IN ``group_ids`` whose ``checkpoint_data`` holds ``key``.
-
-        Serves the UCMV validator, which looks for edits a user saved in an
-        earlier step of a multi-step flow. Empty ``group_ids`` returns None
-        (audit V3-1). Filtered in Python (no Postgres-only ``::text`` cast).
-        """
-        if not group_ids:
-            return None
-        result = await self.session.execute(
-            select(ExecutionHistory.checkpoint_data)
-            .where(
-                ExecutionHistory.checkpoint_data.isnot(None),
-                ExecutionHistory.group_id.in_(list(group_ids)),
-            )
-            .order_by(ExecutionHistory.created_at.desc())
-            .limit(50)
-        )
-        for (data,) in result.all():
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data)
-                except ValueError:
-                    continue
-            if isinstance(data, dict) and key in data:
-                return data
-        return None
 
     async def insert(
         self, run: ExecutionHistory, commit: bool = False
@@ -1214,15 +1188,25 @@ class ExecutionHistoryRepository:
             return False
 
     async def update_execution_result(
-        self, job_id: str, result_data: dict, group_ids: Optional[list[str]] = None
+        self,
+        job_id: str,
+        result_data: dict,
+        group_ids: Optional[list[str]] = None,
+        gate_stamp: Optional[Dict[str, object]] = None,
     ) -> bool:
         """
         Update the result field for an execution identified by job_id.
+
+        The edits are stored on this run's own row and nowhere else; a reader
+        finds them by the run's job_id and group.
 
         Args:
             job_id: Job ID of the execution
             result_data: New result data to store
             group_ids: Optional list of group IDs for tenant filtering
+            gate_stamp: The approval an ``edited_config`` save was made under,
+                stored beside it as ``edited_config_gate`` (cleared when None),
+                so only that gate replays it on resume
 
         Returns:
             True if successful, False if execution not found
@@ -1243,8 +1227,6 @@ class ExecutionHistoryRepository:
                 logger.warning(f"No execution found with job_id: {job_id}")
                 return False
 
-            import json as _json
-
             # Detect the type of result being saved so we use a dedicated
             # checkpoint_data key and never collide with other tools.
             is_ucmv = (
@@ -1254,38 +1236,31 @@ class ExecutionHistoryRepository:
             )
             is_config = isinstance(result_data, dict) and "join_key_map" in result_data
 
-            checkpoint_data = execution.checkpoint_data or {}
+            # A new dict: mutating the loaded one in place does not register as
+            # a change on a JSON column, so a run that already held a checkpoint
+            # record silently kept none of the edits.
+            checkpoint_data = dict(execution.checkpoint_data or {})
 
             if is_ucmv:
                 # UCMV Generator edit: use a dedicated key so Config Generator
                 # saves (which also use edited_config) never overwrite it.
                 checkpoint_data["ucmv_yaml_edits"] = result_data
                 logger.info(
-                    f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}"
-                )
-                # Also write to /tmp so the Validator subprocess can read the
-                # user's edits (subprocess can't connect to DB in deployed env).
-                try:
-
-                    _tmp_path = "/tmp/ucmv_user_edits.json"
-                    with open(_tmp_path, "w") as _f:
-                        _json.dump(result_data, _f)
-                    logger.info(
-                        f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access"
-                    )
-                except Exception as _tmp_err:
-                    logger.debug(
-                        f"[UCMV] Could not write user edits to /tmp: {_tmp_err}"
-                    )
-            elif is_config:
-                # Config Generator edit: keep using edited_config (existing behaviour)
-                checkpoint_data["edited_config"] = result_data
-                logger.info(
-                    f"Saved config edits to checkpoint_data.edited_config for job_id: {job_id}"
+                    "Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: %s",
+                    job_id,
                 )
             else:
-                # Generic: store under edited_config as before
+                # Config Generator (join_key_map) or generic edit, e.g. Genie config.
                 checkpoint_data["edited_config"] = result_data
+                if gate_stamp:
+                    checkpoint_data["edited_config_gate"] = dict(gate_stamp)
+                else:
+                    checkpoint_data.pop("edited_config_gate", None)
+                logger.info(
+                    "Saved %s edits to checkpoint_data.edited_config for job_id: %s",
+                    "config" if is_config else "result",
+                    job_id,
+                )
 
             execution.checkpoint_data = checkpoint_data
             await self.session.flush()

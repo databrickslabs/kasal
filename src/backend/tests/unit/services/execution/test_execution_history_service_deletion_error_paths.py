@@ -657,8 +657,17 @@ async def test_set_checkpoint_active_generic_error():
 
 
 # ---------------------------------------------------------------------------
-# update_result
+# update_result (the gate lookup is covered by test_gate_edits.py)
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_waiting_gate(monkeypatch):
+    from src.services.execution.history import ExecutionHistoryService
+
+    monkeypatch.setattr(
+        ExecutionHistoryService, "_waiting_gate", AsyncMock(return_value=None)
+    )
 
 
 @pytest.mark.asyncio

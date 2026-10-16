@@ -1,10 +1,10 @@
 """The PowerBI/UCMV tools' "latest output" DB fallbacks stay inside one tenant.
 
-Audit V3-1: ``latest_output_for_span_prefix``, ``latest_result_with_keys``,
-``find_recent_results_containing`` and ``latest_checkpoint_containing`` used to
-filter by span name or JSON key only, so tenant B's run picked up tenant A's
-most recent metric-view YAML. Audit V2: ``get_execution_history`` treated
-``None``/``[]`` groups as "all tenants".
+Audit V3-1: ``latest_output_for_span_prefix``, ``latest_result_with_keys`` and
+``find_recent_results_containing`` used to filter by span name or JSON key only,
+so tenant B's run picked up tenant A's most recent metric-view YAML. Audit V2:
+``get_execution_history`` treated ``None``/``[]`` groups as "all tenants". The
+validator's lookups are narrower still: they read only the run's own rows.
 
 Everything here runs on a real SQLite database with two tenants, so the WHERE
 clauses themselves are exercised, not a mock of them.
@@ -37,7 +37,10 @@ def db_url(tmp_path):
     ExecutionHistory.__table__.create(sync)
     ExecutionTrace.__table__.create(sync)
     now = datetime(2026, 9, 1, 12, 0, 0)
-    content = '{"yaml": {"t": "A-secret-catalog"}}'
+    content = (
+        '{"yaml": {"t": "A-secret-catalog"},'
+        ' "resolved_measures_by_table": {"t": [{"measure_name": "m_a"}]}}'
+    )
     with Session(sync) as s:
         s.add_all(
             [
@@ -114,6 +117,15 @@ async def test_trace_latest_output_is_tenant_scoped(db_url):
         )
         assert await repo.latest_output_for_span_prefix(prefix, group_ids=[B]) is None
         assert await repo.latest_output_for_span_prefix(prefix, group_ids=[]) is None
+        assert await repo.latest_output_for_span_prefix(
+            prefix, group_ids=[A], job_id="run-a"
+        )
+        assert (
+            await repo.latest_output_for_span_prefix(
+                prefix, group_ids=[A], job_id="run-a2"
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio
@@ -124,16 +136,10 @@ async def test_history_fallbacks_are_tenant_scoped(db_url):
         assert (await repo.latest_result_with_keys(keys, group_ids=[A]))["yaml"]
         assert await repo.latest_result_with_keys(keys, group_ids=[B]) is None
         assert await repo.latest_result_with_keys(keys, group_ids=[]) is None
-
-        cp = await repo.latest_checkpoint_containing("ucmv_yaml_edits", group_ids=[A])
-        # Tenant A's own edits, never the newer NULL-group row's.
-        assert cp == {"ucmv_yaml_edits": {"yaml": "A-edits"}}
+        # Narrowed to one run: that run's own result, or nothing.
+        assert await repo.latest_result_with_keys(keys, group_ids=[A], job_id="run-a")
         assert (
-            await repo.latest_checkpoint_containing("ucmv_yaml_edits", group_ids=[B])
-            is None
-        )
-        assert (
-            await repo.latest_checkpoint_containing("ucmv_yaml_edits", group_ids=[])
+            await repo.latest_result_with_keys(keys, group_ids=[A], job_id="run-b")
             is None
         )
 
@@ -175,19 +181,48 @@ def _as_tenant(group_id):
     UserContext.set_group_context(GroupContext(group_ids=[group_id]))
 
 
+def _validator_for(job_id):
+    from src.services.tools.metric_view_validator_tool import MetricViewValidatorTool
+
+    tool = MetricViewValidatorTool()
+    tool.trace_context = {"job_id": job_id}
+    return tool
+
+
 def test_validator_fallback_reads_only_the_run_tenant(routed_to):
+    _as_tenant(A)
+    run_a = _validator_for("run-a")
+    assert run_a._fetch_run_ucmv_from_db()["yaml"]
+    assert run_a._fetch_measures_from_db() == [{"measure_name": "m_a"}]
+    assert run_a._fetch_saved_ucmv_edits_from_db() == {"yaml": "A-edits"}
+
+    _as_tenant(B)
+    # Every lookup is by the run's own job id AND its group.
+    for job_id in ("run-a", "run-b"):
+        tool = _validator_for(job_id)
+        assert tool._fetch_run_ucmv_from_db() == {}
+        assert tool._fetch_measures_from_db() == []
+        assert tool._fetch_saved_ucmv_edits_from_db() == {}
+
+
+def test_validator_fallback_never_reads_another_run_of_the_same_tenant(routed_to):
+    """run-a2 is in A too, but run-a's generator output and edits are not its own."""
+    _as_tenant(A)
+    for job_id in ("run-a2", None):
+        tool = _validator_for(job_id)
+        assert tool._fetch_run_ucmv_from_db() == {}
+        assert tool._fetch_measures_from_db() == []
+        assert tool._fetch_saved_ucmv_edits_from_db() == {}
+
+
+def test_workspace_latest_lookup_for_the_genie_and_mapper_tools(routed_to):
+    """Without a job id (their standalone mode) it stays inside the tenant."""
     from src.services.tools.metric_view_validator_tool import MetricViewValidatorTool
 
     _as_tenant(A)
     assert MetricViewValidatorTool._fetch_latest_ucmv_from_db()["yaml"]
-    assert MetricViewValidatorTool._fetch_saved_ucmv_edits_from_db() == {
-        "yaml": "A-edits"
-    }
-
     _as_tenant(B)
     assert MetricViewValidatorTool._fetch_latest_ucmv_from_db() == {}
-    assert MetricViewValidatorTool._fetch_saved_ucmv_edits_from_db() == {}
-    assert MetricViewValidatorTool._fetch_measures_from_db() == []
 
 
 def test_fallback_without_group_context_reads_nothing(routed_to):
@@ -197,7 +232,8 @@ def test_fallback_without_group_context_reads_nothing(routed_to):
     UserContext.clear_context()
     assert ToolSessionProvider.run_group_ids() == []
     assert MetricViewValidatorTool._fetch_latest_ucmv_from_db() == {}
-    assert MetricViewValidatorTool._fetch_saved_ucmv_edits_from_db() == {}
+    assert _validator_for("run-a")._fetch_run_ucmv_from_db() == {}
+    assert _validator_for("run-a")._fetch_saved_ucmv_edits_from_db() == {}
 
 
 @pytest.mark.asyncio

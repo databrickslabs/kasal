@@ -45,6 +45,10 @@ Uses (3-step process):
 
 Docs: [Admin - WorkspaceInfo PostWorkspaceInfo](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-post-workspace-info)
 
+A same-day re-run can reuse an earlier conversion instead of scanning again (see
+[Same-day cache](#same-day-cache)). Before returning a cached result the tool calls
+`GET /admin/groups/{workspaceId}/datasets` with the caller's credentials.
+
 ---
 
 ## Authentication
@@ -130,6 +134,26 @@ Tool 74 is Phase 1 of the migration alongside Tool 73. Its output (`mquery_json`
 - **Tool 86** (UC Metric View Generator): source SQL for each fact table
 - **Tool 87** (Measure Allocator): fact table identification
 - **Tool 89/90** (Config Generators): auto-propose join keys
+
+---
+
+## Same-day cache
+
+A conversion is kept for the rest of the day and reused only when all of these hold:
+
+- the run is in the same teamspace that produced it;
+- the settings are the same (target catalog and schema, LLM options, scan and output
+  options, validation endpoint, tenant and client IDs);
+- the caller's credentials can still list the workspace's datasets, and the dataset
+  when `dataset_id` is set.
+
+Otherwise the tool scans again. Error results are never cached.
+
+The access check calls `GET /admin/groups/{workspaceId}/datasets`, an admin API: the
+caller must be a Fabric administrator or a service principal allowed to use the
+admin APIs (the same requirement as the scan). Microsoft limits it to 200 requests
+per hour. If the check fails for any reason, including throttling, the cached
+result is not used and the tool runs a fresh scan.
 
 ---
 

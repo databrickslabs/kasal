@@ -2205,31 +2205,28 @@ class FlowMethodFactory:
                     logger.info("   Passing through to next step...")
                     logger.info("=" * 80)
 
-                    # Check if the user edited the config in the Config Editor.
-                    # If so, pass the edited version to the next crew instead of
-                    # the original crew output.
+                    # Hand on the edit saved under THIS approval, never one saved
+                    # at another gate (see gate_edits); otherwise the crew output.
                     try:
                         # Runs are ExecutionService's domain.
                         from src.services.execution.service import ExecutionService
+                        from src.services.flow_builder.modules.gate_edits import (
+                            edit_for_gate,
+                        )
 
                         execution = await ExecutionService(session).get_run_by_job_id(
                             job_id
                         )
-                        if execution and execution.checkpoint_data:
-                            edited_config = execution.checkpoint_data.get(
-                                "edited_config"
-                            )
-                            if edited_config:
-                                import json
-
-                                logger.info(
-                                    "   📝 Found edited_config in checkpoint_data — using user edits"
-                                )
-                                return json.dumps(edited_config)
+                        edited = edit_for_gate(
+                            getattr(execution, "checkpoint_data", None),
+                            gate_node_id,
+                            approved_for_gate.id,
+                        )
+                        if edited is not None:
+                            logger.info("   📝 Using the edit saved at this gate")
+                            return edited
                     except Exception as e:
                         logger.warning(f"   Could not check for edited_config: {e}")
-
-                    # No edited config — pass original output
                     return previous_output
 
             # Get previous crew name and output

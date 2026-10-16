@@ -48,8 +48,8 @@
   "src/backend/src/services/flow_builder/modules/flow_builder.py::FlowBuilder.build_flow": 310,
   "src/backend/src/services/flow_builder/modules/flow_config.py::FlowConfigManager.collect_agent_mcp_requirements": 212,
   "src/backend/src/services/flow_builder/modules/flow_eval_context.py::build_eval_context": 202,
-  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_hitl_gate_method": 263,
-  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_hitl_gate_method.hitl_gate_method": 219,
+  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_hitl_gate_method": 260,
+  "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_hitl_gate_method.hitl_gate_method": 216,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_listener_method": 739,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_listener_method.listener_method": 692,
   "src/backend/src/services/flow_builder/modules/flow_methods.py::FlowMethodFactory.create_skipped_crew_method": 275,
@@ -95,7 +95,7 @@
   "src/backend/src/services/tools/metric_view_utils/table_processor.py::process_table": 1312,
   "src/backend/src/services/tools/metric_view_utils/yaml_emitter.py::emit_yaml": 730,
   "src/backend/src/services/tools/metric_view_validation_utils/expression_validator.py::ExpressionValidator._compare_aggregations": 210,
-  "src/backend/src/services/tools/metric_view_validator_tool.py::MetricViewValidatorTool._run": 445,
+  "src/backend/src/services/tools/metric_view_validator_tool.py::MetricViewValidatorTool._run": 391,
   "src/backend/src/services/tools/mquery_conversion_pipeline_tool.py::MqueryConversionPipelineTool._execute_with_validation": 208,
   "src/backend/src/services/tools/mquery_conversion_pipeline_tool.py::MqueryConversionPipelineTool._run": 352,
   "src/backend/src/services/tools/pipeline_config_generator_tool.py::PipelineConfigGeneratorTool._run": 743,
@@ -111,6 +111,6 @@
   "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py::PowerBISemanticModelDaxTool._execute_dax_pipeline": 406,
   "src/backend/src/services/tools/powerbi_semantic_model_fetcher_tool.py::PowerBISemanticModelFetcherTool._execute_fetcher_pipeline": 588,
   "src/backend/src/services/tools/tool_factory.py::ToolFactory._create_tool_impl": 1470,
-  "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 611,
+  "src/backend/src/services/tools/uc_metric_view_generator_tool.py::UCMetricViewGeneratorTool._run": 591,
   "src/backend/src/utils/databricks_auth.py::get_auth_context": 288
 }
