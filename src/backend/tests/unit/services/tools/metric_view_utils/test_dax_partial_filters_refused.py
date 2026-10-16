@@ -43,6 +43,30 @@ class TestConditionIsAllOrNothing:
         )
         assert sql == "source.Region = 'EU' AND source.Year >= 2024"
 
+    @pytest.mark.parametrize(
+        "cond",
+        [
+            'Sales[A] = "x" || Sales[B] = "y" && Sales[C] = "z"',
+            'Sales[A] = "x" && Sales[B] = "y" || Sales[C] = "z"',
+        ],
+    )
+    def test_unparenthesized_and_or_mix_is_refused(self, cond):
+        # DAX reads A || B && C as A || (B && C); splitting on && first would
+        # have produced (A OR B) AND C.
+        t = DaxTranslator()
+        assert t._dax_condition_to_sql(cond, "Sales") == ""
+        assert t._translate_single_condition(cond, "Sales") is None
+        r = _translate(f"SUMX(FILTER(Sales, {cond}), Sales[Amount])")
+        assert r.sql_expr is None
+
+    def test_parenthesized_or_inside_and_still_translates(self):
+        sql = DaxTranslator()._dax_condition_to_sql(
+            '(Sales[A] = "x" || Sales[B] = "y") && Sales[C] = "z"', "Sales"
+        )
+        assert sql == (
+            "(source.A = 'x' OR source.B = 'y') AND source.C = 'z'"
+        )
+
     def test_numeric_in_list_keeps_its_values(self):
         sql = DaxTranslator()._dax_condition_to_sql(
             "Sales[Year] in {2023, 2024}", "Sales"

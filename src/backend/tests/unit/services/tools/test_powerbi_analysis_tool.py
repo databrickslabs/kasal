@@ -695,7 +695,7 @@ class TestExtractFilterFromDefinition:
         filter_def = self._make_filter_def("Sales", "Region", where_clauses=[])
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
-        assert desc is not None
+        assert desc is None  # nothing selected: not a filter on its description
 
 
 # ===========================================================================
@@ -1628,7 +1628,7 @@ class TestGenerateSimpleDax:
         result = self.tool._generate_simple_dax("how many customers?", model_context)
         assert "Customer Count" in result
 
-    def test_fallback_to_first_measure_when_no_match(self):
+    def test_no_named_measure_returns_none(self):
         model_context = {
             "measures": [
                 {
@@ -1644,8 +1644,8 @@ class TestGenerateSimpleDax:
             ]
         }
         result = self.tool._generate_simple_dax("something unrelated", model_context)
-        assert result is not None
-        assert "Total Revenue" in result
+        # no measure named in the question: no answer, not the first measure
+        assert result is None
 
     def test_summarizecolumns_in_output(self):
         model_context = {
@@ -1657,7 +1657,7 @@ class TestGenerateSimpleDax:
                 }
             ]
         }
-        result = self.tool._generate_simple_dax("test?", model_context)
+        result = self.tool._generate_simple_dax("revenue?", model_context)
         assert "SUMMARIZECOLUMNS" in result
 
 
@@ -1767,7 +1767,7 @@ class TestGenerateDaxFilterCondition:
     def test_not_null_returns_isblank(self):
         result = self.tool._generate_dax_filter_condition("Sales[Region]", "NOT NULL")
         assert "ISBLANK" in result
-        assert "FALSE" in result
+        assert "NOT ISBLANK(Sales[Region])" in result
 
     def test_not_starts_with_returns_left(self):
         result = self.tool._generate_dax_filter_condition(
@@ -1852,7 +1852,7 @@ class TestParseFilterConditionExtended:
             "In": {"Expressions": [], "Values": [[{"Literal": {"Value": "'Italy'"}}]]}
         }
         result = self.tool._parse_filter_condition(condition)
-        assert "= 'Italy'" in result
+        assert '= "Italy"' in result
 
     def test_in_multiple_values(self):
         condition = {

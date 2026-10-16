@@ -16,6 +16,12 @@ from typing import Any, Dict, List
 
 import httpx
 
+from src.services.tools.metadata_reduction.report_filters import (
+    describe_filter,
+    spec_from_filter_definition,
+    spec_from_pbi_condition,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -344,146 +350,22 @@ class PowerBITmdlParsingMixin:
         return filters
 
     def _extract_filter_from_definition(self, filter_def: Dict[str, Any]) -> tuple:
-        """
-        Extract filter name and description from Power BI filter definition.
+        """``(Table[Column], spec)`` from a Power BI filter definition.
 
-        Power BI filter structure:
-        {
-          "expression": {
-            "Column": {
-              "Expression": {"SourceRef": {"Entity": "table_name"}},
-              "Property": "column_name"
-            }
-          },
-          "filter": {
-            "Where": [{"Condition": {...}}]
-          },
-          "type": "Categorical" or "Advanced"
-        }
+        The spec is structured (operator + typed values, shared with Tool 79
+        through ``report_filters``). ``None`` when it cannot be applied exactly
+        (a card with nothing selected, a relative date, an advanced filter):
+        such a filter is logged and left out, never applied as its description.
         """
         try:
-            # Extract table and column from expression
-            expression = filter_def.get("expression", {})
-            column_expr = expression.get("Column", {})
-
-            # Get table name
-            expr = column_expr.get("Expression", {})
-            source_ref = expr.get("SourceRef", {})
-            table = source_ref.get("Entity", "")
-
-            # Get column name
-            column = column_expr.get("Property", "")
-
-            if not table or not column:
-                logger.info(
-                    "[Filter Extraction] ⚠️ Could not extract table/column from filter"
-                )
-                return (None, None)
-
-            # Create filter name
-            filter_name = f"{table}[{column}]"
-
-            # Extract filter description from Where clause
-            filter_obj = filter_def.get("filter", {})
-            where_clauses = filter_obj.get("Where", [])
-
-            if not where_clauses:
-                logger.info("[Filter Extraction] ⚠️ No Where clause found")
-                return (filter_name, "has filter (unknown type)")
-
-            # Parse the first Where clause
-            condition = where_clauses[0].get("Condition", {})
-            filter_description = self._parse_filter_condition(condition)
-
-            logger.info(
-                f"[Filter Extraction] ✅ Extracted: {filter_name} - {filter_description}"
-            )
-            return (filter_name, filter_description)
-
-        except Exception as e:
-            logger.warning(f"[Filter Extraction] Failed to extract filter: {e}")
-            import traceback
-
-            logger.warning(f"[Filter Extraction] Traceback: {traceback.format_exc()}")
+            name, spec = spec_from_filter_definition(filter_def)
+        except (AttributeError, TypeError, ValueError):
             return (None, None)
+        if name and spec is None:
+            logger.warning("[Filter Extraction] Not applied (no exact value): %s", name)
+        return (name, spec)
 
     def _parse_filter_condition(self, condition: Dict[str, Any]) -> str:
-        """
-        Parse a Power BI filter condition into a human-readable description.
-
-        Handles:
-        - NOT IN (null) → "NOT NULL"
-        - NOT StartsWith '7' → "NOT STARTS WITH '7'"
-        - IN ('Mandatory') → "= 'Mandatory'"
-        - And more complex conditions
-        """
-        try:
-            # Check for NOT condition
-            if "Not" in condition:
-                not_expr = condition["Not"]["Expression"]
-
-                # NOT IN (null) → NOT NULL
-                if "In" in not_expr:
-                    in_expr = not_expr["In"]
-                    values = in_expr.get("Values", [])
-
-                    # Check if it's filtering out null
-                    if values and len(values) > 0:
-                        first_value = values[0]
-                        if len(first_value) > 0:
-                            literal = first_value[0].get("Literal", {})
-                            if literal.get("Value") == "null":
-                                return "NOT NULL"
-
-                    # Other NOT IN cases
-                    value_strs = []
-                    for val_list in values:
-                        for val in val_list:
-                            lit_val = val.get("Literal", {}).get("Value", "")
-                            value_strs.append(lit_val.strip("'\""))
-
-                    if value_strs:
-                        return f"NOT IN ({', '.join(value_strs)})"
-
-                # NOT StartsWith
-                elif "StartsWith" in not_expr:
-                    starts_with = not_expr["StartsWith"]
-                    right_val = (
-                        starts_with.get("Right", {}).get("Literal", {}).get("Value", "")
-                    )
-                    cleaned_val = right_val.strip("'\"")
-                    return f"NOT STARTS WITH '{cleaned_val}'"
-
-            # Check for IN condition (positive)
-            elif "In" in condition:
-                in_expr = condition["In"]
-                values = in_expr.get("Values", [])
-
-                # Extract values
-                value_strs = []
-                for val_list in values:
-                    for val in val_list:
-                        lit_val = val.get("Literal", {}).get("Value", "")
-                        value_strs.append(lit_val.strip("'\""))
-
-                if len(value_strs) == 1:
-                    return f"= '{value_strs[0]}'"
-                elif len(value_strs) > 1:
-                    return f"IN ({', '.join(value_strs)})"
-
-            # Check for Equals
-            elif "Comparison" in condition:
-                comparison = condition["Comparison"]
-                operator = comparison.get("ComparisonKind", 0)
-                right = comparison.get("Right", {}).get("Literal", {}).get("Value", "")
-
-                op_map = {0: "=", 1: "!=", 2: ">", 3: ">=", 4: "<", 5: "<="}
-                op_str = op_map.get(operator, "=")
-                return f"{op_str} {right}"
-
-            # Fallback - return a generic description
-            return "has complex filter"
-
-        except Exception as e:
-            logger.warning(f"[Filter Extraction] Error parsing condition: {e}")
-            return "has filter"
+        """Human-readable text of a Power BI filter condition (for logs)."""
+        spec = spec_from_pbi_condition(condition)
+        return describe_filter(spec) if spec else "has complex filter"

@@ -11,10 +11,13 @@ A filter is now a spec::
 
 and ``filter_to_dax`` is the one place a filter becomes DAX: strings quoted,
 numbers bare, dates as ``DATE(...)``. ``parse_filter_value`` also reads the
-legacy display strings and the UI's plain values, so caches written before this
-change keep working without a refetch. A filter that has no value to apply
-(a filter-pane card with nothing selected, an advanced AND/OR filter) is
-``None`` and is skipped rather than turned into a filter on its description.
+UI's plain values and the legacy display strings. From legacy text it accepts
+only ``=``, ``IN``, ``NOT IN``, ``NOT NULL`` and ``STARTS WITH``: the old
+extractor shifted comparison operators by one (it wrote ``>=`` for ``<``), so
+a cached comparison is dropped with a warning until the filters are refetched.
+A filter that cannot be applied exactly (a card with nothing selected, an
+advanced AND/OR filter, a relative date, a multi-column tuple) is ``None`` and
+is skipped rather than turned into a filter on its description.
 """
 
 from __future__ import annotations
@@ -39,7 +42,13 @@ class FilterSpec(TypedDict, total=False):
 _CMP_OPERATORS = ("=", "<>", ">", ">=", "<", "<=")
 _LIST_OPERATORS = ("in", "not_in")
 _TEXT_OPERATORS = ("starts_with", "not_starts_with", "contains")
-_OPERATORS = (*_CMP_OPERATORS, *_LIST_OPERATORS, *_TEXT_OPERATORS, "not_blank")
+_OPERATORS = (
+    *_CMP_OPERATORS,
+    *_LIST_OPERATORS,
+    *_TEXT_OPERATORS,
+    "blank",
+    "not_blank",
+)
 # Power BI QueryComparisonKind (semantic query JSON).
 _COMPARISON_KIND = {0: "=", 1: ">", 2: ">=", 3: "<", 4: "<="}
 _UNUSABLE = re.compile(r"^has (complex )?filter\b", re.IGNORECASE)
@@ -66,16 +75,36 @@ def _pbi_literal(raw: object) -> tuple[FilterValue | None, str]:
     return text.strip("\"'"), ""
 
 
-def _literals(values: object) -> tuple[list[FilterValue | None], str]:
+def _literal_node(node: object) -> tuple[FilterValue | None, str] | None:
+    """A ``{"Literal": {...}}`` node's value; ``None`` for anything that is not
+    a literal (a relative date, a measure, another column)."""
+    if not isinstance(node, dict) or not isinstance(node.get("Literal"), dict):
+        return None
+    return _pbi_literal(node["Literal"].get("Value", ""))
+
+
+def _in_values(in_expr: object) -> tuple[list[FilterValue | None], str] | None:
+    """Values of a single-column ``In``; ``None`` for a multi-column tuple
+    ``In`` or any item that is not a literal (never flattened onto one column)."""
+    if not isinstance(in_expr, dict) or len(in_expr.get("Expressions") or [0]) > 1:
+        return None
     out: list[FilterValue | None] = []
     vtype = ""
-    for row in values if isinstance(values, list) else []:
-        for item in row if isinstance(row, list) else [row]:
-            lit = item.get("Literal", {}) if isinstance(item, dict) else {}
-            value, t = _pbi_literal(lit.get("Value", ""))
-            out.append(value)
-            vtype = vtype or t
-    return out, vtype
+    for row in in_expr.get("Values") or []:
+        lit = _literal_node(row[0]) if isinstance(row, list) and len(row) == 1 else None
+        if lit is None:
+            return None
+        out.append(lit[0])
+        vtype = vtype or lit[1]
+    return (out, vtype) if out else None
+
+
+def _text_spec(operator: str, node: object) -> FilterSpec | None:
+    """StartsWith / Contains: only a non-empty text literal is applied."""
+    lit = _literal_node(node.get("Right") if isinstance(node, dict) else None)
+    if lit is None or not isinstance(lit[0], str) or not lit[0]:
+        return None
+    return _spec(operator, [lit[0]], "")
 
 
 def _spec(operator: str, values: list[FilterValue | None], vtype: str) -> FilterSpec:
@@ -89,48 +118,44 @@ def _spec(operator: str, values: list[FilterValue | None], vtype: str) -> Filter
 
 
 def spec_from_pbi_condition(condition: object) -> FilterSpec | None:
-    """Structured spec from one Power BI filter ``Where[].Condition``."""
+    """Structured spec from one Power BI filter ``Where[].Condition``.
+
+    ``None`` (not applied, and logged by the caller) for anything that cannot
+    be applied exactly: a non-literal right side, a tuple ``In``, a list that
+    mixes blank with values, And / Or / Between.
+    """
     if not isinstance(condition, dict):
         return None
-    if "Not" in condition:
-        inner = (condition["Not"] or {}).get("Expression", {})
-        if "In" in inner:
-            values, vtype = _literals(inner["In"].get("Values"))
-            if values and all(v is None for v in values):
-                return _spec("not_blank", [], "")
-            return _spec("not_in", values, vtype) if values else None
-        if "StartsWith" in inner:
-            value, _ = _pbi_literal(
-                inner["StartsWith"].get("Right", {}).get("Literal", {}).get("Value", "")
-            )
-            return _spec("not_starts_with", [value], "")
-        if "Comparison" in inner and inner["Comparison"].get("ComparisonKind", 0) == 0:
-            value, vtype = _pbi_literal(
-                inner["Comparison"].get("Right", {}).get("Literal", {}).get("Value", "")
-            )
-            return _spec("<>", [value], vtype)
+    negated = isinstance(condition.get("Not"), dict)
+    inner = condition["Not"].get("Expression", {}) if negated else condition
+    if not isinstance(inner, dict):
         return None
-    if "In" in condition:
-        values, vtype = _literals(condition["In"].get("Values"))
-        return (
-            _spec("in", values, vtype) if any(v is not None for v in values) else None
-        )
-    for key, operator in (("StartsWith", "starts_with"), ("Contains", "contains")):
-        if key in condition:
-            value, _ = _pbi_literal(
-                condition[key].get("Right", {}).get("Literal", {}).get("Value", "")
-            )
-            return _spec(operator, [value], "")
-    if "Comparison" in condition:
-        comparison = condition["Comparison"]
-        op = _COMPARISON_KIND.get(comparison.get("ComparisonKind", 0))
-        value, vtype = _pbi_literal(
-            comparison.get("Right", {}).get("Literal", {}).get("Value", "")
-        )
-        if op is None or value is None:
+    if "In" in inner:
+        parsed = _in_values(inner["In"])
+        if parsed is None:
             return None
-        return _spec("in" if op == "=" else op, [value], vtype)
-    return None  # And / Or / Between: an advanced filter this does not model
+        values, vtype = parsed
+        if all(v is None for v in values):  # In [null] is "is blank"
+            return _spec("not_blank" if negated else "blank", [], "")
+        if any(v is None for v in values):
+            return None  # values plus blank: not modelled
+        return _spec("not_in" if negated else "in", values, vtype)
+    if "StartsWith" in inner:
+        return _text_spec(
+            "not_starts_with" if negated else "starts_with", inner["StartsWith"]
+        )
+    if "Contains" in inner and not negated:
+        return _text_spec("contains", inner["Contains"])
+    comparison = inner.get("Comparison")
+    if not isinstance(comparison, dict):
+        return None
+    op = _COMPARISON_KIND.get(comparison.get("ComparisonKind", 0))
+    if negated:
+        op = "<>" if op == "=" else None  # there is no not-equal kind
+    lit = _literal_node(comparison.get("Right")) if op else None
+    if lit is None or lit[0] is None:
+        return None
+    return _spec("in" if op == "=" else str(op), [lit[0]], lit[1])
 
 
 def spec_from_filter_definition(
@@ -236,11 +261,27 @@ def parse_filter_value(value: object) -> FilterSpec | None:
             if items
             else None
         )
-    m = re.fullmatch(r"(!=|<>|>=|<=|>|<|=)\s*(.+)", text, re.DOTALL)
+    if re.match(r"(!=|<>|>=|<=|>|<)", text):
+        _warn_once(
+            text,
+            "Not applying legacy report filter text %r: the old extractor shifted "
+            "comparison operators by one (it wrote '>=' for '<'), so its direction "
+            "is unknown. Refetch the report filters (Tool 79) to apply it.",
+        )
+        return None
+    m = re.fullmatch(r"=\s*(.+)", text, re.DOTALL)
     if m:
-        op = {"!=": "<>", "=": "in"}.get(m.group(1), m.group(1))
-        return {"operator": op, "values": [_legacy_value(m.group(2), op != "in")]}
+        return {"operator": "in", "values": [_legacy_value(m.group(1), False)]}
     return {"operator": "in", "values": [text]}
+
+
+_WARNED: set[str] = set()
+
+
+def _warn_once(text: str, message: str) -> None:
+    if text not in _WARNED:
+        _WARNED.add(text)
+        logger.warning(message, text)
 
 
 def dax_column_ref(filter_key: str) -> str | None:
@@ -279,8 +320,9 @@ def filter_to_dax(filter_key: str, value: object) -> str | None:
     op = spec["operator"]
     vtype = spec.get("value_type", "")
     values = [_dax_literal(v, vtype) for v in spec.get("values", [])]
-    if op == "not_blank":
-        return f"FILTER(ALL({col}), NOT ISBLANK({col}))"
+    if op in ("blank", "not_blank"):
+        neg = "NOT " if op == "not_blank" else ""
+        return f"FILTER(ALL({col}), {neg}ISBLANK({col}))"
     if not values:
         return None
     if op in ("in", "="):
@@ -306,8 +348,8 @@ def describe_filter(value: object) -> str:
     op = spec["operator"]
     vtype = spec.get("value_type", "")
     values = [_dax_literal(v, vtype) for v in spec.get("values", [])]
-    if op == "not_blank":
-        return "NOT NULL"
+    if op in ("blank", "not_blank"):
+        return "NOT NULL" if op == "not_blank" else "IS BLANK"
     if op == "in":
         return f"= {values[0]}" if len(values) == 1 else f"IN ({', '.join(values)})"
     if op == "not_in":

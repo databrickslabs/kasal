@@ -8,10 +8,16 @@ movement: every method still reads ``self`` exactly as it did in the single
 import json
 from typing import Any, Dict
 
+from src.services.tools.metadata_reduction.keyword_measure import (
+    KEYWORD_FALLBACK,
+    KEYWORD_FALLBACK_NOTE,
+)
+
 
 class PowerBIOutputMixin:
     def _format_output(self, results: Dict[str, Any], output_format: str) -> str:
         """Format the results for output."""
+        results.setdefault("dax_source", getattr(self, "_last_dax_source", None))
         if output_format == "json":
             return json.dumps(results, indent=2, default=str)
 
@@ -59,6 +65,8 @@ class PowerBIOutputMixin:
             output.append("```dax")
             output.append(results["generated_dax"])
             output.append("```\n")
+            if results.get("dax_source") == KEYWORD_FALLBACK:
+                output.append(KEYWORD_FALLBACK_NOTE)
 
         # Execution Results
         exec_result = results.get("dax_execution", {})

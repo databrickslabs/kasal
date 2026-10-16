@@ -87,6 +87,34 @@ def validator() -> ExpressionValidator:
     return ExpressionValidator(table_mappings={"Sales": "source"})
 
 
+WRONG.append(
+    (
+        "and_or_regrouped",
+        "SUM(source.Amount) FILTER (WHERE (source.A = 'x' OR source.B = 'y') "
+        "AND source.C = 'z')",
+        'CALCULATE(SUM(Sales[Amount]), Sales[A] = "x" || Sales[B] = "y" && Sales[C] = "z")',
+    )
+)
+WRONG.append(
+    (
+        "sql_and_or_mix",
+        "SUM(source.Amount) FILTER (WHERE source.A = 'x' OR source.B = 'y' "
+        "AND source.C = 'z')",
+        'CALCULATE(SUM(Sales[Amount]), (Sales[A] = "x" || Sales[B] = "y") && Sales[C] = "z")',
+    )
+)
+
+
+WRONG.append(
+    (
+        # x is evaluated once, unfiltered; CALCULATE does not re-filter it
+        "var_inside_calculate",
+        "SUM(source.Amount) FILTER (WHERE source.Region = 'EU')",
+        'VAR x = SUM(Sales[Amount]) RETURN CALCULATE(x, Sales[Region] = "EU")',
+    )
+)
+
+
 @pytest.mark.parametrize("name,db,dax", WRONG, ids=[w[0] for w in WRONG])
 def test_partial_similarity_is_not_equivalent(validator, name, db, dax):
     assert _status(validator, db, dax) not in ("VALID", "EQUIVALENT")

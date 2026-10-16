@@ -199,6 +199,13 @@ def _conjunct(text: str, col_of: Callable[[str], str], dialect: str) -> Conjunct
     return ("raw", dialect, t)
 
 
+def _mixes(text: str, and_re: str, or_re: str, quote: str) -> bool:
+    """Both a top-level AND and a top-level OR: AND binds tighter, so reading
+    the parts as a flat conjunction would be wrong; callers refuse instead."""
+    t = _unwrap(text, quote)
+    return len(_split(t, and_re, quote)) > 1 and len(_split(t, or_re, quote)) > 1
+
+
 def _sorted(ctx: tuple[Conjunct, ...], more: list[Conjunct]) -> tuple[Conjunct, ...]:
     return tuple(sorted((*ctx, *more), key=repr))
 
@@ -247,6 +254,8 @@ class _Dax:
             if not re.fullmatch(r"'[^']+'|\w+", args[0]):
                 return None
             t = args[1]
+        if _mixes(t, r"&&", r"\|\|", '"'):
+            return None  # && and || without parentheses: grouping is not proven
         return [_conjunct(c, self.col, "dax") for c in _split(t, r"&&", '"')]
 
     def _table_filters(self, arg: str) -> list[Conjunct] | None:
@@ -316,6 +325,8 @@ class _Dax:
 
 
 def _sql_conjuncts(text: str) -> list[Conjunct]:
+    if _mixes(text, r"\bAND\b", r"\bOR\b", "'"):
+        return [("raw", "sql-mixed", text)]  # AND binds tighter: never flattened
     return [_conjunct(c, _sql_col, "sql") for c in _split(text, r"\bAND\b", "'")]
 
 
@@ -380,3 +391,27 @@ def dax_fingerprint(
     if not dax or re.search(r"\b(VAR|RETURN)\b", dax, re.I):
         return None
     return _Dax(column_mappings or {}).fingerprint(dax)
+
+
+def var_used_inside_calculate(dax: str) -> bool:
+    """True when a VAR is referenced inside a CALCULATE / CALCULATETABLE.
+
+    A DAX variable is evaluated once, where it is defined; CALCULATE does not
+    re-evaluate it under its own filters. Substituting the variable's text
+    into the CALCULATE would apply filters the measure never applies, so such
+    a measure cannot be fingerprinted.
+    """
+    names = re.findall(r"\bVAR\s+(\w+)\s*=", dax or "", re.IGNORECASE)
+    if not names:
+        return False
+    for m in re.finditer(r"\bCALCULATE(?:TABLE)?\s*\(", dax, re.IGNORECASE):
+        inside = dax[m.end() :]
+        depth, end = 1, len(inside)
+        for i, ch in enumerate(inside):
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if depth == 0:
+                end = i
+                break
+        if any(re.search(rf"\b{re.escape(n)}\b", inside[:end]) for n in names):
+            return True
+    return False

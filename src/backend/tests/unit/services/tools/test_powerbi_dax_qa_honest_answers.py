@@ -223,9 +223,11 @@ class TestFilterWithoutValueIsSkipped:
         )
 
     def test_comparison_and_exclusion_filters(self):
-        assert filter_to_dax("Cal[Year]", "> 2020") == (
+        assert filter_to_dax("Cal[Year]", {"operator": ">", "values": [2020]}) == (
             "FILTER(ALL(Cal[Year]), Cal[Year] > 2020)"
         )
+        # cached text comparisons came from a map shifted by one: not applied
+        assert filter_to_dax("Cal[Year]", "> 2020") is None
         assert filter_to_dax("Geo[Country]", "NOT IN (Italy, France)") == (
             'FILTER(ALL(Geo[Country]), NOT Geo[Country] IN {"Italy", "France"})'
         )

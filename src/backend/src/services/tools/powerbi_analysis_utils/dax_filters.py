@@ -9,6 +9,8 @@ movement: every method still reads ``self`` exactly as it did in the single
 import logging
 from typing import Any, Dict
 
+from src.services.tools.metadata_reduction.report_filters import filter_to_dax
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,60 +111,14 @@ class PowerBIDaxFilterMixin:
         return wrapped_dax
 
     def _generate_dax_filter_condition(
-        self, filter_name: str, filter_description: str
+        self, filter_name: str, filter_value: object
     ) -> str:
-        """
-        Generate a DAX filter condition from a filter name and description.
-
-        Handles:
-        - NOT NULL → ISBLANK(column) = FALSE
-        - NOT STARTS WITH 'X' → FILTER(VALUES(column), NOT(LEFT(column, LEN("X")) = "X"))
-        - = 'Value' → column = "Value"
-        - IN (val1, val2) → column IN {"val1", "val2"}
-        """
-        try:
-            # Parse the filter description
-            filter_desc = str(filter_description).strip()
-
-            # Handle NOT NULL
-            if filter_desc == "NOT NULL":
-                return f"ISBLANK({filter_name}) = FALSE"
-
-            # Handle NOT STARTS WITH
-            if filter_desc.startswith("NOT STARTS WITH"):
-                # Extract the value
-                value = filter_desc.replace("NOT STARTS WITH", "").strip().strip("'\"")
-                # Use LEFT() instead of STARTSWITH() - STARTSWITH not supported by Power BI API
-                prefix_length = len(value)
-                return f'FILTER(VALUES({filter_name}), NOT(LEFT({filter_name}, {prefix_length}) = "{value}"))'
-
-            # Handle equals
-            if filter_desc.startswith("= "):
-                value = filter_desc[2:].strip().strip("'\"")
-                return f'{filter_name} = "{value}"'
-
-            # Handle IN (multiple values)
-            if filter_desc.startswith("IN ("):
-                # Extract values from "IN (val1, val2, val3)"
-                values_str = filter_desc[4:-1]  # Remove "IN (" and ")"
-                values = [v.strip().strip("'\"") for v in values_str.split(",")]
-                values_list = ", ".join([f'"{v}"' for v in values])
-                return f"{filter_name} IN {{{values_list}}}"
-
-            # Handle plain value (treat as equals)
-            if not filter_desc.startswith("NOT") and not filter_desc.startswith("IN"):
-                # Might be just a value
-                value = filter_desc.strip("'\"")
-                return f'{filter_name} = "{value}"'
-
-            # Fallback - return as comment
-            logger.warning(
-                f"[DAX Filter] Could not generate condition for: {filter_name} {filter_desc}"
-            )
-            return f"// TODO: Apply filter {filter_name} {filter_desc}"
-
-        except Exception as e:
-            logger.warning(
-                f"[DAX Filter] Error generating condition for {filter_name}: {e}"
-            )
-            return f"// Error: Could not apply filter {filter_name}"
+        """The CALCULATETABLE filter for one stored filter value: a structured
+        spec, a UI value or accepted legacy text (``report_filters``, shared
+        with Tool 80). A ``//`` comment, which the caller skips, when the
+        filter has no exact value: it is never applied as its description."""
+        dax_filter = filter_to_dax(filter_name, filter_value)
+        if dax_filter:
+            return dax_filter
+        logger.warning("[DAX Filter] Not applied (no exact value): %s", filter_name)
+        return f"// No value to apply for filter {filter_name}"

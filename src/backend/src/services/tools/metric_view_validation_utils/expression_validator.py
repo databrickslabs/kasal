@@ -14,7 +14,11 @@ from .constants import (
 from .data_input_handler import DataInputHandler
 from .databricks_parser import UCMetricsViewParser
 from .dax_expression_parser import DAXExpressionParser
-from .measure_fingerprint import dax_fingerprint, sql_fingerprint
+from .measure_fingerprint import (
+    dax_fingerprint,
+    sql_fingerprint,
+    var_used_inside_calculate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +412,8 @@ class ExpressionValidator:
         dax_raw = (result.get("dax_parsed") or {}).get("raw") or ""
         if not db_raw or not dax_raw:
             return None, None
+        if var_used_inside_calculate(dax_raw):
+            return sql_fingerprint(db_raw), None  # substitution would add filters
         return sql_fingerprint(db_raw), dax_fingerprint(
             self.dax_parser.resolved_expression(dax_raw), self.column_mappings
         )

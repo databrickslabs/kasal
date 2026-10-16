@@ -24,6 +24,11 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.powerbi.dax_rag_retriever import DaxRagRetriever
 from src.services.tools.base import BaseTool
+from src.services.tools.metadata_reduction.keyword_measure import (
+    KEYWORD_FALLBACK,
+    KEYWORD_FALLBACK_NOTE,
+    pick_measure,
+)
 from src.services.tools.metadata_reduction.report_filters import filter_to_dax
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
@@ -1727,21 +1732,12 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         question, finds matching values in sample_data, and builds TREATAS filters.
         Its answer is labelled as such in the output: it never adds grouping.
         """
-        self._last_dax_source = "keyword_fallback"
-        measures = model_context.get("measures", [])
-        if not measures:
-            return None
-
-        question_lower = user_question.lower()
-
-        # Pick best measure
-        best_measure = None
-        for measure in measures:
-            if any(word in question_lower for word in measure["name"].lower().split()):
-                best_measure = measure
-                break
+        self._last_dax_source = KEYWORD_FALLBACK
+        # No measure named in the question: no answer, never an arbitrary one.
+        best_measure = pick_measure(user_question, model_context.get("measures", []))
         if not best_measure:
-            best_measure = measures[0]
+            return None
+        question_lower = user_question.lower()
 
         # Build value → column mapping from sample_data
         sample_data = model_context.get("sample_data", {})
@@ -2744,12 +2740,8 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             output.append("```dax")
             output.append(results["generated_dax"])
             output.append("```\n")
-            if results.get("dax_source") == "keyword_fallback":
-                output.append(
-                    "**Note**: this query came from the keyword fallback, not the "
-                    "LLM. It picks one measure by name and adds no grouping; check "
-                    "it answers the question before relying on the numbers.\n"
-                )
+            if results.get("dax_source") == KEYWORD_FALLBACK:
+                output.append(KEYWORD_FALLBACK_NOTE)
 
         exec_result = results.get("dax_execution", {})
         output.append("## Execution Results\n")

@@ -1620,7 +1620,7 @@ class TestGenerateSimpleDaxDaxTool:
         assert result is not None
         assert "EVALUATE" in result
 
-    def test_fallback_to_first_measure(self):
+    def test_no_named_measure_returns_none_not_an_arbitrary_one(self):
         model_context = {
             "measures": [{"name": "SomeMeasure", "table": "SomeTable"}],
             "tables": [{"name": "SomeTable"}],
@@ -1629,7 +1629,7 @@ class TestGenerateSimpleDaxDaxTool:
         result = self.tool._generate_deterministic_dax(
             "unrelated question xyz", model_context, {}
         )
-        assert result is not None
+        assert result is None
 
 
 # ===========================================================================
@@ -2570,7 +2570,7 @@ class TestGenerateDaxWithLlmExtra:
         failing = AsyncMock(side_effect=RuntimeError("no endpoint"))
         with patch("src.services.llm.manager.LLMManager.completion", failing):
             result = self._run(
-                self.tool._generate_dax_with_llm("r?", model_context, {})
+                self.tool._generate_dax_with_llm("revenue?", model_context, {})
             )
         assert failing.await_count == 1 and result is not None
         assert "EVALUATE" in result

@@ -87,6 +87,30 @@ def split_top_level_args(text: str) -> list[str]:
     return parts
 
 
+def mixes_and_or(text: str) -> bool:
+    """True when ``&&`` and ``||`` both appear outside parens and strings.
+
+    DAX binds ``&&`` tighter than ``||``, so ``A || B && C`` is
+    ``A || (B && C)``. Rather than guess at a precedence the source author may
+    not have meant either, an unparenthesized mix is refused.
+    """
+    depth = 0
+    in_str = False
+    seen = set()
+    for i, ch in enumerate(text):
+        if ch == '"':
+            in_str = not in_str
+        elif in_str:
+            continue
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and text[i : i + 2] in ("&&", "||"):
+            seen.add(text[i : i + 2])
+    return len(seen) == 2
+
+
 def _strip_wrapping_parens(cond: str) -> str:
     """Strip parens that wrap the WHOLE condition (balanced at the ends).
 
@@ -150,8 +174,9 @@ class DaxConditionMixin:
     def _all_or_nothing(
         self, condition: str, translate_part: Callable[[str], str | None]
     ) -> str:
-        """Join every translated ``&&`` part, or ``""`` if any part fails."""
-        if not condition or not condition.strip():
+        """Join every translated ``&&`` part, or ``""`` if any part fails (or
+        ``&&`` and ``||`` are mixed without parentheses)."""
+        if not condition or not condition.strip() or mixes_and_or(condition):
             return ""
         sql_parts = []
         for part in self._split_conditions(condition.strip()):
@@ -227,6 +252,8 @@ class DaxConditionMixin:
         """Translate a single DAX condition to SQL, or ``None`` if any part of
         it can't be read (patterns match the WHOLE condition, never a prefix)."""
         cond = _strip_wrapping_parens(cond.strip())
+        if mixes_and_or(cond):
+            return None  # && and || without parentheses: never guess the grouping
 
         # OR (||): every arm must translate, else the whole condition fails.
         if "||" in cond:

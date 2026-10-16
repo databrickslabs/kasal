@@ -101,7 +101,7 @@
   "src/backend/src/services/tools/pipeline_config_generator_tool.py::PipelineConfigGeneratorTool._run": 743,
   "src/backend/src/services/tools/powerbi_analysis_tool.py::PowerBIAnalysisTool._execute_analysis_pipeline": 343,
   "src/backend/src/services/tools/powerbi_analysis_tool.py::PowerBIAnalysisTool._run": 275,
-  "src/backend/src/services/tools/powerbi_analysis_utils/dax_generation.py::PowerBIDaxGenerationMixin._generate_dax_with_llm": 345,
+  "src/backend/src/services/tools/powerbi_analysis_utils/dax_generation.py::PowerBIDaxGenerationMixin._generate_dax_with_llm": 344,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._format_markdown_output": 256,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._format_sql_output": 548,
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._run": 226,
