@@ -17,6 +17,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from .report_filters import filter_to_dax
+
 logger = logging.getLogger(__name__)
 
 # Date table detection: canonical names (case-insensitive)
@@ -587,29 +589,21 @@ class DaxSkeletonBuilder:
     def _format_filter_lines(
         active_filters: Optional[Dict[str, Any]],
     ) -> str:
-        """Format active filters as TREATAS lines."""
+        """Format active filters as TREATAS / FILTER lines.
+
+        Built from the structured filter values (``report_filters``); a
+        filter with no value to apply is skipped instead of quoted.
+        """
         if not active_filters:
             return ""
 
-        lines = []
-        for filter_key, filter_value in active_filters.items():
-            if "[" not in filter_key:
-                continue
-            table = filter_key.split("[")[0]
-            col = filter_key.split("[")[1].rstrip("]")
-
-            if isinstance(filter_value, list):
-                values = ", ".join(f'"{v}"' for v in filter_value)
-                lines.append(f"    TREATAS({{{values}}}, '{table}'[{col}])")
-            elif isinstance(filter_value, str):
-                val = filter_value.strip()
-                if val.upper() == "NOT NULL":
-                    lines.append(
-                        f"    FILTER(ALL('{table}'[{col}]), NOT ISBLANK('{table}'[{col}]))"
-                    )
-                else:
-                    lines.append(f"    TREATAS({{\"{val}\"}}, '{table}'[{col}])")
-
+        lines = [
+            f"    {dax_filter}"
+            for filter_key, filter_value in active_filters.items()
+            if "[" in filter_key
+            and not filter_key.startswith("_")
+            and (dax_filter := filter_to_dax(filter_key, filter_value))
+        ]
         if lines:
             return ",\n" + ",\n".join(lines)
         return ""

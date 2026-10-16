@@ -13,6 +13,11 @@ from typing import Any, Coroutine, Dict, List, Optional, Tuple, Type, TypeVar
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.row_count_check import (
+    UNVERIFIED,
+    build_count_sql,
+    diff_counts,
+)
 from src.services.tools.mquery_conversion_cache import (
     cache_key,
     get_cached_output,
@@ -1408,6 +1413,15 @@ class MqueryConversionPipelineTool(BaseTool):
                 }
 
             diff = self._diff_counts(sql_res, dax_res)
+            if diff and diff.startswith(UNVERIFIED):
+                logger.warning("[Validation] [%s] not verified: %s", tname, diff)
+                return {
+                    "table": tname,
+                    "status": "unverified",
+                    "error": diff,
+                    "sql": select_sql,
+                    "dax": dax,
+                }
             if diff is None:
                 logger.info(
                     f"[Validation] [{tname}] ✅ VERIFIED after {iteration+1} iteration(s)"
@@ -1447,55 +1461,8 @@ class MqueryConversionPipelineTool(BaseTool):
         }
 
     def _build_count_sql(self, select_sql: str) -> str:
-        """
-        Build a COUNT(*) wrapper that works for both plain SELECTs and CTE queries.
-
-        Spark SQL does not support nested CTEs inside subqueries:
-          BAD:  SELECT COUNT(*) FROM (WITH cte AS (...) SELECT ...) _t
-          GOOD: WITH cte AS (...) SELECT COUNT(*) FROM (SELECT ...) _t
-
-        For CTE queries, keep the WITH block at the top level and wrap only
-        the final SELECT in the count subquery.
-        """
-        import re as _re
-
-        stripped = select_sql.strip()
-        if not stripped.upper().startswith("WITH"):
-            return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"
-
-        # Find the last top-level SELECT (depth 0 — not inside any parentheses)
-        depth = 0
-        last_top_select = -1
-        upper = stripped.upper()
-        i = 0
-        while i < len(stripped):
-            ch = stripped[i]
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-            elif depth == 0 and upper[i : i + 7] == "SELECT ":
-                last_top_select = i
-            i += 1
-
-        if last_top_select == -1:
-            # Fallback: can't parse, try wrapping as-is
-            return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"
-
-        cte_part = stripped[:last_top_select]
-        final_select = stripped[last_top_select:].strip()
-
-        # Remove trailing ORDER BY / LIMIT — not needed for COUNT
-        final_select = _re.sub(
-            r"\s+ORDER\s+BY\s+.*$", "", final_select, flags=_re.IGNORECASE | _re.DOTALL
-        )
-        final_select = _re.sub(
-            r"\s+LIMIT\s+\S+.*$", "", final_select, flags=_re.IGNORECASE
-        )
-
-        return (
-            f"{cte_part}SELECT COUNT(*) AS _cnt FROM ({final_select.strip()}) _cnt_agg"
-        )
+        """COUNT(*) wrapper for plain and CTE SELECTs (``row_count_check``)."""
+        return build_count_sql(select_sql)
 
     def _extract_select_body(
         self, sql: str, config: Dict[str, Any], table_name: str
@@ -1546,29 +1513,8 @@ class MqueryConversionPipelineTool(BaseTool):
         return f"SELECT * FROM {target}"
 
     def _diff_counts(self, sql_res: Dict, dax_res: Dict) -> Optional[str]:
-        """Return None if counts match within 0.1%, else a diff string."""
-        try:
-            sql_cnt = int(sql_res.get("rows", [[0]])[0][0])
-            dax_rows = dax_res.get("data", [])
-            dax_cnt = None
-            if dax_rows:
-                row = dax_rows[0]
-                for v in (row.values() if isinstance(row, dict) else row):
-                    try:
-                        dax_cnt = int(float(str(v)))
-                        break
-                    except (ValueError, TypeError):
-                        pass
-            if dax_cnt is None or (sql_cnt == 0 and dax_cnt == 0):
-                return None
-            rel = abs(sql_cnt - dax_cnt) / max(dax_cnt, 1)
-            return (
-                None
-                if rel < 0.001
-                else f"SQL={sql_cnt}, DAX={dax_cnt} (delta={rel:.1%})"
-            )
-        except Exception:
-            return None
+        """None if counts match; else a diff, or an ``unverified:`` reason."""
+        return diff_counts(sql_res, dax_res)
 
     async def _llm_correct_sql(
         self, sql: str, diff: str, mquery: str, cfg: Dict
@@ -2031,8 +1977,9 @@ class MqueryConversionPipelineTool(BaseTool):
     ) -> str:
         lines = ["# M-Query Conversion & Validation Report\n"]
         lines.append(f"**Target**: `{target}`")
+        verified = sum(1 for r in validated if r.get("status") == "validated")
         lines.append(
-            f"**Summary**: {len(validated)} Databricks tables validated | "
+            f"**Summary**: {verified} of {len(validated)} Databricks tables verified | "
             f"{len(inserted)} static tables inserted | "
             f"{len(skipped)} flagged as non-transpilable\n"
         )
@@ -2041,19 +1988,17 @@ class MqueryConversionPipelineTool(BaseTool):
             lines.append("---\n## Databricks Tables — SQL vs DAX Validation\n")
             for r in validated:
                 status = r.get("status", "unknown")
-                icon = (
-                    "✅"
-                    if status == "validated"
-                    else (
-                        "🔷"
-                        if status == "table_not_found"
-                        else ("⚠️" if status == "validation_failed" else "❌")
-                    )
-                )
+                icon = {
+                    "validated": "✅",
+                    "table_not_found": "🔷",
+                    "validation_failed": "⚠️",
+                    "unverified": "⚠️",
+                }.get(status, "❌")
                 badge = {
                     "validated": "**✅ VERIFIED**",
                     "table_not_found": "**🔷 TABLE NOT MIGRATED YET** — SQL correct but target table missing",
                     "validation_failed": "**⚠️ VALIDATION FAILED** — count mismatch after max iterations",
+                    "unverified": "**⚠️ NOT VERIFIED** — row counts could not be compared",
                 }.get(status, f"**❌ {status.upper()}**")
                 lines.append(f"### {icon} `{r['table']}` — {badge}")
                 if r.get("iterations"):

@@ -68,8 +68,8 @@ See [Authentication Setup](./01-authentication-setup.md).
 | `client_id` | SP auth | - | SP application client ID |
 | `client_secret` | SP auth | - | SP client secret |
 | `access_token` | OAuth | - | User OAuth token (alternative to SP) |
-| `llm_workspace_url` | No | - | Databricks workspace URL for LLM |
-| `llm_token` | No | - | Databricks PAT for LLM |
+| `llm_workspace_url` | No | - | Ignored; the LLM call uses the run's own Databricks credentials |
+| `llm_token` | No | - | Ignored; no PAT is needed for DAX generation |
 | `llm_model` | No | `databricks-claude-sonnet-4` | LLM endpoint name |
 | `max_dax_retries` | No | `5` | Retry attempts on failure (1-10) |
 | `include_visual_references` | No | `true` | Find reports using the queried measures |
@@ -98,8 +98,6 @@ See [Authentication Setup](./01-authentication-setup.md).
         "tenant_id": "{tenant_id}",
         "client_id": "{client_id}",
         "client_secret": "{client_secret}",
-        "llm_workspace_url": "{llm_workspace_url}",
-        "llm_token": "{llm_token}",
         "max_dax_retries": 5,
         "output_format": "markdown"
       }

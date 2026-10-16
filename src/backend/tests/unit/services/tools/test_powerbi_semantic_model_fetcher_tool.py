@@ -672,7 +672,7 @@ class TestMergeSlicerDefaultsIntoFilters:
         filters = {}
         self.tool._merge_slicer_defaults_into_filters(slicers, filters)
         assert "Sales[BU]" in filters
-        assert filters["Sales[BU]"] == "Italy"
+        assert filters["Sales[BU]"] == {"operator": "in", "values": ["Italy"]}
 
     def test_slicer_without_default_value_skipped(self):
         slicers = [{"table": "Sales", "column": "BU", "default_value": ""}]
@@ -1011,7 +1011,7 @@ class TestFetcherExtractFilterFromDefinition:
         }
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
-        assert "unknown" in desc.lower()
+        assert desc == {"unapplied": "no value selected"}  # kept, never applied
 
 
 # ===========================================================================

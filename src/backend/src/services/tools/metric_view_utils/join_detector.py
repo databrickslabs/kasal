@@ -32,6 +32,33 @@ class JoinDetector:
         # P4a: global opt-in to dedup ALL dim joins with a QUALIFY subquery
         # (per-dim `dedup_dim` in join_key_map takes precedence / adds to this).
         self._dedup_all_dim_joins = bool(cfg.get("dedup_dim_joins", False))
+        # Dimensions a measure references but no join could be built for;
+        # reported in the migration report (the view would otherwise just
+        # lack them).
+        self.dropped_dims: list[dict] = []
+
+    def _record_dropped(self, fact_table_key: str, dim_name: str) -> None:
+        if any(
+            d["fact"] == fact_table_key and d["dimension"] == dim_name
+            for d in self.dropped_dims
+        ):
+            return
+        logger.warning(
+            "[JoinDetector] %s: join to %s dropped, no physical source table",
+            fact_table_key,
+            dim_name,
+        )
+        self.dropped_dims.append(
+            {
+                "fact": fact_table_key,
+                "dimension": dim_name,
+                "reason": (
+                    "no physical source table: its Power Query M keeps only some "
+                    "rows (or could not be resolved), and join_key_map has no "
+                    "source_table; supply a source view"
+                ),
+            }
+        )
 
     def detect(
         self,
@@ -84,6 +111,7 @@ class JoinDetector:
                 # Fallback: use source_table from join_key_map config
                 source = jk.get("source_table", "")
             if not source:
+                self._record_dropped(fact_table_key, dim_name)
                 continue
 
             alias = jk["alias"]

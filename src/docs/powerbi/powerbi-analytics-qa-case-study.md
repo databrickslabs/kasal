@@ -86,8 +86,8 @@ Why three agents instead of one (Tool 72)? Tool 72 does everything in a single c
 | `tenant_id` | All 3 tasks | Azure AD tenant ID |
 | `client_id` | All 3 tasks | Service principal client ID |
 | `client_secret` | All 3 tasks | Service principal client secret |
-| `llm_workspace_url` | Task 3 (DAX tool) | `https://<your-workspace>.azuredatabricks.net` |
-| `llm_token` | Task 3 (DAX tool) | Databricks PAT |
+
+The DAX tool needs no LLM token: it calls the LLM with the run's own Databricks credentials, and `llm_workspace_url` / `llm_token` are ignored.
 
 The SP needs **Dataset.Read.All** in your Power BI workspace. Admin permissions are not required for Q&A.
 

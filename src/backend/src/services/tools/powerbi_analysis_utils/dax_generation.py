@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from src.services.tools.metadata_reduction.keyword_measure import (
+    KEYWORD_FALLBACK,
+    pick_measure,
+)
+
 from ._mixin_deps import DaxGenerationDeps
 
 logger = logging.getLogger(__name__)
@@ -47,13 +52,9 @@ class PowerBIDaxGenerationMixin(DaxGenerationDeps):
         )
         logger.info("=" * 80)
 
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
+        # The LLM call goes through LLMManager with the run's own credentials;
+        # no llm_workspace_url / llm_token in the tool config is needed.
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
-
-        if not llm_workspace_url or not llm_token:
-            # Fallback: Generate simple DAX without LLM
-            return self._generate_simple_dax(user_question, model_context)
 
         # Check if we have measures to work with
         measures = model_context.get("measures", [])
@@ -357,9 +358,8 @@ CALCULATETABLE(...)
                 )
 
             # Auto-wrap with report-level filters if present
-            dax = self._auto_wrap_with_report_filters(dax, config)
-
-            return dax
+            self._last_dax_source = "llm"
+            return self._auto_wrap_with_report_filters(dax, config)
 
         except Exception as e:
             logger.error(f"LLM DAX generation error: {e}")
@@ -550,12 +550,7 @@ CALCULATETABLE(...)
         Generate DAX with self-correction based on previous failed attempts.
         Uses enriched context (Microsoft Copilot-style) for better error recovery.
         """
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
-
-        if not llm_workspace_url or not llm_token:
-            return None
 
         # Build context about previous attempts
         attempts_text = "\n\n".join(
@@ -710,6 +705,7 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
                 )
 
             logger.info(f"[DAX Self-Correction] Extracted DAX: {dax[:100]}...")
+            self._last_dax_source = "llm"
             return dax
 
         except Exception as e:
@@ -719,25 +715,13 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
     def _generate_simple_dax(
         self, user_question: str, model_context: Dict[str, Any]
     ) -> Optional[str]:
-        """Generate a simple DAX query without LLM."""
-        measures = model_context.get("measures", [])
-        if not measures:
-            return None
-
-        # Find best matching measure based on question keywords
-        question_lower = user_question.lower()
-        best_measure = None
-
-        for measure in measures:
-            measure_name_lower = measure["name"].lower()
-            if any(word in question_lower for word in measure_name_lower.split()):
-                best_measure = measure
-                break
-
+        """Keyword fallback when the LLM could not answer (labelled in the
+        output). ``None`` when no measure is named in the question: no answer
+        rather than an arbitrary measure."""
+        self._last_dax_source = KEYWORD_FALLBACK
+        best_measure = pick_measure(user_question, model_context.get("measures", []))
         if not best_measure:
-            best_measure = measures[0]
-
-        # Generate simple EVALUATE query
+            return None
         return f"""EVALUATE
 SUMMARIZECOLUMNS(
     "Result", [{best_measure['name']}]

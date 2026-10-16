@@ -27,6 +27,14 @@ import httpx
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metadata_reduction.report_filters import (
+    describe_filter,
+    filter_from_definition,
+    parse_filter_value,
+    slicer_selection_spec,
+    spec_from_pbi_condition,
+    validate_filter_datatype,
+)
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
@@ -843,17 +851,18 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     ) -> None:
         """Merge slicer default selections into default_filters.
 
-        If a slicer has a default_value (user input baked into the report),
-        add it to default_filters so downstream tools know about it.
-        Only adds if not already present in default_filters.
+        If a slicer has a default selection (user input baked into the report),
+        add it to default_filters as a structured value so downstream tools
+        build DAX from its values, not its display text. Only adds if not
+        already present in default_filters.
         """
         for s in slicers:
-            default_value = s.get("default_value", "")
-            if not default_value:
-                continue
+            default_value = s.get("default_filter") or parse_filter_value(
+                s.get("default_value") or None
+            )
             table = s.get("table", "")
             column = s.get("column", "")
-            if not table or not column:
+            if not default_value or not table or not column:
                 continue
             filter_key = f"{table}[{column}]"
             if filter_key not in default_filters:
@@ -945,7 +954,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         if filters:
             lines.append("## Default Filters\n")
             for name, desc in filters.items():
-                lines.append(f"- **{name}**: {desc}")
+                lines.append(f"- **{name}**: {describe_filter(desc)}")
             lines.append("")
 
         slicer_list = output.get("slicers", [])
@@ -2337,12 +2346,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         visual_data.get("visual", {})
                     )
 
-                    # Extract active slicer selection
-                    default_value = self._extract_slicer_selection(
+                    # Active slicer selection: structured value + display text
+                    selection = slicer_selection_spec(
                         visual_data, visual_data.get("visual", {})
                     )
+                    default_value = describe_filter(selection) if selection else ""
 
                     slicer = {
+                        "default_filter": selection,
                         "page_id": page_id,
                         "page_name": (
                             page_names.get(page_id, "Unknown") if page_id else "Unknown"
@@ -2479,12 +2490,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             parsed_config
                         )
 
-                        # Extract active slicer selection from visual-level filters
-                        default_value = self._extract_slicer_selection(
-                            vis_data, parsed_config
-                        )
+                        # Active slicer selection: structured value + display text
+                        selection = slicer_selection_spec(vis_data, parsed_config)
+                        default_value = describe_filter(selection) if selection else ""
 
                         slicer = {
+                            "default_filter": selection,
                             "page_id": page_id,
                             "page_name": page_name,
                             "visual_id": visual_id,
@@ -2511,39 +2522,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         """Extract active/default selection from a slicer visual.
 
         Checks the visual's filters array for any pre-set values.
-        Returns a human-readable description of the selection, or empty string.
+        Returns a human-readable description of the selection, or empty string;
+        the structured value itself comes from ``slicer_selection_spec``.
         """
-        try:
-            # Visual-level filters can be in vis_data["filters"] (JSON string or list)
-            filters_raw = vis_data.get("filters") or parsed_config.get("filters")
-            if not filters_raw:
-                return ""
-
-            if isinstance(filters_raw, str):
-                try:
-                    filters_list = json.loads(filters_raw)
-                except json.JSONDecodeError:
-                    return ""
-            elif isinstance(filters_list := filters_raw, list):
-                pass
-            else:
-                return ""
-
-            for f in filters_list:
-                if not isinstance(f, dict):
-                    continue
-                filter_obj = f.get("filter", {})
-                where = filter_obj.get("Where", [])
-                if not where:
-                    continue
-                condition = where[0].get("Condition", {})
-                desc = self._parse_filter_condition(condition)
-                if desc and desc not in ("has filter", "has complex filter"):
-                    return desc
-        except Exception as e:
-            logger.debug(f"[Slicer Extraction] Error extracting selection: {e}")
-
-        return ""
+        spec = slicer_selection_spec(vis_data, parsed_config)
+        return describe_filter(spec) if spec else ""
 
     def _extract_slicer_binding(self, visual: Dict[str, Any]) -> tuple:
         """Extract table and column from a PBIR separate-file visual's queryDefinition.
@@ -2861,135 +2844,26 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
         return filters
 
-    # Power BI DataType enum → human-readable name
-    _PBI_DTYPE_MAP = {
-        "1": "whole_number",
-        "2": "decimal",
-        "3": "currency",
-        "4": "date",
-        "5": "boolean",
-        "6": "string",
-        "7": "binary",
-        "8": "datetime",
-        "9": "time",
-        "10": "duration",
-    }
-
     def _validate_filter_datatype(
-        self, filter_name: str, filter_description: str, column_dtype: str
-    ) -> str:
-        """Validate filter values against the column's actual datatype.
-
-        If a mismatch is detected, append a warning to the description.
-        """
-        dtype_name = self._PBI_DTYPE_MAP.get(column_dtype, column_dtype)
-        numeric_types = {"1", "2", "3"}  # whole_number, decimal, currency
-        date_types = {"4", "8", "9"}  # date, datetime, time
-        string_type = "6"
-
-        # Extract literal values from filter description for validation
-        # Check for quoted string values in a numeric/date column
-        has_quoted = "'" in filter_description and filter_description not in (
-            "has filter",
-            "has complex filter",
-        )
-        is_numeric_col = column_dtype in numeric_types
-        is_date_col = column_dtype in date_types
-        is_string_col = column_dtype == string_type
-
-        mismatch = False
-        if is_numeric_col and has_quoted:
-            # Filter has string-quoted values but column is numeric
-            mismatch = True
-        elif (
-            is_date_col
-            and has_quoted
-            and not re.search(r"\d{4}-\d{2}-\d{2}", filter_description)
-        ):
-            # Date column but filter values don't look like dates
-            mismatch = True
-        elif is_string_col and re.match(r"^[><=!]+ \d+\.?\d*$", filter_description):
-            # String column but filter uses numeric comparison
-            mismatch = True
-
-        if mismatch:
-            logger.warning(
-                f"[Filter Validation] DATATYPE MISMATCH: {filter_name} "
-                f"(column type: {dtype_name}) has filter: {filter_description}"
-            )
-            return f"{filter_description} ⚠️ DATATYPE MISMATCH (column is {dtype_name})"
-
-        return filter_description
+        self, filter_name: str, filter_description: object, column_dtype: str
+    ) -> object:
+        """Check a filter value against its column type (``report_filters``)."""
+        return validate_filter_datatype(filter_name, filter_description, column_dtype)
 
     def _extract_filter_from_definition(self, filter_def: Dict[str, Any]) -> tuple:
-        """Extract filter name and description from Power BI filter definition."""
+        """``(Table[Column], spec)`` from a Power BI filter definition.
+
+        The spec is structured (operator + typed values, see
+        ``report_filters``). A filter with no exact value (a card with no
+        selection, a relative date) is cached as ``{"unapplied": reason}``, so
+        the DAX tool reports it instead of silently answering without it.
+        """
         try:
-            expression = filter_def.get("expression", {})
-            column_expr = expression.get("Column", {})
-            expr = column_expr.get("Expression", {})
-            source_ref = expr.get("SourceRef", {})
-            table = source_ref.get("Entity", "")
-            column = column_expr.get("Property", "")
-            if not table or not column:
-                return (None, None)
-            filter_name = f"{table}[{column}]"
-            filter_obj = filter_def.get("filter", {})
-            where_clauses = filter_obj.get("Where", [])
-            if not where_clauses:
-                return (filter_name, "has filter (unknown type)")
-            condition = where_clauses[0].get("Condition", {})
-            filter_description = self._parse_filter_condition(condition)
-            return (filter_name, filter_description)
-        except Exception:
+            return filter_from_definition(filter_def)
+        except (AttributeError, TypeError, ValueError):
             return (None, None)
 
     def _parse_filter_condition(self, condition: Dict[str, Any]) -> str:
-        """Parse a Power BI filter condition into a human-readable description."""
-        try:
-            if "Not" in condition:
-                not_expr = condition["Not"]["Expression"]
-                if "In" in not_expr:
-                    in_expr = not_expr["In"]
-                    values = in_expr.get("Values", [])
-                    if values and len(values) > 0:
-                        first_value = values[0]
-                        if len(first_value) > 0:
-                            literal = first_value[0].get("Literal", {})
-                            if literal.get("Value") == "null":
-                                return "NOT NULL"
-                    value_strs = []
-                    for val_list in values:
-                        for val in val_list:
-                            lit_val = val.get("Literal", {}).get("Value", "")
-                            value_strs.append(lit_val.strip("'\""))
-                    if value_strs:
-                        return f"NOT IN ({', '.join(value_strs)})"
-                elif "StartsWith" in not_expr:
-                    starts_with = not_expr["StartsWith"]
-                    right_val = (
-                        starts_with.get("Right", {}).get("Literal", {}).get("Value", "")
-                    )
-                    cleaned_val = right_val.strip("'\"")
-                    return f"NOT STARTS WITH '{cleaned_val}'"
-            elif "In" in condition:
-                in_expr = condition["In"]
-                values = in_expr.get("Values", [])
-                value_strs = []
-                for val_list in values:
-                    for val in val_list:
-                        lit_val = val.get("Literal", {}).get("Value", "")
-                        value_strs.append(lit_val.strip("'\""))
-                if len(value_strs) == 1:
-                    return f"= '{value_strs[0]}'"
-                elif len(value_strs) > 1:
-                    return f"IN ({', '.join(value_strs)})"
-            elif "Comparison" in condition:
-                comparison = condition["Comparison"]
-                operator = comparison.get("ComparisonKind", 0)
-                right = comparison.get("Right", {}).get("Literal", {}).get("Value", "")
-                op_map = {0: "=", 1: "!=", 2: ">", 3: ">=", 4: "<", 5: "<="}
-                op_str = op_map.get(operator, "=")
-                return f"{op_str} {right}"
-            return "has complex filter"
-        except Exception:
-            return "has filter"
+        """Human-readable text of a Power BI filter condition (logs, slicers)."""
+        spec = spec_from_pbi_condition(condition)
+        return describe_filter(spec) if spec else "has complex filter"

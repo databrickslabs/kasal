@@ -406,6 +406,7 @@ class PowerBIConnector(BaseInboundConnector):
             kpi._advanced_parsing = {
                 "transpiled_sql": parsed["transpiled_sql"],
                 "is_transpilable": parsed["is_transpilable"],
+                "transpilability_reason": parsed["transpilability_reason"],
                 "signature": parsed["generic_signature"],
                 "tokens_count": len(parsed["tokens"]),
                 "functions_used": [f.value for f in parsed["functions"]],

@@ -176,17 +176,12 @@ class DAXExpressionParser:
         # Step 2: Generate signatures
         signature, generic_signature = self._generate_signature(tokens)
 
-        # Step 3: Check transpilability
-        is_transpilable, transpilability_reason = (
-            self.transpilation_engine.can_transpile(tokens)
+        # Steps 3-4: Transpile, or record why the measure is a gap. A measure
+        # is transpilable only when SQL actually came out.
+        transpiled_sql, transpilability_reason = self.transpilation_engine.translate(
+            generic_signature, tokens
         )
-
-        # Step 4: Transpile if possible
-        transpiled_sql = None
-        if is_transpilable:
-            transpiled_sql = self.transpilation_engine.transpile(
-                generic_signature, tokens
-            )
+        is_transpilable = transpiled_sql is not None
 
         # Step 5: Extract components (for backward compatibility)
         simple_parse = self.parse(expression)

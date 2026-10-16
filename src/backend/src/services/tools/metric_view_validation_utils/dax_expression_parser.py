@@ -410,6 +410,10 @@ class DAXExpressionParser:
         Returns:
             Hierarchical parse tree
         """
+        return self.parse_function_call(self.resolved_expression(dax_expr))
+
+    def resolved_expression(self, dax_expr: str) -> str:
+        """The DAX with comments removed and every VAR substituted into RETURN."""
         cleaned = self.clean_dax_comments(dax_expr)
         toplevel_components = self.decompose_toplevel(cleaned)
 
@@ -427,8 +431,7 @@ class DAXExpressionParser:
             resulting_return_expr = toplevel_components["return_expr"]
         else:
             resulting_return_expr = toplevel_components["expr"]
-
-        return self.parse_function_call(resulting_return_expr)
+        return str(resulting_return_expr)
 
     def _parse_condition(self, condition: str) -> Dict[str, Any]:
         """Parse a DAX filter condition."""

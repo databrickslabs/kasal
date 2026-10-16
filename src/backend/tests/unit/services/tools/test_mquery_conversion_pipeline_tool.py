@@ -967,11 +967,11 @@ class TestDiffCounts:
         result = self.tool._diff_counts(sql_res, dax_res)
         assert result is None
 
-    def test_empty_dax_data_returns_none(self):
+    def test_empty_dax_data_is_unverified_not_a_match(self):
         sql_res = {"success": True, "rows": [[50]]}
         dax_res = {"success": True, "data": []}
         result = self.tool._diff_counts(sql_res, dax_res)
-        assert result is None
+        assert result is not None and result.startswith("unverified")
 
     def test_dax_with_list_row(self):
         sql_res = {"success": True, "rows": [[100]]}
@@ -979,9 +979,9 @@ class TestDiffCounts:
         result = self.tool._diff_counts(sql_res, dax_res)
         assert result is None
 
-    def test_exception_returns_none(self):
+    def test_unreadable_result_is_unverified_not_a_match(self):
         result = self.tool._diff_counts({}, {})
-        assert result is None
+        assert result is not None and result.startswith("unverified")
 
 
 # ===========================================================================

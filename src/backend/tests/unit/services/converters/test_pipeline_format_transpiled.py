@@ -153,15 +153,16 @@ class TestConversionPipelineFormatTranspiled:
     def test_format_transpiled_sql_non_transpilable(
         self, pipeline, non_transpilable_definition
     ):
-        """Test _format_transpiled_sql falls back to original formula"""
+        """A non-transpilable measure is a reported gap with no SQL."""
         result = pipeline._format_transpiled_sql(non_transpilable_definition, {})
 
         assert isinstance(result, list)
         assert len(result) == 1
         measure = result[0]
         assert measure["is_transpilable"] is False
-        # Should use original formula when not transpilable
-        assert "CALCULATE" in measure["sql"] or measure["sql"] is not None
+        assert measure["sql"] is None
+        assert measure["status"] == "gap"
+        assert "KEEPFILTERS" in measure["gap_reason"]
 
     def test_format_transpiled_sql_missing_metadata(
         self, pipeline, missing_metadata_definition
@@ -253,17 +254,13 @@ class TestConversionPipelineFormatTranspiled:
     def test_format_transpiled_uc_metrics_non_transpilable(
         self, pipeline, non_transpilable_definition
     ):
-        """Test _format_transpiled_uc_metrics marks non-transpilable measures"""
+        """A non-transpilable measure is listed as a gap, never emitted."""
         result = pipeline._format_transpiled_uc_metrics(non_transpilable_definition, {})
 
         assert isinstance(result, str)
-        # Should include a warning comment
-        assert (
-            "WARNING" in result
-            or "warning" in result.lower()
-            or "NOT transpilable" in result.lower()
-            or "NOT transpilable" in result
-        )
+        assert "GAP: complex_revenue" in result
+        assert "KEEPFILTERS" in result
+        assert "name: complex_revenue" not in result
 
     def test_format_transpiled_uc_metrics_skips_missing_metadata(
         self, pipeline, missing_metadata_definition

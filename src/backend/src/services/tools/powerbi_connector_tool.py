@@ -268,6 +268,15 @@ class PowerBIConnectorTool(BaseTool):
             # Format output based on target format
             output = result["output"]
             measure_count = result["measure_count"]
+            gaps = result.get("gaps") or []
+            gap_note = (
+                f"**Partial conversion:** {len(gaps)} of {measure_count} measures "
+                "have no SQL translation and were not emitted: "
+                + ", ".join(f"{g['name']} ({g['reason']})" for g in gaps)
+                + "\n\n"
+                if gaps
+                else ""
+            )
 
             if outbound_format_enum == OutboundFormat.DAX:
                 # Format DAX measures
@@ -284,6 +293,7 @@ class PowerBIConnectorTool(BaseTool):
                 # Format SQL query
                 formatted = "# Power BI Measures Converted to SQL\n\n"
                 formatted += f"Extracted {measure_count} measures from Power BI dataset '{semantic_model_id}'\n\n"
+                formatted += gap_note
                 formatted += f"```sql\n{output}\n```\n"
                 return formatted
 
@@ -291,6 +301,7 @@ class PowerBIConnectorTool(BaseTool):
                 # Format UC Metrics YAML
                 formatted = "# Power BI Measures Converted to UC Metrics\n\n"
                 formatted += f"Extracted {measure_count} measures from Power BI dataset '{semantic_model_id}'\n\n"
+                formatted += gap_note
                 formatted += f"```yaml\n{output}\n```\n"
                 return formatted
 

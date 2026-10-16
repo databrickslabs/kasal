@@ -965,11 +965,27 @@ class MetricViewPipeline:
                 total_translated * 100 // business_scope if business_scope > 0 else 0
             ),
         }
+        self._record_source_gaps()
         results["limitations"] = self._limitations
         results["migration_report"] = emit_migration_report(
             self.all_specs, self.stats, self.config, limitations=self._limitations
         )
         return results
+
+    def _record_source_gaps(self) -> None:
+        """Gaps the YAML does not show, for ``limitations`` and the report:
+        dimension joins dropped for lack of a safe source, and Power Query
+        type conversions the views do not apply."""
+        dropped = self.join_detector.dropped_dims
+        if dropped:
+            self._limitations["dropped_dimension_joins"] = list(dropped)
+        type_changes = {
+            name: info.type_changes
+            for name, info in self.mquery_tables.items()
+            if info.type_changes
+        }
+        if type_changes:
+            self._limitations["type_conversions_not_applied"] = type_changes
 
     @staticmethod
     def _resolve_placeholders_in_spec(

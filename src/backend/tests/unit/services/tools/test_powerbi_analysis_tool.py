@@ -695,7 +695,7 @@ class TestExtractFilterFromDefinition:
         filter_def = self._make_filter_def("Sales", "Region", where_clauses=[])
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
-        assert desc is not None
+        assert desc == {"unapplied": "no value selected"}  # kept, never applied
 
 
 # ===========================================================================
@@ -1628,7 +1628,7 @@ class TestGenerateSimpleDax:
         result = self.tool._generate_simple_dax("how many customers?", model_context)
         assert "Customer Count" in result
 
-    def test_fallback_to_first_measure_when_no_match(self):
+    def test_no_named_measure_returns_none(self):
         model_context = {
             "measures": [
                 {
@@ -1644,8 +1644,8 @@ class TestGenerateSimpleDax:
             ]
         }
         result = self.tool._generate_simple_dax("something unrelated", model_context)
-        assert result is not None
-        assert "Total Revenue" in result
+        # no measure named in the question: no answer, not the first measure
+        assert result is None
 
     def test_summarizecolumns_in_output(self):
         model_context = {
@@ -1657,7 +1657,7 @@ class TestGenerateSimpleDax:
                 }
             ]
         }
-        result = self.tool._generate_simple_dax("test?", model_context)
+        result = self.tool._generate_simple_dax("revenue?", model_context)
         assert "SUMMARIZECOLUMNS" in result
 
 
@@ -1767,7 +1767,7 @@ class TestGenerateDaxFilterCondition:
     def test_not_null_returns_isblank(self):
         result = self.tool._generate_dax_filter_condition("Sales[Region]", "NOT NULL")
         assert "ISBLANK" in result
-        assert "FALSE" in result
+        assert "NOT ISBLANK(Sales[Region])" in result
 
     def test_not_starts_with_returns_left(self):
         result = self.tool._generate_dax_filter_condition(
@@ -1852,7 +1852,7 @@ class TestParseFilterConditionExtended:
             "In": {"Expressions": [], "Values": [[{"Literal": {"Value": "'Italy'"}}]]}
         }
         result = self.tool._parse_filter_condition(condition)
-        assert "= 'Italy'" in result
+        assert '= "Italy"' in result
 
     def test_in_multiple_values(self):
         condition = {
@@ -2883,7 +2883,8 @@ class TestGenerateDaxWithLlmFallback:
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def test_no_llm_credentials_falls_back_to_simple(self):
+    def test_llm_failure_without_token_config_falls_back_to_simple(self):
+        """No token config is needed to try the LLM; a failed call falls back."""
         model_context = {
             "measures": [
                 {
@@ -2894,22 +2895,20 @@ class TestGenerateDaxWithLlmFallback:
             ],
             "tables": [],
         }
-        config = {}  # No llm_workspace_url or llm_token
-        result = self._run(
-            self.tool._generate_dax_with_llm("Revenue?", model_context, config)
-        )
-        # Should fall back to _generate_simple_dax
-        assert result is not None
-        assert "EVALUATE" in result
+        failing = AsyncMock(side_effect=RuntimeError("no endpoint"))
+        with patch("src.services.llm.manager.LLMManager.completion", failing):
+            result = self._run(
+                self.tool._generate_dax_with_llm("Revenue?", model_context, {})
+            )
+        assert failing.await_count == 1
+        assert result is not None and "EVALUATE" in result
 
-    def test_no_measures_with_no_llm_returns_none(self):
+    def test_no_measures_returns_none(self):
         model_context = {"measures": [], "tables": []}
-        config = {}
         result = self._run(
-            self.tool._generate_dax_with_llm("Revenue?", model_context, config)
+            self.tool._generate_dax_with_llm("Revenue?", model_context, {})
         )
-        # No measures → None from simple dax
-        assert result is None
+        assert result is None  # no measures: nothing to ask the LLM about
 
     def test_llm_http_error_falls_back_to_simple(self):
         model_context = {
@@ -3382,22 +3381,22 @@ class TestGenerateDaxWithSelfCorrection:
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def test_no_llm_credentials_returns_none(self):
+    def test_llm_failure_without_token_config_returns_none(self):
         model_context = {
             "measures": [{"name": "Revenue", "table": "Sales"}],
             "tables": [],
         }
-        config = {}  # No LLM creds
         previous = [
             {"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "err"}
         ]
-
-        result = self._run(
-            self.tool._generate_dax_with_self_correction(
-                "Revenue?", model_context, config, previous
+        failing = AsyncMock(side_effect=RuntimeError("no endpoint"))
+        with patch("src.services.llm.manager.LLMManager.completion", failing):
+            result = self._run(
+                self.tool._generate_dax_with_self_correction(
+                    "Revenue?", model_context, {}, previous
+                )
             )
-        )
-        assert result is None
+        assert failing.await_count == 1 and result is None
 
     def test_llm_exception_returns_none(self):
         model_context = {

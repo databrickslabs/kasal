@@ -24,6 +24,17 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.powerbi.dax_rag_retriever import DaxRagRetriever
 from src.services.tools.base import BaseTool
+from src.services.tools.metadata_reduction.keyword_measure import (
+    KEYWORD_FALLBACK,
+    KEYWORD_FALLBACK_NOTE,
+    pick_measure,
+)
+from src.services.tools.metadata_reduction.qa_output import (
+    attempt_lines,
+    prompt_filter_lines,
+    unapplied_filter_line,
+)
+from src.services.tools.metadata_reduction.report_filters import filter_to_dax
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
@@ -235,15 +246,6 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     f"[DaxTool] model_context_json preview: {str(kwargs['model_context_json'])[:300]}..."
                 )
 
-            # Filter out placeholder values
-            filtered_kwargs = {}
-            for k, v in kwargs.items():
-                if v is not None and not self._is_placeholder_value(v):
-                    filtered_kwargs[k] = v
-
-            # Merge configs
-            merged_config: Dict[str, Any] = {}
-
             # Connection/auth — default config takes precedence
             config_params = [
                 "workspace_id",
@@ -260,6 +262,21 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 "llm_token",
                 "llm_model",
             ]
+            # Placeholder patterns ("<id>", "your_x_here") apply to ids and
+            # credentials; other inputs are dropped only when they are nothing
+            # but an unfilled "{name}" / "<name>" (a question with "<" and ">",
+            # or compact JSON context, is real input).
+            filtered_kwargs = {
+                k: v
+                for k, v in kwargs.items()
+                if v is not None
+                and not (
+                    self._is_placeholder_value(v)
+                    if k in config_params
+                    else re.fullmatch(r"\s*(\{[\w .-]+\}|<[\w .-]+>)\s*", str(v))
+                )
+            }
+            merged_config: Dict[str, Any] = {}
             for key in config_params:
                 default_val = self._default_config.get(key)
                 kwarg_val = filtered_kwargs.get(key)
@@ -1225,62 +1242,16 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     f"referencing tables not in model context: {skipped_filters}"
                 )
 
-            if relevant_filters:
+            # Built from the structured values; filters left out (no exact value,
+            # table not in context) are kept for the answer's "not applied" line.
+            filter_lines, self._unapplied_filters = prompt_filter_lines(
+                relevant_filters, skipped_filters
+            )
+            if filter_lines:
                 sections.append(
                     "ACTIVE FILTERS — include ALL of these as TREATAS in SUMMARIZECOLUMNS:"
                 )
-                for filter_name, filter_value in relevant_filters.items():
-                    # Render as DAX TREATAS hint when filter is table-qualified (Table[Column])
-                    if "[" in filter_name:
-                        table_part = filter_name.split("[")[0]
-                        col_part = filter_name.split("[", 1)[1].rstrip("]")
-                        # Wrap ONLY the table name in single quotes if it contains spaces
-                        if " " in table_part:
-                            table_col = f"'{table_part}'[{col_part}]"
-                        else:
-                            table_col = filter_name
-                        if isinstance(filter_value, list):
-                            values = ", ".join([f'"{v}"' for v in filter_value])
-                            sections.append(f"  TREATAS({{{values}}}, {table_col})")
-                        elif isinstance(filter_value, str):
-                            val = filter_value.strip()
-                            if val.upper() == "NOT NULL":
-                                sections.append(
-                                    f"  FILTER(ALL({table_col}), NOT ISBLANK({table_col}))"
-                                )
-                            elif val.upper().startswith("NOT STARTS WITH"):
-                                prefix = (
-                                    val[len("NOT STARTS WITH") :].strip().strip("'\"")
-                                )
-                                sections.append(
-                                    f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) <> "{prefix}")'
-                                )
-                            elif val.upper().startswith("STARTS WITH"):
-                                prefix = val[len("STARTS WITH") :].strip().strip("'\"")
-                                sections.append(
-                                    f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) = "{prefix}")'
-                                )
-                            else:
-                                sections.append(f'  TREATAS({{"{val}"}}, {table_col})')
-                        else:
-                            sections.append(
-                                f'  TREATAS({{"{filter_value}"}}, {table_col})'
-                            )
-                    else:
-                        # Unqualified key — give hint so LLM knows to find the right table
-                        if isinstance(filter_value, list):
-                            values = ", ".join([f'"{v}"' for v in filter_value])
-                            sections.append(
-                                f"  [{filter_name}] — multi-value: use TREATAS({{{values}}}, CorrectTable[{filter_name}])"
-                            )
-                        elif isinstance(filter_value, str):
-                            val = filter_value.strip()
-                            sections.append(
-                                f'  [{filter_name}] = "{val}" — use TREATAS({{"{val}"}}, CorrectTable[{filter_name}])'
-                            )
-                        else:
-                            sections.append(f"  [{filter_name}] = {filter_value}")
-                sections.append("")
+                sections.extend([*filter_lines, ""])
 
         # ── Business terminology ──
         business_mappings = config.get("business_mappings", {})
@@ -1449,16 +1420,14 @@ class PowerBISemanticModelDaxTool(BaseTool):
         config: Dict[str, Any],
         rag_examples: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[str]:
-        """Generate DAX query using LLM with enriched context."""
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
+        """Generate DAX query using LLM with enriched context.
+
+        The LLM call goes through ``LLMManager`` with the run's own Databricks
+        credentials, so no token in the tool config is needed (the old
+        ``llm_workspace_url``/``llm_token`` check sent every default run to
+        the keyword fallback instead).
+        """
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
-
-        if not llm_workspace_url or not llm_token:
-            return self._generate_deterministic_dax(
-                user_question, model_context, config
-            )
-
         measures = model_context.get("measures", [])
         if not measures:
             logger.warning("[DAX Generation] No measures available")
@@ -1548,8 +1517,8 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
                 return self._generate_deterministic_dax(
                     user_question, model_context, config
                 )
-            dax = self._auto_wrap_with_report_filters(dax, config)
-            return dax
+            self._last_dax_source = "llm"
+            return self._auto_wrap_with_report_filters(dax, config)
 
         except Exception as e:
             logger.error(f"LLM DAX generation error: {e}")
@@ -1565,12 +1534,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
         previous_attempts: List[Dict[str, Any]],
     ) -> Optional[str]:
         """Generate DAX with self-correction based on previous failed attempts."""
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
-
-        if not llm_workspace_url or not llm_token:
-            return None
 
         # Build compact error summary from previous attempts
         attempts_parts = []
@@ -1618,14 +1582,12 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
                         break
 
         filter_reminder = ""
-        if active_filters:
-            filter_lines = []
-            for k, v in active_filters.items():
-                if isinstance(v, list):
-                    vals = ", ".join([f'"{x}"' for x in v])
-                    filter_lines.append(f"  {k}: TREATAS({{{vals}}}, ...)")
-                else:
-                    filter_lines.append(f'  {k} = "{v}"')
+        filter_lines = [
+            f"  {dax_filter}"
+            for k, v in (active_filters or {}).items()
+            if (dax_filter := filter_to_dax(k, v))
+        ]
+        if filter_lines:
             filter_reminder = (
                 "\n\nMANDATORY — these active_filters MUST appear in the new query, exactly as shown:\n"
                 + "\n".join(filter_lines)
@@ -1676,6 +1638,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             )
             dax = self._extract_dax_from_llm_response(content)
             if dax:
+                self._last_dax_source = "llm"
                 return dax
             # Empty extraction — LLM returned garbage, return None to trigger retry
             logger.warning("[DaxTool] Self-correction returned no extractable DAX")
@@ -1726,7 +1689,6 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             if "[" not in filter_name:
                 continue
             table_part = filter_name.split("[")[0]
-            col_part = filter_name.split("[", 1)[1].rstrip("]")
             if table_part not in tables_seen:
                 continue
             # Skip if this table's TREATAS already exists in the patched DAX
@@ -1735,23 +1697,16 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     f"[DaxTool] Patch: skipping already-present TREATAS for '{table_part}'"
                 )
                 continue
-            table_col = (
-                f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
-            )
-            if isinstance(filter_value, list):
-                vals = ", ".join([f'"{v}"' for v in filter_value])
-                af_treatas_lines.append(f"    TREATAS({{{vals}}}, {table_col}),")
-            elif isinstance(filter_value, str) and filter_value.upper() != "NOT NULL":
-                af_treatas_lines.append(
-                    f'    TREATAS({{"{filter_value}"}}, {table_col}),'
-                )
+            dax_filter = filter_to_dax(filter_name, filter_value)
+            if dax_filter:
+                af_treatas_lines.append(f"    {dax_filter},")
 
         # Inject active_filter TREATAS right after SUMMARIZECOLUMNS(
         if af_treatas_lines and "SUMMARIZECOLUMNS(" in patched.upper():
             inject = "\n".join(af_treatas_lines)
             patched = _re.sub(
                 r"(SUMMARIZECOLUMNS\s*\()",
-                r"\1\n" + inject,
+                lambda m: m.group(1) + "\n" + inject,
                 patched,
                 count=1,
                 flags=_re.IGNORECASE,
@@ -1772,21 +1727,14 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
         This is the fallback when the LLM keeps hallucinating. It parses the user
         question, finds matching values in sample_data, and builds TREATAS filters.
+        Its answer is labelled as such in the output: it never adds grouping.
         """
-        measures = model_context.get("measures", [])
-        if not measures:
-            return None
-
-        question_lower = user_question.lower()
-
-        # Pick best measure
-        best_measure = None
-        for measure in measures:
-            if any(word in question_lower for word in measure["name"].lower().split()):
-                best_measure = measure
-                break
+        self._last_dax_source = KEYWORD_FALLBACK
+        # No measure named in the question: no answer, never an arbitrary one.
+        best_measure = pick_measure(user_question, model_context.get("measures", []))
         if not best_measure:
-            best_measure = measures[0]
+            return None
+        question_lower = user_question.lower()
 
         # Build value → column mapping from sample_data
         sample_data = model_context.get("sample_data", {})
@@ -1812,23 +1760,12 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         # which causes the chaotic country-code / customer-group garbage.
         active_filters = (config or {}).get("active_filters") or {}
         if active_filters:
-            for filter_name, filter_value in active_filters.items():
-                if "[" not in filter_name:
-                    continue
-                table_part = filter_name.split("[")[0]
-                col_part = filter_name.split("[", 1)[1].rstrip("]")
-                table_col = (
-                    f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
-                )
-                if isinstance(filter_value, list):
-                    vals = ", ".join([f'"{v}"' for v in filter_value])
-                    treatas_parts.append(f"    TREATAS({{{vals}}}, {table_col})")
-                elif (
-                    isinstance(filter_value, str) and filter_value.upper() != "NOT NULL"
-                ):
-                    treatas_parts.append(
-                        f'    TREATAS({{"{filter_value}"}}, {table_col})'
-                    )
+            treatas_parts = [
+                f"    {dax_filter}"
+                for filter_name, filter_value in active_filters.items()
+                if "[" in filter_name
+                and (dax_filter := filter_to_dax(filter_name, filter_value))
+            ]
             logger.info(
                 f"[DaxTool] Deterministic fallback using {len(treatas_parts)} active_filter TREATAS (skipping sample-data matching)"
             )
@@ -2197,31 +2134,13 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         return wrapped_dax
 
     def _generate_dax_filter_condition(
-        self, filter_name: str, filter_description: str
+        self, filter_name: str, filter_value: object
     ) -> str:
-        """Generate a DAX filter condition from a filter name and description."""
-        try:
-            filter_desc = str(filter_description).strip()
-            if filter_desc == "NOT NULL":
-                return f"ISBLANK({filter_name}) = FALSE"
-            if filter_desc.startswith("NOT STARTS WITH"):
-                value = filter_desc.replace("NOT STARTS WITH", "").strip().strip("'\"")
-                prefix_length = len(value)
-                return f'FILTER(VALUES({filter_name}), NOT(LEFT({filter_name}, {prefix_length}) = "{value}"))'
-            if filter_desc.startswith("= "):
-                value = filter_desc[2:].strip().strip("'\"")
-                return f'{filter_name} = "{value}"'
-            if filter_desc.startswith("IN ("):
-                values_str = filter_desc[4:-1]
-                values = [v.strip().strip("'\"") for v in values_str.split(",")]
-                values_list = ", ".join([f'"{v}"' for v in values])
-                return f"{filter_name} IN {{{values_list}}}"
-            if not filter_desc.startswith("NOT") and not filter_desc.startswith("IN"):
-                value = filter_desc.strip("'\"")
-                return f'{filter_name} = "{value}"'
-            return f"// TODO: Apply filter {filter_name} {filter_desc}"
-        except Exception:
-            return f"// Error: Could not apply filter {filter_name}"
+        """The CALCULATETABLE filter for one stored filter value (structured
+        spec, UI value or legacy text); a ``//`` comment when there is no
+        value to apply, which the caller skips."""
+        dax_filter = filter_to_dax(filter_name, filter_value)
+        return dax_filter or f"// No value to apply for filter {filter_name}"
 
     # =====================================================================
     # DAX Execution
@@ -2773,6 +2692,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
     def _format_output(self, results: Dict[str, Any], output_format: str) -> str:
         """Format the results for output."""
+        results.setdefault("dax_source", getattr(self, "_last_dax_source", None))
+        results.setdefault("unapplied_filters", getattr(self, "_unapplied_filters", []))
+        self._unapplied_filters = []  # reported once, for this answer only
         if output_format == "json":
             return json.dumps(results, indent=2, default=str)
 
@@ -2806,17 +2728,12 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
         if results.get("generated_dax"):
             output.append("## Generated DAX Query\n")
-            dax_attempts = results.get("dax_attempts", [])
-            if len(dax_attempts) > 1:
-                output.append(f"**Attempts**: {len(dax_attempts)}\n")
-                for att in dax_attempts[:-1]:
-                    output.append(f"**Attempt {att['attempt']}**: FAILED")
-                    if att.get("error"):
-                        output.append(f"  - Error: {att['error'][:100]}...")
-                output.append(f"**Attempt {dax_attempts[-1]['attempt']}**: SUCCESS\n")
+            output.extend(attempt_lines(results.get("dax_attempts", [])))
             output.append("```dax")
             output.append(results["generated_dax"])
             output.append("```\n")
+            if results.get("dax_source") == KEYWORD_FALLBACK:
+                output.append(KEYWORD_FALLBACK_NOTE)
 
         exec_result = results.get("dax_execution", {})
         output.append("## Execution Results\n")
@@ -2844,7 +2761,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     output.append(f"\n*... and {len(data) - 20} more rows*")
         else:
             output.append(f"**Failed**: {exec_result.get('error', 'Unknown error')}")
-        output.append("")
+        output.extend(
+            ["", *unapplied_filter_line(results.get("unapplied_filters", []))]
+        )
 
         if results.get("visual_references"):
             output.append("## Visual References\n")

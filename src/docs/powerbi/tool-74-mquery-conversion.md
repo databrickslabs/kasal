@@ -162,6 +162,7 @@ result is not used and the tool runs a fresh scan.
 - **Admin API is required:** this cannot be done with a non-admin SP
 - If the Admin Portal settings haven't propagated yet (wait 15 min), you will get `401 Unauthorized`
 - Very complex M-Query transformations (custom functions, nested let expressions) benefit from enabling LLM fallback (`use_llm: true`)
+- Validation compares row counts from Databricks SQL and from DAX. A table is **VERIFIED** only when both counts were read and match. When either count cannot be read (no DAX rows, an unreadable value), the table is reported as **NOT VERIFIED** with the reason, and the summary reads "N of M Databricks tables verified"
 
 ## See also
 

@@ -67,11 +67,11 @@ See [Authentication Setup](./01-authentication-setup.md).
 | `tenant_id` | Yes | Azure AD tenant ID |
 | `client_id` | Yes | SP client ID |
 | `client_secret` | Yes | SP client secret |
-| `llm_workspace_url` | Yes | Databricks workspace URL for LLM |
-| `llm_token` | Yes | Databricks PAT for LLM |
+| `llm_workspace_url` | No | Ignored. The LLM call uses the run's own Databricks credentials |
+| `llm_token` | No | Ignored. Leave empty; no PAT is needed for DAX generation |
 | `llm_model` | No | Model endpoint (default: `databricks-claude-sonnet-4`) |
 | `max_retries` | No | Retry limit (default: `5`) |
-| `active_filters` | No | Automatically applied CALCULATE filters |
+| `active_filters` | No | Filters applied to every query: `{"Table[Column]": value}`, where the value is a plain value, a list, or `{"operator": "in", "values": [...]}` |
 | `business_terms` | No | Synonym map (e.g. `{"revenue": "Total Revenue"}`) |
 
 ---
@@ -110,6 +110,8 @@ See [Authentication Setup](./01-authentication-setup.md).
 - If `model_context_json` is not provided, Tool 80 attempts to read from cache using `workspace_id` + `dataset_id`
 - `business_terms` lets you map customer language to DAX measure names (e.g. their team says "bookings" but the measure is "Total Orders")
 - `active_filters` automatically wraps CALCULATE around the generated DAX - useful for models with default date/region filters
+- Report filters and slicer selections cached by Tool 79 are applied by value: `Country = Italy` becomes `TREATAS({"Italy"}, Geo[Country])`, numbers stay numbers, and a filter that cannot be applied exactly (a card with nothing selected, a relative date, an AND/OR filter) is left out and logged. Filters cached in the older text form are read for `=`, `IN`, `NOT IN`, `NOT NULL` and `STARTS WITH`; older cached **comparisons** (`>`, `>=`, `<`, `<=`, `!=`) are not applied, because the old extractor shifted their direction. Re-run Tool 79 (the cache is per day) to restore them. Every filter that is not applied is named in the answer, on a "Report filters not applied: <column> (<reason>)" line, and a run whose attempts all failed says so instead of reporting success. Tool 72 does the same.
+- Every attempt goes to the LLM first. If the LLM call fails, a keyword fallback picks the measure whose name best matches the question; its answer is labelled "keyword fallback" in the output because it adds no grouping. When no measure is named in the question, the fallback gives no answer rather than an arbitrary measure. Tool 72 behaves the same way.
 - For a single question without caching concerns, Tool 72 is simpler
 
 ## See also

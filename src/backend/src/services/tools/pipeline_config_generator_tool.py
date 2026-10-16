@@ -13,6 +13,10 @@ from typing import Any, Optional, Type, cast
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.mquery_handoff import (
+    build_ucmv_mquery,
+    enrich_join_source_tables,
+)
 from src.services.tools.metric_view_utils.utils import run_async as _run_async
 
 logger = logging.getLogger(__name__)
@@ -22,13 +26,6 @@ logger = logging.getLogger(__name__)
 # because BaseTool is a Pydantic model — a class attribute would be treated as
 # a model field.
 _DAX_TABLE_REF = re.compile(r"(?:'([^']+)'|(\w+))\s*\[")
-
-# Cap on the raw M shipped downstream for a table `resolve_mquery_with_context`
-# couldn't compile. Matches the truncation `metric_view_utils/pipeline.py`
-# already applies to its OWN "tables not emitted" report — kept consistent
-# rather than inventing a second cutoff. See `_build_ucmv_mquery`. Module-level
-# for the same Pydantic-private-attribute reason as `_DAX_TABLE_REF` above.
-_UNRESOLVED_MQUERY_PREVIEW_CHARS = 2000
 
 
 class PipelineConfigGeneratorSchema(BaseModel):
@@ -754,7 +751,7 @@ class PipelineConfigGeneratorTool(BaseTool):
             ucmv_measures = self._build_ucmv_measures(
                 measures, admin_tables=admin_tables, config=config
             )
-            ucmv_mquery = self._build_ucmv_mquery(admin_tables, expressions)
+            ucmv_mquery = self._build_ucmv_mquery(admin_tables, expressions, warnings)
 
             # Diagnostic split: how many tables resolve via the DIRECT path alone
             # (resolve_mquery_to_sql — no `expressions` needed) vs how many the
@@ -1051,83 +1048,13 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _build_ucmv_mquery(
-        admin_tables: dict, expressions: dict | None = None
+        admin_tables: dict,
+        expressions: dict | None = None,
+        warnings: list[str] | None = None,
     ) -> list[dict]:
-        """Convert admin_tables into the UCMV `mquery_json` shape.
-
-        Both `parse_admin_tables` and `parse_tmdl_to_admin_tables` populate
-        ``admin_tables[table]["mquery_expression"]`` with the partition source
-        (embedded SQL or raw M). UCMV's MQueryParser.parse_json expects
-            {table_name, transpiled_sql, validation_passed}
-        and skips any entry without both a table_name and sql — so tables with
-        no source expression are omitted (they carry no fact/source signal).
-
-        Prefers a deterministic compile to compact SQL
-        (``resolve_mquery_with_context``) over shipping the raw M. Three
-        reasons, not one:
-        (1) M authored via a catalog-browse connector (``Databricks.Catalogs`` et
-            al — "Get Data → browse catalog/schema/table" in the PBI UI) carries
-            no embedded SQL text at all, so the downstream SQL-only parser finds
-            no FROM clause and silently treats the table as non-fact — every such
-            table was dropped, 0 views generated.
-        (2) Some tables are nothing but a reference to a disabled "staging"
-            query (their own M has no source at all), or build their physical
-            source from model PARAMETERS via string concatenation rather than
-            a literal — both need the model's named/shared ``expressions``
-            (parsed alongside ``admin_tables`` — see ``parse_admin_expressions``
-            / ``parse_tmdl_expressions``) to resolve at all.
-        (3) That M is also the largest text in this payload (a single table's
-            source can run 10-15K+ chars once the connector's ordinary column
-            select/rename steps are included). Shipping it raw, per table, is
-            what breaks the pipeline-config → UCMV task handoff: the receiving
-            agent has to reproduce this JSON verbatim as its own tool-call
-            argument, which is bounded by its own output-token budget — nowhere
-            near enough for a payload like that. A table with unresolved M and
-            no embedded SQL previously still shipped in full; now it's capped.
-        """
-        from src.services.tools.metric_view_utils.mquery_parser import (
-            resolve_mquery_with_context,
-        )
-
-        out: list[dict] = []
-        for tbl_name, tbl_info in (admin_tables or {}).items():
-            if not isinstance(tbl_info, dict):
-                continue
-            raw = (
-                tbl_info.get("mquery_expression") or tbl_info.get("mquery") or ""
-            ).strip()
-            if not tbl_name or not raw:
-                continue
-            resolved = resolve_mquery_with_context(raw, expressions)
-            if resolved:
-                sql = resolved
-            elif len(raw) <= _UNRESOLVED_MQUERY_PREVIEW_CHARS:
-                # Small enough to ship as-is: covers Value.NativeQuery-style M
-                # (the downstream parser finds the embedded SELECT/FROM
-                # regardless of the M wrapper around it) and non-warehouse /
-                # DAX-calc / inline-constant tables the migration report still
-                # wants to explain as "correctly skipped" rather than vanishing.
-                sql = raw
-            else:
-                # Large AND unresolved — cap it. The table still gets reported
-                # (with enough of the M to classify why it was skipped), without
-                # repeating the handoff-breaking mistake. The full text remains
-                # queryable via the persisted powerbi_extraction row.
-                sql = raw[:_UNRESOLVED_MQUERY_PREVIEW_CHARS]
-            out.append(
-                {
-                    "table_name": tbl_name,
-                    "transpiled_sql": sql,
-                    # MUST be "Yes": UCMV's MQueryParser.parse_json drops any entry
-                    # whose validation_passed does not start with "Yes" (unless the
-                    # SQL happens to contain both SUM( and GROUP BY). The source here
-                    # is the authoritative partition expression from the Admin
-                    # Scanner / Fabric TMDL, so mark it accepted — otherwise every
-                    # table is silently skipped and UCMV emits 0 views.
-                    "validation_passed": "Yes",
-                }
-            )
-        return out
+        """admin_tables -> the UCMV ``mquery_json`` entries (see
+        ``metric_view_utils.mquery_handoff.build_ucmv_mquery``)."""
+        return build_ucmv_mquery(admin_tables, expressions, warnings)
 
     async def _save_to_conversion_history(
         self,
@@ -1304,67 +1231,12 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _enrich_source_tables_from_mquery(
-        config: dict,
-        admin_tables: dict,
-        expressions: dict | None = None,
+        config: dict, admin_tables: dict, expressions: dict | None = None
     ) -> list[dict]:
-        """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
-        Power Query M source (deterministic — no warehouse, no LLM).
-
-        A dimension's physical UC table name isn't in the PBI APIs, but a
-        Databricks-connector / native-query M source spells it out. For each join
-        entry lacking a ``source_table`` (or holding a ``TODO:`` placeholder), parse
-        it from ``admin_tables[dim]["mquery_expression"]`` — following a reference
-        to a disabled staging query, or evaluating a parameter-driven source, via
-        the model's named/shared ``expressions`` when the dimension's own M alone
-        isn't enough (``extract_source_table`` accepts them). Strictly additive: an
-        existing non-TODO value is never overwritten. Returns an audit log of what
-        was filled vs. skipped (and why), for the Config Editor.
-        """
-        from src.services.tools.metric_view_utils.mquery_parser import (
-            classify_mquery_source,
-            extract_source_table,
-        )
-
-        log: list[dict] = []
-        join_key_map = config.get("join_key_map", {}) or {}
-        for dim, entry in join_key_map.items():
-            if not isinstance(entry, dict):
-                continue
-            existing = entry.get("source_table")
-            if existing and not str(existing).startswith("TODO"):
-                continue  # human/derived value — never overwrite
-            tinfo = admin_tables.get(dim) or {}
-            mquery = tinfo.get("mquery_expression") or tinfo.get("mquery") or ""
-            resolved = extract_source_table(mquery, expressions) if mquery else None
-            if resolved:
-                entry["source_table"] = resolved
-                log.append(
-                    {
-                        "tier": "P1",
-                        "key": "join_key_map",
-                        "target": dim,
-                        "status": "filled",
-                        "value": resolved,
-                        "detail": "parsed from connector M-query",
-                    }
-                )
-            else:
-                _, reason = (
-                    classify_mquery_source(mquery)
-                    if mquery
-                    else ("unknown", "no M source expression available")
-                )
-                log.append(
-                    {
-                        "tier": "P1",
-                        "key": "join_key_map",
-                        "target": dim,
-                        "status": "skipped",
-                        "detail": reason,
-                    }
-                )
-        return log
+        """P1: fill ``join_key_map[dim].source_table`` from the dimension's M,
+        only when that M keeps every row of the table (see
+        ``metric_view_utils.mquery_handoff.enrich_join_source_tables``)."""
+        return enrich_join_source_tables(config, admin_tables, expressions)
 
     @staticmethod
     async def _enrich_filter_sets_from_warehouse(
