@@ -137,7 +137,17 @@ bundle README; it is never a refusal.
   lives in Kasal's transport tool loop. Under CrewAI that loop is bypassed —
   `delegate_tool_calls` hands it to CrewAI's executor — so CrewAI's own
   `max_iter` governs instead. The same crew can therefore get a different
-  budget depending on the harness.
+  budget depending on the harness. Nothing caps tool calls below that on
+  either harness (the Databricks handler used to stop at 8 tool results).
+* **A spent clock.** On both harnesses a task whose `max_execution_time` or run
+  ceiling runs out ends with its partial answer under a `⚠️ Truncated` banner,
+  and the run carries on. On CrewAI the cap is kept off `crewai.Agent`, whose own
+  timeout would fail the task or re-run it through `max_retry_limit`; the
+  transport's deadline bounds the turn instead (`harnesses/crewai/deadline.py`).
+* **Degraded outputs.** A task output whose every tool call failed is marked
+  `degraded` (`⚠️ Unverified`) on both harnesses; on CrewAI a truncated one is
+  marked too. Memory does not store an output marked `degraded`. (A truncated
+  Kasal-harness output carries only the text banner, so it is still stored.)
 * **Structured output.** `output_pydantic` / `output_json` pass through to
   CrewAI's own converter rather than Kasal's schema gate. Both produce a typed
   `.pydantic` on the crew output — so router conditions on nested schemas work

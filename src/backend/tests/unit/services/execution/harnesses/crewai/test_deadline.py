@@ -89,7 +89,7 @@ def never_finishing_client():
 
 
 def _run_a_capped_agent(client, *, inside_run_scope: bool):
-    """Run one capped agent; return (llm rounds made, seconds elapsed)."""
+    """Run one capped agent; return (llm rounds made, seconds elapsed, result)."""
     harness = binding_for("crewai")
     transport = LLM(model="gpt-4o")
     agent = harness.build_agent(
@@ -108,38 +108,50 @@ def _run_a_capped_agent(client, *, inside_run_scope: bool):
 
     before = client.chat.completions.create.call_count
     started = time.monotonic()
+    result = None
     with patch.object(type(transport), "client", property(lambda s: client)):
-        try:
-            if inside_run_scope:
-                with harness.event_bridge():
-                    crew.kickoff()
-            else:
-                crew.kickoff()
-        except Exception:  # noqa: BLE001 — the timeout is expected either way
-            pass
-    return client.chat.completions.create.call_count - before, (
-        time.monotonic() - started
+        if inside_run_scope:
+            with harness.event_bridge():
+                result = crew.kickoff()
+        else:
+            try:
+                result = crew.kickoff()
+            except Exception:  # noqa: BLE001 — only the overrun is under test
+                pass
+    return (
+        client.chat.completions.create.call_count - before,
+        time.monotonic() - started,
+        result,
     )
 
 
 class TestTheCapBindsTheAgent:
     def test_the_agent_stops_at_the_cap(self, never_finishing_client):
-        """The whole point: work STOPS, rather than being reported on later."""
-        rounds, elapsed = _run_a_capped_agent(
+        """The whole point: work STOPS, rather than being reported on later.
+
+        And it stops with an ANSWER. This used to end in an exception (CrewAI's
+        ThreadPool timeout), which failed the run where the Kasal harness keeps
+        the partial — the outcome is now asserted rather than swallowed.
+        """
+        from src.core.llm.transport.budget import TRUNCATED_MARKER
+
+        rounds, elapsed, result = _run_a_capped_agent(
             never_finishing_client, inside_run_scope=True
         )
         # One round may already be in flight when the deadline passes.
         assert rounds <= 3, f"{rounds} rounds against a {CAP_SECONDS}s cap"
         assert elapsed < CAP_SECONDS + CALL_SECONDS + 1
+        assert TRUNCATED_MARKER in result.raw
 
     def test_without_the_run_scope_the_cap_does_not_bind(self, never_finishing_client):
         """Pins the failure so it cannot come back unnoticed.
 
-        This is CrewAI's own behaviour, and it is why the run scope exists: the
-        agent runs to ``max_iter`` and the cap only surfaces at the end. On the
-        real run that was 145 seconds against a 30-second cap.
+        Without the run scope nothing stamps the turn deadline, and — now that
+        the cap is kept off CrewAI's own field — nothing else bounds the turn:
+        the agent runs to ``max_iter``. On the real run that was 145 seconds
+        against a 30-second cap. The run scope is installed on every path.
         """
-        rounds, elapsed = _run_a_capped_agent(
+        rounds, elapsed, _ = _run_a_capped_agent(
             never_finishing_client, inside_run_scope=False
         )
         assert rounds >= MAX_ITER - 1, "expected CrewAI alone to overrun the cap"

@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from src.core.execution_scope import execution_scope
 from src.core.llm.effort import resolve_effort
+from src.core.llm.transport.budget import turn_cap
 from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 from src.core.llm.transport.request_deadline import run_deadline
 
@@ -33,7 +34,7 @@ async def kickoff_chat_turn(
         budget = resolve_effort(raw)
         seconds = min(
             budget["run_max_seconds"],
-            getattr(agent, "max_execution_time", None) or budget["max_execution_time"],
+            turn_cap(agent) or budget["max_execution_time"],
         )
         # Chat has no Crew.kickoff: stamp the same fixed point on its lone agent.
         deadline = time.monotonic() + seconds

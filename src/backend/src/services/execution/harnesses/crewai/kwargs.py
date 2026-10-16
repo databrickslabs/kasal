@@ -82,8 +82,9 @@ _KNOWN_DROPS: Dict[str, str] = {
         "guardrail itself — see harnesses/crewai/guardrails.py"
     ),
     "on_budget_exceeded": (
-        "no CrewAI field; the transport still degrades a spent budget into a "
-        "wrap-up answer, which is the behaviour this selects"
+        "no CrewAI field; a spent wall clock degrades regardless — the "
+        "delegated transport returns the 'Truncated' partial answer instead of "
+        "raising (transport/budget.py), which is the kernel's default policy"
     ),
 }
 

@@ -44,6 +44,7 @@ from src.core.llm.transport.request_deadline import (
 )
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
+from src.services.execution.harnesses.crewai.outcome import begin_task, flag_output
 
 logger = LoggerManager.get_instance().crew
 
@@ -87,7 +88,11 @@ def kasal_memory_crew_class() -> type:
             ``_get_context`` is a ``staticmethod`` on the base class but is
             always called as ``self._get_context(...)``, so overriding it as an
             instance method is a supported extension point rather than a trick.
+
+            Also where the task's tool-outcome ledger starts: CrewAI calls this
+            right before running each task, in the context it runs in.
             """
+            begin_task(task)
             base: str = crew_base._get_context(task, task_outputs)
             providers = self.context_providers
             if not providers:
@@ -112,10 +117,14 @@ def kasal_memory_crew_class() -> type:
             that produced the checkpoint, and running them again would write
             the same memory twice and record a second checkpoint unit for work
             that did not happen.
+
+            The outcome is flagged BEFORE the sinks, so memory sees a degraded
+            answer as degraded (see ``outcome.py``).
             """
             crew_base._process_task_result(self, task, output)
             if getattr(task, "_kasal_restored", False):
                 return
+            flag_output(task, output)
             for sink in self.output_sinks:
                 try:
                     sink(task=task, output=output)
@@ -144,11 +153,18 @@ def kasal_memory_crew_class() -> type:
 
         def _create_manager_agent(self) -> None:
             from src.core.llm.effort import apply_manager_limits
+            from src.services.execution.harnesses.crewai.deadline import (
+                carry_turn_cap,
+            )
 
             crew_base._create_manager_agent(self)
             apply_manager_limits(
                 self.manager_agent, getattr(self, "_kasal_execution_effort", None)
             )
+            # Off CrewAI's field, like every agent build_agent makes.
+            manager = self.manager_agent
+            if manager is not None:
+                carry_turn_cap(manager, getattr(manager, "max_execution_time", None))
 
         def _stamp_run_deadline(self) -> None:
             """One deadline for the whole run, on every agent.

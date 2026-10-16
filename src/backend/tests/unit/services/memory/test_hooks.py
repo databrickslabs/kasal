@@ -277,6 +277,29 @@ class TestTaskOutputPersistence:
         assert "execution_id" not in metadata
         assert metadata["task_name"] == "research"
 
+    def test_a_degraded_output_is_not_remembered(self):
+        """A truncated or unverified answer would be recalled into later runs as
+        if it were a finding; the run keeps it, memory does not."""
+        from unittest.mock import patch
+
+        _crew, task = self._crew(MagicMock())
+        sink = make_memory_output_sink(MagicMock())
+        output = SimpleNamespace(raw="partial", agent="R", degraded=True)
+        with patch("src.services.memory.run.persist.remember_async") as remember:
+            sink(task=task, output=output)
+        remember.assert_not_called()
+
+    def test_only_a_real_true_counts_as_degraded(self):
+        """``getattr`` on a test double returns a truthy mock; it is not a flag."""
+        from unittest.mock import patch
+
+        _crew, task = self._crew(MagicMock())
+        sink = make_memory_output_sink(MagicMock())
+        output = MagicMock(raw="42 facts found", agent="R")
+        with patch("src.services.memory.run.persist.remember_async") as remember:
+            sink(task=task, output=output)
+        remember.assert_called_once()
+
 
 class TestMemoryOutputSinkDisabled:
     def test_no_sink_without_memory(self):

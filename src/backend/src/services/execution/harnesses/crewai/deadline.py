@@ -29,6 +29,16 @@ is ONE ROUND: the per-call term restarts every round and bounds nothing.
 So this module stamps ``run_deadline`` for the duration of each agent turn,
 taking the earlier of the turn cap and any run-level ceiling already set by
 ``Crew.kickoff``. The transport then stops the agent where it always would have.
+
+## The cap is kept off CrewAI's field
+
+CrewAI's own timeout does not just fail to bound the turn — it ends it badly:
+``TimeoutError`` fails the task, and a budget error raised inside the pool
+comes back as ``RuntimeError``, which ``max_retry_limit`` answers by running the
+whole task again, tools included. So ``build_agent`` never sets
+``crewai.Agent.max_execution_time``; ``carry_turn_cap`` keeps the value beside
+it, where this module and the transport (``budget.turn_cap``) read it. A spent
+clock then ends the turn with the "Truncated" partial answer instead.
 """
 
 from __future__ import annotations
@@ -38,6 +48,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Tuple
 
+from src.core.llm.transport.budget import TURN_CAP_ATTR, turn_cap
 from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().crew
@@ -46,13 +57,26 @@ logger = LoggerManager.get_instance().crew
 RUN_DEADLINE_ATTR = "_kasal_run_deadline"
 
 
+def carry_turn_cap(agent: object, seconds: float | None) -> None:
+    """Keep ``seconds`` as the agent's turn cap without arming CrewAI's timeout.
+
+    Also clears CrewAI's field, for an agent CrewAI built itself (the
+    hierarchical manager) and had a cap stamped onto it afterwards.
+    """
+    try:
+        object.__setattr__(agent, TURN_CAP_ATTR, seconds)
+        object.__setattr__(agent, "max_execution_time", None)
+    except Exception as e:  # noqa: BLE001 — a cap is not worth a failed build
+        logger.debug("Could not carry max_execution_time: %s", e)
+
+
 def _combined_deadline(agent: Any) -> float | None:
     """The earlier of this turn's cap and the run's ceiling."""
     candidates: List[float] = []
 
-    cap = getattr(agent, "max_execution_time", None)
-    if isinstance(cap, (int, float)) and cap > 0:
-        candidates.append(time.monotonic() + float(cap))
+    cap = turn_cap(agent)
+    if cap is not None:
+        candidates.append(time.monotonic() + cap)
 
     run = getattr(agent, RUN_DEADLINE_ATTR, None)
     if isinstance(run, (int, float)):

@@ -54,6 +54,7 @@ def build_agent(**kwargs: Any) -> Any:
     transport object, and CrewAI will only accept a ``BaseLLM``. Wrapping keeps
     the request path identical across harnesses (see ``llm.py``).
     """
+    from src.services.execution.harnesses.crewai.deadline import carry_turn_cap
     from src.services.execution.harnesses.crewai.tools import adapt_tools
 
     kwargs = dict(kwargs)
@@ -63,7 +64,11 @@ def build_agent(**kwargs: Any) -> Any:
 
     label = kwargs.get("role") or "agent"
     window = kwargs.get("max_context_window_size")
+    # Kept OFF CrewAI's field — see deadline.py: there it arms a ThreadPool
+    # timeout that fails the task instead of letting the turn degrade.
+    turn_cap = kwargs.pop("max_execution_time", None)
     agent = _build(crewai_symbols()["Agent"], kwargs, f"agent {label!r}")
+    carry_turn_cap(agent, turn_cap)
 
     # CrewAI has no such field, but the field is not really CrewAI's business:
     # `transport._effective_context_window` reads it off `from_agent`, and

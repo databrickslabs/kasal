@@ -21,6 +21,12 @@ from .response_parsing import REDACTED_REASONING
 #: agent currently loosens the round cap rather than tightening it.
 MAX_TOOL_ROUNDS = 15
 
+#: What ``DatabricksRetryLLM`` writes into a tool-call message that has no
+#: content (the endpoint rejects empty content). Never an answer — and under
+#: CrewAI, which sends tool-call messages with ``content=None``, it is the last
+#: "assistant text" of almost every conversation.
+TOOL_CALL_PLACEHOLDER = "Calling tools."
+
 
 def last_assistant_text(conversation: list[dict[str, Any]] | None) -> str:
     """The most recent thing the model wrote, for a degraded partial answer.
@@ -33,8 +39,11 @@ def last_assistant_text(conversation: list[dict[str, Any]] | None) -> str:
         if not isinstance(entry, dict) or entry.get("role") != "assistant":
             continue
         content = entry.get("content")
-        if isinstance(content, str) and content.strip():
-            return content
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if content.strip() == TOOL_CALL_PLACEHOLDER:
+            continue
+        return content
     return ""
 
 
@@ -62,9 +71,9 @@ def resolve_execution_budget(from_agent: Any) -> tuple[int, float | None]:
     if isinstance(max_iter, int) and max_iter > 0:
         rounds = max_iter
 
-    max_seconds = getattr(from_agent, "max_execution_time", None)
-    if isinstance(max_seconds, (int, float)) and max_seconds > 0:
-        turn_deadline = time.monotonic() + float(max_seconds)
+    max_seconds = turn_cap(from_agent)
+    if max_seconds is not None:
+        turn_deadline = time.monotonic() + max_seconds
         deadline = (
             min(deadline, turn_deadline) if deadline is not None else turn_deadline
         )
@@ -212,4 +221,69 @@ def rounds_exhausted(
     return ExecutionBudgetExceededError(
         f"Tool-calling did not converge within {rounds} rounds for model {model}.",
         partial=last_assistant_text(conversation),
+    )
+
+
+#: Where the CrewAI harness carries ``max_execution_time`` instead of CrewAI's
+#: own field. Set there, CrewAI wraps the turn in a ThreadPool timeout that
+#: FAILS the task; carried here, the transport's deadline bounds the turn and
+#: a spent clock degrades it (``spent_budget_answer``).
+TURN_CAP_ATTR = "_kasal_max_execution_time"
+
+#: The banner a degraded, out-of-budget answer carries. Same text as
+#: ``runtime/task.py``'s, so anything matching on it works on both harnesses.
+TRUNCATED_MARKER = "> ⚠️ Truncated: "
+
+
+def turn_cap(agent: object) -> float | None:
+    """An agent's per-turn wall clock, wherever its harness keeps it."""
+    for value in (
+        getattr(agent, "max_execution_time", None),
+        getattr(agent, TURN_CAP_ATTR, None),
+    ):
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+    return None
+
+
+def truncated_answer(error: Exception) -> str:
+    """The partial answer under the "Truncated" banner."""
+    partial = getattr(error, "partial", "") or ""
+    return (
+        f"{partial}\n\n{TRUNCATED_MARKER}exceeded the execution budget "
+        f"({error}). This answer is incomplete."
+    ).strip()
+
+
+def spent_budget_answer(
+    error: Exception, model: str, conversation: list[dict[str, object]] | None
+) -> str | None:
+    """A delegated round that hit the wall clock, as the turn's last answer.
+
+    For a TASK's turn under ``delegate_tool_calls`` only, where the caller owns
+    the tool loop and each ``call()`` is one round: ``_answer_within_budget`` is
+    unreachable there, so raising handed CrewAI an exception it turns into a
+    failed task or a re-run of the whole task. Returning the partial as TEXT
+    ends the turn the way the Kasal harness's ``Task._run_agent`` does. (A call
+    with no task — Chat's lone agent — keeps raising: its caller degrades it.)
+
+    Covers the deadline found spent at round 0 and a request cut off by it
+    (``bounded_params`` sizes the timeout to the time left). None — raise as
+    before — for a user Stop, or an error while time remained.
+    """
+    from .request_deadline import current_deadline
+
+    if isinstance(error, ExecutionStoppedError):
+        return None
+    if not isinstance(error, ExecutionBudgetExceededError) and not deadline_passed(
+        current_deadline()
+    ):
+        return None
+    # Reworded: the round-0 message reads "exceeded after 0 tool round(s)",
+    # true of one delegated call and wrong about the turn it ends.
+    return truncated_answer(
+        ExecutionBudgetExceededError(
+            f"max_execution_time reached for model {model}",
+            partial=getattr(error, "partial", "") or last_assistant_text(conversation),
+        )
     )
