@@ -100,6 +100,12 @@ from src.services.execution.run_wait import (
     run_deadline,
 )
 from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
+from src.services.flow_builder.completion_payload import is_paused_for_approval
+from src.services.flow_builder.run_outcome import (
+    early_announcement,
+    failure_message,
+    is_failed,
+)
 
 # Use the flow logger for all flow-related operations
 logger = LoggerManager.get_instance().flow
@@ -719,7 +725,7 @@ def run_flow_in_process(
                         )
 
                     async_logger.info(
-                        "[FLOW_SUBPROCESS] Flow execution completed successfully"
+                        "[FLOW_SUBPROCESS] Flow body returned; reading its outcome"
                     )
 
                     # The checkpoint is KEPT, not dropped: a flow checkpoint is
@@ -740,49 +746,30 @@ def run_flow_in_process(
                     #
                     # The status write relays over the event pipe, so the parent
                     # broadcasts it on SSE straight away. The parent still
-                    # finalises afterwards; this only moves the good news
+                    # finalises afterwards; this only moves the news
                     # earlier. Fail-open.
                     try:
-                        from src.models.execution_status import ExecutionStatus
                         from src.services.execution.status import (
                             ExecutionStatusService,
                         )
 
-                        # WITH the answer, not just the status: an
-                        # announcement that carries only the status leaves the
-                        # answer to a later write that may never happen, and the
-                        # UI finalises on the first one either way. See
-                        # flow_builder/completion_payload for both failures this
-                        # caused.
-                        from src.services.flow_builder.completion_payload import (
-                            answer_from_result,
-                            is_paused_for_approval,
-                        )
-
-                        # A flow that stopped at a HITL gate has NOT finished.
-                        # It returns success=True and status="COMPLETED"
-                        # alongside paused_for_approval, so announcing on the
-                        # status alone marked a waiting run as done — and once
-                        # the announcement carried a payload, the approval
-                        # bookkeeping (approval_id, gate_node_id) was shown to
-                        # the reader as their answer. The parent already reads
-                        # the pause markers this way.
-                        if is_paused_for_approval(result):
+                        # COMPLETED with its answer, FAILED with its error (a
+                        # failed flow is RETURNED by run_flow, not raised), or
+                        # nothing for a HITL pause. See flow_builder/run_outcome.
+                        announcement = early_announcement(result)
+                        if announcement is None:
                             async_logger.info(
                                 f"[FLOW_SUBPROCESS] {execution_id} paused for "
                                 f"approval — not announcing completion"
                             )
                         else:
                             await ExecutionStatusService.update_status(
-                                job_id=execution_id,
-                                status=ExecutionStatus.COMPLETED.value,
-                                message="Flow execution completed",
-                                result=answer_from_result(result),
+                                job_id=execution_id, **announcement
                             )
-                        async_logger.info(
-                            f"[FLOW_SUBPROCESS] Announced COMPLETED for "
-                            f"{execution_id} ahead of teardown"
-                        )
+                            async_logger.info(
+                                f"[FLOW_SUBPROCESS] Announced {announcement['status']}"
+                                f" for {execution_id} ahead of teardown"
+                            )
                     except Exception as _announce_err:  # noqa: BLE001
                         async_logger.warning(
                             f"[FLOW_SUBPROCESS] Early completion announcement "
@@ -894,23 +881,10 @@ def run_flow_in_process(
             # Run the flow
             result = loop.run_until_complete(run_async_flow())
 
-            # Check if the result indicates failure BEFORE logging success
-            flow_failed = False
-            flow_error = None
-            if isinstance(result, dict):
-                # Check for explicit failure indicators
-                if result.get("success") is False:
-                    flow_failed = True
-                    flow_error = result.get("error", "Flow execution failed")
-                elif result.get("error"):
-                    flow_failed = True
-                    flow_error = result.get("error")
-                elif result.get("status") == "FAILED":
-                    flow_failed = True
-                    flow_error = result.get(
-                        "error", result.get("message", "Flow execution failed")
-                    )
-
+            # Check if the result indicates failure BEFORE logging success, the
+            # same way the early announcement did (run_outcome).
+            flow_failed = is_failed(result)
+            flow_error = failure_message(result) if flow_failed else None
             if flow_failed:
                 async_logger.error(
                     f"[FLOW_SUBPROCESS] Flow execution failed: {flow_error}"
@@ -977,11 +951,8 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] paused_for_approval value: {result.get('paused_for_approval')}"
                 )
 
-            # Check if flow was paused for HITL approval
-            # IMPORTANT: Check both hitl_paused AND paused_for_approval - the subprocess uses paused_for_approval
-            if isinstance(result, dict) and (
-                result.get("hitl_paused") or result.get("paused_for_approval")
-            ):
+            # Paused at a HITL gate: the same test the early announcement uses
+            if is_paused_for_approval(result):
                 async_logger.info("[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
                 return_dict = {
                     "status": "WAITING_FOR_APPROVAL",
