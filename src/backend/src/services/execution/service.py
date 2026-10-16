@@ -1667,10 +1667,10 @@ class ExecutionService:
                             config=config,
                             execution_type=execution_type,
                             group_context=group_context,
-                            # NOT self.session: this runs after the response, when
-                            # the request session is closed. None makes the run
-                            # route its own fresh session (dispatch_session →
-                            # routed_scoped_session) instead of reusing a dead one.
+                            # A BackgroundTask runs in the request's task, with the
+                            # request session still OPEN: None goes through
+                            # routed_scoped_session, which reuses it, and the router
+                            # commits the run's writes when the request ends.
                             session=None,
                         )
                         task_logger.info(

@@ -7,7 +7,6 @@ from contextvars import ContextVar, Token
 from typing import Any, AsyncGenerator, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from sqlalchemy import event, text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -1063,44 +1062,25 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 # Fallback to NullPool for safety (not the default factory which might be wrong)
                 smart_session_factory = nullpool_session_factory
 
-    max_retries = 3
-    # A yield dependency may yield ONCE. Only a failure before the yield can be
-    # retried; after it the handler has used the session, so the error is raised
-    # as itself instead of yielding a second session ("generator didn't stop").
-    yielded = False
-    for attempt in range(max_retries):
+    # No "database is locked" retry: a yield dependency may yield only ONCE, and
+    # nothing before the yield touches the database. A lock error from the
+    # handler or the commit is raised as itself.
+    # Only None on SQLite, whose branch never selects the PG factories.
+    assert smart_session_factory is not None
+    async with smart_session_factory() as session:
+        # Publish session into ContextVar so that
+        # routed_scoped_session() returns the same session
+        tokens = _enter_request_session(session)
         try:
-            # Only None on SQLite, whose branch never selects the PG factories.
-            assert smart_session_factory is not None
-            async with smart_session_factory() as session:
-                # Publish session into ContextVar so that
-                # routed_scoped_session() returns the same session
-                tokens = _enter_request_session(session)
-                try:
-                    yielded = True
-                    yield session
-                    await session.commit()
-                    return
-                except Exception:
-                    await session.rollback()
-                    raise
-                finally:
-                    _exit_request_session(tokens)
-                    # Ensure session is properly closed
-                    await session.close()
-        except OperationalError as e:
-            if (
-                not yielded
-                and "database is locked" in str(e).lower()
-                and attempt < max_retries - 1
-            ):
-                wait_time = 0.1 * (2.0**attempt)
-                logger.warning(
-                    f"Database locked creating session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                )
-                await asyncio.sleep(wait_time)
-                continue
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
             raise
+        finally:
+            _exit_request_session(tokens)
+            # Ensure session is properly closed
+            await session.close()
 
 
 async def get_local_db() -> AsyncGenerator[AsyncSession, None]:

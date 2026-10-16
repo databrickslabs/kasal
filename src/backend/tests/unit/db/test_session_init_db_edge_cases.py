@@ -533,8 +533,9 @@ class TestGetDbEdgeCases:
                 pass
 
     @pytest.mark.asyncio
-    async def test_get_db_outer_operational_error_lock_retry(self):
-        """get_db retries when outer OperationalError is 'database is locked'."""
+    async def test_get_db_does_not_retry_a_lock_error(self):
+        """The retry loop is gone: nothing before the yield touches the database,
+        and after it a second yield is not allowed. A lock error is raised once."""
         call_count = 0
 
         class MockCtxFactory:
@@ -560,8 +561,7 @@ class TestGetDbEdgeCases:
                 gen = get_db()
                 await gen.__anext__()
 
-        # Should have retried up to max_retries (3)
-        assert call_count == 3
+        assert call_count == 1
 
     @pytest.mark.asyncio
     async def test_get_db_outer_operational_error_non_lock_raises_immediately(self):

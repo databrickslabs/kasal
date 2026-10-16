@@ -93,7 +93,7 @@
   "src/db/self_heal/data.py::G004": 2,
   "src/db/self_heal/tables.py::G004": 1,
   "src/db/session.py::BLE001": 15,
-  "src/db/session.py::G004": 32,
+  "src/db/session.py::G004": 31,
   "src/db/session.py::S110": 5,
   "src/db/session.py::TRY400": 9,
   "src/dependencies/admin_auth.py::G004": 4,

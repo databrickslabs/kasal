@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, patch
 import aiosqlite
 import httpx
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -132,7 +132,26 @@ def _app(path) -> FastAPI:
     ) -> Dict[str, bool]:
         return {"dep": via_dep is session, "router": via_router is session}
 
+    @app.post("/items/background")
+    async def write_in_background(
+        session: SessionDep, background_tasks: BackgroundTasks
+    ) -> Dict[str, bool]:
+        async def routed_write() -> None:
+            from src.db.session import routed_scoped_session
+
+            async with routed_scoped_session() as routed:
+                # Same task, request session still open: it is reused.
+                background_seen["reused"] = routed is session
+                await _insert(routed, "from-background")
+
+        background_tasks.add_task(routed_write)
+        return {"ok": True}
+
     return app
+
+
+#: What the BackgroundTask route's task observed.
+background_seen: Dict[str, bool] = {}
 
 
 async def _call(path, method: str, url: str):
@@ -190,6 +209,21 @@ class TestStreamingResponses:
         assert at_reply == {"names": ["streamed"], "write_lock_free": True}
         # ...and the stream itself still works on the request session.
         assert response.text == "started\ncount=1 lock_free=True\n"
+
+
+class TestBackgroundTasks:
+    async def test_a_routed_write_in_a_background_task_is_committed(self, db):
+        """A BackgroundTask runs in the request's task while the request session
+        is still open, so ``routed_scoped_session`` hands it that session. Its
+        write lands after SessionDep's commit, and the router's own commit at the
+        end of the request is what saves it."""
+        background_seen.clear()
+        response, at_reply = await _call(db, "POST", "/items/background")
+
+        assert response.status_code == 200
+        assert at_reply["names"] == []  # the task has not run yet
+        assert background_seen == {"reused": True}
+        assert (await _observe(db))["names"] == ["from-background"]
 
 
 class TestOneSessionPerRequest:
