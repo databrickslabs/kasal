@@ -13,4 +13,9 @@ describe('apiErrorMessage', () => {
     expect(apiErrorMessage({ response: { data: {} } }, 'Failed to import database')).toBe('Failed to import database');
     expect(apiErrorMessage(new Error('network'), 'Failed to load backups')).toBe('Failed to load backups');
   });
+
+  it('never returns a 422 list of validation issues, which is not text', () => {
+    const err = { response: { status: 422, data: { detail: [{ loc: ['body', 'path'], msg: 'field required' }] } } };
+    expect(apiErrorMessage(err, 'Failed to import database')).toBe('Failed to import database');
+  });
 });

@@ -3,8 +3,9 @@ export interface ErrorWithResponse {
   response?: {
     status?: number;
     data?: {
-      detail?: string;
-      error?: string;
+      // A string for Kasal's errors; FastAPI's 422 sends a list of issues.
+      detail?: unknown;
+      error?: unknown;
     };
   };
   message?: string;
@@ -23,5 +24,9 @@ export function isErrorWithResponse(error: unknown): error is ErrorWithResponse 
  */
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (!isErrorWithResponse(error)) return fallback;
-  return error.response?.data?.detail || error.response?.data?.error || fallback;
+  const { detail, error: message } = error.response?.data ?? {};
+  // Only a non-empty string is shown: a 422's list of issues is not text.
+  if (typeof detail === 'string' && detail) return detail;
+  if (typeof message === 'string' && message) return message;
+  return fallback;
 }
