@@ -18,7 +18,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.core.events.bus import event_bus
 from src.core.events.types import (
@@ -108,6 +108,9 @@ class Task(BaseModel):
     on_budget_exceeded: str = "raise"
     start_time: datetime.datetime | None = None
     end_time: datetime.datetime | None = None
+    #: Why this execution's turn was cut short by its budget, set by
+    #: ``_run_agent`` when it degrades; read by ``_flag_spent_budget``.
+    _budget_spent: str | None = PrivateAttr(default=None)
 
     @property
     def key(self) -> str:
@@ -146,6 +149,7 @@ class Task(BaseModel):
         # both ask "did THIS task's tools work?", and a previous task's 503s
         # would otherwise be held against an answer they had nothing to do with.
         reset_tool_ledger()
+        self._budget_spent = None
         # Same scope, same reason. The plan describes HOW THIS TASK gets done,
         # so it starts empty; carrying the previous task's items forward would
         # have the agent reporting work it never did here.
@@ -198,6 +202,7 @@ class Task(BaseModel):
         )
         output = self._flag_unavailable_sources(output)
         output = self._flag_unfinished_plan(output)
+        output = self._flag_spent_budget(output)
         self.output = output
         self.end_time = datetime.datetime.now(datetime.timezone.utc)
 
@@ -285,11 +290,24 @@ class Task(BaseModel):
                 self.name or self.description[:40],
                 exc,
             )
+            self._budget_spent = f"exceeded the execution budget ({exc})"
             partial = getattr(exc, "partial", "") or ""
             return (
                 f"{partial}\n\n> ⚠️ Truncated: exceeded the execution budget "
                 f"({exc}). This answer is incomplete."
             ).strip()
+
+    def _flag_spent_budget(self, output: TaskOutput) -> TaskOutput:
+        """Mark a truncated answer degraded, in structure as well as in text.
+
+        The banner alone left ``degraded`` False, so memory stored the partial
+        answer as a finding and recipe mining saw a clean success.
+        """
+        if self._budget_spent is None or output.degraded:
+            return output  # a degraded output already carries its reason
+        return output.model_copy(
+            update={"degraded": True, "degradation_reason": self._budget_spent}
+        )
 
     def _shape_output(
         self, raw: str, structured_model: type[BaseModel] | None

@@ -45,7 +45,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
-from src.core.llm.transport.budget import truncated_answer
+from src.core.llm.transport.budget import end_spent_turn
 from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 from src.core.llm.transport.response_parsing import (
     merge_tool_call_metadata,
@@ -87,7 +87,7 @@ def _forward(
     except ExecutionBudgetExceededError as spent:
         if from_task is None:
             raise  # Chat's lone agent: its caller degrades it
-        return _spent(spent)
+        return _spent(spent, call, from_task)
 
 
 async def _aforward(
@@ -114,19 +114,23 @@ async def _aforward(
     except ExecutionBudgetExceededError as spent:
         if from_task is None:
             raise
-        return _spent(spent)
+        return _spent(spent, call, from_task)
 
 
-def _spent(error: ExecutionBudgetExceededError) -> str:
+def _spent(
+    error: ExecutionBudgetExceededError, call: Callable[..., object], task: object
+) -> str:
     """A task turn's spent budget as its answer, for any handler.
 
     ``OpenAICompletion.call`` already returns this itself under delegation; a
     handler with its own entry point (``DatabricksResponsesLLM``) raises. A
     raise is what CrewAI turns into a failed task — or, through
     ``max_retry_limit``, a re-run of the whole task with a fresh turn clock.
+    Same wording and the same mark on the task as the transport's.
     """
     logger.warning("[crewai] budget spent (%s); ending the turn degraded", error)
-    return truncated_answer(error)
+    model = str(getattr(getattr(call, "__self__", None), "model", "") or "?")
+    return end_spent_turn(error, model, None, task)
 
 
 class _ToolCallHistory:

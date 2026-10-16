@@ -348,7 +348,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 # partial as text, as the Kasal harness's Task does. A bare
                 # agent call (Chat) still raises; its caller degrades it.
                 spent = (
-                    spent_budget_answer(e, self.model, conversation)
+                    spent_budget_answer(e, self.model, conversation, from_task)
                     if self.delegate_tool_calls and from_task is not None
                     else None
                 )

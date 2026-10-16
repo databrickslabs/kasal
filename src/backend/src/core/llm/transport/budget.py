@@ -7,6 +7,7 @@ clean seam: it reads an agent's caps and a conversation, and returns numbers.
 the existing test surface are unchanged.
 """
 
+import contextlib
 import time
 from typing import Any
 
@@ -255,8 +256,39 @@ def truncated_answer(error: Exception) -> str:
     ).strip()
 
 
+#: Set on the task whose turn ``end_spent_turn`` ended, with the reason. The
+#: harness marks that task's output degraded from THIS, never from the banner
+#: text — a downstream task that quotes its truncated context is not truncated.
+BUDGET_SPENT_ATTR = "_kasal_budget_spent"
+
+
+def end_spent_turn(
+    error: Exception,
+    model: str,
+    conversation: list[dict[str, object]] | None,
+    task: object,
+) -> str:
+    """A task turn's last answer once its budget is spent; records it on ``task``.
+
+    Reworded from the round-0 message, which reads "exceeded after 0 tool
+    round(s)": true of one delegated call and wrong about the turn it ends.
+    """
+    reason = f"max_execution_time reached for model {model}"
+    with contextlib.suppress(Exception):  # a mark never fails a run
+        object.__setattr__(task, BUDGET_SPENT_ATTR, reason)
+    return truncated_answer(
+        ExecutionBudgetExceededError(
+            reason,
+            partial=getattr(error, "partial", "") or last_assistant_text(conversation),
+        )
+    )
+
+
 def spent_budget_answer(
-    error: Exception, model: str, conversation: list[dict[str, object]] | None
+    error: Exception,
+    model: str,
+    conversation: list[dict[str, object]] | None,
+    task: object,
 ) -> str | None:
     """A delegated round that hit the wall clock, as the turn's last answer.
 
@@ -279,11 +311,4 @@ def spent_budget_answer(
         current_deadline()
     ):
         return None
-    # Reworded: the round-0 message reads "exceeded after 0 tool round(s)",
-    # true of one delegated call and wrong about the turn it ends.
-    return truncated_answer(
-        ExecutionBudgetExceededError(
-            f"max_execution_time reached for model {model}",
-            partial=getattr(error, "partial", "") or last_assistant_text(conversation),
-        )
-    )
+    return end_spent_turn(error, model, conversation, task)

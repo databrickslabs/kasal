@@ -153,6 +153,7 @@ def kasal_memory_crew_class() -> type:
 
         def _create_manager_agent(self) -> None:
             from src.core.llm.effort import apply_manager_limits
+            from src.core.llm.transport.budget import turn_cap
             from src.services.execution.harnesses.crewai.deadline import (
                 carry_turn_cap,
             )
@@ -161,10 +162,12 @@ def kasal_memory_crew_class() -> type:
             apply_manager_limits(
                 self.manager_agent, getattr(self, "_kasal_execution_effort", None)
             )
-            # Off CrewAI's field, like every agent build_agent makes.
+            # Off CrewAI's field, like every agent build_agent makes. A custom
+            # manager built by build_agent already carries its cap and has an
+            # empty field, so fall back to the carried value, not to None.
             manager = self.manager_agent
             if manager is not None:
-                carry_turn_cap(manager, getattr(manager, "max_execution_time", None))
+                carry_turn_cap(manager, turn_cap(manager))
 
         def _stamp_run_deadline(self) -> None:
             """One deadline for the whole run, on every agent.

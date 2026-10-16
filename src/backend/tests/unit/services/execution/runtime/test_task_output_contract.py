@@ -158,3 +158,17 @@ class TestDegradeInsteadOfAbort:
         output = task.execute_sync(_BudgetAgent(partial="what I found so far"))
         assert "what I found so far" in output.raw
         assert "⚠️ Truncated" in output.raw
+
+    def test_a_truncated_answer_is_marked_degraded(self):
+        """In structure, not only in text: memory skips outputs marked degraded,
+        and would otherwise store the truncated answer as a finding."""
+        task = Task(description="d", expected_output="e", on_budget_exceeded="degrade")
+        output = task.execute_sync(_BudgetAgent(partial="what I found so far"))
+        assert output.degraded is True
+        assert output.degradation_reason
+
+    def test_the_mark_does_not_outlive_the_turn_that_earned_it(self):
+        task = Task(description="d", expected_output="e", on_budget_exceeded="degrade")
+        task.execute_sync(_BudgetAgent(partial="so far"))
+        output = task.execute_sync(_Agent(["a clean answer"]))
+        assert output.degraded is False

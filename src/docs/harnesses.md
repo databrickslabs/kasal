@@ -144,10 +144,12 @@ bundle README; it is never a refusal.
   and the run carries on. On CrewAI the cap is kept off `crewai.Agent`, whose own
   timeout would fail the task or re-run it through `max_retry_limit`; the
   transport's deadline bounds the turn instead (`harnesses/crewai/deadline.py`).
-* **Degraded outputs.** A task output whose every tool call failed is marked
-  `degraded` (`⚠️ Unverified`) on both harnesses; on CrewAI a truncated one is
-  marked too. Memory does not store an output marked `degraded`. (A truncated
-  Kasal-harness output carries only the text banner, so it is still stored.)
+  One difference remains: CrewAI has no `on_budget_exceeded`, so a task that
+  sets it to `raise` still degrades there. The kernel's default is `degrade`,
+  so only an explicit `raise` behaves differently between the harnesses.
+* **Degraded outputs.** A task output that was truncated, or whose every tool
+  call failed (`⚠️ Unverified`), is marked `degraded` on both harnesses, and
+  memory does not store it.
 * **Structured output.** `output_pydantic` / `output_json` pass through to
   CrewAI's own converter rather than Kasal's schema gate. Both produce a typed
   `.pydantic` on the crew output — so router conditions on nested schemas work

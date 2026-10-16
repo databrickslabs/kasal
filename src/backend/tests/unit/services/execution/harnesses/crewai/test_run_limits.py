@@ -88,8 +88,9 @@ class _Client:
     what the cap forced, and how a real model behaves.
     """
 
-    def __init__(self, tool_rounds=10_000, per_round=1, delay=0.0):
+    def __init__(self, tool_rounds=10_000, per_round=1, delay=0.0, final=None):
         self.tool_rounds, self.per_round, self.delay = tool_rounds, per_round, delay
+        self.final = final or "finished after every search"
         self.requests = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
@@ -101,7 +102,7 @@ class _Client:
             return _text("forced answer without tools")
         if sum(self.requests) <= self.tool_rounds:
             return _tool_calls(*["search"] * self.per_round)
-        return _text("finished after every search")
+        return _text(self.final)
 
 
 @pytest.fixture(autouse=True)
@@ -229,6 +230,24 @@ class TestASpentClockDegrades:
         assert TRUNCATED_MARKER in result.raw
 
 
+class TestTruncationIsAFactNotAPhrase:
+    def test_quoting_an_upstream_banner_does_not_degrade_the_task(self):
+        """A downstream task that repeats its truncated context has not itself
+        run out of time; only the turn the transport ended is marked."""
+        quoted = (
+            "Upstream reported:\n"
+            f"{TRUNCATED_MARKER}exceeded the execution budget (x). "
+            "This answer is incomplete.\nHere is my own complete analysis."
+        )
+        transport, tool = LLM(model="gpt-4o"), _Search()
+        harness, _, tasks, crew = _crew(transport, tool)
+
+        _kickoff(harness, transport, _Client(tool_rounds=1, final=quoted), crew)
+
+        assert TRUNCATED_MARKER in tasks[0].output.raw
+        assert getattr(tasks[0].output, "degraded", None) is not True
+
+
 class TestEveryHandlerDegrades:
     """``DatabricksResponsesLLM`` has its own ``call`` and raises at a spent
     deadline; the CrewAI LLM wrapper ends the task's turn the same way."""
@@ -238,17 +257,28 @@ class TestEveryHandlerDegrades:
         from src.services.execution.harnesses.crewai.llm import build_kasal_backed_llm
 
         inner = LLM(model="gpt-4o")
-        spent = ExecutionBudgetExceededError("deadline passed", partial="so far")
+        spent = ExecutionBudgetExceededError(
+            "max_execution_time exceeded after 0 tool round(s)", partial="so far"
+        )
         return build_kasal_backed_llm(inner), spent
 
     def test_a_task_turn_gets_the_truncated_partial(self):
+        from src.core.llm.transport.budget import BUDGET_SPENT_ATTR
+
         wrapped, spent = self._wrapped()
-        with patch.object(type(wrapped.inner), "call", side_effect=spent):
-            answer = wrapped.call(
-                [{"role": "user", "content": "x"}], from_task=object()
-            )
+        task = SimpleNamespace()
+
+        def _raises(self, *args, **kwargs):  # a real method: it has a __self__
+            raise spent
+
+        with patch.object(type(wrapped.inner), "call", _raises):
+            answer = wrapped.call([{"role": "user", "content": "x"}], from_task=task)
         assert answer.startswith("so far")
         assert TRUNCATED_MARKER in answer
+        # Same wording as the transport's, and the task is told in structure.
+        assert "max_execution_time reached for model gpt-4o" in answer
+        assert "0 tool round" not in answer
+        assert getattr(task, BUDGET_SPENT_ATTR)
 
     def test_a_call_with_no_task_still_raises(self):
         from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
@@ -305,6 +335,32 @@ class TestMaxExecutionTimeStaysOffCrewAI:
         crew._create_manager_agent()
         assert crew.manager_agent.max_execution_time is None
         assert getattr(crew.manager_agent, TURN_CAP_ATTR) == 300
+
+    def test_a_custom_manager_keeps_its_cap_without_an_effort(self):
+        """``inputs.manager_agent`` is built by build_agent, which has already
+        moved the cap off CrewAI's field; nothing may erase it afterwards."""
+        harness = binding_for("crewai")
+        worker = harness.build_agent(
+            role="R", goal="g", backstory="b", llm=LLM(model="gpt-4o")
+        )
+        manager = harness.build_agent(
+            role="M",
+            goal="manage",
+            backstory="b",
+            llm=LLM(model="gpt-4o"),
+            allow_delegation=True,
+            max_execution_time=900,
+        )
+        task = harness.build_task(description="d", expected_output="o", agent=None)
+        crew = harness.build_crew(
+            agents=[worker],
+            tasks=[task],
+            process=harness.process("hierarchical"),
+            manager_agent=manager,
+        )
+        crew._create_manager_agent()
+        assert crew.manager_agent.max_execution_time is None
+        assert getattr(crew.manager_agent, TURN_CAP_ATTR) == 900
 
 
 class TestWhollyFailedToolsAreFlagged:
@@ -363,6 +419,16 @@ class TestWhollyFailedToolsAreFlagged:
         _kickoff(harness, transport, _Client(tool_rounds=2), crew)
         assert getattr(tasks[0].output, "degraded", None) is not True
         assert DEGRADED_MARKER not in tasks[0].output.raw
+
+    def test_a_started_task_can_still_be_deep_copied(self):
+        """What is kept on the task is the ledger, not a whole Context."""
+        import copy
+
+        from src.services.execution.harnesses.crewai.outcome import begin_task
+
+        task = binding_for("crewai").build_task(description="d", expected_output="o")
+        begin_task(task)
+        copy.deepcopy(task)
 
     def test_each_task_starts_a_fresh_ledger(self):
         """Task one's dead source must not be held against task two."""
