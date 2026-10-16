@@ -20,6 +20,7 @@ from src.schemas.flow_execution import (
 )
 from src.services.execution.stored_inputs import strip_run_credentials
 from src.services.flow_builder.backend_flow import BackendFlow
+from src.services.flow_builder.data_access import build_flow_data_access
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.execution_service import FlowExecutionService
 
@@ -424,14 +425,13 @@ class FlowRunnerService:
 
                 # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
                 from src.services.flow_builder.backend_flow import BackendFlow
-                from src.services.flow_builder.data_access import (
-                    build_flow_data_access,
-                )
 
                 # Initialize BackendFlow with the job_id (no flow_id for dynamic flows)
                 backend_flow = BackendFlow(job_id=job_id, flow_id=None)
-                # Owning SERVICES, not other domains' repositories — see data_access.
-                backend_flow.repositories = build_flow_data_access(session)
+                # Owning SERVICES bound to the run's workspace — see data_access.
+                backend_flow.repositories = build_flow_data_access(
+                    session, (config or {}).get("group_context")
+                )
 
                 # CRITICAL: For dynamic flows, we need to populate _flow_data from config
                 # (not load from database since there's no flow_id)
@@ -748,12 +748,10 @@ class FlowRunnerService:
 
                 # Initialize BackendFlow with the flow_id and job_id
                 backend_flow = BackendFlow(job_id=job_id, flow_id=flow_id)
-                # Owning SERVICES, not other domains' repositories — see data_access.
-                from src.services.flow_builder.data_access import (
-                    build_flow_data_access,
+                # Owning SERVICES bound to the run's workspace — see data_access.
+                backend_flow.repositories = build_flow_data_access(
+                    session, (config or {}).get("group_context")
                 )
-
-                backend_flow.repositories = build_flow_data_access(session)
 
                 # Log what we have in the config BEFORE loading from database
                 logger.info(

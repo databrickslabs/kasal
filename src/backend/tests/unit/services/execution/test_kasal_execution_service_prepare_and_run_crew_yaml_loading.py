@@ -21,6 +21,9 @@ from src.services.execution.kasal_service import (
 )
 from src.utils.user_context import GroupContext
 
+#: Every run has a workspace; one without is refused before it starts.
+CTX = GroupContext(group_ids=["g1"])
+
 
 def make_config(**kwargs):
     # Build only valid CrewConfig fields
@@ -113,7 +116,7 @@ async def test_prepare_and_run_crew_agents_yaml_path():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
         assert result["execution_id"] == exec_id
 
 
@@ -137,11 +140,12 @@ async def test_prepare_and_run_crew_with_db_agent():
     db_task = MagicMock()
     db_task.tool_configs = {"task_key": "task_val"}
 
+    # The stored rows are read by id, group-checked; there is no name lookup.
     mock_agent_svc = AsyncMock()
-    mock_agent_svc.find_by_name = AsyncMock(return_value=db_agent)
+    mock_agent_svc.get_with_group_check = AsyncMock(return_value=db_agent)
 
     mock_task_svc = AsyncMock()
-    mock_task_svc.find_by_name = AsyncMock(return_value=db_task)
+    mock_task_svc.get_with_group_check = AsyncMock(return_value=db_task)
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -170,8 +174,13 @@ async def test_prepare_and_run_crew_with_db_agent():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(
+            exec_id, config, group_context=GroupContext(group_ids=["g1"])
+        )
         assert result["execution_id"] == exec_id
+    run_config = mock_engine.run_execution.await_args.args[1]
+    assert run_config["agents"][0]["tool_configs"] == {"key": "value"}
+    assert run_config["tasks"][0]["tool_configs"] == {"task_key": "task_val"}
 
 
 @pytest.mark.asyncio
@@ -197,7 +206,7 @@ async def test_prepare_and_run_crew_with_agents_yaml_empty_dict():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
         assert "execution_id" in result
 
 
@@ -251,7 +260,7 @@ async def test_prepare_and_run_crew_hierarchical_process():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
         assert "execution_id" in result
 
 
@@ -305,7 +314,7 @@ async def test_prepare_and_run_crew_planning_llm():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
         assert "execution_id" in result
 
 
@@ -385,7 +394,7 @@ async def test_prepare_and_run_crew_exception_path():
         ),
     ):
         with pytest.raises(RuntimeError, match="engine crash"):
-            await svc.prepare_and_run_crew(exec_id, config)
+            await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
 
 
 @pytest.mark.asyncio
@@ -422,7 +431,7 @@ async def test_prepare_and_run_crew_agents_yaml_db_exception_fallback():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
         assert result["execution_id"] == exec_id
 
 
@@ -464,7 +473,7 @@ async def test_prepare_and_run_crew_tasks_yaml_db_exception_fallback():
     ):
         # Run - it may succeed or fail; the important thing is no unhandled crash
         try:
-            await svc.prepare_and_run_crew(exec_id, config)
+            await svc.prepare_and_run_crew(exec_id, config, group_context=CTX)
         except Exception:
             pass
 

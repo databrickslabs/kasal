@@ -15,11 +15,10 @@ The fix was to make the SERVICE offer the guarantee (``get_execution_record``), 
 to keep reaching past it. That is the general shape: when the owning service does
 not expose what you need, add it there rather than bypassing it.
 
-**Almost a gate.** This started at 42 cross-domain pairs and is down to **7**: three
-are the ``repositories`` dict the flow runner injects into ``BackendFlow`` inside the
-flow SUBPROCESS, and four are deployment's catalog reads, which used to be hidden by
-an ``_OWNED`` grant (see ``_BASELINE``). Convert those and the ratchet becomes a hard
-ban.
+**Almost a gate.** This started at 42 cross-domain pairs and is down to **6**: two
+are flow_builder's catalog reads (see ``_BASELINE``), and four are deployment's
+catalog reads, which used to be hidden by an ``_OWNED`` grant. Convert those and the
+ratchet becomes a hard ban.
 
 Fixing the other 36 surfaced four real bugs that the bypass had been hiding, each one
 swallowed by an ``except`` so nothing failed loudly:
@@ -105,20 +104,19 @@ _OWNED = {
     "triggers": {"trigger_queue", "event_subscription"},
 }
 
-#: The ONLY cross-domain pairs left: deployment's catalog reads (below) and the
-#: ``repositories`` dict that ``flow_runner_service`` builds and injects into
-#: ``BackendFlow`` for a DYNAMIC flow run.
+#: The ONLY cross-domain pairs left: deployment's catalog reads (below) and
+#: flow_builder's.
 #:
-#: The flow_builder pairs are not converted because that dict is threaded through 17 read sites across
-#: 6 modules INSIDE the flow subprocess (``backend_flow``, ``checkpoint_resume``,
-#: ``flow_config``, ``flow_processors``, ``task_adapter``). Replacing it with services
-#: cannot be proven safe from in-process tests: the spawned interpreter has its own
-#: event loop and its own Lakebase activation, so a break shows up only in a real
-#: flow execution. See services/execution/CLAUDE.md on subprocess-boundary changes.
+#: The ``repositories`` bundle the flow SUBPROCESS reads (``data_access.py``) holds
+#: services now, bound to the run's workspace; ``flow_builder -> agent`` went when
+#: ``modules/task_adapter`` stopped reading ``AgentRepository`` after a bundle
+#: miss (test_flow_run_lookups_workspace_scoped.py runs the real child). What is
+#: left is ``FlowGenerationService`` (``generation.py``) listing a group's crews and
+#: tasks through their repositories.
 #:
-#: Everything else that was here is gone — 42 pairs down to these 7. Do not add to
-#: this list; convert the dict in a change that can be exercised by a live flow run,
-#: route deployment through the catalog services, and this becomes a hard gate.
+#: Everything else that was here is gone — 42 pairs down to these 6. Do not add to
+#: this list; route generation and deployment through the catalog services, and this
+#: becomes a hard gate.
 _BASELINE = {
     # CrewDeploymentService / crew_export build the catalog repositories
     # themselves (services/deployment/crew.py, crew_export.py). Route those reads
@@ -128,7 +126,6 @@ _BASELINE = {
     "deployment -> crew",
     "deployment -> task",
     "deployment -> tool",
-    "flow_builder -> agent",
     "flow_builder -> crew",
     "flow_builder -> task",
 }

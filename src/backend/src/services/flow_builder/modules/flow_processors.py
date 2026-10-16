@@ -13,6 +13,7 @@ from src.services.flow_builder.mcp_assignments import (
     apply_flow_mcp_assignments,
     flow_task_tool_ids,
 )
+from src.services.flow_builder.modules.canvas_fallback import canvas_task_data
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 _Cfg = Dict[str, Any]
@@ -221,39 +222,9 @@ class FlowProcessorManager:
                             logger.info(
                                 f"Task {task_id} not in database, using embedded node data from crew"
                             )
-                            # Create a mock task data object from node data
-                            from types import SimpleNamespace
-
-                            task_data = SimpleNamespace(
-                                id=task_id,
-                                name=task_node_data.get("label", f"Task {task_id}"),
-                                description=task_node_data.get("description", ""),
-                                expected_output=task_node_data.get(
-                                    "expected_output", ""
-                                ),
-                                agent_id=agent_id,
-                                tools=task_node_data.get("tools", []),
-                                tool_configs=task_node_data.get("tool_configs", {}),
-                                async_execution=task_node_data.get(
-                                    "async_execution", False
-                                ),
-                                context=task_node_data.get("context", []),
-                                config=task_node_data.get("config", {}),
-                                memory=task_node_data.get("memory", False),
-                                markdown=task_node_data.get("markdown", False),
-                                output_file=task_node_data.get("config", {}).get(
-                                    "output_file"
-                                ),
-                                output_json=task_node_data.get("config", {}).get(
-                                    "output_json"
-                                ),
-                                output_pydantic=task_node_data.get("config", {}).get(
-                                    "output_pydantic"
-                                ),
-                                human_input=task_node_data.get("config", {}).get(
-                                    "human_input", False
-                                ),
-                                converter_cls=None,
+                            # Policy (guardrails, human input) comes from the node too.
+                            task_data = canvas_task_data(
+                                task_id, task_node_data, agent_id
                             )
                         else:
                             logger.warning(
@@ -778,39 +749,9 @@ class FlowProcessorManager:
                             logger.info(
                                 f"Listener task {task_id} not in database, using embedded node data from crew"
                             )
-                            # Create a mock task data object from node data
-                            from types import SimpleNamespace
-
-                            task_data = SimpleNamespace(
-                                id=task_id,
-                                name=task_node_data.get("label", f"Task {task_id}"),
-                                description=task_node_data.get("description", ""),
-                                expected_output=task_node_data.get(
-                                    "expected_output", ""
-                                ),
-                                agent_id=agent_id,
-                                tools=task_node_data.get("tools", []),
-                                tool_configs=task_node_data.get("tool_configs", {}),
-                                async_execution=task_node_data.get(
-                                    "async_execution", False
-                                ),
-                                context=task_node_data.get("context", []),
-                                config=task_node_data.get("config", {}),
-                                memory=task_node_data.get("memory", False),
-                                markdown=task_node_data.get("markdown", False),
-                                output_file=task_node_data.get("config", {}).get(
-                                    "output_file"
-                                ),
-                                output_json=task_node_data.get("config", {}).get(
-                                    "output_json"
-                                ),
-                                output_pydantic=task_node_data.get("config", {}).get(
-                                    "output_pydantic"
-                                ),
-                                human_input=task_node_data.get("config", {}).get(
-                                    "human_input", False
-                                ),
-                                converter_cls=None,
+                            # Policy (guardrails, human input) comes from the node too.
+                            task_data = canvas_task_data(
+                                task_id, task_node_data, agent_id
                             )
                         else:
                             logger.warning(
@@ -1191,39 +1132,9 @@ class FlowProcessorManager:
                                 logger.info(
                                     f"Router task {task_id} not in database, using embedded node data from crew"
                                 )
-                                # Create a mock task data object from node data
-                                from types import SimpleNamespace
-
-                                task_data = SimpleNamespace(
-                                    id=task_id,
-                                    name=task_node_data.get("label", f"Task {task_id}"),
-                                    description=task_node_data.get("description", ""),
-                                    expected_output=task_node_data.get(
-                                        "expected_output", ""
-                                    ),
-                                    agent_id=agent_id,
-                                    tools=task_node_data.get("tools", []),
-                                    tool_configs=task_node_data.get("tool_configs", {}),
-                                    async_execution=task_node_data.get(
-                                        "async_execution", False
-                                    ),
-                                    context=task_node_data.get("context", []),
-                                    config=task_node_data.get("config", {}),
-                                    memory=task_node_data.get("memory", False),
-                                    markdown=task_node_data.get("markdown", False),
-                                    output_file=task_node_data.get("config", {}).get(
-                                        "output_file"
-                                    ),
-                                    output_json=task_node_data.get("config", {}).get(
-                                        "output_json"
-                                    ),
-                                    output_pydantic=task_node_data.get(
-                                        "config", {}
-                                    ).get("output_pydantic"),
-                                    human_input=task_node_data.get("config", {}).get(
-                                        "human_input", False
-                                    ),
-                                    converter_cls=None,
+                                # Policy (guardrails, human input) comes from the node too.
+                                task_data = canvas_task_data(
+                                    task_id, task_node_data, agent_id
                                 )
                             else:
                                 logger.warning(
