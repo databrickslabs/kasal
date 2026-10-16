@@ -29,6 +29,7 @@ vi.mock('../../../../api/execution/ExecutionHistoryService', () => ({
     getRunByJobId: vi.fn().mockResolvedValue(null),
   },
 }));
+vi.mock('../utils/runLookup', () => ({ isRunGone: vi.fn(async () => false) }));
 
 vi.mock('../../../../store/taskExecutionStore', () => ({
   useTaskExecutionStore: Object.assign(

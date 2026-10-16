@@ -60,6 +60,8 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             return []
 
         try:
+            # The id breaks timestamp ties, so OFFSET pages are stable: a client
+            # walking every page neither skips nor repeats a row.
             query = (
                 select(self.model)
                 .where(
@@ -68,7 +70,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
                         self.model.group_id.in_(group_ids),
                     )
                 )
-                .order_by(self.model.timestamp.asc())
+                .order_by(self.model.timestamp.asc(), self.model.id.asc())
             )
 
             # Apply pagination

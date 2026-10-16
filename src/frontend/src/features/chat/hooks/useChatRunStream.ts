@@ -32,6 +32,7 @@ import type { Surface } from '../../../shared/a2ui/index';
 import { buildTraceEntry } from '../utils/traceActivity';
 import { cleanTaskLabel, taskHeaderLabel, summarizeTaskOutput } from '../utils/taskChatRendering';
 import { extractResultText, extractA2uiSurface } from '../utils/resultExtraction';
+import { conversationHasAnswer, fetchRunOutcome, TERMINAL_RUN_STATUSES } from '../utils/runOutcome';
 import { GenerationCompleteData } from '../types/dispatcher';
 
 interface UseChatRunStreamArgs {
@@ -374,6 +375,16 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     finishOnce(jobId, () => useExecutionStore.getState().failExecution(error, jobId));
   }, [finishOnce]);
 
+  // Finish a run from its stored row (see utils/runOutcome). Resolves to the
+  // outcome so the caller knows whether it is still running; a still-running
+  // run is left to the REST poller that jobCreated armed.
+  const finishFromServer = useCallback(async (jobId: string) => {
+    const outcome = await fetchRunOutcome(jobId);
+    if (outcome.kind === 'completed') completeExecutionOnce(jobId, outcome.text, outcome.surface);
+    else if (outcome.kind === 'failed') failExecutionOnce(jobId, outcome.error);
+    return outcome;
+  }, [completeExecutionOnce, failExecutionOnce]);
+
   // Keep an undecided approval line BELOW the latest activity row: when a new
   // trace lands for a job with a pending approval message, bump it to the end.
   const bumpPendingApproval = useCallback((jobId?: string) => {
@@ -422,6 +433,14 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     },
     onError: (error) => {
       failExecutionOnce(sseJobIdRef.current, error);
+    },
+    onTransportLost: () => {
+      // The stream gave up; the run did not. Ask the server how it ended. If it
+      // is still going (or the server is unreachable too) keep it tracked: the
+      // REST poller and the reconciliation loop deliver its real ending.
+      const jobId = sseJobIdRef.current;
+      if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
+      void finishFromServer(jobId).catch(() => undefined);
     },
   });
 
@@ -653,16 +672,30 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       }
       handleStartExecutionStream(jobId, sid, { preservePreview: true });
 
-      // Backstop: if the job had ALREADY finished before the refresh, drop the
-      // (now stale) running state so the Stop button doesn't linger. Only acts
-      // on a definitively-terminal status; anything else keeps the optimistic
-      // state and lets the SSE stream resolve it.
+      // Backstop: if the job had ALREADY finished before the refresh, finish it
+      // here. Only acts on a definitively-terminal status; anything else keeps
+      // the optimistic state and lets the SSE stream resolve it.
       try {
         const exec = await getExecutionStatus(jobId);
         const status = String(exec?.status || '').toLowerCase();
-        const finished = ['completed', 'failed', 'stopped', 'cancelled', 'error'].includes(status);
+        const finished = TERMINAL_RUN_STATUSES.includes(status);
         if (finished && useExecutionStore.getState().activeExecution?.jobId === jobId) {
           deadJobsRef.current.add(jobId);
+          // It ended while nobody was watching, so its answer is not in the
+          // conversation yet: post the stored one (once — finishOnce and the job
+          // owner guard a replay or poller delivering it too). A crew composes
+          // its deck AFTER completing, so without a surface the replayed stream
+          // stays open a while for it.
+          const answered = finishedJobsRef.current.has(jobId)
+            || conversationHasAnswer(useSessionStore.getState().messages, jobId);
+          if (!answered) {
+            const outcome = await finishFromServer(jobId);
+            if (outcome.kind === 'completed' && !outcome.surface) executionStream.awaitLateSurface();
+            else if (outcome.kind !== 'running') executionStream.stopStream();
+            return;
+          }
+          // Already answered (only the marker's DELETE was lost): drop the stale
+          // running state so the Stop button doesn't linger.
           executionStream.stopStream();
           useExecutionStore.setState({
             isExecuting: false,
@@ -711,7 +744,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       }
     })();
     return () => { cancelled = true; reconnectingRef.current = null; };
-  }, [currentSessionId, handleStartExecutionStream, executionStream]);
+  }, [currentSessionId, handleStartExecutionStream, executionStream, finishFromServer]);
 
   return { executionStream, handleStartExecutionStream };
 }

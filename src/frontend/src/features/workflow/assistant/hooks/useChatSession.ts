@@ -7,6 +7,28 @@ import { ChatMessage } from '../types/index';
 import { v4 as uuidv4 } from 'uuid';
 import { useChatMessagesStore, deduplicateMessages } from '../store/chatMessagesStore';
 
+/** The backend caps per_page at 100 and pages oldest-first with OFFSET/LIMIT. */
+const HISTORY_PAGE_SIZE = 100;
+
+/**
+ * Every message of a session, oldest first. One default page was only the
+ * OLDEST 50 rows, so a long builder conversation reopened without its newest
+ * turns (the latest run results included). No page cap: pages run oldest
+ * first, so any cap would drop exactly the newest messages. The walk ends at
+ * the first short (or empty) page, which a finite table always reaches.
+ */
+async function loadAllMessages(sessionId: string): Promise<BackendChatMessage[]> {
+  const all: BackendChatMessage[] = [];
+  for (let page = 0; ; page += 1) {
+    const response = await ChatHistoryService.getSessionMessages(sessionId, page, HISTORY_PAGE_SIZE);
+    const batch = response?.messages || [];
+    all.push(...batch);
+    const total = response?.total_messages;
+    if (batch.length < HISTORY_PAGE_SIZE || (typeof total === 'number' && all.length >= total)) break;
+  }
+  return all;
+}
+
 export const useChatSession = (providedChatSessionId?: string) => {
   const [sessionId, setSessionId] = useState<string>(providedChatSessionId || uuidv4());
 
@@ -94,14 +116,25 @@ export const useChatSession = (providedChatSessionId?: string) => {
 
       try {
         try {
-          const response = await ChatHistoryService.getSessionMessages(sessionId);
-          if (response.messages && response.messages.length > 0) {
-            const loadedMessages = response.messages.map(convertBackendMessage);
+          const stored = await loadAllMessages(sessionId);
+          if (stored.length > 0) {
+            const loadedMessages = stored.map(convertBackendMessage);
             // Merge loaded messages with any that arrived during the async fetch
             // (e.g. real-time trace messages from SSE). This avoids a race condition
             // where setMessages would wipe messages added by addMessage during the fetch.
             const currentMessages = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
-            const merged = deduplicateMessages([...loadedMessages, ...currentMessages]);
+            // A message saved from this page keeps its client id in memory and is
+            // stored under a server id (its backendId). Without matching on that,
+            // switching away and back showed every message of this page twice.
+            // The in-memory copy takes the stored row's place, so the order stays
+            // the server's and code holding the client id still finds it.
+            const savedHere = new Map(currentMessages
+              .filter(m => m.backendId && m.backendId !== m.id)
+              .map(m => [m.backendId as string, m]));
+            const merged = deduplicateMessages([
+              ...loadedMessages.map(m => savedHere.get(m.id) ?? m),
+              ...currentMessages,
+            ]);
             setZustandMessages(sessionId, merged);
           }
           // If no messages from backend, keep whatever is in the store (don't clear)
@@ -119,7 +152,10 @@ export const useChatSession = (providedChatSessionId?: string) => {
   // Save message to backend
   const saveMessageToBackend = useCallback(async (message: ChatMessage): Promise<void> => {
     if (sessionId && message.type === 'user') useBuilderCanvasStore.getState().nameSessionFromPrompt(sessionId, message.content || '');
-    if (!sessionId || chatHistoryDisabled) return;
+    // A failure streak does NOT stop saving: that switched history off for the
+    // rest of the page, so the re-enable branch below could never run and every
+    // later turn, in every session, was silently dropped.
+    if (!sessionId) return;
     // Skip saving messages with empty content (backend requires min_length=1)
     if (!message.content) return;
 
@@ -182,7 +218,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
         const errorMessage: ChatMessage = {
           id: `error-${Date.now()}`,
           type: 'assistant',
-          content: '⚠️ Chat history is temporarily disabled due to service issues. Your messages will not be saved.',
+          content: '⚠️ Chat history could not be saved due to service issues. Recent messages may be missing after a reload; saving resumes when the service recovers.',
           timestamp: new Date(),
         };
 
@@ -218,8 +254,8 @@ export const useChatSession = (providedChatSessionId?: string) => {
   const loadSessionMessages = async (selectedSessionId: string) => {
     setIsLoadingSessions(true);
     try {
-      const response = await ChatHistoryService.getSessionMessages(selectedSessionId);
-      
+      const stored = await loadAllMessages(selectedSessionId);
+
       const sessionJobNames = JSON.parse(localStorage.getItem('chatSessionJobNames') || '{}');
       const jobName = sessionJobNames[selectedSessionId];
       if (jobName) {
@@ -228,10 +264,10 @@ export const useChatSession = (providedChatSessionId?: string) => {
         setCurrentSessionName('New Chat');
       }
       
-      const loadedMessages = response.messages.map(convertBackendMessage);
+      const loadedMessages = stored.map(convertBackendMessage);
       setZustandMessages(selectedSessionId, loadedMessages);
       setSessionId(selectedSessionId);
-      setCurrentSessionName(`Session from ${new Date(response.messages[0]?.timestamp || Date.now()).toLocaleDateString()}`);
+      setCurrentSessionName(`Session from ${new Date(stored[0]?.timestamp || Date.now()).toLocaleDateString()}`);
     } catch (error) {
       console.error('Error loading session messages:', error);
       const errorMessage: ChatMessage = {

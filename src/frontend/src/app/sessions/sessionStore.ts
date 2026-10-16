@@ -16,6 +16,7 @@ import {
   getSessionMessages,
   addMessageToSession,
   updateMessageInSession,
+  resendMessageUpdate,
   clearSessionMessages,
 } from '../../features/chat/persistence/sessionApi';
 
@@ -62,9 +63,28 @@ function trimRememberedExtras(): void {
   }
 }
 
-/** Test seam: the cache is module state and would otherwise leak across tests. */
+/**
+ * The newest content known for each message, by id. Same reason as the envelope
+ * cache: only the viewed session is in memory, and a retry of a backgrounded
+ * run's final in-place update needs its content to re-send.
+ */
+const lastKnownContent = new Map<string, string>();
+
+function rememberContent(id: string, content: string | undefined): void {
+  if (content === undefined) return;
+  lastKnownContent.delete(id); // re-insert so the bound evicts the stalest
+  lastKnownContent.set(id, content);
+  while (lastKnownContent.size > MAX_REMEMBERED_EXTRAS) {
+    const oldest = lastKnownContent.keys().next().value;
+    if (oldest === undefined) return;
+    lastKnownContent.delete(oldest);
+  }
+}
+
+/** Test seam: the caches are module state and would otherwise leak across tests. */
 export function __clearRememberedExtras(): void {
   lastKnownExtras.clear();
+  lastKnownContent.clear();
 }
 
 /** Remember any envelope fields an add/update carried. */
@@ -121,6 +141,101 @@ function _merge(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Fire-and-forget message writes that survive a transient failure.
+//
+// An answer is on screen before it is stored, so these writes are not awaited.
+// They used to be uncaught as well: a 503 while saving an assistant answer or
+// its A2UI envelope lost it from the conversation (gone after a reload) with
+// nothing but an unhandled rejection. A retry re-sends the NEWEST copy of the
+// message, never the original payload: an update made in the meantime (or one
+// that failed against a row whose create had failed) is carried along, and a
+// late retry can never overwrite newer content with older.
+//
+// A retry is pinned to the workspace the write started in, and dropped if the
+// user has switched workspace since: the shared client reads the group at
+// request time, so it would otherwise file one workspace's message in another.
+// ---------------------------------------------------------------------------
+
+/** Backoff before each retry; two retries cover a restart or proxy blip. */
+const WRITE_RETRY_DELAYS_MS = [1_000, 4_000];
+
+const statusOf = (err: unknown) =>
+  (err as { response?: { status?: number } } | undefined)?.response?.status;
+
+/** No response at all, a 5xx, 408 or 429. A 4xx is a real rejection. */
+function isTransientWriteError(err: unknown): boolean {
+  const status = statusOf(err);
+  return status === undefined || status >= 500 || status === 408 || status === 429;
+}
+
+/** A retry is handed the workspace it must land in. */
+type DurableWrite = (attempt: number, groupId: string | undefined) => Promise<void> | null;
+
+/**
+ * Run `write`, retrying a transient failure. `write` returns null when there is
+ * nothing safe to re-send. For a create, a 409 on a retry means the earlier
+ * attempt did reach the server (only its response was lost): it is saved.
+ */
+function persistDurably(
+  write: DurableWrite,
+  label: string,
+  opts: { create?: boolean } = {},
+  attempt = 0,
+  groupId = currentGroupId(),
+): void {
+  let pending: Promise<void> | null;
+  try { pending = write(attempt, groupId); } catch (err) { pending = Promise.reject(err); }
+  if (!pending) {
+    if (attempt > 0) console.error(`[sessionStore] ${label} could not be saved`);
+    return;
+  }
+  pending.catch((err: unknown) => {
+    if (opts.create && attempt > 0 && statusOf(err) === 409) return;
+    if (attempt >= WRITE_RETRY_DELAYS_MS.length || !isTransientWriteError(err)) {
+      console.error(`[sessionStore] ${label} could not be saved`, err);
+      return;
+    }
+    setTimeout(() => {
+      if (currentGroupId() !== groupId) {
+        console.error(`[sessionStore] ${label} not saved: the workspace changed before the retry`);
+        return;
+      }
+      persistDurably(write, label, opts, attempt + 1, groupId);
+    }, WRITE_RETRY_DELAYS_MS[attempt]);
+  });
+}
+
+/** The in-memory copy of a message, when its session is the one on screen. */
+function liveMessage(sessionId: string | null, id: string): ChatMessage | undefined {
+  const state = useSessionStore.getState();
+  return sessionId && state.currentSessionId === sessionId
+    ? state.messages.find((m) => m.id === id)
+    : undefined;
+}
+
+/** The newest known copy of a message, for re-sending its create. */
+function newestCopy(message: ChatMessage, sessionId: string | null): ChatMessage {
+  const content = lastKnownContent.get(message.id);
+  return {
+    ...message,
+    ...(content === undefined ? {} : { content }),
+    ...(lastKnownExtras.get(message.id) ?? {}),
+    ...(liveMessage(sessionId, message.id) ?? {}),
+  };
+}
+
+/**
+ * Re-send an update as a full snapshot of the newest copy: the in-memory one
+ * when its session is on screen, else the caches. Null when nothing is known.
+ */
+function snapshotUpdate(sessionId: string, id: string, groupId: string | undefined): Promise<void> | null {
+  const live = liveMessage(sessionId, id);
+  const content = live ? live.content : lastKnownContent.get(id);
+  if (content === undefined) return null;
+  return resendMessageUpdate(id, mergePersistedExtras({ content }, live, id), groupId);
+}
+
 // The selected workspace/group, mirrored to localStorage by the group store.
 // Chat sessions are scoped to it so switching workspace shows only that
 // workspace's chats.
@@ -170,6 +285,9 @@ interface SessionActions {
     content: string,
     extra?: Partial<ChatMessage>,
   ) => string;
+  /** Show an assistant notice on screen WITHOUT storing it — for a failure
+   *  that left no conversation to store it in (addMessage would create one). */
+  addNotice: (content: string) => void;
   /** Append a user turn and wait for its server row before starting a run. */
   saveUserMessage: (sessionId: string, content: string, extra?: Partial<ChatMessage>) => Promise<string>;
   addMessageToTargetSession: (
@@ -395,15 +513,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       timestamp: new Date(),
       ...extra,
     };
+    // The session this message belongs to, fixed now: a retry must not land in
+    // whichever session is on screen by then.
+    let target = get().currentSessionId;
     set((state) => ({ messages: [...state.messages, message] }));
     rememberExtras(id, message);
+    rememberContent(id, content);
 
-    // Persist to IndexedDB (fire-and-forget)
-    const ensureAndPersist = async () => {
-      const sessionId = await get().ensureSession();
-      await addMessageToSession(sessionId, { ...message, sessionId });
+    // Persist (fire-and-forget, retried on a transient failure)
+    const ensureAndPersist = async (copy: ChatMessage, groupId?: string) => {
+      const sessionId = target ?? (await get().ensureSession());
+      target = sessionId;
+      if (groupId) await addMessageToSession(sessionId, { ...copy, sessionId }, groupId);
+      else await addMessageToSession(sessionId, { ...copy, sessionId });
 
-      // Auto-title: first non-command user message becomes the session title
+      // Auto-title: first non-command user message becomes the session title.
+      // Cosmetic, so it never fails the write: a failed rename used to re-send
+      // a message that had already been saved.
       if (
         role === 'user' &&
         !autoTitled.has(sessionId) &&
@@ -411,14 +537,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ) {
         autoTitled.add(sessionId);
         const title = content.slice(0, 40).trim() || 'New Chat';
-        await dbRenameSession(sessionId, title);
-        const allSessions = await dbListSessions(currentGroupId());
-        set({ sessions: allSessions });
+        void dbRenameSession(sessionId, title)
+          .then(() => dbListSessions(currentGroupId()))
+          .then((sessions) => set({ sessions }))
+          .catch(() => autoTitled.delete(sessionId));
       }
     };
-    ensureAndPersist();
+    persistDurably(
+      (attempt, groupId) => (attempt === 0
+        ? ensureAndPersist(message)
+        : ensureAndPersist(newestCopy(message, target), groupId)),
+      `message ${id}`,
+      { create: true },
+    );
 
     return id;
+  },
+
+  addNotice: (content) => {
+    const notice: ChatMessage = { id: generateId(), role: 'assistant', content, timestamp: new Date() };
+    set((state) => ({ messages: [...state.messages, notice] }));
   },
 
   addMessageToTargetSession: (targetSessionId, role, content, extra) => {
@@ -438,11 +576,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
 
     rememberExtras(id, message);
+    rememberContent(id, content);
     // Always persist
-    addMessageToSession(targetSessionId, {
-      ...message,
-      sessionId: targetSessionId,
-    });
+    persistDurably(
+      (attempt, groupId) => (attempt === 0
+        ? addMessageToSession(targetSessionId, { ...message, sessionId: targetSessionId })
+        : addMessageToSession(targetSessionId, { ...newestCopy(message, targetSessionId), sessionId: targetSessionId }, groupId)),
+      `message ${id}`,
+      { create: true },
+    );
 
     return id;
   },
@@ -456,7 +598,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }));
     const sessionId = get().currentSessionId;
     if (sessionId) {
-      updateMessageInSession(sessionId, id, mergePersistedExtras(updates, existing, id));
+      rememberContent(id, updates.content);
+      const merged = mergePersistedExtras(updates, existing, id);
+      persistDurably(
+        (attempt, groupId) => (attempt === 0
+          ? updateMessageInSession(sessionId, id, merged)
+          : snapshotUpdate(sessionId, id, groupId)),
+        `update of ${id}`,
+      );
     }
   },
 
@@ -475,7 +624,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         ),
       }));
     }
-    updateMessageInSession(targetSessionId, id, mergePersistedExtras(updates, existing, id));
+    rememberContent(id, updates.content);
+    const merged = mergePersistedExtras(updates, existing, id);
+    persistDurably(
+      (attempt, groupId) => (attempt === 0
+        ? updateMessageInSession(targetSessionId, id, merged)
+        : snapshotUpdate(targetSessionId, id, groupId)),
+      `update of ${id}`,
+    );
   },
 
   appendToMessage: (id, additionalContent) => {
@@ -488,6 +644,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       if (sessionId) {
         const msg = updated.find((m) => m.id === id);
         if (msg) {
+          rememberContent(id, msg.content);
           void updateMessageInSession(sessionId, id, { content: msg.content }, true)
             .catch(() => undefined);
         }

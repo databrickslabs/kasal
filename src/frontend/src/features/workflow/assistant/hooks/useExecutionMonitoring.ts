@@ -3,6 +3,7 @@ import { ChatMessage } from '../types/index';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { streamExecution } from '../../../chat/api/streaming';
 import { builderResultContent } from '../utils/resultContent';
+import { isRunGone } from '../utils/runLookup';
 
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
 import { useTaskExecutionStore } from '../../../../store/taskExecutionStore';
@@ -50,10 +51,22 @@ export const useExecutionMonitoring = (
   // endpoint remains authoritative: a restored id is reconciled below, so a
   // run that finished while away restores its result instead of staying busy.
   const recoveryKey = `kasal-builder-run:${localStorage.getItem('selectedGroupId') || 'default'}:${sessionId}`;
+  const recoveryKeyRef = useRef(recoveryKey);
+  recoveryKeyRef.current = recoveryKey;
+  // A settled run must not be restored as running. The binding outlived the run
+  // and, on every return to the session, put the finished job back as the
+  // executing one, whose terminal event this instance had already handled: the
+  // composer stayed locked. Only the binding for THIS job is dropped, under the
+  // key it was settled with (the user may be in another session by then).
+  const releaseBinding = useCallback((jobId: string, key = recoveryKeyRef.current) => {
+    try {
+      if (sessionStorage.getItem(key) === jobId) sessionStorage.removeItem(key);
+    } catch { /* Storage may be unavailable. */ }
+  }, []);
   useEffect(() => {
     let restoredJobId: string | null = null;
     try { restoredJobId = sessionStorage.getItem(recoveryKey); } catch { /* Storage may be unavailable. */ }
-    const jobId = restoredJobId;
+    const jobId = restoredJobId && !settledJobsRef.current.has(restoredJobId) ? restoredJobId : null;
     executingJobIdRef.current = jobId;
     lastExecutionJobIdRef.current = restoredJobId;
     executionStartTimeRef.current = null;
@@ -123,6 +136,9 @@ export const useExecutionMonitoring = (
 
       if (shouldClear) {
         settledJobsRef.current.add(jobId);
+        // Released once the result is posted below: a reload before then must
+        // still find the run, or its answer is never fetched.
+        const bindingKey = recoveryKeyRef.current;
         // Transition any remaining "running" or "planning" tasks to "completed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -145,7 +161,10 @@ export const useExecutionMonitoring = (
         setTimeout(() => {
           runService.getRunByJobId(jobId).then(run => {
             const existing = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
-            if (existing.some(message => message.jobId === jobId && message.type === 'result' && !message.isIntermediate)) return;
+            if (existing.some(message => message.jobId === jobId && message.type === 'result' && !message.isIntermediate)) {
+              releaseBinding(jobId, bindingKey);
+              return;
+            }
             const resultContent = builderResultContent(run?.result);
             if (resultContent) {
               const resultMessage: ChatMessage = {
@@ -157,8 +176,11 @@ export const useExecutionMonitoring = (
               };
               addMessage(sessionId, resultMessage);
               saveMessageToBackend(resultMessage);
+              releaseBinding(jobId, bindingKey);
             } else {
               console.warn('[WorkflowChat] No result found for completed job!');
+              // A null run is a failed lookup: keep the binding so a remount retries.
+              if (run) releaseBinding(jobId, bindingKey);
             }
           }).catch(error => {
             console.error('[WorkflowChat] Error fetching job result:', error);
@@ -176,6 +198,7 @@ export const useExecutionMonitoring = (
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
         settledJobsRef.current.add(jobId);
+        releaseBinding(jobId);
         // Transition all "running" or "planning" tasks to "failed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -332,6 +355,7 @@ export const useExecutionMonitoring = (
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
         settledJobsRef.current.add(jobId);
+        releaseBinding(jobId);
         const stoppedMessage: ChatMessage = {
           id: `exec-stopped-${Date.now()}`,
           type: 'execution',
@@ -374,7 +398,7 @@ export const useExecutionMonitoring = (
     };
   // CRITICAL: Using refs for executingJobId, lastExecutionJobId, and processedTraceIds
   // so they don't need to be in the dependency array (avoids re-registering event handlers)
-  }, [saveMessageToBackend, sessionId, addMessage]);
+  }, [saveMessageToBackend, sessionId, addMessage, releaseBinding]);
 
   // Function to mark that this session is about to start an execution
   const markPendingExecution = useCallback(() => {
@@ -384,16 +408,28 @@ export const useExecutionMonitoring = (
   // The transcript's trace polling can show completion even when the global
   // run-status event was missed. Reconcile the input against this exact job,
   // independent of whether the Runs panel (or its stream) is mounted.
+  // Every terminal status settles the run (REJECTED, from an approval gate, was
+  // not one, so a rejected run kept the composer locked).
   const reconcileStatus = useCallback((jobId: string, status: unknown, error?: unknown) => {
     if (executingJobIdRef.current !== jobId) return;
     const normalized = String(status || '').toLowerCase();
     const event = normalized === 'completed' ? 'jobCompleted'
-      : normalized === 'failed' ? 'jobFailed'
+      : ['failed', 'rejected', 'error'].includes(normalized) ? 'jobFailed'
       : ['stopped', 'cancelled'].includes(normalized) ? 'jobStopped' : null;
+    const reason = error || (normalized === 'rejected' ? 'rejected at an approval gate' : undefined);
     if (event) window.dispatchEvent(new CustomEvent(event, {
-      detail: { jobId, status: normalized, error },
+      detail: { jobId, status: normalized, error: reason },
     }));
   }, []);
+
+  // A run that no longer exists (deleted, or another workspace's) is settled
+  // without a message: nothing ran wrong, there is just nothing left to watch.
+  const settleGone = useCallback((jobId: string) => {
+    if (executingJobIdRef.current !== jobId) return;
+    settledJobsRef.current.add(jobId);
+    releaseBinding(jobId);
+    window.dispatchEvent(new CustomEvent('forceClearExecution'));
+  }, [releaseBinding]);
 
   useEffect(() => {
     if (!executingJobId) return;
@@ -403,6 +439,7 @@ export const useExecutionMonitoring = (
       try {
         const run = await runService.getRunByJobId(executingJobId);
         if (!disposed && run) reconcileStatus(executingJobId, run.status, run.error);
+        else if (!disposed && await isRunGone(executingJobId) && !disposed) settleGone(executingJobId);
       } catch {
         // A transient request failure must not end the run or stop reconciliation.
       } finally {
@@ -411,7 +448,7 @@ export const useExecutionMonitoring = (
     };
     void check();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [executingJobId, sessionId, reconcileStatus]);
+  }, [executingJobId, sessionId, reconcileStatus, settleGone]);
 
   // ── Live token streaming into the chat ────────────────────────────────
   // While a job runs, llm_chunk frames (crew subprocess → event pipe → SSE)
