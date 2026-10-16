@@ -26,7 +26,7 @@ A_RESEARCHER = "aaaaaaaa-0000-4000-8000-000000000001"
 A_WRITER = "aaaaaaaa-0000-4000-8000-000000000002"
 A_RESEARCH = "aaaaaaaa-1111-4000-8000-000000000001"
 A_WRITE = "aaaaaaaa-1111-4000-8000-000000000002"
-B_SPY = "bbbbbbbb-0000-4000-8000-000000000001"
+B_AGENT = "bbbbbbbb-0000-4000-8000-000000000001"
 B_TASK = "bbbbbbbb-1111-4000-8000-000000000001"
 A_CONFIGS = {"SerperDevTool": {"serper_api_key": "a-own-key"}}
 B_CONFIGS = {"SerperDevTool": {"serper_api_key": "b-secret-key"}}
@@ -49,7 +49,7 @@ def _canvas(agent_to_task):
 
 def _rows():
     a_nodes, a_edges = _canvas([(A_RESEARCHER, A_RESEARCH), (A_WRITER, A_WRITE)])
-    b_nodes, b_edges = _canvas([(B_SPY, B_TASK)])
+    b_nodes, b_edges = _canvas([(B_AGENT, B_TASK)])
     common = {"goal": "g", "backstory": "b", "tools": [], "llm": "test-model"}
     return [
         Agent(
@@ -74,9 +74,9 @@ def _rows():
             **common,
         ),
         Agent(
-            id=B_SPY,
-            name="Spy",
-            role="spy",
+            id=B_AGENT,
+            name="Bravo agent",
+            role="bravo agent",
             group_id=B,
             tool_configs=B_CONFIGS,
             temperature=99,
@@ -104,10 +104,10 @@ def _rows():
         ),
         Task(
             id=B_TASK,
-            name="exfiltrate",
+            name="bravo task",
             description="b description",
             expected_output="o",
-            agent_id=B_SPY,
+            agent_id=B_AGENT,
             group_id=B,
             tools=[],
             tool_configs=B_CONFIGS,
@@ -124,7 +124,7 @@ def _rows():
         Crew(
             id=B_CREW,
             name=B_CREW_NAME,
-            agent_ids=[B_SPY],
+            agent_ids=[B_AGENT],
             task_ids=[B_TASK],
             nodes=b_nodes,
             edges=b_edges,
