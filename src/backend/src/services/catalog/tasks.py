@@ -159,9 +159,8 @@ class TaskService(BaseService[Task, TaskCreate]):
             # No fields to update
             return await self.get(id)
 
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in update_data and update_data["agent_id"] == "":
-            update_data["agent_id"] = None
+        # agent_id "" is dropped by TaskRepository.update, not nulled here: it
+        # means "not provided", and NULL would unassign the task.
 
         return await self.repository.update(id, update_data)
 
@@ -251,9 +250,8 @@ class TaskService(BaseService[Task, TaskCreate]):
             # No fields to update
             return task
 
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in update_data and update_data["agent_id"] == "":
-            update_data["agent_id"] = None
+        # agent_id "" is dropped by TaskRepository.update, not nulled here: it
+        # means "not provided", and NULL would unassign the task.
 
         return await self.repository.update(id, update_data)
 
@@ -276,9 +274,8 @@ class TaskService(BaseService[Task, TaskCreate]):
         if not task:
             return None
 
-        # Convert empty agent_id to None for PostgreSQL compatibility
-        if "agent_id" in obj_in and obj_in["agent_id"] == "":
-            obj_in["agent_id"] = None
+        # agent_id "" is dropped by TaskRepository.update, not nulled here: it
+        # means "not provided", and NULL would unassign the task.
 
         return await self.repository.update(id, obj_in)
 

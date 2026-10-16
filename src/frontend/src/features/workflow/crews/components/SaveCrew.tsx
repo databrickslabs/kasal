@@ -10,6 +10,7 @@ import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasSto
 import { useUnmountSafeTimeout } from '../../../../hooks/global/useUnmountSafeTimeout';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useAppStore as useChatAppStore } from '../../../chat/store/appStore';
+import { crewSaveTarget } from './crewSaveTarget';
 
 /** Refresh the chat-mode catalog rail so agent-builder saves show up there
  * immediately (the rail otherwise only reloads on mount/workspace change). */
@@ -352,6 +353,30 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     // Prevent multiple saves while one is in progress
     if (isSaving) {
       console.log('SaveCrew: Save already in progress, ignoring request');
+      return;
+    }
+
+    // A canvas bound to a catalog crew holds that crew's own rows: never POST
+    // a second crew over them (see crewSaveTarget).
+    const tab = activeCanvasId ? useBuilderCanvasStore.getState().getCanvas(activeCanvasId) : null;
+    const target = crewSaveTarget(tab, name);
+    if (target.kind === 'refuse') {
+      setError(target.message);
+      pendingSave.current?.onError?.(new Error(target.message));
+      pendingSave.current = null;
+      window.dispatchEvent(new CustomEvent('saveError', { detail: { message: target.message } }));
+      // A `/save crew <name>` request has no dialog to show the error in:
+      // reset, so the next dialog does not open with this name and error.
+      if (!open) handleClose();
+      return;
+    }
+    if (target.kind === 'update') {
+      const callbacks = pendingSave.current;
+      pendingSave.current = null;
+      window.dispatchEvent(new CustomEvent('updateExistingCrew', {
+        detail: { tabId: activeCanvasId, crewId: target.crewId, onSaved: callbacks?.onSaved, onError: callbacks?.onError },
+      }));
+      handleClose();
       return;
     }
 
