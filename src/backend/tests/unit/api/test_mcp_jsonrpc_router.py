@@ -179,6 +179,43 @@ class TestErrors:
             response = _rpc(client, "tools/call", {"name": "create_crew"})
         assert response.json()["error"]["code"] == -32600
 
+    @pytest.mark.parametrize(
+        "error,code",
+        [
+            ("ConflictError", -32009),
+            ("GoneError", -32010),
+            ("ForbiddenError", -32003),
+            ("UnprocessableEntityError", -32602),
+        ],
+    )
+    def test_a_refused_decision_keeps_its_own_code(self, client, error, code):
+        """Already decided, expired and not-allowed answers to respond_to_run
+        are the caller's to act on, not internal errors."""
+        from src.core import exceptions
+
+        with (
+            _accept(),
+            patch(
+                "src.services.mcp.mcp_server.server.call_tool",
+                new=AsyncMock(side_effect=getattr(exceptions, error)("why")),
+            ),
+        ):
+            response = _rpc(client, "tools/call", {"name": "respond_to_run"})
+        assert response.json()["error"] == {"code": code, "message": "why"}
+
+    def test_a_run_not_waiting_is_not_an_internal_error(self, client):
+        from src.services.mcp.mcp_server.tools import UnknownRunError
+
+        with (
+            _accept(),
+            patch(
+                "src.services.mcp.mcp_server.server.call_tool",
+                new=AsyncMock(side_effect=UnknownRunError("not waiting")),
+            ),
+        ):
+            response = _rpc(client, "tools/call", {"name": "respond_to_run"})
+        assert response.json()["error"]["code"] == -32004
+
     def test_a_tool_call_with_no_name_is_invalid_params(self, client):
         with _accept():
             response = _rpc(client, "tools/call", {})

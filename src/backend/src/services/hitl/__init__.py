@@ -4,6 +4,7 @@ Human-in-the-loop: everything about pausing a run for a person.
 - ``service``  — the approval records themselves (create, decide, expire, query)
 - ``notify``   — telling the UI a run is waiting, in-process or from the subprocess
 - ``webhook``  — outbound notifications to Slack/Teams/custom endpoints
+- ``expiry``   — closing gates nobody decided, and which runs that ends, by gate kind
 - ``timeout``  — the background sweep that expires approvals nobody answered
 
 Two callers gate on these: the tool-approval hook

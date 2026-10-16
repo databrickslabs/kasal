@@ -14,11 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.execution_status import ExecutionStatus
-from src.models.hitl_approval import (
-    HITLApproval,
-    HITLApprovalStatus,
-    HITLTimeoutAction,
-)
+from src.models.hitl_approval import HITLApproval, HITLApprovalStatus
 from src.repositories.hitl_repository import (
     HITLApprovalRepository,
     HITLWebhookRepository,
@@ -36,6 +32,7 @@ from src.services.flow_builder.conversation.interrupt import (
     APPROVAL_CONFIG_KEY,
     approval_payload,
 )
+from src.services.hitl.expiry import GateExpiry, is_in_run_gate
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +69,6 @@ class HITLPermissionDeniedError(HITLServiceError):
 
 class HITLApprovalValidationError(HITLServiceError):
     """The requested decision does not satisfy the gate policy."""
-
-
-#: Gates whose blocked worker polls its own row and carries the run on once the
-#: gate is decided or its deadline passes. They never suspend the run, so no
-#: decision or timeout on them relaunches or fails it.
-_IN_RUN_GATE_KINDS = ("tool_call", "task_review")
 
 
 def _already_decided(approval_id: int) -> HITLApprovalAlreadyProcessedError:
@@ -286,13 +277,20 @@ class HITLService:
             # Tool-call and task-review gates don't suspend the orchestration —
             # the blocked worker thread polls the row and resumes itself, so
             # there is no flow to relaunch.
-            if (approval.gate_config or {}).get("kind") in _IN_RUN_GATE_KINDS:
+            message = "Gate approved successfully"
+            if is_in_run_gate(approval):
                 execution_resumed = False
             else:
                 # Resume flow execution with user's token for OBO auth
                 execution_resumed = await self._resume_flow_execution(
                     approval, user_token=user_token
                 )
+                if not execution_resumed:
+                    await self._fail_unresumed(approval, "approved")
+                    message = (
+                        "Gate approved, but the flow could not be resumed; "
+                        "the run was marked failed"
+                    )
 
             logger.info(f"HITL approval {approval_id} approved by {approved_by}")
 
@@ -300,7 +298,7 @@ class HITLService:
                 success=True,
                 approval_id=approval_id,
                 status=HITLApprovalStatusEnum.APPROVED,
-                message="Gate approved successfully",
+                message=message,
                 execution_resumed=execution_resumed,
             )
 
@@ -395,6 +393,12 @@ class HITLService:
                     approval, user_token=user_token
                 )
                 message = "Gate rejected - retrying previous crew"
+                if not execution_resumed:
+                    await self._fail_unresumed(approval, "sent back for a retry")
+                    message = (
+                        "Gate rejected, but the retry could not be started; "
+                        "the run was marked failed"
+                    )
             else:
                 # Reject: Fail the flow
                 await self._fail_execution(approval, reason)
@@ -527,84 +531,48 @@ class HITLService:
 
     async def process_expired_approvals(self) -> List[int]:
         """
-        Process all expired pending approvals.
+        Close every expired gate, and end the runs that only it was holding.
 
-        This method is called by a background task to handle timeouts. Every
-        expired gate is closed as TIMEOUT, but its run is failed only while it
-        is still paused at that gate: a run that finished, was stopped, or (for
-        a tool-call or task-review gate) carried on past its own deadline keeps
-        the status it reached.
+        Called by the background sweep. Which runs are failed, and when, is
+        decided by gate kind in ``services/hitl/expiry.py``; a run that already
+        finished is never relabelled.
 
         Returns:
             List of processed approval IDs
         """
         try:
-            expired_approvals = await self.approval_repo.get_expired_pending()
-            processed_ids = []
-
-            for approval in expired_approvals:
-                try:
-                    timeout_action = approval.timeout_action
-                    auto = timeout_action == HITLTimeoutAction.AUTO_REJECT
-                    if not await self.approval_repo.update_status(
-                        approval_id=approval.id,
-                        status=HITLApprovalStatus.TIMEOUT,
-                        responded_by="system",
-                        rejection_reason=(
-                            "Approval timed out (auto-rejected)"
-                            if auto
-                            else "Approval timed out"
-                        ),
-                    ):
-                        # Decided between the sweep's read and its write.
-                        continue
-                    if await self._run_still_paused(approval):
-                        await self._fail_execution(
-                            approval,
-                            (
-                                "HITL gate timed out and was auto-rejected"
-                                if auto
-                                else "HITL gate timed out"
-                            ),
-                        )
-
-                    processed_ids.append(approval.id)
-                    logger.info(
-                        f"Processed expired HITL approval {approval.id} "
-                        f"with action {timeout_action}"
-                    )
-
-                except Exception as e:
-                    logger.error(
-                        f"Error processing expired approval {approval.id}: {str(e)}"
-                    )
-
-            return processed_ids
-
+            return await GateExpiry(self.session, self.approval_repo).process_expired()
         except SQLAlchemyError as e:
             logger.error(f"Database error processing expired approvals: {str(e)}")
             raise HITLServiceError(f"Failed to process expired approvals: {str(e)}")
+
+    async def reap_abandoned_gates(self, started_before: datetime) -> List[int]:
+        """Close in-run gates a previous server process left open; see expiry.py."""
+        return await GateExpiry(self.session, self.approval_repo).reap_abandoned(
+            started_before
+        )
 
     # =========================================================================
     # Private Methods
     # =========================================================================
 
-    async def _run_still_paused(self, approval: HITLApproval) -> bool:
-        """Whether a timed-out gate's run is still waiting on it.
+    async def _fail_unresumed(self, approval: HITLApproval, decision: str) -> None:
+        """A flow gate was decided, but its relaunch never started.
 
-        Read, then written by the caller, rather than written with
-        ``preserve_terminal``: that guard also protects WAITING_FOR_APPROVAL,
-        so it would make every flow-gate timeout a no-op.
+        Left alone the run would sit at WAITING_FOR_APPROVAL with nothing
+        pending, which external callers see as a question nobody can answer.
         """
-        if (approval.gate_config or {}).get("kind") in _IN_RUN_GATE_KINDS:
-            return False
-        from src.services.execution.status import ExecutionStatusService
-
-        run = await ExecutionStatusService.get_status(
-            approval.execution_id, session=self.session
-        )
-        status = str(getattr(run, "status", "") or "").upper()
-        return status == ExecutionStatus.WAITING_FOR_APPROVAL.value
+        try:
+            await self._update_execution_status(
+                execution_id=approval.execution_id,
+                status=ExecutionStatus.FAILED.value,
+                message=f"HITL gate {decision}, but the flow could not be resumed",
+            )
+        except Exception:
+            logger.exception(
+                "Could not mark run %s failed after its resume did not start",
+                approval.execution_id,
+            )
 
     async def _update_execution_status(
         self, execution_id: str, status: str, message: Optional[str] = None

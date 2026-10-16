@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import src.models  # noqa: F401  registers every ORM model on Base.metadata
+from src.core.exceptions import UnprocessableEntityError
 from src.db.base import Base
 from src.models.flow import Flow
 from src.schemas.a2a import Message, Part
@@ -143,6 +144,78 @@ class TestFlowStartedOverMcp:
         flow_config = engine.run_flow.await_args.kwargs["flow_config"]
         assert flow_config["inputs"] == {"request": "EU AI act"}
         assert flow_config["user_message"] == "EU AI act"
+
+
+class TestCallerArgumentsCannotSteerTheRun:
+    @pytest.mark.asyncio
+    async def test_a_supplied_graph_does_not_replace_the_stored_flow(self, session):
+        await _published_flow(session, "policy_brief")
+        engine = _engine()
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            await mcp_tools.call_crew_tool(
+                _caller("mcp"),
+                "policy_brief",
+                {
+                    "nodes": [{"id": "injected", "type": "crewNode"}],
+                    "edges": [{"source": "a", "target": "b"}],
+                    "flow_config": {"startingPoints": [{"crewId": "x"}]},
+                },
+                session=session,
+            )
+
+        flow_config = engine.run_flow.await_args.kwargs["flow_config"]
+        # Empty, so the runner builds the run from the flow as saved.
+        assert flow_config["nodes"] == []
+        assert flow_config["edges"] == []
+        assert flow_config["flow_config"] == {}
+
+    @pytest.mark.asyncio
+    async def test_id_and_run_metadata_are_not_caller_inputs(self, session):
+        """`id` names the saved state a flow restores."""
+        await _published_flow(session, "policy_brief")
+        engine = _engine()
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            await mcp_tools.call_crew_tool(
+                _caller("mcp"),
+                "policy_brief",
+                {
+                    "id": "another-teams-thread",
+                    "flow_id": "f",
+                    "run_name": "r",
+                    "job_id": "j",
+                    "execution_id": "e",
+                    "topic": "EU AI act",
+                },
+                session=session,
+            )
+
+        flow_config = engine.run_flow.await_args.kwargs["flow_config"]
+        assert flow_config["inputs"] == {"topic": "EU AI act"}
+
+
+class TestArgumentsAreCheckedBeforeTheRunStarts:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "arguments,problem",
+        [
+            ({"topic": "EU AI act", "colour": "red"}, "unknown argument"),
+            ({"topic": 7}, "'topic' should be string"),
+            ({"audience": "board"}, "missing required argument"),
+        ],
+    )
+    async def test_arguments_the_schema_refuses_are_a_422(
+        self, session, arguments, problem
+    ):
+        schema = {**_schema("topic", "audience"), "required": ["topic"]}
+        await _published_flow(session, "policy_brief", schema)
+        engine = _engine()
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            with pytest.raises(UnprocessableEntityError, match=problem):
+                await mcp_tools.call_crew_tool(
+                    _caller("mcp"), "policy_brief", arguments, session=session
+                )
+
+        engine.run_flow.assert_not_awaited()
 
 
 class TestFlowStartedOverA2a:

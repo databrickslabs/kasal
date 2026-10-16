@@ -19,12 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import src.models  # noqa: F401  registers every ORM model on Base.metadata
+from src.core.exceptions import GoneError
 from src.db.base import Base
 from src.models.execution_history import ExecutionHistory
 from src.models.hitl_approval import HITLApproval, HITLApprovalStatus
 from src.schemas.a2a import Message, Part
 from src.services.a2a.a2a_server import tasks as a2a_tasks
 from src.services.external.identity import ExternalCaller
+from src.services.hitl.service import HITLService
 from src.services.mcp.mcp_server import tools as mcp_tools
 from src.utils.user_context import GroupContext
 
@@ -50,7 +52,7 @@ async def maker():
     await engine.dispose()
 
 
-async def _paused_run(maker) -> tuple:
+async def _paused_run(maker, expires_in: timedelta = timedelta(hours=1)) -> tuple:
     """A flow run WAITING_FOR_APPROVAL at a gate, with its pending approval."""
     run_id = f"run-{uuid.uuid4()}"
     async with maker() as s:
@@ -72,7 +74,7 @@ async def _paused_run(maker) -> tuple:
             crew_sequence=1,
             gate_config={"message": "Approve the draft?"},
             previous_crew_output="the draft",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(timezone.utc) + expires_in,
             group_id=RUN_TEAM,
         )
         s.add(approval)
@@ -80,10 +82,10 @@ async def _paused_run(maker) -> tuple:
         return run_id, approval.id
 
 
-def _caller(protocol: str) -> ExternalCaller:
+def _caller(protocol: str, group_ids=(OTHER_TEAM, RUN_TEAM)) -> ExternalCaller:
     return ExternalCaller(
         group_context=GroupContext(
-            group_ids=[OTHER_TEAM, RUN_TEAM],
+            group_ids=list(group_ids),
             group_email="caller@example.com",
             user_role="operator",
             access_token="caller-token",
@@ -140,7 +142,9 @@ class TestMcpRespondToRun:
                 await session.commit()
             await _relaunched(launch)
 
-        assert answer == {"run_id": run_id, "accepted": True}
+        assert answer["accepted"] is True
+        assert answer["execution_resumed"] is True
+        assert answer["state"] == "working"
         status, approval = await _stored(maker, run_id, approval_id)
         assert approval.status == HITLApprovalStatus.APPROVED
         assert approval.responded_by == "caller@example.com"
@@ -165,6 +169,74 @@ class TestMcpRespondToRun:
         status, approval = await _stored(maker, run_id, approval_id)
         assert approval.status == HITLApprovalStatus.REJECTED
         assert status == "REJECTED"
+        launch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_approval_whose_flow_cannot_resume_fails_the_run(self, maker):
+        """Not a run left waiting on nothing, reported as accepted."""
+        run_id, approval_id = await _paused_run(maker)
+        with patch.object(
+            HITLService, "_resume_flow_execution", new=AsyncMock(return_value=False)
+        ):
+            async with maker() as session:
+                answer = await mcp_tools.respond_to_run(
+                    _caller("mcp"), run_id, "yes", session=session
+                )
+                await session.commit()
+
+        assert answer["execution_resumed"] is False
+        assert answer["state"] == "failed"
+        assert "could not be resumed" in answer["message"]
+        status, approval = await _stored(maker, run_id, approval_id)
+        assert approval.status == HITLApprovalStatus.APPROVED
+        assert status == "FAILED"
+
+    @pytest.mark.asyncio
+    async def test_an_answer_to_a_gate_that_just_expired_is_gone(self, maker):
+        """Expired but not yet swept: the caller hears why, not "not waiting"."""
+        run_id, approval_id = await _paused_run(maker, timedelta(seconds=-5))
+        async with maker() as session:
+            payload = await mcp_tools.get_run_status(
+                _caller("mcp"), run_id, session=session
+            )
+            assert "waiting_for" not in payload
+            with pytest.raises(GoneError):
+                await mcp_tools.respond_to_run(
+                    _caller("mcp"), run_id, "yes", session=session
+                )
+
+        _, approval = await _stored(maker, run_id, approval_id)
+        assert approval.status == HITLApprovalStatus.PENDING
+
+
+class TestCallerOutsideTheRunsTeamspace:
+    @pytest.mark.asyncio
+    async def test_can_neither_see_nor_answer_the_gate(self, maker):
+        run_id, approval_id = await _paused_run(maker)
+        outsider = ("mcp", ("team_elsewhere",))
+        launch = AsyncMock(return_value={"status": "running"})
+        message = Message(role="user", parts=[Part(kind="text", text="Approved.")])
+        with patch(RELAUNCH, new=launch):
+            async with maker() as session:
+                with pytest.raises(mcp_tools.UnknownRunError):
+                    await mcp_tools.get_run_status(
+                        _caller(*outsider), run_id, session=session
+                    )
+                with pytest.raises(mcp_tools.UnknownRunError):
+                    await mcp_tools.respond_to_run(
+                        _caller(*outsider), run_id, "yes", session=session
+                    )
+                with pytest.raises(a2a_tasks.UnknownTaskError):
+                    await a2a_tasks.send_message(
+                        _caller("a2a", ("team_elsewhere",)),
+                        message,
+                        task_id=run_id,
+                        session=session,
+                    )
+
+        status, approval = await _stored(maker, run_id, approval_id)
+        assert approval.status == HITLApprovalStatus.PENDING
+        assert status == "WAITING_FOR_APPROVAL"
         launch.assert_not_awaited()
 
 

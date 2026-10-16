@@ -7,7 +7,10 @@ expired HITL approvals and processes them according to their timeout action.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Optional
+
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,7 @@ class HITLTimeoutService:
 
         self._running = True
         logger.info("Starting HITL timeout service...")
+        await self._reap_abandoned_gates()
 
         while self._running:
             try:
@@ -69,6 +73,25 @@ class HITLTimeoutService:
             except asyncio.CancelledError:
                 pass
         logger.info("HITL timeout service stop requested")
+
+    async def _reap_abandoned_gates(self) -> None:
+        """Once, at startup: close the in-run gates a previous process left open.
+
+        Gates raised before this process started belong to a worker that did
+        not survive the restart (services/hitl/expiry.py). Their runs would
+        otherwise wait for approval until the gate expired, and every sweep
+        until then would leave them alone.
+        """
+        from src.db.database_router import get_smart_db_session
+        from src.services.hitl.service import HITLService
+
+        started = datetime.fromtimestamp(psutil.Process().create_time(), timezone.utc)
+        try:
+            async for session in get_smart_db_session():
+                await HITLService(session).reap_abandoned_gates(started)
+                await session.commit()
+        except Exception:
+            logger.exception("Error closing approvals abandoned by a restart")
 
     async def _check_expired_approvals(self) -> None:
         """

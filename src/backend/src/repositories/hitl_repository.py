@@ -262,6 +262,18 @@ class HITLApprovalRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_pending_created_before(self, cutoff: datetime) -> List[HITLApproval]:
+        """Every pending approval, in any group, raised before ``cutoff``."""
+        if not self.session:
+            raise RuntimeError("HITLApprovalRepository requires a session")
+
+        stmt = select(HITLApproval).where(
+            HITLApproval.status == HITLApprovalStatus.PENDING,
+            HITLApproval.created_at < cutoff,
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def mark_webhook_sent(
         self, approval_id: int, response: Optional[Dict[str, Any]] = None
     ) -> bool:

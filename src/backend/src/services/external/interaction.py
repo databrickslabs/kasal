@@ -26,7 +26,11 @@ from src.core.exceptions import (
     ForbiddenError,
     GoneError,
 )
-from src.schemas.hitl import HITLApprovalResponse, HITLApprovalStatusEnum
+from src.schemas.hitl import (
+    HITLActionResponse,
+    HITLApprovalResponse,
+    HITLApprovalStatusEnum,
+)
 from src.services.external.identity import ExternalCaller
 
 logger = logging.getLogger(__name__)
@@ -71,12 +75,16 @@ class PendingInteraction:
 async def _waiting_approvals(
     caller: ExternalCaller, run_id: str, session: AsyncSession
 ) -> Tuple[Optional[str], List[HITLApprovalResponse]]:
-    """The run's undecided, unexpired approvals, and the teamspace holding them.
+    """The run's undecided approvals, and the teamspace holding them.
+
+    Expired ones included, until the sweep closes them: an answer to one gets
+    "expired" from the HITL service rather than "not waiting".
 
     Every teamspace the caller is scoped to is asked, not only the first: a run
     lives in its publication's teamspace, and an unpinned caller's context lists
     all of theirs, the run's not necessarily first. Asking only ``group_ids[0]``
-    missed the run whenever it was published anywhere else.
+    missed the run whenever it was published anywhere else. A teamspace the
+    caller is not in is never asked.
     """
     from src.services.hitl.service import HITLService
 
@@ -92,7 +100,6 @@ async def _waiting_approvals(
                 approval
                 for approval in status.approval_history
                 if approval.status == HITLApprovalStatusEnum.PENDING
-                and not approval.is_expired
             ]
             if pending:
                 return group_id, pending
@@ -122,6 +129,7 @@ async def pending_for_run(
             context=approval.previous_crew_output,
         )
         for approval in pending
+        if not approval.is_expired
     ]
 
 
@@ -164,8 +172,11 @@ async def respond(
     response: str,
     approval_id: Optional[int] = None,
     session: Any = None,
-) -> bool:
-    """Answer a paused run. True if an approval was actioned.
+) -> Optional[HITLActionResponse]:
+    """Answer a paused run: the decision's outcome, or None if not waiting.
+
+    The outcome says whether a flow was relaunched (``execution_resumed``); a
+    tool-call or task-review gate's own worker carries its run on instead.
 
     Resumes on the caller's own token when they presented one (OBO), because
     the resumed work continues under that identity. Without one the Databricks
@@ -178,19 +189,22 @@ async def respond(
     token = caller.obo_token()
     group_id, pending = await _waiting_approvals(caller, run_id, session)
     if not group_id or not pending:
-        return False
+        return None
 
     if approval_id is None:
-        if len(pending) > 1:
+        # The live gates, or else the one that just expired, which the HITL
+        # service then refuses as expired.
+        candidates = [a for a in pending if not a.is_expired] or pending
+        if len(candidates) > 1:
             raise ValueError(
-                f"Run {run_id} has {len(pending)} pending approvals; "
+                f"Run {run_id} has {len(candidates)} pending approvals; "
                 "specify approval_id."
             )
-        approval_id = pending[0].id
+        approval_id = candidates[0].id
     elif approval_id not in {approval.id for approval in pending}:
         # An id from another run, or one already decided: this run is not
         # waiting for it.
-        return False
+        return None
 
     from src.services.hitl.service import HITLService, HITLServiceError
 
@@ -199,14 +213,14 @@ async def respond(
 
     try:
         if is_rejection:
-            await service.reject(
+            outcome = await service.reject(
                 approval_id=approval_id,
                 rejected_by=caller.identifier,
                 group_id=group_id,
                 reason=response,
             )
         else:
-            await service.approve(
+            outcome = await service.approve(
                 approval_id=approval_id,
                 approved_by=caller.identifier,
                 group_id=group_id,
@@ -223,4 +237,4 @@ async def respond(
         approval_id,
         run_id,
     )
-    return True
+    return outcome

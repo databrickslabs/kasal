@@ -20,6 +20,7 @@ from src.db.base import Base
 from src.models.execution_history import ExecutionHistory
 from src.models.hitl_approval import HITLApproval, HITLApprovalStatus
 from src.repositories.hitl_repository import HITLApprovalRepository
+from src.schemas.hitl import HITLRejectionActionEnum
 from src.services.hitl.service import (
     HITLApprovalAlreadyProcessedError,
     HITLService,
@@ -219,3 +220,51 @@ class TestOneDecisionWins:
         assert approval.status == HITLApprovalStatus.APPROVED
         assert approval.responded_by == "a@example.com"
         assert status == "RUNNING"
+
+
+class TestADecisionWhoseRelaunchCannotStart:
+    """The gate is decided, so nothing is pending; a run left WAITING would be
+    a question nobody can answer."""
+
+    @pytest.mark.asyncio
+    async def test_an_approval_marks_the_run_failed(self, maker):
+        run_id, approval_id = await _gate(
+            maker, "WAITING_FOR_APPROVAL", FLOW_GATE, expired=False
+        )
+        async with maker() as s:
+            service = HITLService(s)
+            with patch.object(
+                service, "_resume_flow_execution", new=AsyncMock(return_value=False)
+            ):
+                outcome = await service.approve(
+                    approval_id=approval_id, approved_by="a@example.com", group_id=GROUP
+                )
+            await s.commit()
+
+        assert outcome.execution_resumed is False
+        assert "could not be resumed" in outcome.message
+        status, _ = await _stored(maker, run_id, approval_id)
+        assert status == "FAILED"
+
+    @pytest.mark.asyncio
+    async def test_a_retry_marks_the_run_failed(self, maker):
+        run_id, approval_id = await _gate(
+            maker, "WAITING_FOR_APPROVAL", FLOW_GATE, expired=False
+        )
+        async with maker() as s:
+            service = HITLService(s)
+            with patch.object(
+                service, "_retry_previous_crew", new=AsyncMock(return_value=False)
+            ):
+                outcome = await service.reject(
+                    approval_id=approval_id,
+                    rejected_by="a@example.com",
+                    group_id=GROUP,
+                    reason="again",
+                    action=HITLRejectionActionEnum.RETRY,
+                )
+            await s.commit()
+
+        assert outcome.execution_resumed is False
+        status, _ = await _stored(maker, run_id, approval_id)
+        assert status == "FAILED"
