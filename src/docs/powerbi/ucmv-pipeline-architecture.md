@@ -146,6 +146,13 @@ a join or a computed column, makes the table **not resolvable**: the raw M is
 shipped instead of a `SELECT *` that would aggregate rows Power BI excluded,
 and the skip reason names the refused steps. A native query is never compiled
 to `SELECT *`; its own SQL, with its `WHERE` and `GROUP BY`, reaches the parser.
+`TransformColumnTypes` stays on the allowlist, but the SQL source does not apply
+it: conversions that can change values (whole-number types round, `Currency`
+rounds to 4 decimals, `type date` drops the time) are listed per table in the
+run's warnings (`mquery_handoff.py`). A dimension's physical table is used for a
+join only when its M keeps every row of that table; a dimension with a row
+filter, a dedup or a native-query `WHERE` is reported as skipped, because
+joining the raw table could duplicate fact rows.
 
 Not every M source is a warehouse table. `classify_mquery_source(mquery)` sorts
 a no-SQL source into one of:

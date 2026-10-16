@@ -144,8 +144,6 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
         updatedConfig.client_id = '{client_id}';
         updatedConfig.client_secret = '{client_secret}';
         updatedConfig.access_token = '{access_token}';
-        updatedConfig.llm_workspace_url = '{llm_workspace_url}';
-        updatedConfig.llm_token = '{llm_token}';
         updatedConfig.include_visual_references = value.include_visual_references !== false;
         updatedConfig.max_dax_retries = value.max_dax_retries || '5';
         updatedConfig.output_format = value.output_format || 'json';
@@ -531,25 +529,10 @@ export const PowerBIDaxConfigSelector: React.FC<PowerBIDaxConfigSelectorProps> =
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="LLM Workspace URL"
-              value={value.llm_workspace_url || ''}
-              onChange={(e) => handleFieldChange('llm_workspace_url', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              helperText="Databricks workspace URL for LLM endpoint"
-              size="small"
-            />
-            <TextField
-              label="LLM Token"
-              value={value.llm_token || ''}
-              onChange={(e) => handleFieldChange('llm_token', e.target.value)}
-              disabled={disabled}
-              fullWidth
-              type="password"
-              helperText="Token for LLM endpoint — leave empty to use Databricks auth"
-              size="small"
-            />
+            <Typography variant="body2" color="text.secondary">
+              DAX generation uses this run&apos;s Databricks credentials; no LLM
+              URL or token is needed.
+            </Typography>
             <TextField
               label="LLM Model"
               value={value.llm_model || 'databricks-claude-sonnet-4'}

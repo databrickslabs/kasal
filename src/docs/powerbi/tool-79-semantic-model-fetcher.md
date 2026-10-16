@@ -114,7 +114,7 @@ This JSON is passed as `model_context_json` to Tool 80 (DAX Generator) or Tool 8
 - Cache is per-day: same workspace+dataset within the same calendar day reuses the cache automatically
 - For multi-question workflows, always use Tool 79, then 81, then 80 (not Tool 72 each time) to avoid repeated API calls
 - The output JSON can be large for complex models (hundreds of measures); Tool 81 reduces it to question-relevant subset before sending to the LLM
-- With a `report_id`, the report's filters and slicer selections are cached under `default_filters` as structured values, for example `{"Geo[Country]": {"operator": "in", "values": ["Italy"]}}` or `{"operator": ">=", "values": [2020]}`. Typed literals keep their type (`2020L` becomes the number 2020). A filter card with nothing selected, and advanced AND/OR filters, are not cached as filters
+- With a `report_id`, the report's filters and slicer selections are cached under `default_filters` as structured values, for example `{"Geo[Country]": {"operator": "in", "values": ["Italy"]}}` or `{"operator": ">=", "values": [2020]}`. Typed literals keep their type (`2020L` becomes the number 2020). Comparisons follow Power BI's ComparisonKind (0 `=`, 1 `>`, 2 `>=`, 3 `<`, 4 `<=`; not-equal is a `Not` around kind 0), and "is blank" becomes `ISBLANK`. Filters that cannot be applied exactly are logged and not cached: a card with nothing selected, advanced AND/OR filters, relative dates or other non-literal values, and multi-column tuple filters
 
 ## See also
 

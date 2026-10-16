@@ -110,8 +110,8 @@ See [Authentication Setup](./01-authentication-setup.md).
 - If `model_context_json` is not provided, Tool 80 attempts to read from cache using `workspace_id` + `dataset_id`
 - `business_terms` lets you map customer language to DAX measure names (e.g. their team says "bookings" but the measure is "Total Orders")
 - `active_filters` automatically wraps CALCULATE around the generated DAX - useful for models with default date/region filters
-- Report filters and slicer selections cached by Tool 79 are applied by value: `Country = Italy` becomes `TREATAS({"Italy"}, Geo[Country])`, numbers stay numbers, and a filter card with nothing selected is not applied. Filters cached in the older text form (`= 'Italy'`) are read the same way, so no refetch is needed.
-- Every attempt goes to the LLM first. If the LLM call fails, a keyword fallback picks a single measure by name; its answer is labelled "keyword fallback" in the output because it adds no grouping.
+- Report filters and slicer selections cached by Tool 79 are applied by value: `Country = Italy` becomes `TREATAS({"Italy"}, Geo[Country])`, numbers stay numbers, and a filter that cannot be applied exactly (a card with nothing selected, a relative date, an AND/OR filter) is left out and logged. Filters cached in the older text form are read for `=`, `IN`, `NOT IN`, `NOT NULL` and `STARTS WITH`; older cached **comparisons** (`>`, `>=`, `<`, `<=`, `!=`) are not applied, because the old extractor shifted their direction. Re-run Tool 79 (the cache is per day) to restore them.
+- Every attempt goes to the LLM first. If the LLM call fails, a keyword fallback picks the measure whose name best matches the question; its answer is labelled "keyword fallback" in the output because it adds no grouping. When no measure is named in the question, the fallback gives no answer rather than an arbitrary measure. Tool 72 behaves the same way.
 - For a single question without caching concerns, Tool 72 is simpler
 
 ## See also

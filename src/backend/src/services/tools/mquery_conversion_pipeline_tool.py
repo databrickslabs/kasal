@@ -1988,15 +1988,12 @@ class MqueryConversionPipelineTool(BaseTool):
             lines.append("---\n## Databricks Tables — SQL vs DAX Validation\n")
             for r in validated:
                 status = r.get("status", "unknown")
-                icon = (
-                    "✅"
-                    if status == "validated"
-                    else (
-                        "🔷"
-                        if status == "table_not_found"
-                        else ("⚠️" if status == "validation_failed" else "❌")
-                    )
-                )
+                icon = {
+                    "validated": "✅",
+                    "table_not_found": "🔷",
+                    "validation_failed": "⚠️",
+                    "unverified": "⚠️",
+                }.get(status, "❌")
                 badge = {
                     "validated": "**✅ VERIFIED**",
                     "table_not_found": "**🔷 TABLE NOT MIGRATED YET** — SQL correct but target table missing",

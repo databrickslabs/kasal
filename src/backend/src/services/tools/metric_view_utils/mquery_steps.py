@@ -230,6 +230,31 @@ def steps_after_native_query(mquery: str) -> list[str]:
     return unhandled
 
 
+# Type conversions that can change values, not only labels: whole-number
+# types round, Currency rounds to 4 decimals, date / time drop part of a
+# timestamp (which breaks date-key joins), text and logical change what an
+# aggregate sees. The SQL source does not apply them, so they are reported.
+_VALUE_CHANGING_TYPE = re.compile(
+    r"\bInt(?:8|16|32|64)\.Type\b|\bCurrency\.Type\b|\b(?:Date|Time|Text|Logical)\.Type\b"
+    r"|\btype\s+(?:date|time|text|logical)\b"
+)
+
+
+def type_change_notes(steps: list[MStep]) -> list[str]:
+    """``"column -> type"`` for every ``Table.TransformColumnTypes`` entry whose
+    type can change the column's values (see ``_VALUE_CHANGING_TYPE``)."""
+    notes: list[str] = []
+    for step in steps:
+        if step.function != "Table.TransformColumnTypes" or len(step.args) < 2:
+            continue
+        for col, typ in re.findall(
+            r'\{\s*"((?:[^"]|"")*)"\s*,\s*([^{}]+?)\s*\}', step.args[1]
+        ):
+            if _VALUE_CHANGING_TYPE.search(typ):
+                notes.append(f"{col.replace(chr(34) * 2, chr(34))} -> {typ.strip()}")
+    return notes
+
+
 def _quote(name: str) -> str:
     if re.fullmatch(r"[A-Za-z_]\w*", name):
         return name
@@ -275,17 +300,10 @@ def build_select_clause(steps: list[MStep]) -> str | None:
                 picked.append((src, out))
             cols, renamed, removed = picked, {}, []
         elif step.function == "Table.RenameColumns":
-            pairs = _pairs(step.args[1])
-            if pairs is None:
+            applied = _apply_renames(cols, renamed, removed, _pairs(step.args[1]))
+            if applied is None:
                 return None
-            for old, new in pairs:
-                if cols is not None:
-                    if not any(o == old for _, o in cols):
-                        return None
-                    cols = [(s, new if o == old else o) for s, o in cols]
-                else:
-                    src = next((s for s, o in renamed.items() if o == old), old)
-                    renamed[src] = new
+            cols, renamed = applied
         elif step.function == "Table.RemoveColumns":
             gone = set(_names(step.args[1]))
             if cols is not None:
@@ -304,3 +322,39 @@ def build_select_clause(steps: list[MStep]) -> str | None:
     excluded = ", ".join(_quote(c) for c in [*removed, *renamed])
     aliases = "".join(f", {_quote(s)} AS {_quote(o)}" for s, o in renamed.items())
     return f"* EXCEPT ({excluded}){aliases}"
+
+
+def _apply_renames(
+    cols: list[tuple[str, str]] | None,
+    renamed: dict[str, str],
+    removed: list[str],
+    pairs: list[tuple[str, str]] | None,
+) -> tuple[list[tuple[str, str]] | None, dict[str, str]] | None:
+    """One ``Table.RenameColumns`` step. All its pairs read the step's INPUT
+    names at once (a swap ``a->b, b->a`` is a swap, not ``a->a``). ``None``
+    when an old name does not exist or two columns would get one name."""
+    if not pairs or len({new for _, new in pairs}) != len(pairs):
+        return None
+    mapping = dict(pairs)
+    if cols is not None:
+        if not set(mapping) <= {o for _, o in cols}:
+            return None
+        cols = [(s, mapping.get(o, o)) for s, o in cols]
+        outputs = [o for _, o in cols]
+        return (cols, renamed) if len(set(outputs)) == len(outputs) else None
+    current = {out: src for src, out in renamed.items()}  # output -> source
+    sources: dict[str, str] = {}
+    for old in mapping:
+        src = current.get(old) or (
+            old if old not in renamed and old not in removed else None
+        )
+        if src is None:
+            return None
+        sources[old] = src
+    updated = dict(renamed)
+    for old, new in mapping.items():
+        updated[sources[old]] = new
+    taken = {o for o in updated.values()}
+    if len(taken) != len(updated):
+        return None
+    return None, {s: o for s, o in updated.items() if s != o}
