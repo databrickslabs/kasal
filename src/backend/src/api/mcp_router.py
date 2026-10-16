@@ -813,10 +813,12 @@ async def get_enabled_mcp_servers(
     service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
-    Get all enabled MCP servers.
+    Get the enabled MCP servers of the caller's groups, plus the base servers.
     """
     logger.info("Getting enabled MCP servers")
-    servers_response = await service.get_enabled_servers()
+    servers_response = await service.get_enabled_servers(
+        getattr(group_context, "group_ids", None) or []
+    )
     logger.info(f"Found {servers_response.count} enabled MCP servers")
     return servers_response
 
@@ -826,10 +828,13 @@ async def get_global_mcp_servers(
     service: MCPServiceDep, group_context: GroupContextDep
 ) -> MCPServerListResponse:
     """
-    Get all globally enabled MCP servers.
+    Get the globally enabled MCP servers of the caller's groups, plus the base
+    servers.
     """
     logger.info("Getting globally enabled MCP servers")
-    servers_response = await service.get_global_servers()
+    servers_response = await service.get_global_servers(
+        getattr(group_context, "group_ids", None) or []
+    )
     logger.info(f"Found {servers_response.count} globally enabled MCP servers")
     return servers_response
 

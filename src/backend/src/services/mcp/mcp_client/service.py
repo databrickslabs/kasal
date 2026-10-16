@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,14 +126,17 @@ class MCPService:
             servers=server_responses, count=len(server_responses)
         )
 
-    async def get_enabled_servers(self) -> MCPServerListResponse:
+    async def get_enabled_servers(
+        self, group_ids: Sequence[str]
+    ) -> MCPServerListResponse:
         """
-        Get all enabled MCP servers.
+        Get the enabled MCP servers visible to ``group_ids``: base servers plus
+        those groups' own. Another group's servers are never listed.
 
         Returns:
             MCPServerListResponse with list of enabled servers and count
         """
-        servers = await self.server_repository.find_enabled()
+        servers = await self.server_repository.find_enabled(group_ids)
         server_responses = []
 
         for server in servers:
@@ -144,14 +147,17 @@ class MCPService:
 
         return MCPServerListResponse(servers=server_responses, count=len(servers))
 
-    async def get_global_servers(self) -> MCPServerListResponse:
+    async def get_global_servers(
+        self, group_ids: Sequence[str]
+    ) -> MCPServerListResponse:
         """
-        Get all globally enabled MCP servers.
+        Get the globally enabled MCP servers visible to ``group_ids``: base
+        servers plus those groups' own. Another group's servers are never listed.
 
         Returns:
             MCPServerListResponse with list of globally enabled servers and count
         """
-        servers = await self.server_repository.find_global_enabled()
+        servers = await self.server_repository.find_global_enabled(group_ids)
         server_responses = []
 
         for server in servers:

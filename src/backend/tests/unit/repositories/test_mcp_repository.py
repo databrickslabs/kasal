@@ -183,7 +183,7 @@ class TestMCPServerRepositoryFindEnabled:
         mock_result = MockResult(enabled_servers)
         mock_async_session.execute.return_value = mock_result
 
-        result = await mcp_server_repository.find_enabled()
+        result = await mcp_server_repository.find_enabled(["group-1"])
 
         assert len(result) == len(enabled_servers)
         assert all(server.enabled for server in result)
@@ -197,7 +197,7 @@ class TestMCPServerRepositoryFindEnabled:
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
 
-        result = await mcp_server_repository.find_enabled()
+        result = await mcp_server_repository.find_enabled(["group-1"])
 
         assert result == []
         mock_async_session.execute.assert_called_once()
@@ -210,7 +210,7 @@ class TestMCPServerRepositoryFindEnabled:
         mock_async_session.execute.side_effect = Exception("Query failed")
 
         with pytest.raises(Exception, match="Query failed"):
-            await mcp_server_repository.find_enabled()
+            await mcp_server_repository.find_enabled(["group-1"])
 
 
 class TestMCPServerRepositoryToggleEnabled:
@@ -399,7 +399,7 @@ class TestMCPRepositoryIntegration:
         mock_result = MockResult(enabled_servers)
         mock_async_session.execute.return_value = mock_result
 
-        found_servers = await mcp_server_repository.find_enabled()
+        found_servers = await mcp_server_repository.find_enabled(["group-1"])
 
         assert len(found_servers) == len(enabled_servers)
 
@@ -438,7 +438,7 @@ class TestMCPRepositoryErrorHandling:
         mock_async_session.execute.side_effect = Exception("Query timeout")
 
         with pytest.raises(Exception, match="Query timeout"):
-            await mcp_server_repository.find_enabled()
+            await mcp_server_repository.find_enabled(["group-1"])
 
     @pytest.mark.asyncio
     async def test_get_settings_create_default_error(

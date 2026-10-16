@@ -76,7 +76,7 @@ def settings_repo(async_session):
 async def test_find_global_enabled_returns_results(server_repo, async_session):
     servers = [MockServer(id=1, enabled=True, global_enabled=True)]
     async_session.execute.return_value = MockResult(servers)
-    result = await server_repo.find_global_enabled()
+    result = await server_repo.find_global_enabled(["group-1"])
     assert result == servers
     async_session.execute.assert_called_once()
 
@@ -84,7 +84,7 @@ async def test_find_global_enabled_returns_results(server_repo, async_session):
 @pytest.mark.asyncio
 async def test_find_global_enabled_empty(server_repo, async_session):
     async_session.execute.return_value = MockResult([])
-    result = await server_repo.find_global_enabled()
+    result = await server_repo.find_global_enabled(["group-1"])
     assert result == []
 
 
