@@ -46,7 +46,11 @@ async def test_a_system_admin_sees_secrets():
 
 
 async def test_the_personal_workspace_owner_sees_secrets():
-    user = SimpleNamespace(is_system_admin=False, is_personal_workspace_manager=False)
+    user = SimpleNamespace(
+        is_system_admin=False,
+        is_personal_workspace_manager=False,
+        personal_group_id="user_u_example_com",
+    )
     visible, _ = await _visible(_context(None, group="user_u_example_com", user=user))
     assert visible is True  # the personal workspace resolves to editor
 
