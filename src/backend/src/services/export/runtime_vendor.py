@@ -54,6 +54,10 @@ _MODULES: List[Tuple[Path, str]] = [
     ),
     # transport/budget.py — the user-Stop flag it checks between rounds.
     (BACKEND_SRC / "core" / "execution_stop.py", "core/execution_stop.py"),
+    # runtime/executor.py — which execution a tool call belongs to, for hook
+    # scoping. Stdlib-only; nothing binds it in an exported app, so every hook
+    # there runs, as in a run subprocess.
+    (BACKEND_SRC / "core" / "execution_scope.py", "core/execution_scope.py"),
     # transport/completion.py — decides per model whether thinking is manual
     # (``thinking_budget_tokens``) or adaptive (``reasoning_effort``), and which
     # effort values that model's endpoint actually accepts. It lives in

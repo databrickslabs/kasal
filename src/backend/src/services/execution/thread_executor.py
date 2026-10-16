@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, Literal, Optional
 
+from src.core.execution_scope import execution_scope
 from src.core.execution_stop import (
     bind_stop_event,
     discard_stop_event,
@@ -152,10 +153,13 @@ class CrewExecutor:
                         f"Starting crew execution {execution_id} in thread {current_thread.name}"
                     )
 
-                    if inputs:
-                        result = crew.kickoff(inputs=inputs)
-                    else:
-                        result = crew.kickoff()
+                    # Same for the execution: run_in_executor copies no
+                    # context, and the tool hooks scope by it.
+                    with execution_scope(execution_id):
+                        if inputs:
+                            result = crew.kickoff(inputs=inputs)
+                        else:
+                            result = crew.kickoff()
 
                     # Check if we were asked to stop
                     if stop_event.is_set():
