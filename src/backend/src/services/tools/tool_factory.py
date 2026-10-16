@@ -680,9 +680,9 @@ class ToolFactory:
             )
 
             # The override (agent/task/run tool_configs) wins the merge, minus the
-            # identity, endpoint and policy keys it may not set. Policies are not
-            # constructor kwargs: popped here, stamped by `create_tool` once the
-            # instance exists. Every branch below sees only the cleaned override.
+            # keys it may not set and any teamspace credential for an endpoint it
+            # moved (tool_policies). Policies are popped here and stamped by
+            # `create_tool`. Every branch below sees only the cleaned override.
             tool_config_override, tool_config, self._pending_policies = (
                 merge_tool_config_override(tool_name, base_config, tool_config_override)
             )
@@ -1647,8 +1647,8 @@ class ToolFactory:
                     "group_id": self.config.get("group_id", "default"),
                     # DO NOT PASS execution_id - we want to search all documents!
                     "user_token": self.user_token,
-                    # Per-user knowledge isolation: search only returns chunks uploaded
-                    # by the executing user (set by the engine from the group context).
+                    # Per-user isolation where the engine sets user_email (crew runs);
+                    # chat and flow leave it unset and search the whole group.
                     "user_email": self.config.get("user_email"),
                 }
                 # Keys only: tool_args carries the user's token (audit H6/N4).

@@ -244,7 +244,7 @@ def _safe_fetch(
     timeout: int = 15,
     max_bytes: int | None = None,
 ) -> str:
-    """Fetch a URL, refusing non-HTTP schemes and private/loopback hosts.
+    """Fetch a URL, refusing non-HTTP schemes and non-public hosts.
 
     ``max_bytes`` bounds how much of the response body is READ. Without it a
     multi-megabyte page is pulled into memory in full and only trimmed later,

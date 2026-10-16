@@ -48,7 +48,7 @@ The run log names each ignored or withheld key, without its value.
 Two related rules apply when a tool runs:
 
 - If a tool's `llm_workspace_url` names a workspace other than the run's, the run's Databricks credential is not sent there. To use another workspace, give the entry its own `llm_token` for it.
-- Serper, Image Generation and the scrape tool connect only to globally routable addresses. They refuse private, loopback, link-local, shared (`100.64.0.0/10`), reserved and multicast addresses, so a Serper or Image Generation `base_url` must be a public endpoint. When `HTTP_PROXY` or `HTTPS_PROXY` is set in the environment, they connect through that proxy, except for hosts listed in `NO_PROXY`.
+- Serper, Image Generation and the scrape tool connect only to globally routable addresses. They refuse private, loopback, link-local, shared (`100.64.0.0/10`), reserved and multicast addresses, so a Serper or Image Generation `base_url` must be a public endpoint. When `HTTP_PROXY` or `HTTPS_PROXY` is set in the environment, they connect through that proxy, except for hosts listed in `NO_PROXY`. Through a proxy the target's address is still checked, so the host must resolve from the app as well, but the proxy makes the connection.
 
 ### Native vs custom tools
 
