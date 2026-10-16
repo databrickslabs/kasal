@@ -104,7 +104,8 @@ def _client(user, ctx, service):
     from tests.unit.api.conftest import register_exception_handlers
 
     register_exception_handlers(app)
-    app.dependency_overrides[get_smart_db_session] = lambda: MagicMock()
+    # SessionDep commits the session before replying, so it must be awaitable.
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
     app.dependency_overrides[get_group_context] = lambda: ctx
     # get_admin_user calls require_authenticated_user directly, not via Depends.
     patchers = [

@@ -470,8 +470,9 @@ class TestGetDbEdgeCases:
         mock_session.rollback.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_get_db_locked_error_triggers_rollback_and_retry(self):
-        """get_db rolls back on locked error and retries (ends up succeeding on retry)."""
+    async def test_get_db_locked_error_after_the_yield_rolls_back_and_raises(self):
+        """A lock error thrown in after the yield is rolled back and RAISED: a
+        dependency cannot yield a second session (see test_get_db_yields_once)."""
         mock_session = AsyncMock()
 
         class MockCtx:
@@ -491,14 +492,10 @@ class TestGetDbEdgeCases:
 
             gen = get_db()
             await gen.__anext__()
-            # Throw a lock error — triggers rollback, then retries (succeeds on retry)
-            try:
+            with pytest.raises(OperationalError, match="database is locked"):
                 await gen.athrow(OperationalError("database is locked", None, None))
-            except StopAsyncIteration:
-                pass  # Retry succeeded and generator finished
-            except OperationalError:
-                pass  # Retries exhausted
 
+        assert mock_factory.call_count == 1
         # rollback must have been called due to the lock error
         mock_session.rollback.assert_awaited()
 
@@ -536,8 +533,9 @@ class TestGetDbEdgeCases:
                 pass
 
     @pytest.mark.asyncio
-    async def test_get_db_outer_operational_error_lock_retry(self):
-        """get_db retries when outer OperationalError is 'database is locked'."""
+    async def test_get_db_does_not_retry_a_lock_error(self):
+        """The retry loop is gone: nothing before the yield touches the database,
+        and after it a second yield is not allowed. A lock error is raised once."""
         call_count = 0
 
         class MockCtxFactory:
@@ -563,8 +561,7 @@ class TestGetDbEdgeCases:
                 gen = get_db()
                 await gen.__anext__()
 
-        # Should have retried up to max_retries (3)
-        assert call_count == 3
+        assert call_count == 1
 
     @pytest.mark.asyncio
     async def test_get_db_outer_operational_error_non_lock_raises_immediately(self):

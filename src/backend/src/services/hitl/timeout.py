@@ -7,6 +7,7 @@ expired HITL approvals and processes them according to their timeout action.
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -114,8 +115,9 @@ class HITLTimeoutService:
             # activate_lakebase() ran in this process (boot or subprocess, never a
             # runtime /lakebase/enable). On the wrong database this sweep finds no
             # expired approvals, so a timed-out approval is never actioned and its
-            # run waits forever — a silent hang, not an error.
-            async for session in get_smart_db_session():
+            # run waits forever — a silent hang, not an error. A context manager,
+            # not `async for`: a break OR a return there abandons the generator.
+            async with asynccontextmanager(get_smart_db_session)() as session:
                 approval_repo = HITLApprovalRepository(session)
                 hitl_service = HITLService(session, approval_repository=approval_repo)
                 webhook_service = HITLWebhookService(session)
@@ -124,8 +126,7 @@ class HITLTimeoutService:
                 expired_approvals = await approval_repo.get_expired_pending()
 
                 if not expired_approvals:
-                    # break, not return — see the note on the loop above.
-                    break
+                    return
 
                 logger.info(f"Found {len(expired_approvals)} expired HITL approvals")
 

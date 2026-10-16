@@ -195,3 +195,46 @@ class TestEncodings:
             [c async for c in streaming.to_sse(_one())][0].decode()[len("data: ") :]
         )
         assert nd == sse == frame
+
+
+class TestNoTransactionIsHeldAcrossTheStream:
+    """The A2A and MCP stream routes poll on the REQUEST session, which stays
+    open for the whole stream. Each poll's transaction must end before the stream
+    waits, or one transaction (and on PostgreSQL one pooled connection) is held
+    for up to an hour."""
+
+    @pytest.mark.asyncio
+    async def test_every_frame_is_sent_outside_a_transaction(self, tmp_path):
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 's.db'}")
+        session = async_sessionmaker(engine, expire_on_commit=False)()
+        states = iter([ExternalTaskState.WORKING, ExternalTaskState.COMPLETED])
+
+        async def reading_status(_caller, run_id, session):
+            await session.execute(text("SELECT 1"))  # opens a transaction
+            return InvocationResult(run_id=run_id, state=next(states))
+
+        async def reading_pending(_caller, _run_id, session):
+            await session.execute(text("SELECT 1"))
+            return []
+
+        held = []
+        try:
+            with (
+                patch("src.services.external.streaming.run_status", new=reading_status),
+                patch(
+                    "src.services.external.streaming.interaction.pending_for_run",
+                    new=reading_pending,
+                ),
+            ):
+                async for frame in streaming.stream_run(
+                    _caller(), "run-1", session=session, poll_interval=0
+                ):
+                    held.append((frame["state"], session.in_transaction()))
+        finally:
+            await session.close()
+            await engine.dispose()
+
+        assert held == [("working", False), ("completed", False)]

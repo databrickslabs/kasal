@@ -75,7 +75,8 @@ async def test_a2a_caller_keeps_oauth2_proxy_precedence_outside_apps(outside_app
 def test_mcp_jsonrpc_uses_forwarded_identity_in_apps(in_apps, method):
     app = FastAPI()
     app.include_router(mcp_jsonrpc_router)
-    app.dependency_overrides[get_smart_db_session] = lambda: None
+    # SessionDep commits the session before replying, so it must be awaitable.
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
     client = TestClient(app, raise_server_exceptions=False)
     headers = {
         "X-Forwarded-Email": "real@example.com",

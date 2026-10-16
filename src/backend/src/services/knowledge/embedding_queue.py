@@ -6,6 +6,7 @@ to reduce database lock contention in SQLite.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -145,12 +146,13 @@ class EmbeddingQueueService:
 
         for attempt in range(max_retries):
             try:
-                async for session in get_smart_db_session():
+                # Not `async for ...: break`: the break abandoned the generator,
+                # so the router's close never ran in this task.
+                async with asynccontextmanager(get_smart_db_session)() as session:
                     repository = DocumentationEmbeddingRepository(session)
                     await repository.insert_raw(item)
                     await session.commit()
                     logger.debug(f"Inserted embedding after {attempt + 1} attempts")
-                    break
                 return
             except Exception as e:
                 if attempt < max_retries - 1:

@@ -7,7 +7,6 @@ from contextvars import ContextVar, Token
 from typing import Any, AsyncGenerator, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from sqlalchemy import event, text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -565,6 +564,10 @@ async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
     straight to the snapshot — unconditionally, whether or not auth was involved.
     That looked safe (the name says "request-scoped") and was the same silent split
     as the raw factory in 33 of its 37 call sites.
+
+    Branches 2 and 3 OWN their session: a clean exit commits, an exception rolls
+    back, and both happen in the caller's task before the block returns. Branch 1
+    does neither, because the transaction belongs to the request.
     """
     existing = _request_session.get(None)
     # Reuse the request session ONLY for code running in the task that owns it.
@@ -586,14 +589,23 @@ async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
 
     if _RESOLVING_AUTH.get():
         async with async_session_factory() as session:
-            yield session
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            await session.commit()
         return
 
     from src.db.database_router import get_smart_db_session
 
-    async for session in get_smart_db_session():
+    # Drive the router as a context manager, NOT `async for ...: yield; break`.
+    # The break left the router suspended at its yield, so its commit never ran
+    # and its rollback, close and _request_session reset happened later, in a
+    # finaliser task. The reset then failed (wrong Context), and the next block
+    # in this task reused the finished session through branch 1.
+    async with asynccontextmanager(get_smart_db_session)() as session:
         yield session
-        break
 
 
 # NOTE: detach_request_session() / background_task_context() were removed once
@@ -1050,51 +1062,25 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                 # Fallback to NullPool for safety (not the default factory which might be wrong)
                 smart_session_factory = nullpool_session_factory
 
-    max_retries = 3
-    for attempt in range(max_retries):
+    # No "database is locked" retry: a yield dependency may yield only ONCE, and
+    # nothing before the yield touches the database. A lock error from the
+    # handler or the commit is raised as itself.
+    # Only None on SQLite, whose branch never selects the PG factories.
+    assert smart_session_factory is not None
+    async with smart_session_factory() as session:
+        # Publish session into ContextVar so that
+        # routed_scoped_session() returns the same session
+        tokens = _enter_request_session(session)
         try:
-            # Only None on SQLite, whose branch never selects the PG factories.
-            assert smart_session_factory is not None
-            async with smart_session_factory() as session:
-                # Publish session into ContextVar so that
-                # request_scoped_session() returns the same session
-                tokens = _enter_request_session(session)
-                try:
-                    yield session
-                    # Commit the transaction if no exception occurred
-                    await session.commit()
-                    return  # Success, exit retry loop
-                except OperationalError as e:
-                    # Rollback on any exception
-                    await session.rollback()
-                    if (
-                        "database is locked" in str(e).lower()
-                        and attempt < max_retries - 1
-                    ):
-                        wait_time = 0.1 * (2.0**attempt)
-                        logger.warning(
-                            f"Database locked in session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                        )
-                        await asyncio.sleep(wait_time)
-                        continue
-                    raise
-                except Exception:
-                    # Rollback on any exception
-                    await session.rollback()
-                    raise
-                finally:
-                    _exit_request_session(tokens)
-                    # Ensure session is properly closed
-                    await session.close()
-        except OperationalError as e:
-            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                wait_time = 0.1 * (2.0**attempt)
-                logger.warning(
-                    f"Database locked creating session, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                )
-                await asyncio.sleep(wait_time)
-                continue
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
             raise
+        finally:
+            _exit_request_session(tokens)
+            # Ensure session is properly closed
+            await session.close()
 
 
 async def get_local_db() -> AsyncGenerator[AsyncSession, None]:

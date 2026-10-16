@@ -16,12 +16,15 @@ emits them as-is; the A2A surface renders each into a Task frame.
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.external import artifacts as canonical_artifacts
 from src.services.external import interaction
 from src.services.external.identity import ExternalCaller
-from src.services.external.invocation import run_status
+from src.services.external.interaction import PendingInteraction
+from src.services.external.invocation import InvocationResult, run_status
 from src.services.external.state import ExternalTaskState, is_terminal
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,27 @@ POLL_INTERVAL_SECONDS = 1.0
 #: connection; a run that never terminates must not hold one forever. The run
 #: itself is unaffected — the caller reconnects or polls.
 MAX_STREAM_SECONDS = 3600.0
+
+
+async def _poll(
+    caller: ExternalCaller, run_id: str, session: Optional[AsyncSession]
+) -> Tuple[Optional[InvocationResult], List[PendingInteraction]]:
+    """One poll's reads, with the transaction ENDED before the stream waits.
+
+    The A2A and MCP stream routes pass the request session, which stays open for
+    the whole stream. Left alone, the first poll's transaction (and on PostgreSQL
+    its pooled connection) stayed open until the stream ended, up to
+    MAX_STREAM_SECONDS. A poll only reads, so rolling back loses nothing.
+    """
+    try:
+        result = await run_status(caller, run_id, session=session)
+        pending: List[PendingInteraction] = []
+        if result is not None:
+            pending = await interaction.pending_for_run(caller, run_id, session=session)
+        return result, pending
+    finally:
+        if session is not None:
+            await session.rollback()
 
 
 async def stream_run(
@@ -62,7 +86,7 @@ async def stream_run(
 
     while elapsed < max_seconds:
         try:
-            result = await run_status(caller, run_id, session=session)
+            result, pending = await _poll(caller, run_id, session)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[external] stream for %s ended on error: %s", run_id, exc)
             yield {
@@ -85,7 +109,6 @@ async def stream_run(
 
         frame: Dict[str, Any] = {"run_id": run_id, "state": result.state.value}
 
-        pending = await interaction.pending_for_run(caller, run_id, session=session)
         if pending:
             frame["state"] = ExternalTaskState.INPUT_REQUIRED.value
             frame["waiting_for"] = [p.as_dict() for p in pending]

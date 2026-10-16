@@ -22,7 +22,8 @@ from src.services.external.identity import ExternalAuthError, ExternalCaller
 def client():
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_smart_db_session] = lambda: None
+    # SessionDep commits the session before replying, so it must be awaitable.
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
     return TestClient(app, raise_server_exceptions=False)
 
 

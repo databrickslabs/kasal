@@ -1,7 +1,7 @@
 """FastAPI session, request-context and generic dependency providers."""
 
 import logging
-from typing import Annotated, Callable, Optional, Type
+from typing import Annotated, AsyncIterator, Callable, Optional, Type
 
 from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,11 +21,38 @@ from src.utils.user_context import GroupContext
 
 logger = logging.getLogger("src.core.dependencies")
 
-# Type definitions for dependencies
-# Use smart session that automatically selects between regular DB and Lakebase
-SessionDep = Annotated[AsyncSession, Depends(get_smart_db_session)]
-# Ordinary mutation endpoints must commit before their response is sent. Keep
-# SessionDep for streams and consumers that need a session during response work.
+
+async def _commit_before_response(
+    session: Annotated[AsyncSession, Depends(get_smart_db_session)],
+) -> AsyncIterator[AsyncSession]:
+    """The request session, committed when the handler returns.
+
+    FastAPI tears a yield dependency down at its scope's end. The router
+    (``get_smart_db_session``) keeps the default "request" scope, which ends only
+    after the response has been SENT and BackgroundTasks have run, so its commit
+    came too late: a client could get a 2xx for an unsaved write, and a commit
+    failure was never reported. This wrapper is "function" scoped, which ends
+    once the handler has returned and its result is serialised, but BEFORE the
+    response goes out. A failing commit therefore becomes a 500.
+
+    The session itself stays open until the request ends, so a StreamingResponse
+    body or a BackgroundTask that uses it keeps working, now in a fresh
+    transaction rather than inside the handler's write. The router still closes
+    it, and commits anything written after this point.
+
+    On an exception there is nothing to do here: it propagates through the
+    router's own teardown, which rolls back, before FastAPI turns it into the
+    error response.
+    """
+    yield session
+    await session.commit()
+
+
+# The request session, routed to SQLite/PostgreSQL or Lakebase, committed before
+# the response is sent. Every consumer in one request shares it.
+SessionDep = Annotated[AsyncSession, Depends(_commit_before_response, scope="function")]
+# Like SessionDep, but also CLOSED before the response is sent. Its session is
+# separate from SessionDep's, so do not mix the two in one request.
 WriteSessionDep = Annotated[
     AsyncSession, Depends(get_smart_db_session, scope="function")
 ]
