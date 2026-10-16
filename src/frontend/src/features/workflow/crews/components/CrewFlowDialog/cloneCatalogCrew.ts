@@ -72,9 +72,10 @@ async function cloneTasks(nodes: Node[], edges: Edge[], idMapping: IdMapping): P
     try {
       const taskData = node.data;
       // The copied agent the canvas connects this task to. Node data carries
-      // no agent_id, so the agent->task edge is the only place it lives.
-      const agentEdge = edges.find(edge => edge.target === node.id && idMapping[edge.source]
-        && nodes.some(n => n.id === edge.source && n.type === 'agentNode'));
+      // no agent_id, so the agent->task edge is the only place it lives; with
+      // several, the LAST wins, as in a canvas run (JobExecutionService).
+      const agentEdge = edges.filter(edge => edge.target === node.id && idMapping[edge.source]
+        && nodes.some(n => n.id === edge.source && n.type === 'agentNode')).pop();
 
       // Format task data following TaskForm pattern
       const formattedTaskData = {

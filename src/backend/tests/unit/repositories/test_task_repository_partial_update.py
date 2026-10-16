@@ -179,6 +179,43 @@ class TestAnUpdateWithConfigReplacesIt:
         assert "guardrail" not in row.config
         assert "callback" not in row.config
 
+    @pytest.mark.asyncio
+    async def test_a_field_cleared_in_the_sent_config_is_cleared_at_the_root(
+        self, session, task
+    ):
+        """The root columns mirror the config, and a rebuilt crew (MCP/A2A,
+        triggers, resume) projects them, so a stale root value would bring a
+        cleared output schema or guardrail back on those runs."""
+        task.output_json = "report.json"
+        task.output_file = "report.md"
+        await session.flush()
+        payload = TaskUpdate(config={"human_input": False, "output_pydantic": None})
+
+        await TaskService(session).update_with_group_check("t1", payload, GROUP)
+
+        row = await reread(session)
+        for column in (
+            "output_pydantic",
+            "output_json",
+            "output_file",
+            "callback",
+            "guardrail",
+        ):
+            assert getattr(row, column) is None, column
+
+    @pytest.mark.asyncio
+    async def test_a_value_in_the_sent_config_still_reaches_the_root(
+        self, session, task
+    ):
+        payload = TaskUpdate(config={"output_pydantic": "Summary", "callback": "ping"})
+
+        await TaskService(session).update_with_group_check("t1", payload, GROUP)
+
+        row = await reread(session)
+        assert row.output_pydantic == "Summary"
+        assert row.callback == "ping"
+        assert row.guardrail is None
+
 
 class TestAnEmptyAgentIdIsNotAnUnassign:
     @pytest.mark.asyncio

@@ -117,6 +117,19 @@ describe('Opening a catalog crew', () => {
     ]);
   });
 
+  it('"Open as copy" gives a task with two agent edges the LAST one, as a canvas run does', async () => {
+    vi.mocked(CrewService.getCrew).mockResolvedValue({
+      ...crew,
+      edges: [...(crew.edges ?? []), { id: 'e3', source: 'agent-a1', target: 'task-t2' }],
+    } as CrewResponse);
+    const { onCrewSelect } = setup();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Research crew as copy' }));
+
+    await waitFor(() => expect(onCrewSelect).toHaveBeenCalledOnce());
+    expect(TaskService.createTask).toHaveBeenCalledWith(expect.objectContaining({ name: 'write', agent_id: 'copy-Researcher' }));
+  });
+
   it('keeps "Open as copy" from operators, who cannot create rows', async () => {
     permissions.canEdit = false;
     setup();

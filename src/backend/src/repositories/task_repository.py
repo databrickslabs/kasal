@@ -11,6 +11,15 @@ from src.models.task import Task
 # tests/unit/architecture/test_sessions_go_through_the_router.py covers
 # repositories/ with no allowlist. See src/repositories/CLAUDE.md.
 
+#: Root columns that mirror a key of the same name in ``config``.
+_CONFIG_MIRRORED_FIELDS = (
+    "output_pydantic",
+    "output_json",
+    "output_file",
+    "callback",
+    "guardrail",
+)
+
 
 class TaskRepository(BaseRepository[Task, str]):
     """
@@ -159,6 +168,8 @@ class TaskRepository(BaseRepository[Task, str]):
           mirrored into a COPY of it.
         - A ``config`` in ``obj_in`` REPLACES the stored one. Deliberately not a
           key-by-key merge: the task form clears a field by leaving it out.
+          The root columns that mirror it follow, so a cleared field is
+          cleared there too.
         - ``agent_id: ""`` means "not provided" and is dropped, never written
           as NULL: an unassigned row runs on the crew's first agent wherever
           the crew is rebuilt from its rows.
@@ -180,34 +191,12 @@ class TaskRepository(BaseRepository[Task, str]):
 
             # Ensure synchronization between config and dedicated fields
             if config_sent:
-                # If output_pydantic is in config, sync to root
-                if (
-                    "output_pydantic" in obj_in["config"]
-                    and obj_in["config"]["output_pydantic"]
-                ):
-                    obj_in["output_pydantic"] = obj_in["config"]["output_pydantic"]
-
-                # If output_json is in config, sync to root
-                if (
-                    "output_json" in obj_in["config"]
-                    and obj_in["config"]["output_json"]
-                ):
-                    obj_in["output_json"] = obj_in["config"]["output_json"]
-
-                # If output_file is in config, sync to root
-                if (
-                    "output_file" in obj_in["config"]
-                    and obj_in["config"]["output_file"]
-                ):
-                    obj_in["output_file"] = obj_in["config"]["output_file"]
-
-                # If callback is in config, sync to root
-                if "callback" in obj_in["config"] and obj_in["config"]["callback"]:
-                    obj_in["callback"] = obj_in["config"]["callback"]
-
-                # If guardrail is in config, sync to root
-                if "guardrail" in obj_in["config"] and obj_in["config"]["guardrail"]:
-                    obj_in["guardrail"] = obj_in["config"]["guardrail"]
+                # A sent config replaces the stored one, so the root columns
+                # that mirror it follow it — None included. Rebuilt crews
+                # (MCP/A2A, triggers, resume) project these columns, and a
+                # stale one would bring a cleared schema or guardrail back.
+                for field in _CONFIG_MIRRORED_FIELDS:
+                    obj_in[field] = obj_in["config"].get(field) or None
 
                 # If llm_guardrail is in config, sync to root (including null to clear it)
                 if "llm_guardrail" in obj_in["config"]:

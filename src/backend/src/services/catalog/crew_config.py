@@ -124,7 +124,8 @@ def _agent_ids_from_edges(crew: object) -> Dict[str, str]:
         source = nodes.get(str(edge.get("source")))
         target = nodes.get(str(edge.get("target")))
         if source and target and source[0] == "agent" and target[0] == "task":
-            by_task.setdefault(target[1], source[1])
+            # The LAST agent edge wins, as in a canvas run (JobExecutionService).
+            by_task[target[1]] = source[1]
     return by_task
 
 

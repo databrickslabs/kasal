@@ -165,6 +165,20 @@ class TestEdgesAssignAgents:
         assert assignments(tasks_yaml) == {"research": "Researcher", "write": "Writer"}
 
     @pytest.mark.asyncio
+    async def test_with_two_agent_edges_the_last_one_wins_as_on_the_canvas(self):
+        """A canvas run (JobExecutionService) assigns agents edge by edge, so
+        the last agent edge into a task is the one that runs it."""
+        crew_row, tasks = two_agent_crew(
+            edges=[
+                edge("agent-a1", "task-t1"),
+                edge("agent-a1", "task-t2"),
+                edge("agent-a2", "task-t2"),
+            ]
+        )
+        _, tasks_yaml = await project(crew_row, tasks)
+        assert assignments(tasks_yaml) == {"research": "Researcher", "write": "Writer"}
+
+    @pytest.mark.asyncio
     async def test_a_crew_without_nodes_or_edges_still_projects(self):
         crew_row, tasks = two_agent_crew(tasks_agent_ids=("a1", "a2"))
         crew_row.nodes = None
