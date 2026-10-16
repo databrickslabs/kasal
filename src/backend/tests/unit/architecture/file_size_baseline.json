@@ -75,7 +75,7 @@
   "src/backend/src/services/tools/powerbi_hierarchies_tool.py": 977,
   "src/backend/src/services/tools/powerbi_metadata_reducer_tool.py": 1429,
   "src/backend/src/services/tools/powerbi_report_references_tool.py": 2265,
-  "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py": 2824,
+  "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py": 2818,
   "src/backend/src/services/tools/powerbi_semantic_model_fetcher_tool.py": 2869,
   "src/backend/src/services/tools/tool_factory.py": 2122,
   "src/backend/src/services/tools/uc_metric_view_generator_tool.py": 1704,

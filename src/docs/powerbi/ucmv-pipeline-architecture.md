@@ -148,11 +148,14 @@ and the skip reason names the refused steps. A native query is never compiled
 to `SELECT *`; its own SQL, with its `WHERE` and `GROUP BY`, reaches the parser.
 `TransformColumnTypes` stays on the allowlist, but the SQL source does not apply
 it: conversions that can change values (whole-number types round, `Currency`
-rounds to 4 decimals, `type date` drops the time) are listed per table in the
-run's warnings (`mquery_handoff.py`). A dimension's physical table is used for a
-join only when its M keeps every row of that table; a dimension with a row
-filter, a dedup or a native-query `WHERE` is reported as skipped, because
-joining the raw table could duplicate fact rows.
+rounds to 4 decimals, `type date` drops the time) are listed per table, with the
+Spark SQL that reproduces each one (`CAST(BROUND(c) AS BIGINT)`,
+`BROUND(c, 4)`, `CAST(c AS DATE)`, `CAST(c AS BOOLEAN)`; Power Query rounds half
+to even, as `BROUND` does), in the run's warnings and under "Power Query Type
+Conversions Not Applied" in the migration report. The view itself still reads
+the physical table. A dimension's physical table is used for a join only when
+its M keeps every row of that table; otherwise the join is not built and the
+migration report lists it under "Dimension Joins Not Emitted".
 
 Not every M source is a warehouse table. `classify_mquery_source(mquery)` sorts
 a no-SQL source into one of:

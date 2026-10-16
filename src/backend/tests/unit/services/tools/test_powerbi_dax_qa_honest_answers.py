@@ -144,7 +144,7 @@ class TestReportFiltersAreStructured:
         }
         filters = fetcher._parse_tmdl_for_filters([part])
         assert filters["Geo[Country]"] == {"operator": "in", "values": ["Italy"]}
-        assert "Cal[Year]" not in filters
+        assert filters["Cal[Year]"] == {"unapplied": "no value selected"}
         assert filters["Cal[Month]"] == {"operator": "in", "values": [3]}
         assert filter_to_dax("Cal[Month]", filters["Cal[Month]"]) == (
             "TREATAS({3}, Cal[Month])"

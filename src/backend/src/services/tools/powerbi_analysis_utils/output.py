@@ -12,12 +12,18 @@ from src.services.tools.metadata_reduction.keyword_measure import (
     KEYWORD_FALLBACK,
     KEYWORD_FALLBACK_NOTE,
 )
+from src.services.tools.metadata_reduction.qa_output import (
+    attempt_lines,
+    unapplied_filter_line,
+)
 
 
 class PowerBIOutputMixin:
     def _format_output(self, results: Dict[str, Any], output_format: str) -> str:
         """Format the results for output."""
         results.setdefault("dax_source", getattr(self, "_last_dax_source", None))
+        results.setdefault("unapplied_filters", getattr(self, "_unapplied_filters", []))
+        self._unapplied_filters: list[tuple[str, str]] = []  # this answer only
         if output_format == "json":
             return json.dumps(results, indent=2, default=str)
 
@@ -47,21 +53,8 @@ class PowerBIOutputMixin:
         if results.get("generated_dax"):
             output.append("## Generated DAX Query\n")
 
-            # Show retry attempts if there were multiple
-            dax_attempts = results.get("dax_attempts", [])
-            if len(dax_attempts) > 1:
-                output.append(
-                    f"**Attempts**: {len(dax_attempts)} (successful on attempt {len(dax_attempts)})\n"
-                )
-                output.append("\n### Retry History\n")
-                for att in dax_attempts[:-1]:  # Show all failed attempts
-                    output.append(f"**Attempt {att['attempt']}**: ❌ Failed")
-                    if att.get("error"):
-                        output.append(f"  - Error: {att['error'][:100]}...")
-                output.append(
-                    f"**Attempt {dax_attempts[-1]['attempt']}**: ✅ Success\n"
-                )
-
+            # Retry history, from each attempt's own outcome
+            output.extend(attempt_lines(results.get("dax_attempts", [])))
             output.append("```dax")
             output.append(results["generated_dax"])
             output.append("```\n")
@@ -104,6 +97,7 @@ class PowerBIOutputMixin:
         else:
             output.append(f"❌ **Failed**: {exec_result.get('error', 'Unknown error')}")
         output.append("")
+        output.extend(unapplied_filter_line(results.get("unapplied_filters", [])))
 
         # Visual References
         if results.get("visual_references"):

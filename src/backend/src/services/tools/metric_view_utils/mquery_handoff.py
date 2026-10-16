@@ -112,10 +112,11 @@ def build_ucmv_mquery(
         out.append(entry)
     if type_changes and warnings is not None:
         warnings.append(
-            "Power Query type conversions are not applied by the SQL source and "
-            "can change values (whole-number types round, Currency rounds to 4 "
-            "decimals, date drops the time, which breaks date-key joins). Check: "
-            + "; ".join(type_changes[:10])
+            "Power Query type conversions are not applied: the metric view reads "
+            "the physical table, and these conversions can change values "
+            "(whole-number types round, Currency rounds to 4 decimals, date drops "
+            "the time, which breaks date-key joins). The SQL that reproduces each "
+            "one is shown; apply it in a source view: " + "; ".join(type_changes[:10])
         )
     return out
 

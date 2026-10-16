@@ -63,9 +63,7 @@ class TestConditionIsAllOrNothing:
         sql = DaxTranslator()._dax_condition_to_sql(
             '(Sales[A] = "x" || Sales[B] = "y") && Sales[C] = "z"', "Sales"
         )
-        assert sql == (
-            "(source.A = 'x' OR source.B = 'y') AND source.C = 'z'"
-        )
+        assert sql == ("(source.A = 'x' OR source.B = 'y') AND source.C = 'z'")
 
     def test_numeric_in_list_keeps_its_values(self):
         sql = DaxTranslator()._dax_condition_to_sql(

@@ -29,6 +29,11 @@ from src.services.tools.metadata_reduction.keyword_measure import (
     KEYWORD_FALLBACK_NOTE,
     pick_measure,
 )
+from src.services.tools.metadata_reduction.qa_output import (
+    attempt_lines,
+    prompt_filter_lines,
+    unapplied_filter_line,
+)
 from src.services.tools.metadata_reduction.report_filters import filter_to_dax
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
@@ -1237,19 +1242,11 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     f"referencing tables not in model context: {skipped_filters}"
                 )
 
-            # Built from the structured filter values; a filter with no value
-            # to apply (an unselected filter card) is left out, not quoted.
-            filter_lines = []
-            for filter_name, filter_value in relevant_filters.items():
-                if "[" in filter_name:
-                    dax_filter = filter_to_dax(filter_name, filter_value)
-                    if dax_filter:
-                        filter_lines.append(f"  {dax_filter}")
-                    continue
-                # Unqualified key — the LLM has to find the right table
-                dax_filter = filter_to_dax(f"CorrectTable[{filter_name}]", filter_value)
-                if dax_filter:
-                    filter_lines.append(f"  [{filter_name}] — use {dax_filter}")
+            # Built from the structured values; filters left out (no exact value,
+            # table not in context) are kept for the answer's "not applied" line.
+            filter_lines, self._unapplied_filters = prompt_filter_lines(
+                relevant_filters, skipped_filters
+            )
             if filter_lines:
                 sections.append(
                     "ACTIVE FILTERS — include ALL of these as TREATAS in SUMMARIZECOLUMNS:"
@@ -2696,6 +2693,8 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
     def _format_output(self, results: Dict[str, Any], output_format: str) -> str:
         """Format the results for output."""
         results.setdefault("dax_source", getattr(self, "_last_dax_source", None))
+        results.setdefault("unapplied_filters", getattr(self, "_unapplied_filters", []))
+        self._unapplied_filters = []  # reported once, for this answer only
         if output_format == "json":
             return json.dumps(results, indent=2, default=str)
 
@@ -2729,14 +2728,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
         if results.get("generated_dax"):
             output.append("## Generated DAX Query\n")
-            dax_attempts = results.get("dax_attempts", [])
-            if len(dax_attempts) > 1:
-                output.append(f"**Attempts**: {len(dax_attempts)}\n")
-                for att in dax_attempts[:-1]:
-                    output.append(f"**Attempt {att['attempt']}**: FAILED")
-                    if att.get("error"):
-                        output.append(f"  - Error: {att['error'][:100]}...")
-                output.append(f"**Attempt {dax_attempts[-1]['attempt']}**: SUCCESS\n")
+            output.extend(attempt_lines(results.get("dax_attempts", [])))
             output.append("```dax")
             output.append(results["generated_dax"])
             output.append("```\n")
@@ -2769,7 +2761,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     output.append(f"\n*... and {len(data) - 20} more rows*")
         else:
             output.append(f"**Failed**: {exec_result.get('error', 'Unknown error')}")
-        output.append("")
+        output.extend(
+            ["", *unapplied_filter_line(results.get("unapplied_filters", []))]
+        )
 
         if results.get("visual_references"):
             output.append("## Visual References\n")

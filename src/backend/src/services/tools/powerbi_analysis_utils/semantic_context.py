@@ -8,7 +8,10 @@ movement: every method still reads ``self`` exactly as it did in the single
 import logging
 from typing import Any, Dict
 
-from src.services.tools.metadata_reduction.report_filters import filter_to_dax
+from src.services.tools.metadata_reduction.report_filters import (
+    filter_to_dax,
+    unapplied_filters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,12 +179,14 @@ class PowerBISemanticContextMixin:
 
         # ===== CURRENT VIEW STATE (Active Filters) =====
         # Built from the structured values (report_filters); a filter with no
-        # exact value is left out rather than shown as its description.
+        # exact value is left out of the prompt and reported in the answer.
+        active = config.get("active_filters") or {}
         filter_lines = [
             f"- **{name}**: apply as `{dax_filter}`"
-            for name, value in (config.get("active_filters") or {}).items()
+            for name, value in active.items()
             if (dax_filter := filter_to_dax(name, value))
         ]
+        self._unapplied_filters = unapplied_filters(active)
         if filter_lines:
             sections.append("## 🎯 CURRENT VIEW STATE (AUTO-APPLY FILTERS)\n")
             sections.append(

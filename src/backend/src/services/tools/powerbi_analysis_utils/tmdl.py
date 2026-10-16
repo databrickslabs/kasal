@@ -18,7 +18,7 @@ import httpx
 
 from src.services.tools.metadata_reduction.report_filters import (
     describe_filter,
-    spec_from_filter_definition,
+    filter_from_definition,
     spec_from_pbi_condition,
 )
 
@@ -353,16 +353,18 @@ class PowerBITmdlParsingMixin:
         """``(Table[Column], spec)`` from a Power BI filter definition.
 
         The spec is structured (operator + typed values, shared with Tool 79
-        through ``report_filters``). ``None`` when it cannot be applied exactly
-        (a card with nothing selected, a relative date, an advanced filter):
-        such a filter is logged and left out, never applied as its description.
+        through ``report_filters``). A filter that cannot be applied exactly (a
+        card with nothing selected, a relative date, an advanced filter) is
+        ``{"unapplied": reason}``: never applied as its description, and
+        listed in the answer as a report filter that was not applied.
         """
         try:
-            name, spec = spec_from_filter_definition(filter_def)
+            name, spec = filter_from_definition(filter_def)
         except (AttributeError, TypeError, ValueError):
             return (None, None)
-        if name and spec is None:
-            logger.warning("[Filter Extraction] Not applied (no exact value): %s", name)
+        if spec and "unapplied" in spec:
+            reason = spec["unapplied"]
+            logger.warning("[Filter Extraction] Not applied: %s (%s)", name, reason)
         return (name, spec)
 
     def _parse_filter_condition(self, condition: Dict[str, Any]) -> str:

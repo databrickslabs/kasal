@@ -29,9 +29,9 @@ from pydantic import BaseModel, Field, PrivateAttr
 from src.services.tools.base import BaseTool
 from src.services.tools.metadata_reduction.report_filters import (
     describe_filter,
+    filter_from_definition,
     parse_filter_value,
     slicer_selection_spec,
-    spec_from_filter_definition,
     spec_from_pbi_condition,
     validate_filter_datatype,
 )
@@ -2854,12 +2854,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         """``(Table[Column], spec)`` from a Power BI filter definition.
 
         The spec is structured (operator + typed values, see
-        ``report_filters``); ``None`` when there is nothing to apply, such as
-        a filter-pane card with no selection, so it is never cached as a
-        filter on its description.
+        ``report_filters``). A filter with no exact value (a card with no
+        selection, a relative date) is cached as ``{"unapplied": reason}``, so
+        the DAX tool reports it instead of silently answering without it.
         """
         try:
-            return spec_from_filter_definition(filter_def)
+            return filter_from_definition(filter_def)
         except (AttributeError, TypeError, ValueError):
             return (None, None)
 

@@ -1011,7 +1011,7 @@ class TestFetcherExtractFilterFromDefinition:
         }
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
-        assert desc is None  # nothing selected: no filter, not its description
+        assert desc == {"unapplied": "no value selected"}  # kept, never applied
 
 
 # ===========================================================================

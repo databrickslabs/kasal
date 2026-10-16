@@ -1,13 +1,20 @@
 """Value-changing type conversions are reported, renames are simultaneous,
 and a dimension is only joined on its raw table when its M keeps every row."""
 
+import pytest
+
+from src.services.tools.metric_view_utils.join_detector import JoinDetector
 from src.services.tools.metric_view_utils.mquery_handoff import (
     build_ucmv_mquery,
     enrich_join_source_tables,
     plain_join_source,
     resolve_mquery_with_notes,
 )
-from src.services.tools.metric_view_utils.mquery_parser import resolve_mquery_to_sql
+from src.services.tools.metric_view_utils.mquery_parser import (
+    MQueryParser,
+    resolve_mquery_to_sql,
+)
+from src.services.tools.metric_view_utils.mquery_steps import type_change_sql
 
 _NAV = (
     'Source = Databricks.Catalogs("host.example.com", "/sql/1.0/warehouses/x", null),\n'
@@ -34,10 +41,49 @@ class TestTypeConversionsAreReported:
         sql, notes = resolve_mquery_with_notes(TYPED)
         assert sql == "SELECT * FROM main.sales.orders"
         assert notes == [
-            "amount -> Int64.Type",
-            "order_date -> type date",
-            "fee -> Currency.Type",
+            "amount -> Int64.Type: apply CAST(BROUND(amount) AS BIGINT)",
+            "order_date -> type date: apply CAST(order_date AS DATE)",
+            "fee -> Currency.Type: apply BROUND(fee, 4)",
         ]
+
+    @pytest.mark.parametrize(
+        "type_text,sql",
+        [
+            ("Int64.Type", "CAST(BROUND(c) AS BIGINT)"),
+            ("Int32.Type", "CAST(BROUND(c) AS INT)"),
+            ("Int16.Type", "CAST(BROUND(c) AS SMALLINT)"),
+            ("Int8.Type", "CAST(BROUND(c) AS TINYINT)"),
+            ("Currency.Type", "BROUND(c, 4)"),
+            ("type date", "CAST(c AS DATE)"),
+            ("Date.Type", "CAST(c AS DATE)"),
+            ("type logical", "CAST(c AS BOOLEAN)"),
+            ("Logical.Type", "CAST(c AS BOOLEAN)"),
+            # Text.From formats by culture and Spark has no TIME type
+            ("type text", None),
+            ("type time", None),
+        ],
+    )
+    def test_each_conversion_has_its_sql(self, type_text, sql):
+        assert type_change_sql("c", type_text) == sql
+        m = _m(
+            f'T2 = Table.TransformColumnTypes(t, {{{{"c", {type_text}}}}})',
+            result="T2",
+        )
+        _, notes = resolve_mquery_with_notes(m)
+        expected = f"apply {sql}" if sql else "no exact SQL equivalent"
+        assert notes == [f"c -> {type_text}: {expected}"]
+
+    def test_metric_view_report_lists_them(self):
+        from src.services.tools.metric_view_utils.report_emitter import (
+            emit_migration_report,
+        )
+
+        note = "amount -> Int64.Type: apply CAST(BROUND(amount) AS BIGINT)"
+        report = emit_migration_report(
+            {}, {}, limitations={"type_conversions_not_applied": {"Orders": [note]}}
+        )
+        assert "## Power Query Type Conversions Not Applied" in report
+        assert "CAST(BROUND(amount) AS BIGINT)" in report
 
     def test_handoff_entry_and_run_warning(self):
         from src.services.tools.pipeline_config_generator_tool import (
@@ -48,9 +94,10 @@ class TestTypeConversionsAreReported:
         out = PipelineConfigGeneratorTool._build_ucmv_mquery(
             {"Orders": {"mquery_expression": TYPED}}, {}, warnings
         )
-        assert out[0]["type_changes"][0] == "amount -> Int64.Type"
+        assert out[0]["type_changes"][0].startswith("amount -> Int64.Type: apply")
         assert len(warnings) == 1
         assert "Orders: amount -> Int64.Type" in warnings[0]
+        assert "not applied" in warnings[0]
 
     def test_label_only_types_are_not_reported(self):
         m = _m(
@@ -134,3 +181,89 @@ class TestJoinSourcesKeepEveryRow:
             '"SELECT * FROM main.sales.dim_customer") in Source'
         )
         assert plain_join_source(m) == ("main.sales.dim_customer", "")
+
+
+class TestDroppedDimensionIsReported:
+    def test_join_without_a_safe_source_is_listed_in_the_report(self):
+        from src.services.tools.metric_view_utils.report_emitter import (
+            emit_migration_report,
+        )
+
+        fact_sql = (
+            "SELECT customer_id, SUM(amount) AS amount FROM main.sales.orders "
+            "GROUP BY customer_id"
+        )
+        entries = build_ucmv_mquery(
+            {
+                "Orders": {"mquery_expression": fact_sql},
+                "Dim_Customer": {"mquery_expression": DEDUPED_DIM},
+            }
+        )
+        tables = MQueryParser().parse_json(entries)
+        config = {
+            "join_key_map": {"Dim_Customer": {"alias": "c", "join_key": "customer_id"}}
+        }
+        enrich_join_source_tables(
+            config, {"Dim_Customer": {"mquery_expression": DEDUPED_DIM}}
+        )
+        detector = JoinDetector(tables, config)
+        joins = detector.detect(
+            "Orders",
+            [{"dax_expression": "SUM(Dim_Customer[segment])"}],
+            tables["Orders"],
+        )
+        assert joins == []  # no safe source: the join is not built ...
+        assert (
+            detector.dropped_dims[0]["dimension"] == "Dim_Customer"
+        )  # ... but reported
+        report = emit_migration_report(
+            {}, {}, limitations={"dropped_dimension_joins": detector.dropped_dims}
+        )
+        assert "## Dimension Joins Not Emitted" in report
+        assert "| Orders | Dim_Customer |" in report
+
+    def test_pipeline_output_reports_dropped_join_and_type_changes(self):
+        from src.services.tools.metric_view_utils.pipeline import MetricViewPipeline
+
+        fact = _m(
+            'Typed = Table.TransformColumnTypes(t, {{"amount", Int64.Type}})',
+            result="Typed",
+        )
+        entries = build_ucmv_mquery(
+            {
+                "Orders": {"mquery_expression": fact},
+                "Dim_Customer": {"mquery_expression": DEDUPED_DIM},
+            }
+        )
+        config = {
+            "join_key_map": {"Dim_Customer": {"alias": "c", "join_key": "customer_id"}}
+        }
+        measures = [
+            {
+                "measure_name": "Revenue",
+                "dax_expression": "SUM(Orders[amount])",
+                "proposed_allocation": "Orders",
+            },
+            {
+                "measure_name": "Segments",
+                "dax_expression": "DISTINCTCOUNT(Dim_Customer[segment])",
+                "proposed_allocation": "Orders",
+            },
+        ]
+        pipeline = MetricViewPipeline(
+            mapping=measures,
+            mquery_tables=MQueryParser().parse_json(entries),
+            config=config,
+        )
+        pipeline.run()
+        results = pipeline.get_results()
+        assert results["limitations"]["type_conversions_not_applied"]["Orders"] == [
+            "amount -> Int64.Type: apply CAST(BROUND(amount) AS BIGINT)"
+        ]
+        assert results["limitations"]["dropped_dimension_joins"][0]["dimension"] == (
+            "Dim_Customer"
+        )
+        assert "## Dimension Joins Not Emitted" in results["migration_report"]
+        assert (
+            "## Power Query Type Conversions Not Applied" in results["migration_report"]
+        )

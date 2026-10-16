@@ -695,7 +695,7 @@ class TestExtractFilterFromDefinition:
         filter_def = self._make_filter_def("Sales", "Region", where_clauses=[])
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
-        assert desc is None  # nothing selected: not a filter on its description
+        assert desc == {"unapplied": "no value selected"}  # kept, never applied
 
 
 # ===========================================================================

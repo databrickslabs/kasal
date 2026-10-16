@@ -37,6 +37,9 @@ class FilterSpec(TypedDict, total=False):
     values: list[FilterValue]
     value_type: str  # "date" when the values are ISO dates
     warning: str
+    # Set (alone) on a report filter that exists but cannot be applied exactly.
+    # Kept in the cache so the answer can say which filters it ignored.
+    unapplied: str
 
 
 _CMP_OPERATORS = ("=", "<>", ">", ">=", "<", "<=")
@@ -175,8 +178,47 @@ def spec_from_filter_definition(
     return f"{table}[{prop}]", spec_from_pbi_condition(where[0].get("Condition"))
 
 
+def refusal_reason(condition: object) -> str:
+    """Why ``spec_from_pbi_condition`` refused a condition, for the answer."""
+    if not isinstance(condition, dict) or not condition:
+        return "no value selected"
+    if {"And", "Or"} & set(condition):
+        return "advanced AND/OR filter"
+    if "Between" in condition:
+        return "range filter"
+    negated = isinstance(condition.get("Not"), dict)
+    inner = condition["Not"].get("Expression", {}) if negated else condition
+    if isinstance(inner, dict) and "In" in inner:
+        if _in_values(inner["In"]) is None:
+            return "multi-column or computed values"
+        return "values combined with blank"
+    if isinstance(inner, dict) and "Comparison" in inner:
+        return "negated comparison" if negated else "relative or computed value"
+    if isinstance(inner, dict) and ({"StartsWith", "Contains"} & set(inner)):
+        return "empty or computed text"
+    return "filter type not supported"
+
+
+def filter_from_definition(
+    filter_def: object,
+) -> tuple[str | None, FilterSpec | None]:
+    """Like ``spec_from_filter_definition``, but a filter that exists and
+    cannot be applied comes back as ``{"unapplied": reason}`` (not ``None``),
+    so it stays visible downstream and the answer can report it."""
+    name, spec = spec_from_filter_definition(filter_def)
+    if name is None or spec is not None or not isinstance(filter_def, dict):
+        return name, spec
+    where = (filter_def.get("filter") or {}).get("Where") or []
+    first = where[0] if where and isinstance(where[0], dict) else {}
+    return name, {"unapplied": refusal_reason(first.get("Condition"))}
+
+
 def slicer_selection_spec(vis_data: object, parsed_config: object) -> FilterSpec | None:
-    """The pre-set selection of a slicer visual, from its visual-level filters."""
+    """The pre-set selection of a slicer visual, from its visual-level filters.
+
+    A selection that exists but cannot be applied exactly comes back as
+    ``{"unapplied": reason}``; ``None`` means the slicer has no selection.
+    """
     raw = None
     for source in (vis_data, parsed_config):
         if isinstance(source, dict) and source.get("filters"):
@@ -187,15 +229,18 @@ def slicer_selection_spec(vis_data: object, parsed_config: object) -> FilterSpec
             raw = json.loads(raw)
         except json.JSONDecodeError:
             return None
+    refused: FilterSpec | None = None
     for entry in raw if isinstance(raw, list) else []:
         if not isinstance(entry, dict):
             continue
         where = (entry.get("filter") or {}).get("Where") or []
         if where and isinstance(where[0], dict):
-            spec = spec_from_pbi_condition(where[0].get("Condition"))
+            condition = where[0].get("Condition")
+            spec = spec_from_pbi_condition(condition)
             if spec:
                 return spec
-    return None
+            refused = refused or {"unapplied": refusal_reason(condition)}
+    return refused
 
 
 def _legacy_value(text: str, numeric: bool) -> FilterValue:
@@ -275,6 +320,29 @@ def parse_filter_value(value: object) -> FilterSpec | None:
     return {"operator": "in", "values": [text]}
 
 
+def unapplied_reason(value: object) -> str:
+    """Why a stored filter value has nothing to apply (for the answer)."""
+    if isinstance(value, dict) and isinstance(value.get("unapplied"), str):
+        return str(value["unapplied"])
+    text = _MISMATCH.sub("", value).strip() if isinstance(value, str) else ""
+    if re.match(r"(!=|<>|>=|<=|>|<)", text):
+        return "cached comparison of unknown direction; refetch the report filters"
+    if _UNUSABLE.match(text) or not text:
+        return "no exact value; refetch the report filters"
+    return "value could not be read"
+
+
+def unapplied_filters(filters: object) -> list[tuple[str, str]]:
+    """``(column, reason)`` for every filter in ``filters`` that is not applied."""
+    if not isinstance(filters, dict):
+        return []
+    return [
+        (str(key), unapplied_reason(value))
+        for key, value in filters.items()
+        if not str(key).startswith("_") and parse_filter_value(value) is None
+    ]
+
+
 _WARNED: set[str] = set()
 
 
@@ -344,7 +412,7 @@ def describe_filter(value: object) -> str:
     """Human-readable text for logs, prompts and slicer listings."""
     spec = parse_filter_value(value)
     if not spec:
-        return "no value to apply"
+        return f"not applied: {unapplied_reason(value)}"
     op = spec["operator"]
     vtype = spec.get("value_type", "")
     values = [_dax_literal(v, vtype) for v in spec.get("values", [])]
@@ -405,9 +473,9 @@ def validate_filter_datatype(
     keeps its old behaviour: a mismatch is appended to the text, which
     ``parse_filter_value`` strips again before the value is used.
     """
-    spec = _from_spec_dict(value) if isinstance(value, dict) else None
-    if spec is not None:
-        return check_spec_datatype(spec, column_dtype)
+    if isinstance(value, dict):
+        spec = _from_spec_dict(value)
+        return value if spec is None else check_spec_datatype(spec, column_dtype)
     text = str(value)
     has_quoted = "'" in text and text not in ("has filter", "has complex filter")
     mismatch = (

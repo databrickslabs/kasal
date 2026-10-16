@@ -107,7 +107,7 @@
   "src/backend/src/services/tools/powerbi_field_parameters_calculation_groups_tool.py::PowerBIFieldParametersCalculationGroupsTool._run": 226,
   "src/backend/src/services/tools/powerbi_metadata_reducer_tool.py::PowerBIMetadataReducerTool._execute_reducer_pipeline": 786,
   "src/backend/src/services/tools/powerbi_report_references_tool.py::PowerBIReportReferencesTool._format_markdown_output_multi": 222,
-  "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py::PowerBISemanticModelDaxTool._build_enriched_semantic_context": 229,
+  "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py::PowerBISemanticModelDaxTool._build_enriched_semantic_context": 221,
   "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py::PowerBISemanticModelDaxTool._execute_dax_pipeline": 406,
   "src/backend/src/services/tools/powerbi_semantic_model_fetcher_tool.py::PowerBISemanticModelFetcherTool._execute_fetcher_pipeline": 588,
   "src/backend/src/services/tools/tool_factory.py::ToolFactory._create_tool_impl": 1470,

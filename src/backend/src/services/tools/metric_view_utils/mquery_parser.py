@@ -523,6 +523,7 @@ class MQueryParser:
                     continue
             info = self._parse_sql(table_name, sql)
             info.raw_transpiled_sql = sql
+            info.type_changes = [str(n) for n in entry.get("type_changes") or []]
             tables[table_name] = info
             # ── Diagnostics: make silent fact/source failures visible ──
             if not info.is_fact:

@@ -38,6 +38,45 @@ def build_proposal(
     )
 
 
+def _source_gap_sections(limitations: dict) -> list[str]:
+    """Gaps the YAML itself does not show, reported like untranslatable
+    measures: dimension joins that were dropped, and Power Query type
+    conversions the view does not apply."""
+    lines: list[str] = []
+    dropped = limitations.get("dropped_dimension_joins") or []
+    if dropped:
+        lines += [
+            "## Dimension Joins Not Emitted",
+            "",
+            "These dimensions are referenced by measures but have no physical "
+            "source the view can join safely, so the view does not offer them.",
+            "",
+            "| Fact | Dimension | Reason |",
+            "|------|-----------|--------|",
+        ]
+        lines += [
+            f"| {d['fact']} | {d['dimension']} | {d['reason']} |" for d in dropped
+        ]
+        lines.append("")
+    type_changes = limitations.get("type_conversions_not_applied") or {}
+    if type_changes:
+        lines += [
+            "## Power Query Type Conversions Not Applied",
+            "",
+            "The view reads the physical table, so these conversions from the "
+            "Power Query steps are not applied and values can differ (whole-number "
+            "types round, Currency rounds to 4 decimals, date drops the time). "
+            "Apply the SQL shown in a source view to reproduce them.",
+            "",
+            "| Table | Conversion |",
+            "|-------|------------|",
+        ]
+        for table, notes in sorted(type_changes.items()):
+            lines += [f"| {table} | {note} |" for note in notes]
+        lines.append("")
+    return lines
+
+
 def emit_migration_report(
     all_specs: dict[str, MetricViewSpec],
     stats: dict[str, dict],
@@ -227,7 +266,7 @@ def emit_migration_report(
                 f'| {table_key} | {m.original_name} | {getattr(m, "dax_class", "") or ""} '
                 f"| {reason} | {proposal} |"
             )
-    lines.append("")
+    lines.extend(["", *_source_gap_sections(_lim)])
 
     # ── M:N Relationships ─────────────────────────────────────────────────
 

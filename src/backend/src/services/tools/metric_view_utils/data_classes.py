@@ -55,6 +55,8 @@ class TableInfo:
     raw_transpiled_sql: str = ""  # full transpiled SQL for scan enrichment
     dim_source_tables: dict[str, str] = field(default_factory=dict)
     static_filters: list[str] = field(default_factory=list)
+    # Power Query type conversions the view does not apply (``mquery_handoff``)
+    type_changes: list[str] = field(default_factory=list)
 
 
 @dataclass

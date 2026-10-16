@@ -240,9 +240,32 @@ _VALUE_CHANGING_TYPE = re.compile(
 )
 
 
+# Spark SQL for each conversion. Power Query's Int64.From / Currency.From round
+# half to even by default (RoundingMode.ToEven), which BROUND matches; Date
+# drops the time; Logical maps 0 to false. Text and Time have no exact
+# equivalent (Text.From formats by culture; Spark has no TIME type).
+_INT_SQL_TYPE = {"8": "TINYINT", "16": "SMALLINT", "32": "INT", "64": "BIGINT"}
+
+
+def type_change_sql(column: str, type_text: str) -> str | None:
+    """The SQL that reproduces one conversion, or ``None`` when none does."""
+    col = _quote(column)
+    m = re.search(r"\bInt(8|16|32|64)\.Type\b", type_text)
+    if m:
+        return f"CAST(BROUND({col}) AS {_INT_SQL_TYPE[m.group(1)]})"
+    if re.search(r"\bCurrency\.Type\b", type_text):
+        return f"BROUND({col}, 4)"
+    if re.search(r"\bDate\.Type\b|\btype\s+date\b", type_text):
+        return f"CAST({col} AS DATE)"
+    if re.search(r"\bLogical\.Type\b|\btype\s+logical\b", type_text):
+        return f"CAST({col} AS BOOLEAN)"
+    return None
+
+
 def type_change_notes(steps: list[MStep]) -> list[str]:
-    """``"column -> type"`` for every ``Table.TransformColumnTypes`` entry whose
-    type can change the column's values (see ``_VALUE_CHANGING_TYPE``)."""
+    """One note per ``Table.TransformColumnTypes`` entry whose type can change
+    the column's values: ``"amount -> Int64.Type: apply CAST(BROUND(amount)
+    AS BIGINT)"``, or that no SQL reproduces it exactly."""
     notes: list[str] = []
     for step in steps:
         if step.function != "Table.TransformColumnTypes" or len(step.args) < 2:
@@ -250,8 +273,12 @@ def type_change_notes(steps: list[MStep]) -> list[str]:
         for col, typ in re.findall(
             r'\{\s*"((?:[^"]|"")*)"\s*,\s*([^{}]+?)\s*\}', step.args[1]
         ):
-            if _VALUE_CHANGING_TYPE.search(typ):
-                notes.append(f"{col.replace(chr(34) * 2, chr(34))} -> {typ.strip()}")
+            if not _VALUE_CHANGING_TYPE.search(typ):
+                continue
+            column = col.replace('""', '"')
+            sql = type_change_sql(column, typ)
+            how = f"apply {sql}" if sql else "no exact SQL equivalent"
+            notes.append(f"{column} -> {typ.strip()}: {how}")
     return notes
 
 
