@@ -59,6 +59,7 @@ export default tseslint.config(
           message: 'Render markdown through the shared image policy (safeImageComponents / mdComponents / MarkdownImage in shared/a2ui/lib), then add the file to this allowlist.',
         }],
       }],
+      'no-restricted-syntax': ['error', { selector: "ImportExpression[source.value='react-markdown']", message: 'Render markdown through the shared image policy; see the react-markdown allowlist in eslint.config.js.' }],
     },
   },
   {

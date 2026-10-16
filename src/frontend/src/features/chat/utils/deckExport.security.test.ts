@@ -101,10 +101,34 @@ describe('deck export image policy', () => {
       'data:image/png;base64,AA==',
       '/assets/a.png',
     ]);
-    expect((host.querySelector('#bg') as HTMLElement).style.color).toBe('red');
+    // A style naming a remote resource is dropped whole, not edited.
+    expect(host.querySelector('#bg')?.hasAttribute('style')).toBe(false);
     expect(host.querySelector('#bg2')?.getAttribute('style')).toContain('data:image/png');
     expect(host.querySelector('rect')?.getAttribute('fill')).toBe('url(#g)');
     expect(host.querySelector('a')?.getAttribute('href')).toBe('https://example.com/page');
+  });
+
+  it.each([
+    ['an unclosed, unquoted url(', `color: red; background: url(${remote}/a.png`],
+    ['an unclosed, quoted url(', `color: red; background: url('${remote}/a.png`],
+    ['image-set()', `background-image: image-set('${remote}/a.png' 1x)`],
+    ['-webkit-image-set()', `background-image: -webkit-image-set(url(/x.png) 1x, '${remote}/a.png' 2x)`],
+    ['an escaped url(', `background: u\\72l(${remote}/a.png)`],
+  ])('drops a style that could still fetch through %s', (_form, style) => {
+    const host = document.createElement('div');
+    host.innerHTML = sanitizeForRender(`<section class="slide"><div id="t" style="${style.replace(/"/g, '&quot;')}">x</div></section>`);
+    expect(host.querySelector('#t')?.hasAttribute('style')).toBe(false);
+    expect(host.innerHTML).not.toContain('images.example.org');
+  });
+
+  it('keeps a style whose every url() is local', () => {
+    const style = "color: red; background: url(/assets/a.png) no-repeat, url('data:image/png;base64,AA==')";
+    const host = document.createElement('div');
+    host.innerHTML = sanitizeForRender(`<section class="slide"><div id="t" style="${style.replace(/"/g, '&quot;')}">x</div></section>`);
+    const el = host.querySelector('#t') as HTMLElement;
+    expect(el.style.color).toBe('red');
+    expect(el.getAttribute('style')).toContain('/assets/a.png');
+    expect(el.getAttribute('style')).toContain('data:image/png');
   });
 
   it('applies to the document the PDF export rasterizes', async () => {

@@ -25,14 +25,26 @@ const ACTIVE_CONTENT_TAGS = ['script', 'iframe', 'object', 'embed', 'link', 'met
 // The PDF/PPTX render sits in the app document, where (unlike the preview
 // frame, which allows only data:/blob: images) a remote URL would be fetched.
 // So the shared image policy applies: a remote <img> becomes its alt text, a
-// remote url() in any attribute (style, fill, ...) becomes `none`, and other
-// remote src/href/poster/background attributes are removed. srcset always goes.
-// Links keep their href. A dedicated instance keeps this hook off every other
-// DOMPurify call in the app.
+// CSS-bearing attribute (style, fill, ...) that could fetch from another host is
+// dropped whole, and other remote src/href/poster/background attributes are
+// removed. srcset always goes. Links keep their href. A dedicated instance keeps
+// this hook off every other DOMPurify call in the app.
 const renderPurifier = DOMPurify(window);
 const URL_FUNCTION = /url\(\s*(['"]?)(.*?)\1\s*\)/gi;
 const FETCHING_ATTRS = ['src', 'poster', 'background', 'href', 'xlink:href'];
+// Attributes the browser parses as CSS, so they can name a resource.
+const CSS_ATTRS = new Set(['style', 'fill', 'stroke', 'filter', 'clip-path', 'mask', 'cursor', 'marker-start', 'marker-mid', 'marker-end']);
 const loadsInline = (url: string) => classifyImageSource(url).kind === 'inline';
+
+/** True only when every url() in a CSS value is fully parsed and local. CSS is
+ *  not parsed here: an escape (`u\72l(`), image-set() or a url( the matcher
+ *  cannot close makes the value unsafe, and the attribute is dropped. */
+function cssIsLocal(value: string): boolean {
+  if (value.includes('\\') || /image-set/i.test(value)) return false;
+  const targets = [...value.matchAll(URL_FUNCTION)].map((m) => m[2]);
+  if (targets.length !== (value.match(/url\(/gi) ?? []).length) return false;
+  return targets.every(loadsInline);
+}
 
 renderPurifier.addHook('afterSanitizeAttributes', (node) => {
   if (!(node instanceof Element)) return;
@@ -42,9 +54,8 @@ renderPurifier.addHook('afterSanitizeAttributes', (node) => {
   }
   node.removeAttribute('srcset');
   for (const attr of Array.from(node.attributes)) {
-    if (/url\(/i.test(attr.value)) {
-      node.setAttribute(attr.name, attr.value.replace(URL_FUNCTION, (whole, _q, url) => (loadsInline(url) ? whole : 'none')));
-    }
+    const checked = CSS_ATTRS.has(attr.name.toLowerCase()) || /url\(|image-set/i.test(attr.value);
+    if (checked && !cssIsLocal(attr.value)) node.removeAttribute(attr.name);
   }
   for (const name of FETCHING_ATTRS) {
     if (node.localName === 'a' && name.endsWith('href')) continue;
