@@ -92,15 +92,13 @@ class HumanReviewGuardrail:
 
     async def _restore_running(self) -> None:
         # create_approval_request flips the execution to WAITING_FOR_APPROVAL;
-        # once decided, the run is live again. Safe unconditionally: the run
-        # cannot have reached a terminal state while blocked here.
-        from src.models.execution_status import ExecutionStatus
-        from src.services.execution.status import ExecutionStatusService
+        # once decided, the run is live again, unless it was settled from
+        # outside meanwhile (services/hitl/run_state.py).
+        from src.services.hitl.run_state import restore_running
 
-        await ExecutionStatusService.update_status(
-            job_id=self.execution_id,
-            status=ExecutionStatus.RUNNING.value,
-            message=f"Review of task '{self.task_name}' decided — run continuing",
+        await restore_running(
+            self.execution_id,
+            f"Review of task '{self.task_name}' decided — run continuing",
         )
 
     # ------------------------------ guardrail ------------------------------

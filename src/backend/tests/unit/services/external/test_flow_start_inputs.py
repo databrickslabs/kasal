@@ -200,7 +200,6 @@ class TestArgumentsAreCheckedBeforeTheRunStarts:
         [
             ({"topic": "EU AI act", "colour": "red"}, "unknown argument"),
             ({"topic": 7}, "'topic' should be string"),
-            ({"audience": "board"}, "missing required argument"),
         ],
     )
     async def test_arguments_the_schema_refuses_are_a_422(
@@ -216,6 +215,82 @@ class TestArgumentsAreCheckedBeforeTheRunStarts:
                 )
 
         engine.run_flow.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_extra_keys_are_allowed_when_the_schema_allows_them(self, session):
+        """`additionalProperties: {}` is a schema that accepts anything."""
+        schema = {**_schema("topic"), "additionalProperties": {}}
+        await _published_flow(session, "policy_brief", schema)
+        engine = _engine()
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            await mcp_tools.call_crew_tool(
+                _caller("mcp"),
+                "policy_brief",
+                {"topic": "EU AI act", "colour": "red"},
+                session=session,
+            )
+
+        flow_config = engine.run_flow.await_args.kwargs["flow_config"]
+        assert flow_config["inputs"] == {"topic": "EU AI act", "colour": "red"}
+
+    @pytest.mark.asyncio
+    async def test_an_integral_number_is_an_integer(self, session):
+        schema = {
+            "type": "object",
+            "properties": {"quarter": {"type": "integer"}},
+        }
+        await _published_flow(session, "policy_brief", schema)
+        engine = _engine()
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            await mcp_tools.call_crew_tool(
+                _caller("mcp"), "policy_brief", {"quarter": 3.0}, session=session
+            )
+            with pytest.raises(UnprocessableEntityError, match="integer"):
+                await mcp_tools.call_crew_tool(
+                    _caller("mcp"), "policy_brief", {"quarter": 3.5}, session=session
+                )
+
+        assert engine.run_flow.await_count == 1
+
+
+class TestRequiredInputsDoNotRefuseARun:
+    """The publish dialog marks every placeholder required by default, and the
+    crew path enforces nothing; refusing here stopped flows that ran."""
+
+    REQUIRED = {**_schema("topic", "audience"), "required": ["topic", "audience"]}
+
+    @pytest.mark.asyncio
+    async def test_an_a2a_start_carrying_only_its_text_runs(self, session):
+        await _published_flow(session, "policy_brief", self.REQUIRED)
+        engine = _engine()
+        message = Message(role="user", parts=[Part(kind="text", text="EU AI act")])
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            await a2a_tasks.send_message(
+                _caller("a2a"), message, skill_id="policy_brief", session=session
+            )
+
+        flow_config = engine.run_flow.await_args.kwargs["flow_config"]
+        assert flow_config["inputs"] == {}
+        assert flow_config["user_message"] == "EU AI act"
+
+    @pytest.mark.asyncio
+    async def test_an_mcp_follow_up_turn_with_only_its_session_and_line_runs(
+        self, session
+    ):
+        await _published_flow(session, "research_chat", self.REQUIRED)
+        engine = _engine()
+        with patch(ENGINE, new=AsyncMock(return_value=engine)):
+            await mcp_tools.call_crew_tool(
+                _caller("mcp"),
+                "research_chat",
+                {"session_id": "s-1", "user_message": "And the second one?"},
+                session=session,
+            )
+
+        flow_config = engine.run_flow.await_args.kwargs["flow_config"]
+        assert flow_config["session_id"] == "s-1"
+        assert flow_config["user_message"] == "And the second one?"
+        assert flow_config["inputs"] == {}
 
 
 class TestFlowStartedOverA2a:

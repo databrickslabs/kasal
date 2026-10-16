@@ -33,6 +33,8 @@ ENV_FIELDS = frozenset(
         # Development switches; forced off inside Databricks Apps (see below).
         "DEBUG_MODE",
         "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS",
+        # Set by the server for the run subprocesses it starts.
+        "KASAL_BOOT_ID",
     }
 )
 
@@ -173,6 +175,10 @@ class Settings(BaseSettings):
     # check). A local-dev convenience for a localhost receiver; refused inside
     # Databricks Apps.
     KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS: bool = False
+
+    # Which server process started this run subprocess, so the approval gates
+    # it raises name their owner (services/hitl/boot.py). Empty in the server.
+    KASAL_BOOT_ID: str = ""
 
     @model_validator(mode="after")
     def _apply_databricks_apps_policy(self) -> "Settings":

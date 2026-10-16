@@ -105,8 +105,8 @@ async def _create_approval(
 async def _restore_running(execution_id: str) -> None:
     """Flip WAITING_FOR_APPROVAL back to RUNNING once a gate is decided.
 
-    Safe unconditionally: the run cannot reach a terminal state while its
-    worker thread is blocked on the gate.
+    Not over a run already settled from outside (a restart's reap, the sweep,
+    a stop): see services/hitl/run_state.py.
 
     A FAILED restore is not cosmetic and must not be swallowed: the run keeps
     executing while its status stays WAITING_FOR_APPROVAL, so the UI shows the
@@ -114,14 +114,10 @@ async def _restore_running(execution_id: str) -> None:
     approval" — the decision was made, but nothing reflects it. The usual cause
     is a missing parent row, so say which it is.
     """
-    from src.models.execution_status import ExecutionStatus
     from src.services.execution.status import ExecutionStatusService
+    from src.services.hitl.run_state import restore_running
 
-    updated = await ExecutionStatusService.update_status(
-        job_id=execution_id,
-        status=ExecutionStatus.RUNNING.value,
-        message="Approval decided — run continuing",
-    )
+    updated = await restore_running(execution_id, "Approval decided — run continuing")
     if not updated:
         exists = await ExecutionStatusService.get_status(execution_id) is not None
         logger.error(

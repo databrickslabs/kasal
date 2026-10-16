@@ -262,14 +262,13 @@ class HITLApprovalRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_pending_created_before(self, cutoff: datetime) -> List[HITLApproval]:
-        """Every pending approval, in any group, raised before ``cutoff``."""
+    async def get_all_pending(self) -> List[HITLApproval]:
+        """Every pending approval, in any group (the startup reap's input)."""
         if not self.session:
             raise RuntimeError("HITLApprovalRepository requires a session")
 
         stmt = select(HITLApproval).where(
-            HITLApproval.status == HITLApprovalStatus.PENDING,
-            HITLApproval.created_at < cutoff,
+            HITLApproval.status == HITLApprovalStatus.PENDING
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

@@ -32,7 +32,8 @@ from src.services.flow_builder.conversation.interrupt import (
     APPROVAL_CONFIG_KEY,
     approval_payload,
 )
-from src.services.hitl.expiry import GateExpiry, is_in_run_gate
+from src.services.hitl.boot import BOOT_ID_KEY, current_boot_id
+from src.services.hitl.expiry import IN_RUN_GATE_KINDS, GateExpiry, is_in_run_gate
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,11 @@ class HITLService:
             Created HITLApproval record
         """
         try:
+            if gate_config.get("kind") in IN_RUN_GATE_KINDS:
+                # Which server's worker is blocked on it, so a restart can tell
+                # its own abandoned gates from another deployment's live ones.
+                gate_config = {**gate_config, BOOT_ID_KEY: current_boot_id()}
+
             # Calculate expiration
             timeout_seconds = gate_config.get("timeout_seconds", 3600)
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)

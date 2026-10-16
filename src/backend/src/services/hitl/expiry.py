@@ -31,6 +31,7 @@ from src.models.hitl_approval import (
     HITLTimeoutAction,
 )
 from src.repositories.hitl_repository import HITLApprovalRepository
+from src.services.hitl.boot import BOOT_ID_KEY, current_boot_id, owner_gone
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,21 @@ def _as_utc(moment: datetime) -> datetime:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
+def _abandoned(gate: HITLApproval, current: str, started_before: datetime) -> bool:
+    """Whether nothing can decide ``gate`` any more (see services/hitl/boot.py).
+
+    A gate that names its server is abandoned only when that server is not
+    this one and is provably gone. One raised before gates named their server
+    is abandoned when it is older than this process.
+    """
+    if not is_in_run_gate(gate):
+        return False
+    owner = (gate.gate_config or {}).get(BOOT_ID_KEY)
+    if owner:
+        return str(owner) != current and owner_gone(str(owner))
+    return _as_utc(gate.created_at) < started_before
+
+
 class GateExpiry:
     """Closes gates nobody decided, and ends the runs they would strand."""
 
@@ -76,24 +92,24 @@ class GateExpiry:
         return closed
 
     async def reap_abandoned(self, started_before: datetime) -> List[int]:
-        """Close the in-run gates a previous server process left open.
+        """Close the in-run gates a server process that is gone left open.
 
         Their worker lived in that process (a chat turn) or in a run subprocess
-        it started, and neither survives a restart. Startup cleanup cancels
-        RUNNING runs for the same reason but keeps WAITING_FOR_APPROVAL ones,
-        which is right for a flow gate (its decision relaunches the flow) and
-        wrong for these. A run is cancelled only while it is still waiting and
-        every gate pending on it is an in-run one. Returns the ids closed.
+        it started, and neither survives it. Startup cleanup cancels RUNNING
+        runs for the same reason but keeps WAITING_FOR_APPROVAL ones, which is
+        right for a flow gate (its decision relaunches the flow) and wrong for
+        these. A run is cancelled only while it is still waiting and every gate
+        pending on it is an abandoned in-run one. ``started_before`` is when
+        this process started. Returns the ids closed.
         """
+        current = current_boot_id()
         by_run: Dict[str, List[HITLApproval]] = defaultdict(list)
-        for approval in await self.approval_repo.get_pending_created_before(
-            started_before
-        ):
+        for approval in await self.approval_repo.get_all_pending():
             by_run[approval.execution_id].append(approval)
 
         closed: List[int] = []
         for gates in by_run.values():
-            if not all(is_in_run_gate(gate) for gate in gates):
+            if not all(_abandoned(gate, current, started_before) for gate in gates):
                 continue
             for gate in gates:
                 if await self.approval_repo.update_status(

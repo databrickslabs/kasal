@@ -161,6 +161,12 @@ async def start_hitl_timeout_service() -> None:
     """Start the HITL timeout service as a background task."""
     import asyncio
 
+    from src.services.hitl.boot import export_boot_id
+
+    # Run subprocesses spawned from here on inherit it and stamp their gates
+    # with this server as the owner. One spawned earlier names itself, which
+    # is still a process whose death strands the gate.
+    export_boot_id()
     service = HITLTimeoutService.get_instance()
     service._task = asyncio.create_task(service.start())
     logger.info("HITL timeout service started in background")

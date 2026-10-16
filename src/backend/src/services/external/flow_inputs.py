@@ -75,20 +75,22 @@ def _check(
 ) -> None:
     """Refuse arguments the publication's input_schema does not allow.
 
-    An undeclared key is refused unless the schema says ``additionalProperties``
-    is allowed: JSON Schema permits them by default, but the flow state the
-    schema describes does not.
+    An undeclared key is refused unless the schema sets ``additionalProperties``
+    to anything but ``false`` (``true``, or a schema such as ``{}``): JSON
+    Schema permits extras when it is absent, but the flow state the schema
+    describes does not.
+
+    ``required`` is deliberately not enforced. The publish dialog marks every
+    placeholder required by default, an A2A message can only carry free text,
+    and a conversation's follow-up turn sends only its session and line; the
+    crew path enforces nothing either. Refusing those would stop flows that
+    run today.
     """
     problems: List[str] = []
-    if not schema.get("additionalProperties"):
+    if schema.get("additionalProperties", False) is False:
         unknown = sorted(set(args) - set(declared))
         if unknown:
             problems.append(f"unknown argument(s) {unknown}")
-    required = schema.get("required")
-    if isinstance(required, list):
-        missing = sorted(str(key) for key in required if key not in args)
-        if missing:
-            problems.append(f"missing required argument(s) {missing}")
     for key, value in args.items():
         spec = declared.get(key)
         expected = spec.get("type") if isinstance(spec, dict) else None
@@ -111,5 +113,8 @@ def _has_type(value: object, expected: object) -> bool:
         if isinstance(value, bool) and bool not in python_types:
             continue
         if isinstance(value, python_types):
+            return True
+        # JSON has one number type; 3.0 is an integer to JSON Schema.
+        if type_name == "integer" and isinstance(value, float) and value.is_integer():
             return True
     return False
