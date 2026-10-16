@@ -47,13 +47,9 @@ class PowerBIDaxGenerationMixin(DaxGenerationDeps):
         )
         logger.info("=" * 80)
 
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
+        # The LLM call goes through LLMManager with the run's own credentials;
+        # no llm_workspace_url / llm_token in the tool config is needed.
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
-
-        if not llm_workspace_url or not llm_token:
-            # Fallback: Generate simple DAX without LLM
-            return self._generate_simple_dax(user_question, model_context)
 
         # Check if we have measures to work with
         measures = model_context.get("measures", [])
@@ -550,12 +546,7 @@ CALCULATETABLE(...)
         Generate DAX with self-correction based on previous failed attempts.
         Uses enriched context (Microsoft Copilot-style) for better error recovery.
         """
-        llm_workspace_url = config.get("llm_workspace_url")
-        llm_token = config.get("llm_token")
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
-
-        if not llm_workspace_url or not llm_token:
-            return None
 
         # Build context about previous attempts
         attempts_text = "\n\n".join(

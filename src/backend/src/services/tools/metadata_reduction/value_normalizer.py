@@ -96,8 +96,9 @@ class ValueNormalizer:
                 table_name, column_name, sample_data, slicers
             )
 
-            if not known_values:
-                # No reference values — pass through unchanged
+            if not known_values or isinstance(filter_value, dict):
+                # No reference values, or a structured report filter (operator
+                # + typed values, see report_filters) — pass through unchanged
                 normalized[filter_key] = filter_value
                 log_entries.append(
                     {

@@ -2883,7 +2883,8 @@ class TestGenerateDaxWithLlmFallback:
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def test_no_llm_credentials_falls_back_to_simple(self):
+    def test_llm_failure_without_token_config_falls_back_to_simple(self):
+        """No token config is needed to try the LLM; a failed call falls back."""
         model_context = {
             "measures": [
                 {
@@ -2894,22 +2895,20 @@ class TestGenerateDaxWithLlmFallback:
             ],
             "tables": [],
         }
-        config = {}  # No llm_workspace_url or llm_token
-        result = self._run(
-            self.tool._generate_dax_with_llm("Revenue?", model_context, config)
-        )
-        # Should fall back to _generate_simple_dax
-        assert result is not None
-        assert "EVALUATE" in result
+        failing = AsyncMock(side_effect=RuntimeError("no endpoint"))
+        with patch("src.services.llm.manager.LLMManager.completion", failing):
+            result = self._run(
+                self.tool._generate_dax_with_llm("Revenue?", model_context, {})
+            )
+        assert failing.await_count == 1
+        assert result is not None and "EVALUATE" in result
 
-    def test_no_measures_with_no_llm_returns_none(self):
+    def test_no_measures_returns_none(self):
         model_context = {"measures": [], "tables": []}
-        config = {}
         result = self._run(
-            self.tool._generate_dax_with_llm("Revenue?", model_context, config)
+            self.tool._generate_dax_with_llm("Revenue?", model_context, {})
         )
-        # No measures → None from simple dax
-        assert result is None
+        assert result is None  # no measures: nothing to ask the LLM about
 
     def test_llm_http_error_falls_back_to_simple(self):
         model_context = {
@@ -3382,22 +3381,22 @@ class TestGenerateDaxWithSelfCorrection:
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def test_no_llm_credentials_returns_none(self):
+    def test_llm_failure_without_token_config_returns_none(self):
         model_context = {
             "measures": [{"name": "Revenue", "table": "Sales"}],
             "tables": [],
         }
-        config = {}  # No LLM creds
         previous = [
             {"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "err"}
         ]
-
-        result = self._run(
-            self.tool._generate_dax_with_self_correction(
-                "Revenue?", model_context, config, previous
+        failing = AsyncMock(side_effect=RuntimeError("no endpoint"))
+        with patch("src.services.llm.manager.LLMManager.completion", failing):
+            result = self._run(
+                self.tool._generate_dax_with_self_correction(
+                    "Revenue?", model_context, {}, previous
+                )
             )
-        )
-        assert result is None
+        assert failing.await_count == 1 and result is None
 
     def test_llm_exception_returns_none(self):
         model_context = {
