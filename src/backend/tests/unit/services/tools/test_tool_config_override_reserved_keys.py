@@ -378,7 +378,7 @@ class TestPowerBITaskOverridesStillApply:
         override = {
             **POWER_BI_TASK_OVERRIDE,
             "databricks_host": "https://workspace.example.com",
-            "pbi_api_base_url": "https://api.powerbi.com/v1.0/myorg",
+            "pbi_api_base_url": "https://pbi.example.com/v1.0/myorg",
             "catalog": "main",
             "schema_name": "kpis",
         }
