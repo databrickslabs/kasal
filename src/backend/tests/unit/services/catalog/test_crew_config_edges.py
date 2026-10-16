@@ -20,8 +20,11 @@ from src.services.catalog.crew_config import (
     build_crew_execution_config_by_id,
 )
 from src.services.external.invocation import _crew_to_yaml
+from src.utils.user_context import GroupContext
 
 CREW_ID = str(uuid.UUID(int=7))
+# The projection reads only the caller's workspace; these rows are its.
+CALLER = GroupContext(group_ids=["ws-a"], group_email="a@example.com")
 
 
 def agent(agent_id, name):
@@ -96,7 +99,7 @@ def patch_catalog(agents, tasks):
 async def project(crew_row, tasks, agents=AGENTS):
     agent_p, task_p = patch_catalog(agents, tasks)
     with agent_p, task_p:
-        return await build_crew_execution_config(None, crew_row)
+        return await build_crew_execution_config(None, crew_row, CALLER)
 
 
 def assignments(tasks_yaml):
@@ -194,7 +197,7 @@ class TestEveryServerSideProjection:
         crew_row, tasks = two_agent_crew()
         agent_p, task_p = patch_catalog(AGENTS, tasks)
         with agent_p, task_p:
-            _, tasks_yaml = await _crew_to_yaml(crew_row, None)
+            _, tasks_yaml = await _crew_to_yaml(crew_row, None, CALLER)
         assert assignments(tasks_yaml) == {"research": "Researcher", "write": "Writer"}
 
     @pytest.mark.asyncio
@@ -202,13 +205,13 @@ class TestEveryServerSideProjection:
         """The trigger queue and resume load the crew by id."""
         crew_row, tasks = two_agent_crew()
         crews = AsyncMock()
-        crews.get = AsyncMock(return_value=crew_row)
+        crews.get_by_group = AsyncMock(return_value=crew_row)
         agent_p, task_p = patch_catalog(AGENTS, tasks)
         with (
             agent_p,
             task_p,
             patch("src.services.catalog.crews.CrewService", return_value=crews),
         ):
-            projected = await build_crew_execution_config_by_id(None, CREW_ID)
+            projected = await build_crew_execution_config_by_id(None, CREW_ID, CALLER)
         _, tasks_yaml = projected
         assert assignments(tasks_yaml) == {"research": "Researcher", "write": "Writer"}
