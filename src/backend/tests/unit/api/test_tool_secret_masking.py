@@ -61,6 +61,8 @@ def _task():
         tools=[],
         tool_configs=PBI,
         callback_config={"token": PAT, "volume_path": "/Volumes/a/b/c"},
+        # The task form's copy of the callback config, PAT included.
+        config={"callback_config": {"token": PAT}, "timeout": 30},
         created_at=NOW,
         updated_at=NOW,
     )
@@ -234,10 +236,13 @@ def test_masking_leaves_non_secret_values_and_the_rows_alone(rows):
         "max_tokens": 9,
     }
     assert task["callback_config"]["volume_path"] == "/Volumes/a/b/c"
+    assert task["config"]["callback_config"]["token"] == REDACTED_PLACEHOLDER
+    assert task["config"]["timeout"] == 30
     assert crew["nodes"][0]["data"]["tool_configs"]["Power BI Tool"]["tenant_id"] == (
         "t"
     )
     # The response is a copy: the rows the session would commit are untouched.
     assert rows["agent"].tool_configs == PBI
     assert rows["task"].callback_config["token"] == PAT
+    assert rows["task"].config["callback_config"]["token"] == PAT
     assert rows["crew"].nodes[0]["data"]["tool_configs"] == PBI

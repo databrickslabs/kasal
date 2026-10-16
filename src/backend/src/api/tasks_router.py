@@ -16,8 +16,9 @@ from src.services.catalog.secret_view import masked_response
 from src.services.catalog.tasks import TaskService
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
-#: Task fields that may hold credentials (callback_config carries a PAT).
-_SECRET_FIELDS = ("tool_configs", "callback_config")
+#: Task fields that may hold credentials: tool overrides, and the volume
+#: callback's PAT, saved in callback_config and again in config.callback_config.
+_SECRET_FIELDS = ("tool_configs", "callback_config", "config")
 
 router = APIRouter(
     prefix="/tasks",

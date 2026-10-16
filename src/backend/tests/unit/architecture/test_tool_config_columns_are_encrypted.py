@@ -21,7 +21,8 @@ import src.db.sensitive_json as sensitive_json
 ENCRYPTED = {
     "agents": {"tool_configs"},
     "crews": {"tool_configs", "nodes"},
-    "tasks": {"tool_configs", "callback_config"},
+    # tasks.config nests a second copy of the callback config (its PAT).
+    "tasks": {"tool_configs", "callback_config", "config"},
     "tools": {"config"},
     "group_tools": {"config"},
 }

@@ -35,9 +35,9 @@ def _client(material, principal):
     return SimpleNamespace(secrets=secrets)
 
 
-def test_restored_keys_replace_the_ones_parsed_before(
-    isolated_encryption_keys, monkeypatch
-):
+def test_restored_keys_replace_the_ones_parsed_before(tmp_path, monkeypatch):
+    # This test rewrites the key files: give it its own, not the session's.
+    monkeypatch.setattr(EncryptionUtils, "get_key_directory", lambda: tmp_path)
     # A key pair is in use (and parsed) before startup restores the stored one.
     sealed_before = EncryptionUtils.encrypt_value("before")
     assert EncryptionUtils.decrypt_value(sealed_before) == "before"

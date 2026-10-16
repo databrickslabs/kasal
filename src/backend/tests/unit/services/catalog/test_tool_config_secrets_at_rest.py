@@ -262,6 +262,8 @@ async def _create_task(factory):
                 expected_output="o",
                 tool_configs=PBI,
                 callback_config={"volume_path": "/Volumes/a/b/c", "token": PAT},
+                # Where the task form saves it: config.callback_config.
+                config={"callback_config": {"token": PAT}, "timeout": 30},
             ),
             GROUP,
         )
@@ -279,6 +281,16 @@ class TestTasks:
         assert callback["token"].startswith("ENC:")
         assert callback["volume_path"] == "/Volumes/a/b/c"
         assert SECRET not in json.dumps(configs) and PAT not in json.dumps(callback)
+
+    async def test_the_callback_token_in_config_is_ciphertext(self, factory):
+        task_id = await _create_task(factory)
+        config = await _raw(factory, "tasks", "config", task_id)
+        assert config["callback_config"]["token"].startswith("ENC:")
+        assert config["timeout"] == 30
+        assert PAT not in json.dumps(config)
+        async with factory() as session:
+            task = await TaskService(session).get(task_id)
+            assert task.config["callback_config"]["token"] == PAT
 
     async def test_a_read_then_commit_writes_nothing(self, factory):
         task_id = await _create_task(factory)

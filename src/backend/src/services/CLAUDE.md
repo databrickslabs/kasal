@@ -375,12 +375,14 @@ Where its callers went, in case you are following an old example:
 ## Security
 
 - Tool-config columns (`agents`/`crews`/`tasks.tool_configs`, `crews.nodes`,
-  `tasks.callback_config`, `tools`/`group_tools.config`) use the `SensitiveJSON`
-  column type (`src/db/sensitive_json.py`): it encrypts on write and decrypts on
-  load, so a service works with plaintext and must never encrypt or decrypt
-  them itself. A new credential-bearing JSON column gets the same type. Log a config's key names,
-  never its values; read responses mask credentials for members without builder
-  rights (`services/catalog/secret_view.py`).
+  `tasks.callback_config`, `tasks.config`, `tools`/`group_tools.config`) use the
+  `SensitiveJSON` column type (`src/db/sensitive_json.py`): it encrypts on write
+  and decrypts on load, so a service works with plaintext and must never encrypt
+  or decrypt them itself. A new credential-bearing JSON column gets the same
+  type. Log a config's key names, never its values; read responses mask
+  credentials for members without builder rights
+  (`services/catalog/secret_view.py`); a run record's inputs go through
+  `services/execution/stored_inputs.mask_run_inputs`.
 - For Databricks calls made from a service, add User-Agent telemetry
   (see `src/backend/CLAUDE.md`).
 

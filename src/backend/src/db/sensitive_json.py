@@ -9,10 +9,11 @@ own, while every statement that writes the column sends ciphertext:
   (``sensitive_data_utils.is_sensitive_key``) is encrypted, in nested
   dictionaries and lists too. A value that is already encrypted is left alone,
   so nothing is encrypted twice.
-- On read, every ``ENC:`` value is decrypted. A row written before this type
-  existed reads unchanged. A value that cannot be decrypted (the key changed)
-  comes back still encrypted: it is never blanked, and a later save writes it
-  back as it was.
+- On read, every ``ENC:`` value under a sensitive key is decrypted (the same
+  keys as on write, so an ordinary field that happens to start ``ENC:`` is
+  left alone). A row written before this type existed reads unchanged. A value
+  that cannot be decrypted (the key changed) comes back still encrypted: it is
+  never blanked, and a later save writes it back as it was.
 
 Only the Python side changes: the database type is still JSON, so applying it
 to an existing column needs no DDL and no migration.

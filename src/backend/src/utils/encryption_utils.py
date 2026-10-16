@@ -86,9 +86,18 @@ class EncryptionUtils:
 
     @staticmethod
     def reset_key_cache() -> None:
-        """Drop the parsed RSA keys, e.g. after the key files were replaced."""
+        """Drop the parsed RSA keys, e.g. after the key files were replaced,
+        and every plaintext decrypted under them."""
         EncryptionUtils._cached_private = None
         EncryptionUtils._cached_public = None
+        EncryptionUtils._forget_decrypted_values()
+
+    @staticmethod
+    def _forget_decrypted_values() -> None:
+        # Lazy: sensitive_data_utils imports this module.
+        from src.utils.sensitive_data_utils import forget_decrypted_values
+
+        forget_decrypted_values()
 
     @staticmethod
     def _private_key() -> rsa.RSAPrivateKey:
@@ -96,6 +105,8 @@ class EncryptionUtils:
         cached = EncryptionUtils._cached_private
         if cached is not None and cached[0] == pem:
             return cached[1]
+        if cached is not None:  # the key file changed under a running process
+            EncryptionUtils._forget_decrypted_values()
         # get_or_create_ssh_keys only ever generates RSA keys.
         key = cast(
             rsa.RSAPrivateKey,

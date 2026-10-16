@@ -60,14 +60,18 @@ class ToolSecretView:
         )
 
 
+def _masked(value: object) -> object:
+    """``value`` with its credential strings masked; a nested model stays one."""
+    if isinstance(value, BaseModel):
+        return type(value).model_validate(mask_sensitive_strings(value.model_dump()))
+    return mask_sensitive_strings(value)
+
+
 def masked_response(
     schema: Type[_Response], row: object, fields: Tuple[str, ...]
 ) -> _Response:
     """``row`` as ``schema``, with the credentials in ``fields`` masked."""
     response = schema.model_validate(row)
     return response.model_copy(
-        update={
-            field: mask_sensitive_strings(getattr(response, field, None))
-            for field in fields
-        }
+        update={field: _masked(getattr(response, field, None)) for field in fields}
     )

@@ -20,6 +20,7 @@ from src.models.crew import Crew
 from src.models.group_tool import GroupTool
 from src.models.task import Task
 from src.models.tool import Tool
+from src.utils.encryption_utils import EncryptionUtils
 
 SECRET = "sp-secret-value-123"
 CONFIG = {"PowerBI": {"client_secret": SECRET, "tenant_id": "tenant-1"}}
@@ -71,6 +72,7 @@ def _rows(session):
         ("crews", "nodes", crew.id.hex, crew),
         ("tasks", "tool_configs", task.id, task),
         ("tasks", "callback_config", task.id, task),
+        ("tasks", "config", task.id, task),
         ("tools", "config", tool.id, tool),
         ("group_tools", "config", group_tool.id, group_tool),
     ]
@@ -82,6 +84,7 @@ COLUMNS = [
     "crews.nodes",
     "tasks.tool_configs",
     "tasks.callback_config",
+    "tasks.config",
     "tools.config",
     "group_tools.config",
 ]
@@ -175,7 +178,66 @@ class TestCrewNodes:
             assert session.get(Crew, crew_id).nodes == nodes
 
 
+def _decrypt_spy():
+    return patch.object(
+        EncryptionUtils, "decrypt_value", wraps=EncryptionUtils.decrypt_value
+    )
+
+
+class TestDecryptCache:
+    def _stored_agent(self, engine):
+        with Session(engine) as session:
+            session.add(
+                Agent(
+                    id="a1", name="a", role="r", goal="g", tools=[], tool_configs=CONFIG
+                )
+            )
+            session.commit()
+
+    def _load(self, engine):
+        with Session(engine) as session:
+            return session.get(Agent, "a1").tool_configs
+
+    def test_a_repeated_load_does_not_decrypt_again(self, engine):
+        self._stored_agent(engine)
+        with _decrypt_spy() as decrypt:
+            assert self._load(engine) == CONFIG
+            assert self._load(engine) == CONFIG
+        assert decrypt.call_count == 1
+
+    def test_a_key_reset_decrypts_afresh(self, engine):
+        self._stored_agent(engine)
+        with _decrypt_spy() as decrypt:
+            self._load(engine)
+            EncryptionUtils.reset_key_cache()
+            self._load(engine)
+        assert decrypt.call_count == 2
+
+    def test_a_failed_decrypt_is_not_cached(self, engine):
+        self._stored_agent(engine)
+        _write_raw(
+            engine, "agents", "tool_configs", "a1", {"P": {"client_secret": "ENC:eA=="}}
+        )
+        with _decrypt_spy() as decrypt:
+            self._load(engine)
+            self._load(engine)
+        assert decrypt.call_count == 2
+
+
 class TestReading:
+    def test_enc_text_under_an_ordinary_key_is_not_decrypted(self, engine):
+        # A prompt or label may start with "ENC:"; only credential keys are
+        # ever encrypted, so only they are decrypted.
+        with Session(engine) as session:
+            session.add(Task(id="t1", name="t", description="d", expected_output="o"))
+            session.commit()
+        value = {"llm_guardrail": {"description": "ENC: keep this as typed"}}
+        _write_raw(engine, "tasks", "config", "t1", value)
+        with _decrypt_spy() as decrypt:
+            with Session(engine) as session:
+                assert session.get(Task, "t1").config == value
+        decrypt.assert_not_called()
+
     def test_a_value_that_cannot_be_decrypted_keeps_its_ciphertext(self, engine):
         with Session(engine) as session:
             agent = Agent(id="a1", name="a", role="r", goal="g", tools=[])

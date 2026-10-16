@@ -34,7 +34,9 @@ class Task(Base):
     )  # User-specific tool configuration overrides
     async_execution: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
     context: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
-    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
+    # SensitiveJSON: the task form saves the volume callback's config, PAT
+    # included, under config.callback_config.
+    config: Mapped[Any] = mapped_column(SensitiveJSON, default=dict, nullable=True)
 
     # Multi-group fields
     group_id: Mapped[Optional[str]] = mapped_column(

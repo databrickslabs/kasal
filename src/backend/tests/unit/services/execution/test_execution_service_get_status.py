@@ -62,55 +62,7 @@ def make_crew_config(**kw):
     return cfg
 
 
-# ---------------------------------------------------------------------------
-# _mask_inputs_sensitive_data
-# ---------------------------------------------------------------------------
-
-
-class TestMaskInputsSensitiveData:
-    def _svc(self):
-        return make_service()
-
-    def test_returns_none_when_empty(self):
-        svc = self._svc()
-        assert svc._mask_inputs_sensitive_data(None) is None
-        assert svc._mask_inputs_sensitive_data({}) == {}
-
-    def test_masks_agent_tool_configs(self):
-        svc = self._svc()
-        with patch("src.services.execution.service.mask_sensitive_fields") as msk:
-            msk.return_value = {"masked": True}
-            inputs = {"agents_yaml": {"a": {"tool_configs": {"secret": "s"}}}}
-            result = svc._mask_inputs_sensitive_data(inputs)
-            assert result["agents_yaml"]["a"]["tool_configs"] == {"masked": True}
-
-    def test_masks_task_tool_configs(self):
-        svc = self._svc()
-        with patch("src.services.execution.service.mask_sensitive_fields") as msk:
-            msk.return_value = {"masked": True}
-            inputs = {"tasks_yaml": {"t": {"tool_configs": {"secret": "s"}}}}
-            result = svc._mask_inputs_sensitive_data(inputs)
-            assert result["tasks_yaml"]["t"]["tool_configs"] == {"masked": True}
-
-    def test_masks_nested_inputs(self):
-        svc = self._svc()
-        with patch("src.services.execution.service.mask_sensitive_fields") as msk:
-            msk.return_value = {"key": "***"}
-            inputs = {"inputs": {"client_secret": "my-secret"}}
-            result = svc._mask_inputs_sensitive_data(inputs)
-            assert result["inputs"] == {"key": "***"}
-
-    def test_no_tool_configs_in_agent(self):
-        svc = self._svc()
-        inputs = {"agents_yaml": {"a": {"role": "researcher"}}}
-        result = svc._mask_inputs_sensitive_data(inputs)
-        assert result["agents_yaml"]["a"]["role"] == "researcher"
-
-    def test_agents_yaml_not_dict_skipped(self):
-        svc = self._svc()
-        inputs = {"agents_yaml": "string"}
-        result = svc._mask_inputs_sensitive_data(inputs)
-        assert result["agents_yaml"] == "string"
+# _mask_inputs_sensitive_data: see test_mask_run_inputs.py.
 
 
 # ---------------------------------------------------------------------------

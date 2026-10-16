@@ -74,6 +74,7 @@ class TestParsedKeyCache:
 class TestEncryptionUtils:
     """Test EncryptionUtils class."""
 
+    @pytest.mark.usefixtures("real_key_directory")
     def test_get_key_directory(self):
         """Test get_key_directory creates and returns correct path."""
         with patch("pathlib.Path.home") as mock_home:
@@ -534,6 +535,7 @@ class TestEncryptionIntegration:
 class TestEncryptionUtilsKeyDirectory:
     """Test get_key_directory static method"""
 
+    @pytest.mark.usefixtures("real_key_directory")
     @patch("pathlib.Path.home")
     def test_get_key_directory_real_path(self, mock_home):
         """Test get_key_directory with real path operations"""

@@ -21,6 +21,7 @@ resume that read them back would hand a placeholder string to the model.
 Kept free of heavy imports: the flow subprocess imports this.
 """
 
+import copy
 from typing import Dict, FrozenSet, TypeVar
 
 #: Launch-config keys that carry the caller's identity to the subprocess.
@@ -28,6 +29,11 @@ from typing import Dict, FrozenSet, TypeVar
 RUN_CREDENTIAL_KEYS: FrozenSet[str] = frozenset(
     {"user_token", "access_token", "group_context"}
 )
+
+#: Fields of an ``agents_yaml`` / ``tasks_yaml`` entry that can hold stored
+#: credentials: tool overrides, the volume callback's config (its PAT), and
+#: the task config, which nests a second copy of that callback config.
+CREDENTIAL_FIELDS = ("tool_configs", "callback_config", "config")
 
 _V = TypeVar("_V")
 
@@ -41,3 +47,34 @@ def strip_run_credentials(inputs: Dict[str, _V]) -> Dict[str, _V]:
     if not isinstance(inputs, dict):
         return inputs
     return {k: v for k, v in inputs.items() if k not in RUN_CREDENTIAL_KEYS}
+
+
+def mask_run_inputs(inputs: Dict[str, object]) -> Dict[str, object]:
+    """``inputs`` as a run record may keep it, for every launch path.
+
+    No run credentials, and every credential string masked in the agents' and
+    tasks' :data:`CREDENTIAL_FIELDS` and in the user ``inputs``. Strings only:
+    a count such as ``max_tokens`` survives a resume that reads it back. A deep
+    copy; the run itself keeps the unmasked config. Empty input comes back as
+    it was.
+    """
+    if not inputs:
+        return inputs
+    # Imported here: cryptography, which the masking module pulls in, is not
+    # needed for strip_run_credentials alone.
+    from src.utils.sensitive_data_utils import mask_sensitive_strings
+
+    masked = copy.deepcopy(strip_run_credentials(inputs))
+    for section in ("agents_yaml", "tasks_yaml"):
+        entries = masked.get(section)
+        if not isinstance(entries, dict):
+            continue
+        for entry in entries.values():
+            if not isinstance(entry, dict):
+                continue
+            for field in CREDENTIAL_FIELDS:
+                if field in entry:
+                    entry[field] = mask_sensitive_strings(entry[field])
+    if isinstance(masked.get("inputs"), dict):
+        masked["inputs"] = mask_sensitive_strings(masked["inputs"])
+    return masked

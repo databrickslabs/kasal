@@ -13,6 +13,10 @@ from src.utils.sensitive_data_utils import REDACTED_PLACEHOLDER
 MODULE = "src.services.triggers.queue_consumer_service"
 SECRET = "sp-secret-value-123"
 PAT = "dapi-pat-value-456"
+#: An event input. The run's event context also copies inputs into the task
+#: description, which is prose, not a credential field; only ``inputs`` is
+#: checked for it here.
+INPUT_SECRET = "event-input-secret-789"
 
 AGENTS = {
     "analyst": {
@@ -25,6 +29,7 @@ TASKS = {
         "description": "d",
         "tool_configs": {"SerperDevTool": {"serper_api_key": SECRET}},
         "callback_config": {"token": PAT, "volume_path": "/Volumes/a/b/c"},
+        "config": {"callback_config": {"token": PAT}, "timeout": 30},
     }
 }
 
@@ -45,7 +50,7 @@ async def test_stored_inputs_are_masked_and_the_run_gets_plaintext():
         "id": 3,
         "group_id": "g1",
         "target": {"kind": "crew", "id": "crew-1"},
-        "payload": {"inputs": {"topic": "t"}},
+        "payload": {"inputs": {"topic": "t", "client_secret": INPUT_SECRET}},
         "attempts": 1,
     }
     agents, tasks = json.loads(json.dumps(AGENTS)), json.loads(json.dumps(TASKS))
@@ -84,8 +89,11 @@ async def test_stored_inputs_are_masked_and_the_run_gets_plaintext():
     assert pbi == {"client_secret": REDACTED_PLACEHOLDER, "tenant_id": "t"}
     callback = stored["tasks_yaml"]["extract"]["callback_config"]
     assert callback["volume_path"] == "/Volumes/a/b/c"
+    assert stored["tasks_yaml"]["extract"]["config"]["timeout"] == 30
+    assert stored["inputs"] == {"topic": "t", "client_secret": REDACTED_PLACEHOLDER}
 
     launched = run.await_args.kwargs["config"]
     assert launched.agents_yaml == AGENTS
-    for field in ("tool_configs", "callback_config"):
+    for field in ("tool_configs", "callback_config", "config"):
         assert launched.tasks_yaml["extract"][field] == TASKS["extract"][field]
+    assert launched.inputs["client_secret"] == INPUT_SECRET

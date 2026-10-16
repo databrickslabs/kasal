@@ -198,7 +198,6 @@ export class JobExecutionService {
             const agentData = node.data;
             const savedAgent = savedAgents.get(String(agentData.agentId ?? ''))
               ?? savedAgents.get(node.id.replace(/^agent-/, ''));
-            console.log('Agent node data:', JSON.stringify(agentData, null, 2));
             console.log(`[DEBUG] Node ${node.id} knowledge_sources:`, agentData.knowledge_sources);
             const agentName = `agent_${node.id}`;
             
@@ -487,22 +486,8 @@ export class JobExecutionService {
         config.tasks_yaml = this.sortTasksByDependencies(config.tasks_yaml);
       }
       
-      // Log the final configuration before sending to the server
-      if (executionType === 'flow') {
-        console.log('Sending flow job to server:', JSON.stringify({
-          ...config,
-          // Truncate nodes and edges for better logging
-          nodes: config.nodes ? `[${config.nodes.length} nodes]` : 'none',
-          edges: config.edges ? `[${config.edges.length} edges]` : 'none'
-        }, null, 2));
-      } else {
-        // For crew executions, show the full config
-        console.log('Sending crew job to server:', JSON.stringify(config, null, 2));
-      }
-      
       // Comprehensive logging to debug knowledge_sources
       console.log('[JobExecutionService] === SENDING CONFIG TO BACKEND ===');
-      console.log('[JobExecutionService] Full config:', JSON.stringify(config, null, 2));
       console.log('[JobExecutionService] agents_yaml keys:', Object.keys(config.agents_yaml));
       
       // Log each agent's knowledge_sources

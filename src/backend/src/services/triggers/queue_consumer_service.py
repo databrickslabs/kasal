@@ -24,14 +24,14 @@ import json
 import re
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
 from src.schemas.execution import CrewConfig
-from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.services.execution.stored_inputs import mask_run_inputs
 from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().system
@@ -39,43 +39,10 @@ logger = LoggerManager.get_instance().system
 MAX_ATTEMPTS = 5
 TRIGGER_TYPE = "lakebase_queue"
 
-#: Fields of an agents_yaml / tasks_yaml entry that may hold credentials.
-_SECRET_FIELDS = ("tool_configs", "callback_config")
-
 
 def _backoff_at(attempts: int) -> datetime:
     """Exponential backoff visibility time, capped at 5 minutes."""
     return datetime.utcnow() + timedelta(seconds=min(300, (2 ** max(0, attempts)) * 10))
-
-
-def _masked_entry(entry: object) -> object:
-    if not isinstance(entry, dict):
-        return entry
-    return {
-        key: (
-            mask_sensitive_fields(value)
-            if key in _SECRET_FIELDS and isinstance(value, dict)
-            else value
-        )
-        for key, value in entry.items()
-    }
-
-
-def _stored_inputs(config_dict: Mapping[str, object]) -> Dict[str, object]:
-    """The run row's copy of ``config_dict``, credentials in tool configs masked.
-
-    A saved crew's agents and tasks come back from the catalog decrypted. The
-    run itself needs them so; the copy kept in ``executionhistory.inputs`` does
-    not, and is masked as on every other launch path. Never mutates the input.
-    """
-    stored = dict(config_dict)
-    for section in ("agents_yaml", "tasks_yaml"):
-        entries = stored.get(section)
-        if isinstance(entries, dict):
-            stored[section] = {
-                name: _masked_entry(entry) for name, entry in entries.items()
-            }
-    return stored
 
 
 class TriggerQueueConsumerService:
@@ -208,7 +175,9 @@ class TriggerQueueConsumerService:
                     session,
                     job_id=job_id,
                     run_name=run_name,
-                    inputs=_stored_inputs(config_dict),
+                    # A saved crew comes back from the catalog decrypted; the
+                    # run gets that, its record the masked copy.
+                    inputs=mask_run_inputs(config_dict),
                     execution_type=execution_type,
                     group_id=group_id,
                     flow_id=config.flow_id if execution_type == "flow" else None,

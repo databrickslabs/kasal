@@ -113,7 +113,7 @@ class TestTask:
 
     def test_task_json_columns_properties(self):
         """Test JSON column properties."""
-        json_columns = ["tools", "context", "config", "output"]
+        json_columns = ["tools", "context", "output"]
 
         for col_name in json_columns:
             column = getattr(Task, col_name).property.columns[0]
@@ -121,7 +121,7 @@ class TestTask:
             assert isinstance(column.type, JSON)
 
         # Credential-bearing columns: JSON in the database, encrypted leaves.
-        for col_name in ("tool_configs", "callback_config"):
+        for col_name in ("tool_configs", "callback_config", "config"):
             column = getattr(Task, col_name).property.columns[0]
             assert isinstance(column.type, SensitiveJSON)
             assert isinstance(column.type.impl_instance, JSON)

@@ -460,6 +460,17 @@ class TestDecryptSensitiveFields:
             )
         assert result == {"secret": "ENC:bad_data"}  # no blank, no marker key
 
+    def test_decrypts_only_under_sensitive_keys(self):
+        mock_eu = _make_encryption_utils_mock()
+        with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
+            from src.utils import sensitive_data_utils
+
+            result = sensitive_data_utils.decrypt_sensitive_fields(
+                {"prompt": "ENC: as typed", "api_keys": ["ENC:encrypted_k"]}
+            )
+        assert result == {"prompt": "ENC: as typed", "api_keys": ["k"]}
+        mock_eu.decrypt_value.assert_called_once_with("encrypted_k")
+
     def test_walks_lists_and_a_list_root(self):
         mock_eu = _make_encryption_utils_mock()
         with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):

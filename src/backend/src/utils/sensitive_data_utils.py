@@ -6,6 +6,8 @@ including encryption, decryption, and masking for logs and API responses.
 """
 
 import logging
+import threading
+from collections import OrderedDict
 from typing import Any, Dict, Optional, Set
 
 from src.utils.encryption_utils import EncryptionUtils
@@ -203,6 +205,22 @@ def encrypt_sensitive_json(value: object) -> object:
     return _seal(value, False, True)
 
 
+#: Plaintext of recently decrypted values, keyed by ciphertext. Every load of a
+#: tool-config column decrypts every secret in it (~1.6 ms each, an RSA
+#: private-key operation), and the same rows are read over and over. A
+#: ciphertext only ever decrypts to one value, so a hit is always right; only
+#: successful decrypts are kept, and the parsed-key reset clears it.
+_DECRYPTED_MAX = 2048
+_decrypted: "OrderedDict[str, str]" = OrderedDict()
+_decrypted_lock = threading.Lock()
+
+
+def forget_decrypted_values() -> None:
+    """Drop every cached plaintext (``EncryptionUtils.reset_key_cache`` calls it)."""
+    with _decrypted_lock:
+        _decrypted.clear()
+
+
 def _decrypt_or_keep(value: str) -> str:
     """The plaintext of ``value``, or ``value`` itself when it cannot be decrypted.
 
@@ -210,11 +228,20 @@ def _decrypt_or_keep(value: str) -> str:
     credential is recoverable once the right key is back. ``encrypt_value``
     never encrypts an empty string, so an empty result always means failure.
     """
+    with _decrypted_lock:
+        cached = _decrypted.get(value)
+        if cached is not None:
+            _decrypted.move_to_end(value)
+            return cached
     try:
         plain = EncryptionUtils.decrypt_value(value[len(ENCRYPTED_PREFIX) :])
     except Exception:  # noqa: BLE001 — reported below; the caller gets the ciphertext
         plain = ""
     if plain:
+        with _decrypted_lock:
+            _decrypted[value] = plain
+            if len(_decrypted) > _DECRYPTED_MAX:
+                _decrypted.popitem(last=False)
         return plain
     logger.warning(
         "A stored credential could not be decrypted and is left encrypted; "
@@ -223,12 +250,17 @@ def _decrypt_or_keep(value: str) -> str:
     return value
 
 
-def _open(value: object, recursive: bool) -> object:
+def _open(value: object, sensitive: bool, recursive: bool) -> object:
+    """``value`` with each encrypted string under a sensitive key decrypted.
+
+    The mirror of ``_seal``: only where encryption could have happened, so an
+    ``ENC:``-looking string under an ordinary key (a prompt) is left alone.
+    """
     if recursive and isinstance(value, dict):
         return decrypt_sensitive_fields(value)
     if recursive and isinstance(value, list):
-        return [_open(item, True) for item in value]
-    if isinstance(value, str) and is_encrypted(value):
+        return [_open(item, sensitive, True) for item in value]
+    if sensitive and isinstance(value, str) and is_encrypted(value):
         return _decrypt_or_keep(value)
     return value
 
@@ -239,9 +271,9 @@ def decrypt_sensitive_fields(
     """
     Decrypt sensitive fields in a dictionary (e.g., tool_configs).
 
-    Every ``ENC:`` string is decrypted, whatever its key, in nested dictionaries
-    and lists too. A value that cannot be decrypted is returned still
-    encrypted, never blanked.
+    Decrypts the ``ENC:`` strings under sensitive keys, the same keys
+    ``encrypt_sensitive_fields`` encrypts, in nested dictionaries and lists too.
+    A value that cannot be decrypted is returned still encrypted, never blanked.
 
     Args:
         data: The dictionary containing potentially encrypted data
@@ -252,12 +284,15 @@ def decrypt_sensitive_fields(
     """
     if not data or not isinstance(data, dict):
         return data
-    return {key: _open(value, recursive) for key, value in data.items()}
+    return {
+        key: _open(value, isinstance(key, str) and is_sensitive_key(key), recursive)
+        for key, value in data.items()
+    }
 
 
 def decrypt_sensitive_json(value: object) -> object:
     """``decrypt_sensitive_fields`` for any JSON value, a list at the root too."""
-    return _open(value, True)
+    return _open(value, False, True)
 
 
 def mask_sensitive_strings(value: object, sensitive: bool = False) -> object:
