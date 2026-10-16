@@ -37,8 +37,9 @@ from src.seeds.prompt_templates import DETECT_INTENT_TEMPLATE
 from src.services.catalog.crews import CrewService
 from src.services.catalog.templates import TemplateService
 from src.services.chat.capability_dispatch import route_and_dispatch
+from src.services.chat.catalog_delete import can_delete, delete_from_chat
 from src.services.chat.intent_dispatch import detect_request_intent
-from src.services.chat.slash_commands import detect_slash_command
+from src.services.chat.slash_commands import detect_slash_command, help_text
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.flow_builder.flow_service import FlowService
 from src.services.generation.agents import AgentGenerationService
@@ -1617,27 +1618,7 @@ Please analyze this message and provide your intent classification."""
                         f"Unknown command `{invalid_cmd}`.\n\n" if invalid else ""
                     )
 
-                    full_help = (
-                        "**Crew Commands:**\n"
-                        "- `/list crews` — List all saved crews in your catalog\n"
-                        "- `/load crew <name>` — Load a saved crew onto the canvas\n"
-                        "- `/save crew [name]` — Save the current canvas as a crew\n"
-                        "- `/run crew` — Execute the current crew on the canvas\n"
-                        "- `/delete crew <name>` — Delete a saved crew\n"
-                        "- `/schedule crew` — Schedule the current crew for automatic execution\n"
-                        "\n"
-                        "**Flow Commands:**\n"
-                        "- `/list flows` — List all saved flows\n"
-                        "- `/load flow <name>` — Load a saved flow onto the canvas\n"
-                        "- `/save flow [name]` — Save the current flow\n"
-                        "- `/run flow` — Execute the current flow\n"
-                        "- `/delete flow <name>` — Delete a saved flow\n"
-                        "\n"
-                        "**Other:**\n"
-                        "- `/help` — Show this help message\n"
-                        "\n"
-                        "**Aliases:** `/plans` = `/list crews`, `/exec` = `/run`, `/flows` = `/list flows`"
-                    )
+                    full_help = help_text(can_delete(group_context))
 
                     if command_help:
                         # Show only the command-specific usage hint
@@ -1739,80 +1720,22 @@ Please analyze this message and provide your intent classification."""
                         ),
                     }
 
-                elif dispatcher_response.intent == IntentType.CATALOG_DELETE:
-                    delete_name = dispatcher_response.extracted_info.get(
-                        "args", ""
-                    ).strip()
-                    crews = await self.catalog_service.find_by_group(group_context)
-
-                    if not delete_name:
-                        generation_result = {
-                            "type": "catalog_delete",
-                            "message": "Please specify a crew name to delete. Usage: `/delete crew <name>`",
-                        }
-                    else:
-                        crew, matches = match_by_name(crews, delete_name)
-                        if crew is not None:
-                            await self.catalog_service.delete_by_group(
-                                crew.id, group_context
-                            )
-                            recent = " (most recent)" if len(matches) > 1 else ""
-                            generation_result = {
-                                "type": "catalog_delete",
-                                "message": f"Crew '{crew.name}'{recent} has been deleted.",
-                            }
-                        elif matches:
-                            generation_result = {
-                                "type": "catalog_list",
-                                "plans": [
-                                    {"id": str(c.id), "name": c.name} for c in matches
-                                ],
-                                "message": f"Multiple crews match '{delete_name}'. Please be more specific:",
-                            }
-                        else:
-                            generation_result = {
-                                "type": "catalog_delete",
-                                "message": f"No crew found matching '{delete_name}'.",
-                            }
-
-                elif dispatcher_response.intent == IntentType.FLOW_DELETE:
-                    delete_name = dispatcher_response.extracted_info.get(
-                        "args", ""
-                    ).strip()
-                    flows = await self.flow_service.get_all_flows_for_group(
-                        group_context
+                elif dispatcher_response.intent in (
+                    IntentType.CATALOG_DELETE,
+                    IntentType.FLOW_DELETE,
+                ):
+                    # Editors and admins only; exact name or id; asks to confirm.
+                    generation_result = await delete_from_chat(
+                        (
+                            "crew"
+                            if dispatcher_response.intent == IntentType.CATALOG_DELETE
+                            else "flow"
+                        ),
+                        dispatcher_response.extracted_info.get("args", ""),
+                        group_context,
+                        self.catalog_service,
+                        self.flow_service,
                     )
-
-                    if not delete_name:
-                        generation_result = {
-                            "type": "flow_delete",
-                            "message": "Please specify a flow name to delete. Usage: `/delete flow <name>`",
-                        }
-                    else:
-                        flow, flow_matches = match_by_name(flows, delete_name)
-                        if flow is not None:
-                            await self.flow_service.force_delete_flow_with_executions_with_group_check(
-                                flow.id, group_context
-                            )
-                            recent = " (most recent)" if len(flow_matches) > 1 else ""
-                            generation_result = {
-                                "type": "flow_delete",
-                                "message": f"Flow '{flow.name}'{recent} has been deleted.",
-                            }
-                        elif flow_matches:
-                            generation_result = {
-                                "type": "flow_list",
-                                "flows": [
-                                    {"id": str(f.id), "name": f.name}
-                                    for f in flow_matches
-                                ],
-                                "message": f"Multiple flows match '{delete_name}'. Please be more specific:",
-                            }
-                        else:
-                            generation_result = {
-                                "type": "flow_delete",
-                                "message": f"No flow found matching '{delete_name}'.",
-                            }
 
                 else:
                     logger.warning(

@@ -16,6 +16,37 @@ not to write an llmlog row for a call that never happened.
 
 from typing import Any, Dict, Optional
 
+# `/delete` lines are listed only to callers who may delete (editors, admins).
+_CREW_DELETE_HELP = "- `/delete crew <name>` — Delete a saved crew (asks to confirm)\n"
+_FLOW_DELETE_HELP = "- `/delete flow <name>` — Delete a saved flow (asks to confirm)\n"
+
+
+def help_text(can_delete: bool) -> str:
+    """The full ``/help`` text, with the delete commands only for ``can_delete``."""
+    crew_delete = _CREW_DELETE_HELP if can_delete else ""
+    flow_delete = _FLOW_DELETE_HELP if can_delete else ""
+    return (
+        "**Crew Commands:**\n"
+        "- `/list crews` — List all saved crews in your catalog\n"
+        "- `/load crew <name>` — Load a saved crew onto the canvas\n"
+        "- `/save crew [name]` — Save the current canvas as a crew\n"
+        "- `/run crew` — Execute the current crew on the canvas\n"
+        f"{crew_delete}"
+        "- `/schedule crew` — Schedule the current crew for automatic execution\n"
+        "\n"
+        "**Flow Commands:**\n"
+        "- `/list flows` — List all saved flows\n"
+        "- `/load flow <name>` — Load a saved flow onto the canvas\n"
+        "- `/save flow [name]` — Save the current flow\n"
+        "- `/run flow` — Execute the current flow\n"
+        f"{flow_delete}"
+        "\n"
+        "**Other:**\n"
+        "- `/help` — Show this help message\n"
+        "\n"
+        "**Aliases:** `/plans` = `/list crews`, `/exec` = `/run`, `/flows` = `/list flows`"
+    )
+
 
 def detect_slash_command(message: str) -> Optional[Dict[str, Any]]:
     """Detect and parse slash commands (e.g., /list, /load my-plan).
