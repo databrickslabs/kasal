@@ -15,11 +15,23 @@ from src.services.agent_builder.schema_converter import build_model_from_schema
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.task_builder import build_task_args
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
-from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 # Get loggers from the centralized logging system
 logger = LoggerManager.get_instance().crew
 guardrail_logger = LoggerManager.get_instance().guardrails
+
+
+def _loggable_keys(config: object) -> List[str]:
+    """The key names of a tool or callback config, for the logs (never values)."""
+    return sorted(config) if isinstance(config, dict) else []
+
+
+def _loggable_tool_names(tools: List[object]) -> List[str]:
+    """Tool names for the logs: a tool's repr can include its credentials."""
+    return [
+        t if isinstance(t, str) else str(getattr(t, "name", type(t).__name__))
+        for t in tools
+    ]
 
 
 def is_data_missing(output: Any) -> bool:
@@ -319,9 +331,12 @@ async def create_task(
                     )
 
                 tool_override = task_tool_configs_map.get(tool_name, {})
+                # Key names only: the override carries the tool's credentials.
                 logger.info(
-                    f"Task {task_key} - Auto-creating {tool_name} with "
-                    f"override: {tool_override}"
+                    "Task %s - Auto-creating %s with override keys: %s",
+                    task_key,
+                    tool_name,
+                    _loggable_keys(tool_override),
                 )
 
                 tool_instance = tool_factory.create_tool(
@@ -402,26 +417,15 @@ async def create_task(
                             "Measure Conversion Pipeline",
                         ]
                         if tool_name in debug_tools:
+                            # Key names only: the override carries credentials.
                             logger.info(
-                                f"Task {task_key} - {tool_name} task_tool_configs keys: {list(task_tool_configs.keys())}"
+                                "Task %s - %s task_tool_configs keys: %s; "
+                                "override keys: %s",
+                                task_key,
+                                tool_name,
+                                list(task_tool_configs.keys()),
+                                _loggable_keys(tool_override),
                             )
-                            logger.info(
-                                f"Task {task_key} - {tool_name} tool_override: {tool_override}"
-                            )
-                            # Also log if the override has actual values
-                            if tool_override:
-                                override_preview = {
-                                    k: (
-                                        v[:30] + "..."
-                                        if isinstance(v, str) and len(v) > 30
-                                        else v
-                                    )
-                                    for k, v in tool_override.items()
-                                    if v and "secret" not in k.lower()
-                                }
-                                logger.info(
-                                    f"Task {task_key} - {tool_name} override values preview: {override_preview}"
-                                )
 
                         # Create the tool instance with overrides
                         tool_instance = tool_factory.create_tool(
@@ -474,8 +478,11 @@ async def create_task(
                                 )
                         else:
                             logger.error(
-                                f"Could not create tool instance for {tool_name}: the tool factory returned None (see its logs). "
-                                f"Tool config: {mask_sensitive_fields(tool_config)}"
+                                "Could not create tool instance for %s: the tool "
+                                "factory returned None (see its logs). Tool config "
+                                "keys: %s",
+                                tool_name,
+                                _loggable_keys(tool_config),
                             )
                     except Exception as e:
                         logger.error(f"Error creating tool {tool_name}: {str(e)}")
@@ -488,7 +495,7 @@ async def create_task(
         except Exception as e:
             logger.error(f"Error resolving tool IDs for task {task_key}: {str(e)}")
 
-    logger.info(f"This is the tools: {task_tools}")
+    logger.info("This is the tools: %s", _loggable_tool_names(task_tools))
     # Log tool information if provided
     if task_tools:
         logger.info(f"Task {task_key} has {len(task_tools)} specific tools assigned:")
@@ -604,8 +611,12 @@ async def create_task(
                                     is not None
                                     else True
                                 )
+                            # Key names only: a task's callback_config can hold a PAT.
                             logger.info(
-                                f"Merged task-specific config with global defaults for task {task_key}: {callback_config}"
+                                "Merged task-specific config with global defaults "
+                                "for task %s: keys %s",
+                                task_key,
+                                _loggable_keys(callback_config),
                             )
                     else:
                         logger.info(
@@ -683,7 +694,7 @@ async def create_task(
         return task
     except Exception as e:
         logger.error(f"Error creating task: {e}")
-        # Log the task_args for debugging
-        logger.error(f"Task args: {task_args}")
+        # Key names only: the values include tool instances and their credentials.
+        logger.error("Task args keys: %s", sorted(task_args))
         logger.error(f"Stack trace: {traceback.format_exc()}")
         raise

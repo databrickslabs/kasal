@@ -203,6 +203,22 @@ RequestEmailDep = Annotated[str, Depends(get_request_email)]
 GroupContextDep = Annotated[GroupContext, Depends(get_group_context)]
 
 
+async def get_tool_secrets_visible(
+    session: SessionDep, group_context: GroupContextDep
+) -> bool:
+    """Whether the caller may read the credentials stored in tool configs.
+
+    Read endpoints for agents, tasks, crews and tools mask them when this is
+    False; see ``services/catalog/secret_view``.
+    """
+    from src.services.catalog.secret_view import ToolSecretView
+
+    return await ToolSecretView(session).visible_to(group_context)
+
+
+ToolSecretsVisibleDep = Annotated[bool, Depends(get_tool_secrets_visible)]
+
+
 def require_group_id(group_context: GroupContext) -> str:
     """The caller's primary workspace id, for services that scope by one group.
 

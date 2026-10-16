@@ -99,7 +99,10 @@ class BaseRepository(Generic[ModelType, IdT]):
         logger = logging.getLogger(__name__)
 
         try:
-            logger.debug(f"Creating new {self.model.__name__} with data: {obj_in}")
+            # Field names only: values can carry credentials (tool configs).
+            logger.debug(
+                "Creating new %s with fields: %s", self.model.__name__, sorted(obj_in)
+            )
             db_obj = self.model(**obj_in)
             self.session.add(db_obj)
 
@@ -200,7 +203,10 @@ class BaseRepository(Generic[ModelType, IdT]):
                 return None
 
             logger.debug(
-                f"Found {self.model.__name__} with ID {id}, updating with: {obj_in}"
+                "Found %s with ID %s, updating fields: %s",
+                self.model.__name__,
+                id,
+                sorted(obj_in),
             )
 
             # Use SQLAlchemy's update statement instead of ORM-style updates

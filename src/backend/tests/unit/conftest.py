@@ -32,3 +32,18 @@ def restore_tool_hook_lists():
     for hooks, before in zip(_hook_lists(), saved):
         if hooks is not None:
             hooks[:] = before
+
+
+@pytest.fixture
+def isolated_encryption_keys(tmp_path, monkeypatch):
+    """Point EncryptionUtils at a fresh key pair under ``tmp_path``.
+
+    Opt-in: a test that really encrypts (the tool-config column type does on
+    every save) must not read or create the developer's key files in HOME.
+    """
+    from src.utils.encryption_utils import EncryptionUtils
+
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir()
+    monkeypatch.setattr(EncryptionUtils, "get_key_directory", lambda: key_dir)
+    return key_dir

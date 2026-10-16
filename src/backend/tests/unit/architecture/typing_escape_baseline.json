@@ -247,10 +247,10 @@
   "src/services/agent_builder/task_adapter.py::Any": 12,
   "src/services/assets/service.py::Any": 9,
   "src/services/billing/service.py::Any": 2,
-  "src/services/catalog/agents.py::Any": 5,
+  "src/services/catalog/agents.py::Any": 3,
   "src/services/catalog/crew_config.py::Any": 17,
   "src/services/catalog/crew_feedback.py::Any": 3,
-  "src/services/catalog/crews.py::Any": 4,
+  "src/services/catalog/crews.py::Any": 1,
   "src/services/catalog/schemas.py::Any": 1,
   "src/services/catalog/tasks.py::Any": 1,
   "src/services/catalog/templates.py::Any": 1,
@@ -755,7 +755,7 @@
   "src/utils/encryption_utils.py::cast": 2,
   "src/utils/model_config.py::Any": 1,
   "src/utils/safe_eval.py::Any": 7,
-  "src/utils/sensitive_data_utils.py::Any": 13,
+  "src/utils/sensitive_data_utils.py::Any": 11,
   "src/utils/telemetry.py::Any": 3,
   "src/utils/user_context.py::Any": 14
 }

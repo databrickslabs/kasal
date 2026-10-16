@@ -14,9 +14,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.core.databricks_app import DatabricksAppInstallation
 from src.core.logger import LoggerManager
 from src.utils.databricks_url_utils import DatabricksURLUtils
-from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = LoggerManager.get_instance().crew
+
+
+def _loggable_embedder(embedder: object) -> str:
+    """An embedder config for the logs: provider and key NAMES, never values.
+
+    These dicts carry the provider API key (``config.api_key``), and these log
+    lines reach crew.log and the run's execution logs.
+    """
+    if not isinstance(embedder, dict):
+        return "none"
+    config = embedder.get("config")
+    keys = sorted(config) if isinstance(config, dict) else []
+    return f"provider={embedder.get('provider')} config_keys={keys}"
 
 
 class EmbedderConfigBuilder:
@@ -51,12 +63,14 @@ class EmbedderConfigBuilder:
                 if isinstance(ec, dict) and "provider" in ec:
                     embedder_config = ec
                     logger.info(
-                        f"Found valid embedder configuration: {mask_sensitive_fields(embedder_config)}"
+                        "Found valid embedder configuration: %s",
+                        _loggable_embedder(embedder_config),
                     )
                     break
                 else:
                     logger.warning(
-                        f"Found invalid embedder config (missing provider): {ec}"
+                        "Found invalid embedder config (missing provider): keys=%s",
+                        sorted(ec) if isinstance(ec, dict) else type(ec).__name__,
                     )
 
         # Default to Databricks if no valid config found
@@ -116,7 +130,8 @@ class EmbedderConfigBuilder:
                     },
                 }
                 logger.info(
-                    f"Databricks embedder unavailable, falling back to Ollama: {crew_kwargs['embedder']}"
+                    "Databricks embedder unavailable, falling back to Ollama: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
                 )
                 self.embedder_config = crew_kwargs["embedder"]
         elif provider == "openai":
@@ -132,12 +147,15 @@ class EmbedderConfigBuilder:
             # Other providers - pass through config as-is
             crew_kwargs["embedder"] = embedder_config
             logger.info(
-                f"Configured CrewAI embedder for {provider}: {crew_kwargs['embedder']}"
+                "Configured CrewAI embedder for %s: %s",
+                provider,
+                _loggable_embedder(crew_kwargs["embedder"]),
             )
             self.embedder_config = crew_kwargs.get("embedder")
 
         logger.info(
-            f"Final embedder configuration: {crew_kwargs.get('embedder', 'None (default)')}"
+            "Final embedder configuration: %s",
+            _loggable_embedder(crew_kwargs.get("embedder")),
         )
 
         return crew_kwargs, self.custom_embedder, self.embedder_config
@@ -450,7 +468,8 @@ class EmbedderConfigBuilder:
                     },
                 }
                 logger.info(
-                    f"Configured CrewAI embedder for OpenAI: {crew_kwargs['embedder']}"
+                    "Configured CrewAI embedder for OpenAI: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
                 )
         except Exception as e:
             logger.error(f"Error configuring OpenAI embedder: {e}")
@@ -476,7 +495,10 @@ class EmbedderConfigBuilder:
                 "url": config.get("url") or ollama_base_url(),
             },
         }
-        logger.info(f"Configured CrewAI embedder for Ollama: {crew_kwargs['embedder']}")
+        logger.info(
+            "Configured CrewAI embedder for Ollama: %s",
+            _loggable_embedder(crew_kwargs["embedder"]),
+        )
         return crew_kwargs
 
     async def _configure_google_embedder(
@@ -500,7 +522,8 @@ class EmbedderConfigBuilder:
                     },
                 }
                 logger.info(
-                    f"Configured CrewAI embedder for Google: {crew_kwargs['embedder']}"
+                    "Configured CrewAI embedder for Google: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
                 )
         except Exception as e:
             logger.error(f"Error configuring Google embedder: {e}")

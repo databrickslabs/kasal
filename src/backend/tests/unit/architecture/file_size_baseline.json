@@ -120,7 +120,7 @@
   "src/backend/tests/unit/services/agent_builder/test_crew_preparation_agent_task_creation.py": 1053,
   "src/backend/tests/unit/services/agent_builder/test_process_crew_executor_async.py": 853,
   "src/backend/tests/unit/services/agent_builder/test_process_crew_executor_isolated_execution_context.py": 819,
-  "src/backend/tests/unit/services/catalog/test_agent_service.py": 906,
+  "src/backend/tests/unit/services/catalog/test_agent_service.py": 824,
   "src/backend/tests/unit/services/catalog/test_crew_service.py": 928,
   "src/backend/tests/unit/services/catalog/test_schema_service.py": 920,
   "src/backend/tests/unit/services/catalog/test_template_service.py": 821,

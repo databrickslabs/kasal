@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.db.sensitive_json import SensitiveJSON
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
@@ -67,7 +68,7 @@ class Agent(Base):
     #: keeps working when a workspace overrides a builtin with its own version.
     skills: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
     tool_configs: Mapped[Any] = mapped_column(
-        JSON, default=dict, nullable=True
+        SensitiveJSON, default=dict, nullable=True
     )  # User-specific tool configuration overrides
     function_calling_llm: Mapped[Optional[str]] = mapped_column(String)
 

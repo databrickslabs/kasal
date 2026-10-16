@@ -374,10 +374,13 @@ Where its callers went, in case you are following an old example:
 
 ## Security
 
-- Encrypt sensitive fields before persisting and decrypt after reading, using the
-  helpers in `src.utils.sensitive_data_utils` (see `_encrypt_tool_configs_in_data`
-  / `_decrypt_agent_tool_configs`). Decrypted values are in-memory only — never
-  write them back to the DB or into logs.
+- Tool-config columns (`agents`/`crews`/`tasks.tool_configs`, `crews.nodes`,
+  `tasks.callback_config`, `tools`/`group_tools.config`) use the `SensitiveJSON`
+  column type (`src/db/sensitive_json.py`): it encrypts on write and decrypts on
+  load, so a service works with plaintext and must never encrypt or decrypt
+  them itself. A new credential-bearing JSON column gets the same type. Log a config's key names,
+  never its values; read responses mask credentials for members without builder
+  rights (`services/catalog/secret_view.py`).
 - For Databricks calls made from a service, add User-Agent telemetry
   (see `src/backend/CLAUDE.md`).
 

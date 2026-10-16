@@ -353,15 +353,54 @@ class TestEncryptSensitiveFields:
         assert result["password"] == ""
         mock_eu.encrypt_value.assert_not_called()
 
-    def test_returns_original_on_encrypt_failure(self):
+    def test_raises_on_encrypt_failure_rather_than_keep_plaintext(self):
         mock_eu = _make_encryption_utils_mock()
         mock_eu.encrypt_value.side_effect = RuntimeError("fail")
         with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
             from src.utils import sensitive_data_utils
 
-            # Should not raise; falls back to original value on error
-            result = sensitive_data_utils.encrypt_sensitive_fields({"api_key": "mykey"})
-        assert result["api_key"] == "mykey"
+            # The result is what gets stored: a plaintext fallback would be saved.
+            with pytest.raises(RuntimeError):
+                sensitive_data_utils.encrypt_sensitive_fields({"api_key": "mykey"})
+
+    def test_walks_lists(self):
+        mock_eu = _make_encryption_utils_mock()
+        with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
+            from src.utils import sensitive_data_utils
+
+            result = sensitive_data_utils.encrypt_sensitive_fields(
+                {
+                    "servers": [{"name": "s", "auth_token": "t"}],
+                    "api_keys": ["k1", ""],
+                    "names": ["plain"],
+                    "max_tokens": 10,
+                }
+            )
+        assert result["servers"] == [{"name": "s", "auth_token": "ENC:encrypted_t"}]
+        assert result["api_keys"] == ["ENC:encrypted_k1", ""]
+        assert result["names"] == ["plain"]
+        assert result["max_tokens"] == 10
+
+    def test_a_list_at_the_root(self):
+        mock_eu = _make_encryption_utils_mock()
+        with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
+            from src.utils import sensitive_data_utils
+
+            result = sensitive_data_utils.encrypt_sensitive_json(
+                [{"data": {"tool_configs": {"T": {"password": "pw"}}}}]
+            )
+        assert result == [
+            {"data": {"tool_configs": {"T": {"password": "ENC:encrypted_pw"}}}}
+        ]
+
+    def test_does_not_mutate_its_input(self):
+        mock_eu = _make_encryption_utils_mock()
+        data = {"T": {"password": "pw"}, "l": [{"token": "t"}]}
+        with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
+            from src.utils import sensitive_data_utils
+
+            sensitive_data_utils.encrypt_sensitive_fields(data)
+        assert data == {"T": {"password": "pw"}, "l": [{"token": "t"}]}
 
 
 # ---------------------------------------------------------------------------
@@ -405,29 +444,31 @@ class TestDecryptSensitiveFields:
         assert result["config"]["password"] == "pw"
         assert result["config"]["host"] == "db.example.com"
 
-    def test_returns_empty_string_on_decrypt_error(self):
+    @pytest.mark.parametrize("failure", ["raises", "returns_empty"])
+    def test_keeps_the_ciphertext_when_it_cannot_decrypt(self, failure):
+        """A blanked value would be saved over the only copy of the credential."""
         mock_eu = _make_encryption_utils_mock()
-        mock_eu.decrypt_value.side_effect = Exception("bad")
+        if failure == "raises":
+            mock_eu.decrypt_value.side_effect = Exception("bad")
+        else:  # EncryptionUtils.decrypt_value reports failure as ''
+            mock_eu.decrypt_value.side_effect = lambda v: ""
         with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
             from src.utils import sensitive_data_utils
 
             result = sensitive_data_utils.decrypt_sensitive_fields(
                 {"secret": "ENC:bad_data"}
             )
-        assert result["secret"] == ""
+        assert result == {"secret": "ENC:bad_data"}  # no blank, no marker key
 
-    def test_decrypt_error_adds_no_marker_key(self):
-        """On decrypt failure we blank the value but must NOT add a marker key —
-        the dict may be re-persisted, and a stray key would pollute tool_configs."""
+    def test_walks_lists_and_a_list_root(self):
         mock_eu = _make_encryption_utils_mock()
-        mock_eu.decrypt_value.side_effect = Exception("key mismatch")
         with patch("src.utils.sensitive_data_utils.EncryptionUtils", mock_eu):
             from src.utils import sensitive_data_utils
 
-            result = sensitive_data_utils.decrypt_sensitive_fields(
-                {"secret": "ENC:bad_data"}
+            result = sensitive_data_utils.decrypt_sensitive_json(
+                [{"servers": [{"auth_token": "ENC:encrypted_t"}], "n": 1}]
             )
-        assert result == {"secret": ""}  # exactly one key, blanked — no breadcrumb
+        assert result == [{"servers": [{"auth_token": "t"}], "n": 1}]
 
     def test_decrypt_error_logs_actionable_warning(self):
         """decrypt failure logs an actionable 're-enter your credential' warning
@@ -543,8 +584,48 @@ class TestMaskSensitiveFields:
 
 
 # ---------------------------------------------------------------------------
-# mask_sensitive_string
+# mask_sensitive_strings
 # ---------------------------------------------------------------------------
+
+
+class TestMaskSensitiveStrings:
+    """Tests for mask_sensitive_strings() (API responses)."""
+
+    def test_masks_strings_in_nested_dicts_and_lists(self):
+        from src.utils.sensitive_data_utils import (
+            REDACTED_PLACEHOLDER,
+            mask_sensitive_strings,
+        )
+
+        value = [
+            {
+                "data": {
+                    "tool_configs": {"T": {"client_secret": "s", "tenant_id": "t"}},
+                    "servers": [{"auth_token": "a", "name": "n"}],
+                    "api_keys": ["k", ""],
+                }
+            }
+        ]
+        data = mask_sensitive_strings(value)[0]["data"]
+        assert data["tool_configs"]["T"] == {
+            "client_secret": REDACTED_PLACEHOLDER,
+            "tenant_id": "t",
+        }
+        assert data["servers"] == [{"auth_token": REDACTED_PLACEHOLDER, "name": "n"}]
+        assert data["api_keys"] == [REDACTED_PLACEHOLDER, ""]
+
+    def test_leaves_numbers_and_empty_values_alone(self):
+        from src.utils.sensitive_data_utils import mask_sensitive_strings
+
+        value = {"max_tokens": 4000, "password": "", "token_limit": None}
+        assert mask_sensitive_strings(value) == value
+
+    def test_does_not_mutate_its_input(self):
+        from src.utils.sensitive_data_utils import mask_sensitive_strings
+
+        value = {"T": {"password": "pw"}, "l": [{"token": "t"}]}
+        mask_sensitive_strings(value)
+        assert value == {"T": {"password": "pw"}, "l": [{"token": "t"}]}
 
 
 # ---------------------------------------------------------------------------

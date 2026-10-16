@@ -168,6 +168,8 @@ def _ensure_material(scope: str) -> None:
     directory = EncryptionUtils.get_key_directory()
     _write_private_file(directory / "private_key.pem", material["private_key"])
     _write_private_file(directory / "public_key.pem", material["public_key"])
+    # Keys parsed before this point came from files that were just replaced.
+    EncryptionUtils.reset_key_cache()
     # Subprocesses inherit this key and read the restored RSA files. No SDK call
     # or key generation is needed on their encrypt/decrypt paths.
     os.environ["ENCRYPTION_KEY"] = material["fernet"]

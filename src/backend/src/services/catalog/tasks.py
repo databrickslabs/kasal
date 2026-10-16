@@ -13,6 +13,10 @@ from src.utils.user_context import GroupContext
 class TaskService(BaseService[Task, TaskCreate]):
     """
     Service for Task model with business logic.
+
+    Security: ``tasks.tool_configs`` and ``tasks.callback_config`` are
+    ``SensitiveJSON`` columns, so the credentials in them are encrypted on every
+    write and decrypted on load. This service works with plaintext.
     """
 
     def __init__(
