@@ -248,7 +248,7 @@
   "src/services/assets/service.py::Any": 9,
   "src/services/billing/service.py::Any": 2,
   "src/services/catalog/agents.py::Any": 5,
-  "src/services/catalog/crew_config.py::Any": 17,
+  "src/services/catalog/crew_config.py::Any": 15,
   "src/services/catalog/crew_feedback.py::Any": 3,
   "src/services/catalog/crews.py::Any": 4,
   "src/services/catalog/schemas.py::Any": 1,

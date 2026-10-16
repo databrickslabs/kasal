@@ -27,6 +27,11 @@ produce something different. So every field the row carries is projected, and
 the set is asserted against the model in
 ``tests/unit/services/catalog/test_crew_config.py`` so a column added later
 cannot be silently left behind.
+
+**Only the caller's workspace is read.** The crew id, and the ids it lists, can
+come from the caller (a trigger target names any id), so every read goes through
+``run_lookup`` with the caller's ``GroupContext``. With no group ids nothing is
+read; a crew of another workspace is "not found", the same as a deleted one.
 """
 
 import logging
@@ -35,11 +40,12 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Agent columns that are pure pass-through: present in the config under the
-# same name whenever the row has a value. Excluded deliberately: id, name,
-# group_id, created_by_email, created_at, updated_at (identity/audit, not
-# behaviour), and temperature (carried inside the model config, not the agent
-# entry the engine reads).
+# same name whenever the row has a value. Excluded deliberately: group_id,
+# created_by_email, created_at, updated_at (audit, not behaviour). id and name
+# are emitted explicitly. temperature stays the row's 0-100 value: the kernel
+# reads spec["temperature"] and scales it (kernel/agent_builder).
 _AGENT_FIELDS = (
+    "temperature",
     "execution_effort",
     "llm",
     "function_calling_llm",
@@ -152,46 +158,49 @@ async def build_crew_execution_config(
     Args:
         session: The session to resolve the crew's agents and tasks on.
         crew: The saved ``Crew`` row.
-        group_context: When given, agents and tasks are read through the
-            group-checked accessors so a crew cannot pull in another tenant's
-            rows even if its id lists name them.
+        group_context: The caller's workspace. Agents and tasks are read only
+            from its groups, so a crew cannot pull in another tenant's rows
+            even if its id lists name them. With no group ids, nothing is read.
 
     Returns:
         ``(agents_yaml, tasks_yaml)``. Either may be empty when the crew's id
-        lists reference rows that no longer exist — callers must treat an empty
-        pair as "cannot rebuild" rather than as a valid empty crew.
+        lists reference rows that no longer exist or are not the caller's —
+        callers must treat an empty pair as "cannot rebuild" rather than as a
+        valid empty crew.
     """
     from src.services.catalog.agents import AgentService
+    from src.services.catalog.run_lookup import (
+        agent_for_run,
+        run_group_ids,
+        task_for_run,
+    )
     from src.services.catalog.tasks import TaskService
+
+    if not run_group_ids(group_context):
+        logger.warning(
+            "Crew %s not rebuilt: the caller has no workspace",
+            getattr(crew, "id", None),
+        )
+        return {}, {}
 
     agent_service = AgentService(session)
     task_service = TaskService(session)
 
-    async def get_agent(agent_id: str) -> Any:
-        if group_context is not None:
-            return await agent_service.get_with_group_check(agent_id, group_context)
-        return await agent_service.get(agent_id)
-
-    async def get_task(task_id: str) -> Any:
-        if group_context is not None:
-            return await task_service.get_with_group_check(task_id, group_context)
-        return await task_service.get(task_id)
-
     agents_yaml: Dict[str, Any] = {}
     agent_key_by_id: Dict[str, str] = {}
     for agent_id in getattr(crew, "agent_ids", None) or []:
-        agent = await get_agent(str(agent_id))
+        agent = await agent_for_run(agent_service, str(agent_id), group_context, logger)
         if agent is None:
-            logger.warning(
-                "Crew %s references agent %s, which no longer exists — it will "
-                "not be part of the rebuilt config",
-                getattr(crew, "id", None),
-                agent_id,
-            )
             continue
         key = agent.name or agent.role or str(agent_id)
         agent_key_by_id[str(agent_id)] = key
         entry: Dict[str, Any] = {
+            # The row id lets the run's group-checked fill-in (kasal_service)
+            # and settings snapshot find this agent. ``name`` keeps the engine
+            # keying it by this entry's key, which is what tasks reference:
+            # CrewPreparation names an agent by name, else by id.
+            "id": str(agent.id),
+            "name": key,
             "role": agent.role,
             "goal": agent.goal,
             "backstory": agent.backstory,
@@ -209,14 +218,8 @@ async def build_crew_execution_config(
     resolved = []
     task_key_by_id: Dict[str, str] = {}
     for task_id in getattr(crew, "task_ids", None) or []:
-        task = await get_task(str(task_id))
+        task = await task_for_run(task_service, str(task_id), group_context, logger)
         if task is None:
-            logger.warning(
-                "Crew %s references task %s, which no longer exists — it will "
-                "not be part of the rebuilt config",
-                getattr(crew, "id", None),
-                task_id,
-            )
             continue
         key = task.name or str(task_id)
         task_key_by_id[str(task_id)] = key
@@ -269,28 +272,18 @@ async def build_crew_execution_config_by_id(
     crew_id: Any,
     group_context: Any = None,
 ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
-    """As above, from a crew id. None when the crew is gone or unreadable.
+    """As above, from a crew id. None means "not found" in the caller's workspace.
 
-    None is a normal answer, not an error: a run whose crew was deleted since
-    is exactly the case that has to fall back to its stored snapshot.
+    That covers a deleted crew, another workspace's crew, an id that is not a
+    UUID, and a caller with no workspace. A resume falls back to its stored
+    snapshot on None; a caller STARTING a run (the trigger queue) must fail.
     """
-    import uuid
-
     from src.services.catalog.crews import CrewService
-
-    # ``crews.id`` is a UUID column; a string id (what MCP/A2A and the trigger
-    # queue pass) must be coerced or the SQLite UUID bind raises
-    # "'str' object has no attribute 'hex'". An unparseable id is a miss, not a
-    # crash — same as a deleted crew.
-    if isinstance(crew_id, str):
-        try:
-            crew_id = uuid.UUID(crew_id)
-        except ValueError:
-            logger.warning("Invalid crew id %r", crew_id)
-            return None
+    from src.services.catalog.run_lookup import crew_for_run
 
     try:
-        crew = await CrewService(session).get(crew_id)
+        # crew_for_run coerces a string id to the UUID the column binds.
+        crew = await crew_for_run(CrewService(session), crew_id, group_context, logger)
     except Exception as exc:  # noqa: BLE001 — a fallback beats a failed resume
         logger.warning("Could not load crew %s: %s", crew_id, exc)
         return None

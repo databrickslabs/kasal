@@ -23,6 +23,10 @@ from src.services.catalog.crew_config import (
     _TASK_FIELDS,
     build_crew_execution_config,
 )
+from src.utils.user_context import GroupContext
+
+# The projection reads only the caller's workspace; these rows are its.
+CALLER = GroupContext(group_ids=["ws-a"], group_email="a@example.com")
 
 
 def make_agent(agent_id="a1", **overrides):
@@ -76,7 +80,7 @@ def patch_catalog(agents, tasks):
     )
 
 
-async def project(crew_row, agents, tasks, group_context=None):
+async def project(crew_row, agents, tasks, group_context=CALLER):
     agent_p, task_p = patch_catalog(agents, tasks)
     with agent_p, task_p:
         return await build_crew_execution_config(None, crew_row, group_context)
@@ -178,11 +182,12 @@ class TestMissingRows:
         tasks = {"t1": make_task()}
         agent_p, task_p = patch_catalog(agents, tasks)
         with agent_p as agent_service, task_p as task_service:
-            await build_crew_execution_config(None, crew(), group_context="ctx")
+            await build_crew_execution_config(None, crew(), group_context=CALLER)
 
         agent_service.return_value.get_with_group_check.assert_awaited()
         task_service.return_value.get_with_group_check.assert_awaited()
         agent_service.return_value.get.assert_not_awaited()
+        task_service.return_value.get.assert_not_awaited()
 
 
 class TestFidelity:
@@ -193,22 +198,20 @@ class TestFidelity:
     continue.
     """
 
-    # Identity and audit, not behaviour — deliberately not projected.
+    # Audit, not behaviour — deliberately not projected.
     AGENT_EXCLUDED = {
-        "id",
-        "name",
         "group_id",
         "created_by_email",
         "created_at",
         "updated_at",
         # Emitted explicitly rather than via the pass-through list.
+        "id",
+        "name",
         "role",
         "goal",
         "backstory",
         "tools",
         "tool_configs",
-        # Carried in the model config, not the agent entry.
-        "temperature",
     }
 
     TASK_EXCLUDED = {

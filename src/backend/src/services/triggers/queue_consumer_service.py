@@ -150,7 +150,7 @@ class TriggerQueueConsumerService:
                 # "auto" in the target becomes one enabled model for this run.
                 auto = await run_freeze.resolve(config, session, group_context)
                 run_name = await self._resolve_run_name(
-                    session, snap["target"], execution_type, job_id
+                    session, snap["target"], execution_type, job_id, group_context
                 )
 
                 config_dict: Dict[str, Any] = {
@@ -391,13 +391,15 @@ class TriggerQueueConsumerService:
         target: Dict[str, Any],
         execution_type: str,
         job_id: str,
+        group_context: Optional[GroupContext] = None,
     ) -> str:
         """Name the run after the saved crew/flow, so it reads like any other run
         in the history rather than an opaque ``Event crew <id>``.
 
         Resolved through the owning domain's SERVICE (catalog crew / flow_builder
         flow), never their repositories. Best-effort — falls back to a generic
-        label if the definition is gone or the target is inline.
+        label if the definition is gone or the target is inline. A crew is read
+        only from the row's workspace: the id is the enqueuer's.
         """
         import uuid
 
@@ -405,14 +407,18 @@ class TriggerQueueConsumerService:
         try:
             if execution_type == "crew" and tid:
                 from src.services.catalog.crews import CrewService
+                from src.services.catalog.run_lookup import crew_for_run
 
-                crew = await CrewService(session).get(uuid.UUID(str(tid)))
+                crew = await crew_for_run(CrewService(session), tid, group_context)
                 if crew and crew.name:
                     return crew.name
             elif execution_type == "flow" and tid:
                 from src.services.flow_builder.flow_service import FlowService
 
-                flow = await FlowService(session).get_flow(uuid.UUID(str(tid)))
+                flow = await FlowService(session).get_flow_with_group_check(
+                    uuid.UUID(str(tid)), group_context
+                )
+                FlowService.require_execution_access(flow, group_context)
                 if flow and getattr(flow, "name", None):
                     return flow.name
         except Exception:  # noqa: BLE001 — naming must never block dispatch
@@ -462,8 +468,12 @@ class TriggerQueueConsumerService:
             resolved = await build_crew_execution_config_by_id(
                 session, crew_id, group_context
             )
-            if not resolved:
-                raise ValueError(f"crew {crew_id!r} not found or unreadable")
+            # None: not in this workspace. An empty side: none of its agents or
+            # tasks are. Either way there is nothing of the caller's to run.
+            if not resolved or not resolved[0] or not resolved[1]:
+                raise ValueError(
+                    f"crew {crew_id!r} not found or unreadable in this workspace"
+                )
             agents_yaml, tasks_yaml = resolved
             return (
                 CrewConfig(
