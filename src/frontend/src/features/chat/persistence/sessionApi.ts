@@ -132,9 +132,17 @@ function chainMessageWrite(msgId: string, write: () => Promise<void>): Promise<v
   return next;
 }
 
+/**
+ * A request pinned to one workspace. The shared client reads the group at
+ * request time, so a write retried after a workspace switch would otherwise be
+ * filed under the workspace the user switched to.
+ */
+const inGroup = (groupId?: string) => (groupId ? [{ headers: { group_id: groupId } }] as const : [] as const);
+
 export async function addMessageToSession(
   sessionId: string,
   msg: ChatMessage,
+  groupId?: string,
 ): Promise<void> {
   const hasCard = Boolean(msg.resultType || msg.resultData !== undefined);
   // A STREAMING placeholder has no text yet and must STILL be created: dispatch
@@ -153,7 +161,7 @@ export async function addMessageToSession(
       content: msg.content || (hasCard ? CARD_PLACEHOLDER : ''),
       intent: msg.intent ?? null,
       generation_result: packExtras(msg) ?? null,
-    });
+    }, ...inGroup(groupId));
   });
 }
 
@@ -169,6 +177,30 @@ export async function updateMessageInSession(
   updates: Partial<ChatMessage>,
   defer = false,
 ): Promise<void> {
+  const payload = updatePayload(updates);
+  // isStreaming flips and other transient-only updates need no round trip
+  if (Object.keys(payload).length === 0) return messageUpdates.flush(msgId);
+  await messageUpdates.enqueue(msgId, payload, defer);
+}
+
+/**
+ * Re-send a message update in one workspace, ordered after the message's other
+ * writes. Used for a retry, which carries the full newest copy, so it does not
+ * need the coalescing queue.
+ */
+export async function resendMessageUpdate(
+  msgId: string,
+  updates: Partial<ChatMessage>,
+  groupId?: string,
+): Promise<void> {
+  const payload = updatePayload(updates);
+  if (Object.keys(payload).length === 0) return;
+  await chainMessageWrite(msgId, async () => {
+    await getClient().put(`${BASE}/messages/${msgId}`, payload, ...inGroup(groupId));
+  });
+}
+
+function updatePayload(updates: Partial<ChatMessage>): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   // `!== undefined`, not truthiness: CLEARING content is a real update. The
   // dispatcher posts a "Thinking..." placeholder and blanks it once the answer
@@ -180,9 +212,7 @@ export async function updateMessageInSession(
   if (updates.intent) payload.intent = updates.intent;
   const extras = packExtras(updates);
   if (extras) payload.generation_result = extras;
-  // isStreaming flips and other transient-only updates need no round trip
-  if (Object.keys(payload).length === 0) return messageUpdates.flush(msgId);
-  await messageUpdates.enqueue(msgId, payload, defer);
+  return payload;
 }
 
 /** Clearing keeps the session but drops its messages: delete + recreate id. */

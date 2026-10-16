@@ -35,6 +35,8 @@ vi.mock('../../../../api/execution/ExecutionHistoryService', () => ({
     getRunByJobId: vi.fn().mockResolvedValue(null),
   },
 }));
+const runLookup = vi.hoisted(() => ({ isRunGone: vi.fn(async (_jobId: string) => false) }));
+vi.mock('../utils/runLookup', () => runLookup);
 
 vi.mock('../../../../store/taskExecutionStore', () => ({
   useTaskExecutionStore: Object.assign(
@@ -274,6 +276,54 @@ describe('Returning to a session whose run already finished', () => {
       expect(result.current.executingJobId).toBeNull();
       const workspace = localStorage.getItem('selectedGroupId') || 'default';
       expect(sessionStorage.getItem(`kasal-builder-run:${workspace}:${sessionA}`)).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('settles a run that no longer exists (404) instead of polling it forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const workspace = localStorage.getItem('selectedGroupId') || 'default';
+      sessionStorage.setItem(`kasal-builder-run:${workspace}:gone-session`, 'deleted-job');
+      const { runService } = await import('../../../../api/execution/ExecutionHistoryService');
+      vi.mocked(runService.getRunByJobId).mockResolvedValue(null);
+      runLookup.isRunGone.mockResolvedValue(true);
+      const { result } = renderHook(() => useExecutionMonitoring('gone-session', noop, vi.fn()));
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(result.current.executingJobId).toBeNull();
+      expect(sessionStorage.getItem(`kasal-builder-run:${workspace}:gone-session`)).toBeNull();
+      const polls = vi.mocked(runService.getRunByJobId).mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+      expect(vi.mocked(runService.getRunByJobId).mock.calls.length).toBe(polls);
+      expect(addMessage).not.toHaveBeenCalled();
+    } finally { runLookup.isRunGone.mockResolvedValue(false); vi.useRealTimers(); }
+  });
+
+  it('keeps polling when the lookup failed for another reason', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runService } = await import('../../../../api/execution/ExecutionHistoryService');
+      vi.mocked(runService.getRunByJobId).mockResolvedValue(null);
+      const { result } = renderHook(() => useExecutionMonitoring('flaky-session', noop, vi.fn()));
+      await act(async () => { result.current.setExecutingJobId('flaky-job'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_100); });
+      expect(result.current.executingJobId).toBe('flaky-job');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('settles a run rejected at an approval gate', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runService } = await import('../../../../api/execution/ExecutionHistoryService');
+      vi.mocked(runService.getRunByJobId).mockResolvedValue({ status: 'REJECTED' } as never);
+      const { result } = renderHook(() => useExecutionMonitoring('rejected-session', noop, vi.fn()));
+      act(() => { window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId: 'rejected-job', jobName: 'Run' } })); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(result.current.executingJobId).toBeNull();
+      const workspace = localStorage.getItem('selectedGroupId') || 'default';
+      expect(sessionStorage.getItem(`kasal-builder-run:${workspace}:rejected-session`)).toBeNull();
+      expect(addMessage).toHaveBeenCalledWith('rejected-session', expect.objectContaining({
+        content: expect.stringContaining('rejected at an approval gate'), jobId: 'rejected-job',
+      }));
     } finally { vi.useRealTimers(); }
   });
 });

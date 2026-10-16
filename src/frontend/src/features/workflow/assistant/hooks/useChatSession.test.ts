@@ -64,6 +64,16 @@ describe('reopened conversations', () => {
     expect(useChatMessagesStore.getState().getMessages('long').map(m => m.id)).toEqual(rows.map(r => r.id));
   });
 
+  it('has no page cap that would drop the newest messages of a very long session', async () => {
+    const rows = Array.from({ length: 5_050 }, (_, i) => row(i + 1));
+    history.getSessionMessages.mockImplementation(async (_sid: string, page = 0, perPage = 50) => ({
+      messages: rows.slice(page * perPage, (page + 1) * perPage), page, per_page: perPage,
+    }));
+    renderHook(() => useChatSession('long'));
+    await waitFor(() => expect(useChatMessagesStore.getState().getMessages('long')).toHaveLength(5_050));
+    expect(useChatMessagesStore.getState().getMessages('long').at(-1)?.id).toBe('row-5050');
+  });
+
   it('does not duplicate this page session’s messages when switching away and back', async () => {
     const { result, rerender } = renderHook(({ id }) => useChatSession(id), { initialProps: { id: 'dup-a' } });
     const older = { ...row(1), session_id: 'dup-a', id: 'stored-older' };

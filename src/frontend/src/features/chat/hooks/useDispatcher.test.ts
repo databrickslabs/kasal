@@ -5,6 +5,7 @@ import { useChatEffortStore } from '../../../store/chatEffort';
 import { dispatch } from '../api/dispatcher';
 import { generateId } from '../utils/markdown';
 import { useExecutionStore } from '../store/executionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import type { DispatchResult, GenerationCompleteData } from '../types/dispatcher';
 
 vi.mock('../api/dispatcher', () => ({
@@ -119,10 +120,16 @@ describe('useDispatcher', () => {
     const ensure = vi.fn().mockRejectedValueOnce(new Error('Service unavailable')).mockResolvedValue('session-1');
     const opts = makeOptions({ ensureSession: ensure });
     mockedDispatch.mockResolvedValue(result('conversation', { message: 'Done' }));
+    useSessionStore.setState({ currentSessionId: null, messages: [] });
     const { result: hook } = renderHook(() => useDispatcher(opts));
-    await act(async () => { await hook.current.sendMessage('First question'); });
+    await act(async () => { await hook.current.sendMessage('First question\nwith detail'); });
     expect(mockedDispatch).not.toHaveBeenCalled();
-    expect(opts.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('could not be sent'));
+    // The typed text comes back to copy, and no session is created for the notice.
+    expect(opts.addMessage).not.toHaveBeenCalled();
+    const notice = useSessionStore.getState().messages.at(-1)?.content ?? '';
+    expect(notice).toContain('could not be sent');
+    expect(notice).toContain('> First question\n> with detail');
+    expect(useSessionStore.getState().currentSessionId).toBeNull();
     await act(async () => { await hook.current.sendMessage('First question'); });
     expect(mockedDispatch).toHaveBeenCalledTimes(1);
     expect(hook.current.isDispatching.current).toBe(false);

@@ -125,6 +125,20 @@ describe('a lost stream is not a failed run', () => {
     await settle();
 
     expect(failures().map((m) => m.content)).toEqual(['Execution failed: Tool crashed']);
+    // Stamped with its run, so a later reload knows it was reported.
+    expect(failures()[0].executionId).toBe('job-lost-fail');
+  });
+
+  it('treats a run rejected at an approval gate as ended', async () => {
+    const { result } = mountOn('s-lost-rejected');
+    act(() => result.current.handleStartExecutionStream('job-lost-rejected', 's-lost-rejected'));
+    net.getExecution.mockResolvedValue({ status: 'REJECTED' });
+
+    act(() => net.streams[0].onLost?.());
+    await settle();
+
+    expect(failures().map((m) => m.content)).toEqual(['Execution failed: Rejected at an approval gate']);
+    expect(useExecutionStore.getState().isExecuting).toBe(false);
   });
 });
 
@@ -165,5 +179,19 @@ describe('returning to a run that finished while nobody watched', () => {
     expect(answersFor('job-seen').map((m) => m.content)).toEqual(['Earlier answer']);
     expect(net.clearSessionRunningJob).toHaveBeenCalledWith('s-seen');
     expect(useExecutionStore.getState().isExecuting).toBe(false);
+  });
+
+  it('does not post a reported failure a second time', async () => {
+    net.getSessionRunningJob.mockResolvedValue('job-failed-seen');
+    net.getExecutionStatus.mockResolvedValue({ status: 'failed' });
+    const reported: ChatMessage = {
+      id: 'f1', role: 'assistant', content: 'Execution failed: boom', timestamp: new Date(), executionId: 'job-failed-seen',
+    };
+
+    mountOn('s-failed-seen', [question, reported]);
+    await settle();
+
+    expect(net.getExecution).not.toHaveBeenCalled();
+    expect(failures()).toHaveLength(1);
   });
 });

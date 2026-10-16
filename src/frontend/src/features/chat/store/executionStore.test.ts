@@ -1040,7 +1040,7 @@ describe('executionStore - failExecution', () => {
     expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
       'sess-O',
       'assistant',
-      'Execution failed: boom',
+      'Execution failed: boom', undefined,
     );
     const s = useExecutionStore.getState();
     expect(s.activeExecution).toEqual({ jobId: 'j', status: 'failed' });
@@ -1064,7 +1064,7 @@ describe('executionStore - failExecution', () => {
     useExecutionStore.getState().failExecution('oops');
     expect(sessionState().addMessage).toHaveBeenCalledWith(
       'assistant',
-      'Execution failed: oops',
+      'Execution failed: oops', undefined,
     );
   });
 
@@ -1083,7 +1083,7 @@ describe('executionStore - failExecution', () => {
     useExecutionStore.getState().failExecution('bad');
     expect(sessionState().addMessage).toHaveBeenCalledWith(
       'assistant',
-      'Execution failed: bad',
+      'Execution failed: bad', undefined,
     );
     expect(useExecutionStore.getState().isExecuting).toBe(true);
   });
@@ -1537,7 +1537,7 @@ describe('executionStore - parallel sessions (jobId routing)', () => {
     useExecutionStore.setState({ executionOwnerSessionId: 'sess-B' });
     setCurrentSessionId('sess-B');
     useExecutionStore.getState().failExecution('boom', 'job-F');
-    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith('sess-A', 'assistant', 'Execution failed: boom');
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith('sess-A', 'assistant', 'Execution failed: boom', { executionId: 'job-F' });
     expect(useExecutionStore.getState().executionOwnerSessionId).toBe('sess-B');
     // Idempotent: a second fail for the same job is a no-op.
     (sessionState().addMessageToTargetSession as any).mockClear();

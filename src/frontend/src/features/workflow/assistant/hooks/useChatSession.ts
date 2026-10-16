@@ -9,17 +9,17 @@ import { useChatMessagesStore, deduplicateMessages } from '../store/chatMessages
 
 /** The backend caps per_page at 100 and pages oldest-first with OFFSET/LIMIT. */
 const HISTORY_PAGE_SIZE = 100;
-/** Runaway guard, not a design limit: 50 pages is 5,000 messages. */
-const HISTORY_MAX_PAGES = 50;
 
 /**
  * Every message of a session, oldest first. One default page was only the
  * OLDEST 50 rows, so a long builder conversation reopened without its newest
- * turns (the latest run results included). Same walk as Chat's sessionApi.
+ * turns (the latest run results included). No page cap: pages run oldest
+ * first, so any cap would drop exactly the newest messages. The walk ends at
+ * the first short (or empty) page, which a finite table always reaches.
  */
 async function loadAllMessages(sessionId: string): Promise<BackendChatMessage[]> {
   const all: BackendChatMessage[] = [];
-  for (let page = 0; page < HISTORY_MAX_PAGES; page += 1) {
+  for (let page = 0; ; page += 1) {
     const response = await ChatHistoryService.getSessionMessages(sessionId, page, HISTORY_PAGE_SIZE);
     const batch = response?.messages || [];
     all.push(...batch);

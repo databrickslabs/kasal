@@ -32,7 +32,7 @@ import type { Surface } from '../../../shared/a2ui/index';
 import { buildTraceEntry } from '../utils/traceActivity';
 import { cleanTaskLabel, taskHeaderLabel, summarizeTaskOutput } from '../utils/taskChatRendering';
 import { extractResultText, extractA2uiSurface } from '../utils/resultExtraction';
-import { conversationHasAnswer, fetchRunOutcome } from '../utils/runOutcome';
+import { conversationHasAnswer, fetchRunOutcome, TERMINAL_RUN_STATUSES } from '../utils/runOutcome';
 import { GenerationCompleteData } from '../types/dispatcher';
 
 interface UseChatRunStreamArgs {
@@ -678,7 +678,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       try {
         const exec = await getExecutionStatus(jobId);
         const status = String(exec?.status || '').toLowerCase();
-        const finished = ['completed', 'failed', 'stopped', 'cancelled', 'error'].includes(status);
+        const finished = TERMINAL_RUN_STATUSES.includes(status);
         if (finished && useExecutionStore.getState().activeExecution?.jobId === jobId) {
           deadJobsRef.current.add(jobId);
           // It ended while nobody was watching, so its answer is not in the

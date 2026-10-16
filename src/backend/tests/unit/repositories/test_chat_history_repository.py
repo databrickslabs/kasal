@@ -165,6 +165,22 @@ class TestChatHistoryRepository:
         # Note: In a real test, you'd inspect the query more thoroughly
 
     @pytest.mark.asyncio
+    async def test_get_by_session_and_group_orders_ties_by_id(
+        self, chat_history_repository, mock_session
+    ):
+        """Rows sharing a timestamp keep one order across pages (id tiebreak)."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_session.execute.return_value = mock_result
+
+        await chat_history_repository.get_by_session_and_group(
+            session_id="session-123", group_ids=["group-111"], page=1, per_page=100
+        )
+
+        sql = str(mock_session.execute.call_args[0][0])
+        assert "ORDER BY chat_history.timestamp ASC, chat_history.id ASC" in sql
+
+    @pytest.mark.asyncio
     async def test_get_by_session_and_group_database_exception(
         self, chat_history_repository, mock_session
     ):

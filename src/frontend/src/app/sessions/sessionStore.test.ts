@@ -18,6 +18,7 @@ vi.mock('../../features/chat/persistence/sessionApi', () => ({
   getSessionMessages: vi.fn(),
   addMessageToSession: vi.fn(),
   updateMessageInSession: vi.fn(),
+  resendMessageUpdate: vi.fn(async () => {}),
   clearSessionMessages: vi.fn(),
 }));
 
@@ -848,9 +849,13 @@ describe('message writes survive a transient failure', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await flush();
   };
-
-  it('retries a failed answer create with its newest content', async () => {
+  beforeEach(() => {
     vi.useFakeTimers();
+    __clearRememberedExtras();
+    localStorage.setItem('selectedGroupId', 'ws-a');
+  });
+
+  it('retries a failed answer create with its newest content, pinned to its workspace', async () => {
     useSessionStore.setState({ currentSessionId: 'target', messages: [] });
     vi.mocked(db.addMessageToSession).mockRejectedValueOnce(unavailable);
     const id = useSessionStore.getState().addMessageToTargetSession('target', 'assistant', 'partial');
@@ -858,33 +863,77 @@ describe('message writes survive a transient failure', () => {
     useSessionStore.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, content: 'final answer' } : m)) }));
     await settleRetries();
     expect(db.addMessageToSession).toHaveBeenCalledTimes(2);
-    expect(db.addMessageToSession).toHaveBeenLastCalledWith('target', expect.objectContaining({ id, content: 'final answer' }));
+    expect(db.addMessageToSession).toHaveBeenLastCalledWith('target', expect.objectContaining({ id, content: 'final answer' }), 'ws-a');
+  });
+
+  it('drops the retry when the user has switched workspace since', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useSessionStore.setState({ currentSessionId: 'target', messages: [] });
+    vi.mocked(db.addMessageToSession).mockRejectedValueOnce(unavailable);
+    vi.mocked(db.updateMessageInSession).mockRejectedValueOnce(unavailable);
+    useSessionStore.getState().addMessageToTargetSession('target', 'assistant', 'answer');
+    useSessionStore.getState().updateMessageInTargetSession('target', 'other-msg', { content: 'edit' });
+    localStorage.setItem('selectedGroupId', 'ws-b');
+    await settleRetries();
+    expect(db.addMessageToSession).toHaveBeenCalledTimes(1);
+    expect(db.resendMessageUpdate).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('workspace changed'));
+    logged.mockRestore();
   });
 
   it('retries addMessage into the session it was written to, not the one on screen later', async () => {
-    vi.useFakeTimers();
     useSessionStore.setState({ currentSessionId: 'origin', messages: [] });
     vi.mocked(db.addMessageToSession).mockRejectedValueOnce(unavailable);
     const id = useSessionStore.getState().addMessage('assistant', 'answer');
     useSessionStore.setState({ currentSessionId: 'elsewhere', messages: [] });
     await settleRetries();
     expect(db.addMessageToSession).toHaveBeenCalledTimes(2);
-    expect(db.addMessageToSession).toHaveBeenLastCalledWith('origin', expect.objectContaining({ id, content: 'answer' }));
+    expect(db.addMessageToSession).toHaveBeenLastCalledWith('origin', expect.objectContaining({ id, content: 'answer' }), 'ws-a');
   });
 
   it('retries a failed update with the message as it is now', async () => {
-    vi.useFakeTimers();
     useSessionStore.setState({ currentSessionId: 'sess', messages: [makeMsg('m1', 'old')] });
     vi.mocked(db.updateMessageInSession).mockRejectedValueOnce(unavailable);
     useSessionStore.getState().updateMessage('m1', { content: 'first edit' });
     useSessionStore.setState((s) => ({ messages: s.messages.map((m) => ({ ...m, content: 'newest' })) }));
     await settleRetries();
-    expect(db.updateMessageInSession).toHaveBeenCalledTimes(2);
-    expect(db.updateMessageInSession).toHaveBeenLastCalledWith('sess', 'm1', expect.objectContaining({ content: 'newest' }));
+    expect(db.resendMessageUpdate).toHaveBeenCalledTimes(1);
+    expect(db.resendMessageUpdate).toHaveBeenCalledWith('m1', expect.objectContaining({ content: 'newest' }), 'ws-a');
+  });
+
+  it('retries the final update of a backgrounded answer from the remembered content', async () => {
+    useSessionStore.setState({ currentSessionId: 'on-screen', messages: [] });
+    vi.mocked(db.updateMessageInSession).mockRejectedValueOnce(unavailable);
+    useSessionStore.getState().updateMessageInTargetSession('background', 'bg-answer', {
+      content: 'The whole answer', executionId: 'run-9',
+    });
+    await settleRetries();
+    expect(db.resendMessageUpdate).toHaveBeenCalledWith(
+      'bg-answer', expect.objectContaining({ content: 'The whole answer', executionId: 'run-9' }), 'ws-a',
+    );
+  });
+
+  it('treats a 409 on a create retry as saved (the first attempt reached the server)', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useSessionStore.setState({ currentSessionId: 'target', messages: [] });
+    vi.mocked(db.addMessageToSession).mockRejectedValueOnce(unavailable).mockRejectedValueOnce({ response: { status: 409 } });
+    useSessionStore.getState().addMessageToTargetSession('target', 'assistant', 'answer');
+    await settleRetries();
+    expect(db.addMessageToSession).toHaveBeenCalledTimes(2);
+    expect(logged).not.toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
+  it('does not re-send a saved message when only the follow-up rename failed', async () => {
+    useSessionStore.setState({ currentSessionId: 'titled', messages: [] });
+    vi.mocked(db.renameSession).mockRejectedValueOnce(unavailable);
+    useSessionStore.getState().addMessage('user', 'first question here');
+    await settleRetries();
+    expect(db.renameSession).toHaveBeenCalledTimes(1);
+    expect(db.addMessageToSession).toHaveBeenCalledTimes(1);
   });
 
   it('gives up on a real rejection without an unhandled error', async () => {
-    vi.useFakeTimers();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     useSessionStore.setState({ currentSessionId: 'target', messages: [] });
     vi.mocked(db.addMessageToSession).mockRejectedValueOnce({ response: { status: 422 } });
@@ -893,5 +942,17 @@ describe('message writes survive a transient failure', () => {
     expect(db.addMessageToSession).toHaveBeenCalledTimes(1);
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+  });
+});
+
+describe('addNotice', () => {
+  it('shows the notice without creating or writing a session', async () => {
+    useSessionStore.setState({ currentSessionId: null, messages: [] });
+    useSessionStore.getState().addNotice('Could not send');
+    await flush();
+    expect(useSessionStore.getState().messages.map((m) => m.content)).toEqual(['Could not send']);
+    expect(useSessionStore.getState().currentSessionId).toBeNull();
+    expect(db.createSession).not.toHaveBeenCalled();
+    expect(db.addMessageToSession).not.toHaveBeenCalled();
   });
 });

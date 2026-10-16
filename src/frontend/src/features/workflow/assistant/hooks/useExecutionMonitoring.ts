@@ -3,6 +3,7 @@ import { ChatMessage } from '../types/index';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { streamExecution } from '../../../chat/api/streaming';
 import { builderResultContent } from '../utils/resultContent';
+import { isRunGone } from '../utils/runLookup';
 
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
 import { useTaskExecutionStore } from '../../../../store/taskExecutionStore';
@@ -407,16 +408,28 @@ export const useExecutionMonitoring = (
   // The transcript's trace polling can show completion even when the global
   // run-status event was missed. Reconcile the input against this exact job,
   // independent of whether the Runs panel (or its stream) is mounted.
+  // Every terminal status settles the run (REJECTED, from an approval gate, was
+  // not one, so a rejected run kept the composer locked).
   const reconcileStatus = useCallback((jobId: string, status: unknown, error?: unknown) => {
     if (executingJobIdRef.current !== jobId) return;
     const normalized = String(status || '').toLowerCase();
     const event = normalized === 'completed' ? 'jobCompleted'
-      : normalized === 'failed' ? 'jobFailed'
+      : ['failed', 'rejected', 'error'].includes(normalized) ? 'jobFailed'
       : ['stopped', 'cancelled'].includes(normalized) ? 'jobStopped' : null;
+    const reason = error || (normalized === 'rejected' ? 'rejected at an approval gate' : undefined);
     if (event) window.dispatchEvent(new CustomEvent(event, {
-      detail: { jobId, status: normalized, error },
+      detail: { jobId, status: normalized, error: reason },
     }));
   }, []);
+
+  // A run that no longer exists (deleted, or another workspace's) is settled
+  // without a message: nothing ran wrong, there is just nothing left to watch.
+  const settleGone = useCallback((jobId: string) => {
+    if (executingJobIdRef.current !== jobId) return;
+    settledJobsRef.current.add(jobId);
+    releaseBinding(jobId);
+    window.dispatchEvent(new CustomEvent('forceClearExecution'));
+  }, [releaseBinding]);
 
   useEffect(() => {
     if (!executingJobId) return;
@@ -426,6 +439,7 @@ export const useExecutionMonitoring = (
       try {
         const run = await runService.getRunByJobId(executingJobId);
         if (!disposed && run) reconcileStatus(executingJobId, run.status, run.error);
+        else if (!disposed && await isRunGone(executingJobId) && !disposed) settleGone(executingJobId);
       } catch {
         // A transient request failure must not end the run or stop reconciliation.
       } finally {
@@ -434,7 +448,7 @@ export const useExecutionMonitoring = (
     };
     void check();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [executingJobId, sessionId, reconcileStatus]);
+  }, [executingJobId, sessionId, reconcileStatus, settleGone]);
 
   // ── Live token streaming into the chat ────────────────────────────────
   // While a job runs, llm_chunk frames (crew subprocess → event pipe → SSE)

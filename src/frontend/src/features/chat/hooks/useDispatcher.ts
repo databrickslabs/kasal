@@ -3,6 +3,7 @@ import type { ImageRef } from '../types/chat';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import {
   DispatchResult,
   GeneratedCrew,
@@ -316,7 +317,12 @@ export function useDispatcher(options: UseDispatcherOptions) {
       } catch (error) {
         isDispatchingRef.current = false;
         const reason = error instanceof Error ? error.message : 'Unknown error';
-        options.addMessage('assistant', `Your message could not be sent because the conversation could not be created (${reason}). Please send it again.`);
+        // The composer already cleared, so the text is quoted back to copy.
+        // Shown, never stored: addMessage would create a session just to hold it.
+        const typed = (displayAs || message).split('\n').map((line) => `> ${line}`).join('\n');
+        useSessionStore.getState().addNotice(
+          `Your message could not be sent because the conversation could not be created (${reason}). Please send it again:\n\n${typed}`,
+        );
         return;
       }
 

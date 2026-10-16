@@ -24,17 +24,22 @@ export async function fetchRunOutcome(jobId: string): Promise<RunOutcome> {
     return { kind: 'completed', text: extractResultText(row!), surface: extractA2uiSurface(row!) };
   }
   if (status === 'stopped' || status === 'cancelled') return { kind: 'failed', error: 'Execution stopped' };
+  if (status === 'rejected') return { kind: 'failed', error: (row?.error as string) || 'Rejected at an approval gate' };
   if (status === 'failed' || status === 'error') {
     return { kind: 'failed', error: (row?.error as string) || 'Execution failed' };
   }
   return { kind: 'running' };
 }
 
+/** Every status a run does not leave (the backend's ExecutionStatus). */
+export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'stopped', 'cancelled', 'rejected', 'error'];
+
 /**
- * Whether the conversation already holds this run's answer.
+ * Whether the conversation already reports this run's ending.
  *
- * completeExecution stamps the run's id on the message the answer lands in.
- * The actions bar and trace rows carry the id too, but they are not the answer.
+ * completeExecution stamps the run's id on the message the answer lands in, and
+ * failExecution on its "Execution failed" line. The actions bar and trace rows
+ * carry the id too, but they are not the ending.
  */
 export function conversationHasAnswer(messages: ChatMessage[], jobId: string): boolean {
   return messages.some(
