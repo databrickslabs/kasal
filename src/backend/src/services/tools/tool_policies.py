@@ -31,8 +31,9 @@ Two policies today, deliberately the same shape:
 
 Both are the TEAMSPACE's decision. A per-agent, per-task or run ``tool_configs``
 entry is merged over the teamspace tool config by ``merge_tool_config_override``,
-which keeps policy, identity and endpoint keys out of it (see
-``RESERVED_OVERRIDE_KEYS``). The one policy change an override may make is to
+which keeps policy, identity, endpoint and naming keys out of it (see
+``RESERVED_OVERRIDE_KEYS``) and keeps a teamspace credential from following an
+endpoint the override moved. The one policy change an override may make is to
 add an approval gate the teamspace does not have.
 
 Extracted from ``tool_factory.py`` (2,700 lines, over the ceiling) rather than
@@ -40,7 +41,8 @@ added to it, per the file-size rule in CLAUDE.md.
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from src.utils.coercion import positive_int
 
@@ -78,7 +80,19 @@ _IDENTITY_KEYS = frozenset(
 #: Where a teamspace provider key is sent (Serper, Image Generation).
 _ENDPOINT_KEYS = frozenset({"base_url"})
 _POLICY_KEYS = frozenset({"requires_approval", "approval", "replayable", "replay"})
-RESERVED_OVERRIDE_KEYS = _IDENTITY_KEYS | _ENDPOINT_KEYS | _POLICY_KEYS
+#: What the model and the approval prompt know the tool by. An approval
+#: decision is remembered per tool name for the run.
+_NAMING_KEYS = frozenset({"name", "description"})
+RESERVED_OVERRIDE_KEYS = _IDENTITY_KEYS | _ENDPOINT_KEYS | _POLICY_KEYS | _NAMING_KEYS
+
+#: An endpoint an override may set, and the credentials sent to it. When the
+#: override moves the endpoint to another host without bringing its own
+#: credential, the teamspace's stays behind: the tool then uses the run's own
+#: credential for its own workspace (``workspace_llm_credentials``) or none.
+_ENDPOINT_CREDENTIALS: Dict[str, Tuple[str, ...]] = {
+    "llm_workspace_url": ("llm_token",),
+    "databricks_sql_endpoint": ("databricks_pat",),
+}
 
 
 def extract_tool_policies(tool_config: ToolConfig) -> ToolPolicies:
@@ -128,7 +142,9 @@ def merge_tool_config_override(
       gate the teamspace does not have; it cannot remove or change one, and it
       cannot turn replay on.
 
-    Neither input is mutated. Dropped keys are logged by name, never by value.
+    A teamspace credential is not sent to a host the override chose (see
+    ``_ENDPOINT_CREDENTIALS``). Neither input is mutated. Dropped keys are
+    logged by name, never by value.
     """
     raw = dict(override or {})
     dropped = sorted(key for key in raw if key in RESERVED_OVERRIDE_KEYS)
@@ -136,6 +152,7 @@ def merge_tool_config_override(
     clean = {k: v for k, v in raw.items() if k not in RESERVED_OVERRIDE_KEYS}
 
     tool_config = {**base_config, **clean}
+    withheld = _withhold_moved_credentials(base_config, clean, tool_config)
     policies = extract_tool_policies(tool_config)
     if APPROVAL_ATTR in requested and APPROVAL_ATTR not in policies:
         policies[APPROVAL_ATTR] = requested[APPROVAL_ATTR]
@@ -147,7 +164,47 @@ def merge_tool_config_override(
             tool_name,
             ", ".join(dropped),
         )
+    if withheld:
+        logger.warning(
+            "[ToolFactory] %s: tool_configs moves an endpoint to another host; "
+            "the teamspace's %s is not sent there",
+            tool_name,
+            ", ".join(withheld),
+        )
     return clean, tool_config, policies
+
+
+def _withhold_moved_credentials(
+    base_config: ToolConfig, clean: ToolConfig, tool_config: ToolConfig
+) -> List[str]:
+    """Pop from ``tool_config`` each teamspace credential whose endpoint the
+    override moved to another origin without supplying its own. Returns the
+    names popped."""
+    withheld: List[str] = []
+    for endpoint, credentials in _ENDPOINT_CREDENTIALS.items():
+        moved_to = clean.get(endpoint)
+        if not str(moved_to or "").strip():
+            continue
+        if _origin(moved_to) == _origin(base_config.get(endpoint)):
+            continue
+        for credential in credentials:
+            if base_config.get(credential) and not clean.get(credential):
+                tool_config.pop(credential, None)
+                withheld.append(credential)
+    return withheld
+
+
+def _origin(endpoint: object) -> Tuple[str, str]:
+    """``(scheme, host[:port])`` of a configured endpoint, lower-cased; a bare
+    host counts as https, the way the tools read it."""
+    text = str(endpoint or "").strip().lower()
+    if text and "://" not in text:
+        text = f"https://{text}"
+    try:
+        parts = urlsplit(text)
+    except ValueError:  # e.g. an unclosed IPv6 bracket: compare it as written
+        return "", text
+    return parts.scheme, parts.netloc
 
 
 def stamp_tool_policies(result: object, policies: ToolPolicies) -> None:

@@ -159,6 +159,92 @@ class TestEndpointsStayWhereTheTeamspacePutThem:
         assert kwargs["model"] == "some-model"
 
 
+TEAMSPACE_LLM_AND_SQL = {
+    "llm_workspace_url": "https://ws.example.com",
+    "llm_token": "teamspace-llm-token",
+    "databricks_sql_endpoint": "https://ws.example.com/api/2.0/mcp/sql",
+    "databricks_pat": "teamspace-pat",
+}
+
+
+class TestATeamspaceCredentialIsNotSentToAnOverrideHost:
+    """The teamspace holds the credential, the override names the host: the
+    credential stays behind, and the tool falls back to the run's own
+    credential (same workspace only) or does without."""
+
+    def test_power_bi_analysis_llm_token(self):
+        factory, ctor = _factory(
+            "Power BI Comprehensive Analysis Tool", dict(TEAMSPACE_LLM_AND_SQL)
+        )
+
+        factory.create_tool(
+            "Power BI Comprehensive Analysis Tool",
+            tool_config_override={"llm_workspace_url": "https://elsewhere.example.net"},
+        )
+
+        kwargs = ctor.call_args.kwargs
+        assert kwargs["llm_workspace_url"] == "https://elsewhere.example.net"
+        assert not kwargs.get("llm_token")
+
+    def test_mquery_sql_endpoint_pat(self):
+        factory, ctor = _factory(
+            "M-Query Conversion Pipeline", dict(TEAMSPACE_LLM_AND_SQL)
+        )
+
+        factory.create_tool(
+            "M-Query Conversion Pipeline",
+            tool_config_override={
+                "databricks_sql_endpoint": "https://elsewhere.example.net/api/2.0/mcp/sql"
+            },
+        )
+
+        kwargs = ctor.call_args.kwargs
+        assert kwargs["databricks_sql_endpoint"].startswith(
+            "https://elsewhere.example.net"
+        )
+        assert not kwargs.get("databricks_pat")
+        assert kwargs["llm_token"] == "teamspace-llm-token"  # its host did not move
+
+    def test_mquery_llm_token(self):
+        factory, ctor = _factory(
+            "M-Query Conversion Pipeline", dict(TEAMSPACE_LLM_AND_SQL)
+        )
+
+        factory.create_tool(
+            "M-Query Conversion Pipeline",
+            tool_config_override={"llm_workspace_url": "https://elsewhere.example.net"},
+        )
+
+        assert not ctor.call_args.kwargs.get("llm_token")
+
+    def test_a_generic_tool_llm_token(self):
+        factory, ctor = _factory(
+            "UC Metric View Generator", dict(TEAMSPACE_LLM_AND_SQL)
+        )
+
+        factory.create_tool(
+            "UC Metric View Generator",
+            tool_config_override={"llm_workspace_url": "https://elsewhere.example.net"},
+        )
+
+        assert not ctor.call_args.kwargs.get("llm_token")
+
+    def test_a_task_that_brings_its_own_token_keeps_it(self):
+        factory, ctor = _factory(
+            "Power BI Comprehensive Analysis Tool", dict(TEAMSPACE_LLM_AND_SQL)
+        )
+
+        factory.create_tool(
+            "Power BI Comprehensive Analysis Tool",
+            tool_config_override={
+                "llm_workspace_url": "https://elsewhere.example.net",
+                "llm_token": "task-token",
+            },
+        )
+
+        assert ctor.call_args.kwargs["llm_token"] == "task-token"
+
+
 # ---------------------------------------------------------------------------
 # Policies
 # ---------------------------------------------------------------------------
@@ -213,6 +299,23 @@ class TestTheTeamspaceApprovalGateHolds:
 
         for key in ("requires_approval", "approval", "replayable", "replay"):
             assert key not in tool.kwargs
+
+
+class TestAGatedToolKeepsItsName:
+    @pytest.mark.parametrize("tool_name", ["ScrapeWebsiteTool", "SerperDevTool"])
+    def test_an_override_cannot_rename_or_redescribe_it(self, tool_name):
+        factory, _ = _factory(tool_name, {"requires_approval": True}, cls=_RealTool)
+        with patch.object(factory, "_get_api_key", return_value="teamspace-key"):
+            tool = factory.create_tool(
+                tool_name,
+                tool_config_override={
+                    "name": "Another approved tool",
+                    "description": "something else",
+                },
+            )
+
+        assert "name" not in tool.kwargs and "description" not in tool.kwargs
+        assert tool._approval_policy == {}
 
 
 class TestGmailReMergeIsClean:

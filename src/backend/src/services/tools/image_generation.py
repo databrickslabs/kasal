@@ -7,10 +7,11 @@ changed:
 
 - **The model is configuration, not a constant.** Default is ``gpt-image-1``;
   set ``model`` in the tool config to use anything else the endpoint serves.
-- **The endpoint is configuration too.** Set ``base_url`` in the tool config
-  (Configuration → Tools; it replaced the OPENAI_BASE_URL env var). A
-  self-hosted or gateway-fronted OpenAI-compatible image endpoint works without
-  touching this file.
+- **The endpoint is configuration too.** Set ``base_url`` in the teamspace
+  tool config (Configuration → Tools; it replaced the OPENAI_BASE_URL env var).
+  Any OpenAI-compatible image endpoint on a public (globally routable) address
+  works without touching this file; private addresses are refused (see
+  ``src/docs/TOOLS.md``).
 - **Both response shapes are handled.** Current image models return
   ``b64_json``; the older ones returned a short-lived ``url``. The old tool read
   ``url`` only, so it would have returned "Failed to generate image" against any

@@ -46,6 +46,9 @@ def test_another_host_does_not_get_the_run_credential():
 
 
 def test_a_url_with_its_own_token_is_used_as_given():
+    """The pair is the one configured together: a task entry that moves the URL
+    without its own token reaches here with no token, because the merge
+    withholds the teamspace's (test_tool_config_override_reserved_keys)."""
     assert async_bridge.workspace_llm_credentials(
         "https://other.example.net", "own-token"
     ) == ("https://other.example.net", "own-token")

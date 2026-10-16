@@ -189,3 +189,124 @@ class TestMergingAnOverride:
             merge_tool_config_override("T", {}, {"requires_approval": True})
 
         assert caplog.text == ""
+
+    @pytest.mark.parametrize("key", ["name", "description"])
+    def test_an_override_cannot_rename_the_tool(self, key):
+        clean, merged, _ = merge_tool_config_override(
+            "T", {"requires_approval": True}, {key: "Another tool"}
+        )
+
+        assert key not in clean and key not in merged
+
+
+TEAMSPACE_LLM = {
+    "llm_workspace_url": "https://ws.example.com",
+    "llm_token": "teamspace-llm-token",
+    "databricks_sql_endpoint": "https://ws.example.com/api/2.0/mcp/sql",
+    "databricks_pat": "teamspace-pat",
+}
+
+
+class TestATeamspaceCredentialStaysWithItsEndpoint:
+    """An override that points an endpoint elsewhere does not take the
+    teamspace credential for that endpoint with it."""
+
+    @pytest.mark.parametrize(
+        "endpoint, credential, moved_to",
+        [
+            ("llm_workspace_url", "llm_token", "https://elsewhere.example.net"),
+            ("llm_workspace_url", "llm_token", "elsewhere.example.net"),
+            ("llm_workspace_url", "llm_token", "{llm_workspace_url}"),
+            ("llm_workspace_url", "llm_token", "https://[elsewhere.example.net"),
+            (
+                "databricks_sql_endpoint",
+                "databricks_pat",
+                "https://elsewhere.example.net/api/2.0/mcp/sql",
+            ),
+            # Same host, other scheme: the credential would travel in clear.
+            (
+                "databricks_sql_endpoint",
+                "databricks_pat",
+                "http://ws.example.com/api/2.0/mcp/sql",
+            ),
+        ],
+    )
+    def test_moving_the_endpoint_withholds_the_teamspace_credential(
+        self, endpoint, credential, moved_to
+    ):
+        _, merged, _ = merge_tool_config_override(
+            "T", dict(TEAMSPACE_LLM), {endpoint: moved_to}
+        )
+
+        assert merged[endpoint] == moved_to
+        assert credential not in merged
+
+    def test_an_empty_credential_in_the_override_does_not_bring_it_back(self):
+        _, merged, _ = merge_tool_config_override(
+            "T",
+            dict(TEAMSPACE_LLM),
+            {"llm_workspace_url": "https://elsewhere.example.net", "llm_token": ""},
+        )
+
+        assert not merged.get("llm_token")
+
+    def test_the_other_pair_is_untouched(self):
+        _, merged, _ = merge_tool_config_override(
+            "T", dict(TEAMSPACE_LLM), {"llm_workspace_url": "https://other.example.net"}
+        )
+
+        assert merged["databricks_pat"] == "teamspace-pat"
+
+    def test_the_override_s_own_credential_goes_with_its_endpoint(self):
+        _, merged, _ = merge_tool_config_override(
+            "T",
+            dict(TEAMSPACE_LLM),
+            {
+                "llm_workspace_url": "https://elsewhere.example.net",
+                "llm_token": "task-token",
+            },
+        )
+
+        assert merged["llm_token"] == "task-token"
+
+    @pytest.mark.parametrize(
+        "same",
+        ["https://ws.example.com", "https://WS.example.com/", "ws.example.com", ""],
+    )
+    def test_the_same_endpoint_keeps_the_teamspace_credential(self, same):
+        _, merged, _ = merge_tool_config_override(
+            "T", dict(TEAMSPACE_LLM), {"llm_workspace_url": same}
+        )
+
+        assert merged["llm_token"] == "teamspace-llm-token"
+
+    def test_a_new_path_on_the_same_host_keeps_the_teamspace_pat(self):
+        _, merged, _ = merge_tool_config_override(
+            "T",
+            dict(TEAMSPACE_LLM),
+            {"databricks_sql_endpoint": "https://ws.example.com/sql/1.0/warehouses/a1"},
+        )
+
+        assert merged["databricks_pat"] == "teamspace-pat"
+
+    def test_a_teamspace_without_an_endpoint_still_withholds_its_credential(self):
+        """The credential was meant for the run's own workspace."""
+        _, merged, _ = merge_tool_config_override(
+            "T",
+            {"llm_token": "teamspace-llm-token"},
+            {"llm_workspace_url": "https://elsewhere.example.net"},
+        )
+
+        assert "llm_token" not in merged
+
+    def test_the_withheld_credential_is_logged_by_name_only(self, caplog):
+        with caplog.at_level(logging.WARNING, logger=tool_policies.__name__):
+            merge_tool_config_override(
+                "T",
+                dict(TEAMSPACE_LLM),
+                {"llm_workspace_url": "https://elsewhere.example.net"},
+            )
+
+        assert "llm_token" in caplog.text
+        assert "teamspace-llm-token" not in caplog.text
+        assert "elsewhere.example.net" not in caplog.text

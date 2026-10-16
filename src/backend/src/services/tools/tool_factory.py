@@ -1730,38 +1730,6 @@ class ToolFactory:
                             "conversation_history"
                         )
 
-                    # Allow tool_config_override to override specific fields
-                    if isinstance(tool_config_override, dict):
-                        for key in [
-                            "workspace_id",
-                            "dataset_id",
-                            "report_id",
-                            "tenant_id",
-                            "client_id",
-                            "client_secret",
-                            "username",
-                            "password",
-                            "auth_method",
-                            "access_token",
-                            "llm_workspace_url",
-                            "llm_token",
-                            "llm_model",
-                            "include_visual_references",
-                            "skip_system_tables",
-                            "output_format",
-                            "user_question",
-                            "enable_info_columns",
-                            "max_dax_retries",
-                            "business_mappings",
-                            "field_synonyms",
-                            "active_filters",
-                            "session_id",
-                            "visible_tables",
-                            "conversation_history",
-                        ]:
-                            if key in tool_config_override:
-                                tool_args[key] = tool_config_override[key]
-
                     # Filter out None values
                     tool_args = {k: v for k, v in tool_args.items() if v is not None}
 
