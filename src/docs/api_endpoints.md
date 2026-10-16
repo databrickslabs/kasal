@@ -142,6 +142,16 @@ see [Executions](#executions).
 | `PATCH` | `/crews/{crew_id}/publish` | Change a publication |
 | `DELETE` | `/crews/{crew_id}/publish` | Unpublish |
 
+A crew that runs without the canvas (published over MCP or A2A, started by an
+event trigger, or resumed) is rebuilt from its saved agents and tasks. Each task
+runs on the agent its agent-to-task edge on the canvas comes from, as in a canvas
+run; the task's `agent_id` is used only for a task with no edge.
+
+**Release note:** these runs used to read `agent_id` alone, so a task whose
+`agent_id` had been cleared ran on the crew's first agent. In the Agent Builder
+catalog, clicking a crew opens that crew rather than a copy of its agents and
+tasks; **Open as copy** on the card starts a new crew from it.
+
 Export lives on its own router: see [Other domains](#other-domains).
 
 ---
@@ -180,6 +190,10 @@ Export lives on its own router: see [Other domains](#other-domains).
 `context` (ids of tasks whose output feeds this one), `tools`, `tool_configs`,
 `output_pydantic` / `output_json` for structured output, `guardrail`,
 `human_input`, `async_execution`.
+
+`PUT /tasks/{task_id}` changes only the fields it is sent. A `config` that is
+sent replaces the stored one; when none is sent the stored `config` is kept.
+`agent_id: ""` is read as "not provided" and leaves the assignment unchanged.
 
 ---
 

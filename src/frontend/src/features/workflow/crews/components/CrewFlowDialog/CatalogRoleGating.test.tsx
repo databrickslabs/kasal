@@ -37,6 +37,7 @@ describe('crew/flow catalog role gating', () => {
 
   it.each([
     ['title="Optimize Prompts"', 'canEdit'],
+    ['title="Open as copy"', 'canEdit'],
     ['entityType="crew"', 'canEdit'],
     ['title="Delete Crew"', 'canDelete'],
     ['title="Edit on canvas"', 'canEdit'],

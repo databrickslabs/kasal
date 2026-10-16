@@ -242,7 +242,7 @@
   "src/frontend/src/features/workflow/assistant/components/MessageRenderer.test.tsx": 855,
   "src/frontend/src/features/workflow/assistant/utils/nodeGenerationHandlers.ts": 975,
   "src/frontend/src/features/workflow/canvas/components/FlowCanvas.tsx": 860,
-  "src/frontend/src/features/workflow/crews/components/CrewFlowDialog/CrewFlowDialog.tsx": 1926,
+  "src/frontend/src/features/workflow/crews/components/CrewFlowDialog/CrewFlowDialog.tsx": 1765,
   "src/frontend/src/features/workflow/crews/components/CrewOptimizeDialog.tsx": 1111,
   "src/frontend/src/features/workflow/tasks/components/TaskForm.tsx": 2035,
   "src/frontend/src/features/workflow/tasks/components/TaskNode.test.tsx": 1430,

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, IconButton, Tooltip } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DownloadIcon from '@mui/icons-material/Download';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
@@ -16,12 +17,14 @@ interface Props {
   published: boolean;
   onPublished: (published: boolean) => void;
   onOptimize: () => void;
+  /** "Start from this crew": copies its rows; the card itself opens it in place. */
+  onOpenCopy: () => void;
   onExport: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
 }
 
 export default function CrewCatalogActions({
-  crew, canEdit, canDelete, mlflowEnabled, published, onPublished, onOptimize, onExport, onDelete,
+  crew, canEdit, canDelete, mlflowEnabled, published, onPublished, onOptimize, onOpenCopy, onExport, onDelete,
 }: Props) {
   const [deployOpen, setDeployOpen] = useState(false);
   return <Box
@@ -32,6 +35,13 @@ export default function CrewCatalogActions({
       <Tooltip title="Optimize Prompts">
         <IconButton size="small" onClick={() => onOptimize()}>
           <AutoFixHighIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )}
+    {canEdit && (
+      <Tooltip title="Open as copy">
+        <IconButton size="small" aria-label={`Open ${crew.name} as copy`} onClick={() => onOpenCopy()}>
+          <ContentCopyIcon fontSize="small" />
         </IconButton>
       </Tooltip>
     )}
