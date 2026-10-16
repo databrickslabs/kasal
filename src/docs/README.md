@@ -27,6 +27,7 @@ Learn Kasal by building something end to end.
 
 Reach a specific goal, assuming you already know the basics.
 
+- [Upgrading from v1.3.0](./upgrading-from-v1-3-0.md): attach the existing database as the required `lakebase` resource, back up first, and check the first-start schema self-heal in the logs and `/health/db`.
 - [Crew export and deployment](./crew-export-deployment.md): export CrewAI crews to Python projects, Databricks notebooks, or deployable Databricks Apps, and ship them to Model Serving.
 - [Lakebase setup for Kasal](./lakebase-deployment.md): configure managed Lakebase PostgreSQL so crews, agents, tasks, and run history survive Databricks Apps restarts.
 - [MLflow tracing setup](./mlflow-tracing-setup.md): export every crew and flow execution to MLflow Tracing for observability.
