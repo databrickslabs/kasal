@@ -20,6 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from src.core.base_service import BaseService
 from src.db.base import Base
+from src.services.databricks.lakebase.installation_guard import (
+    SCHEMA_DROP_REFUSED,
+    refuse_when_installation_managed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +191,7 @@ class LakebaseSchemaService(BaseService):
 
             # Handle schema recreation if requested
             if recreate:
+                refuse_when_installation_managed(SCHEMA_DROP_REFUSED)
                 try:
                     async with engine.begin() as conn:
                         await conn.execute(
@@ -249,6 +254,32 @@ class LakebaseSchemaService(BaseService):
             logger.error(f"Error creating schema: {e}")
             raise
 
+    def drop_schema_sync(self, engine: Engine, user_email: str) -> Optional[str]:
+        """Take ownership of the kasal schema and DROP it, CASCADE.
+
+        Refused (BadRequestError, before any SQL) when the Databricks App
+        installation binds the database: that schema is the one the app runs
+        on. A drop that fails is logged and its error returned, so the caller's
+        CREATE SCHEMA IF NOT EXISTS can carry on; None means it was dropped.
+        """
+        refuse_when_installation_managed(SCHEMA_DROP_REFUSED)
+        safe_role = _quote_pg_role(user_email)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER SCHEMA kasal OWNER TO {safe_role}"))
+        except Exception:
+            pass  # Schema may not exist yet
+        try:
+            with engine.begin() as conn:
+                logger.info("Dropping existing kasal schema (if exists)...")
+                conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
+                logger.info("Dropped kasal schema")
+        except Exception as drop_error:
+            logger.warning(f"Could not drop schema: {drop_error}")
+            logger.info("Proceeding with CREATE SCHEMA IF NOT EXISTS...")
+            return str(drop_error)
+        return None
+
     def create_schema_sync(
         self, engine: Engine, user_email: str, recreate: bool = False
     ) -> None:
@@ -268,19 +299,7 @@ class LakebaseSchemaService(BaseService):
 
             # Handle schema recreation if requested
             if recreate:
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text(f"ALTER SCHEMA kasal OWNER TO {safe_role}"))
-                except Exception:
-                    pass  # Schema may not exist yet
-                try:
-                    with engine.begin() as conn:
-                        logger.info("Dropping existing kasal schema (if exists)...")
-                        conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                        logger.info("Dropped kasal schema")
-                except Exception as drop_error:
-                    logger.warning(f"Could not drop schema: {drop_error}")
-                    logger.info("Proceeding with CREATE SCHEMA IF NOT EXISTS...")
+                self.drop_schema_sync(engine, user_email)
 
             # Create schema in a fresh transaction
             with engine.begin() as conn:

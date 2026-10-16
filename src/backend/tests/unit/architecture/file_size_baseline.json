@@ -25,7 +25,7 @@
   "src/backend/src/services/converters/formats/sql/helpers/sql_structures.py": 1080,
   "src/backend/src/services/databricks/lakebase/management.py": 875,
   "src/backend/src/services/databricks/lakebase/migration.py": 877,
-  "src/backend/src/services/databricks/lakebase/service.py": 2090,
+  "src/backend/src/services/databricks/lakebase/service.py": 2081,
   "src/backend/src/services/execution/history.py": 994,
   "src/backend/src/services/execution/kasal_service.py": 1002,
   "src/backend/src/services/execution/service.py": 2299,

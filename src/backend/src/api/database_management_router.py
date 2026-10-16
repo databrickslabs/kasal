@@ -27,6 +27,10 @@ from src.schemas.database_management import (
     ListBackupsResponse,
 )
 from src.schemas.lakebase_preflight import LakebasePreflightReport
+from src.services.databricks.lakebase.installation_guard import (
+    MIGRATION_REFUSED,
+    refuse_when_installation_managed,
+)
 from src.services.databricks.lakebase.management import DatabaseManagementService
 from src.services.databricks.lakebase.service import LakebaseService
 
@@ -676,6 +680,7 @@ async def migrate_to_lakebase(
     Returns:
         Migration result
     """
+    refuse_when_installation_managed(MIGRATION_REFUSED)
     # The requested instance, else the Apps binding — never an invented name.
     instance_name = resolve_lakebase_instance_name(request.get("instance_name"))
     endpoint = request.get("endpoint")
@@ -701,7 +706,12 @@ async def migrate_to_lakebase_stream(
 
     Returns:
         StreamingResponse with SSE events
+
+    Raises:
+        BadRequestError: 400 when the Databricks App installation binds the
+            database; checked before the stream starts, so nothing is dropped.
     """
+    refuse_when_installation_managed(MIGRATION_REFUSED)
 
     async def event_generator() -> AsyncIterator[str]:
         migration_succeeded = False

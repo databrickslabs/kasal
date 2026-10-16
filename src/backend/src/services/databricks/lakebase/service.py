@@ -51,6 +51,10 @@ from src.repositories.database_config_repository import (  # noqa: E402
 from src.services.databricks.lakebase.connection import (  # noqa: E402
     LakebaseConnectionService,
 )
+from src.services.databricks.lakebase.installation_guard import (  # noqa: E402
+    MIGRATION_REFUSED,
+    refuse_when_installation_managed,
+)
 from src.services.databricks.lakebase.migration import (  # noqa: E402
     LakebaseMigrationService,
     _validate_identifier,
@@ -321,13 +325,7 @@ class LakebaseService(BaseService):
         Returns:
             Saved configuration or empty dict if deleted
         """
-        from src.core.databricks_app import LakebaseAppResource
-        from src.core.exceptions import BadRequestError
-
-        if LakebaseAppResource.from_env():
-            raise BadRequestError(
-                "Lakebase is managed through the Databricks App installation resources"
-            )
+        refuse_when_installation_managed()
         try:
             # If Lakebase is being disabled, delete the configuration
             if not config.get("enabled", False):
@@ -659,6 +657,7 @@ class LakebaseService(BaseService):
         Returns:
             Migration result
         """
+        refuse_when_installation_managed(MIGRATION_REFUSED)
         try:
             # Check if Lakebase is available
             if not LAKEBASE_AVAILABLE:
@@ -767,8 +766,6 @@ class LakebaseService(BaseService):
 
             logger.info("-" * 60)
             logger.info("📤 Starting data migration...")
-
-            # Import json for serialization (datetime already imported at top)
 
             # Initialize migration service with engines
             self.migration_service = LakebaseMigrationService(
@@ -899,14 +896,13 @@ class LakebaseService(BaseService):
             recreate_schema: Whether to drop and recreate the schema
             migrate_data: Whether to migrate data (False = schema only)
 
-        Args:
-            instance_name: Lakebase instance name
-            endpoint: Lakebase endpoint
-            recreate_schema: If True, drop and recreate kasal schema before migration
-
         Yields:
             Dict with event type and progress information
+
+        Raises:
+            BadRequestError: the installation binds the database (never drops it)
         """
+        refuse_when_installation_managed(MIGRATION_REFUSED)
         try:
             # Check if Lakebase is available
             if not LAKEBASE_AVAILABLE:
@@ -1041,22 +1037,17 @@ class LakebaseService(BaseService):
                     "type": "progress",
                     "message": "🗑️ Dropping existing kasal schema...",
                 }
-                try:
-                    with lakebase_engine.begin() as conn:
-                        conn.execute(
-                            text(f'ALTER SCHEMA kasal OWNER TO "{user_email}"')
-                        )
-                except Exception:
-                    pass  # Schema may not exist yet — that's fine
-                try:
-                    with lakebase_engine.begin() as conn:
-                        conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                    yield {"type": "success", "message": "✅ Dropped kasal schema"}
-                except Exception as drop_error:
-                    yield {
+                drop_error = self.schema_service.drop_schema_sync(
+                    lakebase_engine, user_email
+                )
+                yield (
+                    {"type": "success", "message": "✅ Dropped kasal schema"}
+                    if drop_error is None
+                    else {
                         "type": "warning",
                         "message": f"Could not drop schema: {drop_error}. Continuing...",
                     }
+                )
 
             # Create schema using schema service
             with lakebase_engine.begin() as conn:
