@@ -74,6 +74,54 @@ class HITLApprovalValidationError(HITLServiceError):
     """The requested decision does not satisfy the gate policy."""
 
 
+#: Gates whose blocked worker polls its own row and carries the run on once the
+#: gate is decided or its deadline passes. They never suspend the run, so no
+#: decision or timeout on them relaunches or fails it.
+_IN_RUN_GATE_KINDS = ("tool_call", "task_review")
+
+
+def _already_decided(approval_id: int) -> HITLApprovalAlreadyProcessedError:
+    return HITLApprovalAlreadyProcessedError(
+        f"Approval {approval_id} was already decided by another response"
+    )
+
+
+def _summary(a: HITLApproval) -> HITLApprovalResponse:
+    """An approval as the list and status reads return it.
+
+    Without ``previous_crew_output``: those reads are polled to detect gates,
+    and shipping a ~1 MB output on each made the config-gen gate slow to open.
+    The flags say it exists; GET /approvals/{id} serves it when rendered.
+    """
+    return HITLApprovalResponse(
+        id=a.id,
+        execution_id=a.execution_id,
+        flow_id=a.flow_id,
+        gate_node_id=a.gate_node_id,
+        crew_sequence=a.crew_sequence,
+        status=HITLApprovalStatusEnum(a.status),
+        gate_config=a.gate_config,
+        previous_crew_name=a.previous_crew_name,
+        previous_crew_output=None,
+        has_previous_crew_output=bool(a.previous_crew_output),
+        previous_crew_output_size=(
+            len(a.previous_crew_output) if a.previous_crew_output else None
+        ),
+        flow_state_snapshot=a.flow_state_snapshot,
+        responded_by=a.responded_by,
+        responded_at=a.responded_at,
+        approval_comment=a.approval_comment,
+        rejection_reason=a.rejection_reason,
+        rejection_action=(
+            HITLRejectionActionEnum(a.rejection_action) if a.rejection_action else None
+        ),
+        expires_at=a.expires_at,
+        is_expired=a.is_expired,
+        created_at=a.created_at,
+        group_id=a.group_id,
+    )
+
+
 class HITLService:
     """Service for Human in the Loop approval operations."""
 
@@ -225,18 +273,20 @@ class HITLService:
                     "A comment is required to approve this request"
                 )
 
-            # Update approval status
-            await self.approval_repo.update_status(
+            # Recorded only while still pending, so a decision that lost a race
+            # resumes nothing.
+            if not await self.approval_repo.update_status(
                 approval_id=approval_id,
                 status=HITLApprovalStatus.APPROVED,
                 responded_by=approved_by,
                 approval_comment=comment,
-            )
+            ):
+                raise _already_decided(approval_id)
 
             # Tool-call and task-review gates don't suspend the orchestration —
             # the blocked worker thread polls the row and resumes itself, so
             # there is no flow to relaunch.
-            if (approval.gate_config or {}).get("kind") in ("tool_call", "task_review"):
+            if (approval.gate_config or {}).get("kind") in _IN_RUN_GATE_KINDS:
                 execution_resumed = False
             else:
                 # Resume flow execution with user's token for OBO auth
@@ -317,14 +367,14 @@ class HITLService:
                 else HITLApprovalStatus.REJECTED
             )
 
-            # Update approval status
-            await self.approval_repo.update_status(
+            if not await self.approval_repo.update_status(
                 approval_id=approval_id,
                 status=new_status,
                 responded_by=rejected_by,
                 rejection_reason=reason,
                 rejection_action=action.value,
-            )
+            ):
+                raise _already_decided(approval_id)
 
             # Handle rejection action
             gate_kind = (approval.gate_config or {}).get("kind")
@@ -413,42 +463,7 @@ class HITLService:
                 group_id=group_id, limit=limit, offset=offset
             )
 
-            # Omit the heavy `previous_crew_output` from the LIST response too
-            # (same reason as get_execution_hitl_status — this can be polled and
-            # each row's output can be ~1 MB). Clients fetch the full output via
-            # GET /approvals/{id} on demand.
-            items = [
-                HITLApprovalResponse(
-                    id=a.id,
-                    execution_id=a.execution_id,
-                    flow_id=a.flow_id,
-                    gate_node_id=a.gate_node_id,
-                    crew_sequence=a.crew_sequence,
-                    status=HITLApprovalStatusEnum(a.status),
-                    gate_config=a.gate_config,
-                    previous_crew_name=a.previous_crew_name,
-                    previous_crew_output=None,  # omitted — lazy-loaded on demand
-                    has_previous_crew_output=bool(a.previous_crew_output),
-                    previous_crew_output_size=(
-                        len(a.previous_crew_output) if a.previous_crew_output else None
-                    ),
-                    flow_state_snapshot=a.flow_state_snapshot,
-                    responded_by=a.responded_by,
-                    responded_at=a.responded_at,
-                    approval_comment=a.approval_comment,
-                    rejection_reason=a.rejection_reason,
-                    rejection_action=(
-                        HITLRejectionActionEnum(a.rejection_action)
-                        if a.rejection_action
-                        else None
-                    ),
-                    expires_at=a.expires_at,
-                    is_expired=a.is_expired,
-                    created_at=a.created_at,
-                    group_id=a.group_id,
-                )
-                for a in approvals
-            ]
+            items = [_summary(a) for a in approvals]
 
             return HITLApprovalListResponse(
                 items=items, total=total, limit=limit, offset=offset
@@ -482,46 +497,7 @@ class HITLService:
                 (a for a in approvals if a.status == HITLApprovalStatus.PENDING), None
             )
 
-            # Convert to response objects.
-            # NOTE: omit the (potentially ~1 MB) `previous_crew_output` here — this
-            # status endpoint is polled to DETECT gates, and shipping the full
-            # output made the config-gen gate slow to open (browser downloads +
-            # JSON.parses ~1 MB). The client lazy-loads the full output via
-            # GET /approvals/{id} only when it renders it. We still signal that
-            # output exists (has_previous_crew_output + size) so the client knows
-            # to fetch it.
-            approval_responses = [
-                HITLApprovalResponse(
-                    id=a.id,
-                    execution_id=a.execution_id,
-                    flow_id=a.flow_id,
-                    gate_node_id=a.gate_node_id,
-                    crew_sequence=a.crew_sequence,
-                    status=HITLApprovalStatusEnum(a.status),
-                    gate_config=a.gate_config,
-                    previous_crew_name=a.previous_crew_name,
-                    previous_crew_output=None,  # omitted — lazy-loaded on demand
-                    has_previous_crew_output=bool(a.previous_crew_output),
-                    previous_crew_output_size=(
-                        len(a.previous_crew_output) if a.previous_crew_output else None
-                    ),
-                    flow_state_snapshot=a.flow_state_snapshot,
-                    responded_by=a.responded_by,
-                    responded_at=a.responded_at,
-                    approval_comment=a.approval_comment,
-                    rejection_reason=a.rejection_reason,
-                    rejection_action=(
-                        HITLRejectionActionEnum(a.rejection_action)
-                        if a.rejection_action
-                        else None
-                    ),
-                    expires_at=a.expires_at,
-                    is_expired=a.is_expired,
-                    created_at=a.created_at,
-                    group_id=a.group_id,
-                )
-                for a in approvals
-            ]
+            approval_responses = [_summary(a) for a in approvals]
 
             pending_response = next(
                 (
@@ -553,8 +529,11 @@ class HITLService:
         """
         Process all expired pending approvals.
 
-        This method is called by a background task to handle timeouts.
-        It applies the configured timeout_action (auto_reject or fail).
+        This method is called by a background task to handle timeouts. Every
+        expired gate is closed as TIMEOUT, but its run is failed only while it
+        is still paused at that gate: a run that finished, was stopped, or (for
+        a tool-call or task-review gate) carried on past its own deadline keeps
+        the status it reached.
 
         Returns:
             List of processed approval IDs
@@ -566,27 +545,28 @@ class HITLService:
             for approval in expired_approvals:
                 try:
                     timeout_action = approval.timeout_action
-
-                    if timeout_action == HITLTimeoutAction.AUTO_REJECT:
-                        # Auto-reject the approval
-                        await self.approval_repo.update_status(
-                            approval_id=approval.id,
-                            status=HITLApprovalStatus.TIMEOUT,
-                            responded_by="system",
-                            rejection_reason="Approval timed out (auto-rejected)",
-                        )
+                    auto = timeout_action == HITLTimeoutAction.AUTO_REJECT
+                    if not await self.approval_repo.update_status(
+                        approval_id=approval.id,
+                        status=HITLApprovalStatus.TIMEOUT,
+                        responded_by="system",
+                        rejection_reason=(
+                            "Approval timed out (auto-rejected)"
+                            if auto
+                            else "Approval timed out"
+                        ),
+                    ):
+                        # Decided between the sweep's read and its write.
+                        continue
+                    if await self._run_still_paused(approval):
                         await self._fail_execution(
-                            approval, "HITL gate timed out and was auto-rejected"
+                            approval,
+                            (
+                                "HITL gate timed out and was auto-rejected"
+                                if auto
+                                else "HITL gate timed out"
+                            ),
                         )
-                    else:
-                        # Fail action - fail the execution
-                        await self.approval_repo.update_status(
-                            approval_id=approval.id,
-                            status=HITLApprovalStatus.TIMEOUT,
-                            responded_by="system",
-                            rejection_reason="Approval timed out",
-                        )
-                        await self._fail_execution(approval, "HITL gate timed out")
 
                     processed_ids.append(approval.id)
                     logger.info(
@@ -608,6 +588,23 @@ class HITLService:
     # =========================================================================
     # Private Methods
     # =========================================================================
+
+    async def _run_still_paused(self, approval: HITLApproval) -> bool:
+        """Whether a timed-out gate's run is still waiting on it.
+
+        Read, then written by the caller, rather than written with
+        ``preserve_terminal``: that guard also protects WAITING_FOR_APPROVAL,
+        so it would make every flow-gate timeout a no-op.
+        """
+        if (approval.gate_config or {}).get("kind") in _IN_RUN_GATE_KINDS:
+            return False
+        from src.services.execution.status import ExecutionStatusService
+
+        run = await ExecutionStatusService.get_status(
+            approval.execution_id, session=self.session
+        )
+        status = str(getattr(run, "status", "") or "").upper()
+        return status == ExecutionStatus.WAITING_FOR_APPROVAL.value
 
     async def _update_execution_status(
         self, execution_id: str, status: str, message: Optional[str] = None
