@@ -11,10 +11,10 @@ from src.services.flow_builder.modules.flow_eval_context import extract_embedded
 PROSE_WRAPPED = (
     "Based on my comprehensive online research, I have compiled the following:\n\n"
     "```json\n"
-    '{"query": "Nehme Tohme", "results_found": 15, "has_results": true, '
+    '{"query": "Jane Example", "results_found": 15, "has_results": true, '
     '"answer_found": true, "relevance_score": 0.98}\n'
     "```\n\n"
-    "## Summary\nNehme Tohme is a Lebanese politician and businessman..."
+    "## Summary\nJane Example is a fictional person used in this fixture..."
 )
 
 

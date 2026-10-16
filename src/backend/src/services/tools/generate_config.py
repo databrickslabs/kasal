@@ -9,13 +9,13 @@ Dependencies: requests (pip install requests)
 
 Usage:
   python generate_config.py \
-    --workspace-id ac0fa11c-... \
-    --dataset-id ecdd57ae-... \
-    --tenant-id 9f37a392-... \
-    --client-id 7b597aac-... \
-    --client-secret "U5b8Q~..." \
-    --admin-client-id 8d8aa6ee-... \
-    --admin-client-secret "RXm8Q~..." \
+    --workspace-id 00000000-0000-0000-0000-000000000001 \
+    --dataset-id 00000000-0000-0000-0000-000000000003 \
+    --tenant-id 00000000-0000-0000-0000-000000000002 \
+    --client-id 00000000-0000-0000-0000-000000000009 \
+    --client-secret "<client-secret>" \
+    --admin-client-id 00000000-0000-0000-0000-00000000000a \
+    --admin-client-secret "<admin-client-secret>" \
     --catalog my_catalog \
     --schema my_schema \
     --output proposed_pipeline_config.json
@@ -59,13 +59,13 @@ def main() -> None:
         epilog=(
             "Example:\n"
             "  python generate_config.py \\\n"
-            "    --workspace-id ac0fa11c-... \\\n"
-            "    --dataset-id ecdd57ae-... \\\n"
-            "    --tenant-id 9f37a392-... \\\n"
-            "    --client-id 7b597aac-... \\\n"
-            "    --client-secret 'U5b8Q~...' \\\n"
-            "    --admin-client-id 8d8aa6ee-... \\\n"
-            "    --admin-client-secret 'RXm8Q~...' \\\n"
+            "    --workspace-id 00000000-0000-0000-0000-000000000001 \\\n"
+            "    --dataset-id 00000000-0000-0000-0000-000000000003 \\\n"
+            "    --tenant-id 00000000-0000-0000-0000-000000000002 \\\n"
+            "    --client-id 00000000-0000-0000-0000-000000000009 \\\n"
+            "    --client-secret '<client-secret>' \\\n"
+            "    --admin-client-id 00000000-0000-0000-0000-00000000000a \\\n"
+            "    --admin-client-secret '<admin-client-secret>' \\\n"
             "    --catalog my_catalog \\\n"
             "    --schema my_schema \\\n"
             "    --output proposed_pipeline_config.json"

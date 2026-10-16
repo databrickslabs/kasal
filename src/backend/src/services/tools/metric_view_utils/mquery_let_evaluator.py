@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 
 # A PBI parameter query: a literal string tagged as its own value, e.g.
-#   "dc_datalake_prod_001" meta [IsParameterQuery = true, Type = "Text"]
+#   "acme_prod" meta [IsParameterQuery = true, Type = "Text"]
 _PARAMETER_RE = re.compile(
     r'^\s*"((?:[^"]|"")*)"\s*meta\s*\[[^\]]*IsParameterQuery\s*=\s*true',
     re.IGNORECASE | re.DOTALL,

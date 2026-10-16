@@ -11,7 +11,6 @@ How each recommendation in the Databricks AI security guidance maps to its Kasal
 - [Test evidence files](#test-evidence-files)
 
 **Reference document:** *Security advice for LLM usage in Databricks Apps*
-Author: Alexander Warnecke. Reviewer: Alex Moneger. Org: Product Security. Feb 12, 2026.
 
 This document maps every recommendation from the reference doc to its Kasal implementation, together with observed log evidence from runtime verification (tested Mar 4, 2026).
 
@@ -795,7 +794,7 @@ Several tools added in recent PRs were missing from `TOOL_CAPABILITIES`, meaning
 
 ## Beyond-document overdelivery (Phases 4 and 5)
 
-Areas 9 to 16 go **beyond** the Warnecke reference document's explicit requirements. They address OWASP LLM Top 10 risks and operational hardening not covered in the original guidance:
+Areas 9 to 16 go **beyond** the reference document's explicit requirements. They address OWASP LLM Top 10 risks and operational hardening not covered in the original guidance:
 
 | Area | OWASP Risk | What |
 |------|-----------|------|
@@ -815,7 +814,7 @@ Areas 9 to 16 go **beyond** the Warnecke reference document's explicit requireme
 
 ## Gaps and future work
 
-The current implementation is fully compliant with the Warnecke reference document and exceeds it with 8 additional security measures. The items below are remaining enhancements, categorised by implementation effort.
+The current implementation is fully compliant with the reference document and exceeds it with 8 additional security measures. The items below are remaining enhancements, categorised by implementation effort.
 
 ### Compliance gaps (against reference document)
 

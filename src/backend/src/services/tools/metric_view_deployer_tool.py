@@ -37,7 +37,7 @@ class MetricViewDeployerSchema(BaseModel):
     warehouse_id: Optional[str] = Field(None, description="Databricks SQL warehouse ID")
     catalog_remap: Optional[str] = Field(
         None,
-        description='JSON dict of source catalog replacements, e.g. {"dc_datalake_prod_001": "david_test_metrics"}',
+        description='JSON dict of source catalog replacements, e.g. {"acme_prod": "main"}',
     )
 
 

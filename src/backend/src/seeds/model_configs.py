@@ -801,7 +801,7 @@ REMOVED_MODEL_KEYS = [
     # verified 2026-08-05: the endpoint reports READY and serves completions — so
     # it is back in DEFAULT_MODELS and must NOT be listed here, or the seeder
     # would delete it again on every startup.)
-    # Audited 2026-06-20 against the fevm-serverless-stable workspace with a
+    # Audited 2026-06-20 against a serverless test workspace with a
     # hello-world run through Kasal's own LLM path: these Databricks endpoints no
     # longer work — removed/renamed in the workspace, or only support the
     # Responses API (which Kasal's chat-completions path can't use). Pruned so

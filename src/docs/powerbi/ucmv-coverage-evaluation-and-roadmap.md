@@ -1,9 +1,9 @@
 # PBI → UCMV: coverage evaluation and best-effort roadmap (SC / PAAT / DCC)
 
 > [!NOTE]
-> **Status: internal / evaluation and roadmap.** An engineering digest of specific customer dataset runs, not user documentation. It names a customer and branch-specific behaviour; review before shipping it in the app bundle.
+> **Status: internal / evaluation and roadmap.** An engineering digest of specific customer dataset runs, not user documentation. It describes branch-specific behaviour; review before shipping it in the app bundle.
 
-Consolidated summary of three CCHBC dataset runs (2026-07-28), each analysed
+Consolidated summary of three customer dataset runs (2026-07-28), each analysed
 against the current `feat/pbi-ucmv-fixes-v2` behaviour, plus the concrete repo
 changes they imply. Source analyses live with the run artifacts
 (`EVALUATION_README.md` / `DIAGNOSTIC_README.md` per dataset); this doc is the
@@ -130,4 +130,4 @@ and physical source-table names are a required input Kasal cannot invent.
 _Digest of: SC `EVALUATION_README.md` (30 views, 100% measure match, 74% coverage,
 +41 vs prior run); PAAT `DIAGNOSTIC_README.md` (46 resolvable, ~10–19% ceiling);
 DCC `DIAGNOSTIC_README.md` (0 resolvable, measure-on-measure web, ~0–5% ceiling).
-Analyses run 2026-07-28/29 on CCHBC crew outputs._
+Analyses run 2026-07-28/29 on the customer's crew outputs._

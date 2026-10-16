@@ -646,7 +646,7 @@ class TestCatalogSchemaPlaceholderResolution:
                 },
                 {
                     "name": "dim_real",
-                    "source": "dc_prod.idor.ca_dim_plant",
+                    "source": "acme_prod.acme_hr.ca_dim_plant",
                     "on": "source.p = dim_real.p",
                 },
             ],
@@ -654,15 +654,15 @@ class TestCatalogSchemaPlaceholderResolution:
 
     def test_placeholders_substituted(self):
         spec = self._spec()
-        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
-        assert spec.source_table == "dc_prod.idor.fact_x"
-        assert spec.joins[0]["source"] == "dc_prod.idor.c_dim_calendar"
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
+        assert spec.source_table == "acme_prod.acme_hr.fact_x"
+        assert spec.joins[0]["source"] == "acme_prod.acme_hr.c_dim_calendar"
         # already-resolved sources untouched
-        assert spec.joins[1]["source"] == "dc_prod.idor.ca_dim_plant"
+        assert spec.joins[1]["source"] == "acme_prod.acme_hr.ca_dim_plant"
 
     def test_idempotent(self):
         spec = self._spec()
-        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
-        MetricViewPipeline._resolve_placeholders_in_spec(spec, "dc_prod", "idor")
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
+        MetricViewPipeline._resolve_placeholders_in_spec(spec, "acme_prod", "acme_hr")
         assert "{catalog}" not in spec.joins[0]["source"]
         assert "{schema}" not in spec.joins[0]["source"]

@@ -25,15 +25,15 @@
         ],
         "tool_configs": {
           "Pipeline Config Generator": {
-            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
-            "dataset_id": "826baa71-34d7-4ea4-89d2-67202f7e9b63",
-            "report_id": "7ff0e337-8f43-4109-93a5-164e77cb4d47",
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "dataset_id": "00000000-0000-0000-0000-000000000005",
+            "report_id": "00000000-0000-0000-0000-000000000007",
             "tenant_id": "<YOUR_AZURE_TENANT_ID>",
             "client_id": "<YOUR_SP_CLIENT_ID>",
             "client_secret": "<YOUR_SP_CLIENT_SECRET>",
             "admin_client_id": "<YOUR_ADMIN_SP_CLIENT_ID>",
             "admin_client_secret": "<YOUR_ADMIN_SP_CLIENT_SECRET>",
-            "catalog": "david_test_metrics",
+            "catalog": "main",
             "schema_name": "example_schema"
           }
         },

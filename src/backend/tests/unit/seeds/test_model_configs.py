@@ -582,7 +582,7 @@ class TestMainBlock:
 
 class TestAuditedDatabricksModels:
     """Regression test for the 2026-06-20 Databricks model audit (hello-world run
-    through Kasal's own LLM path against the fevm-serverless-stable workspace).
+    through Kasal's own LLM path against a serverless test workspace).
     Locks in which endpoints were removed and which working ones were added."""
 
     # Endpoints that no longer work and were pruned (removed from DEFAULT_MODELS
