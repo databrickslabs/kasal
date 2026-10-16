@@ -31,10 +31,12 @@ async def health_check() -> Dict[str, Any]:
 @router.get("/db", response_model=None)
 async def db_health() -> Dict[str, Any]:
     """
-    Database health check — reports Lakebase reachability when enabled.
+    Database health check — reports Lakebase reachability when enabled, and
+    whether the startup schema self-heal applied every step.
 
     Returns:
-        dict: Lakebase status including enabled, activated, reachable, and error info
+        dict: Lakebase status including enabled, activated, reachable, and error
+        info, plus ``schema_heal`` (status, failed_steps, databases)
     """
     from src.db.database_router import is_lakebase_enabled
     from src.db.lakebase_state import (
@@ -77,6 +79,15 @@ async def db_health() -> Dict[str, Any]:
     last_conn = get_last_successful_connection()
     if last_conn:
         result["last_successful_connection"] = last_conn.isoformat()
+
+    # Schema gaps the startup self-heal could not close (step names only; the
+    # causes are in the startup log). Reported, never fatal: see
+    # src/db/self_heal/report.py.
+    from src.services.databricks.lakebase.schema_health import schema_heal_status
+
+    result["schema_heal"] = schema_heal_status()
+    if result["schema_heal"]["status"] == "incomplete":
+        result["status"] = "degraded"
 
     return result
 

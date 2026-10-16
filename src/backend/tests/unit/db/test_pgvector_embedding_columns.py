@@ -145,10 +145,14 @@ class TestWithoutPgvector:
         assert len(statements) == 1  # just the pg_extension probe
         assert "pg_extension" in statements[0]
 
-    async def test_a_probe_failure_is_not_fatal(self):
+    async def test_a_probe_failure_reaches_the_steps_savepoint(self):
+        """Not swallowed: on PostgreSQL a failed probe aborts the transaction,
+        so it must reach the runner's SAVEPOINT to be rolled back. The runner
+        then records it and carries on (it is not fatal to startup)."""
         conn = _conn()
         conn.exec_driver_sql = AsyncMock(side_effect=Exception("connection reset"))
-        await _ensure_pgvector_embedding_columns(conn)  # must not raise
+        with pytest.raises(Exception, match="connection reset"):
+            await _ensure_pgvector_embedding_columns(conn)
 
 
 @pytest.mark.asyncio
@@ -166,13 +170,16 @@ class TestSqlite:
 
 class TestItRunsOnEveryStartup:
     def test_the_self_heal_calls_it(self):
-        """Otherwise the column only ever appears on a freshly created table."""
+        """Otherwise the column only ever appears on a freshly created table.
+
+        It is its own step in the pass, so a documentation_embeddings this role
+        cannot ALTER no longer skips it."""
         import inspect
 
-        import src.db.self_heal.columns as columns_module
+        import src.db.self_heal.runner as runner_module
 
-        source = inspect.getsource(columns_module)
-        assert "_ensure_pgvector_embedding_columns(conn)" in source
+        source = inspect.getsource(runner_module.run_schema_self_heal)
+        assert "_ensure_pgvector_embedding_columns," in source
 
 
 @pytest.mark.asyncio

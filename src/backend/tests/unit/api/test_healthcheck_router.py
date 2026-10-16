@@ -339,3 +339,61 @@ class TestDbHealthEndpoint:
         result = await db_health()
 
         assert "last_successful_connection" not in result
+
+
+# ---------------------------------------------------------------------------
+# /health/db — schema self-heal gaps
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_heal_report_from_other_tests(monkeypatch):
+    """The self-heal report is process-wide; start every test without one."""
+    from src.db.self_heal import report
+
+    monkeypatch.setattr(report, "_last_reports", {})
+
+
+class TestDbHealthReportsSchemaGaps:
+    """A step the startup self-heal could not apply is visible, not fatal."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
+    @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
+    async def test_a_gap_degrades_the_status_and_names_the_step(self, *_mocks):
+        from src.db.self_heal import report
+
+        conn = MagicMock()
+        conn.engine.dialect.name = "postgresql"
+        with report.heal_pass(conn):
+            report.record_gap("_ensure_agent_columns", RuntimeError("must be owner"))
+
+        result = await db_health()
+
+        assert result["status"] == "degraded"
+        assert result["schema_heal"] == {
+            "status": "incomplete",
+            "failed_steps": ["_ensure_agent_columns"],
+            "databases": ["postgresql"],
+        }
+        # Names only: the cause (which may name tables and roles) stays in the log.
+        assert "must be owner" not in str(result)
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
+    @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
+    async def test_before_any_pass_it_says_not_run(self, *_mocks):
+        result = await db_health()
+
+        assert result["status"] == "ok"
+        assert result["schema_heal"]["status"] == "not_run"

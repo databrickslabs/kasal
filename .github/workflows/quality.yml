@@ -167,6 +167,17 @@ jobs:
       - name: App schema builds on an empty PostgreSQL (init_db)
         run: uv run python -c "import asyncio; from src.db.session import init_db; asyncio.run(init_db())"
 
+      # The self-heal tests on a real PostgreSQL, where one failed statement
+      # aborts the whole transaction (mocks cannot show that). The suite forces
+      # a heal step to fail inside create_all's transaction, as the Lakebase boot
+      # does, and asserts the other steps and the new tables survive. Each test
+      # creates and drops its own database, so this does not disturb the schema
+      # the step above built.
+      - name: Self-heal isolation on PostgreSQL
+        env:
+          KASAL_TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/kasal
+        run: uv run pytest -q -rs tests/unit/db/self_heal
+
       # REPORT-ONLY until the history is replayable. Today `alembic upgrade
       # head` cannot build a database from empty: the history has four root
       # revisions and no baseline, and the first one ALTERs a table

@@ -62,3 +62,20 @@ async def _pg_columns(conn: AsyncConnection, table: str) -> set[str]:
         "AND table_schema = ANY (current_schemas(false))"
     )
     return {row[0] for row in res.fetchall()}
+
+
+async def _index_exists(conn: AsyncConnection, name: str) -> bool:
+    """Whether an index called ``name`` exists, on either dialect.
+
+    The PostgreSQL lookup follows ``search_path``, like :func:`_pg_columns`.
+    ``name`` is always a literal from the heal steps, never user input.
+    """
+    if _conn_is_sqlite(conn):
+        sql = f"SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = '{name}'"
+    else:
+        sql = (
+            f"SELECT 1 FROM pg_indexes WHERE indexname = '{name}' "
+            "AND schemaname = ANY (current_schemas(false))"
+        )
+    res = await conn.exec_driver_sql(sql)
+    return res.fetchone() is not None

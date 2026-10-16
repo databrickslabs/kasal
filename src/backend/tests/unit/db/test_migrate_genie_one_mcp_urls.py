@@ -93,12 +93,20 @@ async def test_migrates_beta_genie_one_rows_and_leaves_the_rest():
 
 
 @pytest.mark.asyncio
-async def test_noop_when_table_missing():
-    """A DB without the table yet: the heal logs and returns, never raises."""
+async def test_a_missing_table_is_isolated_by_the_pass_not_swallowed():
+    """The step raises so its SAVEPOINT rolls back; the pass records it and
+    carries on. Swallowing it here aborted PostgreSQL's transaction."""
+    from src.db.self_heal.runner import _run_self_heal_step
+
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            await heal._migrate_genie_one_mcp_urls(conn)
+            with pytest.raises(Exception, match="mcp_servers"):
+                await heal._migrate_genie_one_mcp_urls(conn)
+            assert (
+                await _run_self_heal_step(conn, heal._migrate_genie_one_mcp_urls)
+                is False
+            )
     finally:
         await engine.dispose()
 

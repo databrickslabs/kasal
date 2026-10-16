@@ -397,8 +397,12 @@ class TestEnsureDatabricksConfigColumns:
         assert not any("PRAGMA" in s for s in sql_calls)
 
     @pytest.mark.asyncio
-    async def test_exception_is_swallowed(self):
-        """Driver errors are caught and logged, not propagated."""
+    async def test_exception_reaches_the_steps_savepoint(self):
+        """Driver errors propagate, so the runner's SAVEPOINT rolls the step back.
+
+        Catching them here left PostgreSQL's transaction aborted for every step
+        after this one (src/db/self_heal/report.py).
+        """
         from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
@@ -406,8 +410,8 @@ class TestEnsureDatabricksConfigColumns:
 
         with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
-            # Must not raise.
-            await _ensure_databricks_config_columns(conn)
+            with pytest.raises(RuntimeError, match="driver boom"):
+                await _ensure_databricks_config_columns(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -720,11 +724,13 @@ class TestEnsureChatSessionsTable:
             create_fn(sync_conn)
 
     @pytest.mark.asyncio
-    async def test_failure_is_swallowed(self):
-        """A create failure must not break startup — logged as a warning."""
+    async def test_failure_reaches_the_steps_savepoint(self):
+        """A create failure propagates; the runner rolls the step back and
+        carries on, so startup is unaffected (see test_self_heal_step_isolation)."""
         from src.db.self_heal.tables import _ensure_chat_sessions_table
 
         conn = MagicMock()
         conn.run_sync = AsyncMock(side_effect=Exception("locked"))
 
-        await _ensure_chat_sessions_table(conn)  # must not raise
+        with pytest.raises(Exception, match="locked"):
+            await _ensure_chat_sessions_table(conn)

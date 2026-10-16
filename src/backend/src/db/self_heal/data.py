@@ -2,7 +2,8 @@
 
 These rewrite ROWS, not schema — renames that outlived the code that produced
 them, and a seed that shipped with the wrong flag. Each is idempotent and
-scoped tightly enough to run on every startup.
+scoped tightly enough to run on every startup. None catches its own error: the
+runner's SAVEPOINT must see it to roll the step back (``self_heal/report.py``).
 """
 
 import logging
@@ -33,20 +34,17 @@ async def _disable_bi_specialist_crew_memory(conn: AsyncConnection) -> None:
     # with a literal keeps this dialect-agnostic enough for both.
     true_val = "1" if is_sqlite else "true"
     false_val = "0" if is_sqlite else "false"
-    try:
-        for table in ("crews", "agents"):
-            if is_sqlite:
-                res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
-                cols = {row[1] for row in res.fetchall()}
-                if "memory" not in cols or "group_id" not in cols:
-                    continue  # table/columns not present yet (fresh DB handled by seed)
-            await conn.exec_driver_sql(
-                f"UPDATE {table} SET memory = {false_val} "
-                f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"
-            )
-        logger.info("Ensured bi-specialist crews/agents have memory disabled")
-    except Exception as e:
-        logger.warning(f"Could not disable bi-specialist crew memory: {e}")
+    for table in ("crews", "agents"):
+        if is_sqlite:
+            res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            cols = {row[1] for row in res.fetchall()}
+            if "memory" not in cols or "group_id" not in cols:
+                continue  # table/columns not present yet (fresh DB handled by seed)
+        await conn.exec_driver_sql(
+            f"UPDATE {table} SET memory = {false_val} "
+            f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"
+        )
+    logger.info("Ensured bi-specialist crews/agents have memory disabled")
 
 
 async def _heal_personal_group_names(conn: AsyncConnection) -> None:
@@ -56,16 +54,13 @@ async def _heal_personal_group_names(conn: AsyncConnection) -> None:
     is now the "Personal Space" (it is not a teamspace), so rewrite the prefix
     in place. Idempotent (the WHERE prefix no longer matches after the first
     run) and DML-only, so it also runs on deployments where DDL is unavailable."""
-    try:
-        res = await conn.exec_driver_sql(
-            "UPDATE \"groups\" SET name = REPLACE(name, 'Personal Workspace', 'Personal Space') "
-            "WHERE name LIKE 'Personal Workspace%'"
-        )
-        renamed = getattr(res, "rowcount", 0) or 0
-        if renamed > 0:
-            logger.info(f"Renamed {renamed} personal group(s) to 'Personal Space'")
-    except Exception as e:
-        logger.warning(f"Could not heal personal group names: {e}")
+    res = await conn.exec_driver_sql(
+        "UPDATE \"groups\" SET name = REPLACE(name, 'Personal Workspace', 'Personal Space') "
+        "WHERE name LIKE 'Personal Workspace%'"
+    )
+    renamed = getattr(res, "rowcount", 0) or 0
+    if renamed > 0:
+        logger.info(f"Renamed {renamed} personal group(s) to 'Personal Space'")
 
 
 #: The engineconfig keys that existed before the crewai→kasal rename. The heal
@@ -90,19 +85,14 @@ async def _heal_engine_config_names(conn: AsyncConnection) -> None:
     unscoped UPDATE here would rewrite a live CrewAI configuration to `kasal`
     at every startup, and the symptom — "the engine keeps switching back" —
     would point nowhere near this function."""
-    try:
-        keys = "', '".join(_LEGACY_ENGINE_CONFIG_KEYS)
-        res = await conn.exec_driver_sql(
-            "UPDATE engineconfig SET engine_name = 'kasal' "
-            f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"
-        )
-        renamed = getattr(res, "rowcount", 0) or 0
-        if renamed > 0:
-            logger.info(
-                f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'"
-            )
-    except Exception as e:
-        logger.warning(f"Could not heal engine_config engine names: {e}")
+    keys = "', '".join(_LEGACY_ENGINE_CONFIG_KEYS)
+    res = await conn.exec_driver_sql(
+        "UPDATE engineconfig SET engine_name = 'kasal' "
+        f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"
+    )
+    renamed = getattr(res, "rowcount", 0) or 0
+    if renamed > 0:
+        logger.info(f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'")
 
 
 #: Genie One's Beta and GA paths. Literal copies of GENIE_ONE_BETA_PATH and
@@ -130,46 +120,44 @@ async def _migrate_genie_one_mcp_urls(conn: AsyncConnection) -> None:
     already has one keeps it; anything else becomes ``databricks_obo``, what the
     catalog registers. Name and scope are untouched.
 
-    Idempotent: a migrated row no longer matches. DML only.
+    Idempotent: a migrated row no longer matches. DML only. A failure raises
+    into the step's SAVEPOINT, so no row is left half-moved.
     """
-    try:
-        rows = (
-            await conn.execute(
-                text(
-                    "SELECT id, server_url, auth_type FROM mcp_servers "
-                    "WHERE server_url LIKE :bare OR server_url LIKE :slash"
-                ),
-                {
-                    "bare": f"%{_GENIE_ONE_BETA_PATH}",
-                    "slash": f"%{_GENIE_ONE_BETA_PATH}/",
-                },
-            )
-        ).fetchall()
-        migrated = 0
-        for row_id, server_url, auth_type in rows:
-            match = _GENIE_ONE_BETA_URL.match(server_url or "")
-            if not match:
-                continue
-            if auth_type not in _DATABRICKS_MCP_AUTH_TYPES:
-                auth_type = "databricks_obo"
-            await conn.execute(
-                text(
-                    "UPDATE mcp_servers SET server_url = :url, auth_type = :auth "
-                    "WHERE id = :id"
-                ),
-                {
-                    "url": match.group(1) + _GENIE_ONE_GA_PATH,
-                    "auth": auth_type,
-                    "id": row_id,
-                },
-            )
-            migrated += 1
-        if migrated:
-            logger.info(
-                "Moved %s Genie One MCP registration(s) to the GA endpoint", migrated
-            )
-    except Exception as e:  # noqa: BLE001 — a skipped heal must not stop startup
-        logger.warning("Could not migrate Genie One MCP URLs: %s", e)
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT id, server_url, auth_type FROM mcp_servers "
+                "WHERE server_url LIKE :bare OR server_url LIKE :slash"
+            ),
+            {
+                "bare": f"%{_GENIE_ONE_BETA_PATH}",
+                "slash": f"%{_GENIE_ONE_BETA_PATH}/",
+            },
+        )
+    ).fetchall()
+    migrated = 0
+    for row_id, server_url, auth_type in rows:
+        match = _GENIE_ONE_BETA_URL.match(server_url or "")
+        if not match:
+            continue
+        if auth_type not in _DATABRICKS_MCP_AUTH_TYPES:
+            auth_type = "databricks_obo"
+        await conn.execute(
+            text(
+                "UPDATE mcp_servers SET server_url = :url, auth_type = :auth "
+                "WHERE id = :id"
+            ),
+            {
+                "url": match.group(1) + _GENIE_ONE_GA_PATH,
+                "auth": auth_type,
+                "id": row_id,
+            },
+        )
+        migrated += 1
+    if migrated:
+        logger.info(
+            "Moved %s Genie One MCP registration(s) to the GA endpoint", migrated
+        )
 
 
 async def _assign_personal_workspace_ids(conn: AsyncConnection) -> None:
