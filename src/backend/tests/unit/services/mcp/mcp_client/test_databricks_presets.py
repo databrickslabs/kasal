@@ -27,6 +27,36 @@ def test_genie_one_url_matches_the_workspace_preset():
     )
 
 
+def test_genie_one_ga_url_matches_the_workspace_preset():
+    """The GA Genie One service exposes the same genie_ask / genie_poll_response
+    tools as the Beta endpoint, so it gets the same follow preset."""
+    for url in (
+        "https://workspace.example.com/ai-gateway/mcp-services/system.ai.genie_one_mcp",
+        "https://workspace.example.com/ai-gateway/mcp-services/system.ai.genie_one_mcp/",
+    ):
+        assert follow_preset_for(url) is GENIE_ONE_FOLLOW, url
+
+
+def test_other_gateway_services_have_no_genie_preset():
+    for url in (
+        "https://workspace.example.com/ai-gateway/mcp-services/system.ai.gmail",
+        "https://workspace.example.com/ai-gateway/mcp-services/main.gold.genie_one_mcp",
+        "https://workspace.example.com/ai-gateway/mcp-services/system.ai.genie_one_mcp_v2",
+        "https://workspace.example.com/ai-gateway/mcp-services/system.ai.genie_one_mcp/x",
+    ):
+        assert follow_preset_for(url) is None, url
+
+
+def test_genie_one_paths_are_the_documented_ones():
+    from src.services.mcp.mcp_client.databricks_presets import (
+        GENIE_ONE_BETA_PATH,
+        GENIE_ONE_PATH,
+    )
+
+    assert GENIE_ONE_PATH == "/ai-gateway/mcp-services/system.ai.genie_one_mcp"
+    assert GENIE_ONE_BETA_PATH == "/api/2.0/mcp/genie"
+
+
 def test_genie_space_url_matches_the_per_space_preset():
     assert (
         follow_preset_for("https://ws.example.com/api/2.0/mcp/genie/space-1")
@@ -113,6 +143,14 @@ def test_managed_genie_rows_get_the_preset_with_no_stored_config():
         "additional_config": {},
     }
     assert _follow_config_for(space) is GENIE_SPACE_FOLLOW
+    ga = {
+        "server_url": (
+            "https://workspace.example.com"
+            "/ai-gateway/mcp-services/system.ai.genie_one_mcp"
+        ),
+        "additional_config": {},
+    }
+    assert _follow_config_for(ga) is GENIE_ONE_FOLLOW
 
 
 def test_unmanaged_servers_get_no_follow_default():

@@ -22,7 +22,15 @@ envelope.
 import re
 from typing import Any, Dict, List, Optional
 
-#: Workspace-wide managed Genie MCP: {workspace}/api/2.0/mcp/genie
+#: Genie One, the workspace-wide Genie MCP, as the GA Unity Gateway service
+#: ``system.ai.genie_one_mcp``. This is the path the catalog registers.
+GENIE_ONE_PATH = "/ai-gateway/mcp-services/system.ai.genie_one_mcp"
+#: Genie One's Beta endpoint, which Databricks retires on 2026-10-31. Still
+#: recognised so a row registered before the move keeps its follow loop; the
+#: startup self-heal (``src/db/self_heal/data.py``) re-points stored rows.
+GENIE_ONE_BETA_PATH = "/api/2.0/mcp/genie"
+
+#: Workspace-wide Genie MCP (Genie One), at either path above.
 GENIE_ONE_FOLLOW: List[Dict[str, Any]] = [
     {
         "name": "Genie",
@@ -56,12 +64,17 @@ GENIE_SPACE_FOLLOW: List[Dict[str, Any]] = [
     },
 ]
 
+#: Beta Genie One (no tail) or a per-space server (``/{space_id}``).
 _GENIE_URL = re.compile(r"/api/2\.0/mcp/genie(/[^/?#]+)?/?$")
+_GENIE_ONE_GA_URL = re.compile(re.escape(GENIE_ONE_PATH) + r"/?$")
 
 
 def follow_preset_for(server_url: Optional[str]) -> Optional[List[Dict[str, Any]]]:
     """The follow declarations for a managed Databricks MCP URL, or None."""
-    match = _GENIE_URL.search((server_url or "").strip())
+    url = (server_url or "").strip()
+    if _GENIE_ONE_GA_URL.search(url):
+        return GENIE_ONE_FOLLOW
+    match = _GENIE_URL.search(url)
     if not match:
         return None
     return GENIE_SPACE_FOLLOW if match.group(1) else GENIE_ONE_FOLLOW

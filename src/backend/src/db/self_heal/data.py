@@ -6,7 +6,9 @@ scoped tightly enough to run on every startup.
 """
 
 import logging
+import re
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.db.self_heal.dialect import _conn_is_sqlite
@@ -101,6 +103,73 @@ async def _heal_engine_config_names(conn: AsyncConnection) -> None:
             )
     except Exception as e:
         logger.warning(f"Could not heal engine_config engine names: {e}")
+
+
+#: Genie One's Beta and GA paths. Literal copies of GENIE_ONE_BETA_PATH and
+#: GENIE_ONE_PATH in services/mcp/mcp_client/databricks_presets (src.db may not
+#: import services); a unit test keeps the two pairs equal.
+_GENIE_ONE_BETA_PATH = "/api/2.0/mcp/genie"
+_GENIE_ONE_GA_PATH = "/ai-gateway/mcp-services/system.ai.genie_one_mcp"
+#: Exactly ``<scheme>://<host>/api/2.0/mcp/genie`` with an optional trailing
+#: slash: never a per-space ``/genie/{id}`` row, a query string, or a path with
+#: anything in front of ``/api``.
+_GENIE_ONE_BETA_URL = re.compile(r"^(https?://[^/?#\s]+)/api/2\.0/mcp/genie/?$")
+_DATABRICKS_MCP_AUTH_TYPES = ("databricks_obo", "databricks_spn")
+
+
+async def _migrate_genie_one_mcp_urls(conn: AsyncConnection) -> None:
+    """Re-point Genie One registrations from the Beta endpoint to the GA one.
+
+    Databricks retires the Beta workspace-wide Genie MCP on 2026-10-31. Rows
+    registered from the catalog before the move point at ``{host}/api/2.0/mcp/genie``;
+    this rewrites them to ``{host}/ai-gateway/mcp-services/system.ai.genie_one_mcp``
+    on the same host, in every tenant, with no admin action. It also sets a
+    Databricks ``auth_type``: the runtime treats any ``/api/2.0/mcp/`` URL as
+    Databricks-hosted, but sends Databricks credentials to an AI Gateway URL only
+    when ``auth_type`` is ``databricks_obo`` or ``databricks_spn``. A row that
+    already has one keeps it; anything else becomes ``databricks_obo``, what the
+    catalog registers. Name and scope are untouched.
+
+    Idempotent: a migrated row no longer matches. DML only.
+    """
+    try:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT id, server_url, auth_type FROM mcp_servers "
+                    "WHERE server_url LIKE :bare OR server_url LIKE :slash"
+                ),
+                {
+                    "bare": f"%{_GENIE_ONE_BETA_PATH}",
+                    "slash": f"%{_GENIE_ONE_BETA_PATH}/",
+                },
+            )
+        ).fetchall()
+        migrated = 0
+        for row_id, server_url, auth_type in rows:
+            match = _GENIE_ONE_BETA_URL.match(server_url or "")
+            if not match:
+                continue
+            if auth_type not in _DATABRICKS_MCP_AUTH_TYPES:
+                auth_type = "databricks_obo"
+            await conn.execute(
+                text(
+                    "UPDATE mcp_servers SET server_url = :url, auth_type = :auth "
+                    "WHERE id = :id"
+                ),
+                {
+                    "url": match.group(1) + _GENIE_ONE_GA_PATH,
+                    "auth": auth_type,
+                    "id": row_id,
+                },
+            )
+            migrated += 1
+        if migrated:
+            logger.info(
+                "Moved %s Genie One MCP registration(s) to the GA endpoint", migrated
+            )
+    except Exception as e:  # noqa: BLE001 — a skipped heal must not stop startup
+        logger.warning("Could not migrate Genie One MCP URLs: %s", e)
 
 
 async def _assign_personal_workspace_ids(conn: AsyncConnection) -> None:
