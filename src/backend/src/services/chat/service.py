@@ -86,6 +86,7 @@ class LightAgentService:
         # gave "Added 1 explicit MCP servers" in Agent Builder and "Added 0" here.
         from src.db.session import routed_scoped_session
         from src.services.catalog.agents import AgentService
+        from src.services.catalog.run_lookup import agent_for_run
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.logs.queue import enqueue_log
         from src.utils.user_context import UserContext
@@ -137,17 +138,16 @@ class LightAgentService:
                 )
 
             # Best-effort: merge DB tool_configs when the spec lacks them (catalog
-            # agents). Chat-generated agents already carry their own tool_configs.
+            # agents of THIS workspace only; a miss skips it). Chat agents carry theirs.
             if not agent_spec.get("tool_configs"):
                 try:
                     async with routed_scoped_session() as db_session:
-                        db_id = (
+                        db_agent = await agent_for_run(
+                            AgentService(db_session),
                             str(agent_spec.get("id", ""))
                             .replace("agent_", "")
-                            .replace("agent-", "")
-                        )
-                        db_agent = (
-                            await AgentService(db_session).get(db_id) if db_id else None
+                            .replace("agent-", ""),
+                            group_context,
                         )
                         if db_agent and getattr(db_agent, "tool_configs", None):
                             agent_spec["tool_configs"] = db_agent.tool_configs

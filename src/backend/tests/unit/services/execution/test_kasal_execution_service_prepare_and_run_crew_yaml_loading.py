@@ -137,11 +137,12 @@ async def test_prepare_and_run_crew_with_db_agent():
     db_task = MagicMock()
     db_task.tool_configs = {"task_key": "task_val"}
 
+    # The stored rows are read by id, group-checked; there is no name lookup.
     mock_agent_svc = AsyncMock()
-    mock_agent_svc.find_by_name = AsyncMock(return_value=db_agent)
+    mock_agent_svc.get_with_group_check = AsyncMock(return_value=db_agent)
 
     mock_task_svc = AsyncMock()
-    mock_task_svc.find_by_name = AsyncMock(return_value=db_task)
+    mock_task_svc.get_with_group_check = AsyncMock(return_value=db_task)
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -170,8 +171,13 @@ async def test_prepare_and_run_crew_with_db_agent():
             new_callable=AsyncMock,
         ),
     ):
-        result = await svc.prepare_and_run_crew(exec_id, config)
+        result = await svc.prepare_and_run_crew(
+            exec_id, config, group_context=GroupContext(group_ids=["g1"])
+        )
         assert result["execution_id"] == exec_id
+    run_config = mock_engine.run_execution.await_args.args[1]
+    assert run_config["agents"][0]["tool_configs"] == {"key": "value"}
+    assert run_config["tasks"][0]["tool_configs"] == {"task_key": "task_val"}
 
 
 @pytest.mark.asyncio

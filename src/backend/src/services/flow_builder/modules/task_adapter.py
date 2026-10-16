@@ -185,27 +185,15 @@ class TaskConfig:
         """
         from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
-        # If task has an agent_id, try to get that agent
+        # If task has an agent_id, try to get that agent. Only through the run's
+        # bundle: its reads are scoped to the run's workspace, and a miss there is
+        # final — reading the table directly would skip that check.
         if hasattr(task_data, "agent_id") and task_data.agent_id:
-            # Try to get agent from repository first
             agent_data = None
             agent_repo = None if repositories is None else repositories.get("agent")
 
             if agent_repo:
                 agent_data = await agent_repo.get(task_data.agent_id)
-
-            # Fallback to direct database lookup if repository not available or agent not found
-            if not agent_data:
-                try:
-                    from src.db.session import routed_scoped_session
-                    from src.repositories.agent_repository import AgentRepository
-
-                    async with routed_scoped_session() as db:
-                        agent_data = await AgentRepository(db).get(task_data.agent_id)
-                except Exception as db_error:
-                    logger.error(
-                        f"Error querying database for agent: {db_error}", exc_info=True
-                    )
 
             if agent_data:
                 # Configure the agent
@@ -252,26 +240,9 @@ class TaskConfig:
                             None if repositories is None else repositories.get("agent")
                         )
 
+                        # The run's bundle only, as above.
                         if agent_repo:
                             agent_data = await agent_repo.get(inferred_agent_id)
-
-                        # Fallback to direct database lookup
-                        if not agent_data:
-                            try:
-                                from src.db.session import routed_scoped_session
-                                from src.repositories.agent_repository import (
-                                    AgentRepository,
-                                )
-
-                                async with routed_scoped_session() as db:
-                                    agent_data = await AgentRepository(db).get(
-                                        inferred_agent_id
-                                    )
-                            except Exception as db_error:
-                                logger.error(
-                                    f"Error querying database for inferred agent: {db_error}",
-                                    exc_info=True,
-                                )
 
                         if agent_data:
                             # Configure the agent

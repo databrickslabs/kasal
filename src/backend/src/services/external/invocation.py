@@ -41,6 +41,7 @@ from src.services.external.state import (
     is_terminal,
     to_external_state,
 )
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +337,7 @@ async def start_run(
     if crew is None:
         raise ValueError(f"Published crew {entity_id} no longer exists")
 
-    agents_yaml, tasks_yaml = await _crew_to_yaml(crew, session)
+    agents_yaml, tasks_yaml = await _crew_to_yaml(crew, session, caller.group_context)
     if not agents_yaml or not tasks_yaml:
         raise ValueError(
             f"Published crew {publication.external_name!r} has no agents or tasks"
@@ -425,17 +426,23 @@ async def cancel_run(
     return InvocationResult(run_id=run_id, state=ExternalTaskState.CANCELED)
 
 
-async def _crew_to_yaml(crew: Any, session: Any) -> tuple:
+async def _crew_to_yaml(
+    crew: Any, session: Any, group_context: Optional[GroupContext]
+) -> tuple:
     """A saved crew -> the agents_yaml/tasks_yaml the engine takes.
 
     Delegates to ``catalog/crew_config.py``, which owns the projection because
     the crews domain owns the data. Resume needs the same one — it rebuilds a
     run from the crew as it is now — and two copies is two ways for an
     externally-started run to differ from a resumed or a UI one.
+
+    ``group_context`` is the caller's, narrowed to the publication's workspace:
+    an imported crew can still list another workspace's agent and task ids, and
+    those must project as missing rows, not as that workspace's definitions.
     """
     from src.services.catalog.crew_config import build_crew_execution_config
 
-    return await build_crew_execution_config(session, crew)
+    return await build_crew_execution_config(session, crew, group_context)
 
 
 async def _start_flow(
