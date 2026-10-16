@@ -509,9 +509,9 @@ describe('useExecutionStream', () => {
     expect(options.onComplete).not.toHaveBeenCalled();
   });
 
-  it('connection lost callback calls onError when not completed', () => {
+  it('a lost connection is reported as transport loss, never as a run error', () => {
     const captures = setupStreamCapture();
-    const options = makeOptions();
+    const options = { ...makeOptions(), onTransportLost: vi.fn() };
     const { result } = renderHook(() => useExecutionStream(options));
 
     act(() => {
@@ -521,7 +521,8 @@ describe('useExecutionStream', () => {
       captures[0].onConnLost();
     });
 
-    expect(options.onError).toHaveBeenCalledWith('Connection lost');
+    expect(options.onTransportLost).toHaveBeenCalledTimes(1);
+    expect(options.onError).not.toHaveBeenCalled();
   });
 
   it('connection lost callback does NOT call onError when already completed', () => {

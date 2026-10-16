@@ -128,6 +128,7 @@ const h = vi.hoisted(() => {
     listExecutions: vi.fn(async () => []),
     stopExecution: vi.fn(async () => {}),
     getExecutionStatus: vi.fn(async () => ({ status: 'running' })),
+    getExecution: vi.fn(async () => ({ status: 'running' })),
     getJobTraces: vi.fn(async () => []),
     saveGeneratedCrew: vi.fn(async () => ({ id: 'crew-1', name: 'Saved Crew' })),
     saveSessionPreview: vi.fn(),
@@ -184,6 +185,7 @@ vi.mock('./hooks/useExecutionStream', () => ({
     h.streamApi ??= {
       startStream: (...a: unknown[]) => h.startStream(...a),
       stopStream: (...a: unknown[]) => h.stopStream(...a),
+      awaitLateSurface: () => {},
     };
     return h.streamApi;
   },
@@ -204,6 +206,7 @@ vi.mock('./api/executions', () => ({
   listExecutions: (...a: unknown[]) => h.listExecutions(...a),
   stopExecution: (...a: unknown[]) => h.stopExecution(...a),
   getExecutionStatus: (...a: unknown[]) => h.getExecutionStatus(...a),
+  getExecution: (...a: unknown[]) => h.getExecution(...a),
   getJobTraces: (...a: unknown[]) => h.getJobTraces(...a),
 }));
 vi.mock('./api/crews', () => ({
@@ -2052,11 +2055,7 @@ describe('ChatWorkspace component', () => {
   });
 
   // --- group switching + reconnect-after-refresh (window-driven) ---
-
-
-
-
-  it('reconnects to a still-running job after refresh, then clears it once finished', async () => {
+  it('reconnects to a job that finished while away and posts its stored answer', async () => {
     h.getSessionRunningJob.mockResolvedValueOnce('job-rc');
     h.exec.activeExecution = null;
     h.exec.startExecution.mockImplementationOnce((jobId: string) => {
@@ -2064,6 +2063,7 @@ describe('ChatWorkspace component', () => {
       h.exec.isExecuting = true;
     });
     h.getExecutionStatus.mockResolvedValueOnce({ status: 'completed' });
+    h.getExecution.mockResolvedValueOnce({ status: 'completed', result: 'stored answer' });
     h.session.currentSessionId = 's1';
     await act(async () => {
       render(<ChatWorkspace />);
@@ -2071,7 +2071,7 @@ describe('ChatWorkspace component', () => {
     });
     expect(h.exec.startExecution).toHaveBeenCalledWith('job-rc', 's1', { preservePreview: true });
     expect(h.getExecutionStatus).toHaveBeenCalledWith('job-rc');
-    expect(h.clearSessionRunningJob).toHaveBeenCalledWith('s1');
+    expect(h.exec.completeExecution).toHaveBeenCalledWith('stored answer', 'job-rc');
   });
 
   it('reconnect keeps the optimistic running state when status is missing/not terminal', async () => {
