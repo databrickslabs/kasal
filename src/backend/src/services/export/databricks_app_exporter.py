@@ -178,6 +178,22 @@ _EXT_TYPE = {
     ".txt": "text",
 }
 
+#: URL path prefixes of Databricks-managed MCP servers: the workspace MCP
+#: endpoints and the Unity Gateway MCP services (Genie One's GA home among them).
+_DATABRICKS_MCP_PREFIXES = ("/api/2.0/mcp/", "/ai-gateway/mcp-services/")
+
+
+def _databricks_mcp_path(url: str) -> Optional[str]:
+    """The host-relative path of a Databricks-managed MCP URL, else None.
+
+    The exported app gives a relative URL the app's Databricks identity and an
+    absolute one its own ``<NAME>_MCP_TOKEN`` (``agent_server/agent.py``).
+    """
+    for prefix in _DATABRICKS_MCP_PREFIXES:
+        if prefix in url:
+            return prefix + url.split(prefix, 1)[1]
+    return None
+
 
 class DatabricksAppExporter(BaseExporter):
     """Export a crew as a Databricks App project (template-driven)."""
@@ -612,9 +628,10 @@ class DatabricksAppExporter(BaseExporter):
         for server in mcp_servers or []:
             name = str(server.get("name", "mcp")).replace('"', "'")
             url = server.get("server_url") or ""
-            if "/api/2.0/mcp/" in url:
+            managed_path = _databricks_mcp_path(url)
+            if managed_path:
                 # Databricks-managed: keep the host-relative path; always HTTP.
-                url = "/api/2.0/mcp/" + url.split("/api/2.0/mcp/", 1)[1]
+                url = managed_path
                 transport = "streamable-http"
             else:
                 transport = (
@@ -763,8 +780,7 @@ class DatabricksAppExporter(BaseExporter):
                     keys.append(env)
         # Third-party (non-Databricks-managed) MCP servers need their own token.
         for server in mcp_servers or []:
-            url = server.get("server_url") or ""
-            if "/api/2.0/mcp/" in url:
+            if _databricks_mcp_path(server.get("server_url") or ""):
                 continue
             key = self._mcp_env_key(str(server.get("name", "mcp")))
             if key not in keys:

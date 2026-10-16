@@ -37,6 +37,11 @@ else:
     logger = logger_manager.crew
 
 
+#: Paths of Databricks-hosted MCP servers: managed MCP, and Unity Gateway MCP
+#: services. The workspace host check still applies to both.
+_DATABRICKS_MCP_PATHS = ("/api/2.0/mcp/", "/ai-gateway/mcp-services/")
+
+
 def _follow_config_for(server: Dict[str, Any]) -> Optional[Any]:
     """The follow declarations for one server: its own config wins; for the
     managed Databricks endpoints the catalog preset fills in as the default.
@@ -504,10 +509,10 @@ class MCPIntegration:
                 "headers": {},
             }
 
-            # Detect Databricks-hosted MCP URLs (external MCP proxy)
+            # Detect Databricks-hosted MCP URLs (see _DATABRICKS_MCP_PATHS)
             # These always require Databricks auth, regardless of auth_type setting
             server_url = server.get("server_url", "")
-            is_databricks_mcp = "/api/2.0/mcp/" in server_url
+            is_databricks_mcp = any(p in server_url for p in _DATABRICKS_MCP_PATHS)
 
             # Add authentication headers
             auth_type = server.get("auth_type", "api_key")

@@ -170,6 +170,9 @@ def get_desired_oauth_scopes(exclude_dataplane=True):
     names) — the platform replaced the older granular ids
     (sql.warehouses, vectorsearch.*, serving.serving-endpoints,
     dashboards.genie, files.files) with these umbrella scopes.
+
+    src/manifest.yaml declares the same list for Marketplace installs; a unit
+    test (tests/unit/test_deploy_scopes.py) fails when the two differ.
     """
     desired_scopes = [
         # Execute SQL and manage SQL-related resources
@@ -188,7 +191,8 @@ def get_desired_oauth_scopes(exclude_dataplane=True):
         "catalog.connections",
         # Filesystem-like file operations (volumes, workspace files)
         "files",
-        # AI Gateway V2 inference routing
+        # AI Gateway: V2 inference routing and Unity Gateway MCP services
+        # (UC MCP Services and Genie One, system.ai.genie_one_mcp)
         "ai-gateway",
         # Vector Search - CRITICAL for index creation
         "vector-search",

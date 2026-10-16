@@ -459,9 +459,9 @@ def _mcp_param(name: str, url: str, transport: str, host: str, db_headers: dict)
 
     Transport MATTERS: Databricks-managed MCP is streamable-HTTP; without it the
     adapter falls back to SSE and times out. Databricks-managed servers (relative
-    ``/api/2.0/mcp/...`` URLs) use the app's Databricks identity; third-party
-    servers (absolute URLs) use their own ``<NAME>_MCP_TOKEN`` so the Databricks
-    token is never sent off-platform.
+    ``/api/2.0/mcp/...`` and ``/ai-gateway/mcp-services/...`` URLs) use the
+    app's Databricks identity; third-party servers (absolute URLs) use their own
+    ``<NAME>_MCP_TOKEN`` so the Databricks token is never sent off-platform.
     """
     if url.startswith("/"):
         return {"url": f"{host}{url}", "transport": transport, "headers": dict(db_headers)}

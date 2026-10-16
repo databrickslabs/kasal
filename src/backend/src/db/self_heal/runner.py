@@ -31,6 +31,7 @@ from src.db.self_heal.data import (
     _disable_bi_specialist_crew_memory,
     _heal_engine_config_names,
     _heal_personal_group_names,
+    _migrate_genie_one_mcp_urls,
 )
 from src.db.self_heal.dialect import _conn_is_sqlite
 from src.db.self_heal.tables import (
@@ -147,6 +148,7 @@ async def run_schema_self_heal(conn: AsyncConnection) -> None:
         _assign_personal_workspace_ids,
         _heal_engine_config_names,
         _disable_bi_specialist_crew_memory,
+        _migrate_genie_one_mcp_urls,
     )
     for step in steps:
         await _run_self_heal_step(conn, step)

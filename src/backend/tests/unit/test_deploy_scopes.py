@@ -3,13 +3,19 @@
 import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import yaml
 
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
 )
 
-from deploy import configure_oauth_scopes
+from deploy import configure_oauth_scopes, get_desired_oauth_scopes
+
+# <repo>/src/manifest.yaml: parents[4] of <repo>/src/backend/tests/unit/<file>.
+MANIFEST = Path(__file__).resolve().parents[4] / "src" / "manifest.yaml"
 
 
 def test_scopes_do_not_include_catalog_volumes():
@@ -79,6 +85,16 @@ def test_scopes_match_the_required_app_consent_set():
                 "mcp.functions",
             ]
         )
+
+
+def test_marketplace_manifest_requests_the_same_scopes_as_deploy():
+    """src/manifest.yaml drives Marketplace installs; deploy.py drives CLI
+    deploys. Both must ask for the same user-authorization scopes, or one
+    install path gets an on-behalf-of token the app cannot work with."""
+    manifest = yaml.safe_load(MANIFEST.read_text())
+
+    assert manifest["user_api_scopes"] == get_desired_oauth_scopes()
+    assert "ai-gateway" in manifest["user_api_scopes"]
 
 
 def test_scopes_use_current_ids_not_legacy_ones():

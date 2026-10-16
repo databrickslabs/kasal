@@ -24,6 +24,7 @@ from src.schemas.mcp import (
     MCPTestConnectionResponse,
     MCPToggleResponse,
 )
+from src.services.mcp.mcp_client.databricks_presets import GENIE_ONE_PATH
 from src.services.mcp.mcp_client.legacy_urls import MCPLegacyUrlService
 from src.services.mcp.mcp_client.service import MCPService
 from src.utils.user_context import GroupContext
@@ -346,7 +347,7 @@ async def get_databricks_mcp_options(
         * AI Search → drill into /mcp/databricks/ai-search-indexes
 
     Selecting any leaf registers it as a Kasal MCP server with
-    ``auth_type=databricks_spn`` and ``server_type=streamable``.
+    ``auth_type=databricks_obo`` and ``server_type=streamable``.
 
     Browsing/registering Databricks MCP servers is a workspace-admin action, so
     this catalog is admin-only (enforced here, not just hidden in the UI).
@@ -400,17 +401,20 @@ async def get_databricks_mcp_options(
             }
         )
 
-        # Genie One — the workspace-wide managed Genie MCP (no space id): one
-        # endpoint that reaches every Genie space the caller can see, so it is
-        # directly selectable, unlike the per-space servers listed on drill-in
-        # below. Same host as the per-space servers, minus the /{space_id} tail.
+        # Genie One — the workspace-wide Genie MCP (no space id): one endpoint
+        # that reaches every Genie space the caller can see, so it is directly
+        # selectable, unlike the per-space servers listed on drill-in below.
+        # Registered at the GA Unity Gateway service system.ai.genie_one_mcp;
+        # the Beta /api/2.0/mcp/genie is retired on 2026-10-31 and rows still
+        # pointing there are re-pointed by the startup self-heal. id, kind and
+        # name are unchanged, so the registered row keeps its name.
         managed.append(
             {
                 "id": "genie-one",
                 "kind": "genie",
                 "name": "Genie One",
                 "description": "Ask across all your Genie spaces (workspace-wide)",
-                "server_url": f"{workspace_url}/api/2.0/mcp/genie",
+                "server_url": f"{workspace_url}{GENIE_ONE_PATH}",
                 "expandable": False,
                 # No tool-convention config here: the catalog names Databricks
                 # PRODUCTS only. The start+poll follow convention is supplied

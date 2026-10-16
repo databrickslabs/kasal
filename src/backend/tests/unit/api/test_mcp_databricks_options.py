@@ -124,9 +124,10 @@ async def test_catalog_groups_external_and_managed_types():
     assert managed["sql"]["server_url"] == "https://ws.example.com/api/2.0/mcp/sql"
     assert managed["sql"]["expandable"] is False
     # Genie One — the workspace-wide managed Genie MCP (no space id) is a
-    # directly-selectable leaf, distinct from the per-space drill-in below.
-    assert (
-        managed["genie-one"]["server_url"] == "https://ws.example.com/api/2.0/mcp/genie"
+    # directly-selectable leaf, distinct from the per-space drill-in below. It is
+    # the GA Unity Gateway service; the Beta /api/2.0/mcp/genie is retired.
+    assert managed["genie-one"]["server_url"] == (
+        "https://ws.example.com/ai-gateway/mcp-services/system.ai.genie_one_mcp"
     )
     assert managed["genie-one"]["kind"] == "genie"
     assert managed["genie-one"]["expandable"] is False

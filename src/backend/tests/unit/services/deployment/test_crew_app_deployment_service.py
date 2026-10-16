@@ -3,13 +3,16 @@ Unit tests for CrewAppDeploymentService (one-click Databricks Apps deploy).
 """
 
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 
 from src.schemas.crew_export import AppDeploymentConfig
 from src.services.deployment.app import (
+    DESIRED_OAUTH_SCOPES,
     STATUS_FAILED,
     STATUS_PENDING,
     STATUS_SUCCEEDED,
@@ -458,3 +461,12 @@ class TestNormalizeAppName:
     )
     def test_normalize(self, raw, expected):
         assert CrewAppDeploymentService._normalize_app_name(raw) == expected
+
+
+def test_app_deploys_request_the_marketplace_manifest_scopes():
+    """The in-app deploy keeps its own scope list; it must match the manifest
+    (which tests/unit/test_deploy_scopes.py ties to deploy.py)."""
+    manifest = Path(__file__).resolve().parents[5] / "manifest.yaml"
+    scopes = yaml.safe_load(manifest.read_text())["user_api_scopes"]
+
+    assert sorted(DESIRED_OAUTH_SCOPES) == sorted(scopes)
