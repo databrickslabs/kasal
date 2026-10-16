@@ -245,3 +245,35 @@ describe('Run recovery after mode changes and refresh', () => {
     expect(sessionStorage.getItem(`kasal-builder-run:${workspace}:new-conversation`)).toBeNull();
   });
 });
+
+describe('Returning to a session whose run already finished', () => {
+  it.each([
+    ['jobCompleted', 'COMPLETED'],
+    ['jobFailed', 'FAILED'],
+    ['jobStopped', 'STOPPED'],
+  ])('leaves the composer unlocked after %s, and drops the run binding', async (event, status) => {
+    vi.useFakeTimers();
+    try {
+      const { runService } = await import('../../../../api/execution/ExecutionHistoryService');
+      vi.mocked(runService.getRunByJobId).mockResolvedValue({ status } as never);
+      const jobId = `finished-${status}`;
+      const sessionA = `session-a-${status}`;
+      const { result, rerender } = renderHook(
+        ({ session }) => useExecutionMonitoring(session, noop, vi.fn()),
+        { initialProps: { session: sessionA } },
+      );
+      act(() => { window.dispatchEvent(new CustomEvent('jobCreated', { detail: { jobId, jobName: 'Run' } })); });
+      act(() => { window.dispatchEvent(new CustomEvent(event, { detail: { jobId, error: 'boom' } })); });
+      expect(result.current.executingJobId).toBeNull();
+
+      // Back to A before the result was even fetched, then after it was.
+      rerender({ session: `session-b-${status}` });
+      await act(async () => { rerender({ session: sessionA }); });
+      expect(result.current.executingJobId).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+      expect(result.current.executingJobId).toBeNull();
+      const workspace = localStorage.getItem('selectedGroupId') || 'default';
+      expect(sessionStorage.getItem(`kasal-builder-run:${workspace}:${sessionA}`)).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+});

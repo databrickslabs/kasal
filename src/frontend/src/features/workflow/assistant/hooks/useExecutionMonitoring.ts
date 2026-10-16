@@ -50,10 +50,22 @@ export const useExecutionMonitoring = (
   // endpoint remains authoritative: a restored id is reconciled below, so a
   // run that finished while away restores its result instead of staying busy.
   const recoveryKey = `kasal-builder-run:${localStorage.getItem('selectedGroupId') || 'default'}:${sessionId}`;
+  const recoveryKeyRef = useRef(recoveryKey);
+  recoveryKeyRef.current = recoveryKey;
+  // A settled run must not be restored as running. The binding outlived the run
+  // and, on every return to the session, put the finished job back as the
+  // executing one, whose terminal event this instance had already handled: the
+  // composer stayed locked. Only the binding for THIS job is dropped, under the
+  // key it was settled with (the user may be in another session by then).
+  const releaseBinding = useCallback((jobId: string, key = recoveryKeyRef.current) => {
+    try {
+      if (sessionStorage.getItem(key) === jobId) sessionStorage.removeItem(key);
+    } catch { /* Storage may be unavailable. */ }
+  }, []);
   useEffect(() => {
     let restoredJobId: string | null = null;
     try { restoredJobId = sessionStorage.getItem(recoveryKey); } catch { /* Storage may be unavailable. */ }
-    const jobId = restoredJobId;
+    const jobId = restoredJobId && !settledJobsRef.current.has(restoredJobId) ? restoredJobId : null;
     executingJobIdRef.current = jobId;
     lastExecutionJobIdRef.current = restoredJobId;
     executionStartTimeRef.current = null;
@@ -123,6 +135,9 @@ export const useExecutionMonitoring = (
 
       if (shouldClear) {
         settledJobsRef.current.add(jobId);
+        // Released once the result is posted below: a reload before then must
+        // still find the run, or its answer is never fetched.
+        const bindingKey = recoveryKeyRef.current;
         // Transition any remaining "running" or "planning" tasks to "completed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -145,7 +160,10 @@ export const useExecutionMonitoring = (
         setTimeout(() => {
           runService.getRunByJobId(jobId).then(run => {
             const existing = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
-            if (existing.some(message => message.jobId === jobId && message.type === 'result' && !message.isIntermediate)) return;
+            if (existing.some(message => message.jobId === jobId && message.type === 'result' && !message.isIntermediate)) {
+              releaseBinding(jobId, bindingKey);
+              return;
+            }
             const resultContent = builderResultContent(run?.result);
             if (resultContent) {
               const resultMessage: ChatMessage = {
@@ -157,8 +175,11 @@ export const useExecutionMonitoring = (
               };
               addMessage(sessionId, resultMessage);
               saveMessageToBackend(resultMessage);
+              releaseBinding(jobId, bindingKey);
             } else {
               console.warn('[WorkflowChat] No result found for completed job!');
+              // A null run is a failed lookup: keep the binding so a remount retries.
+              if (run) releaseBinding(jobId, bindingKey);
             }
           }).catch(error => {
             console.error('[WorkflowChat] Error fetching job result:', error);
@@ -176,6 +197,7 @@ export const useExecutionMonitoring = (
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
         settledJobsRef.current.add(jobId);
+        releaseBinding(jobId);
         // Transition all "running" or "planning" tasks to "failed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -332,6 +354,7 @@ export const useExecutionMonitoring = (
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
         settledJobsRef.current.add(jobId);
+        releaseBinding(jobId);
         const stoppedMessage: ChatMessage = {
           id: `exec-stopped-${Date.now()}`,
           type: 'execution',
@@ -374,7 +397,7 @@ export const useExecutionMonitoring = (
     };
   // CRITICAL: Using refs for executingJobId, lastExecutionJobId, and processedTraceIds
   // so they don't need to be in the dependency array (avoids re-registering event handlers)
-  }, [saveMessageToBackend, sessionId, addMessage]);
+  }, [saveMessageToBackend, sessionId, addMessage, releaseBinding]);
 
   // Function to mark that this session is about to start an execution
   const markPendingExecution = useCallback(() => {
