@@ -6,6 +6,7 @@ import { lazy, Suspense, useContext, useMemo, useState } from 'react'
 import type { NodeProps } from '../types'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { DeckThemeContext, seriesFromAccent } from '../lib/deckThemes'
+import { safeLinkHref } from '../lib/imagePolicy'
 import { SafeImage } from '../lib/safeImage'
 import { asArr, asStr } from './values'
 
@@ -28,7 +29,8 @@ export function Album({ node, resolve }: NodeProps) {
           if (it && typeof it === 'object') {
             const o = it as Record<string, unknown>
             const src = asStr(o.src ?? o.url ?? o.image ?? o.link)
-            return { src, caption: asStr(o.caption ?? o.label ?? o.title) || undefined, href: asStr(o.href ?? o.link ?? o.url) || undefined }
+            // Caption links: http(s) and mailto only; anything else is plain text.
+            return { src, caption: asStr(o.caption ?? o.label ?? o.title) || undefined, href: safeLinkHref(asStr(o.href ?? o.link ?? o.url)) }
           }
           return { src: asStr(it) }
         })

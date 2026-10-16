@@ -451,6 +451,30 @@ def validate_surface(payload: Any, catalog: Dict[str, Any]) -> bool:
     return payload.get("root") in ids
 
 
+#: The only colour a surface ``theme`` may carry. The renderer paints theme values
+#: into CSS as they are (``background: theme.panel``), so anything else, such as
+#: ``url(...)``, could make the browser fetch it.
+_HEX_COLOUR = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")
+
+
+def drop_unsafe_theme(payload: dict) -> dict:
+    """Keep only the hex colours of a model-sent ``theme``; drop every other
+    entry, and the theme itself when nothing is left."""
+    if "theme" not in payload:
+        return payload
+    theme = payload["theme"] if isinstance(payload["theme"], dict) else {}
+    kept = {
+        key: value.strip()
+        for key, value in theme.items()
+        if isinstance(value, str) and _HEX_COLOUR.fullmatch(value.strip())
+    }
+    if kept:
+        payload["theme"] = kept
+    else:
+        del payload["theme"]
+    return payload
+
+
 def _deref(value: Any, data_model: Dict[str, Any]) -> Any:
     """Resolve a literal-or-{path} binding against dataModel (shallow JSON pointer)."""
     if isinstance(value, dict) and isinstance(value.get("path"), str):
@@ -972,7 +996,7 @@ def compose_a2ui(
                         "Reply with ONLY the corrected JSON object."
                     )
                 else:
-                    return _done(normalize_tables(payload))
+                    return _done(normalize_tables(drop_unsafe_theme(payload)))
             else:
                 problem = (
                     json_error_of(raw_str)

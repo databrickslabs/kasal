@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyImageSource } from './imagePolicy'
+import { classifyImageSource, safeLinkHref } from './imagePolicy'
 
 const PAGE = 'https://kasal.example.com/chat/run-1'
 
@@ -40,6 +40,15 @@ describe('classifyImageSource', () => {
   it('refuses sources that are neither inline nor http(s)', () => {
     for (const src of ['javascript:alert(1)', 'file:///etc/passwd', 'ftp://example.org/x.png', '', '   ', undefined, null, 42]) {
       expect(classifyImageSource(src, PAGE)).toEqual({ kind: 'unsupported' })
+    }
+  })
+
+  it('safeLinkHref keeps http(s) and mailto links, relative ones included, and nothing else', () => {
+    expect(safeLinkHref('https://example.com/a', PAGE)).toBe('https://example.com/a')
+    expect(safeLinkHref('mailto:team@example.com', PAGE)).toBe('mailto:team@example.com')
+    expect(safeLinkHref('/runs/1', PAGE)).toBe('/runs/1')
+    for (const href of ['javascript:alert(1)', ' JavaScript:alert(1)', 'data:text/html,x', 'vbscript:x', 'file:///etc', '', undefined, 3]) {
+      expect(safeLinkHref(href, PAGE)).toBeUndefined()
     }
   })
 

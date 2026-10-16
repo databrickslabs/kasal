@@ -296,9 +296,11 @@ class SPAMiddleware:
 
         path = scope["path"]
 
-        # Skip API routes, static files, manifest, and markdown files
+        # Skip API routes (and the health check), static files, manifest, and
+        # markdown files
         if (
             path.startswith("/api/")
+            or path == "/health"
             or path.startswith("/api-docs")
             or path.startswith("/assets/")
             or path == "/favicon.ico"

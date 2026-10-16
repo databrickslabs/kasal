@@ -76,3 +76,45 @@ describe('deck export security', () => {
     },
   );
 });
+
+describe('deck export image policy', () => {
+  const remote = 'https://images.example.org';
+  const slide =
+    '<section class="slide">' +
+    `<img src="${remote}/x.png?d=1" alt="Revenue chart">` +
+    '<img src="data:image/png;base64,AA==" alt="inline">' +
+    `<img src="/assets/a.png" srcset="${remote}/2x.png 2x" alt="local">` +
+    `<div id="bg" style="color: red; background: url(${remote}/bg.png) center"></div>` +
+    `<div id="bg2" style="background-image: url('data:image/png;base64,AA==')"></div>` +
+    `<table background="${remote}/t.png"><tr><td>x</td></tr></table>` +
+    `<svg><image href="${remote}/i.png"></image><rect fill="url(#g)" width="1" height="1"></rect></svg>` +
+    '<a href="https://example.com/page">source</a>' +
+    '</section>';
+
+  it('keeps nothing that would fetch from another host; inline and same-origin stay', () => {
+    const out = sanitizeForRender(slide);
+    expect(out).not.toContain('images.example.org');
+    const host = document.createElement('div');
+    host.innerHTML = out;
+    expect(host.textContent).toContain('Revenue chart');
+    expect([...host.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([
+      'data:image/png;base64,AA==',
+      '/assets/a.png',
+    ]);
+    expect((host.querySelector('#bg') as HTMLElement).style.color).toBe('red');
+    expect(host.querySelector('#bg2')?.getAttribute('style')).toContain('data:image/png');
+    expect(host.querySelector('rect')?.getAttribute('fill')).toBe('url(#g)');
+    expect(host.querySelector('a')?.getAttribute('href')).toBe('https://example.com/page');
+  });
+
+  it('applies to the document the PDF export rasterizes', async () => {
+    await downloadDeckPdf([slide]);
+    expect(capture.html).toContain('Revenue chart');
+    expect(capture.html).not.toContain('images.example.org');
+  });
+
+  it('leaves other DOMPurify callers alone', async () => {
+    const DOMPurify = (await import('dompurify')).default;
+    expect(DOMPurify.sanitize(`<img src="${remote}/x.png">`)).toContain('images.example.org');
+  });
+});

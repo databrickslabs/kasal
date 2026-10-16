@@ -337,6 +337,24 @@ describe('Album', () => {
     expect(screen.getByRole('link', { name: 'First' })).toHaveAttribute('href', 'https://example.com/story');
   });
 
+  it('links a caption only to http(s) or mailto; any other href leaves plain text', () => {
+    const pics = [
+      { src: '/1.jpg', caption: 'Web', href: 'https://example.com/story' },
+      { src: '/2.jpg', caption: 'Mail', href: 'mailto:team@example.com' },
+      { src: '/3.jpg', caption: 'Script', href: 'javascript:alert(1)' },
+      { src: '/4.jpg', caption: 'Data', href: 'data:text/html,<b>x</b>' },
+    ];
+    render(<A2UIRenderer payload={{ ...album, dataModel: { pics } }} />);
+    expect(screen.getByRole('link', { name: 'Web' })).toHaveAttribute('href', 'https://example.com/story');
+    fireEvent.click(screen.getByLabelText('Next image'));
+    expect(screen.getByRole('link', { name: 'Mail' })).toHaveAttribute('href', 'mailto:team@example.com');
+    for (const caption of ['Script', 'Data']) {
+      fireEvent.click(screen.getByLabelText('Next image'));
+      expect(screen.queryByRole('link', { name: caption })).toBeNull();
+      expect(screen.getByText(caption).tagName).toBe('SPAN');
+    }
+  });
+
   it('accepts bare string URLs and renders nothing when empty', () => {
     const bare: Surface = { ...album, dataModel: { pics: ['data:image/png;base64,iVBORw0KGgo='] } };
     const { rerender } = render(<A2UIRenderer payload={bare} />);

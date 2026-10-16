@@ -63,6 +63,7 @@ import {
 export { untranslatableKey };
 export type { UntranslatableItem, ReviewAnnotation, ReviewStatus } from './NonTranspiledPanel';
 import rehypeSanitize from 'rehype-sanitize';
+import { safeImageComponents } from '../../../shared/a2ui/lib/markdown';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -671,7 +672,7 @@ const UCMVResultViewer: React.FC<UCMVResultViewerProps> = ({ result, editable = 
           defaultExpanded={false}
         >
           <Box sx={{ p: 2, '& table': { borderCollapse: 'collapse', width: '100%' }, '& th, & td': { border: '1px solid', borderColor: 'divider', px: 1, py: 0.5, fontSize: '0.8rem' } }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={safeImageComponents}>
               {result.migration_report}
             </ReactMarkdown>
           </Box>

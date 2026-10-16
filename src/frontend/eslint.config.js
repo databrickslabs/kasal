@@ -31,6 +31,37 @@ export default tseslint.config(
     },
   },
   {
+    // react-markdown only where the shared image policy is applied (checked by
+    // src/shared/a2ui/lib/imagePolicy.coverage.test.ts). Kept BEFORE the
+    // file-scoped no-restricted-imports blocks below, which replace this rule
+    // for their (non-UI) files rather than being replaced by it.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      '**/*.test.*',
+      'src/shared/a2ui/lib/markdown.tsx',
+      'src/shared/a2ui/components/primitives.tsx',
+      'src/shared/ui/PaginatedOutput.tsx',
+      'src/features/approvals/components/CrewOutputRenderer.tsx',
+      'src/features/chat/components/Cards/HelpCard.tsx',
+      'src/features/chat/components/Chat/MessageContent.tsx',
+      'src/features/chat/components/Preview/StepContent.tsx',
+      'src/features/executions/components/ShowResult.tsx',
+      'src/features/executions/components/UCMVResultViewer.tsx',
+      'src/features/help/documentation/Documentation.tsx',
+      'src/features/memory/components/MemoryRecordMarkdown.tsx',
+      'src/features/workflow/assistant/components/MessageRenderer.tsx',
+      'src/features/workflow/crews/components/DeliverableMarkdown.tsx',
+    ],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{
+          name: 'react-markdown',
+          message: 'Render markdown through the shared image policy (safeImageComponents / mdComponents / MarkdownImage in shared/a2ui/lib), then add the file to this allowlist.',
+        }],
+      }],
+    },
+  },
+  {
     files: [
       'src/api/**/*.ts',
       'src/types/**/*.ts',

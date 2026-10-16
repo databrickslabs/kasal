@@ -12,6 +12,7 @@ import { Box, Paper, useTheme } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownImage } from '../../../shared/a2ui/lib/safeImage';
+import { withFramePolicy } from '../utils/framePolicy';
 
 interface CrewOutputRendererProps {
   content: string;
@@ -28,24 +29,6 @@ export const looksLikeHtmlDocument = (raw: string): boolean => {
     /<html[\s>]/i.test(s) ||
     /<body[\s>]/i.test(s)
   );
-};
-
-// The previewed document may load nothing from the network: inline images and
-// styles only, the same rule the chat answer follows for images.
-const FRAME_POLICY =
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; ' +
-  'img-src data: blob:; style-src \'unsafe-inline\'; font-src data:">';
-
-/** `html` with FRAME_POLICY placed before anything in it that could fetch. */
-const withFramePolicy = (html: string): string => {
-  for (const opening of [/<head(?:\s[^>]*)?>/i, /<html(?:\s[^>]*)?>/i, /<!doctype[^>]*>/i]) {
-    const match = opening.exec(html);
-    if (match) {
-      const at = match.index + match[0].length;
-      return html.slice(0, at) + FRAME_POLICY + html.slice(at);
-    }
-  }
-  return FRAME_POLICY + html;
 };
 
 export const CrewOutputRenderer: React.FC<CrewOutputRendererProps> = ({

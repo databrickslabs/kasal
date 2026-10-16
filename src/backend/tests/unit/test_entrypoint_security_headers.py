@@ -110,6 +110,14 @@ async def test_static_assets_and_api_responses_still_carry_them(served, path):
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
 
 
+@pytest.mark.asyncio
+async def test_the_health_check_reaches_the_api_not_the_page(served):
+    response = await _get(served, "/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
+
+
 def test_the_spa_middleware_is_registered_once(served, entrypoint):
     spa = [m for m in served.user_middleware if m.cls is entrypoint.SPAMiddleware]
     assert len(spa) == 1
@@ -120,7 +128,13 @@ async def test_images_load_only_from_the_app_and_its_map_tiles(policy):
     """Remote images in model output must not load by themselves: img-src
     names no scheme-wide or wildcard source, only what the app itself needs."""
     assert sorted(policy["img-src"]) == sorted(
-        ["'self'", "data:", "blob:", "https://*.tile.openstreetmap.org"]
+        [
+            "'self'",
+            "data:",
+            "blob:",
+            "https://tile.openstreetmap.org",
+            "https://*.tile.openstreetmap.org",
+        ]
     )
 
 
@@ -133,6 +147,7 @@ async def test_the_policy_allows_what_the_app_loads_and_nothing_wider(policy):
         ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"]
     )
     assert sorted(policy["style-src"]) == sorted(["'self'", "'unsafe-inline'"])
+    assert sorted(policy["font-src"]) == sorted(["'self'", "data:"])
     assert sorted(policy["connect-src"]) == sorted(
         [
             "'self'",
