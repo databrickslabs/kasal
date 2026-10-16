@@ -613,14 +613,18 @@ class TemplateService:
         if cached is not None:
             return cached
 
+        from contextlib import asynccontextmanager
+
         from src.db.database_router import get_smart_db_session
 
-        async for session in get_smart_db_session():
+        # A context manager, not `async for`: a return inside the loop abandoned
+        # the router generator, and left this task's request session pointing at it.
+        async with asynccontextmanager(get_smart_db_session)() as session:
             service = TemplateService(session)
             return await service._get_effective_template_content_instance(
                 name, group_context
             )
-        return ""  # the session generator always yields; this keeps the type honest
+        return ""  # unreachable; mypy cannot tell the context manager re-raises
 
     @staticmethod
     async def invalidate_template_cache() -> None:

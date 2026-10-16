@@ -265,9 +265,9 @@ async def _auth_scoped_session() -> AsyncIterator[AsyncSession]:
 
     token = _RESOLVING_AUTH.set(True)
     try:
-        async for session in get_smart_db_session():
+        # Not `async for ...: yield; break` — see routed_scoped_session.
+        async with contextlib.asynccontextmanager(get_smart_db_session)() as session:
             yield session
-            break
     finally:
         _RESOLVING_AUTH.reset(token)
 

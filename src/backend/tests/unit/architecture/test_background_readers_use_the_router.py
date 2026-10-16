@@ -127,45 +127,67 @@ def test_an_allowed_module_still_routes_somewhere(relative_path):
     )
 
 
-@pytest.mark.parametrize("relative_path", sorted(ROUTER_REQUIRED))
-def test_no_return_inside_a_router_session_loop(relative_path):
-    """``return`` inside ``async for ... in get_smart_db_session()`` is a bug.
+#: Modules allowed to leave a router loop early, with the reason. Both are the
+#: crew/flow SUBPROCESS entry points, where the loop wraps the whole run and the
+#: process ends right after it; converting them changes what is committed at the
+#: end of a run, which needs a real subprocess run to verify. Shrink-only.
+EARLY_EXIT_ALLOWED = {
+    "services/agent_builder/process_executor.py": "subprocess entry point",
+    "services/flow_builder/process_executor.py": "subprocess entry point",
+}
 
-    The router yields ONCE and does its ``commit()`` and ``close()`` AFTER the
-    yield. Returning from inside the loop abandons the generator, so on the
-    local-DB branch the write is never committed and the session is never closed.
-    ``break`` exits the loop and lets the generator finish.
 
-    Four sites had this when the conversion was first made, including one that
-    committed on every insert — so it leaked a session per embedding.
+def _early_exits(body):
+    """Line numbers of a ``return`` or a ``break`` that leaves THIS loop.
+
+    A return in a nested function is that function's own; a break in a nested
+    loop exits that loop, not this one.
     """
-    path = BACKEND_SRC / relative_path
-    source = path.read_text()
-    tree = ast.parse(source)
+    found, stack = [], list(body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, (ast.Return, ast.Break)):
+            found.append(node.lineno)
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            # Its returns still leave our loop; its breaks do not.
+            stack.extend(n for n in ast.walk(node) if isinstance(n, ast.Return))
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    sorted(
+        str(p.relative_to(BACKEND_SRC))
+        for p in BACKEND_SRC.rglob("*.py")
+        if "get_smart_db_session()" in p.read_text()
+    ),
+)
+def test_no_early_exit_from_a_router_session_loop(relative_path):
+    """``return`` OR ``break`` inside ``async for ... in get_smart_db_session()``.
+
+    The router yields ONCE and does its ``commit()``, ``close()`` and the reset
+    of ``_request_session`` AFTER the yield. Leaving the loop early by either
+    route abandons the generator: the commit never runs, the close happens later
+    in a finaliser task, and the next routed block in this task reuses the
+    abandoned session. (This test used to recommend ``break``; it is the same
+    bug.) Use ``async with asynccontextmanager(get_smart_db_session)() as s:``.
+    """
+    if relative_path in EARLY_EXIT_ALLOWED:
+        pytest.skip(f"allowed: {EARLY_EXIT_ALLOWED[relative_path]}")
+    source = (BACKEND_SRC / relative_path).read_text()
     offenders = []
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.AsyncFor):
             continue
         iterated = ast.get_source_segment(source, node.iter) or ""
-        if "get_smart_db_session" not in iterated:
-            continue
-        # A return inside a NESTED function is that function's own, not ours.
-        nested = {
-            id(inner)
-            for stmt in node.body
-            for fn in ast.walk(stmt)
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for inner in ast.walk(fn)
-            if isinstance(inner, ast.Return)
-        }
-        offenders += [
-            node.lineno
-            for stmt in node.body
-            for inner in ast.walk(stmt)
-            if isinstance(inner, ast.Return) and id(inner) not in nested
-        ]
+        if "get_smart_db_session" in iterated:
+            offenders += _early_exits(node.body)
     assert not offenders, (
-        f"{relative_path}: `return` inside a get_smart_db_session loop at line(s) "
-        f"{sorted(set(offenders))}. Use `break` — a return abandons the generator "
-        "before its commit/close run."
+        f"{relative_path}: `return`/`break` inside a get_smart_db_session loop at "
+        f"line(s) {sorted(set(offenders))}. It abandons the generator before its "
+        "commit/close run; use the router as a context manager instead."
     )

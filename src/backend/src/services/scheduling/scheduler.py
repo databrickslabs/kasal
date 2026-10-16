@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
@@ -534,16 +535,15 @@ class SchedulerService:
             # that only points there if activate_lakebase() ran in this process
             # (boot or subprocess — never a runtime /lakebase/enable). Reading the
             # wrong database here means the schedule is "not found" and the run is
-            # skipped silently.
-            async for session in get_smart_db_session():
+            # skipped silently. A context manager, not `async for`: a break OR a
+            # return in the loop abandons the generator before it commits/closes.
+            async with asynccontextmanager(get_smart_db_session)() as session:
                 # Get the schedule to retrieve group information
                 repo = ScheduleRepository(session)
                 schedule = await repo.find_by_id(schedule_id)
                 if not schedule:
                     logger_manager.scheduler.error(f"Schedule {schedule_id} not found")
-                    # break, not return: a return would abandon the session
-                    # generator before it commits and closes.
-                    break
+                    return
 
                 from src.services.execution.config import run_freeze
 

@@ -16,6 +16,7 @@ The service:
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import Dict, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -158,15 +159,15 @@ class TraceBroadcastService:
         # _get_running_job_ids was already fixed this way for its own query; the
         # session around it was not, so every OTHER read in this poll still went
         # to the snapshot. This closes that.
-        async for session in get_smart_db_session():
+        # A context manager, not `async for`: a break OR a return inside the loop
+        # abandons the router generator, skipping its commit and close.
+        async with asynccontextmanager(get_smart_db_session)() as session:
             if has_global:
                 running_jobs = await self._get_running_job_ids(session)
                 active_jobs = active_jobs | running_jobs
 
             if not active_jobs:
-                # break, not return: a return abandons the generator and skips the
-                # commit/close that follow its yield.
-                break
+                return
             # Initialize tracking for new jobs - start from current max ID
             # This avoids re-broadcasting traces that the initial fetch already loaded
             trace_repo = ExecutionTraceRepository(session)
