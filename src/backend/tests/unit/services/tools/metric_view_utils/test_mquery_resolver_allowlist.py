@@ -58,6 +58,15 @@ class TestRowLevelStepsAreNotResolvable:
         assert any("Table.SelectRows" in u for u in unhandled)
         assert any("Table.Distinct" in u for u in unhandled)
 
+    def test_skip_reason_names_the_refused_steps(self):
+        from src.services.tools.metric_view_utils.mquery_parser import (
+            classify_mquery_source,
+        )
+
+        category, reason = classify_mquery_source(FILTERED_AND_DEDUPED)
+        assert category == "extractable"
+        assert "Table.SelectRows" in reason and "Table.Distinct" in reason
+
     def test_group_and_added_column_are_not_resolvable(self):
         grouped = _m(
             'Grouped = Table.Group(orders_Table, {"region"}, '

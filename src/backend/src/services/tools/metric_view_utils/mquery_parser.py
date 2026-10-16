@@ -138,11 +138,20 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
     if re.search(
         r"\b(Value\.NativeQuery|Sql\.Databases?|Spark\.)\b", m
     ) or _CATALOG_NAV_CONNECTORS.search(m):
+        # Name the row-level steps the deterministic resolver refused, so the
+        # report says why the table has no view instead of a generic gap.
+        _, unhandled = classify_m_steps(m)
+        steps = [u for u in unhandled if re.search(r"\b(Table|List)\.", u)]
+        detail = (
+            "; Power Query steps not reproduced in SQL: " + ", ".join(steps[:5])
+            if steps
+            else ""
+        )
         return (
             "extractable",
             "looks extractable (native query / catalog-browsing warehouse "
             "connector) but no source table was resolved — extraction gap, "
-            "investigate",
+            f"investigate{detail}",
         )
     return ("unknown", "unrecognized M source shape")
 

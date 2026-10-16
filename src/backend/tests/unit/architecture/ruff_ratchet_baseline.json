@@ -798,7 +798,7 @@
   "src/services/tools/metric_view_validator_tool.py::BLE001": 10,
   "src/services/tools/metric_view_validator_tool.py::G004": 14,
   "src/services/tools/metric_view_validator_tool.py::S110": 2,
-  "src/services/tools/mquery_conversion_pipeline_tool.py::BLE001": 16,
+  "src/services/tools/mquery_conversion_pipeline_tool.py::BLE001": 15,
   "src/services/tools/mquery_conversion_pipeline_tool.py::G004": 53,
   "src/services/tools/pbi_visual_ucmv_mapper_tool.py::BLE001": 10,
   "src/services/tools/pbi_visual_ucmv_mapper_tool.py::G004": 11,
