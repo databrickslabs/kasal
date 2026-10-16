@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core.exceptions import ConflictError
+from src.schemas.hitl import HITLApprovalStatusEnum
 from src.services.external.identity import ExternalCaller
 from src.services.external.interaction import (
     PendingInteraction,
@@ -40,20 +42,29 @@ def _caller(token="tok-123"):
 
 
 def _hitl_with(pending):
+    """HITLService whose status read returns ``pending`` as the run's history,
+    in the shape ``ExecutionHITLStatus`` really has."""
     service = MagicMock()
     service.get_execution_hitl_status = AsyncMock(
-        return_value=SimpleNamespace(pending_approvals=pending)
+        return_value=SimpleNamespace(approval_history=pending)
     )
     service.approve = AsyncMock(return_value=True)
     service.reject = AsyncMock(return_value=True)
     return service
 
 
-def _approval(approval_id=1, prompt="Approve the draft?", output="the draft"):
+def _approval(
+    approval_id=1,
+    prompt="Approve the draft?",
+    output="the draft",
+    status=HITLApprovalStatusEnum.PENDING,
+    is_expired=False,
+):
     return SimpleNamespace(
         id=approval_id,
-        prompt=prompt,
-        gate_config={},
+        status=status,
+        is_expired=is_expired,
+        gate_config={"message": prompt},
         previous_crew_output=output,
     )
 
@@ -84,18 +95,27 @@ class TestPending:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_the_gate_prompt(self):
-        approval = SimpleNamespace(
-            id=7,
-            prompt=None,
-            gate_config={"prompt": "Ship it?"},
-            previous_crew_output=None,
-        )
+        approval = _approval(approval_id=7, output=None)
+        approval.gate_config = {"prompt": "Ship it?"}
         with patch(
             "src.services.hitl.service.HITLService",
             return_value=_hitl_with([approval]),
         ):
             pending = await pending_for_run(_caller(), "run-1")
         assert pending[0].prompt == "Ship it?"
+
+    @pytest.mark.asyncio
+    async def test_decided_and_expired_gates_are_not_waiting(self):
+        history = [
+            _approval(1, status=HITLApprovalStatusEnum.APPROVED),
+            _approval(2, is_expired=True),
+            _approval(3),
+        ]
+        with patch(
+            "src.services.hitl.service.HITLService", return_value=_hitl_with(history)
+        ):
+            pending = await pending_for_run(_caller(), "run-1")
+        assert [p.approval_id for p in pending] == [3]
 
 
 class TestRespond:
@@ -171,3 +191,23 @@ class TestRespond:
         service = _hitl_with([])
         with patch("src.services.hitl.service.HITLService", return_value=service):
             assert await respond(_caller(), "run-1", "yes") is False
+
+    @pytest.mark.asyncio
+    async def test_only_an_approval_this_run_is_waiting_for_is_actioned(self):
+        service = _hitl_with([_approval(approval_id=1)])
+        with patch("src.services.hitl.service.HITLService", return_value=service):
+            assert await respond(_caller(), "run-1", "yes", approval_id=99) is False
+            service.approve.assert_not_awaited()
+            assert await respond(_caller(), "run-1", "yes", approval_id=1) is True
+        assert service.approve.await_args.kwargs["approval_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_decision_that_lost_the_race_is_a_conflict(self):
+        """Not a 500: the caller is told the gate was already decided."""
+        from src.services.hitl.service import HITLApprovalAlreadyProcessedError
+
+        service = _hitl_with([_approval()])
+        service.approve.side_effect = HITLApprovalAlreadyProcessedError("decided")
+        with patch("src.services.hitl.service.HITLService", return_value=service):
+            with pytest.raises(ConflictError, match="already been decided"):
+                await respond(_caller(), "run-1", "yes")

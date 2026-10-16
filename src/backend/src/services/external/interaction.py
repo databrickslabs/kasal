@@ -16,8 +16,17 @@ reply → approve/reject.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    GoneError,
+)
+from src.schemas.hitl import HITLApprovalResponse, HITLApprovalStatusEnum
 from src.services.external.identity import ExternalCaller
 
 logger = logging.getLogger(__name__)
@@ -59,6 +68,41 @@ class PendingInteraction:
         return payload
 
 
+async def _waiting_approvals(
+    caller: ExternalCaller, run_id: str, session: AsyncSession
+) -> Tuple[Optional[str], List[HITLApprovalResponse]]:
+    """The run's undecided, unexpired approvals, and the teamspace holding them.
+
+    Every teamspace the caller is scoped to is asked, not only the first: a run
+    lives in its publication's teamspace, and an unpinned caller's context lists
+    all of theirs, the run's not necessarily first. Asking only ``group_ids[0]``
+    missed the run whenever it was published anywhere else.
+    """
+    from src.services.hitl.service import HITLService
+
+    service = HITLService(session)
+    try:
+        for group_id in caller.group_ids:
+            status = await service.get_execution_hitl_status(
+                execution_id=run_id, group_id=group_id
+            )
+            # The history, not `pending_approval`: that names only one gate,
+            # and respond() lets a caller pick among several by approval_id.
+            pending = [
+                approval
+                for approval in status.approval_history
+                if approval.status == HITLApprovalStatusEnum.PENDING
+                and not approval.is_expired
+            ]
+            if pending:
+                return group_id, pending
+    except Exception as exc:  # noqa: BLE001
+        # A run with no HITL configuration is not an error condition, and the
+        # status call is an enrichment — never let it break a status poll.
+        logger.debug("[external] hitl status skipped for %s: %s", run_id, exc)
+    return None, []
+
+
 async def pending_for_run(
     caller: ExternalCaller, run_id: str, session: Any = None
 ) -> List[PendingInteraction]:
@@ -68,37 +112,17 @@ async def pending_for_run(
     this must be cheap and must not raise when there is no HITL involvement at
     all.
     """
-    group_id = caller.group_context.primary_group_id
-    if not group_id:
-        return []
-
-    from src.services.hitl.service import HITLService
-
-    try:
-        status = await HITLService(session).get_execution_hitl_status(
-            execution_id=run_id, group_id=group_id
+    _, pending = await _waiting_approvals(caller, run_id, session)
+    return [
+        PendingInteraction(
+            approval_id=approval.id,
+            prompt=_gate_prompt(approval) or "This run is waiting for approval.",
+            # The status read leaves the reviewed output out (it can be ~1 MB
+            # and is polled), so this is normally empty.
+            context=approval.previous_crew_output,
         )
-    except Exception as exc:  # noqa: BLE001
-        # A run with no HITL configuration is not an error condition, and the
-        # status call is an enrichment — never let it break a status poll.
-        logger.debug("[external] hitl status skipped for %s: %s", run_id, exc)
-        return []
-
-    pending = getattr(status, "pending_approvals", None) or []
-    out: List[PendingInteraction] = []
-    for approval in pending:
-        out.append(
-            PendingInteraction(
-                approval_id=getattr(approval, "id", 0),
-                prompt=(
-                    getattr(approval, "prompt", None)
-                    or _gate_prompt(approval)
-                    or "This run is waiting for approval."
-                ),
-                context=getattr(approval, "previous_crew_output", None),
-            )
-        )
-    return out
+        for approval in pending
+    ]
 
 
 def _gate_prompt(approval: Any) -> Optional[str]:
@@ -107,6 +131,31 @@ def _gate_prompt(approval: Any) -> Optional[str]:
     if isinstance(config, dict):
         return config.get("prompt") or config.get("message")
     return None
+
+
+def _client_error(exc: Exception, approval_id: int) -> Exception:
+    """A refused decision as the error both protocols answer with.
+
+    The HITL errors are not HTTP errors, so the MCP and A2A routers answered
+    each with a 500. These are the codes the HITL router gives the same
+    refusals; anything else is re-raised as it is.
+    """
+    from src.services.hitl.service import (
+        HITLApprovalAlreadyProcessedError,
+        HITLApprovalExpiredError,
+        HITLApprovalValidationError,
+        HITLPermissionDeniedError,
+    )
+
+    if isinstance(exc, HITLApprovalAlreadyProcessedError):
+        return ConflictError(f"Approval {approval_id} has already been decided.")
+    if isinstance(exc, HITLApprovalExpiredError):
+        return GoneError(f"Approval {approval_id} has expired.")
+    if isinstance(exc, HITLPermissionDeniedError):
+        return ForbiddenError(f"You may not decide approval {approval_id}.")
+    if isinstance(exc, HITLApprovalValidationError):
+        return BadRequestError(str(exc))
+    return exc
 
 
 async def respond(
@@ -127,12 +176,8 @@ async def respond(
     answer into three.
     """
     token = caller.obo_token()
-    group_id = caller.group_context.primary_group_id
-    if not group_id:
-        return False
-
-    pending = await pending_for_run(caller, run_id, session=session)
-    if not pending:
+    group_id, pending = await _waiting_approvals(caller, run_id, session)
+    if not group_id or not pending:
         return False
 
     if approval_id is None:
@@ -141,28 +186,35 @@ async def respond(
                 f"Run {run_id} has {len(pending)} pending approvals; "
                 "specify approval_id."
             )
-        approval_id = pending[0].approval_id
+        approval_id = pending[0].id
+    elif approval_id not in {approval.id for approval in pending}:
+        # An id from another run, or one already decided: this run is not
+        # waiting for it.
+        return False
 
-    from src.services.hitl.service import HITLService
+    from src.services.hitl.service import HITLService, HITLServiceError
 
     service = HITLService(session)
     is_rejection = response.strip().lower() in _REJECTION_WORDS
 
-    if is_rejection:
-        await service.reject(
-            approval_id=approval_id,
-            rejected_by=caller.identifier,
-            group_id=group_id,
-            reason=response,
-        )
-    else:
-        await service.approve(
-            approval_id=approval_id,
-            approved_by=caller.identifier,
-            group_id=group_id,
-            comment=response,
-            user_token=token,
-        )
+    try:
+        if is_rejection:
+            await service.reject(
+                approval_id=approval_id,
+                rejected_by=caller.identifier,
+                group_id=group_id,
+                reason=response,
+            )
+        else:
+            await service.approve(
+                approval_id=approval_id,
+                approved_by=caller.identifier,
+                group_id=group_id,
+                comment=response,
+                user_token=token,
+            )
+    except HITLServiceError as exc:
+        raise _client_error(exc, approval_id) from exc
 
     logger.info(
         "[external] %s %s approval %s on run %s",
