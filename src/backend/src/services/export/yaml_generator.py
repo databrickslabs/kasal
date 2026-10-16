@@ -13,21 +13,25 @@ from src.utils.sensitive_data_utils import is_sensitive_key
 logger = logging.getLogger(__name__)
 
 
-def _without_secrets(value: Any) -> Any:
-    """``value`` with credential strings removed at any depth.
+def _without_secrets(config: Dict[str, object]) -> Dict[str, object]:
+    """``config`` with credential strings removed at any depth.
 
     A task's config can carry credentials (a Databricks Volume callback's
     ``token``); an export never bakes them in, the deployed app supplies its own.
     Only string values are dropped, so a numeric ``max_tokens`` survives.
     """
+    return {
+        key: _scrub(value)
+        for key, value in config.items()
+        if not (is_sensitive_key(str(key)) and isinstance(value, str))
+    }
+
+
+def _scrub(value: object) -> object:
     if isinstance(value, dict):
-        return {
-            k: _without_secrets(v)
-            for k, v in value.items()
-            if not (is_sensitive_key(str(k)) and isinstance(v, str))
-        }
+        return _without_secrets(value)
     if isinstance(value, list):
-        return [_without_secrets(v) for v in value]
+        return [_scrub(item) for item in value]
     return value
 
 
