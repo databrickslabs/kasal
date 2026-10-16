@@ -13,6 +13,7 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import ExecutionStopButton from './ExecutionStopButton';
 import CheckpointDialog from './CheckpointDialog';
 import { useUserPreferencesStore } from '../../../store/userPreferencesStore';
+import { usePermissionStore } from '../../../store/permissions';
 // Loads @react-pdf/renderer on demand and toasts on failure.
 import { downloadRunPDF } from './downloadRunPDF';
 
@@ -60,6 +61,8 @@ const RunActions: React.FC<RunActionsProps> = ({
   const useNewExecutionUI = useUserPreferencesStore(state => state.useNewExecutionUI);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
+  // Deleting a run needs editor or admin; operators run and monitor only.
+  const canDelete = usePermissionStore((state) => state.userRole) !== 'operator';
 
   const status = run.status?.toLowerCase() || '';
   const isResumable =
@@ -115,7 +118,7 @@ const RunActions: React.FC<RunActionsProps> = ({
           <MenuItem onClick={() => act(() => onSchedule(run))}><ListItemIcon><ScheduleIcon fontSize="small" /></ListItemIcon><ListItemText>Schedule execution</ListItemText></MenuItem>
           <MenuItem disabled={isActive} onClick={() => act(() => { void downloadRunPDF(run); })}><ListItemIcon><PictureAsPdfIcon fontSize="small" /></ListItemIcon><ListItemText>Download PDF</ListItemText></MenuItem>
           {isResumable && <MenuItem onClick={() => act(() => setCheckpointOpen(true))}><ListItemIcon><ReplayIcon fontSize="small" /></ListItemIcon><ListItemText>Checkpoint and resume</ListItemText></MenuItem>}
-          <MenuItem onClick={() => act(() => onDelete(run))} sx={{ color: 'error.main', mt: 0.5 }}><ListItemIcon sx={{ color: 'inherit' }}><DeleteIcon fontSize="small" /></ListItemIcon><ListItemText>Delete run</ListItemText></MenuItem>
+          {canDelete && <MenuItem onClick={() => act(() => onDelete(run))} sx={{ color: 'error.main', mt: 0.5 }}><ListItemIcon sx={{ color: 'inherit' }}><DeleteIcon fontSize="small" /></ListItemIcon><ListItemText>Delete run</ListItemText></MenuItem>}
         </Menu>
         {checkpointDialog}
       </Box>
@@ -139,15 +142,17 @@ const RunActions: React.FC<RunActionsProps> = ({
           }}
         />
         {resumeButton}
-        <Tooltip title={t('runHistory.actions.deleteRun')}>
-          <IconButton
-            size="small"
-            onClick={() => onDelete(run)}
-            color="error"
-          >
-            <DeleteIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        {canDelete && (
+          <Tooltip title={t('runHistory.actions.deleteRun')}>
+            <IconButton
+              size="small"
+              onClick={() => onDelete(run)}
+              color="error"
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
         {checkpointDialog}
       </Box>
     );
@@ -221,15 +226,17 @@ const RunActions: React.FC<RunActionsProps> = ({
         </IconButton>
       </Tooltip>
       {resumeButton}
-      <Tooltip title={t('runHistory.actions.deleteRun')}>
-        <IconButton
-          size="small"
-          onClick={() => onDelete(run)}
-          color="error"
-        >
-          <DeleteIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
+      {canDelete && (
+        <Tooltip title={t('runHistory.actions.deleteRun')}>
+          <IconButton
+            size="small"
+            onClick={() => onDelete(run)}
+            color="error"
+          >
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
       {checkpointDialog}
     </Box>
   );

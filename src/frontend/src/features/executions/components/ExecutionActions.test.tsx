@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import RunActions from './ExecutionActions';
+import { usePermissionStore } from '../../../store/permissions';
 import type { Run } from '../../../api/execution/ExecutionHistoryService';
 vi.mock('./CheckpointDialog', () => ({ default: ({ open, onResumed }: { open: boolean; onResumed: () => void }) => open ? <button onClick={onResumed}>Resume checkpoint</button> : null }));
 vi.mock('./ExecutionStopButton', () => ({ default: () => null }));
@@ -37,5 +38,15 @@ describe('History run actions', () => {
     menu(); fireEvent.click(screen.getByRole('menuitem', { name: 'Checkpoint and resume' }));
     fireEvent.click(screen.getByRole('button', { name: 'Resume checkpoint' }));
     expect(callbacks.onStatusChange).toHaveBeenCalledWith('run-1', 'RUNNING');
+  });
+  describe('as an operator', () => {
+    afterEach(() => usePermissionStore.setState({ userRole: null }));
+    it('offers no delete, which needs editor or admin', () => {
+      usePermissionStore.setState({ userRole: 'operator' });
+      const { menu } = setup('COMPLETED');
+      menu();
+      expect(screen.getByRole('menuitem', { name: 'View logs' })).toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Delete run' })).not.toBeInTheDocument();
+    });
   });
 });

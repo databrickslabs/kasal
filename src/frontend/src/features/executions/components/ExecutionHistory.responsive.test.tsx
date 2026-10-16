@@ -67,8 +67,9 @@ vi.mock('../../../store/taskExecutionStore', () => ({
   }),
 }));
 
+let mockRole = 'admin';
 vi.mock('../../../hooks/usePermissions', () => ({
-  usePermissions: () => ({ userRole: 'admin' }),
+  usePermissions: () => ({ userRole: mockRole }),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -121,7 +122,18 @@ describe('Job history sidebar', () => {
     vi.clearAllMocks();
     mockRuns = [];
     mockIsMobile = false;
+    mockRole = 'admin';
   });
+  it.each([['admin', true], ['editor', false], ['operator', false]])(
+    'offers "delete all runs" to %s: %s',
+    (role, offered) => {
+      mockRole = role;
+      renderHistory();
+      fireEvent.click(screen.getByRole('button', { name: 'History options' }));
+      const item = screen.queryByRole('menuitem', { name: /runHistory.deleteAllRuns/ });
+      expect(Boolean(item)).toBe(offered);
+    },
+  );
   it('shows a useful empty state and closes from its header', () => {
     renderHistory();
     expect(screen.getByText('Your work, all in one place')).toBeVisible();
