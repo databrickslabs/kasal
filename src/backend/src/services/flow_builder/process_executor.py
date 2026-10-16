@@ -100,6 +100,7 @@ from src.services.execution.run_wait import (
     run_deadline,
 )
 from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
+from src.services.flow_builder.completion_payload import is_paused_for_approval
 from src.services.flow_builder.run_outcome import (
     early_announcement,
     failure_message,
@@ -724,7 +725,7 @@ def run_flow_in_process(
                         )
 
                     async_logger.info(
-                        "[FLOW_SUBPROCESS] Flow execution completed successfully"
+                        "[FLOW_SUBPROCESS] Flow body returned; reading its outcome"
                     )
 
                     # The checkpoint is KEPT, not dropped: a flow checkpoint is
@@ -950,11 +951,8 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] paused_for_approval value: {result.get('paused_for_approval')}"
                 )
 
-            # Check if flow was paused for HITL approval
-            # IMPORTANT: Check both hitl_paused AND paused_for_approval - the subprocess uses paused_for_approval
-            if isinstance(result, dict) and (
-                result.get("hitl_paused") or result.get("paused_for_approval")
-            ):
+            # Paused at a HITL gate: the same test the early announcement uses
+            if is_paused_for_approval(result):
                 async_logger.info("[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
                 return_dict = {
                     "status": "WAITING_FOR_APPROVAL",

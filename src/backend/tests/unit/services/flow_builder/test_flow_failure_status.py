@@ -241,7 +241,12 @@ def _launch(script, args, workdir, stdin=None):
 
 def _finish(launched, out):
     process, stdin = launched
-    _, stderr = process.communicate(input=stdin, timeout=240)
+    try:
+        _, stderr = process.communicate(input=stdin, timeout=240)
+    except subprocess.TimeoutExpired:
+        process.kill()  # never leave the spawned interpreter running
+        process.communicate()
+        raise
     assert out.exists(), (process.returncode, stderr[-3000:])
     return json.loads(out.read_text())
 
