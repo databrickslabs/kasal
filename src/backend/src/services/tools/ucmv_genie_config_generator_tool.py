@@ -394,17 +394,6 @@ Rules:
                         }
                     )
 
-        # Dimension tables from joins — exclude any that look like sanitised UCMV table names
-        # (those are already embedded in the metric view definition, not extra tables)
-        real_dim_tables = [
-            t
-            for t in dim_tables
-            if not any(
-                skip in t
-                for skip in ["dc_datalake_prod_001__", "udm_cchbc", "udm_datamart"]
-            )
-        ]
-
         output = {
             # Connection params
             "space_title": space_title,
@@ -417,7 +406,8 @@ Rules:
             "example_sqls_json": generated.get("example_sqls_json", "[]"),
             # Structural content derived from UCMVs
             "join_specs_json": json.dumps(join_specs) if join_specs else "[]",
-            "additional_tables": "\n".join(real_dim_tables) if real_dim_tables else "",
+            # Every table the metric views join to, so Genie can query it too.
+            "additional_tables": "\n".join(dim_tables) if dim_tables else "",
             # Pass ucmv_output through so the Genie Space Generator knows
             # which metric views to add to the space
             "ucmv_output": ucmv_raw,
