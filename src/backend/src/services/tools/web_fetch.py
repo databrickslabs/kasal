@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 def _http_json(
     url: str, payload: dict[str, Any], headers: dict[str, str], timeout: int = 10
 ) -> dict[str, Any]:
+    """POST JSON and parse the JSON reply, through the same guarded opener as
+    ``_safe_fetch``: http(s) only, no address that is not globally routable on
+    any hop, and (unless an egress proxy carries it) the connection goes to the
+    address that was checked.
+    """
+    _assert_http_scheme(url)  # the transport checks the address, per hop
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -35,7 +41,7 @@ def _http_json(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
@@ -48,8 +54,14 @@ def _http_json(
 
 #: Redirect hops followed before giving up. urllib's own default is 10.
 _MAX_REDIRECTS = 5
-#: Request headers dropped when a redirect changes the origin.
-_SENSITIVE_REQUEST_HEADERS = ("Authorization", "Cookie", "Proxy-Authorization")
+#: Request headers dropped when a redirect changes the origin (lower-case:
+#: urllib re-cases header names, so they are compared case-insensitively).
+_SENSITIVE_REQUEST_HEADERS = (
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "x-api-key",
+)
 
 
 def _assert_http_scheme(url: str) -> None:
@@ -59,8 +71,9 @@ def _assert_http_scheme(url: str) -> None:
 
 
 def _assert_public_target(url: str) -> str:
-    """Refuse non-HTTP schemes and hosts that resolve to private, loopback,
-    link-local or reserved addresses, and return the address that passed.
+    """Refuse non-HTTP schemes and hosts that resolve to an address that is
+    not globally routable (private, loopback, link-local, shared, reserved)
+    or is multicast, and return the address that passed.
 
     Applied to the first URL AND to every redirect hop — a public URL that
     302s to ``http://127.0.0.1/…`` used to be followed without a second look
@@ -79,7 +92,9 @@ def _assert_public_target(url: str) -> str:
     for info in infos:
         address = ipaddress.ip_address(info[4][0])
         if (
-            address.is_private
+            not address.is_global
+            or address.is_multicast
+            or address.is_private
             or address.is_loopback
             or address.is_link_local
             or address.is_reserved
@@ -120,10 +135,19 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
 
 
+def _through_proxy(req: urllib.request.Request) -> bool:
+    """True once ``ProxyHandler`` has routed ``req`` to an egress proxy: a
+    CONNECT tunnel for https, an absolute-URL request for http."""
+    return bool(getattr(req, "_tunnel_host", None)) or req.has_proxy()
+
+
 class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
     """The opener's transport: every request — first URL and every redirect
     hop, which the redirect handler re-issues through here — is validated and
-    then connected to exactly the address that passed."""
+    then connected to exactly the address that passed.
+
+    Through an egress proxy the proxy makes the connection, so the target is
+    validated but cannot be pinned."""
 
     def __init__(self) -> None:
         urllib.request.HTTPHandler.__init__(self)
@@ -131,6 +155,8 @@ class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
 
     def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
         pinned = _assert_public_target(req.full_url)
+        if _through_proxy(req):
+            return self.do_open(http.client.HTTPConnection, req)
         return self.do_open(
             _PinnedHTTPConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
             req,
@@ -139,11 +165,14 @@ class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
 
     def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
         pinned = _assert_public_target(req.full_url)
+        context = self._context  # type: ignore[attr-defined]  # private HTTPSHandler attr
+        if _through_proxy(req):
+            return self.do_open(http.client.HTTPSConnection, req, context=context)
         return self.do_open(
             _PinnedHTTPSConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
             req,
             pinned=pinned,
-            context=self._context,  # type: ignore[attr-defined]  # private HTTPSHandler attr
+            context=context,
         )
 
 
@@ -176,8 +205,9 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
             ) from refused
         new = super().redirect_request(req, fp, code, msg, headers, target)
         if new is not None and _origin(target) != _origin(req.full_url):
-            for header in _SENSITIVE_REQUEST_HEADERS:
-                new.remove_header(header)
+            for header in list(new.headers):
+                if header.lower() in _SENSITIVE_REQUEST_HEADERS:
+                    new.remove_header(header)
         return new
 
 
@@ -186,14 +216,23 @@ def _open(request: urllib.request.Request, timeout: int) -> http.client.HTTPResp
 
     Built by hand rather than with ``build_opener``: the default set includes
     file:, ftp: and data: handlers, and a redirect to ``file:///etc/passwd``
-    must have nowhere to go."""
+    must have nowhere to go. An HTTP(S)_PROXY in the environment (NO_PROXY
+    honoured) is used for http(s), as urllib's default opener would."""
     opener = urllib.request.OpenerDirector()
-    for handler in (
+    handlers: list[urllib.request.BaseHandler] = [
         _PinnedHandler(),
         _SafeRedirects(),
         urllib.request.HTTPDefaultErrorHandler(),
         urllib.request.HTTPErrorProcessor(),
-    ):
+    ]
+    proxies = {
+        scheme: proxy
+        for scheme, proxy in urllib.request.getproxies_environment().items()
+        if scheme in ("http", "https")
+    }
+    if proxies:
+        handlers.append(urllib.request.ProxyHandler(proxies))
+    for handler in handlers:
         opener.add_handler(handler)
     response: http.client.HTTPResponse = opener.open(request, timeout=timeout)
     return response

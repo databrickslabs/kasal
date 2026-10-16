@@ -44,7 +44,10 @@ from src.services.tools.optional_tools import (  # tests patch these names here
 )
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
-from src.services.tools.tool_policies import extract_tool_policies, stamp_tool_policies
+from src.services.tools.tool_policies import (
+    merge_tool_config_override,
+    stamp_tool_policies,
+)
 
 # SECURITY: mask decrypted secrets (PATs, client_secret, api_key, password,
 # access_token, ...) before they are written to logs / the volume log sink.
@@ -676,6 +679,14 @@ class ToolFactory:
                 else {}
             )
 
+            # The override (agent/task/run tool_configs) wins the merge, minus the
+            # identity, endpoint and policy keys it may not set. Policies are not
+            # constructor kwargs: popped here, stamped by `create_tool` once the
+            # instance exists. Every branch below sees only the cleaned override.
+            tool_config_override, tool_config, self._pending_policies = (
+                merge_tool_config_override(tool_name, base_config, tool_config_override)
+            )
+
             # Log what we're merging — MASK sensitive fields (client_secret, tokens,
             # passwords) so they never land in crew.log / flow.log in cleartext.
             logger.info(
@@ -684,17 +695,6 @@ class ToolFactory:
             logger.info(
                 f"[ToolFactory] {tool_name} - tool_config_override received: {mask_sensitive_fields(tool_config_override or {})}"
             )
-
-            # Merge with override config if provided
-            # The override takes precedence over base_config
-            tool_config = {**base_config, **(tool_config_override or {})}
-
-            # Policies (human approval, the replay cassette) are NOT constructor
-            # kwargs — popped here, before the per-tool `tool_class(**tool_config)`
-            # branches (some splat into non-pydantic clients), and stamped on the
-            # instance by `create_tool` once it exists. See tool_policies.py for
-            # the accepted shapes.
-            self._pending_policies = extract_tool_policies(tool_config)
 
             # Inject execution inputs if available in the main config (for dynamic parameter resolution)
             # Handle both direct inputs and nested inputs structure
@@ -1640,18 +1640,17 @@ class ToolFactory:
                         "[TOOL_FACTORY] Proceeding with tool creation despite validation error"
                     )
 
+                # Tool-specific config first (file_paths, agent_id from task
+                # tool_configs), then the run's identity, which no config replaces.
                 tool_args = {
+                    **(tool_config if isinstance(tool_config, dict) else {}),
                     "group_id": self.config.get("group_id", "default"),
                     # DO NOT PASS execution_id - we want to search all documents!
-                    # "execution_id": self.config.get('execution_id') or self.config.get('run_id'),
                     "user_token": self.user_token,
                     # Per-user knowledge isolation: search only returns chunks uploaded
                     # by the executing user (set by the engine from the group context).
                     "user_email": self.config.get("user_email"),
                 }
-                # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
-                if tool_config and isinstance(tool_config, dict):
-                    tool_args.update(tool_config)
                 # Keys only: tool_args carries the user's token (audit H6/N4).
                 logger.debug(
                     "[TOOL_FACTORY] DatabricksKnowledgeSearchTool args: %s",
@@ -1730,38 +1729,6 @@ class ToolFactory:
                         tool_args["conversation_history"] = tool_config.get(
                             "conversation_history"
                         )
-
-                    # Allow tool_config_override to override specific fields
-                    if isinstance(tool_config_override, dict):
-                        for key in [
-                            "workspace_id",
-                            "dataset_id",
-                            "report_id",
-                            "tenant_id",
-                            "client_id",
-                            "client_secret",
-                            "username",
-                            "password",
-                            "auth_method",
-                            "access_token",
-                            "llm_workspace_url",
-                            "llm_token",
-                            "llm_model",
-                            "include_visual_references",
-                            "skip_system_tables",
-                            "output_format",
-                            "user_question",
-                            "enable_info_columns",
-                            "max_dax_retries",
-                            "business_mappings",
-                            "field_synonyms",
-                            "active_filters",
-                            "session_id",
-                            "visible_tables",
-                            "conversation_history",
-                        ]:
-                            if key in tool_config_override:
-                                tool_args[key] = tool_config_override[key]
 
                     # Filter out None values
                     tool_args = {k: v for k, v in tool_args.items() if v is not None}
