@@ -161,7 +161,7 @@ class TestStartDeployment:
         found — deploy adds the allocated personal workspace ID."""
         ctx = GroupContext(
             group_ids=["shared_ws"],
-            group_email="alice@acme.com",
+            group_email="alice@example.com",
             access_token=None,
             current_user=SimpleNamespace(personal_group_id="user_alice_acme_com"),
         )

@@ -28,7 +28,7 @@ beforeEach(() => {
   setWorkspace(null, []);
   // The personal workspace is the id stored on the user, not a name prefix.
   useUserStore.setState({
-    currentUser: { id: 'u1', email: 'alice@acme.com', username: 'alice', personal_group_id: PERSONAL.id },
+    currentUser: { id: 'u1', email: 'alice@example.com', username: 'alice', personal_group_id: PERSONAL.id },
   });
 });
 
