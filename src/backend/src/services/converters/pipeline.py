@@ -39,7 +39,8 @@ def translation_gaps(definition: Optional[KPIDefinition]) -> List[Dict[str, str]
         if advanced.get("is_transpilable") and advanced.get("transpiled_sql"):
             continue
         reason = advanced.get("transpilability_reason") or "not translated to SQL"
-        gaps.append({"name": kpi.technical_name, "reason": str(reason)})
+        name = kpi.technical_name or kpi.description or "unnamed measure"
+        gaps.append({"name": name, "reason": str(reason)})
     return gaps
 
 

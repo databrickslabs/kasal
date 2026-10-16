@@ -689,7 +689,6 @@
   "src/services/tools/metadata_reduction/value_normalizer.py::Any": 3,
   "src/services/tools/metric_view_deployer_tool.py::Any": 3,
   "src/services/tools/metric_view_utils/artifact_cascade.py::Any": 1,
-  "src/services/tools/metric_view_utils/dax_translator.py::Any": 1,
   "src/services/tools/metric_view_utils/physical_name_resolver.py::Any": 3,
   "src/services/tools/metric_view_utils/pipeline.py::Any": 4,
   "src/services/tools/metric_view_utils/table_processor.py::Any": 9,
