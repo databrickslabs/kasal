@@ -6,12 +6,14 @@ import { lazy, Suspense, useContext, useMemo, useState } from 'react'
 import type { NodeProps } from '../types'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { DeckThemeContext, seriesFromAccent } from '../lib/deckThemes'
+import { SafeImage } from '../lib/safeImage'
 import { asArr, asStr } from './values'
 
 // ---- Album (image carousel) ----------------------------------------------
 // A one-image-at-a-time carousel with prev/next. items is a list of image URLs
 // or {src|url, caption?, href?}. The caption links to `href` (or the source URL)
-// so a gallery built from search results stays clickable.
+// so a gallery built from search results stays clickable. A remote image shows
+// as a placeholder until the reader opens it (lib/imagePolicy.ts).
 interface AlbumItem {
   src: string
   caption?: string
@@ -44,7 +46,7 @@ export function Album({ node, resolve }: NodeProps) {
     <div className="flex w-full min-w-0 flex-col">
       {node.title != null && <div className="mb-2 font-semibold">{asStr(node.title)}</div>}
       <div className="relative flex items-center justify-center overflow-hidden rounded-lg border" style={{ minHeight: 240, background: theme.panel }}>
-        <img src={cur.src} alt={cur.caption || ''} className="max-h-[440px] max-w-full object-contain" />
+        <SafeImage src={cur.src} alt={cur.caption || ''} className="max-h-[440px] max-w-full object-contain" />
         {items.length > 1 && (
           <>
             <button type="button" aria-label="Previous image" onClick={() => go(-1)} className={`${navBtn} left-2`}>

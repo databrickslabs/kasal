@@ -57,6 +57,25 @@ describe('StepContent', () => {
     expect(screen.getByText('Body text here.')).toBeInTheDocument();
   });
 
+  it('holds a scraped page\'s remote images back; same-origin images and links render as before', () => {
+    const remote = 'https://images.example.org/c.png?d=1';
+    const { container } = render(
+      <StepContent
+        step={{
+          id: '5',
+          label: 'scrape (output)',
+          detail: `## Page\n\n![hero](${remote}) ![logo](/logo192.png)\n\n[read more](https://example.com/page)`,
+        }}
+      />,
+    );
+    expect(container.querySelector(`img[src="${remote}"]`)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Load image' })).toHaveAttribute('href', remote);
+    expect(container.querySelector('img[src="/logo192.png"]')).not.toBeNull();
+    const link = screen.getByRole('link', { name: 'read more' });
+    expect(link).toHaveAttribute('href', 'https://example.com/page');
+    expect(link).toHaveClass('break-words');
+  });
+
   it('renders plain text as plain text', () => {
     render(<StepContent step={{ id: '4', label: 'x', detail: 'just a sentence' }} />);
     expect(screen.getByText('just a sentence')).toBeInTheDocument();
