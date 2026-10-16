@@ -154,9 +154,9 @@ For the full guardrail set and how to verify each one, see the [security guardra
 Kasal blocks the common exfiltration paths that indirect prompt injection tries to exploit:
 
 - Secret leak detection scans agent and tool output for leaked credentials (Databricks PATs, AWS keys, Slack and GitHub tokens, PEM private keys, GCP service accounts, Azure connection strings, and generic API keys).
-- Frontend rendering is hardened: `react-markdown` uses `rehypeSanitize`, disallows `img` / `script` / `iframe`, and blocks `javascript:`, `data:`, and `vbscript:` URL schemes, which prevents image-based GET exfiltration and link-based XSS.
+- Images in model output never load by themselves. Chat answers, markdown, A2UI Image and Album, and the exported app load only `data:`, `blob:` and same-origin images directly. Any other image shows as a placeholder with its host and a "Load image" link that opens it in a new tab. Links render as before. The rule lives in `shared/a2ui/lib/imagePolicy.ts`.
 - HTML preview iframes use a tightened sandbox (no forms, popups, or downloads) plus a Content-Security-Policy that sets `connect-src: none`, so an embedded document cannot make outbound network calls.
-- HTTP security headers (Content-Security-Policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, and a strict referrer policy) are applied to every response.
+- HTTP security headers (Content-Security-Policy, `X-Content-Type-Options: nosniff` and a strict referrer policy) are sent on every response, the app page included. API and static responses also carry `X-Frame-Options: SAMEORIGIN`; the page does not, so the workspace can embed it. The page's `img-src` allows only the app itself, `data:`, `blob:` and the map tiles. The policy and the reason for each directive are in `src/backend/src/core/security_headers.py`.
 - In multi-crew flows, each crew's task output is scanned (log-only) and leaked secrets are redacted before the output is logged, streamed or persisted. There is no blocking scan between crews; enable the LLM injection guardrail on downstream tasks when you need one.
 
 These controls map to areas 5 to 12 in [security compliance](./README_SECURITY_COMPLIANCE.md).
