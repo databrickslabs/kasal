@@ -1555,163 +1555,16 @@ class LightAgentService:
         group_context: Optional[GroupContext],
         group_id: str,
     ) -> Any:
-        """Run ``agent.kickoff_async`` inside an MLflow root trace that lands in
-        the SAME UC trace experiment crew/flow use, so chat LLM spans show up
-        alongside crew/flow runs.
+        """Run ``agent.kickoff_async`` inside this teamspace's MLflow root trace.
 
-        Crew/flow run in a subprocess and call ``configure_mlflow_in_subprocess``
-        (which ``set_experiment(name, trace_location=UnityCatalog(...))`` and
-        flips global env). The light path runs IN-PROCESS, so instead of mutating
-        the shared process we route THIS run's trace **context-locally** to the
-        configured UC experiment (``mlflow.tracing.set_destination(..., context_local=True)``)
-        — isolated per async task, concurrency-safe. The experiment name comes
-        from the workspace's Databricks config (``mlflow_experiment_name``) + the
-        ``-uc`` suffix, exactly like ``configure_mlflow_in_subprocess`` derives it.
-        MLflow autolog is already enabled process-wide by ``LLMManager``, so the
-        root trace is what groups the kickoff's LLM call(s) into one trace.
-
-        CHAT-ONLY: also tags the trace with the chat ``session_id`` (and user) via
-        MLflow's session metadata keys, so the MLflow UI groups a conversation's
-        turns into one session. Crew/flow deliberately do NOT set this.
-
-        Fully best-effort: any MLflow problem falls back to a plain kickoff, and
-        ``kickoff_async`` runs exactly once (a real kickoff error propagates).
+        See ``chat/turn_trace``: the parent-process MLflow setup, never the crew
+        subprocess's, because this runs in the server beside other turns.
         """
+        from src.services.chat.turn_trace import kickoff_with_mlflow_trace
 
-        async def _do() -> Any:
-            # Cooperative stop: POST /executions/{id}/stop sets this event and
-            # the transport round loop checks it before every LLM round, so
-            # Stop reaches an in-process chat run mid-flight. contextvars flow
-            # through kickoff_async's asyncio.to_thread.
-            from src.core.execution_stop import (
-                bind_stop_event,
-                discard_stop_event,
-                reset_stop_event,
-                stop_event_for,
-            )
-
-            stop_token = bind_stop_event(stop_event_for(execution_id))
-            try:
-                return await agent.kickoff_async(kickoff_prompt)
-            finally:
-                reset_stop_event(stop_token)
-                discard_stop_event(execution_id)
-
-        try:
-            import logging as _logging
-
-            import mlflow
-
-            # Load the workspace's Databricks config (same source crew/flow use).
-            # The provider ROUTES: chat runs IN-PROCESS, where the raw factory is a
-            # snapshot only a subprocess ever swaps to Lakebase — so this read got
-            # the LOCAL databricksconfig while the crew subprocess got the Lakebase
-            # one (verified: 1 row in Lakebase, 2 locally, different contents).
-            from src.services.databricks.workspace.config_provider import (
-                DatabricksConfigProvider,
-            )
-            from src.services.mlflow.tracing import start_root_trace
-            from src.services.otel_tracing.mlflow_setup import (
-                configure_mlflow_in_subprocess,
-                extract_trace_outputs,
-                set_trace_attributes,
-            )
-
-            db_config = await DatabricksConfigProvider.get(group_id=group_id)
-
-            # Run the EXACT MLflow setup crew/flow use — auth → bind the `-uc`
-            # experiment to the UC Delta-table trace location → enable native
-            # autolog. The lightweight set_experiment-only variant did NOT work
-            # (autolog stayed bound to the startup experiment), so we use the same
-            # function crew/flow use. It configures the CURRENT process (the light
-            # path is in-process), which is acceptable: traces route to the same UC
-            # experiment crew/flow write to. Its verbose diagnostics are routed to
-            # the "crew" logger (crew.log) — NOT the main app log — to keep the app
-            # console clean.
-            mlflow_result = await configure_mlflow_in_subprocess(
-                db_config=db_config,
-                job_id=execution_id,
-                execution_id=execution_id,
-                group_id=group_id,
-                group_context=group_context,
-                async_logger=_logging.getLogger("crew"),
-            )
-        except Exception as setup_err:  # noqa: BLE001
-            logger.warning(
-                f"[light_agent] MLflow setup failed; running without trace: {setup_err}",
-                exc_info=True,
-            )
-            return await _do()
-
-        if not mlflow_result or not getattr(mlflow_result, "tracing_ready", False):
-            logger.info(
-                "[light_agent] MLflow tracing not ready (enabled=%s, error=%s) — "
-                "running chat kickoff without an MLflow trace",
-                getattr(mlflow_result, "enabled", None),
-                getattr(mlflow_result, "error", None),
-            )
-            return await _do()
-        uc_name = getattr(mlflow_result, "experiment_name", None)
-
-        run_name = (getattr(config, "inputs", None) or {}).get("run_name")
-        flow_config = {
-            "model": getattr(config, "model", None),
-            "execution_type": "agent",
-            "run_name": run_name,
-        }
-        # Show the ACTUAL prompt sent to the model (conversation preamble + the
-        # user's current message) on the trace, not the generic one-line task
-        # label — so the MLflow trace's Inputs reflect the real request. Capped so
-        # a long conversation doesn't bloat the trace.
-        _prompt_for_trace = (
-            kickoff_prompt if isinstance(kickoff_prompt, str) else str(kickoff_prompt)
+        return await kickoff_with_mlflow_trace(
+            agent, kickoff_prompt, config, execution_id, trace_context, group_context
         )
-        if len(_prompt_for_trace) > 20000:
-            _prompt_for_trace = _prompt_for_trace[:20000] + "…[truncated]"
-        inputs = {"run_name": run_name or trace_context, "prompt": _prompt_for_trace}
-        # session_id can ride on the config top-level OR inside inputs depending on
-        # the entry path (the service copies it into execution_config["session_id"]).
-        # Read both so the MLflow session tag is set consistently across runs.
-        session_id = getattr(config, "session_id", None) or (
-            getattr(config, "inputs", None) or {}
-        ).get("session_id")
-        user = getattr(group_context, "group_email", None)
-
-        logger.info(
-            "[light_agent] MLflow tracing chat kickoff → experiment=%s session=%s",
-            uc_name,
-            session_id,
-        )
-        with start_root_trace(
-            f"chat_kickoff:{run_name or trace_context}", inputs
-        ) as root_span:
-            # CHAT-ONLY: group this conversation's turns into one MLflow session.
-            if session_id:
-                try:
-                    metadata = {"mlflow.trace.session": str(session_id)}
-                    if user:
-                        metadata["mlflow.trace.user"] = str(user)
-                    mlflow.update_current_trace(metadata=metadata)
-                except Exception as sess_err:  # noqa: BLE001
-                    logger.debug(
-                        f"[light_agent] mlflow session tag skipped: {sess_err}"
-                    )
-            try:
-                set_trace_attributes(root_span, flow_config, logger, run_name=run_name)
-            except Exception:  # noqa: BLE001
-                pass
-            result = await _do()
-            try:
-                outputs = extract_trace_outputs(result, logger)
-                if (
-                    outputs
-                    and root_span is not None
-                    and hasattr(root_span, "set_outputs")
-                ):
-                    root_span.set_outputs(outputs)
-            except Exception:  # noqa: BLE001
-                pass
-            return result
 
     async def _conversation_preamble(
         self,
