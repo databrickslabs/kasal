@@ -28,6 +28,7 @@ import { DatabricksService, DatabricksConfig } from '../../../api/databricks/Dat
 import { MemoryBackendService } from '../../../api/memory/MemoryBackendService';
 import { MemoryBackendConfig } from '../../../types/config/memoryBackend';
 import { usePermissionStore } from '../../../store/permissions';
+import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../store/user';
 import { ToolService, Tool as ServiceTool } from '../../../api/tools/ToolService';
 import { MCPService } from '../../../api/tools/MCPService';
 import type { MCPServerConfig } from '../../../types/config/mcp';
@@ -58,7 +59,8 @@ function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOv
   const [error, setError] = useState<string | null>(null);
 
   const selectedGroupId = localStorage.getItem('selectedGroupId');
-  const isPersonalWorkspace = selectedGroupId?.startsWith('user_');
+  const personalGroupId = usePersonalGroupId();
+  const isPersonalWorkspace = isPersonalWorkspaceId(selectedGroupId, personalGroupId);
   const userRole = usePermissionStore(state => state.userRole);
 
   useEffect(() => {

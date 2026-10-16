@@ -153,3 +153,24 @@ export const useUserStore = create<UserState>()(
     }
   )
 );
+
+/**
+ * Whether `groupId` is the user's own personal workspace: exactly their
+ * `personal_group_id`. Never test a `user_` prefix: a team named "User …"
+ * gets an id that starts with `user_` too. False while the user is unknown.
+ */
+export function isPersonalWorkspaceId(
+  groupId: string | null | undefined,
+  personalGroupId: string | null | undefined,
+): boolean {
+  return !!groupId && !!personalGroupId && groupId === personalGroupId;
+}
+
+/** `isPersonalWorkspaceId` against the current user, for code outside React. */
+export function isOwnPersonalWorkspace(groupId: string | null | undefined): boolean {
+  return isPersonalWorkspaceId(groupId, useUserStore.getState().currentUser?.personal_group_id);
+}
+
+/** The current user's personal workspace id, for components (re-renders on change). */
+export const usePersonalGroupId = (): string | null =>
+  useUserStore((state) => state.currentUser?.personal_group_id ?? null);

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { GroupService } from '../api/groups/GroupService';
-import { useUserStore } from './user';
+import { isOwnPersonalWorkspace, isPersonalWorkspaceId, useUserStore } from './user';
 
 // Define permission types based on backend privileges
 export const Permissions = {
@@ -245,7 +245,7 @@ export const usePermissionStore = create<PermissionState>()(
             const targetGroupId = groupId || localStorage.getItem('selectedGroupId');
 
             // If it's a personal workspace, determine role based on permissions
-            if (targetGroupId && targetGroupId.startsWith('user_')) {
+            if (isPersonalWorkspaceId(targetGroupId, currentUserFromStore?.personal_group_id)) {
               // Check if user has personal workspace manager permission
               const effectiveRole = userIsSystemAdmin || userIsPersonalWorkspaceManager ? 'admin' : 'editor';
               const rolePermissions = ROLE_PERMISSIONS[effectiveRole];
@@ -460,7 +460,7 @@ export const usePermissionStore = create<PermissionState>()(
         isWorkspaceAdmin: () => {
           const { userRole, isSystemAdmin, isPersonalWorkspaceManager } = get();
           const groupId = localStorage.getItem('selectedGroupId');
-          const isPersonalWorkspace = groupId?.startsWith('user_');
+          const isPersonalWorkspace = isOwnPersonalWorkspace(groupId);
 
           if (isSystemAdmin) return true;
           if (isPersonalWorkspace && isPersonalWorkspaceManager) return true;
