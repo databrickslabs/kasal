@@ -76,7 +76,7 @@ Every protected API route depends on `get_group_context` (`src/backend/src/depen
 
 If you start uvicorn yourself instead of through `run.sh`, export `LOCAL_DEV_AUTH=true` or send an `X-Forwarded-Email` header, or every API call returns 401. In development the frontend sends `X-Forwarded-Email` itself (see `VITE_DEV_USER_EMAIL`), and native `EventSource` streams carry the identity as `_sse_email` / `_sse_group_id` query parameters, which the backend honors only on `/sse/` routes from a loopback client outside production. For more information, see the [security guide](./SECURITY.md).
 
-A user seen for the first time is always created as a regular user. The former `ADMIN_EMAILS` variable, and the development-only promotion of `admin@…` emails, are gone: workspace admin rights come from group membership.
+A user seen for the first time is created as a regular user, with one exception: the first user of a fresh install becomes its system admin (see [the first system admin](./SECURITY.md#authorization-boundaries)). The former `ADMIN_EMAILS` variable, and the development-only promotion of `admin@…` emails, are gone: workspace admin rights come from group membership.
 
 ## Database
 
