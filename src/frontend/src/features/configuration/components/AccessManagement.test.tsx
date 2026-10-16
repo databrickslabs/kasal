@@ -125,6 +125,16 @@ describe('AccessManagement (combined Access screen)', () => {
     );
   });
 
+  it('shows the server reason when removing the last system admin is refused', async () => {
+    const reason = 'Cannot remove admin rights from the last system administrator.';
+    getUsers.mockResolvedValue([{ ...USER, is_system_admin: true }]);
+    updateUserPermissions.mockRejectedValue({ response: { status: 409, data: { detail: reason } } });
+    render(<AccessManagement />);
+    await screen.findByText('ada@example.com');
+    fireEvent.click(screen.getByLabelText('System Admin for ada@example.com'));
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+  });
+
   it('a role chip opens the role menu; picking a role updates the membership', async () => {
     render(<AccessManagement />);
     fireEvent.click(await screen.findByText('Research: operator · chat only'));

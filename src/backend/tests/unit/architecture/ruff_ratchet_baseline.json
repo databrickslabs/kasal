@@ -535,7 +535,7 @@
   "src/services/groups/groups.py::G004": 5,
   "src/services/groups/groups.py::TRY400": 1,
   "src/services/groups/users.py::BLE001": 3,
-  "src/services/groups/users.py::G004": 19,
+  "src/services/groups/users.py::G004": 15,
   "src/services/groups/users.py::TRY400": 4,
   "src/services/guardrails/core/human_review_guardrail.py::G004": 5,
   "src/services/guardrails/core/human_review_guardrail.py::TRY400": 1,

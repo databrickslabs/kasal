@@ -215,42 +215,31 @@ async def test_get_or_create_at_localhost_allowed():
     assert result is user
 
 
-# ---- _handle_first_user_admin_setup ----
+# ---- first system admin: only the first user of a fresh install ----
+
+
+def _granted_admin(repo) -> bool:
+    return any(
+        call.args[1].get("is_system_admin") is True
+        for call in repo.update.await_args_list
+        if len(call.args) > 1 and isinstance(call.args[1], dict)
+    )
 
 
 @pytest.mark.asyncio
-async def test_handle_first_user_admin_already_admin():
-    svc = make_service()
-    user = make_user(is_system_admin=True)
-    # Already admin - should return early
-    await svc._handle_first_user_admin_setup(user, is_new_user=False)
-    svc.user_repo.update.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_handle_first_user_admin_no_admins_existing():
+async def test_existing_user_is_not_promoted_when_no_admin_exists():
+    """With zero system admins, signing in must not make anyone an admin."""
     svc = make_service()
     user = make_user(is_system_admin=False)
-
-    # No admins exist, should grant admin
+    svc.user_repo.get_by_email = AsyncMock(return_value=user)
     svc.user_repo.count_system_admins = AsyncMock(return_value=0)
+    svc.user_repo.count = AsyncMock(return_value=3)
     svc.user_repo.update = AsyncMock()
 
-    await svc._handle_first_user_admin_setup(user, is_new_user=False)
-    svc.user_repo.update.assert_called_once()
+    result = await svc.get_or_create_user_by_email("user@example.com")
 
-
-@pytest.mark.asyncio
-async def test_handle_first_user_admin_existing_admins():
-    svc = make_service()
-    user = make_user(is_system_admin=False)
-
-    # Admins exist - don't grant
-    svc.user_repo.count_system_admins = AsyncMock(return_value=2)
-    svc.user_repo.update = AsyncMock()
-
-    await svc._handle_first_user_admin_setup(user, is_new_user=False)
-    svc.user_repo.update.assert_not_called()
+    assert result is user
+    assert not _granted_admin(svc.user_repo)
 
 
 @pytest.mark.asyncio
@@ -260,8 +249,8 @@ async def test_handle_first_user_new_user_first():
     svc.user_repo.count = AsyncMock(return_value=1)  # Only this user
     svc.user_repo.update = AsyncMock()
 
-    await svc._handle_first_user_admin_setup(user, is_new_user=True)
-    svc.user_repo.update.assert_called_once()
+    await svc._handle_first_user_admin_setup(user)
+    assert _granted_admin(svc.user_repo)
 
 
 @pytest.mark.asyncio
@@ -271,7 +260,7 @@ async def test_handle_first_user_new_user_not_first():
     svc.user_repo.count = AsyncMock(return_value=5)  # Multiple users
     svc.user_repo.update = AsyncMock()
 
-    await svc._handle_first_user_admin_setup(user, is_new_user=True)
+    await svc._handle_first_user_admin_setup(user)
     svc.user_repo.update.assert_not_called()
 
 
@@ -281,7 +270,71 @@ async def test_handle_first_user_exception_swallowed():
     user = make_user()
     svc.user_repo.count = AsyncMock(side_effect=Exception("count error"))
     # Should not raise
-    await svc._handle_first_user_admin_setup(user, is_new_user=True)
+    await svc._handle_first_user_admin_setup(user)
+
+
+# ---- the last system admin is protected ----
+
+
+def _permission_update(**fields):
+    return UserPermissionUpdate(**fields)
+
+
+@pytest.mark.asyncio
+async def test_last_admin_cannot_be_demoted():
+    from src.core.exceptions import ConflictError
+
+    svc = make_service()
+    svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
+    svc.user_repo.count_system_admins = AsyncMock(return_value=1)
+    svc.user_repo.update = AsyncMock()
+
+    with pytest.raises(ConflictError, match="last system administrator"):
+        await svc.update_user_permissions(
+            "u1", _permission_update(is_system_admin=False)
+        )
+    svc.user_repo.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_can_be_demoted_while_another_admin_remains():
+    svc = make_service()
+    svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
+    svc.user_repo.count_system_admins = AsyncMock(return_value=2)
+    svc.user_repo.update = AsyncMock()
+
+    await svc.update_user_permissions("u1", _permission_update(is_system_admin=False))
+
+    svc.user_repo.update.assert_awaited_once_with("u1", {"is_system_admin": False})
+
+
+@pytest.mark.asyncio
+async def test_last_admin_keeps_other_permission_changes():
+    """Only removing admin is refused; the last admin's other flags can change."""
+    svc = make_service()
+    svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
+    svc.user_repo.count_system_admins = AsyncMock(return_value=1)
+    svc.user_repo.update = AsyncMock()
+
+    await svc.update_user_permissions(
+        "u1", _permission_update(is_personal_workspace_manager=False)
+    )
+
+    svc.user_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_last_admin_cannot_be_deleted():
+    from src.core.exceptions import ConflictError
+
+    svc = make_service()
+    svc.user_repo.get = AsyncMock(return_value=make_user(is_system_admin=True))
+    svc.user_repo.count_system_admins = AsyncMock(return_value=1)
+    svc.user_repo.delete = AsyncMock()
+
+    with pytest.raises(ConflictError, match="last system administrator"):
+        await svc.delete_user("u1")
+    svc.user_repo.delete.assert_not_called()
 
 
 # ---- delete_user ----
@@ -428,13 +481,13 @@ async def test_get_or_create_user_by_email_existing_user_no_update_login():
         Repo.return_value = repo
 
         svc = UserService(session)
-        # Patch admin setup to avoid DB count path
+        # An existing user never goes through the first-admin bootstrap.
         with patch.object(
             svc, "_handle_first_user_admin_setup", new=AsyncMock()
         ) as setup:
             out = await svc.get_or_create_user_by_email("e@x.com")
             assert out is existing
-            setup.assert_awaited()
+            setup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
