@@ -460,14 +460,22 @@ async def _start_flow(
     must be indistinguishable from a UI-started one everywhere except its origin
     tag, or the traces, logs and history stop lining up.
     """
+    from src.services.external.flow_inputs import flow_run_config
     from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
+    # Built, and checked against the publication's input_schema, before any
+    # run exists: a refusal is a 422, not a run that fails at kickoff.
+    config = flow_run_config(
+        publication.external_name,
+        getattr(publication, "input_schema", None),
+        inputs,
+    )
     run_id = str(uuid.uuid4())
     result = await KasalFlowService(session).run_flow(
         flow_id=flow_id,
         job_id=run_id,
         run_name=f"{publication.external_name} via {caller.protocol}",
-        config={**(inputs or {}), "external_origin": caller.origin},
+        config=config,
         group_context=caller.group_context,
         user_token=caller.obo_token(),
     )

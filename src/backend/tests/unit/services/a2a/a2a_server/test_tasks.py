@@ -127,7 +127,7 @@ class TestContinuingATask:
     async def test_answering_a_task_that_is_not_waiting_is_refused(self):
         with patch(
             "src.services.a2a.a2a_server.tasks.interaction.respond",
-            new=AsyncMock(return_value=False),
+            new=AsyncMock(return_value=None),
         ):
             with pytest.raises(a2a_tasks.UnknownTaskError):
                 await a2a_tasks.send_message(_caller(), _msg(), task_id="run-1")

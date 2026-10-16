@@ -28,6 +28,7 @@ from typing import Annotated, Any, AsyncIterator, Dict, Optional
 from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.core.exceptions import KasalError
 from src.dependencies.providers import SessionDep
 from src.services.external.identity import (
     ExternalAuthError,
@@ -37,6 +38,7 @@ from src.services.external.identity import (
 from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp.mcp_server import server as mcp_server
 from src.services.mcp.mcp_server import sessions
+from src.services.mcp.mcp_server.tools import UnknownCapabilityError, UnknownRunError
 from src.utils.request_identity import resolve_request_identity
 
 router = APIRouter(tags=["mcp-server"])
@@ -57,6 +59,19 @@ _INVALID_REQUEST = -32600
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _INTERNAL_ERROR = -32603
+
+
+def _client_error_code(http_status: int) -> int:
+    """A refused tool call's JSON-RPC code, distinct per kind of refusal.
+
+    Bad arguments (400, 422) are the spec's invalid-params. The rest use the
+    range the spec reserves for implementation-defined server errors, ending
+    in the HTTP status they mirror: -32003 forbidden, -32004 not found,
+    -32009 conflict (already decided), -32010 gone (expired).
+    """
+    if http_status in (400, 422):
+        return _INVALID_PARAMS
+    return -32000 - (http_status % 100)
 
 
 def _result(request_id: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -190,6 +205,15 @@ async def _handle(
             return _error(request_id, _INVALID_REQUEST, exc.detail)
         except TypeError as exc:
             return _error(request_id, _INVALID_PARAMS, str(exc))
+        except (UnknownCapabilityError, UnknownRunError) as exc:
+            return _error(request_id, _client_error_code(404), str(exc))
+        except KasalError as exc:
+            if exc.status_code >= 500:
+                logger.exception("[mcp] tool %s failed", name)
+                return _error(request_id, _INTERNAL_ERROR, str(exc))
+            # A refusal written for the caller (already decided, expired, not
+            # an allowed approver, invalid arguments), not a server failure.
+            return _error(request_id, _client_error_code(exc.status_code), exc.detail)
         except Exception as exc:
             logger.exception("[mcp] tool %s failed", name)
             return _error(request_id, _INTERNAL_ERROR, str(exc))

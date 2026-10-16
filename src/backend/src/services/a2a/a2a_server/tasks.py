@@ -87,10 +87,10 @@ async def _continue_task(
     caller: ExternalCaller, task_id: str, text: str, session: Any = None
 ) -> Task:
     """Answer a task that is waiting for a human."""
-    accepted = await interaction.respond(
+    outcome = await interaction.respond(
         caller=caller, run_id=task_id, response=text, session=session
     )
-    if not accepted:
+    if outcome is None:
         raise UnknownTaskError(
             f"Task {task_id!r} is not waiting for input; nothing to answer."
         )

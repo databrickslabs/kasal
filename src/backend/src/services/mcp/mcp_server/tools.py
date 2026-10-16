@@ -305,16 +305,27 @@ async def respond_to_run(
     The tool MCP would not have. See the module docstring.
     """
     require_role(caller, RUN_ROLES)
-    accepted = await interaction.respond(
+    outcome = await interaction.respond(
         caller=caller,
         run_id=run_id,
         response=response,
         approval_id=approval_id,
         session=session,
     )
-    if not accepted:
+    if outcome is None:
         raise UnknownRunError(f"Run {run_id!r} is not waiting for a response")
-    return {"run_id": run_id, "accepted": True}
+    # The run's state as of now, re-read rather than assumed: it is how a
+    # caller learns that an approved flow could not be resumed and failed.
+    status = await _run_status(caller, run_id, session=session)
+    payload: Dict[str, object] = {
+        "run_id": run_id,
+        "accepted": True,
+        "execution_resumed": outcome.execution_resumed,
+        "message": outcome.message,
+    }
+    if status is not None:
+        payload["state"] = status.state.value
+    return payload
 
 
 async def create_crew(
