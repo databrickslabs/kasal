@@ -16,6 +16,9 @@ Resolved from ``agent_ids``/``task_ids`` rather than from the canvas ``nodes``:
 nodes are presentation data (positions, edges, UI state) and a crew can be
 perfectly valid with none, while the id lists are what the crew actually IS.
 Task ORDER is the order of ``task_ids``, which is also what the canvas writes.
+The one thing read from the canvas is AGENT ASSIGNMENT: a task runs on the
+agent its agent->task edge comes from, as it does in a UI run, and the row's
+``agent_id`` is used only for a task with no edge.
 
 **Fidelity matters more here than it does for a fresh run.** A resume that
 rebuilds a thinner crew than the one that ran would quietly drop guardrails,
@@ -27,7 +30,7 @@ cannot be silently left behind.
 """
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +86,46 @@ _TASK_FIELDS = (
     "llm_guardrail",
     "config",
 )
+
+
+def _node_row_id(node: Mapping[str, object]) -> Tuple[str, str]:
+    """``(kind, row id)`` for a canvas node: kind is "agent", "task" or "".
+
+    ``data.agentId``/``data.taskId`` name the row; the node id is a canvas
+    handle that only falls back to ``agent-<id>``/``task-<id>`` — the same
+    order CrewService uses when it builds ``agent_ids``/``task_ids``.
+    """
+    kind = {"agentNode": "agent", "taskNode": "task"}.get(str(node.get("type")), "")
+    data = node.get("data")
+    row_id = data.get(f"{kind}Id") if kind and isinstance(data, Mapping) else None
+    if not row_id:
+        node_id = str(node.get("id") or "")
+        prefix = f"{kind}-"
+        row_id = node_id[len(prefix) :] if node_id.startswith(prefix) else node_id
+    return kind, str(row_id)
+
+
+def _agent_ids_from_edges(crew: object) -> Dict[str, str]:
+    """Task row id -> agent row id, read from the crew's agent->task edges.
+
+    The edges are what the canvas shows and what a UI run uses. ``task.agent_id``
+    is a second copy that partial writes used to blank, and a blank one puts the
+    task on the crew's FIRST agent without an error — so edges win.
+    """
+    nodes = {
+        str(node.get("id")): _node_row_id(node)
+        for node in getattr(crew, "nodes", None) or []
+        if isinstance(node, Mapping)
+    }
+    by_task: Dict[str, str] = {}
+    for edge in getattr(crew, "edges", None) or []:
+        if not isinstance(edge, Mapping):
+            continue
+        source = nodes.get(str(edge.get("source")))
+        target = nodes.get(str(edge.get("target")))
+        if source and target and source[0] == "agent" and target[0] == "task":
+            by_task.setdefault(target[1], source[1])
+    return by_task
 
 
 def _copy_fields(row: Any, fields: Tuple[str, ...], into: Dict[str, Any]) -> None:
@@ -178,6 +221,7 @@ async def build_crew_execution_config(
         task_key_by_id[str(task_id)] = key
         resolved.append((key, task))
 
+    edge_agents = _agent_ids_from_edges(crew)
     tasks_yaml: Dict[str, Any] = {}
     for key, task in resolved:
         entry = {
@@ -192,7 +236,11 @@ async def build_crew_execution_config(
         if tool_configs:
             entry["tool_configs"] = tool_configs
 
-        assigned = agent_key_by_id.get(str(getattr(task, "agent_id", "") or ""))
+        # The edge the canvas draws wins; the row's agent_id covers a task
+        # with no edge (or an edge to an agent no longer in the crew).
+        edge_agent = agent_key_by_id.get(edge_agents.get(str(task.id), ""))
+        row_agent = agent_key_by_id.get(str(getattr(task, "agent_id", "") or ""))
+        assigned = edge_agent or row_agent
         if assigned:
             entry["agent"] = assigned
 
