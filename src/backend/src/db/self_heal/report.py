@@ -10,8 +10,8 @@ Lakebase boot path that last step also discards ``create_all``'s new tables
 errors propagate, and :func:`run_isolated` is the one place that catches them,
 after the savepoint has rolled back.
 
-What could not apply is a schema gap, kept per database dialect for the life of
-the process: the pass logs it at ERROR, and ``GET /health/db`` reports it
+What could not apply is a schema gap, kept per database for the life of the
+process: the pass logs it at ERROR, and ``GET /health/db`` reports it
 (:func:`schema_heal_summary`). A gap never stops startup.
 """
 
@@ -39,18 +39,21 @@ class HealGap:
 
 @dataclass(frozen=True)
 class HealReport:
-    """The outcome of the last pass against one kind of database."""
+    """The outcome of the last pass against one database."""
 
     dialect: str
     finished_at: datetime
     gaps: tuple[HealGap, ...]
+    #: False when the pass stopped on an exception: the schema was not verified.
+    completed: bool = True
 
 
 #: The gaps of the pass running in this task; None outside a pass.
 _current_gaps: ContextVar[Optional[list[HealGap]]] = ContextVar(
     "self_heal_current_gaps", default=None
 )
-#: The last finished pass per dialect ("sqlite", "postgresql").
+#: The last pass per database the app itself runs on (see :func:`_database_key`).
+#: Heals of a migration target pass ``record=False`` and are not kept.
 _last_reports: dict[str, HealReport] = {}
 
 
@@ -98,46 +101,84 @@ def _dialect(conn: AsyncConnection) -> str:
     return name if isinstance(name, str) else "unknown"
 
 
+def _database_key(conn: AsyncConnection) -> str:
+    """Which database ``conn`` is on (dialect, host, name), so two databases of
+    one dialect keep separate reports. Internal only: /health/db shows dialects."""
+    try:
+        url = conn.engine.url
+        return f"{url.get_backend_name()}://{url.host or ''}/{url.database or ''}"
+    except Exception:  # noqa: BLE001 — a test double without an engine
+        return _dialect(conn)
+
+
+def _log_pass(dialect: str, gaps: list[HealGap], completed: bool) -> None:
+    if not completed:
+        logger.error(
+            "Schema self-heal on %s stopped before it finished (%d gap(s) so far); "
+            "the schema was not verified. Startup continues.",
+            dialect,
+            len(gaps),
+        )
+    elif gaps:
+        logger.error(
+            "Schema self-heal INCOMPLETE on %s: %d step(s) did not apply: %s. "
+            "Tables they touch may be missing columns, tables or indexes; "
+            "the warnings above give each cause. Startup continues.",
+            dialect,
+            len(gaps),
+            ", ".join(gap.step for gap in gaps),
+        )
+    else:
+        logger.info("Schema self-heal applied every step on %s", dialect)
+
+
 @contextmanager
-def heal_pass(conn: AsyncConnection) -> Iterator[list[HealGap]]:
-    """Collect the gaps of one pass, then log and keep them."""
+def heal_pass(conn: AsyncConnection, record: bool = True) -> Iterator[list[HealGap]]:
+    """Collect the gaps of one pass, then log them, and keep them when ``record``.
+
+    ``record=False`` is for a database the app does not run on yet (a migration
+    target): its result must not replace the active database's report.
+    """
     gaps: list[HealGap] = []
     token = _current_gaps.set(gaps)
+    completed = False
     try:
         yield gaps
+        completed = True
     finally:
         _current_gaps.reset(token)
         dialect = _dialect(conn)
-        _last_reports[dialect] = HealReport(
-            dialect=dialect,
-            finished_at=datetime.now(timezone.utc),
-            gaps=tuple(gaps),
-        )
-        if gaps:
-            logger.error(
-                "Schema self-heal INCOMPLETE on %s: %d step(s) did not apply: %s. "
-                "Tables they touch may be missing columns, tables or indexes; "
-                "the warnings above give each cause. Startup continues.",
-                dialect,
-                len(gaps),
-                ", ".join(gap.step for gap in gaps),
+        if record:
+            _last_reports[_database_key(conn)] = HealReport(
+                dialect=dialect,
+                finished_at=datetime.now(timezone.utc),
+                gaps=tuple(gaps),
+                completed=completed,
             )
-        else:
-            logger.info("Schema self-heal applied every step on %s", dialect)
+        _log_pass(dialect, gaps, completed)
 
 
 def schema_heal_summary() -> dict[str, Union[str, list[str]]]:
-    """What ``/health/db`` shows: names only, never the error text."""
-    if not _last_reports:
-        return {"status": "not_run", "failed_steps": [], "databases": []}
-    failed = sorted({gap.step for r in _last_reports.values() for gap in r.gaps})
+    """What ``/health/db`` shows: names only, never the error text.
+
+    ``ok`` only when every kept pass finished with no gap; ``incomplete`` when a
+    step did not apply; ``not_run`` when no pass ran or one stopped early.
+    """
+    reports = list(_last_reports.values())
+    failed = sorted({gap.step for r in reports for gap in r.gaps})
+    if failed:
+        status = "incomplete"
+    elif not reports or not all(r.completed for r in reports):
+        status = "not_run"
+    else:
+        status = "ok"
     return {
-        "status": "incomplete" if failed else "ok",
+        "status": status,
         "failed_steps": failed,
-        "databases": sorted(_last_reports),
+        "databases": sorted({r.dialect for r in reports}),
     }
 
 
 def last_reports() -> dict[str, HealReport]:
-    """The last pass per dialect (a copy)."""
+    """The last pass per database (a copy)."""
     return dict(_last_reports)

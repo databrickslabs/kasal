@@ -347,11 +347,13 @@ class TestDbHealthEndpoint:
 
 
 @pytest.fixture(autouse=True)
-def _no_heal_report_from_other_tests(monkeypatch):
-    """The self-heal report is process-wide; start every test without one."""
+def _a_clean_heal_report(monkeypatch):
+    """The self-heal report is process-wide: never inherit one from another test.
+    Start from a clean, finished pass, as after a healthy startup."""
     from src.db.self_heal import report
 
-    monkeypatch.setattr(report, "_last_reports", {})
+    clean = report.HealReport("sqlite", datetime.now(timezone.utc), (), True)
+    monkeypatch.setattr(report, "_last_reports", {"sqlite:///app": clean})
 
 
 class TestDbHealthReportsSchemaGaps:
@@ -379,7 +381,7 @@ class TestDbHealthReportsSchemaGaps:
         assert result["schema_heal"] == {
             "status": "incomplete",
             "failed_steps": ["_ensure_agent_columns"],
-            "databases": ["postgresql"],
+            "databases": ["postgresql", "sqlite"],
         }
         # Names only: the cause (which may name tables and roles) stays in the log.
         assert "must be owner" not in str(result)
@@ -392,8 +394,36 @@ class TestDbHealthReportsSchemaGaps:
     )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
     @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
-    async def test_before_any_pass_it_says_not_run(self, *_mocks):
+    async def test_a_clean_pass_is_ok(self, *_mocks):
         result = await db_health()
 
         assert result["status"] == "ok"
+        assert result["schema_heal"]["status"] == "ok"
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
+    @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
+    @pytest.mark.parametrize("aborted", [False, True])
+    async def test_a_skipped_or_aborted_heal_is_not_run_not_ok(
+        self, _last, _activated, _enabled, aborted, monkeypatch
+    ):
+        """No pass at all, or one that stopped on an exception, verified nothing."""
+        from src.db.self_heal import report
+
+        monkeypatch.setattr(report, "_last_reports", {})
+        if aborted:
+            conn = MagicMock()
+            conn.engine.dialect.name = "postgresql"
+            with pytest.raises(RuntimeError):
+                with report.heal_pass(conn):
+                    raise RuntimeError("connection reset")
+
+        result = await db_health()
+
         assert result["schema_heal"]["status"] == "not_run"
+        assert result["status"] == "degraded"

@@ -391,7 +391,7 @@ class TestEnsureDatabricksConfigColumns:
         await _ensure_databricks_config_columns(conn)
 
         sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
-        assert "information_schema.columns" in sql_calls[0]
+        assert "pg_attribute" in sql_calls[0]
         assert len(sql_calls) == 2
         assert "ADD COLUMN IF NOT EXISTS ai_gateway_enabled" in sql_calls[1]
         assert not any("PRAGMA" in s for s in sql_calls)

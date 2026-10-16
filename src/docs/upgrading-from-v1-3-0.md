@@ -124,8 +124,11 @@ Before it accepts requests, Kasal:
 Steps 2 and 3 run in one transaction, and every self-heal step runs in its own
 savepoint. A step that cannot apply is rolled back on its own and logged; the
 other steps and the new tables still apply. Startup does not stop for such a gap:
-it is reported instead (see below). Nothing is dropped. Redeploying runs the same
-non-destructive pass again, so a gap you fix is healed on the next start.
+it is reported instead (see below). No table, column or row is dropped. The one
+thing the pass removes is the foreign key from `decision_config.group_id` to
+`groups`, which personal spaces cannot satisfy (on SQLite the table is rebuilt
+without it and its rows are copied across). Redeploying runs the same pass
+again, so a gap you fix is healed on the next start.
 
 ## What to check after the upgrade
 
@@ -160,9 +163,9 @@ a `schema_heal` object:
 ```
 
 `schema_heal.status` is `ok` when every step applied, `incomplete` when some did
-not, and `not_run` before the first pass. While it is `incomplete`, the top-level
-`status` is `degraded`. The endpoint lists step names only; the causes stay in
-the logs.
+not, and `not_run` when no pass ran or one stopped before it finished (the schema
+was not checked). Unless it is `ok`, the top-level `status` is `degraded`. The
+endpoint lists step names only; the causes stay in the logs.
 
 Then open Kasal and check that your crews, flows, run history and teamspaces are
 there.

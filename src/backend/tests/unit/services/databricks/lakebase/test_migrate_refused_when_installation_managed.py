@@ -135,7 +135,6 @@ class TestTheServiceRefusesOnItsOwn:
         _no_drop_was_sent(engines)
 
 
-@pytest.mark.asyncio
 class TestTheSchemaDropRefuses:
     def test_sync_drop(self, installation_managed):
         engine = MagicMock()
@@ -143,6 +142,7 @@ class TestTheSchemaDropRefuses:
             LakebaseSchemaService().drop_schema_sync(engine, "app@example.com")
         engine.begin.assert_not_called()
 
+    @pytest.mark.asyncio
     async def test_async_recreate(self, installation_managed):
         engine = MagicMock()
         with pytest.raises(BadRequestError):

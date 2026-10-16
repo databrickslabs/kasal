@@ -659,3 +659,49 @@ class TestMainGuard:
             import uvicorn
 
             assert callable(uvicorn.run)
+
+
+def _heal_session_factory() -> MagicMock:
+    session = AsyncMock()
+    session.connection = AsyncMock(return_value=MagicMock())
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=ctx)
+
+
+class TestActiveLakebaseHealLogging:
+    """The boot heal of an active Lakebase says "complete" only when it was.
+
+    The self-heal logs an ERROR naming the steps that did not apply; this line
+    used to follow it with "Lakebase schema self-heal complete" regardless.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "gaps,level,phrase",
+        [((), "info", "complete"), ((object(),), "warning", "incomplete")],
+    )
+    async def test_complete_is_logged_only_without_gaps(self, gaps, level, phrase):
+        from src.main import _heal_activated_lakebase
+
+        log = MagicMock()
+        heal = AsyncMock(return_value=gaps)
+        with patch("src.db.session.run_schema_self_heal", heal):
+            await _heal_activated_lakebase(_heal_session_factory(), log)
+
+        assert phrase in getattr(log, level).call_args.args[0]
+        if gaps:
+            assert not any("complete" in c.args[0] for c in log.info.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_a_heal_that_cannot_run_is_logged_as_skipped(self):
+        from src.main import _heal_activated_lakebase
+
+        log = MagicMock()
+        heal = AsyncMock(side_effect=RuntimeError("connection reset"))
+        with patch("src.db.session.run_schema_self_heal", heal):
+            await _heal_activated_lakebase(_heal_session_factory(), log)
+
+        assert "skipped" in log.warning.call_args.args[0]
+        log.info.assert_not_called()

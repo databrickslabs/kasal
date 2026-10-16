@@ -271,6 +271,7 @@ async def _ensure_users_personal_group_index(conn: AsyncConnection) -> None:
     the requirement, and existing duplicates must not roll the column back."""
     await ensure_index(
         conn,
+        "users",
         "ix_users_personal_group_id",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_personal_group_id "
         "ON users (personal_group_id)",
@@ -302,6 +303,7 @@ async def _ensure_flow_states_group_index(conn: AsyncConnection) -> None:
     rolls back the column every flow_states read needs."""
     await ensure_index(
         conn,
+        "flow_states",
         "ix_flow_states_group_uuid",
         "CREATE INDEX IF NOT EXISTS ix_flow_states_group_uuid "
         "ON flow_states (group_id, flow_uuid)",

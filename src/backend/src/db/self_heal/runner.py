@@ -59,7 +59,9 @@ from src.db.self_heal.tables import (
 from src.db.self_heal.vectors import _ensure_pgvector_embedding_columns
 
 
-async def run_schema_self_heal(conn: AsyncConnection) -> tuple[HealGap, ...]:
+async def run_schema_self_heal(
+    conn: AsyncConnection, *, record: bool = True
+) -> tuple[HealGap, ...]:
     """Create missing tables and add missing columns on an existing DB.
 
     ``create_all`` fully creates a NEW table but never ALTERs an existing one, so
@@ -88,9 +90,11 @@ async def run_schema_self_heal(conn: AsyncConnection) -> tuple[HealGap, ...]:
     does not exist``.
 
     Returns the steps that did not apply. They are logged at ERROR and shown by
-    ``GET /health/db``; they never stop startup.
+    ``GET /health/db``; they never stop startup. Pass ``record=False`` when
+    healing a database the app does not run on yet (a migration target), so its
+    result does not stand in for the active database's.
     """
-    with heal_pass(conn) as gaps:
+    with heal_pass(conn, record=record) as gaps:
         # On Lakebase, act as the shared ``databricks_superuser`` role for the
         # whole heal. Every identity on the instance (each app's SPN + the
         # admins) is a member of it, so this bypasses table-ownership checks:
@@ -116,7 +120,6 @@ async def run_schema_self_heal(conn: AsyncConnection) -> tuple[HealGap, ...]:
             _drop_decision_config_group_fk,
             _ensure_documentation_embeddings_columns,
             _ensure_knowledge_embeddings_table,
-            _ensure_pgvector_embedding_columns,
             _ensure_databricks_config_columns,
             _ensure_chat_assets_table,
             _ensure_chat_sessions_table,
@@ -149,6 +152,9 @@ async def run_schema_self_heal(conn: AsyncConnection) -> tuple[HealGap, ...]:
             _ensure_flow_states_group_index,
             _ensure_ui_config_columns,
             _ensure_modelconfig_columns,
+            # After every table step, so a vector table created on this pass
+            # (workflow_recipes, knowledge_embeddings) gets its column too.
+            _ensure_pgvector_embedding_columns,
             _ensure_hot_polling_indexes,
             _heal_personal_group_names,
             _assign_personal_workspace_ids,

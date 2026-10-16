@@ -16,10 +16,11 @@ in the ``migrations`` job of ``.github/workflows/quality.yml``.
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import AsyncIterator, Awaitable, Callable
 
 import pytest
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -27,7 +28,7 @@ import src.db.all_models  # noqa: F401 — register every table on Base.metadata
 from src.db.base import Base
 from src.db.self_heal import report
 from src.db.self_heal.columns import ensure_columns
-from src.db.self_heal.dialect import _conn_is_sqlite, _pg_columns
+from src.db.self_heal.dialect import _conn_is_sqlite, _index_exists, _pg_columns
 from src.db.self_heal.runner import run_schema_self_heal
 
 _PG_URL = os.environ.get("KASAL_TEST_POSTGRES_URL", "")
@@ -44,6 +45,30 @@ def _fresh_heal_reports(monkeypatch):
     monkeypatch.setattr(report, "_last_reports", {})
 
 
+@asynccontextmanager
+async def _fresh_postgres() -> AsyncIterator[tuple[AsyncEngine, URL]]:
+    """A new database with pgvector, dropped afterwards; skip without a server."""
+    if not _PG_URL:
+        pytest.skip("KASAL_TEST_POSTGRES_URL is not set; no PostgreSQL to test on")
+    admin = create_async_engine(
+        _PG_URL, isolation_level="AUTOCOMMIT", poolclass=NullPool
+    )
+    name = f"kasal_heal_{uuid.uuid4().hex[:12]}"
+    async with admin.connect() as conn:
+        await conn.exec_driver_sql(f'CREATE DATABASE "{name}"')
+    url = make_url(_PG_URL).set(database=name)
+    pg = create_async_engine(url, poolclass=NullPool)
+    try:
+        async with pg.begin() as conn:
+            await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
+        yield pg, url
+    finally:
+        await pg.dispose()
+        async with admin.connect() as conn:
+            await conn.exec_driver_sql(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        await admin.dispose()
+
+
 @pytest.fixture(params=["sqlite", "postgresql"])
 async def engine(request, tmp_path) -> AsyncIterator[AsyncEngine]:
     if request.param == "sqlite":
@@ -53,24 +78,14 @@ async def engine(request, tmp_path) -> AsyncIterator[AsyncEngine]:
         finally:
             await sqlite.dispose()
         return
-    if not _PG_URL:
-        pytest.skip("KASAL_TEST_POSTGRES_URL is not set; no PostgreSQL to test on")
-    admin = create_async_engine(
-        _PG_URL, isolation_level="AUTOCOMMIT", poolclass=NullPool
-    )
-    name = f"kasal_heal_{uuid.uuid4().hex[:12]}"
-    async with admin.connect() as conn:
-        await conn.exec_driver_sql(f'CREATE DATABASE "{name}"')
-    pg = create_async_engine(make_url(_PG_URL).set(database=name), poolclass=NullPool)
-    try:
-        async with pg.begin() as conn:
-            await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
+    async with _fresh_postgres() as (pg, _url):
         yield pg
-    finally:
-        await pg.dispose()
-        async with admin.connect() as conn:
-            await conn.exec_driver_sql(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-        await admin.dispose()
+
+
+@pytest.fixture
+async def postgres() -> AsyncIterator[tuple[AsyncEngine, URL]]:
+    async with _fresh_postgres() as database:
+        yield database
 
 
 async def _columns(conn: AsyncConnection, table: str) -> set[str]:
@@ -188,6 +203,19 @@ class TestTheGapIsReported:
         assert gaps == ()
         assert report.schema_heal_summary()["status"] == "ok"
 
+    async def test_a_migration_targets_heal_does_not_replace_the_report(
+        self, engine, monkeypatch
+    ):
+        """record=False (the migrate paths) logs but keeps the active report."""
+        await _an_older_install(engine)
+        failing = _named("_ensure_agent_columns", _agent_columns_with_a_broken_column)
+        monkeypatch.setattr("src.db.self_heal.runner._ensure_agent_columns", failing)
+        async with engine.begin() as conn:
+            gaps = await run_schema_self_heal(conn, record=False)
+
+        assert [gap.step for gap in gaps] == ["_ensure_agent_columns"]
+        assert report.schema_heal_summary()["status"] == "not_run"
+
 
 @pytest.mark.asyncio
 class TestAFailingDataStep:
@@ -203,3 +231,81 @@ class TestAFailingDataStep:
 
         assert [gap.step for gap in gaps] == ["_migrate_genie_one_mcp_urls"]
         await _assert_the_rest_of_the_upgrade_landed(engine)
+
+
+@asynccontextmanager
+async def _roles(admin: AsyncEngine) -> AsyncIterator[tuple[str, str]]:
+    """An owner role and a login role with GRANT ALL; both dropped afterwards."""
+    suffix = uuid.uuid4().hex[:8]
+    owner, app = f"heal_owner_{suffix}", f"heal_app_{suffix}"
+    async with admin.begin() as conn:
+        await conn.exec_driver_sql(f'CREATE ROLE "{owner}"')
+        await conn.exec_driver_sql(f"CREATE ROLE \"{app}\" LOGIN PASSWORD '{suffix}'")
+        await conn.exec_driver_sql(
+            f'GRANT USAGE, CREATE ON SCHEMA public TO "{owner}", "{app}"'
+        )
+    try:
+        yield owner, app
+    finally:
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql(f'REASSIGN OWNED BY "{owner}" TO CURRENT_USER')
+            for role in (owner, app):
+                await conn.exec_driver_sql(f'DROP OWNED BY "{role}"')
+                await conn.exec_driver_sql(f'DROP ROLE "{role}"')
+
+
+@pytest.mark.asyncio
+class TestOnPostgresOnly:
+    async def test_tables_another_role_owns_heal_with_no_gap_when_nothing_is_missing(
+        self, postgres
+    ):
+        """A re-created app, or a DBA-owned schema: the app may read and write
+        (GRANT ALL) but not ALTER. PostgreSQL checks ownership before existence,
+        so any ALTER / CREATE INDEX ... IF NOT EXISTS fails there even when the
+        column or index exists. Every step must read the catalogue first, or a
+        healthy install reports INCOMPLETE and a degraded /health/db each boot."""
+        admin, url = postgres
+        async with _roles(admin) as (owner, app):
+            async with admin.begin() as conn:  # an earlier app built and healed it
+                await conn.exec_driver_sql(f'SET ROLE "{owner}"')
+                await conn.run_sync(Base.metadata.create_all)
+                assert await run_schema_self_heal(conn) == ()
+            async with admin.begin() as conn:
+                for kind in ("TABLES", "SEQUENCES"):
+                    await conn.exec_driver_sql(
+                        f'GRANT ALL ON ALL {kind} IN SCHEMA public TO "{app}"'
+                    )
+            password = app.rsplit("_", 1)[1]
+            as_app = create_async_engine(
+                url.set(username=app, password=password), poolclass=NullPool
+            )
+            try:
+                async with as_app.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+                    gaps = await run_schema_self_heal(conn)
+            finally:
+                await as_app.dispose()
+
+        assert gaps == ()
+        assert report.schema_heal_summary()["status"] == "ok"
+
+    async def test_a_vector_table_made_on_this_pass_gets_its_index_on_this_pass(
+        self, postgres
+    ):
+        """The heal-only paths (no create_all first): the pgvector step runs after
+        the table steps, so a recreated workflow_recipes is finished in one pass."""
+        admin, _url = postgres
+        async with admin.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with admin.begin() as conn:
+            await conn.exec_driver_sql("DROP TABLE workflow_recipes CASCADE")
+
+        async with admin.begin() as conn:
+            gaps = await run_schema_self_heal(conn)
+
+        assert gaps == ()
+        async with admin.connect() as conn:
+            assert "embedding" in await _pg_columns(conn, "workflow_recipes")
+            assert await _index_exists(
+                conn, "workflow_recipes", "idx_workflow_recipes_embedding"
+            )

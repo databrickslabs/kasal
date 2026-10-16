@@ -37,15 +37,15 @@ async def ensure_table(conn: AsyncConnection, module: str, *models: str) -> None
     logger.info(f"Ensured {', '.join(t.name for t in tables)} table(s) exist")
 
 
-async def ensure_index(conn: AsyncConnection, name: str, ddl: str) -> None:
-    """Run ``ddl`` (a CREATE INDEX) unless index ``name`` already exists.
+async def ensure_index(conn: AsyncConnection, table: str, name: str, ddl: str) -> None:
+    """Run ``ddl`` (a CREATE INDEX on ``table``) unless ``table`` has index ``name``.
 
     Reads the catalogue first for the same reason ``ensure_columns`` does: on
     PostgreSQL ``CREATE INDEX IF NOT EXISTS`` checks table ownership before it
     checks existence, so on a table another role owns it fails even when the
     index is there. A failure RAISES into the caller's SAVEPOINT.
     """
-    if await _index_exists(conn, name):
+    if await _index_exists(conn, table, name):
         return
     await conn.exec_driver_sql(ddl)
     logger.info("Created index %s", name)
@@ -152,19 +152,22 @@ async def _ensure_hot_polling_indexes(conn: AsyncConnection) -> None:
     indexes = (
         (
             "idx_executionhistory_group_created",
-            "executionhistory (group_id, created_at)",
+            "executionhistory",
+            "group_id, created_at",
         ),
-        ("ix_executionhistory_status", "executionhistory (status)"),
-        ("ix_executionhistory_created_at", "executionhistory (created_at)"),
-        ("ix_execution_trace_run_id", "execution_trace (run_id)"),
-        ("ix_execution_trace_created_at", "execution_trace (created_at)"),
+        ("ix_executionhistory_status", "executionhistory", "status"),
+        ("ix_executionhistory_created_at", "executionhistory", "created_at"),
+        ("ix_execution_trace_run_id", "execution_trace", "run_id"),
+        ("ix_execution_trace_created_at", "execution_trace", "created_at"),
     )
     applied = True
-    for name, target in indexes:
-        ddl = f"CREATE INDEX IF NOT EXISTS {name} ON {target}"
+    for name, table, columns in indexes:
+        ddl = f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
 
-        async def _create(c: AsyncConnection, name: str = name, ddl: str = ddl) -> None:
-            await ensure_index(c, name, ddl)
+        async def _create(
+            c: AsyncConnection, table: str = table, name: str = name, ddl: str = ddl
+        ) -> None:
+            await ensure_index(c, table, name, ddl)
 
         step = f"_ensure_hot_polling_indexes.{name}"
         applied = await run_isolated(conn, step, _create) and applied

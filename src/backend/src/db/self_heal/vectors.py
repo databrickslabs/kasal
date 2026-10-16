@@ -10,8 +10,9 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.db.base import Base
-from src.db.self_heal.dialect import _conn_is_sqlite
+from src.db.self_heal.dialect import _conn_is_sqlite, _pg_columns
 from src.db.self_heal.report import run_isolated
+from src.db.self_heal.tables import ensure_index
 
 logger = logging.getLogger(__name__)
 
@@ -91,26 +92,34 @@ async def _ensure_pgvector_embedding_columns(conn: AsyncConnection) -> None:
 
     applied = True
     for table in _vector_embedding_tables():
-        # Each statement in its own SAVEPOINT: an orphaned-owner table (42501)
-        # must not abort the surrounding self-heal transaction, nor the others.
-        for label, stmt in (
-            (
-                "column",
-                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding "
-                f"{ext_schema}.vector(1024)",
-            ),
-            (
-                "index",
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding ON {table} "
-                f"USING hnsw (embedding {ext_schema}.vector_cosine_ops)",
-            ),
-        ):
+        # Catalogue first, as ensure_columns does: PostgreSQL checks ownership
+        # before existence, so on a table another role owns ADD COLUMN IF NOT
+        # EXISTS and CREATE INDEX IF NOT EXISTS fail with "must be owner" even when
+        # the column and index are already there. A table that does not exist yet
+        # is left to create_all and its table step. Each piece has its own
+        # SAVEPOINT, so one table cannot abort the pass or stop the others.
 
-            async def _apply(c: AsyncConnection, stmt: str = stmt) -> None:
-                await c.exec_driver_sql(stmt)
+        async def _column(c: AsyncConnection, table: str = table) -> None:
+            existing = await _pg_columns(c, table)
+            if existing and "embedding" not in existing:
+                await c.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding "
+                    f"{ext_schema}.vector(1024)"
+                )
 
-            name = f"_ensure_pgvector_embedding_columns.{table}.{label}"
-            applied = await run_isolated(conn, name, _apply) and applied
+        async def _index(c: AsyncConnection, table: str = table) -> None:
+            if "embedding" in await _pg_columns(c, table):
+                await ensure_index(
+                    c,
+                    table,
+                    f"idx_{table}_embedding",
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding ON {table} "
+                    f"USING hnsw (embedding {ext_schema}.vector_cosine_ops)",
+                )
+
+        prefix = f"_ensure_pgvector_embedding_columns.{table}"
+        applied = await run_isolated(conn, f"{prefix}.column", _column) and applied
+        applied = await run_isolated(conn, f"{prefix}.index", _index) and applied
     if applied:
         logger.info("Ensured pgvector embedding columns + HNSW indexes")
     else:

@@ -50,22 +50,7 @@ import DatabaseOverview, { type DatabaseInfo } from './DatabaseOverview';
 import LakebaseSetupOptions from './LakebaseSetupOptions';
 import LakebasePreflightPanel from './LakebasePreflightPanel';
 import { APIKeysService } from '../../../api/config/APIKeysService';
-
-// Type guard for Axios errors with response data
-interface ErrorWithResponse {
-  response?: {
-    status?: number;
-    data?: {
-      detail?: string;
-      error?: string;
-    };
-  };
-  message?: string;
-}
-
-function isErrorWithResponse(error: unknown): error is ErrorWithResponse {
-  return typeof error === 'object' && error !== null && 'response' in error;
-}
+import { apiErrorMessage, isErrorWithResponse } from './apiErrorMessage';
 
 
 interface BackupFile {
@@ -411,10 +396,7 @@ const DatabaseManagement: React.FC = () => {
       });
       setBackups(response.data);
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.error || 'Failed to load backups'
-        : 'Failed to load backups';
-      setError(errorMessage);
+      setError(apiErrorMessage(err, 'Failed to load backups'));
     } finally {
       setLoading(false);
     }
@@ -439,10 +421,7 @@ const DatabaseManagement: React.FC = () => {
         setError(response.data.error || 'Export failed');
       }
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.error || 'Failed to export database'
-        : 'Failed to export database';
-      setError(errorMessage);
+      setError(apiErrorMessage(err, 'Failed to export database'));
     } finally {
       setLoading(false);
     }
@@ -472,10 +451,7 @@ const DatabaseManagement: React.FC = () => {
         setError(response.data.error || 'Import failed');
       }
     } catch (err: unknown) {
-      const errorMessage = isErrorWithResponse(err)
-        ? err.response?.data?.error || 'Failed to import database'
-        : 'Failed to import database';
-      setError(errorMessage);
+      setError(apiErrorMessage(err, 'Failed to import database'));
     } finally {
       setLoading(false);
     }
@@ -706,6 +682,8 @@ const DatabaseManagement: React.FC = () => {
     );
   }
 
+  // In-app backup covers SQLite and PostgreSQL 'public'; the server refuses Lakebase (400).
+  const onLakebase = databaseInfo?.database_type === 'lakebase';
   return (
     <Box sx={{ maxWidth: 880, '& > .MuiAccordion-root': { mb: 1 }, '& .MuiAccordionSummary-content': { my: 1 } }}>
       <Typography data-settings-page-title variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
@@ -1240,13 +1218,16 @@ const DatabaseManagement: React.FC = () => {
             {!hasDatabricksApiKey && <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Add a Databricks API key in API Keys to import or export backups.
             </Typography>}
+            {onLakebase && <Alert severity="info" sx={{ mb: 2 }}>
+              In-app backup and restore do not cover Lakebase. Protect this database with Lakebase point-in-time restore.
+            </Alert>}
             <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                 <Button
                   variant="contained"
                   startIcon={<UploadIcon />}
                   onClick={() => setExportDialog(true)}
-                  disabled={!hasDatabricksApiKey}
+                  disabled={!hasDatabricksApiKey || onLakebase}
                 >
                   Export to Volume
                 </Button>
@@ -1259,7 +1240,7 @@ const DatabaseManagement: React.FC = () => {
                     loadBackups();
                     setImportDialog(true);
                   }}
-                  disabled={!hasDatabricksApiKey}
+                  disabled={!hasDatabricksApiKey || onLakebase}
                 >
                   Import from Volume
                 </Button>

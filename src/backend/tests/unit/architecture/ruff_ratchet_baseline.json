@@ -296,7 +296,7 @@
   "src/services/databricks/lakebase/schema.py::TRY400": 7,
   "src/services/databricks/lakebase/service.py::B904": 1,
   "src/services/databricks/lakebase/service.py::BLE001": 15,
-  "src/services/databricks/lakebase/service.py::G004": 52,
+  "src/services/databricks/lakebase/service.py::G004": 51,
   "src/services/databricks/lakebase/service.py::S110": 3,
   "src/services/databricks/lakebase/service.py::TRY400": 14,
   "src/services/databricks/volumes/base.py::B904": 1,

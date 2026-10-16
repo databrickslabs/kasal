@@ -85,7 +85,7 @@ class TestEnsureColumnsOnPostgres:
             conn, "t", [("a", "TEXT", "JSONB"), ("b", "TEXT", "JSONB")]
         )
         stmts = _statements(conn)
-        assert "information_schema.columns" in stmts[0]
+        assert "pg_attribute" in stmts[0]
         assert stmts[1:] == ["ALTER TABLE t ADD COLUMN IF NOT EXISTS b JSONB"]
 
     async def test_no_alter_at_all_when_every_column_is_present(self):
@@ -155,8 +155,8 @@ class TestEnsureIndex:
         try:
             async with engine.begin() as conn:
                 await conn.exec_driver_sql("CREATE TABLE t (a TEXT)")
-                await ensure_index(conn, "ix_t_a", ddl)
-                await ensure_index(conn, "ix_t_a", ddl)
+                await ensure_index(conn, "t", "ix_t_a", ddl)
+                await ensure_index(conn, "t", "ix_t_a", ddl)
                 rows = await conn.exec_driver_sql("PRAGMA index_list(t)")
                 assert [r[1] for r in rows.fetchall()] == ["ix_t_a"]
         finally:
@@ -169,6 +169,8 @@ class TestEnsureIndex:
         found = MagicMock()
         found.fetchone = MagicMock(return_value=(1,))
         conn.exec_driver_sql = AsyncMock(return_value=found)
-        await ensure_index(conn, "ix_t_a", "CREATE INDEX IF NOT EXISTS ix_t_a ON t (a)")
+        await ensure_index(
+            conn, "t", "ix_t_a", "CREATE INDEX IF NOT EXISTS ix_t_a ON t (a)"
+        )
         statements = _statements(conn)
-        assert len(statements) == 1 and "pg_indexes" in statements[0]
+        assert len(statements) == 1 and "pg_index" in statements[0]

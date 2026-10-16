@@ -760,7 +760,7 @@ class LakebaseService(BaseService):
                 from src.db.session import run_schema_self_heal
 
                 async with lakebase_engine.begin() as heal_conn:
-                    await run_schema_self_heal(heal_conn)
+                    await run_schema_self_heal(heal_conn, record=False)
             except Exception as heal_error:
                 logger.warning(f"Column reconcile skipped: {heal_error}")
 
@@ -1095,7 +1095,7 @@ class LakebaseService(BaseService):
                 )
                 try:
                     async with lakebase_heal_engine.begin() as heal_conn:
-                        await run_schema_self_heal(heal_conn)
+                        await run_schema_self_heal(heal_conn, record=False)
                 finally:
                     await lakebase_heal_engine.dispose()
                 yield {"type": "success", "message": "✅ Columns up to date"}
@@ -1975,10 +1975,10 @@ class LakebaseService(BaseService):
 
                     async with lakebase_engine.begin() as conn:
                         await self.schema_service.set_search_path_async(conn)
-                        await run_schema_self_heal(conn)
-                    result["schema_reconcile"] = "reconciled"
+                        gaps = await run_schema_self_heal(conn)
+                    result["schema_reconcile"] = "partial" if gaps else "reconciled"
                     logger.info(
-                        "Lakebase columns reconciled on connect (no restart needed)"
+                        "Lakebase columns reconciled on connect (%d gap(s))", len(gaps)
                     )
                 finally:
                     await lakebase_engine.dispose()
@@ -2029,20 +2029,17 @@ class LakebaseService(BaseService):
                         f"column reconcile: {exc}"
                     )
 
-                # create_tables_async is CREATE TABLE IF NOT EXISTS — it adds
-                # missing TABLES and nothing else. A table that already exists is
-                # left exactly as-is, including its column list, so a column added
-                # to a model after the instance was provisioned never lands here.
-                # That is not a hypothetical: modelconfig.thinking_budget_tokens
-                # was missing on a live Lakebase and 500'd every model-catalogue
-                # read while this path reported "schema expanded". The self-heal is
-                # the piece that reconciles COLUMNS (ADD COLUMN IF NOT EXISTS).
+                # create_tables_async is CREATE TABLE IF NOT EXISTS: an existing
+                # table keeps its column list, so a column added to a model later
+                # never lands here (modelconfig.thinking_budget_tokens was missing on
+                # a live Lakebase and 500'd every model-catalogue read while this
+                # path said "schema expanded"). The self-heal reconciles COLUMNS.
                 from src.db.session import run_schema_self_heal
 
                 async with lakebase_engine.begin() as conn:
-                    await run_schema_self_heal(conn)
+                    gaps = await run_schema_self_heal(conn)
 
-                if table_error is None:
+                if table_error is None and not gaps:
                     logger.info(
                         "Lakebase schema expanded on enable (missing tables AND "
                         "columns created non-destructively)"
@@ -2050,8 +2047,10 @@ class LakebaseService(BaseService):
                 else:
                     reconcile_status = "partial"
                     logger.warning(
-                        "Lakebase columns reconciled, but some tables could not be "
-                        f"created: {table_error}"
+                        "Lakebase schema partly reconciled: table error %s, "
+                        "%d self-heal gap(s)",
+                        table_error,
+                        len(gaps),
                     )
             finally:
                 await lakebase_engine.dispose()

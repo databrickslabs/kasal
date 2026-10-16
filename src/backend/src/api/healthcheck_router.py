@@ -86,7 +86,7 @@ async def db_health() -> Dict[str, Any]:
     from src.services.databricks.lakebase.schema_health import schema_heal_status
 
     result["schema_heal"] = schema_heal_status()
-    if result["schema_heal"]["status"] == "incomplete":
+    if result["schema_heal"]["status"] != "ok":  # incomplete, or not run at all
         result["status"] = "degraded"
 
     return result
