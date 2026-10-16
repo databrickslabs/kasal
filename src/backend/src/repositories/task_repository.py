@@ -152,7 +152,16 @@ class TaskRepository(BaseRepository[Task, str]):
 
     async def update(self, id: str, obj_in: dict) -> Optional[Task]:
         """
-        Update an existing task.
+        Update an existing task, leaving what ``obj_in`` does not name alone.
+
+        - No ``config`` in ``obj_in``: the row's config is kept, and root fields
+          that are sent (output_pydantic, llm_guardrail, markdown, ...) are
+          mirrored into a COPY of it.
+        - A ``config`` in ``obj_in`` REPLACES the stored one. Deliberately not a
+          key-by-key merge: the task form clears a field by leaving it out.
+        - ``agent_id: ""`` means "not provided" and is dropped, never written
+          as NULL: an unassigned row runs on the crew's first agent wherever
+          the crew is rebuilt from its rows.
 
         Args:
             id: ID of the task to update
@@ -164,9 +173,13 @@ class TaskRepository(BaseRepository[Task, str]):
         try:
             # Do not convert None to empty string for agent_id
             # as it would violate PostgreSQL foreign key constraints
+            if obj_in.get("agent_id") == "":
+                obj_in.pop("agent_id")
+
+            config_sent = obj_in.get("config") is not None
 
             # Ensure synchronization between config and dedicated fields
-            if "config" in obj_in and obj_in["config"] is not None:
+            if config_sent:
                 # If output_pydantic is in config, sync to root
                 if (
                     "output_pydantic" in obj_in["config"]
@@ -200,55 +213,47 @@ class TaskRepository(BaseRepository[Task, str]):
                 if "llm_guardrail" in obj_in["config"]:
                     obj_in["llm_guardrail"] = obj_in["config"]["llm_guardrail"]
 
-            # Vice versa: if fields are at root level, ensure they're in config too
-            if "config" not in obj_in:
-                obj_in["config"] = {}
+            db_obj = await self.get(id)
+            if db_obj is None:
+                return None
 
+            # Absent = untouched. A copy, not the stored dict: a JSON column
+            # mutated in place is a change SQLAlchemy never writes.
+            if not config_sent:
+                obj_in["config"] = dict(db_obj.config or {})
+
+            # Vice versa: if fields are at root level, ensure they're in config too
             if "output_pydantic" in obj_in and obj_in["output_pydantic"]:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["output_pydantic"] = obj_in["output_pydantic"]
 
             if "output_json" in obj_in and obj_in["output_json"]:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["output_json"] = obj_in["output_json"]
 
             if "output_file" in obj_in and obj_in["output_file"]:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["output_file"] = obj_in["output_file"]
 
             if "callback" in obj_in and obj_in["callback"]:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["callback"] = obj_in["callback"]
 
             if "guardrail" in obj_in and obj_in["guardrail"]:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["guardrail"] = obj_in["guardrail"]
 
             # Sync llm_guardrail from root to config (including null to clear it)
             if "llm_guardrail" in obj_in:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["llm_guardrail"] = obj_in["llm_guardrail"]
 
             if "markdown" in obj_in and obj_in["markdown"] is not None:
-                if "config" not in obj_in:
-                    obj_in["config"] = {}
                 obj_in["config"]["markdown"] = obj_in["markdown"]
 
-            # Also sync markdown from config to root if present
-            if "config" in obj_in and obj_in["config"] is not None:
+            # Also sync markdown from a SENT config to root. A kept config is
+            # not a request to rewrite the root column.
+            if config_sent:
                 if (
                     "markdown" in obj_in["config"]
                     and obj_in["config"]["markdown"] is not None
                 ):
                     obj_in["markdown"] = obj_in["config"]["markdown"]
 
-            db_obj = await self.get(id)
             if db_obj:
                 # Debug logging for tool_configs
                 if "tool_configs" in obj_in:
