@@ -3,6 +3,7 @@
 import logging
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +31,37 @@ _DEFAULT_MAX_CHARS = 30_000
 #: megabytes into memory just to extract a few thousand characters.
 _DEFAULT_MAX_FETCH_BYTES = 2_000_000
 
+#: The tool's own request headers. They carry no credential, so they go to any
+#: URL the tool reads; configured ``cookies`` and ``headers`` go only to the
+#: origin of the configured ``website_url`` (see ``_request_headers``).
+_DEFAULT_HEADERS: dict[str, str] = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.google.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> tuple[str, str, int] | None:
+    """``(scheme, host, port)`` of ``url``, with the scheme's default port
+    filled in; None when it is not an http(s) URL with a host, or when the
+    authority carries userinfo or a backslash (parsers disagree on the host)."""
+    try:
+        parts = urlsplit(str(url).strip())
+        port = parts.port
+    except ValueError:  # a malformed port or IPv6 bracket
+        return None
+    scheme = parts.scheme.lower()
+    if scheme not in _DEFAULT_PORTS or not parts.hostname:
+        return None
+    if "@" in parts.netloc or "\\" in parts.netloc:
+        return None
+    return scheme, parts.hostname, _DEFAULT_PORTS[scheme] if port is None else port
+
 
 class FixedScrapeWebsiteToolSchema(BaseModel):
     """Input for ScrapeWebsiteTool with a preset website_url."""
@@ -56,14 +88,7 @@ class ScrapeWebsiteTool(BaseTool):
         default_factory=lambda: int(engine_setting("scrape_max_fetch_bytes"))
     )
     headers: dict[str, str] | None = Field(
-        default_factory=lambda: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.google.com/",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-        }
+        default_factory=lambda: dict(_DEFAULT_HEADERS)
     )
 
     def __init__(
@@ -90,13 +115,9 @@ class ScrapeWebsiteTool(BaseTool):
         if website_url is None:
             raise ValueError("Website URL must be provided.")
 
-        headers = dict(self.headers or {})
-        if self.cookies:
-            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self.cookies.items())
-
         html = _safe_fetch(
             website_url,
-            headers=headers,
+            headers=self._request_headers(website_url),
             timeout=15,
             max_bytes=self.max_fetch_bytes,
         )
@@ -129,3 +150,33 @@ class ScrapeWebsiteTool(BaseTool):
             )
 
         return "The following text is scraped website content:\n\n" + text
+
+    def _request_headers(self, url: str) -> dict[str, str]:
+        """The headers for a request to ``url``.
+
+        The configured cookies and headers were set up for ``website_url``, so
+        they are sent only to its origin (scheme, host and port). Any other URL,
+        and every URL when no ``website_url`` is configured, gets the default
+        headers. A redirect to another origin drops them too (``web_fetch``).
+        """
+        configured = dict(self.headers or {})
+        if self.cookies:
+            configured["Cookie"] = "; ".join(
+                f"{k}={v}" for k, v in self.cookies.items()
+            )
+        site = _origin(self.website_url) if self.website_url else None
+        if site is not None and _origin(url) == site:
+            return configured
+
+        skipped = sorted(
+            name
+            for name, value in configured.items()
+            if _DEFAULT_HEADERS.get(name) != value
+        )
+        if skipped:
+            logger.warning(
+                "Not sending the configured %s: the URL is outside the origin "
+                "of the tool's website_url",
+                ", ".join(skipped),
+            )
+        return dict(_DEFAULT_HEADERS)

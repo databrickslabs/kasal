@@ -54,13 +54,21 @@ def _http_json(
 
 #: Redirect hops followed before giving up. urllib's own default is 10.
 _MAX_REDIRECTS = 5
-#: Request headers dropped when a redirect changes the origin (lower-case:
-#: urllib re-cases header names, so they are compared case-insensitively).
-_SENSITIVE_REQUEST_HEADERS = (
-    "authorization",
-    "cookie",
-    "proxy-authorization",
-    "x-api-key",
+#: The only request headers kept when a redirect changes the origin: content
+#: negotiation and connection handling, none of which carries a credential.
+#: Every other header (Authorization, Cookie, an API key, any header a tool
+#: config set) is dropped, whatever its name. Lower-case: urllib re-cases
+#: header names, so they are compared case-insensitively.
+_CROSS_ORIGIN_REQUEST_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "connection",
+        "referer",
+        "upgrade-insecure-requests",
+        "user-agent",
+    }
 )
 
 
@@ -206,7 +214,7 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
         new = super().redirect_request(req, fp, code, msg, headers, target)
         if new is not None and _origin(target) != _origin(req.full_url):
             for header in list(new.headers):
-                if header.lower() in _SENSITIVE_REQUEST_HEADERS:
+                if header.lower() not in _CROSS_ORIGIN_REQUEST_HEADERS:
                     new.remove_header(header)
         return new
 
