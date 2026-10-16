@@ -26,6 +26,7 @@ from tests.unit.services.catalog.crew_workspaces import (
     B_CREW_NAME,
     CALLER_A,
     A,
+    B,
     routed_to,
     seeded_database,
 )
@@ -118,6 +119,38 @@ async def test_the_run_name_is_read_only_from_the_rows_workspace(db):
 
     assert foreign == f"Event crew {job_id[:8]}"
     assert own == "Alpha crew"
+
+
+@pytest.mark.asyncio
+async def test_a_flow_run_name_is_read_only_from_the_rows_workspace(db):
+    from src.models.flow import Flow
+
+    own_flow, foreign_flow, unowned_flow = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with db() as session:
+        # The shared seed creates only the catalog tables.
+        connection = await session.connection()
+        await connection.run_sync(Flow.__table__.create, checkfirst=True)
+        session.add_all(
+            [
+                Flow(id=own_flow, name="Alpha flow", group_id=A),
+                Flow(id=foreign_flow, name="Bravo secret flow", group_id=B),
+                Flow(id=unowned_flow, name="Unowned flow", group_id=None),
+            ]
+        )
+        await session.commit()
+
+    job_id = str(uuid.uuid4())
+    consumer = TriggerQueueConsumerService()
+    async with db() as session:
+        names = [
+            await consumer._resolve_run_name(
+                session, {"id": str(flow_id)}, "flow", job_id, CALLER_A
+            )
+            for flow_id in (own_flow, foreign_flow, unowned_flow)
+        ]
+
+    generic = f"Event flow {job_id[:8]}"
+    assert names == ["Alpha flow", generic, generic]
 
 
 @pytest.mark.asyncio

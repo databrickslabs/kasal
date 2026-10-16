@@ -415,7 +415,10 @@ class TriggerQueueConsumerService:
             elif execution_type == "flow" and tid:
                 from src.services.flow_builder.flow_service import FlowService
 
-                flow = await FlowService(session).get_flow(uuid.UUID(str(tid)))
+                flow = await FlowService(session).get_flow_with_group_check(
+                    uuid.UUID(str(tid)), group_context
+                )
+                FlowService.require_execution_access(flow, group_context)
                 if flow and getattr(flow, "name", None):
                     return flow.name
         except Exception:  # noqa: BLE001 — naming must never block dispatch
