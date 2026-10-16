@@ -417,8 +417,8 @@ export const MetricViewDeployerConfigSelector: React.FC<MetricViewDeployerConfig
               onChange={(e) => handleField('catalog_remap', e.target.value)}
               disabled={disabled}
               fullWidth size="small"
-              helperText='Replace source catalogs in YAML before deploying. JSON dict, e.g. {"dc_datalake_prod_001": "david_test_metrics"}'
-              placeholder='{"dc_datalake_prod_001": "david_test_metrics"}'
+              helperText='Replace source catalogs in YAML before deploying. JSON dict, e.g. {"acme_prod": "main"}'
+              placeholder='{"acme_prod": "main"}'
             />
           </Box>
         </AccordionDetails>

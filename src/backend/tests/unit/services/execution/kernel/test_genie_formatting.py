@@ -11,9 +11,9 @@ from src.services.execution.kernel.genie_formatting import (
 )
 
 GENIE_MCP_URL = (
-    "https://ws.databricks.com/api/2.0/mcp/genie/01f16bcd318214ec8ef983b7627e0221"
+    "https://ws.databricks.com/api/2.0/mcp/genie/01f00000000000000000000000000001"
 )
-SPACE_ID = "01f16bcd318214ec8ef983b7627e0221"
+SPACE_ID = "01f00000000000000000000000000001"
 
 
 def _genie_mcp_tool(url=GENIE_MCP_URL):

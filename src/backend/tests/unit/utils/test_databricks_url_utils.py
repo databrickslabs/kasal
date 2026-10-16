@@ -221,7 +221,7 @@ class TestDatabricksURLUtils:
         domains = [
             "workspace.cloud.databricks.com",
             "adb-1234567890123456.7.azuredatabricks.net",
-            "e2-demo-west.cloud.databricks.com",
+            "example-west.cloud.databricks.com",
             "dbc-abcd1234-5678.cloud.databricks.com",
         ]
 

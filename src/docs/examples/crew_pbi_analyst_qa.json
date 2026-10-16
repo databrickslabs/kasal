@@ -30,10 +30,10 @@
         "tool_configs": {
           "PowerBIAnalysisTool": {
             "use_separate_report_sp": true,
-            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
-            "dataset_id": "ecdd57ae-22be-4e66-871c-dd2abacea765",
-            "admin_tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
-            "report_tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "dataset_id": "00000000-0000-0000-0000-000000000003",
+            "admin_tenant_id": "00000000-0000-0000-0000-000000000002",
+            "report_tenant_id": "00000000-0000-0000-0000-000000000002",
             "admin_client_id": "<YOUR_ADMIN_SP_CLIENT_ID>",
             "admin_client_secret": "<YOUR_ADMIN_SP_CLIENT_SECRET>",
             "report_client_id": "<YOUR_REPORT_SP_CLIENT_ID>",
@@ -48,9 +48,9 @@
           },
           "Power BI Semantic Model Fetcher": {
             "tenant_id": "<YOUR_AZURE_TENANT_ID>",
-            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
-            "dataset_id": "e4ce7d2c-0bf3-48dd-8bfb-c8d3fa478953",
-            "report_id": "7b605187-a6ed-426b-91be-7b4ac201ee42",
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "dataset_id": "00000000-0000-0000-0000-000000000004",
+            "report_id": "00000000-0000-0000-0000-000000000006",
             "client_id": "<YOUR_SP_CLIENT_ID>",
             "client_secret": "<YOUR_SP_CLIENT_SECRET>"
           }
@@ -188,8 +188,8 @@
             "strategy": "fuzzy",
             "synonym_threshold": 80,
             "user_question": "{user_question}",
-            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
-            "dataset_id": "e4ce7d2c-0bf3-48dd-8bfb-c8d3fa478953"
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "dataset_id": "00000000-0000-0000-0000-000000000004"
           }
         },
         "agentId": null,
@@ -323,10 +323,10 @@
         "tool_configs": {
           "PowerBIAnalysisTool": {
             "use_separate_report_sp": true,
-            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
-            "dataset_id": "ecdd57ae-22be-4e66-871c-dd2abacea765",
-            "admin_tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
-            "report_tenant_id": "9f37a392-f0ae-4280-9796-f1864a10effc",
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "dataset_id": "00000000-0000-0000-0000-000000000003",
+            "admin_tenant_id": "00000000-0000-0000-0000-000000000002",
+            "report_tenant_id": "00000000-0000-0000-0000-000000000002",
             "admin_client_id": "<YOUR_ADMIN_SP_CLIENT_ID>",
             "admin_client_secret": "<YOUR_ADMIN_SP_CLIENT_SECRET>",
             "report_client_id": "<YOUR_REPORT_SP_CLIENT_ID>",
@@ -340,8 +340,8 @@
             "llm_workspace_url": "https://<YOUR_DATABRICKS_WORKSPACE>.azuredatabricks.net"
           },
           "Power BI Semantic Model DAX Generator": {
-            "dataset_id": "e4ce7d2c-0bf3-48dd-8bfb-c8d3fa478953",
-            "workspace_id": "ac0fa11c-fc3a-43f9-9873-fe62816f439d",
+            "dataset_id": "00000000-0000-0000-0000-000000000004",
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
             "llm_workspace_url": "https://<YOUR_DATABRICKS_WORKSPACE>.azuredatabricks.net",
             "llm_token": "<YOUR_DATABRICKS_PAT>",
             "tenant_id": "<YOUR_AZURE_TENANT_ID>",

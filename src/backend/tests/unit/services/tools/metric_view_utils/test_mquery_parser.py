@@ -199,10 +199,10 @@ class TestExtractSourceTable:
     def test_databricks_catalogs_navigation_chain(self):
         m = (
             'let Source = Databricks.Catalogs("h.databricks.com","/sql/1.0/wh/abc")'
-            '{[Name="dc_datalake_prod_001"]}[Data]{[Name="udm_example_md"]}[Data]'
+            '{[Name="acme_prod"]}[Data]{[Name="udm_example_md"]}[Data]'
             '{[Name="ca_dim_workcenter"]}[Data] in Source'
         )
-        assert self._E(m) == "dc_datalake_prod_001.udm_example_md.ca_dim_workcenter"
+        assert self._E(m) == "acme_prod.udm_example_md.ca_dim_workcenter"
 
     def test_databricks_keyed_navigation(self):
         m = (

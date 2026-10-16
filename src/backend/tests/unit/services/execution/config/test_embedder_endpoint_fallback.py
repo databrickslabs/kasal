@@ -47,11 +47,11 @@ class TestGetDatabricksEndpointEnvFallback:
                 "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(
-                    os.environ, {"DATABRICKS_HOST": "e2-demo.cloud.databricks.com"}
+                    os.environ, {"DATABRICKS_HOST": "example.cloud.databricks.com"}
                 ):
                     result = await builder._get_databricks_endpoint()
 
-        assert result == "https://e2-demo.cloud.databricks.com"
+        assert result == "https://example.cloud.databricks.com"
 
     @pytest.mark.asyncio
     async def test_env_var_fallback_with_https_prefix(self):
@@ -89,11 +89,11 @@ class TestGetDatabricksEndpointEnvFallback:
                 "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(
-                    os.environ, {"DATABRICKS_HOST": "e2-demo.cloud.databricks.com/"}
+                    os.environ, {"DATABRICKS_HOST": "example.cloud.databricks.com/"}
                 ):
                     result = await builder._get_databricks_endpoint()
 
-        assert result == "https://e2-demo.cloud.databricks.com"
+        assert result == "https://example.cloud.databricks.com"
 
     @pytest.mark.asyncio
     async def test_env_var_not_set_returns_empty(self):

@@ -413,7 +413,7 @@ export const MQueryConverterConfigSelector: React.FC<MQueryConverterConfigSelect
                 disabled={disabled}
                 fullWidth
                 size="small"
-                helperText="Unity Catalog name (e.g. david_test_metrics)"
+                helperText="Unity Catalog name (e.g. main)"
               />
               <TextField
                 label="Target Schema"
