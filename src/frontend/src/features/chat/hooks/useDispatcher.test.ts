@@ -115,6 +115,19 @@ describe('useDispatcher', () => {
     expect(mockedDispatch).toHaveBeenCalledTimes(1);
   });
 
+  it('a failed session create says so and does not block every later message', async () => {
+    const ensure = vi.fn().mockRejectedValueOnce(new Error('Service unavailable')).mockResolvedValue('session-1');
+    const opts = makeOptions({ ensureSession: ensure });
+    mockedDispatch.mockResolvedValue(result('conversation', { message: 'Done' }));
+    const { result: hook } = renderHook(() => useDispatcher(opts));
+    await act(async () => { await hook.current.sendMessage('First question'); });
+    expect(mockedDispatch).not.toHaveBeenCalled();
+    expect(opts.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('could not be sent'));
+    await act(async () => { await hook.current.sendMessage('First question'); });
+    expect(mockedDispatch).toHaveBeenCalledTimes(1);
+    expect(hook.current.isDispatching.current).toBe(false);
+  });
+
   it('exposes sendMessage, isDispatching ref, and setLastGenerated', () => {
     const { result: hook } = renderHook(() => useDispatcher(makeOptions()));
     expect(typeof hook.current.sendMessage).toBe('function');

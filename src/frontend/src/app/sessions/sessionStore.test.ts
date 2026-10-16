@@ -840,3 +840,58 @@ it('retains the session list and saved selection when selected messages fail', a
   expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('broken');
   expect(db.deleteSession).not.toHaveBeenCalled();
 });
+
+describe('message writes survive a transient failure', () => {
+  const unavailable = { response: { status: 503 } };
+  const settleRetries = async () => {
+    await flush();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flush();
+  };
+
+  it('retries a failed answer create with its newest content', async () => {
+    vi.useFakeTimers();
+    useSessionStore.setState({ currentSessionId: 'target', messages: [] });
+    vi.mocked(db.addMessageToSession).mockRejectedValueOnce(unavailable);
+    const id = useSessionStore.getState().addMessageToTargetSession('target', 'assistant', 'partial');
+    // The answer is finalized in place while the create is failing.
+    useSessionStore.setState((s) => ({ messages: s.messages.map((m) => (m.id === id ? { ...m, content: 'final answer' } : m)) }));
+    await settleRetries();
+    expect(db.addMessageToSession).toHaveBeenCalledTimes(2);
+    expect(db.addMessageToSession).toHaveBeenLastCalledWith('target', expect.objectContaining({ id, content: 'final answer' }));
+  });
+
+  it('retries addMessage into the session it was written to, not the one on screen later', async () => {
+    vi.useFakeTimers();
+    useSessionStore.setState({ currentSessionId: 'origin', messages: [] });
+    vi.mocked(db.addMessageToSession).mockRejectedValueOnce(unavailable);
+    const id = useSessionStore.getState().addMessage('assistant', 'answer');
+    useSessionStore.setState({ currentSessionId: 'elsewhere', messages: [] });
+    await settleRetries();
+    expect(db.addMessageToSession).toHaveBeenCalledTimes(2);
+    expect(db.addMessageToSession).toHaveBeenLastCalledWith('origin', expect.objectContaining({ id, content: 'answer' }));
+  });
+
+  it('retries a failed update with the message as it is now', async () => {
+    vi.useFakeTimers();
+    useSessionStore.setState({ currentSessionId: 'sess', messages: [makeMsg('m1', 'old')] });
+    vi.mocked(db.updateMessageInSession).mockRejectedValueOnce(unavailable);
+    useSessionStore.getState().updateMessage('m1', { content: 'first edit' });
+    useSessionStore.setState((s) => ({ messages: s.messages.map((m) => ({ ...m, content: 'newest' })) }));
+    await settleRetries();
+    expect(db.updateMessageInSession).toHaveBeenCalledTimes(2);
+    expect(db.updateMessageInSession).toHaveBeenLastCalledWith('sess', 'm1', expect.objectContaining({ content: 'newest' }));
+  });
+
+  it('gives up on a real rejection without an unhandled error', async () => {
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    useSessionStore.setState({ currentSessionId: 'target', messages: [] });
+    vi.mocked(db.addMessageToSession).mockRejectedValueOnce({ response: { status: 422 } });
+    useSessionStore.getState().addMessageToTargetSession('target', 'assistant', 'answer');
+    await settleRetries();
+    expect(db.addMessageToSession).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+});

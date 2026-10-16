@@ -306,7 +306,19 @@ export function useDispatcher(options: UseDispatcherOptions) {
       // run under an empty owner, so its completed result never rendered ("first
       // prompt empty, second works"). Await the (deduped) session-ensure so we
       // hold the REAL id before dispatch + onStartGenerationStream.
-      const originSessionId = await options.ensureSession();
+      //
+      // This await sits outside the try/finally below, so a failed create (a
+      // 5xx, an expired token) used to leave the guard set: every later send
+      // returned at the guard with no message until the page was reloaded.
+      let originSessionId: string;
+      try {
+        originSessionId = await options.ensureSession();
+      } catch (error) {
+        isDispatchingRef.current = false;
+        const reason = error instanceof Error ? error.message : 'Unknown error';
+        options.addMessage('assistant', `Your message could not be sent because the conversation could not be created (${reason}). Please send it again.`);
+        return;
+      }
 
       // Intercept "ec" / "execute crew" locally
       const lower = message.toLowerCase().trim();
