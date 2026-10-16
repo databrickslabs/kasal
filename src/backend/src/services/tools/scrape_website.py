@@ -48,7 +48,8 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 def _origin(url: str) -> tuple[str, str, int] | None:
     """``(scheme, host, port)`` of ``url``, with the scheme's default port
-    filled in; None when it is not an http(s) URL with a host."""
+    filled in; None when it is not an http(s) URL with a host, or when the
+    authority carries userinfo or a backslash (parsers disagree on the host)."""
     try:
         parts = urlsplit(str(url).strip())
         port = parts.port
@@ -56,6 +57,8 @@ def _origin(url: str) -> tuple[str, str, int] | None:
         return None
     scheme = parts.scheme.lower()
     if scheme not in _DEFAULT_PORTS or not parts.hostname:
+        return None
+    if "@" in parts.netloc or "\\" in parts.netloc:
         return None
     return scheme, parts.hostname, _DEFAULT_PORTS[scheme] if port is None else port
 

@@ -84,6 +84,11 @@ class TestAnotherOriginDoesNot:
             "http://example.com/reports",  # same host, another scheme
             "https://example.com:8443/reports",  # same host, another port
             "https://example.com@example.net/reports",  # userinfo, host is example.net
+            # Userinfo or a backslash before the configured host: parsers
+            # (and proxies) disagree on which host this names.
+            "https://example.net@example.com/reports",
+            "https://example.net\\@example.com/reports",
+            "https://example.net%2F@example.com/reports",
         ],
     )
     def test_the_model_chosen_url_gets_no_cookies_or_headers(self, url):
@@ -193,7 +198,7 @@ class TestRedirects:
         hop = _lower(landed[0][1])
         assert "cookie" not in hop
         assert "x-site-token" not in hop
-        assert "user-agent" in hop  # an ordinary request, just without them
+        assert hop["accept"] == "text/html"  # an allowlisted header survives
 
     def test_a_redirect_on_the_same_origin_keeps_them(self):
         with ExitStack() as stack:
