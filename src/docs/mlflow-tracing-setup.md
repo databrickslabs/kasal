@@ -109,6 +109,18 @@ Each run is a trace you can expand into its `agent` to `task` to `tool / llm` sp
 The numeric `?o=...` in a workspace URL is just the workspace org id. It is not the
 experiment id, so a bare `/ml/experiments?o=...` URL only shows the experiment list.
 
+### Chat turns
+
+Chat answers run in the server process, not a subprocess, and use the same MLflow
+setup as the dispatcher and the builder. Each turn is one `chat_kickoff:<run>` trace
+in the teamspace's experiment: the prompt sent to the model, the answer, and the
+chat session. It has no per-call LLM spans. Gates #1 and #2 apply as above, and a
+local MLflow server is not used for chat.
+
+Outside Databricks Apps the MLflow binding is shared by the whole server process.
+A chat turn that starts while another teamspace holds it is not traced, so its trace
+never lands in another teamspace's experiment.
+
 ## Verifying it works (backend log)
 
 Watch the crew/subprocess log when you run a workflow. A healthy run shows, in order:

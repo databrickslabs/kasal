@@ -5,6 +5,7 @@ import time
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
+from src.core.execution_scope import execution_scope
 from src.core.llm.effort import resolve_effort
 from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 from src.core.llm.transport.request_deadline import run_deadline
@@ -39,7 +40,10 @@ async def kickoff_chat_turn(
         object.__setattr__(agent, "run_deadline", deadline)
         object.__setattr__(agent, "_kasal_run_deadline", deadline)
     try:
-        with run_deadline(seconds if raw else None):
+        # The turn's execution, for its whole kickoff (the slide finish too):
+        # the tool hooks are process-wide and other turns' hooks are installed
+        # alongside this turn's, so wrap_tool needs to know whose call it is.
+        with run_deadline(seconds if raw else None), execution_scope(execution_id):
             kicked = await _kickoff(
                 service,
                 agent,

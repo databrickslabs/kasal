@@ -193,7 +193,8 @@ def install_tool_replay_hook(
             return None
         return ToolCallAnswered(output=match.output, source="replay")
 
-    register_tool_hooks(pre=_pre_hook)
+    # This run's cassette answers only this run's calls (see tool_approval).
+    register_tool_hooks(pre=_pre_hook, execution_id=execution_id)
 
     def _uninstall() -> None:
         unregister_tool_hooks(pre=_pre_hook)

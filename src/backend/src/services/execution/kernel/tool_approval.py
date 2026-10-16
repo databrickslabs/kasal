@@ -275,9 +275,14 @@ def make_tool_approval_hook(
 def install_tool_approval_hook(
     execution_id: str, group_context: Optional[GroupContext]
 ) -> Callable[[], None]:
-    """Register the hook; returns a callable that unregisters it."""
+    """Register the hook; returns a callable that unregisters it.
+
+    Registered FOR this execution: in the server process, where several chat
+    turns hold a hook at once, it gates only the calls made under this
+    execution (``core.execution_scope``).
+    """
     hook = make_tool_approval_hook(execution_id, group_context)
-    register_tool_hooks(pre=hook)
+    register_tool_hooks(pre=hook, execution_id=execution_id)
 
     def uninstall() -> None:
         unregister_tool_hooks(pre=hook)

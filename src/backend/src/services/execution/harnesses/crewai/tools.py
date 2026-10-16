@@ -21,8 +21,9 @@ when an operator changes a dropdown.
 
 from __future__ import annotations
 
+import types
 from contextvars import ContextVar
-from typing import Any, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Protocol, Tuple, Type
 
 from pydantic import BaseModel
 
@@ -143,12 +144,63 @@ def _adapter_base() -> type:
 
             return await asyncio.to_thread(self._run, *args, **kwargs)
 
+        def to_structured_tool(self) -> object:
+            """CrewAI's structured tool, with an ``ainvoke`` that keeps the context.
+
+            CrewAI's ReAct path awaits ``ainvoke``, which hands a sync tool to
+            ``loop.run_in_executor`` — and that copies no contextvars. ``_run``
+            would then run without the chat turn's execution binding
+            (``core.execution_scope``) or the agent/task captured above, and
+            ``wrap_tool`` could not tell whose call it was.
+            """
+            structured = super().to_structured_tool()
+            structured.__class__ = _context_carrying(type(structured))
+            return structured
+
         @property
         def kasal_tool(self) -> Any:
             return getattr(self, "_kasal_tool", None)
 
     _adapter_class = KasalToolAdapter
     return KasalToolAdapter
+
+
+class _Invokes(Protocol):
+    def invoke(self, input: object, config: object = None, **kwargs: object) -> object:
+        """CrewStructuredTool.invoke: parse, count the use, call."""
+
+
+async def _ainvoke_with_context(
+    self: _Invokes, input: object, config: object = None, **kwargs: object
+) -> object:
+    import asyncio
+
+    return await asyncio.to_thread(self.invoke, input, config, **kwargs)
+
+
+_carrying_classes: dict[type, type] = {}
+
+
+def _context_carrying(structured_cls: type) -> type:
+    """``structured_cls`` with ``ainvoke`` run through ``asyncio.to_thread``.
+
+    Same work as CrewAI's own ``ainvoke`` for a sync tool — parse, count the
+    use, call — via ``invoke``, on a thread that inherits the caller's context.
+    A subclass with no fields of its own, so the instance CrewAI built can take
+    it as its class unchanged. Built once per process.
+    """
+    carrying = _carrying_classes.get(structured_cls)
+    if carrying is None:
+        name = "ContextCarryingStructuredTool"
+
+        def body(namespace: dict[str, object]) -> None:
+            namespace.update(
+                __module__=__name__, __qualname__=name, ainvoke=_ainvoke_with_context
+            )
+
+        carrying = types.new_class(name, (structured_cls,), exec_body=body)
+        _carrying_classes[structured_cls] = carrying
+    return carrying
 
 
 def _args_schema_of(tool: Any) -> Optional[Type[BaseModel]]:

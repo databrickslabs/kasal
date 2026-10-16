@@ -83,6 +83,20 @@ def invalidate_parent_mlflow_cache() -> None:
     _hosted_destinations.clear()
 
 
+def owns_process_binding(group_context: object) -> bool:
+    """Whether the process-wide MLflow binding is this group's, right now.
+
+    Off Databricks Apps nothing here is context-local: ``set_experiment`` and
+    the destination belong to the whole process, and another group's setup
+    re-points them (on a worker thread, while it holds the lock). A trace's
+    experiment is fixed when its root span starts, so a caller that must never
+    write into another group's experiment checks this in the same synchronous
+    step that opens the root — no ``await`` in between.
+    """
+    ours = _bound_group_key == _group_cache_key(group_context)
+    return ours and not _setup_lock.locked()
+
+
 def set_mlflow_tracing(enabled: bool) -> None:
     """Hard-toggle MLflow tracing to match the setup outcome.
 
