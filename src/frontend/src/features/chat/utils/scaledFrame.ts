@@ -24,9 +24,10 @@ export const DEFAULT_CANVAS_W = 1200;
 
 // Matches the app's existing HTML-preview CSP (see Jobs/ShowResult): inline
 // styles/scripts allowed for self-contained content; no network egress, no
-// remote images beyond data:/blob:.
+// remote images beyond data:/blob:. No eval: the frame inherits the page's
+// policy, which blocks it (backend core/security_headers.py).
 const CSP =
-  "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src data: blob:; " +
+  "default-src 'self' 'unsafe-inline'; img-src data: blob:; " +
   "connect-src 'none'; base-uri 'none'; form-action 'none';";
 
 // Height/height-message protocol shared with useScaledFrameHeight below.

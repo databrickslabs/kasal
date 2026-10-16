@@ -208,6 +208,8 @@ from fastapi import HTTPException  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
+from src.core.security_headers import PAGE_SECURITY_HEADERS  # noqa: E402
+
 # Get logger after configuration
 logger = logging.getLogger("kasal")
 
@@ -266,6 +268,10 @@ class SPAMiddleware:
     Unlike BaseHTTPMiddleware, this does NOT buffer StreamingResponse bodies,
     which is critical for SSE streams to work through HTTP/2 proxies
     (e.g. Databricks Apps).
+
+    It is the outermost middleware and answers page routes itself, so the app's
+    SecurityHeadersMiddleware never sees the document: the page's security
+    headers (its Content-Security-Policy above all) are sent here.
     """
 
     def __init__(self, app, frontend_dir):
@@ -290,9 +296,11 @@ class SPAMiddleware:
 
         path = scope["path"]
 
-        # Skip API routes, static files, manifest, and markdown files
+        # Skip API routes (and the health check), static files, manifest, and
+        # markdown files
         if (
             path.startswith("/api/")
+            or path == "/health"
             or path.startswith("/api-docs")
             or path.startswith("/assets/")
             or path == "/favicon.ico"
@@ -313,8 +321,9 @@ class SPAMiddleware:
                     "type": "http.response.start",
                     "status": 200,
                     "headers": [
-                        [b"content-type", b"text/html; charset=utf-8"],
-                        [b"content-length", str(len(content)).encode()],
+                        (b"content-type", b"text/html; charset=utf-8"),
+                        (b"content-length", str(len(content)).encode()),
+                        *PAGE_SECURITY_HEADERS,
                     ],
                 }
             )
@@ -439,9 +448,6 @@ def build_app():
                     if os.path.exists(file_path):
                         return FileResponse(file_path, media_type="text/markdown")
                 raise HTTPException(status_code=404, detail="File not found")
-
-    # Add middleware to serve frontend for all non-API routes
-    app.add_middleware(SPAMiddleware, frontend_dir=frontend_static_dir)
 
     # Add middleware to serve frontend for all non-API routes
     app.add_middleware(SPAMiddleware, frontend_dir=frontend_static_dir)

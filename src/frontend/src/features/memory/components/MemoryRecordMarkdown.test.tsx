@@ -23,6 +23,17 @@ describe('MemoryRecordMarkdown', () => {
     expect(box.style.overflow).toBe('');
   });
 
+  it('holds remote images back; same-origin images and links render as before', () => {
+    const remote = 'https://images.example.org/c.png?d=1';
+    const { container } = render(
+      <MemoryRecordMarkdown content={`![chart](${remote}) ![logo](/logo192.png) [src](https://example.com/page)`} expanded />,
+    );
+    expect(container.querySelector(`img[src="${remote}"]`)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Load image' })).toHaveAttribute('href', remote);
+    expect(container.querySelector('img[src="/logo192.png"]')).not.toBeNull();
+    expect(screen.getByRole('link', { name: 'src' })).toHaveAttribute('target', '_blank');
+  });
+
   it('plain text still reads as plain text', () => {
     render(<MemoryRecordMarkdown content="User asked for swiss news." expanded={false} />);
     expect(screen.getByText('User asked for swiss news.')).toBeInTheDocument();

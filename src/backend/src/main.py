@@ -28,7 +28,7 @@ from fastapi.responses import (  # noqa: E402 - import follows module initializa
     JSONResponse,
 )
 from sqlalchemy import text  # noqa: E402 - import follows module initialization
-from starlette.types import ASGIApp, Message, Receive, Scope, Send  # noqa: E402
+from starlette.types import ASGIApp, Receive, Scope, Send  # noqa: E402
 
 from src.api import api_router  # noqa: E402 - import follows module initialization
 from src.config.settings import (  # noqa: E402 - import follows module initialization
@@ -827,64 +827,11 @@ from src.core.rate_limit import RateLimitMiddleware  # noqa: E402
 app.add_middleware(RateLimitMiddleware)
 
 
-# ---------------------------------------------------------------------------
-# Pure ASGI security headers middleware (NOT BaseHTTPMiddleware) to avoid
-# buffering StreamingResponse bodies — critical for SSE compatibility.
-# See: https://github.com/encode/starlette/issues/1012
-# ---------------------------------------------------------------------------
-
-
-class SecurityHeadersMiddleware:
-    """Pure ASGI middleware to add HTTP security headers to all responses.
-
-    Adds Content-Security-Policy, X-Content-Type-Options, X-Frame-Options,
-    and Referrer-Policy headers as recommended by the Databricks AI Security
-    team (Security advice for LLM usage in Databricks Apps, Feb 2026).
-
-    CSP design notes:
-    - unsafe-inline required for MUI (Material-UI) inline styles
-    - connect-src includes ws:/wss: for SSE streams and WebSocket connections
-    - frame-src 'self' allows the HTML-preview srcdoc iframe
-    - frame-ancestors omitted intentionally: Databricks Apps embeds Kasal
-      inside the workspace UI iframe; setting frame-ancestors 'none' or
-      'self' would break that embedding. Restrict once deployment context
-      is confirmed.
-    """
-
-    _CSP = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; "
-        "connect-src 'self' ws: wss:; "
-        "frame-src 'self';"
-    )
-
-    _SECURITY_HEADERS = [
-        (b"content-security-policy", _CSP.encode()),
-        (b"x-content-type-options", b"nosniff"),
-        # SAMEORIGIN (not DENY) — Databricks workspace may embed Kasal in an iframe
-        (b"x-frame-options", b"SAMEORIGIN"),
-        (b"referrer-policy", b"strict-origin-when-cross-origin"),
-    ]
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        async def send_with_security_headers(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
-                headers.extend(self._SECURITY_HEADERS)
-                message = {**message, "headers": headers}
-            await send(message)
-
-        await self.app(scope, receive, send_with_security_headers)
-
+# Security headers (CSP, nosniff, X-Frame-Options, Referrer-Policy), recommended
+# by the Databricks AI Security team (Security advice for LLM usage in Databricks
+# Apps, Feb 2026). The policy and why each directive is there live in
+# src/core/security_headers.py; entrypoint.py sends the same set on the SPA page.
+from src.core.security_headers import SecurityHeadersMiddleware  # noqa: E402
 
 app.add_middleware(SecurityHeadersMiddleware)
 

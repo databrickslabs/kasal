@@ -25,8 +25,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import GavelIcon from '@mui/icons-material/Gavel';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { toast } from 'react-hot-toast';
 import {
   CrewEval,
@@ -37,6 +35,7 @@ import {
   PromptOptimizationService,
 } from '../../../../api/config/PromptOptimizationService';
 import CrewOptimizeFrame from './CrewOptimizeFrame';
+import DeliverableMarkdown from './DeliverableMarkdown';
 import JudgePicker from './JudgePicker';
 import CrewLabelsFields from './CrewLabelsFields';
 import { useBuiltinJudges } from '../hooks/useBuiltinJudges';
@@ -926,16 +925,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                       }}
                     >
                       {ev.deliverable ? (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            a: ({ node: _node, ...props }) => (
-                              <a {...props} target="_blank" rel="noreferrer" />
-                            ),
-                          }}
-                        >
-                          {ev.deliverable}
-                        </ReactMarkdown>
+                        <DeliverableMarkdown content={ev.deliverable} />
                       ) : (
                         <Typography variant="body2" color="text.secondary">
                           (empty deliverable)

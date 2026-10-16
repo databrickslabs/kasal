@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { safeImageComponents } from '../../../../shared/a2ui/lib/markdown';
 import { containsMarkdown } from '../../utils/markdown';
 import { hasDiagram, splitDiagramSegments } from '../../utils/mdSandboxDiagram';
 import { isDeck, mergeDeckSegments } from '../../utils/htmlDeck';
@@ -31,7 +32,7 @@ function renderText(content: string, key?: React.Key) {
         key={key}
         className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:my-2"
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeImageComponents}>{content}</ReactMarkdown>
       </div>
     );
   }

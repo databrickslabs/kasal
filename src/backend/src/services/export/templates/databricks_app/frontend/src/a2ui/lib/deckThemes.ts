@@ -187,6 +187,30 @@ function isDarkHex(hex: string): boolean {
 // always return usable colors. Matches the Default palette accent (uiConfigShared).
 const DEFAULT_ACCENT = '#2272B4'
 
+// A palette's colours reach CSS as they are (`background: theme.panel`), and a
+// surface's `theme` can come from the model, so only hex colours are used. Any
+// other value (a url(), a gradient, a keyword) is dropped for a neutral colour.
+const HEX_COLOUR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
+type PaletteColour = 'accent' | 'background' | 'surface' | 'text' | 'heading' | 'muted'
+const NEUTRAL: Record<PaletteColour, string> = {
+  accent: DEFAULT_ACCENT,
+  background: '#ffffff',
+  surface: '#f8fafc',
+  text: '#0f172a',
+  heading: '#0f172a',
+  muted: '#64748b',
+}
+
+/** `p` with every colour that is not a hex colour replaced by a neutral one. */
+export function safePalette(p: Palette): Palette {
+  const out = { ...p }
+  for (const key of Object.keys(NEUTRAL) as PaletteColour[]) {
+    const value = typeof p?.[key] === 'string' ? p[key].trim() : ''
+    out[key] = HEX_COLOUR.test(value) ? value : NEUTRAL[key]
+  }
+  return out
+}
+
 /** hex (#RRGGBB / #RGB) → {h:0-360, s:0-1, l:0-1}, or null when unparseable. */
 function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
   const rgb = _ch(hex)
@@ -255,7 +279,8 @@ export function readableTextOn(hex: string): string {
 
 /** Map a workspace branding palette → a DeckTheme (drives the on-screen deck AND
  *  the PowerPoint export, which both read DeckThemeContext). */
-export function themeToDeck(p: Palette): DeckTheme {
+export function themeToDeck(palette: Palette): DeckTheme {
+  const p = safePalette(palette)
   return {
     id: 'workspace',
     name: 'Workspace',
@@ -276,7 +301,8 @@ export function themeToDeck(p: Palette): DeckTheme {
  *  shadcn components (Card/Table/Markdown/Chart/Button) consume. Apply as an
  *  inline style on the renderer's wrapper so document/dashboard surfaces pick up
  *  workspace branding too. */
-export function themeToTokens(p: Palette): Record<string, string> {
+export function themeToTokens(palette: Palette): Record<string, string> {
+  const p = safePalette(palette)
   const bg = hexToHslChannels(p.background)
   const fg = hexToHslChannels(p.text)
   const surface = hexToHslChannels(p.surface)

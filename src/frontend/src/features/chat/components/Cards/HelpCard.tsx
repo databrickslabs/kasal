@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { safeImageComponents } from '../../../../shared/a2ui/lib/markdown';
 
 interface HelpCardProps {
   content: string;
@@ -16,7 +17,7 @@ const HelpCard: React.FC<HelpCardProps> = ({ content }) => {
       }}
     >
       <div className="prose prose-sm max-w-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeImageComponents}>{content}</ReactMarkdown>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import type { Components } from 'react-markdown'
+import { MarkdownImage } from './safeImage'
 
 // Make inline citation markers clickable even when the model writes them as bare
 // text (e.g. `...in October 2022.[1][2]`) and only puts the URLs in a trailing
@@ -24,16 +25,22 @@ export function linkifyCitations(md: string): string {
   return md.replace(/\[(\d{1,3})\](?!\()/g, (whole, n) => (map[n] ? `[${n}](${map[n]})` : whole))
 }
 
+// Only the image policy (safeImage.tsx), for renderers that keep their own (or
+// the default) link rendering.
+export const safeImageComponents: Components = { img: MarkdownImage }
+
 // Shared ReactMarkdown component overrides, used by every markdown surface
 // (the chat Prose and the A2UI Markdown component) so links behave the same.
 //
-// Two behaviours:
+// Three behaviours:
 //   1. Every link opens in a new tab (rel=noopener) — required inside the
 //      Databricks App iframe, where same-tab navigation would replace the app.
 //   2. A link whose visible text is just a number — e.g. `[1](https://…)`, the
 //      citation style the agent emits — renders as a small superscript chip you
 //      click to open the source. Normal links render as normal links.
+//   3. Images follow the image policy: a remote one waits for a click.
 export const mdComponents: Components = {
+  img: MarkdownImage,
   a({ node: _node, href, children, ...props }) {
     const text = (Array.isArray(children) ? children.join('') : String(children ?? '')).trim()
     const isCitation = /^\[?\d+\]?$/.test(text)
