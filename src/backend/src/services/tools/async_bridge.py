@@ -224,9 +224,16 @@ def workspace_llm_credentials(
     caller did not supply comes from ``get_auth_context`` (OBO -> this group's
     PAT -> app SP), never from ``DATABRICKS_TOKEN`` in the process environment,
     which every workspace shares. Missing values come back as ``""``.
+
+    That credential is only filled in for its own workspace: a configured
+    ``workspace_url`` on another host gets no token (the caller degrades).
     """
     if workspace_url and token:
         return workspace_url, token
+    from src.core.exceptions import ForbiddenError
+    from src.services.databricks.workspace.host_guard import (
+        assert_host_is_configured_workspace,
+    )
     from src.utils.databricks_auth import get_auth_context
 
     try:
@@ -236,4 +243,10 @@ def workspace_llm_credentials(
         auth = None
     auth_url = (getattr(auth, "workspace_url", "") or "").rstrip("/")
     auth_token = getattr(auth, "token", "") or ""
+    if workspace_url and auth_token:
+        try:
+            assert_host_is_configured_workspace(workspace_url, (auth_url,))
+        except ForbiddenError:
+            logger.warning("Configured LLM workspace is not this run's; no token sent")
+            auth_token = ""
     return workspace_url or auth_url, token or auth_token

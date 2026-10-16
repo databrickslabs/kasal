@@ -78,7 +78,7 @@
   "src/backend/src/services/tools/powerbi_report_references_tool.py": 2265,
   "src/backend/src/services/tools/powerbi_semantic_model_dax_tool.py": 2899,
   "src/backend/src/services/tools/powerbi_semantic_model_fetcher_tool.py": 2995,
-  "src/backend/src/services/tools/tool_factory.py": 2155,
+  "src/backend/src/services/tools/tool_factory.py": 2154,
   "src/backend/src/services/tools/uc_metric_view_generator_tool.py": 1724,
   "src/backend/src/services/trace/service.py": 847,
   "src/backend/src/utils/databricks_auth.py": 1550,

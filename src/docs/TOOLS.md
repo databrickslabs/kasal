@@ -32,6 +32,21 @@ At execution time the tool factory (`src/backend/src/services/tools/tool_factory
 
 The set of available tools is seeded into the `tools` table from `src/backend/src/seeds/tools.py`. Each entry has an id, a title (the name agents reference), a description, an icon category, and a default configuration block. Tools are global by default (available to all groups) and enabled on seed. Configuration values, such as API parameters and Databricks or Power BI credentials, are set per tool either in the UI or in the seeded defaults.
 
+### Per-agent and per-task configuration
+
+An agent's or task's `tool_configs` entry (for example the Power BI ids and credentials a task form saves) is laid over the teamspace tool configuration from Configuration → Tools, and its values win. These keys are the exception, and Kasal ignores them in an entry:
+
+- Identity: `group_id`, `group_ids`, `user_email`, `user_token` and `execution_id` always come from the run.
+- Endpoint: `base_url` (Serper, Image Generation) comes only from the teamspace configuration, because the teamspace's provider key is sent there.
+- Policies: `requires_approval` / `approval` and `replayable` / `replay` come from the teamspace configuration. An entry can add an approval gate to a tool that the teamspace leaves ungated, but it cannot remove or change the teamspace's gate.
+
+The run log names each ignored key, without its value.
+
+Two related rules apply when a tool runs:
+
+- If a tool's `llm_workspace_url` names a workspace other than the run's, the run's Databricks credential is not sent there. To use another workspace, give the entry its own `llm_token` for it.
+- Serper and Image Generation refuse private, loopback, link-local and reserved addresses, so their `base_url` must be a public endpoint.
+
 ### Native vs custom tools
 
 - Built-in tools cover general capabilities such as web search (`SerperDevTool`, `serper_search.py`), scraping (`ScrapeWebsiteTool`, `scrape_website.py`) and image generation (`Dall-E Tool`, `image_generation.py`). Kasal does not depend on `crewai-tools`; these are first-party implementations.

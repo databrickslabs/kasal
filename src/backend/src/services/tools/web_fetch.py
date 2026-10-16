@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 def _http_json(
     url: str, payload: dict[str, Any], headers: dict[str, str], timeout: int = 10
 ) -> dict[str, Any]:
+    """POST JSON and parse the JSON reply, through the same guarded opener as
+    ``_safe_fetch``: http(s) only, no private, loopback, link-local or reserved
+    address on any hop, and the connection goes to the address that was checked.
+    """
+    _assert_http_scheme(url)  # the transport checks the address, per hop
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -35,7 +40,7 @@ def _http_json(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
@@ -48,8 +53,14 @@ def _http_json(
 
 #: Redirect hops followed before giving up. urllib's own default is 10.
 _MAX_REDIRECTS = 5
-#: Request headers dropped when a redirect changes the origin.
-_SENSITIVE_REQUEST_HEADERS = ("Authorization", "Cookie", "Proxy-Authorization")
+#: Request headers dropped when a redirect changes the origin (lower-case:
+#: urllib re-cases header names, so they are compared case-insensitively).
+_SENSITIVE_REQUEST_HEADERS = (
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "x-api-key",
+)
 
 
 def _assert_http_scheme(url: str) -> None:
@@ -176,8 +187,9 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
             ) from refused
         new = super().redirect_request(req, fp, code, msg, headers, target)
         if new is not None and _origin(target) != _origin(req.full_url):
-            for header in _SENSITIVE_REQUEST_HEADERS:
-                new.remove_header(header)
+            for header in list(new.headers):
+                if header.lower() in _SENSITIVE_REQUEST_HEADERS:
+                    new.remove_header(header)
         return new
 
 

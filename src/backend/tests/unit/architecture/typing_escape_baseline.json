@@ -732,7 +732,7 @@
   "src/services/tools/serper_search.py::type-ignore": 1,
   "src/services/tools/skill_tools.py::Any": 6,
   "src/services/tools/tool_factory.py::Any": 11,
-  "src/services/tools/tool_policies.py::Any": 9,
+  "src/services/tools/tool_policies.py::Any": 1,
   "src/services/tools/tool_service.py::Any": 11,
   "src/services/tools/tool_session_provider.py::Any": 2,
   "src/services/tools/uc_metric_view_generator_tool.py::Any": 22,

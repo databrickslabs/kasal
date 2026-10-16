@@ -1,13 +1,18 @@
 """Policies ride on the tool config, and must never reach its constructor."""
 
+import logging
+
 import pytest
 
+from src.services.tools import tool_policies
 from src.services.tools.tool_policies import (
     APPROVAL_ATTR,
     DEFAULT_REPLAY_SCOPE,
     DEFAULT_REPLAY_TTL_SECONDS,
     REPLAY_ATTR,
+    RESERVED_OVERRIDE_KEYS,
     extract_tool_policies,
+    merge_tool_config_override,
     replay_policy,
     stamp_tool_policies,
 )
@@ -115,3 +120,72 @@ class TestStamping:
 
         # Losing a policy must not lose the run; absent reads as "call for real".
         assert replay_policy(frozen) is None or isinstance(replay_policy(frozen), dict)
+
+
+class TestMergingAnOverride:
+    """``merge_tool_config_override``: a run, agent or task entry over the
+    teamspace config."""
+
+    def test_neither_input_is_mutated(self):
+        base = {"requires_approval": True, "model": "a"}
+        override = {"model": "b", "group_id": "other", "requires_approval": False}
+
+        merge_tool_config_override("T", base, override)
+
+        assert base == {"requires_approval": True, "model": "a"}
+        assert override == {
+            "model": "b",
+            "group_id": "other",
+            "requires_approval": False,
+        }
+
+    def test_ordinary_keys_win_and_reserved_ones_are_dropped(self):
+        clean, merged, _ = merge_tool_config_override(
+            "T",
+            {"model": "a", "base_url": "https://teamspace.example.com"},
+            {"model": "b", "base_url": "https://other.example.net", "user_token": "t"},
+        )
+
+        assert clean == {"model": "b"}
+        assert merged == {"model": "b", "base_url": "https://teamspace.example.com"}
+
+    @pytest.mark.parametrize("key", sorted(RESERVED_OVERRIDE_KEYS))
+    def test_every_reserved_key_is_dropped(self, key):
+        clean, _, _ = merge_tool_config_override("T", {}, {key: "x", "keep": 1})
+
+        assert clean == {"keep": 1}
+
+    def test_the_teamspace_gate_survives(self):
+        _, _, policies = merge_tool_config_override(
+            "T", {"requires_approval": True}, {"requires_approval": False}
+        )
+
+        assert policies[APPROVAL_ATTR] == {}
+
+    def test_an_override_may_add_a_gate(self):
+        _, merged, policies = merge_tool_config_override(
+            "T", {}, {"approval": {"timeout_seconds": 60}}
+        )
+
+        assert policies[APPROVAL_ATTR] == {"timeout_seconds": 60}
+        assert "approval" not in merged
+
+    def test_an_override_never_turns_replay_on(self):
+        _, _, policies = merge_tool_config_override("T", {}, {"replayable": True})
+
+        assert REPLAY_ATTR not in policies
+
+    def test_no_override_is_the_teamspace_config(self):
+        clean, merged, policies = merge_tool_config_override(
+            "T", {"replayable": True, "model": "a"}, None
+        )
+
+        assert clean == {}
+        assert merged == {"model": "a"}
+        assert REPLAY_ATTR in policies
+
+    def test_an_added_gate_is_not_reported_as_ignored(self, caplog):
+        with caplog.at_level(logging.WARNING, logger=tool_policies.__name__):
+            merge_tool_config_override("T", {}, {"requires_approval": True})
+
+        assert caplog.text == ""
