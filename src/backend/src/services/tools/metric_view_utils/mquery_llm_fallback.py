@@ -51,6 +51,10 @@ Rules:
 5. If the M expression does NOT read a queryable relational source (e.g. it is a hand-authored
    table, a web/JSON/Excel source, or pure in-memory transformation with no table), return
    success=false.
+6. NEVER drop a step that changes which rows the table holds. Table.SelectRows becomes WHERE,
+   Table.Distinct becomes SELECT DISTINCT, Table.Group becomes GROUP BY, a join becomes a JOIN.
+   If you cannot translate EVERY such step faithfully, return success=false: a SELECT that
+   reads more rows than the M keeps produces wrong numbers.
 
 ALWAYS respond with valid JSON (no markdown code blocks):
 {

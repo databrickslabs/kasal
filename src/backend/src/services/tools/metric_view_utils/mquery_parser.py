@@ -16,6 +16,12 @@ from .constants import (
     RE_LEFT_JOIN,
 )
 from .data_classes import TableInfo
+from .mquery_steps import (
+    MStep,
+    build_select_clause,
+    classify_m_steps,
+    steps_after_native_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -203,17 +209,9 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
     m = mquery
 
     # 1. Databricks.Catalogs(...){[Name="cat"]}[Data]{[Name="sch"]}[Data]{[Name="tbl"]}[Data]
-    #    — walk the ordered [Name="…"] navigation chain (catalog, schema, table).
-    if re.search(r"\bDatabricks\.\w+", m):
-        names = re.findall(r'\[\s*Name\s*=\s*"([^"]+)"', m)
-        if len(names) >= 3:
-            return f"{names[0]}.{names[1]}.{names[2]}"
-        # Some connectors expose a Catalog/Schema/Table keyed nav instead.
-        cat = re.search(r'\[\s*Catalog\s*=\s*"([^"]+)"', m)
-        sch = re.search(r'\[\s*(?:Schema|Database)\s*=\s*"([^"]+)"', m)
-        tbl = re.search(r'\[\s*(?:Item|Table)\s*=\s*"([^"]+)"', m)
-        if cat and sch and tbl:
-            return f"{cat.group(1)}.{sch.group(1)}.{tbl.group(1)}"
+    fqn = _databricks_navigation_fqn(m)
+    if fqn:
+        return fqn
 
     # 2. Value.NativeQuery(<src>, "… FROM cat.sch.tbl …") — pull the first FROM target.
     if re.search(r"\bValue\.NativeQuery\b", m):
@@ -228,20 +226,47 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
                 return ".".join(_unquote(p) for p in parts.groups())
 
     # 3. Sql.Database(server, db){[Schema="s", Item="t"]} — db.schema.table.
-    #    Schema/Item can sit anywhere in the record (after `[` or a comma), so the
-    #    key regexes must not require a leading bracket.
-    if re.search(r"\bSql\.Databases?\b", m):
-        db = re.search(r'Sql\.Databases?\s*\(\s*"[^"]*"\s*,\s*"([^"]+)"', m)
-        sch = re.search(r'\bSchema\s*=\s*"([^"]+)"', m)
-        tbl = re.search(r'\bItem\s*=\s*"([^"]+)"', m)
-        if db and sch and tbl:
-            return f"{db.group(1)}.{sch.group(1)}.{tbl.group(1)}"
+    fqn = _sql_database_navigation_fqn(m)
+    if fqn:
+        return fqn
 
     # 4. Last resort: a bare qualified 3-level name literal anywhere in the M.
     bare = _FQN_RE.search(m)
     if bare:
         return ".".join(_unquote(p) for p in bare.groups())
 
+    return None
+
+
+def _databricks_navigation_fqn(m: str) -> str | None:
+    """Walk the ordered ``[Name="…"]`` chain (catalog, schema, table)."""
+    if not re.search(r"\bDatabricks\.\w+", m):
+        return None
+    names = re.findall(r'\[\s*Name\s*=\s*"([^"]+)"', m)
+    if len(names) >= 3:
+        return f"{names[0]}.{names[1]}.{names[2]}"
+    # Some connectors expose a Catalog/Schema/Table keyed nav instead.
+    cat = re.search(r'\[\s*Catalog\s*=\s*"([^"]+)"', m)
+    sch = re.search(r'\[\s*(?:Schema|Database)\s*=\s*"([^"]+)"', m)
+    tbl = re.search(r'\[\s*(?:Item|Table)\s*=\s*"([^"]+)"', m)
+    if cat and sch and tbl:
+        return f"{cat.group(1)}.{sch.group(1)}.{tbl.group(1)}"
+    return None
+
+
+def _sql_database_navigation_fqn(m: str) -> str | None:
+    """``db.schema.table`` from ``Sql.Database(server, db){[Schema=, Item=]}``.
+
+    Schema/Item can sit anywhere in the record (after ``[`` or a comma), so the
+    key regexes must not require a leading bracket.
+    """
+    if not re.search(r"\bSql\.Databases?\b", m):
+        return None
+    db = re.search(r'Sql\.Databases?\s*\(\s*"[^"]*"\s*,\s*"([^"]+)"', m)
+    sch = re.search(r'\bSchema\s*=\s*"([^"]+)"', m)
+    tbl = re.search(r'\bItem\s*=\s*"([^"]+)"', m)
+    if db and sch and tbl:
+        return f"{db.group(1)}.{sch.group(1)}.{tbl.group(1)}"
     return None
 
 
@@ -271,54 +296,52 @@ def resolve_mquery_to_sql(mquery: str) -> str | None:
     way to recover them was routing the FULL raw M through an LLM. Query
     folding for this shape is trivial and fully structural — a source
     navigation chain plus, at most, a column projection/rename — so it needs
-    no LLM: same physical-table resolution as ``extract_source_table``, plus a
-    best-effort read of a following ``Table.SelectColumns``/``RenameColumns``
-    step pair for the projected column list.
+    no LLM: the navigation chain gives the physical table, and the column-only
+    steps after it (``mquery_steps.COLUMN_ONLY_STEPS``) give the projection.
 
-    Returns ``None`` when the source table itself can't be resolved (caller
-    then falls back to the LLM path or skips the table, per the same policy
-    for a bare ``extract_source_table`` miss). Never invents a JOIN or a
-    filter — those M shapes are more varied and are left to the LLM fallback.
+    Returns ``None`` ("not resolvable") unless EVERY applied step is on that
+    allowlist. A row filter, dedup, group, join or computed column changes the
+    rows the table holds, so compiling past it would make each measure
+    aggregate rows Power BI excluded; the caller then ships the raw M (or
+    routes it to the LLM recovery path) instead. Also ``None`` when the
+    physical table can't be resolved from the navigation itself.
     """
-    fqn = extract_source_table(mquery)
-    if not fqn:
+    steps, unhandled = classify_m_steps(mquery)
+    if unhandled:
+        logger.info(
+            "[MQueryParser] M not resolved deterministically; steps not "
+            "reproduced in SQL: %s",
+            "; ".join(unhandled[:5]),
+        )
         return None
-    m = mquery
+    return _compile_steps(mquery, steps)
 
-    # Table.SelectColumns(<prevStep>, {"a","b","c"}) — projected column list,
-    # order preserved. Absent → keep every source column (SELECT *).
-    select_cols: list[str] = []
-    sel_match = re.search(r"Table\.SelectColumns\s*\([^,]+,\s*\{([^}]*)\}", m)
-    if sel_match:
-        select_cols = re.findall(r'"([^"]+)"', sel_match.group(1))
 
-    # Table.RenameColumns(<prevStep>, {{"old","new"}, {"old2","new2"}, ...})
-    # — old→new alias map, applied over the projected list (if any).
-    renames: dict[str, str] = {}
-    ren_match = re.search(
-        r"Table\.RenameColumns\s*\([^,]+,\s*\{(.*?)\}\s*\)", m, re.DOTALL
-    )
-    if ren_match:
-        for pair in re.finditer(
-            r'\{\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\}', ren_match.group(1)
-        ):
-            renames[pair.group(1)] = pair.group(2)
-
-    if select_cols:
-        projected = [
-            (
-                f"{_quote_sql_ident(c)} AS {_quote_sql_ident(renames[c])}"
-                if renames.get(c) and renames[c] != c
-                else _quote_sql_ident(c)
-            )
-            for c in select_cols
-        ]
-        select_clause = ", ".join(projected)
-    else:
-        select_clause = "*"
-
+def _compile_steps(source_m: str, steps: list[MStep]) -> str | None:
+    """``SELECT <projection> FROM <fqn>`` for already-allowlisted steps."""
+    fqn = _databricks_navigation_fqn(source_m) or _sql_database_navigation_fqn(source_m)
+    select_clause = build_select_clause(steps)
+    if not fqn or select_clause is None:
+        return None
     fqn_quoted = ".".join(_quote_sql_ident(p) for p in fqn.split("."))
     return f"SELECT {select_clause} FROM {fqn_quoted}"
+
+
+def _resolve_through_reference(
+    mquery: str, referenced: str, passthrough: bool
+) -> str | None:
+    """Resolve a table that reads another named query, honouring BOTH sets of
+    steps: the referenced query's and the table's own (``passthrough`` = the
+    table adds none). Either side carrying a step not on the allowlist (its
+    own ``Table.SelectRows``, say) makes the whole table unresolvable."""
+    ref_steps, ref_unhandled = classify_m_steps(referenced)
+    own_steps: list[MStep] = []
+    own_unhandled: list[str] = []
+    if not passthrough:
+        own_steps, own_unhandled = classify_m_steps(mquery, source_is_reference=True)
+    if ref_unhandled or own_unhandled:
+        return None
+    return _compile_steps(referenced, ref_steps + own_steps)
 
 
 # A table whose M is nothing but a passthrough to another named expression —
@@ -437,12 +460,14 @@ def resolve_mquery_with_context(
     if not expressions:
         return None
 
-    for ref_name in (
-        _extract_bare_reference(mquery),
-        _extract_first_binding_reference(mquery),
+    for ref_name, passthrough in (
+        (_extract_bare_reference(mquery), True),
+        (_extract_first_binding_reference(mquery), False),
     ):
         if ref_name and ref_name in expressions and expressions[ref_name] != mquery:
-            resolved = resolve_mquery_to_sql(expressions[ref_name])
+            resolved = _resolve_through_reference(
+                mquery, expressions[ref_name], passthrough
+            )
             if resolved:
                 return resolved
 
@@ -452,7 +477,7 @@ def resolve_mquery_with_context(
     )
 
     params = extract_parameter_defaults(expressions)
-    if params:
+    if params and not steps_after_native_query(mquery):
         return resolve_via_let_evaluation(mquery, params)
     return None
 
