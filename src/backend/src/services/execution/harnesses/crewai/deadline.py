@@ -46,9 +46,15 @@ from __future__ import annotations
 import importlib
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any, Iterator, List, Tuple
 
-from src.core.llm.transport.budget import TURN_CAP_ATTR, turn_cap
+from src.core.llm.transport.budget import (
+    BUDGET_SPENT_AT_ATTR,
+    BUDGET_SPENT_ATTR,
+    TURN_CAP_ATTR,
+    turn_cap,
+)
 from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().crew
@@ -85,6 +91,27 @@ def _combined_deadline(agent: Any) -> float | None:
     return min(candidates) if candidates else None
 
 
+def _forget_earlier_truncation(event: object) -> None:
+    """A new attempt at the task drops a truncation an EARLIER attempt left.
+
+    A guardrail retry or a ``max_retry_limit`` retry re-enters
+    ``execute_task`` with a fresh turn clock; if it answers in full, that
+    answer is not truncated. Compared by time rather than cleared outright:
+    this handler runs on CrewAI's pool, so it can land after the new attempt
+    has already been truncated itself (a run ceiling spent before it began).
+    """
+    task = getattr(event, "task", None)
+    marked = getattr(task, BUDGET_SPENT_AT_ATTR, None)
+    started = getattr(event, "timestamp", None)
+    if not isinstance(marked, float) or not isinstance(started, datetime):
+        return
+    if marked < started.timestamp():
+        try:
+            object.__setattr__(task, BUDGET_SPENT_ATTR, None)
+        except Exception as e:  # noqa: BLE001 — bookkeeping never fails a run
+            logger.debug("Could not clear an earlier truncation: %s", e)
+
+
 def _restore(agent: Any) -> None:
     """Put the run-level ceiling back once the turn ends.
 
@@ -115,6 +142,7 @@ def enforce_turn_deadlines() -> Iterator[None]:
         return
 
     def _on_start(source: Any, event: Any) -> None:
+        _forget_earlier_truncation(event)
         agent = getattr(event, "agent", None) or source
         deadline = _combined_deadline(agent)
         if deadline is None:

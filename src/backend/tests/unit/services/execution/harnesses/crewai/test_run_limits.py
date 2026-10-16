@@ -117,14 +117,28 @@ def _databricks_llm():
         return DatabricksRetryLLM(model="databricks/databricks-claude-sonnet-4-6")
 
 
-def _crew(transport, tool, *, tasks=1, sink=None, crew_kwargs=None, **agent_kwargs):
+def _crew(
+    transport,
+    tool,
+    *,
+    tasks=1,
+    sink=None,
+    crew_kwargs=None,
+    task_kwargs=None,
+    **agent_kwargs,
+):
     harness = binding_for("crewai")
     agent_kwargs.setdefault("max_iter", 40)
     agent = harness.build_agent(
         role="R", goal="g", backstory="b", llm=transport, tools=[tool], **agent_kwargs
     )
     built = [
-        harness.build_task(description=f"do {i}", expected_output="text", agent=agent)
+        harness.build_task(
+            description=f"do {i}",
+            expected_output="text",
+            agent=agent,
+            **(task_kwargs or {}),
+        )
         for i in range(tasks)
     ]
     crew_kwargs = crew_kwargs or {}
@@ -212,6 +226,37 @@ class TestASpentClockDegrades:
         # purpose: timing under a loaded CI worker.
         assert elapsed < self.CAP + 3
         assert persisted == [], "a degraded answer was written to memory"
+
+    def test_a_clean_guardrail_retry_is_not_marked_and_is_remembered(self):
+        """Attempt one hits the turn cap, the guardrail asks again, and the
+        retry (a new turn, with its own clock) answers in full. The mark the
+        first attempt left must not follow the answer that replaced it."""
+        transport, tool = _databricks_llm(), _Search()
+        client = _Client(delay=0.25)
+
+        def guardrail(output):  # unannotated: CrewAI validates annotations
+            if TRUNCATED_MARKER in output.raw:
+                client.tool_rounds = 0  # the retry answers at once
+                return (False, "this was cut short; answer from what you have")
+            return (True, output)
+
+        sink = make_memory_output_sink(MagicMock())
+        assert sink is not None
+        harness, _, tasks, crew = _crew(
+            transport,
+            tool,
+            sink=sink,
+            max_execution_time=self.CAP,
+            task_kwargs={"guardrail": guardrail, "guardrail_max_retries": 1},
+        )
+
+        with patch("src.services.memory.run.persist.remember_async") as remember:
+            result, turns = _kickoff(harness, transport, client, crew)
+
+        assert len(turns) == 2  # the truncated attempt and the retry
+        assert result.raw == "finished after every search"
+        assert getattr(tasks[0].output, "degraded", None) is not True
+        remember.assert_called_once()
 
     def test_the_run_ceiling_degrades_every_later_task_without_a_retry(self):
         transport, tool = _databricks_llm(), _Search()

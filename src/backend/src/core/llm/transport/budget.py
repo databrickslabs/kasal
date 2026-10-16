@@ -261,6 +261,10 @@ def truncated_answer(error: Exception) -> str:
 #: text — a downstream task that quotes its truncated context is not truncated.
 BUDGET_SPENT_ATTR = "_kasal_budget_spent"
 
+#: When that mark was made (``time.time()``), so a retry can tell a truncation
+#: left by an EARLIER attempt from its own.
+BUDGET_SPENT_AT_ATTR = "_kasal_budget_spent_at"
+
 
 def end_spent_turn(
     error: Exception,
@@ -276,6 +280,7 @@ def end_spent_turn(
     reason = f"max_execution_time reached for model {model}"
     with contextlib.suppress(Exception):  # a mark never fails a run
         object.__setattr__(task, BUDGET_SPENT_ATTR, reason)
+        object.__setattr__(task, BUDGET_SPENT_AT_ATTR, time.time())
     return truncated_answer(
         ExecutionBudgetExceededError(
             reason,

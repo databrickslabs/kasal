@@ -108,7 +108,7 @@ class Task(BaseModel):
     on_budget_exceeded: str = "raise"
     start_time: datetime.datetime | None = None
     end_time: datetime.datetime | None = None
-    #: Why this execution's turn was cut short by its budget, set by
+    #: Why the latest attempt's turn was cut short by its budget, set by
     #: ``_run_agent`` when it degrades; read by ``_flag_spent_budget``.
     _budget_spent: str | None = PrivateAttr(default=None)
 
@@ -149,7 +149,6 @@ class Task(BaseModel):
         # both ask "did THIS task's tools work?", and a previous task's 503s
         # would otherwise be held against an answer they had nothing to do with.
         reset_tool_ledger()
-        self._budget_spent = None
         # Same scope, same reason. The plan describes HOW THIS TASK gets done,
         # so it starts empty; carrying the previous task's items forward would
         # have the agent reporting work it never did here.
@@ -275,6 +274,9 @@ class Task(BaseModel):
         """
         from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 
+        # Per attempt: a guardrail retry that answers in full replaces the
+        # truncated answer, so the truncation is no longer this task's outcome.
+        self._budget_spent = None
         try:
             return cast(
                 str,
