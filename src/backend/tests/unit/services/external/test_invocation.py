@@ -272,4 +272,4 @@ class TestStartFlow:
         assert result.run_id == "run-9"
         kwargs = service.run_flow.await_args.kwargs
         assert kwargs["flow_id"] == "flow-1"
-        assert kwargs["config"]["x"] == 1
+        assert kwargs["config"]["inputs"] == {"x": 1}

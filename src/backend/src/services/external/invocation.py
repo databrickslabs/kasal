@@ -30,7 +30,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 from uuid import UUID
 
 from src.models.execution_status import ExecutionStatus
@@ -445,6 +445,36 @@ async def _crew_to_yaml(
     return await build_crew_execution_config(session, crew, group_context)
 
 
+def _flow_run_config(
+    publication: object, inputs: Optional[Mapping[str, object]]
+) -> Dict[str, object]:
+    """The caller's arguments, shaped the way a flow run reads them.
+
+    The flow service rebuilds its config from a whitelist and takes the
+    caller's values from ``inputs`` only; passed at the top level they were
+    dropped and the flow ran on empty state. ``session_id`` and
+    ``user_message`` are read from the top level. ``request`` is the free-text
+    ask that the default tool schema and every A2A message carry: it is the
+    turn's user line, and a state input only when the publication declares it,
+    because a typed state (every conversational flow has one) refuses a key it
+    has no channel for and the run would fail at kickoff.
+    """
+    args = dict(inputs or {})
+    session_id = args.pop("session_id", None)
+    user_message = args.pop("user_message", None)
+    schema = getattr(publication, "input_schema", None)
+    declared = (schema.get("properties") if isinstance(schema, dict) else None) or {}
+    if "request" in declared:
+        request = args.get("request")
+    else:
+        request = args.pop("request", None)
+    return {
+        "inputs": args,
+        "session_id": session_id,
+        "user_message": user_message or request,
+    }
+
+
 async def _start_flow(
     caller: ExternalCaller,
     publication: Any,
@@ -467,7 +497,7 @@ async def _start_flow(
         flow_id=flow_id,
         job_id=run_id,
         run_name=f"{publication.external_name} via {caller.protocol}",
-        config={**(inputs or {}), "external_origin": caller.origin},
+        config=_flow_run_config(publication, inputs),
         group_context=caller.group_context,
         user_token=caller.obo_token(),
     )
