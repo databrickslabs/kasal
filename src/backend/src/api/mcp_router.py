@@ -347,7 +347,7 @@ async def get_databricks_mcp_options(
         * AI Search → drill into /mcp/databricks/ai-search-indexes
 
     Selecting any leaf registers it as a Kasal MCP server with
-    ``auth_type=databricks_spn`` and ``server_type=streamable``.
+    ``auth_type=databricks_obo`` and ``server_type=streamable``.
 
     Browsing/registering Databricks MCP servers is a workspace-admin action, so
     this catalog is admin-only (enforced here, not just hidden in the UI).
