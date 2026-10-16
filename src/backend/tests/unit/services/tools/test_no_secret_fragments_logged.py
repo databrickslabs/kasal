@@ -110,9 +110,11 @@ LOG_RECEIVER = re.compile(r"(?:^|[._])log|logger", re.IGNORECASE)
 # A name that holds a whole config / credential mapping, or a whole secret. Any
 # ``*_config``/``*_settings``/``*_payload``/``*_spec`` is presumed to be able to
 # carry decrypted tool credentials (``crew_config`` did, audit V5-1).
+# ``*_override`` is a task's per-tool config, credentials included.
 WHOLE_SECRET_CARRIER = re.compile(
     r"^(?:\w*_)?(?:config|configs|settings|payload|spec|credentials?|creds|headers"
-    r"|kwargs|secrets?|token|access_token|password|client_secret|api_?key)$"
+    r"|kwargs|secrets?|token|access_token|password|client_secret|api_?key"
+    r"|overrides?)$"
     r"|^(?:agents_yaml|tasks_yaml|tool_args|tool_arguments|tool_input|tool_params)$",
     re.IGNORECASE,
 )
@@ -352,6 +354,7 @@ def test_the_whole_config_check_catches_what_it_is_for():
         "logger.info(f\"{db_task['tool_configs']}\")",
         "logger.info(f\"{getattr(obj, 'api_key', None)}\")",
         'logger.info(f"{mask(x) if y else tool_config}")',
+        'logger.info(f"Task {task_key} - {tool_name} tool_override: {tool_override}")',
     ]
     for sample in caught:
         assert list(_whole_config_logs(sample)), sample

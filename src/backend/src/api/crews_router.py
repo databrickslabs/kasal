@@ -8,7 +8,11 @@ from pydantic import ValidationError
 
 from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEntityError
 from src.core.permissions import check_role_in_context
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.dependencies.providers import (
+    GroupContextDep,
+    SessionDep,
+    ToolSecretsVisibleDep,
+)
 from src.models.crew import Crew
 from src.schemas.crew import CrewCreate, CrewResponse, CrewUpdate
 from src.schemas.crew_feedback import (
@@ -24,6 +28,7 @@ from src.schemas.crew_publication import (
 from src.services.catalog.crew_feedback import CrewFeedbackService
 from src.services.catalog.crews import CrewService
 from src.services.publications.publication import PublicationService
+from src.utils.sensitive_data_utils import mask_sensitive_strings
 
 router = APIRouter(
     prefix="/crews",
@@ -40,7 +45,7 @@ def get_crew_service(session: SessionDep) -> CrewService:
     return CrewService(session)
 
 
-def _crew_to_response(crew: Crew) -> CrewResponse:
+def _crew_to_response(crew: Crew, secrets_visible: bool = True) -> CrewResponse:
     """Serialize a Crew model to CrewResponse including ALL execution-config fields.
 
     Building CrewResponse field-by-field previously listed only id/name/ids/nodes/
@@ -48,13 +53,21 @@ def _crew_to_response(crew: Crew) -> CrewResponse:
     reasoning_config) on every GET/POST/PUT — so a crew saved to the catalog
     reloaded with empty/default execution config. Centralized here so the response
     can never diverge from the model again.
+
+    ``secrets_visible=False`` masks the credentials in ``nodes`` and
+    ``tool_configs`` (a copy; the row is untouched).
     """
+    nodes = crew.nodes or []
+    tool_configs = getattr(crew, "tool_configs", None)
+    if not secrets_visible:
+        nodes = mask_sensitive_strings(nodes)
+        tool_configs = mask_sensitive_strings(tool_configs)
     return CrewResponse(
         id=crew.id,
         name=crew.name,
         agent_ids=crew.agent_ids,
         task_ids=crew.task_ids,
-        nodes=crew.nodes or [],
+        nodes=nodes,
         edges=crew.edges or [],
         created_at=crew.created_at.isoformat(),
         updated_at=crew.updated_at.isoformat(),
@@ -65,7 +78,7 @@ def _crew_to_response(crew: Crew) -> CrewResponse:
         reasoning_llm=getattr(crew, "reasoning_llm", None),
         reasoning_config=getattr(crew, "reasoning_config", None),
         manager_llm=getattr(crew, "manager_llm", None),
-        tool_configs=getattr(crew, "tool_configs", None),
+        tool_configs=tool_configs,
         memory=getattr(crew, "memory", True),
         verbose=getattr(crew, "verbose", True),
         max_rpm=getattr(crew, "max_rpm", None),
@@ -76,19 +89,24 @@ def _crew_to_response(crew: Crew) -> CrewResponse:
 async def list_crews(
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> List[CrewResponse]:
     """
     Retrieve all crews for the current group.
 
+    Any member (Operator / Editor / Admin). Stored credentials in nodes and
+    tool_configs are masked for members without builder rights.
+
     Args:
         service: Crew service injected by dependency
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         List of crews for current group
     """
     crews = await service.find_by_group(group_context)
-    return [_crew_to_response(crew) for crew in crews]
+    return [_crew_to_response(crew, secrets_visible) for crew in crews]
 
 
 def get_crew_feedback_service(session: SessionDep) -> CrewFeedbackService:
@@ -150,14 +168,19 @@ async def get_crew(
     crew_id: Annotated[UUID, Path(title="The ID of the crew to get")],
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
+    secrets_visible: ToolSecretsVisibleDep,
 ) -> CrewResponse:
     """
     Get a specific crew by ID for the current group.
+
+    Any member (Operator / Editor / Admin). Stored credentials in nodes and
+    tool_configs are masked for members without builder rights.
 
     Args:
         crew_id: ID of the crew to get
         service: Crew service injected by dependency
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         Crew if found and belongs to group
@@ -168,7 +191,7 @@ async def get_crew(
     crew = await service.get_by_group(crew_id, group_context)
     if not crew:
         raise NotFoundError("Crew not found")
-    return _crew_to_response(crew)
+    return _crew_to_response(crew, secrets_visible)
 
 
 @router.post("", response_model=CrewResponse, status_code=status.HTTP_201_CREATED)

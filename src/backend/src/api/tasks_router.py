@@ -1,15 +1,24 @@
 import logging
-from typing import Annotated, List
+from typing import Annotated, List, Sequence, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from src.core.permissions import check_role_in_context
-from src.dependencies.providers import GroupContextDep, SessionDep
+from src.dependencies.providers import (
+    GroupContextDep,
+    SessionDep,
+    ToolSecretsVisibleDep,
+)
 from src.models.task import Task as TaskModel
 from src.schemas.task import Task as TaskSchema
 from src.schemas.task import TaskCreate, TaskUpdate
+from src.services.catalog.secret_view import masked_response
 from src.services.catalog.tasks import TaskService
 from src.utils.sensitive_data_utils import safe_log_tool_configs
+
+#: Task fields that may hold credentials: tool overrides, and the volume
+#: callback's PAT, saved in callback_config and again in config.callback_config.
+_SECRET_FIELDS = ("tool_configs", "callback_config", "config")
 
 router = APIRouter(
     prefix="/tasks",
@@ -77,22 +86,30 @@ async def create_task(
 async def list_tasks(
     service: TaskServiceDep,
     group_context: GroupContextDep,
-) -> List[TaskModel]:
+    secrets_visible: ToolSecretsVisibleDep,
+) -> Sequence[Union[TaskModel, TaskSchema]]:
     """
     Retrieve all tasks for the current group.
+
+    Any member (Operator / Editor / Admin). Stored credentials are masked for
+    members without builder rights.
 
     Args:
         service: Task service injected by dependency
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         List of tasks for the current group
     """
     try:
-        return await service.find_by_group(group_context)
+        tasks = await service.find_by_group(group_context)
     except Exception as e:
         logger.exception("Error listing tasks")
         raise HTTPException(status_code=500, detail="Error listing tasks") from e
+    if secrets_visible:
+        return tasks
+    return [masked_response(TaskSchema, t, _SECRET_FIELDS) for t in tasks]
 
 
 @router.get("/{task_id}", response_model=TaskSchema)
@@ -100,14 +117,19 @@ async def get_task(
     task_id: Annotated[str, Path(title="The ID of the task to get")],
     service: TaskServiceDep,
     group_context: GroupContextDep,
-) -> TaskModel:
+    secrets_visible: ToolSecretsVisibleDep,
+) -> Union[TaskModel, TaskSchema]:
     """
     Get a specific task by ID with group isolation.
+
+    Any member (Operator / Editor / Admin). Stored credentials are masked for
+    members without builder rights.
 
     Args:
         task_id: ID of the task to get
         service: Task service injected by dependency
         group_context: Group context from headers
+        secrets_visible: Whether the caller may read stored credentials
 
     Returns:
         Task if found and belongs to user's group
@@ -131,7 +153,9 @@ async def get_task(
         else:
             logger.warning(f"GET task {task_id} - no tool_configs attribute found")
 
-        return task
+        if secrets_visible:
+            return task
+        return masked_response(TaskSchema, task, _SECRET_FIELDS)
     except HTTPException as he:
         raise he
     except Exception as e:

@@ -8,7 +8,27 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from src.utils.sensitive_data_utils import is_sensitive_key
+
 logger = logging.getLogger(__name__)
+
+
+def _without_secrets(value: Any) -> Any:
+    """``value`` with credential strings removed at any depth.
+
+    A task's config can carry credentials (a Databricks Volume callback's
+    ``token``); an export never bakes them in, the deployed app supplies its own.
+    Only string values are dropped, so a numeric ``max_tokens`` survives.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _without_secrets(v)
+            for k, v in value.items()
+            if not (is_sensitive_key(str(k)) and isinstance(v, str))
+        }
+    if isinstance(value, list):
+        return [_without_secrets(v) for v in value]
+    return value
 
 
 def _parse_task_guardrail(task: Dict[str, Any]) -> Optional[tuple]:
@@ -290,7 +310,7 @@ class YAMLGenerator:
             # Add task config options if present
             if "config" in task and isinstance(task["config"], dict):
                 config = task["config"]
-                for key, value in config.items():
+                for key, value in _without_secrets(config).items():
                     if value is not None and key not in task_config:
                         task_config[key] = value
 

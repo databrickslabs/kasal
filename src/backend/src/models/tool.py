@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.db.sensitive_json import SensitiveJSON
 
 
 class Tool(Base):
@@ -19,7 +20,7 @@ class Tool(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=False)
     icon: Mapped[str] = mapped_column(String, nullable=False)
-    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
+    config: Mapped[Any] = mapped_column(SensitiveJSON, default=dict, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
 
     # Multi-group fields

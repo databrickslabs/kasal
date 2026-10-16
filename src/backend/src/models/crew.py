@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.db.sensitive_json import SensitiveJSON
 
 
 class Crew(Base):
@@ -23,7 +24,7 @@ class Crew(Base):
     name: Mapped[Optional[str]] = mapped_column(String, index=True)
     agent_ids: Mapped[Any] = mapped_column(JSON, default=lambda: [], nullable=True)
     task_ids: Mapped[Any] = mapped_column(JSON, default=lambda: [], nullable=True)
-    nodes: Mapped[Any] = mapped_column(JSON, nullable=True)
+    nodes: Mapped[Any] = mapped_column(SensitiveJSON, nullable=True)
     edges: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     # Crew execution configuration
@@ -43,7 +44,7 @@ class Crew(Base):
         String(255), nullable=True
     )  # LLM for hierarchical manager
     tool_configs: Mapped[Any] = mapped_column(
-        JSON, nullable=True
+        SensitiveJSON, nullable=True
     )  # Crew-level tool configurations (MCP servers, etc.)
     memory: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=True

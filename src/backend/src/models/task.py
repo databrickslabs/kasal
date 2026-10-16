@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
+from src.db.sensitive_json import SensitiveJSON
 
 
 def generate_uuid() -> str:
@@ -29,11 +30,13 @@ class Task(Base):
     expected_output: Mapped[str] = mapped_column(String, nullable=False)
     tools: Mapped[Any] = mapped_column(JSON, default=list, nullable=False)
     tool_configs: Mapped[Any] = mapped_column(
-        JSON, default=dict, nullable=True
+        SensitiveJSON, default=dict, nullable=True
     )  # User-specific tool configuration overrides
     async_execution: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
     context: Mapped[Any] = mapped_column(JSON, default=list, nullable=True)
-    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
+    # SensitiveJSON: the task form saves the volume callback's config, PAT
+    # included, under config.callback_config.
+    config: Mapped[Any] = mapped_column(SensitiveJSON, default=dict, nullable=True)
 
     # Multi-group fields
     group_id: Mapped[Optional[str]] = mapped_column(
@@ -53,7 +56,7 @@ class Task(Base):
     # Advanced configuration
     callback: Mapped[Optional[str]] = mapped_column(String)
     callback_config: Mapped[Any] = mapped_column(
-        JSON, nullable=True
+        SensitiveJSON, nullable=True
     )  # Configuration for callbacks like DatabricksVolume
     human_input: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
     converter_cls: Mapped[Optional[str]] = mapped_column(String)

@@ -26,7 +26,6 @@ Example:
 
 import asyncio
 import concurrent.futures
-import copy
 import logging
 import uuid
 from datetime import datetime
@@ -46,9 +45,11 @@ from src.services.execution.kasal_service import KasalExecutionService
 from src.services.execution.naming import ExecutionNameService, run_name_model
 from src.services.execution.serialization import sanitize_for_database
 from src.services.execution.status import ExecutionStatusService
-from src.services.execution.stored_inputs import strip_run_credentials
+from src.services.execution.stored_inputs import (
+    mask_run_inputs,
+    strip_run_credentials,
+)
 from src.utils.asyncio_utils import create_and_run_loop, run_in_thread_with_loop
-from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -103,51 +104,11 @@ class ExecutionService:
         self.kasal_execution_service = KasalExecutionService()
 
     def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Mask sensitive fields in execution inputs before returning to API or storing to database.
+        """Execution inputs as the API returns them and the run row stores them.
 
-        This method processes the inputs dictionary which may contain:
-        - agents_yaml: Dict of agent configs with tool_configs containing secrets
-        - tasks_yaml: Dict of task configs with tool_configs containing secrets
-        - inputs: Dict of user-provided inputs that may contain secrets (client_secret, etc.)
-
-        Args:
-            inputs: The raw inputs dictionary from execution
-
-        Returns:
-            A copy of inputs with sensitive fields masked and no run credentials
+        One rule for every launch path: see ``stored_inputs.mask_run_inputs``.
         """
-        if not inputs:
-            return inputs
-
-        # A deep copy (the original is not modified), minus the run credentials.
-        masked_inputs = copy.deepcopy(strip_run_credentials(inputs))
-
-        # Mask tool_configs in agents_yaml
-        if "agents_yaml" in masked_inputs and isinstance(
-            masked_inputs["agents_yaml"], dict
-        ):
-            for agent_key, agent_config in masked_inputs["agents_yaml"].items():
-                if isinstance(agent_config, dict) and "tool_configs" in agent_config:
-                    agent_config["tool_configs"] = mask_sensitive_fields(
-                        agent_config["tool_configs"]
-                    )
-
-        # Mask tool_configs in tasks_yaml
-        if "tasks_yaml" in masked_inputs and isinstance(
-            masked_inputs["tasks_yaml"], dict
-        ):
-            for task_key, task_config in masked_inputs["tasks_yaml"].items():
-                if isinstance(task_config, dict) and "tool_configs" in task_config:
-                    task_config["tool_configs"] = mask_sensitive_fields(
-                        task_config["tool_configs"]
-                    )
-
-        # Mask sensitive fields in the nested 'inputs' dictionary (user-provided values)
-        # This catches fields like client_secret, password, token, api_key, etc.
-        if "inputs" in masked_inputs and isinstance(masked_inputs["inputs"], dict):
-            masked_inputs["inputs"] = mask_sensitive_fields(masked_inputs["inputs"])
-
-        return masked_inputs
+        return mask_run_inputs(inputs)
 
     async def execute_flow(
         self,

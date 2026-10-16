@@ -31,6 +31,7 @@ from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
 from src.schemas.execution import CrewConfig
+from src.services.execution.stored_inputs import mask_run_inputs
 from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().system
@@ -174,7 +175,9 @@ class TriggerQueueConsumerService:
                     session,
                     job_id=job_id,
                     run_name=run_name,
-                    inputs=config_dict,
+                    # A saved crew comes back from the catalog decrypted; the
+                    # run gets that, its record the masked copy.
+                    inputs=mask_run_inputs(config_dict),
                     execution_type=execution_type,
                     group_id=group_id,
                     flow_id=config.flow_id if execution_type == "flow" else None,

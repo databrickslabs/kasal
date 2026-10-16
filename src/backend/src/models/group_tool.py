@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -14,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
+from src.db.sensitive_json import SensitiveJSON
 
 
 class GroupTool(Base):
@@ -42,7 +42,7 @@ class GroupTool(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Group-scoped configuration/credentials (subset of global config, where allowed)
-    config: Mapped[Any] = mapped_column(JSON, default=dict, nullable=True)
+    config: Mapped[Any] = mapped_column(SensitiveJSON, default=dict, nullable=True)
 
     # Optional operational status for credentials/connection checks
     credentials_status: Mapped[str] = mapped_column(

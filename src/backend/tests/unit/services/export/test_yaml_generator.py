@@ -573,3 +573,33 @@ class TestTaskConfigMerging:
 
         assert "extra_key" not in parsed["task"]
         assert parsed["task"]["real_key"] == "value"
+
+
+def test_task_config_credentials_are_never_exported():
+    """A Volume callback's token stays out of tasks.yaml; its other settings stay."""
+    tasks = [
+        {
+            "name": "report",
+            "description": "Write the report",
+            "expected_output": "A report",
+            "agent_id": "a1",
+            "config": {
+                "markdown": True,
+                "max_tokens": 4000,
+                "callback_config": {
+                    "type": "databricks_volume",
+                    "volume_path": "/Volumes/main/default/out",
+                    "token": "volume-pat-value",
+                },
+            },
+        }
+    ]
+    agents = [{"id": "a1", "name": "Writer", "role": "Writer"}]
+
+    content = YAMLGenerator().generate_tasks_yaml(tasks, agents, include_comments=False)
+
+    assert "volume-pat-value" not in content
+    task = next(iter(yaml.safe_load(content).values()))
+    assert task["callback_config"]["volume_path"] == "/Volumes/main/default/out"
+    assert "token" not in task["callback_config"]
+    assert task["max_tokens"] == 4000

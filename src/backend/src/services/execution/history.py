@@ -5,7 +5,6 @@ This module provides functions for retrieving and managing execution history
 from the database.
 """
 
-import copy
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -24,8 +23,7 @@ from src.schemas.execution_history import (
     ExecutionOutputList,
 )
 from src.services.execution.listing import result_preview
-from src.services.execution.stored_inputs import strip_run_credentials
-from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.services.execution.stored_inputs import mask_run_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -79,46 +77,12 @@ class ExecutionHistoryService:
         self.logs_repo = execution_logs_repository or ExecutionLogsRepository(session)
 
     def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Execution inputs as the history API returns them.
+
+        The same rule as when they are stored, so rows written before a field
+        was masked come back masked too: ``stored_inputs.mask_run_inputs``.
         """
-        Mask sensitive fields in execution inputs before returning to API.
-
-        This method processes the inputs dictionary which may contain:
-        - agents_yaml: Dict of agent configs with tool_configs containing secrets
-        - tasks_yaml: Dict of task configs with tool_configs containing secrets
-
-        Args:
-            inputs: The raw inputs dictionary from execution history
-
-        Returns:
-            A copy of inputs with sensitive fields masked and no run credentials
-        """
-        if not inputs:
-            return inputs
-
-        # A deep copy (the original is not modified), minus the run credentials.
-        masked_inputs = copy.deepcopy(strip_run_credentials(inputs))
-
-        # Mask tool_configs in agents_yaml
-        if "agents_yaml" in masked_inputs and isinstance(
-            masked_inputs["agents_yaml"], dict
-        ):
-            for agent_key, agent_config in masked_inputs["agents_yaml"].items():
-                if isinstance(agent_config, dict) and "tool_configs" in agent_config:
-                    agent_config["tool_configs"] = mask_sensitive_fields(
-                        agent_config["tool_configs"]
-                    )
-
-        # Mask tool_configs in tasks_yaml
-        if "tasks_yaml" in masked_inputs and isinstance(
-            masked_inputs["tasks_yaml"], dict
-        ):
-            for task_key, task_config in masked_inputs["tasks_yaml"].items():
-                if isinstance(task_config, dict) and "tool_configs" in task_config:
-                    task_config["tool_configs"] = mask_sensitive_fields(
-                        task_config["tool_configs"]
-                    )
-
-        return masked_inputs
+        return mask_run_inputs(inputs)
 
     async def get_execution_history(
         self,
