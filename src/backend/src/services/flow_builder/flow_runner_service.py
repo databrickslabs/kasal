@@ -18,6 +18,7 @@ from src.repositories.flow_repository import FlowRepository
 from src.schemas.flow_execution import (
     FlowExecutionStatus,
 )
+from src.services.execution.stored_inputs import strip_run_credentials
 from src.services.flow_builder.backend_flow import BackendFlow
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.execution_service import FlowExecutionService
@@ -233,8 +234,8 @@ class FlowRunnerService:
             group_context = config.get("group_context")
             auto = await run_freeze.resolve_mapping(config, self.db, group_context)
 
-            # Create a sanitized config for database storage (remove non-serializable objects)
-            sanitized_config = {k: v for k, v in config.items() if k != "group_context"}
+            # The stored record drops the credentials; the flow body gets them.
+            sanitized_config = strip_run_credentials(config)
 
             # Check if this is a resume scenario - if so, use existing execution record
             resume_from_execution_id = (

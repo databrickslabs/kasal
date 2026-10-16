@@ -24,6 +24,7 @@ from src.schemas.execution_history import (
     ExecutionOutputList,
 )
 from src.services.execution.listing import result_preview
+from src.services.execution.stored_inputs import strip_run_credentials
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 logger = logging.getLogger(__name__)
@@ -89,13 +90,13 @@ class ExecutionHistoryService:
             inputs: The raw inputs dictionary from execution history
 
         Returns:
-            A copy of inputs with sensitive fields masked
+            A copy of inputs with sensitive fields masked and no run credentials
         """
         if not inputs:
             return inputs
 
-        # Create a deep copy to avoid modifying the original
-        masked_inputs = copy.deepcopy(inputs)
+        # A deep copy (the original is not modified), minus the run credentials.
+        masked_inputs = copy.deepcopy(strip_run_credentials(inputs))
 
         # Mask tool_configs in agents_yaml
         if "agents_yaml" in masked_inputs and isinstance(

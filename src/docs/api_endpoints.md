@@ -232,6 +232,10 @@ the model, and `result_preview`, the first 280 characters of the serialized
 result. Read `GET /executions/{execution_id}` for the full result, or pass
 `?include_payload=true` to get full rows in bulk.
 
+**`inputs` is the run's configuration, never its credentials.** The access
+token a run uses is not stored with the run and is not returned by these
+endpoints. A resumed run uses the token of the request that resumes it.
+
 **Over the concurrent-run limit, a run queues.** Crew and flow runs share one
 limit per server process (see [run concurrency limit](#run-concurrency-limit)).
 A run started while every slot is in use is still accepted: its status is

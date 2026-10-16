@@ -85,7 +85,7 @@
   "src/backend/tests/integration/test_chat_history_workflow.py": 1449,
   "src/backend/tests/unit/api/test_execution_trace_router.py": 911,
   "src/backend/tests/unit/api/test_group_router.py": 807,
-  "src/backend/tests/unit/api/test_hitl_router.py": 1677,
+  "src/backend/tests/unit/api/test_hitl_router.py": 1676,
   "src/backend/tests/unit/api/test_memory_backend_router_local_default_store.py": 879,
   "src/backend/tests/unit/api/test_scheduler_router.py": 1016,
   "src/backend/tests/unit/core/test_logger.py": 1676,
