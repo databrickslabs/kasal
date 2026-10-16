@@ -7,7 +7,7 @@
  * name the save updates the bound crew; under another name it is refused.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import SaveCrew from './SaveCrew';
 import { CrewService } from '../../../../api/workflow/CrewService';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
@@ -62,6 +62,22 @@ describe('Saving a canvas bound to a catalog crew', () => {
     expect(CrewService.updateCrew).not.toHaveBeenCalled();
     expect(useBuilderCanvasStore.getState().getCanvas(tabId)?.savedCrewId).toBe('crew-1');
     window.removeEventListener('saveError', shown);
+  });
+
+  it('a refused /save crew leaves no stale name or error for the next dialog', async () => {
+    const shown = vi.fn();
+    window.addEventListener('saveError', shown);
+    saveAs('Research crew v2');
+    await waitFor(() => expect(shown).toHaveBeenCalledOnce());
+    window.removeEventListener('saveError', shown);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('openSaveCrewDialog'));
+    });
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    expect(screen.queryByText(/is open from the catalog/)).toBeNull();
+    expect(screen.queryByDisplayValue('Research crew v2')).toBeNull();
   });
 
   it('under the bound name it updates the bound crew instead of creating one', async () => {

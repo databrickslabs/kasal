@@ -365,6 +365,9 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       pendingSave.current?.onError?.(new Error(target.message));
       pendingSave.current = null;
       window.dispatchEvent(new CustomEvent('saveError', { detail: { message: target.message } }));
+      // A `/save crew <name>` request has no dialog to show the error in:
+      // reset, so the next dialog does not open with this name and error.
+      if (!open) handleClose();
       return;
     }
     if (target.kind === 'update') {
