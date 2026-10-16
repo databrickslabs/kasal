@@ -1,9 +1,11 @@
 """Policies ride on the tool config, and must never reach its constructor."""
 
 import logging
+from unittest.mock import patch
 
 import pytest
 
+import src.services.tools.scrape_website as scrape_website
 from src.services.tools import tool_policies
 from src.services.tools.tool_policies import (
     APPROVAL_ATTR,
@@ -310,3 +312,72 @@ class TestATeamspaceCredentialStaysWithItsEndpoint:
         assert "llm_token" in caplog.text
         assert "teamspace-llm-token" not in caplog.text
         assert "elsewhere.example.net" not in caplog.text
+
+
+TEAMSPACE_SCRAPE = {
+    "website_url": "https://example.com/reports",
+    "cookies": {"name": "session", "value": "teamspace-cookie"},
+    "headers": {"X-Site-Token": "teamspace-header"},
+}
+
+
+class TestTheScrapeToolsCookiesStayWithItsSite:
+    """Configuration → Tools sets ``website_url``, ``cookies`` and ``headers``
+    in one JSON block, so the cookies and headers belong to that site."""
+
+    @pytest.mark.parametrize(
+        "moved_to",
+        [
+            "https://example.net/reports",
+            "http://example.com/reports",
+            "https://example.com:8443/reports",
+        ],
+    )
+    def test_moving_the_site_withholds_cookies_and_headers(self, moved_to):
+        _, merged, _ = merge_tool_config_override(
+            "ScrapeWebsiteTool", dict(TEAMSPACE_SCRAPE), {"website_url": moved_to}
+        )
+
+        assert merged["website_url"] == moved_to
+        assert "cookies" not in merged
+        assert "headers" not in merged
+
+    def test_another_page_on_the_same_site_keeps_them(self):
+        _, merged, _ = merge_tool_config_override(
+            "ScrapeWebsiteTool",
+            dict(TEAMSPACE_SCRAPE),
+            {"website_url": "https://example.com/other"},
+        )
+
+        assert merged["cookies"] == TEAMSPACE_SCRAPE["cookies"]
+        assert merged["headers"] == TEAMSPACE_SCRAPE["headers"]
+
+    def test_the_override_s_own_cookies_go_with_its_site(self):
+        own = {"name": "session", "value": "task-cookie"}
+        _, merged, _ = merge_tool_config_override(
+            "ScrapeWebsiteTool",
+            dict(TEAMSPACE_SCRAPE),
+            {"website_url": "https://example.net/", "cookies": own},
+        )
+
+        assert merged["cookies"] == own
+        assert "headers" not in merged
+
+    def test_the_built_tool_does_not_send_them_to_the_moved_site(self):
+        _, merged, _ = merge_tool_config_override(
+            "ScrapeWebsiteTool",
+            dict(TEAMSPACE_SCRAPE),
+            {"website_url": "https://example.net/"},
+        )
+        seen = {}
+
+        def fake_fetch(url, headers, timeout=15, max_bytes=None):
+            seen.update(url=url, headers=dict(headers))
+            return "<p>ok</p>"
+
+        with patch.object(scrape_website, "_safe_fetch", fake_fetch):
+            scrape_website.ScrapeWebsiteTool(**merged)._run()
+
+        assert seen["url"] == "https://example.net/"
+        assert "Cookie" not in seen["headers"]
+        assert "X-Site-Token" not in seen["headers"]

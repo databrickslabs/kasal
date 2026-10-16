@@ -41,13 +41,18 @@ An agent's or task's `tool_configs` entry (for example the Power BI ids and cred
 - Policies: `requires_approval` / `approval` and `replayable` / `replay` come from the teamspace configuration. An entry can add an approval gate to a tool that the teamspace leaves ungated, but it cannot remove or change the teamspace's gate.
 - Naming: `name` and `description` come from the tool registry.
 
-If an entry points `llm_workspace_url` or `databricks_sql_endpoint` at another host, the teamspace's `llm_token` or `databricks_pat` is not sent there. Give the entry its own credential for that host, in the same form.
+If an entry points an endpoint at another origin (scheme, host or port), the teamspace credential for that endpoint is not sent there. Give the entry its own credential for that origin, in the same form. The pairs are:
+
+- `llm_workspace_url`: `llm_token`
+- `databricks_sql_endpoint`: `databricks_pat`
+- `website_url` (`ScrapeWebsiteTool`): `cookies` and `headers`
 
 The run log names each ignored or withheld key, without its value.
 
-Two related rules apply when a tool runs:
+Three related rules apply when a tool runs:
 
 - If a tool's `llm_workspace_url` names a workspace other than the run's, the run's Databricks credential is not sent there. To use another workspace, give the entry its own `llm_token` for it.
+- `ScrapeWebsiteTool` sends its configured `cookies` and `headers` only to the origin of its configured `website_url`. Another page on that origin gets them. Any other URL the agent asks it to read gets the tool's default browser headers. So does every URL when no `website_url` is set. A redirect to another origin keeps only content-negotiation headers such as `User-Agent` and `Accept`. The run log names each header that was not sent.
 - Serper, Image Generation and the scrape tool connect only to globally routable addresses. They refuse private, loopback, link-local, shared (`100.64.0.0/10`), reserved and multicast addresses, so a Serper or Image Generation `base_url` must be a public endpoint. When `HTTP_PROXY` or `HTTPS_PROXY` is set in the environment, they connect through that proxy, except for hosts listed in `NO_PROXY`. Through a proxy the target's address is still checked, so the host must resolve from the app as well, but the proxy makes the connection.
 
 ### Native vs custom tools

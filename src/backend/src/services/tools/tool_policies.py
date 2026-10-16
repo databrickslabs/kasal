@@ -89,9 +89,12 @@ RESERVED_OVERRIDE_KEYS = _IDENTITY_KEYS | _ENDPOINT_KEYS | _POLICY_KEYS | _NAMIN
 #: override moves the endpoint to another host without bringing its own
 #: credential, the teamspace's stays behind: the tool then uses the run's own
 #: credential for its own workspace (``workspace_llm_credentials``) or none.
+#: The scrape tool's ``cookies`` and ``headers`` are set in the same teamspace
+#: block as its ``website_url``, so they belong to that site.
 _ENDPOINT_CREDENTIALS: Dict[str, Tuple[str, ...]] = {
     "llm_workspace_url": ("llm_token",),
     "databricks_sql_endpoint": ("databricks_pat",),
+    "website_url": ("cookies", "headers"),
 }
 
 
