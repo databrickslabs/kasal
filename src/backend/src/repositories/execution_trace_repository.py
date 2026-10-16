@@ -118,10 +118,10 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         return list(result.scalars().all())
 
     async def latest_output_for_span_prefix(
-        self, prefix: str, *, group_ids: Sequence[str]
+        self, prefix: str, *, group_ids: Sequence[str], job_id: Optional[str] = None
     ) -> Optional[str]:
         """The most recent trace ``output`` IN ``group_ids`` whose ``span_name``
-        starts with ``prefix``.
+        starts with ``prefix`` (and, given ``job_id``, from that run only).
 
         Serves the PowerBI/UCMV tools, which hand later steps the output of an
         earlier one. Returns the raw JSON string, or None when nothing matched.
@@ -132,14 +132,14 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         """
         if not group_ids:
             return None
+        stmt = select(ExecutionTrace.output).where(
+            ExecutionTrace.span_name.like(f"{prefix}%"),
+            ExecutionTrace.group_id.in_(list(group_ids)),
+        )
+        if job_id is not None:
+            stmt = stmt.where(ExecutionTrace.job_id == job_id)
         result = await self.session.execute(
-            select(ExecutionTrace.output)
-            .where(
-                ExecutionTrace.span_name.like(f"{prefix}%"),
-                ExecutionTrace.group_id.in_(list(group_ids)),
-            )
-            .order_by(ExecutionTrace.created_at.desc())
-            .limit(1)
+            stmt.order_by(ExecutionTrace.created_at.desc()).limit(1)
         )
         row = result.first()
         if not row or row[0] is None:

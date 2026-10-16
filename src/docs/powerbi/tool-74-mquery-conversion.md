@@ -149,6 +149,12 @@ A conversion is kept for the rest of the day and reused only when all of these h
 
 Otherwise the tool scans again. Error results are never cached.
 
+The access check calls `GET /admin/groups/{workspaceId}/datasets`, an admin API: the
+caller must be a Fabric administrator or a service principal allowed to use the
+admin APIs (the same requirement as the scan). Microsoft limits it to 200 requests
+per hour. If the check fails for any reason, including throttling, the cached
+result is not used and the tool runs a fresh scan.
+
 ---
 
 ## Notes

@@ -119,13 +119,13 @@ class MetricViewValidatorTool(BaseTool):
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON input: {e}"})
 
-        # Fallback: if no YAML provided, fetch from the latest UCMV Generator execution trace
+        # Fallback: no YAML handed in — read THIS run's UCMV Generator output.
         if not yaml_tables:
             logger.info(
-                "[Validator] No YAML in args — attempting to fetch from latest UCMV execution trace"
+                "[Validator] No YAML in args — fetching this run's UCMV Generator output"
             )
             try:
-                _db_result = self._fetch_latest_ucmv_from_db()
+                _db_result = self._fetch_run_ucmv_from_db()
                 if isinstance(_db_result, dict) and "yaml" in _db_result:
                     # Full UCMV output — extract yaml and keep the rest for validation
                     yaml_tables = _db_result["yaml"]
@@ -139,17 +139,6 @@ class MetricViewValidatorTool(BaseTool):
                     yaml_tables = _db_result
             except Exception as db_err:
                 logger.warning(f"[Validator] DB fallback failed: {db_err}")
-
-        # Fallback: if no measures, fetch from the latest UCMV Generator execution
-        if not measures or measures == []:
-            logger.info(
-                "[Validator] No measures in args — fetching from latest UCMV execution trace"
-            )
-            try:
-                measures = self._fetch_measures_from_db()
-                logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
-            except Exception as db_err:
-                logger.warning(f"[Validator] Measures DB fallback failed: {db_err}")
 
         if not yaml_tables:
             return json.dumps(
@@ -224,8 +213,9 @@ class MetricViewValidatorTool(BaseTool):
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+        # Last: the measures THIS run's UCMV Generator recorded in its trace.
         if not measures or measures == []:
-            logger.info("[Validator] No measures — fetching from latest UCMV execution")
+            logger.info("[Validator] No measures — fetching this run's UCMV output")
             try:
                 measures = self._fetch_measures_from_db()
                 logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
@@ -464,12 +454,24 @@ class MetricViewValidatorTool(BaseTool):
         )
         return json.dumps(output, indent=2, default=str)
 
-    @staticmethod
-    def _fetch_measures_from_db() -> list:
-        """Fetch measures from this workspace's latest UCMV Generator run."""
+    def _run_scope(self) -> tuple[Optional[str], list[str]]:
+        """This run's job id (trace context) and group (GroupContext).
+
+        Every DB lookup below reads only this run's own rows: another run's
+        generator output or edits, in this workspace or another, are never used.
+        """
         from src.services.tools.tool_session_provider import ToolSessionProvider
 
-        group_ids = ToolSessionProvider.run_group_ids()
+        job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+        return job_id, ToolSessionProvider.run_group_ids()
+
+    def _fetch_measures_from_db(self) -> list:
+        """Measures recorded by THIS run's UCMV Generator, or an empty list."""
+        from src.services.tools.tool_session_provider import ToolSessionProvider
+
+        job_id, group_ids = self._run_scope()
+        if not job_id or not group_ids:
+            return []
 
         async def _query() -> list:
             async with ToolSessionProvider.session() as session:
@@ -481,7 +483,7 @@ class MetricViewValidatorTool(BaseTool):
                 raw = await ExecutionTraceService(
                     session
                 ).latest_output_for_span_prefix(
-                    "UC Metric View Generator", group_ids=group_ids
+                    "UC Metric View Generator", group_ids=group_ids, job_id=job_id
                 )
                 if not raw:
                     return []
@@ -544,8 +546,7 @@ class MetricViewValidatorTool(BaseTool):
         """
         from src.services.tools.tool_session_provider import ToolSessionProvider
 
-        job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
-        group_ids = ToolSessionProvider.run_group_ids()
+        job_id, group_ids = self._run_scope()
         if not job_id or not group_ids:
             return {}
 
@@ -565,25 +566,37 @@ class MetricViewValidatorTool(BaseTool):
         except Exception:
             return {}
 
-    @staticmethod
-    def _fetch_latest_ucmv_from_db() -> dict:
-        """Fetch YAML from this workspace's latest UCMV Generator run in the DB.
+    def _fetch_run_ucmv_from_db(self) -> dict:
+        """THIS run's UCMV Generator output, for a flow whose injection missed it.
 
-        Scoped to the run's workspace: it used to read any tenant's (audit V3-1).
+        The validator never falls back to another run's output: no job id, nothing.
+        """
+        job_id, _ = self._run_scope()
+        return self._fetch_latest_ucmv_from_db(job_id) if job_id else {}
+
+    @staticmethod
+    def _fetch_latest_ucmv_from_db(job_id: Optional[str] = None) -> dict:
+        """The latest UCMV Generator output in this workspace (YAML and all).
+
+        With ``job_id``, from that run only (the validator's own lookup). The
+        Genie config generator and visual mapper call it without one, to run
+        standalone after an earlier UCMV run in the same workspace.
         """
         from src.services.tools.tool_session_provider import ToolSessionProvider
 
         group_ids = ToolSessionProvider.run_group_ids()
+        if not group_ids:
+            return {}
 
         async def _query() -> dict:
             async with ToolSessionProvider.session() as session:
                 from src.services.trace.service import ExecutionTraceService
 
-                # Strategy 1: the latest UCMV Generator run span.
+                # Strategy 1: the latest UCMV Generator span (of run job_id, if set).
                 raw = await ExecutionTraceService(
                     session
                 ).latest_output_for_span_prefix(
-                    "UC Metric View Generator", group_ids=group_ids
+                    "UC Metric View Generator", group_ids=group_ids, job_id=job_id
                 )
                 if raw:
                     try:
@@ -600,11 +613,11 @@ class MetricViewValidatorTool(BaseTool):
                     except Exception:
                         pass
 
-            # Strategy 2: the latest run whose result carries a full UCMV payload
+            # Strategy 2: the latest result (of run job_id) with a full UCMV payload
             # (written by the safety-net status update after the queue-drain fix).
             async with ToolSessionProvider.execution_history_service() as history:
                 inner2 = await history.latest_result_with_keys(
-                    ["yaml", "sql", "stats"], group_ids=group_ids
+                    ["yaml", "sql", "stats"], group_ids=group_ids, job_id=job_id
                 )
                 if inner2:
                     try:

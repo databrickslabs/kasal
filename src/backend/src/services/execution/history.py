@@ -898,11 +898,12 @@ class ExecutionHistoryService:
         return edits if isinstance(edits, dict) else None
 
     async def latest_result_with_keys(
-        self, keys: List[str], *, group_ids: Sequence[str]
+        self, keys: List[str], *, group_ids: Sequence[str], job_id: Optional[str] = None
     ) -> Optional[dict]:
-        """Most recent run in ``group_ids`` whose ``result`` dict holds ALL ``keys``."""
+        """Most recent run in ``group_ids`` (or run ``job_id``) whose ``result``
+        dict holds ALL ``keys``."""
         found: Optional[dict] = await self.history_repo.latest_result_with_keys(
-            keys, group_ids=group_ids
+            keys, group_ids=group_ids, job_id=job_id
         )
         return found
 
@@ -951,6 +952,7 @@ class ExecutionHistoryService:
                 job_id=job_id,
                 result_data=result_data,
                 group_ids=group_ids,
+                gate_stamp=await self._waiting_gate(job_id, group_ids),
             )
 
             if not success:
@@ -970,6 +972,29 @@ class ExecutionHistoryService:
         except Exception as e:
             logger.error(f"Error updating result for job_id {job_id}: {str(e)}")
             raise
+
+    async def _waiting_gate(
+        self, job_id: str, group_ids: Optional[list[str]]
+    ) -> Optional[Dict[str, object]]:
+        """The approval the run is waiting at, as ``{approval_id, gate_node_id}``.
+
+        An edit saved now belongs to that gate alone, so only that gate hands it
+        on when the flow resumes. Resolved here, from the run's own approvals,
+        rather than taken from the client. None unless exactly one is pending.
+        """
+        from src.models.hitl_approval import HITLApprovalStatus
+        from src.services.hitl.service import HITLService
+
+        approvals = await HITLService(self.session).get_approvals_for_execution(job_id)
+        pending = [
+            a
+            for a in approvals
+            if a.status == HITLApprovalStatus.PENDING
+            and (not group_ids or a.group_id in group_ids)
+        ]
+        if len(pending) != 1:
+            return None
+        return {"approval_id": pending[0].id, "gate_node_id": pending[0].gate_node_id}
 
     async def get_execution_groups_with_counts(
         self,

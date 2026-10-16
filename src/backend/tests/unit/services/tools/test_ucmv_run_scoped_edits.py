@@ -129,10 +129,10 @@ def routed_to(db_url, monkeypatch):
 
     monkeypatch.setattr(db_session, "routed_scoped_session", lambda: _session(db_url))
     monkeypatch.setattr(time, "sleep", lambda *_: None)
-    # The validator's "latest measures in this workspace" fallback reads the
-    # trace table, which this database does not have; it is not under test.
+    # The validator's "this run's measures" fallback reads the trace table,
+    # which this database does not have; it is not under test here.
     monkeypatch.setattr(
-        MetricViewValidatorTool, "_fetch_measures_from_db", staticmethod(lambda: [])
+        MetricViewValidatorTool, "_fetch_measures_from_db", lambda self: []
     )
     yield
     UserContext.clear_context()
