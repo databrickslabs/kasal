@@ -392,7 +392,9 @@ previous crew and then:
 That exception derives from `BaseException`, not `Exception`, so ordinary
 error handling does not swallow it — it is a controlled pause, not a failure.
 The run resumes from the checkpoint once a decision is recorded, which is why a
-gate requires `checkpoint: true` on the edge.
+gate requires `checkpoint: true` on the edge. The resumed part of the flow (or,
+on a retry, the re-run crew) uses the access token of the person who answered
+the gate, when their request carries one.
 
 ## Conversations across turns
 

@@ -31,6 +31,7 @@ from src.schemas.hitl import (
     HITLApprovalStatusEnum,
     HITLRejectionActionEnum,
 )
+from src.services.execution.stored_inputs import strip_run_credentials
 from src.services.flow_builder.conversation.interrupt import (
     APPROVAL_CONFIG_KEY,
     approval_payload,
@@ -271,6 +272,7 @@ class HITLService:
         group_id: str,
         reason: str,
         action: HITLRejectionActionEnum = HITLRejectionActionEnum.REJECT,
+        user_token: Optional[str] = None,
     ) -> HITLActionResponse:
         """
         Reject an HITL gate.
@@ -281,6 +283,7 @@ class HITLService:
             group_id: Group ID for authorization
             reason: Reason for rejection
             action: Action to take (reject = fail flow, retry = re-run previous crew)
+            user_token: User's access token for OBO authentication on retry
 
         Returns:
             HITLActionResponse with result
@@ -338,7 +341,9 @@ class HITLService:
                 message = "Output rejected - the task retries with your feedback"
             elif action == HITLRejectionActionEnum.RETRY:
                 # Retry: Re-run the previous crew
-                execution_resumed = await self._retry_previous_crew(approval)
+                execution_resumed = await self._retry_previous_crew(
+                    approval, user_token=user_token
+                )
                 message = "Gate rejected - retrying previous crew"
             else:
                 # Reject: Fail the flow
@@ -659,8 +664,9 @@ class HITLService:
                 execution_id=approval.execution_id, status=ExecutionStatus.RUNNING.value
             )
 
-            # Extract the original flow configuration from the execution inputs
-            original_inputs = execution.inputs or {}
+            # The original flow configuration, minus any credential an older row
+            # still stores: the resume runs on the approver's token below.
+            original_inputs = strip_run_credentials(execution.inputs or {})
             flow_id = (
                 str(execution.flow_id)
                 if execution.flow_id
@@ -734,12 +740,15 @@ class HITLService:
             logger.error(f"Error resuming flow execution: {str(e)}", exc_info=True)
             return False
 
-    async def _retry_previous_crew(self, approval: HITLApproval) -> bool:
+    async def _retry_previous_crew(
+        self, approval: HITLApproval, user_token: Optional[str] = None
+    ) -> bool:
         """
         Retry the previous crew after rejection with retry action.
 
         Args:
             approval: The rejected HITLApproval with retry action
+            user_token: The reviewer's access token for OBO authentication
 
         Returns:
             True if retry was initiated successfully
@@ -767,8 +776,9 @@ class HITLService:
                 execution_id=approval.execution_id, status=ExecutionStatus.RUNNING.value
             )
 
-            # Extract the original flow configuration from the execution inputs
-            original_inputs = execution.inputs or {}
+            # The original flow configuration, minus any credential an older row
+            # still stores: the retry runs on the reviewer's token below.
+            original_inputs = strip_run_credentials(execution.inputs or {})
             flow_id = (
                 str(execution.flow_id)
                 if execution.flow_id
@@ -796,9 +806,11 @@ class HITLService:
                 f"flow_uuid={flow_uuid}, re-running from crew sequence {approval.crew_sequence}"
             )
 
-            # Create group context for the retry
+            # Create group context for the retry, with the reviewer's token for OBO
             group_context = GroupContext(
-                group_ids=[approval.group_id], group_email=approval.responded_by
+                group_ids=[approval.group_id],
+                group_email=approval.responded_by,
+                access_token=user_token,
             )
 
             # Trigger the flow execution asynchronously in a background task

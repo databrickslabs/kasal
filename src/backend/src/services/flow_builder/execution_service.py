@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import ForbiddenError
 from src.core.logger import LoggerManager
 from src.models.execution_history import ExecutionHistory
+from src.services.execution.stored_inputs import strip_run_credentials
 
 logger = LoggerManager.get_instance().flow
 
@@ -127,7 +128,9 @@ class FlowExecutionService:
             if run_name:
                 execution.run_name = run_name
             if config:
-                execution.inputs = config
+                # The run's record, never the caller's credentials. (A new row
+                # gets the same treatment inside create_run_record.)
+                execution.inputs = strip_run_credentials(config)
             await self.session.commit()
             await self.execution_service.reload_run(execution)
             logger.info(

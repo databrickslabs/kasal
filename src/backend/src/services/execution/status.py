@@ -689,6 +689,7 @@ class ExecutionStatusService:
         """
         from src.db.session import get_isolated_db_session
         from src.repositories.execution_repository import ExecutionRepository
+        from src.services.execution.stored_inputs import strip_run_credentials
 
         # Validate job_id
         job_id = execution_data.get("job_id")
@@ -697,6 +698,10 @@ class ExecutionStatusService:
                 f"[ExecutionStatusService] Invalid job_id in execution data: {job_id}"
             )
             return False
+
+        # The row records the run; the caller's credentials are not part of it.
+        if "inputs" in execution_data:
+            execution_data["inputs"] = strip_run_credentials(execution_data["inputs"])
 
         try:
             # Add group information to execution data if group context is provided

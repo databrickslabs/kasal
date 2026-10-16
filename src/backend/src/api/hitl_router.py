@@ -276,6 +276,7 @@ async def reject_gate(
             group_id=require_group_id(group_context),
             reason=request.reason,
             action=request.action,
+            user_token=group_context.access_token,  # OBO auth for a retry
         )
         return result
 
