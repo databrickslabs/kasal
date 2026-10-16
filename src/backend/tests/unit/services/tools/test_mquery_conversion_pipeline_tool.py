@@ -781,69 +781,8 @@ class TestMqueryExecuteConversionComprehensive:
         assert "connector error" in result["error"]
 
 
-# ===========================================================================
-# Cache helpers comprehensive tests
-# ===========================================================================
-
-
-class TestMqueryCacheComprehensive:
-    def setup_method(self):
-        self.tool = MqueryConversionPipelineTool(
-            workspace_id=WORKSPACE_ID,
-            tenant_id=TENANT_ID,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-        )
-
-    def _run(self, coro):
-        return asyncio.run(coro)
-
-    def test_cache_hit_returns_formatted_output(self):
-        fake_cm, mock_svc = _mock_cache_service_via_provider(
-            cached_metadata={"formatted_output": "cached data"}
-        )
-        with patch(
-            "src.services.tools.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
-            fake_cm,
-        ):
-            result = self._run(self.tool._get_mquery_cache("key", WORKSPACE_ID))
-        assert result == "cached data"
-
-    def test_cache_miss_returns_none(self):
-        fake_cm, mock_svc = _mock_cache_service_via_provider(cached_metadata=None)
-        with patch(
-            "src.services.tools.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
-            fake_cm,
-        ):
-            result = self._run(self.tool._get_mquery_cache("key", WORKSPACE_ID))
-        assert result is None
-
-    def test_cache_with_no_formatted_output_key_returns_none(self):
-        fake_cm, mock_svc = _mock_cache_service_via_provider(
-            cached_metadata={"other_key": "data"}
-        )
-        with patch(
-            "src.services.tools.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
-            fake_cm,
-        ):
-            result = self._run(self.tool._get_mquery_cache("key", WORKSPACE_ID))
-        assert result is None
-
-    def test_save_mquery_cache_calls_save_metadata(self):
-        fake_cm, mock_svc = _mock_cache_service_via_provider()
-        with patch(
-            "src.services.tools.mquery_conversion_pipeline_tool.ToolSessionProvider.cache_service",
-            fake_cm,
-        ):
-            self._run(
-                self.tool._save_mquery_cache(
-                    "key", WORKSPACE_ID, {"formatted_output": "result"}
-                )
-            )
-        mock_svc.save_metadata.assert_called_once()
-
-    def test_cache_group_constant(self):
-        assert self.tool._CACHE_GROUP == "mquery_conversion"
+# Cache behaviour (group scope, settings key, access check) is covered in
+# test_mquery_conversion_cache.py.
 
 
 # ===========================================================================

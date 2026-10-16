@@ -883,18 +883,19 @@ class ExecutionHistoryService:
             )
             raise
 
-    async def latest_checkpoint_containing(
-        self, key: str, *, group_ids: Sequence[str]
+    async def saved_ucmv_edits(
+        self, job_id: str, *, group_ids: Sequence[str]
     ) -> Optional[dict]:
-        """Most recent run in ``group_ids`` whose ``checkpoint_data`` holds ``key``.
+        """The UCMV edits saved on run ``job_id``, if that run is in ``group_ids``.
 
-        For the UCMV tools, which look for edits a user saved in an earlier step
-        of a multi-step flow. No groups, no result (audit V3-1).
+        For the UCMV validator, which applies only its own run's edits, never
+        another run's. No job id or no groups, no result.
         """
-        found: Optional[dict] = await self.history_repo.latest_checkpoint_containing(
-            key, group_ids=group_ids
-        )
-        return found
+        if not job_id or not group_ids:
+            return None
+        data = await self.history_repo.get_checkpoint_data(job_id, list(group_ids))
+        edits = data.get("ucmv_yaml_edits") if isinstance(data, dict) else None
+        return edits if isinstance(edits, dict) else None
 
     async def latest_result_with_keys(
         self, keys: List[str], *, group_ids: Sequence[str]

@@ -175,18 +175,28 @@ def _as_tenant(group_id):
     UserContext.set_group_context(GroupContext(group_ids=[group_id]))
 
 
+def _validator_for(job_id):
+    from src.services.tools.metric_view_validator_tool import MetricViewValidatorTool
+
+    tool = MetricViewValidatorTool()
+    tool.trace_context = {"job_id": job_id}
+    return tool
+
+
 def test_validator_fallback_reads_only_the_run_tenant(routed_to):
     from src.services.tools.metric_view_validator_tool import MetricViewValidatorTool
 
     _as_tenant(A)
     assert MetricViewValidatorTool._fetch_latest_ucmv_from_db()["yaml"]
-    assert MetricViewValidatorTool._fetch_saved_ucmv_edits_from_db() == {
+    assert _validator_for("run-a")._fetch_saved_ucmv_edits_from_db() == {
         "yaml": "A-edits"
     }
 
     _as_tenant(B)
     assert MetricViewValidatorTool._fetch_latest_ucmv_from_db() == {}
-    assert MetricViewValidatorTool._fetch_saved_ucmv_edits_from_db() == {}
+    # Saved edits are read by the run's own job id AND its group.
+    assert _validator_for("run-a")._fetch_saved_ucmv_edits_from_db() == {}
+    assert _validator_for("run-b")._fetch_saved_ucmv_edits_from_db() == {}
     assert MetricViewValidatorTool._fetch_measures_from_db() == []
 
 
@@ -197,7 +207,7 @@ def test_fallback_without_group_context_reads_nothing(routed_to):
     UserContext.clear_context()
     assert ToolSessionProvider.run_group_ids() == []
     assert MetricViewValidatorTool._fetch_latest_ucmv_from_db() == {}
-    assert MetricViewValidatorTool._fetch_saved_ucmv_edits_from_db() == {}
+    assert _validator_for("run-a")._fetch_saved_ucmv_edits_from_db() == {}
 
 
 @pytest.mark.asyncio

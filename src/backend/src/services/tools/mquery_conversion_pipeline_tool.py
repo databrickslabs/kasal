@@ -13,6 +13,11 @@ from typing import Any, Coroutine, Dict, List, Optional, Tuple, Type, TypeVar
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.mquery_conversion_cache import (
+    cache_key,
+    get_cached_output,
+    save_cached_output,
+)
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
@@ -582,13 +587,13 @@ class MqueryConversionPipelineTool(BaseTool):
                 f"[TOOL CALL] Instance {instance_id} - Executing M-Query extraction for workspace: {workspace_id}"
             )
 
-            # ── Same-day cache check ─────────────────────────────────────────
-            _cache_dataset_key = workspace_id + (
-                "__" + dataset_id if dataset_id else "__all"
-            )
+            # ── Same-day cache check (this group, these settings, verified access)
+            _cache_dataset_key = cache_key(workspace_id, dataset_id, merged_kwargs)
             try:
                 cached_output = run_sync(
-                    self._get_mquery_cache(_cache_dataset_key, workspace_id)
+                    get_cached_output(
+                        _cache_dataset_key, workspace_id, dataset_id, auth_config
+                    )
                 )
                 if cached_output:
                     logger.info(
@@ -618,7 +623,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 # Cache the validation output too
                 try:
                     run_sync(
-                        self._save_mquery_cache(
+                        save_cached_output(
                             _cache_dataset_key,
                             workspace_id,
                             {
@@ -760,7 +765,7 @@ class MqueryConversionPipelineTool(BaseTool):
             # ── Save to same-day cache ───────────────────────────────────────
             try:
                 run_sync(
-                    self._save_mquery_cache(
+                    save_cached_output(
                         _cache_dataset_key,
                         workspace_id,
                         {
@@ -839,38 +844,6 @@ class MqueryConversionPipelineTool(BaseTool):
         except Exception as e:
             logger.error(f"Conversion execution error: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
-
-    # ── Cache helpers ────────────────────────────────────────────────────────
-
-    _CACHE_GROUP = "mquery_conversion"
-
-    async def _get_mquery_cache(
-        self, dataset_key: str, workspace_id: str
-    ) -> Optional[str]:
-        """Return today's cached formatted output, or None on miss."""
-        async with ToolSessionProvider.cache_service() as svc:
-            cached = await svc.get_cached_metadata(
-                group_id=self._CACHE_GROUP,
-                dataset_id=dataset_key,
-                workspace_id=workspace_id,
-                report_id=None,
-            )
-        if cached and "formatted_output" in cached:
-            return str(cached["formatted_output"])
-        return None
-
-    async def _save_mquery_cache(
-        self, dataset_key: str, workspace_id: str, metadata: Dict[str, Any]
-    ) -> None:
-        """Persist the conversion result so same-day reruns are instant."""
-        async with ToolSessionProvider.cache_service() as svc:
-            await svc.save_metadata(
-                group_id=self._CACHE_GROUP,
-                dataset_id=dataset_key,
-                workspace_id=workspace_id,
-                metadata=metadata,
-                report_id=None,
-            )
 
     # ── Durable raw M-Query persistence (conversion_history / Lakebase) ────────
 

@@ -1219,6 +1219,9 @@ class ExecutionHistoryRepository:
         """
         Update the result field for an execution identified by job_id.
 
+        The edits are stored on this run's own row and nowhere else; a reader
+        finds them by the run's job_id and group.
+
         Args:
             job_id: Job ID of the execution
             result_data: New result data to store
@@ -1243,8 +1246,6 @@ class ExecutionHistoryRepository:
                 logger.warning(f"No execution found with job_id: {job_id}")
                 return False
 
-            import json as _json
-
             # Detect the type of result being saved so we use a dedicated
             # checkpoint_data key and never collide with other tools.
             is_ucmv = (
@@ -1254,29 +1255,19 @@ class ExecutionHistoryRepository:
             )
             is_config = isinstance(result_data, dict) and "join_key_map" in result_data
 
-            checkpoint_data = execution.checkpoint_data or {}
+            # A new dict: mutating the loaded one in place does not register as
+            # a change on a JSON column, so a run that already held a checkpoint
+            # record silently kept none of the edits.
+            checkpoint_data = dict(execution.checkpoint_data or {})
 
             if is_ucmv:
                 # UCMV Generator edit: use a dedicated key so Config Generator
                 # saves (which also use edited_config) never overwrite it.
                 checkpoint_data["ucmv_yaml_edits"] = result_data
                 logger.info(
-                    f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}"
+                    "Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: %s",
+                    job_id,
                 )
-                # Also write to /tmp so the Validator subprocess can read the
-                # user's edits (subprocess can't connect to DB in deployed env).
-                try:
-
-                    _tmp_path = "/tmp/ucmv_user_edits.json"
-                    with open(_tmp_path, "w") as _f:
-                        _json.dump(result_data, _f)
-                    logger.info(
-                        f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access"
-                    )
-                except Exception as _tmp_err:
-                    logger.debug(
-                        f"[UCMV] Could not write user edits to /tmp: {_tmp_err}"
-                    )
             elif is_config:
                 # Config Generator edit: keep using edited_config (existing behaviour)
                 checkpoint_data["edited_config"] = result_data

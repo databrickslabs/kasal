@@ -79,34 +79,17 @@ class MetricViewValidatorTool(BaseTool):
         yaml_raw = _get("yaml_content") or "{}"
         measures_raw = _get("measures_json") or "[]"
 
-        # HIGHEST PRIORITY: check /tmp/ucmv_user_edits.json written by the API
-        # when the user saves edits from the UI. This file is accessible to the
-        # subprocess (shared /tmp in the container) unlike the DB.
+        # Edits the user saved on THIS run (Save, or approving its review gate)
+        # win over the run's raw output. Another run's edits are never read.
         try:
-            _user_edits_path = "/tmp/ucmv_user_edits.json"
-            if os.path.exists(_user_edits_path):
-                with open(_user_edits_path) as _f:
-                    _user_edits = json.load(_f)
-                if isinstance(_user_edits, dict) and "yaml" in _user_edits:
-                    logger.info(
-                        f"[Validator] Found user-saved UCMV edits in {_user_edits_path} — using over flow output"
-                    )
-                    ucmv_raw = json.dumps(_user_edits)
-        except Exception as _ue:
-            logger.debug(f"[Validator] Could not read user edits from /tmp: {_ue}")
-
-        # Also check DB for user-saved edits (works locally, fails in deployed env).
-        # Only try DB if the /tmp user-edits file wasn't found.
-        if not os.path.exists("/tmp/ucmv_user_edits.json"):
-            try:
-                saved = self._fetch_saved_ucmv_edits_from_db()
-                if saved and isinstance(saved, dict) and "yaml" in saved:
-                    logger.info(
-                        "[Validator] Found user-saved UCMV edits in DB — using edited YAML instead of flow-passed output"
-                    )
-                    ucmv_raw = json.dumps(saved)
-            except Exception as _e:
-                logger.debug(f"[Validator] Could not check for saved edits: {_e}")
+            saved = self._fetch_saved_ucmv_edits_from_db()
+            if saved and isinstance(saved, dict) and "yaml" in saved:
+                logger.info(
+                    "[Validator] Found this run's saved UCMV edits — using edited YAML instead of flow-passed output"
+                )
+                ucmv_raw = json.dumps(saved)
+        except Exception as _e:
+            logger.debug("[Validator] Could not check for saved edits: %s", _e)
 
         try:
             # If ucmv_output is provided, extract yaml from it
@@ -167,33 +150,6 @@ class MetricViewValidatorTool(BaseTool):
                 logger.info(f"[Validator] Fetched {len(measures)} measures from DB")
             except Exception as db_err:
                 logger.warning(f"[Validator] Measures DB fallback failed: {db_err}")
-
-        # Final fallback: read from /tmp file written by the UCMV Generator tool
-        # (covers the edge case where flow injection into _default_config failed)
-        if not yaml_tables:
-            logger.info(
-                "[Validator] No YAML after DB fallback — checking /tmp for Generator output"
-            )
-            try:
-                import glob as _glob
-
-                _tmp_files = sorted(
-                    _glob.glob("/tmp/ucmv_latest_*.json"),
-                    key=lambda p: os.path.getmtime(p),
-                    reverse=True,
-                )
-                if _tmp_files:
-                    with open(_tmp_files[0]) as _f:
-                        _tmp_data = json.load(_f)
-                    if isinstance(_tmp_data, dict) and "yaml" in _tmp_data:
-                        yaml_tables = _tmp_data["yaml"]
-                        if not ucmv_raw:
-                            ucmv_raw = json.dumps(_tmp_data)
-                        logger.info(
-                            f"[Validator] Loaded UCMV output from {_tmp_files[0]} ({len(yaml_tables)} tables)"
-                        )
-            except Exception as _tmp_err:
-                logger.warning(f"[Validator] /tmp fallback failed: {_tmp_err}")
 
         if not yaml_tables:
             return json.dumps(
@@ -578,38 +534,25 @@ class MetricViewValidatorTool(BaseTool):
         except Exception:
             return []
 
-    @staticmethod
-    def _fetch_saved_ucmv_edits_from_db() -> dict:
-        """
-        Check executionhistory for the most recent UCMV Generator result that has
-        user-saved edits (stored in checkpoint_data.edited_config or result field).
+    def _fetch_saved_ucmv_edits_from_db(self) -> dict:
+        """The UCMV edits a user saved on THIS run, or an empty dict.
 
-        Returns the edited UCMV result dict if found, otherwise empty dict.
-        Scoped to the run's workspace (audit V3-1).
+        Read from the run's own row (``checkpoint_data.ucmv_yaml_edits``, written
+        by the result Save and by approving the run's review gate), found by the
+        run's job id and only if that run is in the run's own group. A run with
+        no job id or no group context reads nothing.
         """
         from src.services.tools.tool_session_provider import ToolSessionProvider
 
+        job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
         group_ids = ToolSessionProvider.run_group_ids()
+        if not job_id or not group_ids:
+            return {}
 
         async def _query() -> dict:
-            # Look for the dedicated UCMV yaml edits key written by the save button
-            # in the UI (separate from Config Generator's edited_config to avoid
-            # collisions in a multi-step flow).
             async with ToolSessionProvider.execution_history_service() as history:
-                cp = await history.latest_checkpoint_containing(
-                    "ucmv_yaml_edits", group_ids=group_ids
-                )
-                if cp:
-                    try:
-                        edits = cp.get("ucmv_yaml_edits", {})
-                        if isinstance(edits, dict) and "yaml" in edits:
-                            logger.info(
-                                "[Validator] Using user-edited UCMV YAML from checkpoint_data.ucmv_yaml_edits"
-                            )
-                            return edits
-                    except Exception:
-                        pass
-                return {}
+                edits = await history.saved_ucmv_edits(job_id, group_ids=group_ids)
+            return edits if isinstance(edits, dict) and "yaml" in edits else {}
 
         from src.services.tools.async_bridge import run_sync_with_context
         from src.utils.asyncio_utils import create_and_run_loop
