@@ -80,89 +80,23 @@ class TestDatabaseBackupRepositoryInit:
 
 
 class TestDatabaseBackupRepositoryGetDatabaseType:
-    """Test DatabaseBackupRepository get_database_type static method"""
+    """get_database_type is static and asks the SESSION, never settings."""
 
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_sqlite(self, mock_settings):
-        """Test get_database_type returns 'sqlite' for SQLite database"""
-        mock_settings.DATABASE_URI = "sqlite:///test.db"
+    @pytest.mark.parametrize(
+        "dialect,expected",
+        [("sqlite", "sqlite"), ("postgresql", "postgres"), ("mysql", "unknown")],
+    )
+    def test_maps_the_sessions_dialect(self, dialect, expected):
+        session = Mock()
+        session.get_bind.return_value.dialect.name = dialect
 
-        result = DatabaseBackupRepository.get_database_type()
+        assert DatabaseBackupRepository.get_database_type(session) == expected
 
-        assert result == "sqlite"
+    def test_a_session_that_cannot_bind_is_unknown(self):
+        session = Mock()
+        session.get_bind.side_effect = RuntimeError("unbound")
 
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_sqlite_uppercase(self, mock_settings):
-        """Test get_database_type returns 'sqlite' for SQLite database with uppercase"""
-        mock_settings.DATABASE_URI = "SQLITE:///test.db"
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "sqlite"
-
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_postgres(self, mock_settings):
-        """Test get_database_type returns 'postgres' for PostgreSQL database"""
-        mock_settings.DATABASE_URI = "postgresql://user" ":pass@localhost/db"
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "postgres"
-
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_postgres_short(self, mock_settings):
-        """Test get_database_type returns 'postgres' for postgres:// URI"""
-        mock_settings.DATABASE_URI = "postgres://user" ":pass@localhost/db"
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "postgres"
-
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_postgres_uppercase(self, mock_settings):
-        """Test get_database_type returns 'postgres' for uppercase PostgreSQL"""
-        mock_settings.DATABASE_URI = "POSTGRESQL://user" ":pass@localhost/db"
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "postgres"
-
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_unknown(self, mock_settings):
-        """Test get_database_type returns 'unknown' for unrecognized database"""
-        mock_settings.DATABASE_URI = "mysql://user:pass@localhost/db"
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "unknown"
-
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_empty_uri(self, mock_settings):
-        """Test get_database_type returns 'unknown' for empty URI"""
-        mock_settings.DATABASE_URI = ""
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "unknown"
-
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_get_database_type_none_uri(self, mock_settings):
-        """Test get_database_type handles None URI"""
-        mock_settings.DATABASE_URI = None
-
-        result = DatabaseBackupRepository.get_database_type()
-
-        assert result == "unknown"
-
-    def test_get_database_type_is_static(self):
-        """Test get_database_type is a static method"""
-        # Should be callable without instance
-        with patch(
-            "src.repositories.database_backup_repository.settings"
-        ) as mock_settings:
-            mock_settings.DATABASE_URI = "sqlite:///test.db"
-            result = DatabaseBackupRepository.get_database_type()
-            assert result == "sqlite"
+        assert DatabaseBackupRepository.get_database_type(session) == "unknown"
 
 
 class TestDatabaseBackupRepositoryAttributes:
@@ -275,11 +209,9 @@ class TestDatabaseBackupRepositoryConstants:
         from src.repositories.database_backup_repository import (
             DatabricksVolumeRepository,
             LoggerManager,
-            settings,
         )
 
         assert LoggerManager is not None
-        assert settings is not None
         assert DatabricksVolumeRepository is not None
 
 

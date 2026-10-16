@@ -81,31 +81,44 @@ class TestValidateIdentifier:
 # ---------------------------------------------------------------------------
 
 
+def _bound_to(dialect: str) -> MagicMock:
+    session = MagicMock()
+    session.get_bind.return_value.dialect.name = dialect
+    return session
+
+
 class TestGetDatabaseType:
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_sqlite(self, mock_settings):
-        mock_settings.DATABASE_URI = "sqlite:///app.db"
-        assert DatabaseBackupRepository.get_database_type() == "sqlite"
+    """Read from the SESSION's dialect: settings name the boot file in Apps."""
 
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_postgresql(self, mock_settings):
-        mock_settings.DATABASE_URI = "postgresql://u" ":p@host/db"
-        assert DatabaseBackupRepository.get_database_type() == "postgres"
+    def test_sqlite(self):
+        assert (
+            DatabaseBackupRepository.get_database_type(_bound_to("sqlite")) == "sqlite"
+        )
 
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_postgres_short(self, mock_settings):
-        mock_settings.DATABASE_URI = "postgres://u" ":p@host/db"
-        assert DatabaseBackupRepository.get_database_type() == "postgres"
+    def test_postgresql(self):
+        assert (
+            DatabaseBackupRepository.get_database_type(_bound_to("postgresql"))
+            == "postgres"
+        )
 
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_unknown(self, mock_settings):
-        mock_settings.DATABASE_URI = "mysql://u:p@host/db"
-        assert DatabaseBackupRepository.get_database_type() == "unknown"
+    def test_unknown(self):
+        assert (
+            DatabaseBackupRepository.get_database_type(_bound_to("mysql")) == "unknown"
+        )
 
-    @patch("src.repositories.database_backup_repository.settings")
-    def test_none_uri_returns_unknown(self, mock_settings):
-        mock_settings.DATABASE_URI = None
-        assert DatabaseBackupRepository.get_database_type() == "unknown"
+    def test_a_session_without_a_bind_is_unknown(self):
+        session = MagicMock()
+        session.get_bind.side_effect = Exception("no bind")
+        assert DatabaseBackupRepository.get_database_type(session) == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_current_schema_is_asked_of_the_session(self):
+        session = MagicMock()
+        session.execute = AsyncMock(return_value=MagicMock(scalar=lambda: "kasal"))
+        repo = DatabaseBackupRepository.__new__(DatabaseBackupRepository)
+        repo.session = session
+        assert await repo.get_current_schema() == "kasal"
+        assert "current_schema()" in str(session.execute.await_args.args[0])
 
 
 # ---------------------------------------------------------------------------

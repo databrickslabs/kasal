@@ -51,6 +51,10 @@ from src.repositories.database_config_repository import (  # noqa: E402
 from src.services.databricks.lakebase.connection import (  # noqa: E402
     LakebaseConnectionService,
 )
+from src.services.databricks.lakebase.installation_guard import (  # noqa: E402
+    MIGRATION_REFUSED,
+    refuse_when_installation_managed,
+)
 from src.services.databricks.lakebase.migration import (  # noqa: E402
     LakebaseMigrationService,
     _validate_identifier,
@@ -321,13 +325,7 @@ class LakebaseService(BaseService):
         Returns:
             Saved configuration or empty dict if deleted
         """
-        from src.core.databricks_app import LakebaseAppResource
-        from src.core.exceptions import BadRequestError
-
-        if LakebaseAppResource.from_env():
-            raise BadRequestError(
-                "Lakebase is managed through the Databricks App installation resources"
-            )
+        refuse_when_installation_managed()
         try:
             # If Lakebase is being disabled, delete the configuration
             if not config.get("enabled", False):
@@ -659,6 +657,7 @@ class LakebaseService(BaseService):
         Returns:
             Migration result
         """
+        refuse_when_installation_managed(MIGRATION_REFUSED)
         try:
             # Check if Lakebase is available
             if not LAKEBASE_AVAILABLE:
@@ -761,14 +760,12 @@ class LakebaseService(BaseService):
                 from src.db.session import run_schema_self_heal
 
                 async with lakebase_engine.begin() as heal_conn:
-                    await run_schema_self_heal(heal_conn)
+                    await run_schema_self_heal(heal_conn, record=False)
             except Exception as heal_error:
                 logger.warning(f"Column reconcile skipped: {heal_error}")
 
             logger.info("-" * 60)
             logger.info("📤 Starting data migration...")
-
-            # Import json for serialization (datetime already imported at top)
 
             # Initialize migration service with engines
             self.migration_service = LakebaseMigrationService(
@@ -899,14 +896,13 @@ class LakebaseService(BaseService):
             recreate_schema: Whether to drop and recreate the schema
             migrate_data: Whether to migrate data (False = schema only)
 
-        Args:
-            instance_name: Lakebase instance name
-            endpoint: Lakebase endpoint
-            recreate_schema: If True, drop and recreate kasal schema before migration
-
         Yields:
             Dict with event type and progress information
+
+        Raises:
+            BadRequestError: the installation binds the database (never drops it)
         """
+        refuse_when_installation_managed(MIGRATION_REFUSED)
         try:
             # Check if Lakebase is available
             if not LAKEBASE_AVAILABLE:
@@ -1041,22 +1037,17 @@ class LakebaseService(BaseService):
                     "type": "progress",
                     "message": "🗑️ Dropping existing kasal schema...",
                 }
-                try:
-                    with lakebase_engine.begin() as conn:
-                        conn.execute(
-                            text(f'ALTER SCHEMA kasal OWNER TO "{user_email}"')
-                        )
-                except Exception:
-                    pass  # Schema may not exist yet — that's fine
-                try:
-                    with lakebase_engine.begin() as conn:
-                        conn.execute(text("DROP SCHEMA IF EXISTS kasal CASCADE"))
-                    yield {"type": "success", "message": "✅ Dropped kasal schema"}
-                except Exception as drop_error:
-                    yield {
+                drop_error = self.schema_service.drop_schema_sync(
+                    lakebase_engine, user_email
+                )
+                yield (
+                    {"type": "success", "message": "✅ Dropped kasal schema"}
+                    if drop_error is None
+                    else {
                         "type": "warning",
                         "message": f"Could not drop schema: {drop_error}. Continuing...",
                     }
+                )
 
             # Create schema using schema service
             with lakebase_engine.begin() as conn:
@@ -1104,7 +1095,7 @@ class LakebaseService(BaseService):
                 )
                 try:
                     async with lakebase_heal_engine.begin() as heal_conn:
-                        await run_schema_self_heal(heal_conn)
+                        await run_schema_self_heal(heal_conn, record=False)
                 finally:
                     await lakebase_heal_engine.dispose()
                 yield {"type": "success", "message": "✅ Columns up to date"}
@@ -1984,10 +1975,10 @@ class LakebaseService(BaseService):
 
                     async with lakebase_engine.begin() as conn:
                         await self.schema_service.set_search_path_async(conn)
-                        await run_schema_self_heal(conn)
-                    result["schema_reconcile"] = "reconciled"
+                        gaps = await run_schema_self_heal(conn)
+                    result["schema_reconcile"] = "partial" if gaps else "reconciled"
                     logger.info(
-                        "Lakebase columns reconciled on connect (no restart needed)"
+                        "Lakebase columns reconciled on connect (%d gap(s))", len(gaps)
                     )
                 finally:
                     await lakebase_engine.dispose()
@@ -2038,20 +2029,17 @@ class LakebaseService(BaseService):
                         f"column reconcile: {exc}"
                     )
 
-                # create_tables_async is CREATE TABLE IF NOT EXISTS — it adds
-                # missing TABLES and nothing else. A table that already exists is
-                # left exactly as-is, including its column list, so a column added
-                # to a model after the instance was provisioned never lands here.
-                # That is not a hypothetical: modelconfig.thinking_budget_tokens
-                # was missing on a live Lakebase and 500'd every model-catalogue
-                # read while this path reported "schema expanded". The self-heal is
-                # the piece that reconciles COLUMNS (ADD COLUMN IF NOT EXISTS).
+                # create_tables_async is CREATE TABLE IF NOT EXISTS: an existing
+                # table keeps its column list, so a column added to a model later
+                # never lands here (modelconfig.thinking_budget_tokens was missing on
+                # a live Lakebase and 500'd every model-catalogue read while this
+                # path said "schema expanded"). The self-heal reconciles COLUMNS.
                 from src.db.session import run_schema_self_heal
 
                 async with lakebase_engine.begin() as conn:
-                    await run_schema_self_heal(conn)
+                    gaps = await run_schema_self_heal(conn)
 
-                if table_error is None:
+                if table_error is None and not gaps:
                     logger.info(
                         "Lakebase schema expanded on enable (missing tables AND "
                         "columns created non-destructively)"
@@ -2059,8 +2047,10 @@ class LakebaseService(BaseService):
                 else:
                     reconcile_status = "partial"
                     logger.warning(
-                        "Lakebase columns reconciled, but some tables could not be "
-                        f"created: {table_error}"
+                        "Lakebase schema partly reconciled: table error %s, "
+                        "%d self-heal gap(s)",
+                        table_error,
+                        len(gaps),
                     )
             finally:
                 await lakebase_engine.dispose()

@@ -37,13 +37,53 @@ from src.db.self_heal.vectors import (
 )
 
 
-def _conn(dialect: str = "postgresql", pgvector: bool = True) -> MagicMock:
+class _Catalogue:
+    """Just enough of PostgreSQL's catalogue for the vector step to read.
+
+    ``fail(sql)`` returns an exception to raise for a statement, or None.
+    """
+
+    def __init__(self, pgvector=True, embedding=False, indexed=False, fail=None):
+        tables = _vector_embedding_tables()
+        self.columns = {
+            t: {"id"} | ({"embedding"} if embedding else set()) for t in tables
+        }
+        self.indexes = {f"idx_{t}_embedding" for t in tables} if indexed else set()
+        self.pgvector = pgvector
+        self.fail = fail or (lambda sql: None)
+
+    async def execute(self, sql, *args, **kwargs):
+        error = self.fail(sql)
+        if error is not None:
+            raise error
+        result = MagicMock()
+        if "pg_extension" in sql:
+            result.fetchone.return_value = ("public",) if self.pgvector else None
+        elif "pg_attribute" in sql:
+            table = sql.split("to_regclass('")[1].split("'")[0]
+            result.fetchall.return_value = [(c,) for c in self.columns.get(table, ())]
+        elif "pg_index" in sql:
+            name = sql.split("i.relname = '")[1].split("'")[0]
+            result.fetchone.return_value = (1,) if name in self.indexes else None
+        elif sql.startswith("ALTER TABLE"):
+            self.columns[sql.split()[2]].add("embedding")
+        elif sql.startswith("CREATE INDEX"):
+            self.indexes.add(sql.split()[5])
+        return result
+
+
+def _ddl_fails(sql):
+    """A table another role owns: every ALTER / CREATE is refused."""
+    if sql.startswith(("ALTER", "CREATE")):
+        return Exception("must be owner of table")
+    return None
+
+
+def _conn(dialect: str = "postgresql", pgvector: bool = True, **catalogue) -> MagicMock:
     conn = MagicMock()
     conn.engine.dialect.name = dialect
-    probe = MagicMock()
-    probe.fetchone = MagicMock(return_value=("public",) if pgvector else None)
     conn.exec_driver_sql = AsyncMock(
-        side_effect=[probe] + [MagicMock() for _ in range(12)]
+        side_effect=_Catalogue(pgvector=pgvector, **catalogue).execute
     )
     savepoint = AsyncMock()
     savepoint.__aenter__ = AsyncMock(return_value=savepoint)
@@ -116,17 +156,43 @@ class TestWithPgvectorAvailable:
         assert conn.begin_nested.call_count >= 2 * len(_vector_embedding_tables())
 
     async def test_one_failing_table_does_not_stop_the_other(self):
-        conn = _conn()
-        probe = MagicMock()
-        probe.fetchone = MagicMock(return_value=("public",))
-        # First ALTER blows up; everything after must still be attempted.
-        conn.exec_driver_sql = AsyncMock(
-            side_effect=[probe, Exception("must be owner")]
-            + [MagicMock() for _ in range(8)]
+        # The first table's ALTER blows up; everything after must still be attempted.
+        conn = _conn(
+            fail=lambda sql: (
+                Exception("must be owner")
+                if sql.startswith("ALTER TABLE documentation_embeddings")
+                else None
+            )
         )
         await _ensure_pgvector_embedding_columns(conn)
-        sql = " ".join(str(c.args[0]) for c in conn.exec_driver_sql.await_args_list)
-        assert "knowledge_embeddings" in sql
+        sql = " ".join(_statements(conn))
+        assert "ALTER TABLE knowledge_embeddings ADD COLUMN" in sql
+
+    async def test_a_table_another_role_owns_gets_no_ddl_when_nothing_is_missing(
+        self,
+    ):
+        """PostgreSQL checks ownership before existence: ADD COLUMN IF NOT EXISTS
+        and CREATE INDEX IF NOT EXISTS fail on such a table even when the column
+        and index are there. Read the catalogue first, so a healthy install with
+        a re-created app (or a DBA-owned schema) records no gap on every boot."""
+        from src.db.self_heal import report
+
+        conn = _conn(embedding=True, indexed=True, fail=_ddl_fails)
+        with report.heal_pass(conn, record=False) as gaps:
+            await _ensure_pgvector_embedding_columns(conn)
+
+        assert gaps == []
+        assert not any(s.startswith(("ALTER", "CREATE")) for s in _statements(conn))
+
+    async def test_a_missing_table_is_left_to_create_all(self):
+        """No ALTER on a table that is not there yet, so no gap for it."""
+        conn = _conn()
+        catalogue = conn.exec_driver_sql.side_effect.__self__
+        catalogue.columns["workflow_recipes"] = set()
+        await _ensure_pgvector_embedding_columns(conn)
+        assert not any(
+            "workflow_recipes" in s and "ALTER" in s for s in _statements(conn)
+        )
 
 
 @pytest.mark.asyncio
@@ -145,10 +211,14 @@ class TestWithoutPgvector:
         assert len(statements) == 1  # just the pg_extension probe
         assert "pg_extension" in statements[0]
 
-    async def test_a_probe_failure_is_not_fatal(self):
+    async def test_a_probe_failure_reaches_the_steps_savepoint(self):
+        """Not swallowed: on PostgreSQL a failed probe aborts the transaction,
+        so it must reach the runner's SAVEPOINT to be rolled back. The runner
+        then records it and carries on (it is not fatal to startup)."""
         conn = _conn()
         conn.exec_driver_sql = AsyncMock(side_effect=Exception("connection reset"))
-        await _ensure_pgvector_embedding_columns(conn)  # must not raise
+        with pytest.raises(Exception, match="connection reset"):
+            await _ensure_pgvector_embedding_columns(conn)
 
 
 @pytest.mark.asyncio
@@ -166,13 +236,16 @@ class TestSqlite:
 
 class TestItRunsOnEveryStartup:
     def test_the_self_heal_calls_it(self):
-        """Otherwise the column only ever appears on a freshly created table."""
+        """Otherwise the column only ever appears on a freshly created table.
+
+        It is its own step in the pass, so a documentation_embeddings this role
+        cannot ALTER no longer skips it."""
         import inspect
 
-        import src.db.self_heal.columns as columns_module
+        import src.db.self_heal.runner as runner_module
 
-        source = inspect.getsource(columns_module)
-        assert "_ensure_pgvector_embedding_columns(conn)" in source
+        source = inspect.getsource(runner_module.run_schema_self_heal)
+        assert "_ensure_pgvector_embedding_columns," in source
 
 
 @pytest.mark.asyncio
@@ -193,12 +266,7 @@ class TestTheLogTellsTheTruth:
         assert any("Ensured pgvector embedding columns" in m for m in messages)
 
     async def test_a_failure_is_reported_as_incomplete(self):
-        conn = _conn()
-        probe = MagicMock()
-        probe.fetchone = MagicMock(return_value=("public",))
-        conn.exec_driver_sql = AsyncMock(
-            side_effect=[probe] + [Exception("must be owner")] * 8
-        )
+        conn = _conn(fail=_ddl_fails)
         with patch("src.db.self_heal.vectors.logger") as mock_logger:
             await _ensure_pgvector_embedding_columns(conn)
 

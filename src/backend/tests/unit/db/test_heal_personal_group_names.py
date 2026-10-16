@@ -55,11 +55,19 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_heal_noop_when_table_missing():
-    """Fresh DB (create_all not yet run): the heal must swallow the error."""
+async def test_a_missing_table_is_isolated_by_the_pass_not_swallowed():
+    """Fresh DB (create_all not yet run): the step raises so its SAVEPOINT rolls
+    back, and the pass records the gap and carries on without raising."""
+    from src.db.self_heal.runner import _run_self_heal_step
+
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            await heal._heal_personal_group_names(conn)  # must not raise
+            with pytest.raises(Exception, match="groups"):
+                await heal._heal_personal_group_names(conn)
+            assert (
+                await _run_self_heal_step(conn, heal._heal_personal_group_names)
+                is False
+            )
     finally:
         await engine.dispose()

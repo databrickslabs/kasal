@@ -339,3 +339,91 @@ class TestDbHealthEndpoint:
         result = await db_health()
 
         assert "last_successful_connection" not in result
+
+
+# ---------------------------------------------------------------------------
+# /health/db — schema self-heal gaps
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _a_clean_heal_report(monkeypatch):
+    """The self-heal report is process-wide: never inherit one from another test.
+    Start from a clean, finished pass, as after a healthy startup."""
+    from src.db.self_heal import report
+
+    clean = report.HealReport("sqlite", datetime.now(timezone.utc), (), True)
+    monkeypatch.setattr(report, "_last_reports", {"sqlite:///app": clean})
+
+
+class TestDbHealthReportsSchemaGaps:
+    """A step the startup self-heal could not apply is visible, not fatal."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
+    @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
+    async def test_a_gap_degrades_the_status_and_names_the_step(self, *_mocks):
+        from src.db.self_heal import report
+
+        conn = MagicMock()
+        conn.engine.dialect.name = "postgresql"
+        with report.heal_pass(conn):
+            report.record_gap("_ensure_agent_columns", RuntimeError("must be owner"))
+
+        result = await db_health()
+
+        assert result["status"] == "degraded"
+        assert result["schema_heal"] == {
+            "status": "incomplete",
+            "failed_steps": ["_ensure_agent_columns"],
+            "databases": ["postgresql", "sqlite"],
+        }
+        # Names only: the cause (which may name tables and roles) stays in the log.
+        assert "must be owner" not in str(result)
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
+    @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
+    async def test_a_clean_pass_is_ok(self, *_mocks):
+        result = await db_health()
+
+        assert result["status"] == "ok"
+        assert result["schema_heal"]["status"] == "ok"
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
+    @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
+    @pytest.mark.parametrize("aborted", [False, True])
+    async def test_a_skipped_or_aborted_heal_is_not_run_not_ok(
+        self, _last, _activated, _enabled, aborted, monkeypatch
+    ):
+        """No pass at all, or one that stopped on an exception, verified nothing."""
+        from src.db.self_heal import report
+
+        monkeypatch.setattr(report, "_last_reports", {})
+        if aborted:
+            conn = MagicMock()
+            conn.engine.dialect.name = "postgresql"
+            with pytest.raises(RuntimeError):
+                with report.heal_pass(conn):
+                    raise RuntimeError("connection reset")
+
+        result = await db_health()
+
+        assert result["schema_heal"]["status"] == "not_run"
+        assert result["status"] == "degraded"

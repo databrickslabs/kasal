@@ -74,7 +74,7 @@ class TestEnableWithExpandSchema:
         svc.connection_service.create_lakebase_engine_async = AsyncMock(
             return_value=engine
         )
-        heal = AsyncMock()
+        heal = AsyncMock(return_value=())
         with patch("src.db.session.run_schema_self_heal", heal):
             result = await svc.enable_lakebase(
                 "inst", "h.example.com", expand_schema=True
@@ -103,7 +103,7 @@ class TestEnableWithExpandSchema:
         svc.schema_service.create_tables_async = AsyncMock(
             side_effect=Exception('type "vector" does not exist')
         )
-        heal = AsyncMock()
+        heal = AsyncMock(return_value=())
         with patch("src.db.session.run_schema_self_heal", heal):
             result = await svc.enable_lakebase(
                 "inst", "h.example.com", expand_schema=True
@@ -123,7 +123,7 @@ class TestEnableWithExpandSchema:
         svc.connection_service.create_lakebase_engine_async = AsyncMock(
             return_value=engine
         )
-        heal = AsyncMock(return_value=True)
+        heal = AsyncMock(return_value=())
         with patch("src.db.session.run_schema_self_heal", heal):
             result = await svc.enable_lakebase("inst", "h.example.com")
         assert result["schema_reconcile"] == "reconciled"
@@ -155,7 +155,7 @@ class TestEnableWithExpandSchema:
         svc.connection_service.create_lakebase_engine_async = AsyncMock(
             return_value=engine
         )
-        with patch("src.db.session.run_schema_self_heal", AsyncMock()):
+        with patch("src.db.session.run_schema_self_heal", AsyncMock(return_value=())):
             await svc.enable_lakebase("inst", "h.example.com", expand_schema=True)
         engine.dispose.assert_awaited()
 
@@ -176,7 +176,7 @@ class TestEnableWithExpandSchema:
         svc.schema_service.create_tables_async = AsyncMock(
             side_effect=Exception('type "vector" does not exist')
         )
-        with patch("src.db.session.run_schema_self_heal", AsyncMock()):
+        with patch("src.db.session.run_schema_self_heal", AsyncMock(return_value=())):
             result = await svc.enable_lakebase(
                 "inst", "h.example.com", expand_schema=True
             )
@@ -201,13 +201,33 @@ class TestEnableWithExpandSchema:
         svc.connection_service.create_lakebase_engine_async = AsyncMock(
             return_value=engine
         )
-        with patch("src.db.session.run_schema_self_heal", AsyncMock()):
+        with patch("src.db.session.run_schema_self_heal", AsyncMock(return_value=())):
             result = await svc.enable_lakebase(
                 "inst", "h.example.com", expand_schema=True
             )
 
         assert result["schema_reconcile"] == "reconciled"
         assert "expanded" in result["message"]
+
+    @pytest.mark.parametrize("expand", [True, False])
+    async def test_a_self_heal_gap_is_partial_not_reconciled(self, expand):
+        """A step the heal could not apply is a gap, whichever way we connect."""
+        from src.db.self_heal.report import HealGap
+
+        svc = _make_service()
+        engine, _ = _engine_stub()
+        svc.connection_service.create_lakebase_engine_async = AsyncMock(
+            return_value=engine
+        )
+        gap = HealGap(step="_ensure_agent_columns", error="must be owner")
+        with patch(
+            "src.db.session.run_schema_self_heal", AsyncMock(return_value=(gap,))
+        ):
+            result = await svc.enable_lakebase(
+                "inst", "h.example.com", expand_schema=expand
+            )
+
+        assert result["schema_reconcile"] == "partial"
 
 
 @pytest.mark.asyncio
@@ -253,7 +273,7 @@ class TestMigrateStreamReconcilesColumns:
         svc = _make_service()
         self._wire_stream(svc)
         engine, conn = _engine_stub()
-        heal = AsyncMock()
+        heal = AsyncMock(return_value=())
         with (
             patch("src.db.session.run_schema_self_heal", heal),
             patch(

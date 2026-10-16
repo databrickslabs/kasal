@@ -27,6 +27,8 @@ Provisioned resource's type when upgrading it.
 The selected database and branch are used as supplied. Kasal does not guess a
 production branch or create a replacement SQLite database if Lakebase fails.
 Existing data is not automatically migrated when changing the assigned database.
+To upgrade an app installed at v1.3.0, see
+[Upgrading from v1.3.0](./upgrading-from-v1-3-0.md).
 
 ## Startup and fresh databases
 

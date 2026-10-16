@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
 
@@ -54,20 +53,31 @@ class DatabaseBackupRepository:
         return name
 
     @staticmethod
-    def get_database_type() -> str:
-        """
-        Determine the database type from settings.
+    def dialect_name(session: AsyncSession) -> str:
+        """The SQLAlchemy dialect ``session`` is bound to; '' when it has none."""
+        try:
+            name = session.get_bind().dialect.name
+        except Exception:  # noqa: BLE001 — no usable bind: say so, never guess
+            return ""
+        return name if isinstance(name, str) else ""
 
-        Returns:
-            Database type ('sqlite' or 'postgres')
+    @staticmethod
+    def get_database_type(session: AsyncSession) -> str:
+        """'sqlite', 'postgres' or 'unknown': the database ``session`` talks to.
+
+        Asked of the session, never of ``settings.DATABASE_URI``. Inside
+        Databricks Apps that URI names the boot SQLite file while every request
+        runs on Lakebase, so reading it made export, import and housekeeping act
+        on a file no request uses.
         """
-        db_uri = str(settings.DATABASE_URI)
-        if "sqlite" in db_uri.lower():
-            return "sqlite"
-        elif "postgresql" in db_uri.lower() or "postgres" in db_uri.lower():
-            return "postgres"
-        else:
-            return "unknown"
+        name = DatabaseBackupRepository.dialect_name(session)
+        return {"sqlite": "sqlite", "postgresql": "postgres"}.get(name, "unknown")
+
+    async def get_current_schema(self, session: Optional[AsyncSession] = None) -> str:
+        """The schema unqualified table names resolve to on a PostgreSQL session."""
+        db_session = session if session else self.session
+        result = await db_session.execute(text("SELECT current_schema()"))
+        return str(result.scalar() or "")
 
     async def create_sqlite_backup(
         self,
@@ -1104,7 +1114,7 @@ class DatabaseBackupRepository:
         """
         try:
             # Determine database type based on parameters
-            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > check settings
+            # Priority: explicit db_path (SQLite) > explicit session (PostgreSQL/Lakebase) > own session
             logger.debug(
                 f"[DB INFO] get_database_info called with db_path={db_path}, session={session is not None}"
             )
@@ -1122,9 +1132,9 @@ class DatabaseBackupRepository:
                     "[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)"
                 )
             else:
-                # No explicit parameters - check settings
-                db_type = self.get_database_type()
-                logger.debug(f"[DB INFO] Using database type from settings: {db_type}")
+                # No explicit parameters - ask this repository's own session
+                db_type = self.get_database_type(self.session)
+                logger.debug(f"[DB INFO] Using database type of the session: {db_type}")
 
             # Use provided session or stored session for PostgreSQL/Lakebase
             db_session = session if session else self.session

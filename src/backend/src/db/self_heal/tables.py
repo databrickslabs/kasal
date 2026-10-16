@@ -15,25 +15,40 @@ import logging
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from src.db.self_heal.dialect import _conn_is_sqlite
+from src.db.self_heal.dialect import _conn_is_sqlite, _index_exists
+from src.db.self_heal.report import run_isolated
 
 logger = logging.getLogger(__name__)
 
 
 async def ensure_table(conn: AsyncConnection, module: str, *models: str) -> None:
-    """checkfirst-create the tables of ``models`` (class names in ``module``)."""
-    try:
-        mod = importlib.import_module(module)
-        tables = [getattr(mod, name).__table__ for name in models]
+    """checkfirst-create the tables of ``models`` (class names in ``module``).
 
-        def _create(sync_conn: Connection) -> None:
-            for table in tables:
-                table.create(sync_conn, checkfirst=True)
+    A failure RAISES into the step's SAVEPOINT (see ``self_heal/report.py``).
+    """
+    mod = importlib.import_module(module)
+    tables = [getattr(mod, name).__table__ for name in models]
 
-        await conn.run_sync(_create)
-        logger.info(f"Ensured {', '.join(t.name for t in tables)} table(s) exist")
-    except Exception as e:
-        logger.warning(f"Could not ensure {', '.join(models)} table(s): {e}")
+    def _create(sync_conn: Connection) -> None:
+        for table in tables:
+            table.create(sync_conn, checkfirst=True)
+
+    await conn.run_sync(_create)
+    logger.info(f"Ensured {', '.join(t.name for t in tables)} table(s) exist")
+
+
+async def ensure_index(conn: AsyncConnection, table: str, name: str, ddl: str) -> None:
+    """Run ``ddl`` (a CREATE INDEX on ``table``) unless ``table`` has index ``name``.
+
+    Reads the catalogue first for the same reason ``ensure_columns`` does: on
+    PostgreSQL ``CREATE INDEX IF NOT EXISTS`` checks table ownership before it
+    checks existence, so on a table another role owns it fails even when the
+    index is there. A failure RAISES into the caller's SAVEPOINT.
+    """
+    if await _index_exists(conn, table, name):
+        return
+    await conn.exec_driver_sql(ddl)
+    logger.info("Created index %s", name)
 
 
 async def _ensure_chat_sessions_table(conn: AsyncConnection) -> None:
@@ -130,27 +145,34 @@ async def _ensure_hot_polling_indexes(conn: AsyncConnection) -> None:
     poll: executionhistory (list: group_id + ORDER BY created_at DESC; trace
     broadcaster: status IN ('RUNNING', ...) every second) and execution_trace
     (run-scoped reads/deletes on run_id, ordered reads on created_at).
-    CREATE INDEX IF NOT EXISTS is valid on both SQLite and PostgreSQL."""
-    statements = (
-        "CREATE INDEX IF NOT EXISTS idx_executionhistory_group_created "
-        "ON executionhistory (group_id, created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_executionhistory_status "
-        "ON executionhistory (status)",
-        "CREATE INDEX IF NOT EXISTS ix_executionhistory_created_at "
-        "ON executionhistory (created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_execution_trace_run_id "
-        "ON execution_trace (run_id)",
-        "CREATE INDEX IF NOT EXISTS ix_execution_trace_created_at "
-        "ON execution_trace (created_at)",
+    CREATE INDEX IF NOT EXISTS is valid on both SQLite and PostgreSQL.
+
+    Each index has its own SAVEPOINT, so one that cannot be built (a table
+    another role owns) neither aborts the pass nor stops the others."""
+    indexes = (
+        (
+            "idx_executionhistory_group_created",
+            "executionhistory",
+            "group_id, created_at",
+        ),
+        ("ix_executionhistory_status", "executionhistory", "status"),
+        ("ix_executionhistory_created_at", "executionhistory", "created_at"),
+        ("ix_execution_trace_run_id", "execution_trace", "run_id"),
+        ("ix_execution_trace_created_at", "execution_trace", "created_at"),
     )
-    for stmt in statements:
-        try:
-            await conn.exec_driver_sql(stmt)
-        except Exception as e:
-            logger.warning(
-                f"Could not ensure polling index ({stmt.split(' ON ', 1)[0]}): {e}"
-            )
-    logger.info("Ensured hot-polling indexes on executionhistory/execution_trace")
+    applied = True
+    for name, table, columns in indexes:
+        ddl = f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
+
+        async def _create(
+            c: AsyncConnection, table: str = table, name: str = name, ddl: str = ddl
+        ) -> None:
+            await ensure_index(c, table, name, ddl)
+
+        step = f"_ensure_hot_polling_indexes.{name}"
+        applied = await run_isolated(conn, step, _create) and applied
+    if applied:
+        logger.info("Ensured hot-polling indexes on executionhistory/execution_trace")
 
 
 async def _ensure_decision_config_table(conn: AsyncConnection) -> None:

@@ -28,6 +28,10 @@ from fastapi.responses import (  # noqa: E402 - import follows module initializa
     JSONResponse,
 )
 from sqlalchemy import text  # noqa: E402 - import follows module initialization
+from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
+    AsyncSession,
+    async_sessionmaker,
+)
 from starlette.types import ASGIApp, Receive, Scope, Send  # noqa: E402
 
 from src.api import api_router  # noqa: E402 - import follows module initialization
@@ -113,6 +117,37 @@ async def _on_database_ready(system_logger: logging.Logger) -> None:
             system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
     except Exception as e:
         system_logger.error(f"Error cleaning up stale jobs: {e}")
+
+
+async def _heal_activated_lakebase(
+    session_factory: async_sessionmaker[AsyncSession], system_logger: logging.Logger
+) -> None:
+    """Self-heal the ACTIVE Lakebase schema. Best-effort.
+
+    init_db() already ran the same pass, but against the local/default engine
+    BEFORE the hot-swap — so it never touched the Lakebase. Re-running it here
+    (create-missing-tables + add-missing-columns, all idempotent and
+    NON-DESTRUCTIVE) is the only path that heals a customer's PRE-EXISTING
+    Lakebase, e.g. adding powerbi_extraction without the destructive DROP SCHEMA
+    the migrate UI would do. "complete" is logged only when every step applied.
+    """
+    try:
+        from src.db.session import run_schema_self_heal
+
+        async with session_factory() as heal_session:
+            gaps = await run_schema_self_heal(await heal_session.connection())
+            await heal_session.commit()
+    except Exception as heal_err:
+        system_logger.warning(f"Lakebase schema self-heal skipped: {heal_err}")
+        return
+    if gaps:
+        system_logger.warning(
+            "Lakebase schema self-heal incomplete: %d step(s) did not apply "
+            "(see the ERROR above; /health/db lists them)",
+            len(gaps),
+        )
+    else:
+        system_logger.info("Lakebase schema self-heal complete")
 
 
 @asynccontextmanager
@@ -444,25 +479,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     f"Activated Lakebase session factory (instance: {instance_name})"
                 )
 
-                # Self-heal the ACTIVE Lakebase schema. init_db() already ran the
-                # same pass, but against the local/default engine BEFORE this
-                # hot-swap — so it never touched the Lakebase. Re-running it here
-                # (create-missing-tables + add-missing-columns, all idempotent and
-                # NON-DESTRUCTIVE) is the only path that heals a customer's
-                # PRE-EXISTING Lakebase, e.g. adding powerbi_extraction without the
-                # destructive DROP SCHEMA the migrate UI would do. Best-effort.
-                try:
-                    from src.db.session import run_schema_self_heal
-
-                    async with lb_session_factory() as _heal_session:
-                        heal_conn = await _heal_session.connection()
-                        await run_schema_self_heal(heal_conn)
-                        await _heal_session.commit()
-                    system_logger.info("Lakebase schema self-heal complete")
-                except Exception as _heal_err:
-                    system_logger.warning(
-                        f"Lakebase schema self-heal skipped: {_heal_err}"
-                    )
+                await _heal_activated_lakebase(lb_session_factory, system_logger)
         except Exception as e:
             system_logger.warning(f"Lakebase activation skipped: {e}")
 

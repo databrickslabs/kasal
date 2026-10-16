@@ -355,6 +355,22 @@ describe('DatabaseManagement', () => {
       expect(screen.getByText('Endpoint')).toBeInTheDocument();
     });
 
+    it('disables in-app export and import on lakebase and points to point-in-time restore', async () => {
+      setMockDatabaseInfo({ success: true, database_type: 'lakebase', lakebase_instance: 'test-instance' });
+      // A key is present, so only Lakebase can be what disables the actions.
+      mockGetAPIKeys.mockResolvedValue([{ name: 'DATABRICKS_API_KEY', value: 'set' }]);
+
+      renderWithProviders(<DatabaseManagement />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Lakebase point-in-time restore/)).toBeInTheDocument();
+        expect(screen.queryByText(/Add a Databricks API key/)).not.toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Backups & restore'));
+      expect(screen.getByText('Export to Volume').closest('button')).toBeDisabled();
+      expect(screen.getByText('Import from Volume').closest('button')).toBeDisabled();
+    });
+
     it('does not render path and size fields for lakebase databases', async () => {
       setMockDatabaseInfo({
         success: true,

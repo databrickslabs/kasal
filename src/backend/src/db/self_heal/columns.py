@@ -11,8 +11,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.db.self_heal.dialect import _conn_is_sqlite, _pg_columns
-from src.db.self_heal.tables import ensure_table
-from src.db.self_heal.vectors import _ensure_pgvector_embedding_columns
+from src.db.self_heal.tables import ensure_index, ensure_table
 
 logger = logging.getLogger(__name__)
 
@@ -35,38 +34,38 @@ async def ensure_columns(
     whole self-heal transaction on the deployed app, leaving
     ``agents.thinking_budget_tokens`` missing. Only the genuinely missing
     columns get an ALTER, so the common case never touches the failure path.
+
+    A failure RAISES, so the step's SAVEPOINT rolls back (``self_heal/report.py``
+    explains why catching it here would abort the whole pass on PostgreSQL).
     """
     is_sqlite = _conn_is_sqlite(conn)
-    try:
+    if is_sqlite:
+        res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in res.fetchall()}
+    else:
+        existing = await _pg_columns(conn, table)
+    if not existing:
+        return  # table not created yet
+    for name, sqlite_ddl, pg_ddl in columns:
+        if name in existing:
+            continue
         if is_sqlite:
-            res = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
-            existing = {row[1] for row in res.fetchall()}
+            await conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN {name} {sqlite_ddl}"
+            )
         else:
-            existing = await _pg_columns(conn, table)
-        if not existing:
-            return  # table not created yet
-        for name, sqlite_ddl, pg_ddl in columns:
-            if name in existing:
-                continue
-            if is_sqlite:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN {name} {sqlite_ddl}"
-                )
-            else:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {pg_ddl}"
-                )
-            logger.info(f"Added {table}.{name} column")
-        logger.info(f"Ensured {table} columns")
-    except Exception as e:
-        logger.warning(f"Could not ensure {table} columns: {e}")
+            await conn.exec_driver_sql(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {pg_ddl}"
+            )
+        logger.info(f"Added {table}.{name} column")
+    logger.info(f"Ensured {table} columns")
 
 
 async def _ensure_documentation_embeddings_columns(conn: AsyncConnection) -> None:
     """documentation_embeddings.group_id / file_path — knowledge-ingest fallback,
-    built-in doc seeding and group-scoped search all reference them. Then the
-    knowledge_embeddings table (uploaded knowledge when no Lakebase backend is
-    active), its per-user ``created_by``, and the pgvector columns on both."""
+    built-in doc seeding and group-scoped search all reference them. The
+    knowledge table and the pgvector columns are separate steps, so a
+    documentation_embeddings this role cannot ALTER does not skip them."""
     await ensure_columns(
         conn,
         "documentation_embeddings",
@@ -75,11 +74,15 @@ async def _ensure_documentation_embeddings_columns(conn: AsyncConnection) -> Non
             ("file_path", "VARCHAR", "VARCHAR"),
         ],
     )
+
+
+async def _ensure_knowledge_embeddings_table(conn: AsyncConnection) -> None:
+    """knowledge_embeddings (uploaded knowledge when no Lakebase backend is
+    active) and its per-user ``created_by``."""
     await ensure_table(conn, "src.models.documentation_embedding", "KnowledgeEmbedding")
     await ensure_columns(
         conn, "knowledge_embeddings", [("created_by", "VARCHAR(255)", "VARCHAR(255)")]
     )
-    await _ensure_pgvector_embedding_columns(conn)
 
 
 async def _ensure_publications_columns(conn: AsyncConnection) -> None:
@@ -261,13 +264,18 @@ async def _ensure_users_columns(conn: AsyncConnection) -> None:
     await ensure_columns(
         conn, "users", [("personal_group_id", "VARCHAR(255)", "VARCHAR(255)")]
     )
-    try:
-        await conn.exec_driver_sql(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_personal_group_id "
-            "ON users (personal_group_id)"
-        )
-    except Exception as e:  # noqa: BLE001 — the column is the requirement
-        logger.warning(f"Could not create the users.personal_group_id index: {e}")
+
+
+async def _ensure_users_personal_group_index(conn: AsyncConnection) -> None:
+    """The unique index on users.personal_group_id. Its own step: the column is
+    the requirement, and existing duplicates must not roll the column back."""
+    await ensure_index(
+        conn,
+        "users",
+        "ix_users_personal_group_id",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_personal_group_id "
+        "ON users (personal_group_id)",
+    )
 
 
 async def _ensure_powerbi_extraction_columns(conn: AsyncConnection) -> None:
@@ -288,10 +296,15 @@ async def _ensure_flow_states_columns(conn: AsyncConnection) -> None:
     await ensure_columns(
         conn, "flow_states", [("group_id", "VARCHAR(100)", "VARCHAR(100)")]
     )
-    try:
-        await conn.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS ix_flow_states_group_uuid "
-            "ON flow_states (group_id, flow_uuid)"
-        )
-    except Exception as e:  # noqa: BLE001 — the column is the requirement
-        logger.warning(f"Could not create the flow_states.group_uuid index: {e}")
+
+
+async def _ensure_flow_states_group_index(conn: AsyncConnection) -> None:
+    """The (group_id, flow_uuid) index. Its own step, so a failed index never
+    rolls back the column every flow_states read needs."""
+    await ensure_index(
+        conn,
+        "flow_states",
+        "ix_flow_states_group_uuid",
+        "CREATE INDEX IF NOT EXISTS ix_flow_states_group_uuid "
+        "ON flow_states (group_id, flow_uuid)",
+    )
