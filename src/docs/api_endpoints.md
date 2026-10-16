@@ -337,12 +337,12 @@ dispatch) when the request named a model. `GET /decision-config` returns
 | --- | --- | --- |
 | `GET` | `/executions/history` | Paged run history for the teamspace, as summary rows (`include_payload`) |
 | `GET` | `/executions/history/{execution_id}` | One historical run, including `result`, `input`, `agents_yaml` and `tasks_yaml` |
-| `DELETE` | `/executions/history/{execution_id}` | Delete one |
-| `DELETE` | `/executions/history` | Delete all history for the teamspace |
+| `DELETE` | `/executions/history/{execution_id}` | Delete one (editors and admins) |
+| `DELETE` | `/executions/history` | Delete all history for the selected teamspace (admins; `400` with no single teamspace selected) |
 | `GET` | `/executions/history/all-groups` | Across teamspaces (admin), as summary rows (`include_payload`) |
 | `GET` | `/executions/{execution_id}/outputs` | Task outputs recorded for a run |
 | `PATCH` | `/executions/{job_id}/result` | Amend a stored result |
-| `DELETE` | `/executions/{job_id}` | Delete a run record |
+| `DELETE` | `/executions/{job_id}` | Delete a run record (editors and admins) |
 
 Like `GET /executions`, the two history list endpoints omit `result`, `input`,
 `agents_yaml` and `tasks_yaml` from each row and return `result_preview`
