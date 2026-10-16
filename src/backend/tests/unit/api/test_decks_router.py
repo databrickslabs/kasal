@@ -1,5 +1,7 @@
 """The decks router: one endpoint, revising one slide."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -10,6 +12,9 @@ from src.core.exceptions import KasalError
 from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.services.decks.slide_refine import SlideRefineService
 from src.utils.user_context import GroupContext
+
+#: The request session. SessionDep commits it before replying, so it is awaitable.
+SESSION = AsyncMock(name="SESSION")
 
 
 def _client(monkeypatch, refine):
@@ -28,7 +33,7 @@ def _client(monkeypatch, refine):
     )
 
     async def session():
-        yield "SESSION"
+        yield SESSION
 
     app.dependency_overrides[get_smart_db_session] = session
     monkeypatch.setattr(SlideRefineService, "refine", staticmethod(refine))
@@ -66,7 +71,7 @@ def test_refine_slide_passes_the_edit_through_and_returns_the_section(monkeypatc
     assert (
         seen["mode"] == "refine"
         and seen["instruction"] == "bigger"
-        and seen["session"] == "SESSION"
+        and seen["session"] is SESSION
     )
     assert seen["position"] == "2 of 8" and seen["model"] == "k"
 
@@ -117,7 +122,7 @@ def test_start_slide_edit_returns_run_id_and_forwards_capabilities(monkeypatch):
     assert body.agentbricks_endpoints == ["researcher"]
     # An older client sends no effort: the run keeps the model's own settings.
     assert body.execution_effort is None
-    assert session == "SESSION"
+    assert session is SESSION
     assert context.group_ids == ["g1"]
 
 

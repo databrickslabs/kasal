@@ -368,7 +368,8 @@ class TestCatalogMutationsAreSystemAdminOnly:
         app = FastAPI()
         app.include_router(router)
         register_exception_handlers(app)
-        app.dependency_overrides[get_smart_db_session] = lambda: None
+        # SessionDep commits the session before replying, so it must be awaitable.
+        app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
         app.dependency_overrides[get_group_context] = gc
         return TestClient(app)
 

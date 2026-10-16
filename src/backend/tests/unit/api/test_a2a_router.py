@@ -33,9 +33,10 @@ def client():
 
     # These routes take a DB session. The minimal test app has no database, and
     # every one of these tests patches the service layer above it, so the
-    # session is never used — but without an override FastAPI tries to open a
-    # real connection and the endpoint 500s before the test's assertion runs.
-    app.dependency_overrides[get_smart_db_session] = lambda: None
+    # session is used only for SessionDep's commit before the reply — but
+    # without an override FastAPI tries to open a real connection and the
+    # endpoint 500s before the test's assertion runs.
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
 
     return TestClient(app, raise_server_exceptions=False)
 

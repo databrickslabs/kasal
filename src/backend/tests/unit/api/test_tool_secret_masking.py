@@ -120,7 +120,8 @@ def _app(rows, role, membership):
     )
 
     async def session():
-        yield SimpleNamespace()
+        # SessionDep commits the session before replying, so it is awaitable.
+        yield AsyncMock()
 
     agents = SimpleNamespace(
         find_by_group=AsyncMock(return_value=[rows["agent"]]),

@@ -23,7 +23,8 @@ def client():
     app.dependency_overrides[get_group_context] = lambda: SimpleNamespace(
         group_ids=["ws-a"], primary_group_id="ws-a", group_email="a@example.com"
     )
-    app.dependency_overrides[get_smart_db_session] = lambda: None
+    # SessionDep commits the session before replying, so it must be awaitable.
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
     return TestClient(app)
 
 
