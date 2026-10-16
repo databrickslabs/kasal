@@ -83,9 +83,12 @@ _tool_ledger: contextvars.ContextVar[dict[str, ToolOutcome] | None] = (
 )
 
 
-def reset_tool_ledger() -> None:
-    """Start a fresh tally. Called at the top of each task."""
-    _tool_ledger.set({})
+def reset_tool_ledger() -> dict[str, ToolOutcome]:
+    """Start a fresh tally. Called at the top of each task; returns it, so a
+    caller that judges the task later (CrewAI's crew) can keep this one."""
+    ledger: dict[str, ToolOutcome] = {}
+    _tool_ledger.set(ledger)
+    return ledger
 
 
 def tool_ledger() -> dict[str, ToolOutcome]:
@@ -132,9 +135,11 @@ def tool_failure_summary() -> str:
     return "\n".join(lines)
 
 
-def wholly_failed_tools() -> list[str]:
-    """Tools that were called and never once succeeded."""
-    return sorted(n for n, o in tool_ledger().items() if o.wholly_failed)
+def wholly_failed_tools(ledger: dict[str, ToolOutcome] | None = None) -> list[str]:
+    """Tools that were called and never once succeeded — in ``ledger``, or in
+    the current task's tally."""
+    entries = tool_ledger() if ledger is None else ledger
+    return sorted(n for n, o in entries.items() if o.wholly_failed)
 
 
 @overload

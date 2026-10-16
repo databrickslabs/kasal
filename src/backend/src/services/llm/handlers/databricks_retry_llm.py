@@ -28,6 +28,7 @@ from typing import (
 import litellm
 
 from src.core.llm.transport import LLM, LLMContextLengthExceededError, OpenAICompletion
+from src.core.llm.transport.budget import TOOL_CALL_PLACEHOLDER
 
 # Use centralized logger
 from src.core.logger import get_logger
@@ -77,8 +78,9 @@ def _get_retry_tracer() -> Any:
 # turns the model — Haiku especially — can MIMIC the pattern and emit this
 # placeholder as its actual final text answer (observed: crews answering
 # literally "Calling tools."). Any response that is just this placeholder is
-# therefore treated as EMPTY and retried with a corrective nudge.
-TOOL_CALL_PLACEHOLDER = "Calling tools."
+# therefore treated as EMPTY and retried with a corrective nudge. The literal
+# lives in the transport (``TOOL_CALL_PLACEHOLDER``), which also needs it: a
+# degraded partial answer must never be this placeholder.
 
 _PLACEHOLDER_NUDGE = (
     'Your previous reply was just "Calling tools." — that is a placeholder, '
@@ -344,6 +346,7 @@ class DatabricksRetryLLM(LLM):
                 LLMManager.configure_kasal_llm(candidate.name, self._group_id)
             )
             self._disable_nested_fallback(llm)
+            llm.delegate_tool_calls = self.delegate_tool_calls  # CrewAI's contract
             self._fallback_llm_cache[candidate.name] = llm
             return llm
         except Exception as e:
@@ -365,6 +368,7 @@ class DatabricksRetryLLM(LLM):
 
             llm = await LLMManager.configure_kasal_llm(candidate.name, self._group_id)
             self._disable_nested_fallback(llm)
+            llm.delegate_tool_calls = self.delegate_tool_calls  # CrewAI's contract
             self._fallback_llm_cache[candidate.name] = llm
             return llm
         except Exception as e:
@@ -388,7 +392,6 @@ class DatabricksRetryLLM(LLM):
     # follow — it hallucinates tool results instead of emitting Action:). The
     # engine's BaseLLM returns True for every model and consults no registry, so
     # the override said nothing the base class did not already say.
-    # Infinite tool-call loops are still bounded by call()'s MAX_TOOL_CALLS.
 
     def supports_stop_words(self) -> bool:
         """Check if this model supports the 'stop' parameter.
@@ -579,6 +582,7 @@ class DatabricksRetryLLM(LLM):
                     f"(token length: {len(auth_ctx.token)})"
                 )
                 self.api_key = auth_ctx.token
+                self._client = None  # the cached client still holds the old token
                 return True
             else:
                 crew_log.warning(
@@ -985,26 +989,6 @@ class DatabricksRetryLLM(LLM):
             _sanitize_tools_for_gemini(tools, str(getattr(self, "model", "")))
             _strip_tool_strict(tools)
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
-
-        # --- Tool-call limiter: prevent infinite tool-calling loops ---
-        # Count tool-result messages in the conversation history.
-        # After MAX_TOOL_CALLS tool results, strip tools from the request
-        # to force the model to produce a text answer instead of more tool_calls.
-        # This is critical for GPT-5 which keeps requesting tool_calls indefinitely.
-        MAX_TOOL_CALLS = 8
-        if tools and isinstance(fixed_messages, list):
-            tool_result_count = sum(
-                1
-                for m in fixed_messages
-                if (isinstance(m, dict) and m.get("role") == "tool")
-                or (hasattr(m, "role") and getattr(m, "role", None) == "tool")
-            )
-            if tool_result_count >= MAX_TOOL_CALLS:
-                crew_log.warning(
-                    f"[DatabricksRetryLLM] Reached {tool_result_count} tool results "
-                    f"(limit: {MAX_TOOL_CALLS}). Stripping tools to force final text answer."
-                )
-                tools = None
 
         while True:
             max_retries = self._get_max_retries(is_rate_limit)

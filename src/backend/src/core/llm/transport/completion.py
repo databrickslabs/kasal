@@ -35,6 +35,7 @@ from .budget import (
     partial_from_reasoning,
     resolve_execution_budget,
     rounds_exhausted,
+    spent_budget_answer,
     wrapup_conversation,
 )
 from .context_recovery import MAX_REJECTIONS_PER_ROUND
@@ -343,10 +344,21 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             except LLMContextLengthExceededError:
                 raise
             except Exception as e:
-                self._emit_call_failed_event(str(e), from_task, from_agent)
-                if is_context_length_exceeded(e):
-                    raise LLMContextLengthExceededError(str(e)) from e
-                raise
+                # A delegated TASK turn (CrewAI): a spent clock ends it with the
+                # partial as text, as the Kasal harness's Task does. A bare
+                # agent call (Chat) still raises; its caller degrades it.
+                spent = (
+                    spent_budget_answer(e, self.model, conversation, from_task)
+                    if self.delegate_tool_calls and from_task is not None
+                    else None
+                )
+                if spent is None:
+                    self._emit_call_failed_event(str(e), from_task, from_agent)
+                    if is_context_length_exceeded(e):
+                        raise LLMContextLengthExceededError(str(e)) from e
+                    raise
+                logger.warning("budget spent (%s); returning the partial answer", e)
+                text, usage, call_type = spent, None, LLMCallType.LLM_CALL
 
             if isinstance(text, list):
                 # Tool calls handed back for the caller to execute

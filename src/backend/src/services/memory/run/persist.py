@@ -278,6 +278,11 @@ def _persist_task_output(
     raw = str(getattr(output, "raw", "") or "")
     if not raw.strip():
         return
+    # A truncated or unverified answer would be recalled into later runs as a
+    # finding. `is True`: getattr on a test double returns a truthy mock.
+    if getattr(output, "degraded", None) is True:
+        logger.info("[memory] task output is degraded; not remembering it")
+        return
     task_name = getattr(task, "name", None) or "task"
     description = " ".join(str(getattr(task, "description", "") or "").split())[:300]
     metadata: dict[str, Any] = {

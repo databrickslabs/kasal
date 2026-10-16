@@ -1107,26 +1107,6 @@ class TestCallMethodMissingCoverage:
     """Cover additional call() paths."""
 
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
-    def test_call_tool_call_limiter_strips_tools(self, mock_crew_log):
-        """When tool_result_count >= MAX_TOOL_CALLS, tools are stripped."""
-        mock_crew_log.return_value = MagicMock()
-        with patch("litellm.request_timeout", 120.0):
-            llm = DatabricksRetryLLM(model="databricks/test-model")
-
-        # Build 8 tool result messages
-        messages = [{"role": "tool", "content": f"result {i}"} for i in range(8)]
-        tools = [{"function": {"name": "test_tool"}}]
-
-        with patch.object(
-            type(llm).__bases__[0], "call", return_value="response"
-        ) as mock_parent_call:
-            result = llm.call(messages, tools=tools)
-        assert result == "response"
-        # Tools should have been stripped (call without tools)
-        call_args = mock_parent_call.call_args
-        assert call_args[1].get("tools") is None
-
-    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_call_auth_error_triggers_token_refresh(self, mock_crew_log):
         """An auth error triggers _try_refresh_token and retries."""
         mock_log = MagicMock()

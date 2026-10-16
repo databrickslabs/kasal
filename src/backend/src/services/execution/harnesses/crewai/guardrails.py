@@ -86,7 +86,7 @@ def _reason_for(result: Any) -> str:
     return str(result)
 
 
-def _annotate(output: Any, reason: str) -> Any:
+def annotate_degraded(output: Any, reason: str) -> Any:
     """Mark an output degraded, in text and in structure."""
     raw = getattr(output, "raw", None)
     if isinstance(raw, str) and DEGRADED_MARKER not in raw:
@@ -142,6 +142,6 @@ def degrade_on_exhausted(
             max_retries,
             reason,
         )
-        return True, _annotate(output, reason)
+        return True, annotate_degraded(output, reason)
 
     return wrapped
