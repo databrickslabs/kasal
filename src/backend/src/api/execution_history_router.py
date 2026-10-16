@@ -5,13 +5,14 @@ This module provides API endpoints for retrieving, managing, and deleting
 execution history records and related data.
 """
 
-from typing import Annotated, Any, Dict
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from src.config.settings import settings
-from src.core.exceptions import NotFoundError
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
+from src.core.permissions import can_clear_workspace_history, check_role_in_context
 from src.dependencies.providers import GroupContextDep, RequestEmailDep, SessionDep
 from src.schemas.execution_history import (
     DeleteResponse,
@@ -297,17 +298,30 @@ async def update_execution_result(
 @router.delete("/history", response_model=DeleteResponse)
 async def delete_all_executions(
     group_context: GroupContextDep,
+    job_id: Annotated[Optional[str], Query()] = None,
     service: ExecutionHistoryService = Depends(get_execution_history_service),
 ) -> DeleteResponse:
     """
-    Delete all executions and their associated data for the user's groups.
+    Delete all executions and their associated data in the selected workspace.
 
-    This endpoint ensures tenant isolation by only deleting executions
-    that belong to the groups the user has access to.
+    Allowed roles: admin, or anyone in their own personal workspace. This also
+    deletes the workspace's traces, logs and workflow-recipe library, the same
+    bar as deleting every crew.
+
+    It needs one selected workspace: with none, the scope is every workspace
+    the caller belongs to, and one request must not wipe them all. A
+    ``job_id`` query asks for one run, which this route would not honour, so it
+    is refused rather than read as "delete everything".
 
     Returns:
         DeleteResponse with information about the deleted data
     """
+    if not can_clear_workspace_history(group_context):
+        raise ForbiddenError("Only admins can delete the whole run history")
+    if job_id is not None:
+        raise BadRequestError("Use DELETE /executions/{job_id} to delete one run")
+    if len(group_context.group_ids or []) != 1:
+        raise BadRequestError("Select a workspace before deleting its run history")
     return await service.delete_all_executions(group_ids=group_context.group_ids)
 
 
@@ -320,6 +334,8 @@ async def delete_execution(
     """
     Delete a specific execution and its associated data.
 
+    Allowed roles: admin / editor.
+
     Args:
         execution_id: Database ID of the execution
         service: ExecutionHistoryService instance
@@ -327,6 +343,8 @@ async def delete_execution(
     Returns:
         DeleteResponse with information about the deleted data
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only admins and editors can delete runs")
     result = await service.delete_execution(
         execution_id, group_ids=group_context.group_ids
     )
@@ -344,6 +362,8 @@ async def delete_execution_by_job_id(
     """
     Delete an execution by its job_id.
 
+    Allowed roles: admin / editor.
+
     Args:
         job_id: String ID (UUID) of the execution
         service: ExecutionHistoryService instance
@@ -351,6 +371,8 @@ async def delete_execution_by_job_id(
     Returns:
         DeleteResponse with information about the deleted data
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only admins and editors can delete runs")
     result = await service.delete_execution_by_job_id(
         job_id, group_ids=group_context.group_ids
     )

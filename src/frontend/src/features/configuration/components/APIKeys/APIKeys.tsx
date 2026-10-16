@@ -50,12 +50,14 @@ interface ApiKeyWithMasked extends ApiKey {
 
 import { useAPIKeys } from '../../../../hooks/global/useAPIKeys';
 import { useAPIKeysStore } from '../../../../store/apiKeys';
+import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../../store/user';
 import { NotificationState } from '../../../../types/common';
 
 import { matchesSearch } from './searchApiKeys';
 
 function APIKeys(): JSX.Element {
   const { secrets: apiKeys, loading, error, updateSecrets: updateApiKeys } = useAPIKeys();
+  const personalGroupId = usePersonalGroupId();
   const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore(useShallow(state => ({
     editDialogOpen: state.editDialogOpen,
     providerToEdit: state.providerToEdit,
@@ -450,7 +452,7 @@ function APIKeys(): JSX.Element {
         {/* Shared Workspace Warning */}
         {(() => {
           const selectedGroupId = localStorage.getItem('selectedGroupId');
-          const isSharedWorkspace = selectedGroupId && !selectedGroupId.startsWith('user_');
+          const isSharedWorkspace = selectedGroupId && !isPersonalWorkspaceId(selectedGroupId, personalGroupId);
 
           if (isSharedWorkspace) {
             return (

@@ -1,8 +1,9 @@
 """Resolve a saved crew or flow by the name a user typed in chat.
 
-The run / load / delete slash commands all resolve a name the same way, so the
-rule lives here once: a case-insensitive substring match, exact names preferred,
-and duplicates of one name resolved to the most recently updated copy.
+The run and load slash commands resolve a name the same way, so the rule lives
+here once: a case-insensitive substring match, exact names preferred, and
+duplicates of one name resolved to the most recently updated copy. ``/delete``
+does NOT use it: a delete needs the exact name or id (see ``catalog_delete``).
 """
 
 from datetime import datetime

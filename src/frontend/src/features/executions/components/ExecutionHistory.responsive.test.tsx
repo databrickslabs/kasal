@@ -67,8 +67,9 @@ vi.mock('../../../store/taskExecutionStore', () => ({
   }),
 }));
 
+let mockRole = 'admin';
 vi.mock('../../../hooks/usePermissions', () => ({
-  usePermissions: () => ({ userRole: 'admin' }),
+  usePermissions: () => ({ userRole: mockRole }),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -104,6 +105,8 @@ vi.mock('../../../api/execution/ExecutionHistoryService', async importOriginal =
   calculateDurationFromTraces: vi.fn().mockResolvedValue('15s'),
 }));
 import type { Run } from '../../../api/execution/ExecutionHistoryService';
+import { useGroupStore } from '../../../store/groups';
+import { useUserStore } from '../../../store/user';
 // Import component after mocks are set up
 import ExecutionHistory from './ExecutionHistory';
 
@@ -121,6 +124,30 @@ describe('Job history sidebar', () => {
     vi.clearAllMocks();
     mockRuns = [];
     mockIsMobile = false;
+    mockRole = 'admin';
+  });
+  it.each([['admin', true], ['editor', false], ['operator', false]])(
+    'offers "delete all runs" to %s: %s',
+    (role, offered) => {
+      mockRole = role;
+      renderHistory();
+      fireEvent.click(screen.getByRole('button', { name: 'History options' }));
+      const item = screen.queryByRole('menuitem', { name: /runHistory.deleteAllRuns/ });
+      expect(Boolean(item)).toBe(offered);
+    },
+  );
+  it('offers "delete all runs" in the user\'s own personal workspace', () => {
+    mockRole = 'editor';
+    useUserStore.setState({ currentUser: { id: 'u1', email: 'p@example.com', username: 'p', personal_group_id: 'user_p1' } });
+    useGroupStore.setState({ currentGroupId: 'user_p1' });
+    try {
+      renderHistory();
+      fireEvent.click(screen.getByRole('button', { name: 'History options' }));
+      expect(screen.getByRole('menuitem', { name: /runHistory.deleteAllRuns/ })).toBeInTheDocument();
+    } finally {
+      useUserStore.setState({ currentUser: null });
+      useGroupStore.setState({ currentGroupId: null });
+    }
   });
   it('shows a useful empty state and closes from its header', () => {
     renderHistory();

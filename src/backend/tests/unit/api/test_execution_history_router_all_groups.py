@@ -460,11 +460,12 @@ class TestUpdateExecutionResult:
 class TestDeleteAllExecutions:
     @pytest.mark.asyncio
     async def test_calls_service_delete_all(self):
-        """Delegates to service.delete_all_executions."""
+        """Delegates to service.delete_all_executions for one selected workspace."""
         expected = DeleteResponse(success=True, message="ok")
         service = AsyncMock()
         service.delete_all_executions = AsyncMock(return_value=expected)
         ctx = make_gc()
+        ctx.group_ids = ["g1"]
 
         result = await delete_all_executions(group_context=ctx, service=service)
         assert result == expected

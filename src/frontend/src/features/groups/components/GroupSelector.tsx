@@ -22,7 +22,7 @@ import {
 import { GroupWithRole } from '../../../api/groups/GroupService';
 import toast from 'react-hot-toast';
 import { useRunStatusStore } from '../../../store/runStatus';
-import { useUserStore } from '../../../store/user';
+import { isPersonalWorkspaceId, useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useUILayoutStore } from '../../../store/uiLayout';
 
@@ -104,7 +104,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
       handleClose();
 
       // Show success message with the actual group ID being used
-      const displayName = group.id.startsWith('user_')
+      const displayName = isPersonalWorkspaceId(group.id, currentUser?.personal_group_id)
         ? 'Personal Space'
         : `${group.name} teamspace`;
       toast.success(`Switched to ${displayName}`);
@@ -170,7 +170,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
           onClick={handleClick}
           size="small"
           aria-label={
-            currentGroup.id.startsWith('user_')
+            isPersonalWorkspaceId(currentGroup.id, currentUser?.personal_group_id)
               ? `Switch teamspace: Personal Space (${currentUser?.email})`
               : `Switch teamspace: ${currentGroup.name} - Shared Teamspace`
           }
@@ -191,7 +191,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
                 {avatarElement}
               </Box>
               <Typography component="span" noWrap sx={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: 'text.secondary' }}>
-                {currentGroup.id.startsWith('user_') ? 'Personal Space' : currentGroup.name}
+                {isPersonalWorkspaceId(currentGroup.id, currentUser?.personal_group_id) ? 'Personal Space' : currentGroup.name}
               </Typography>
             </>
           ) : avatarElement}
@@ -243,7 +243,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
           </Typography>
         </Box>
         {groups.map((group) => {
-          const isPersonalWorkspace = group.id.startsWith('user_');
+          const isPersonalWorkspace = isPersonalWorkspaceId(group.id, currentUser?.personal_group_id);
           const isSelected = currentGroup?.id === group.id;
 
           return (

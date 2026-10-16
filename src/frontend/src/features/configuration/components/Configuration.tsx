@@ -4,7 +4,7 @@ import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdo
 import { Zap, Search, X, Settings2, SlidersHorizontal, Bot, Wrench, BookOpen, MessageSquare, Brain, LayoutTemplate, Cloud, Plug, Network, Activity, KeyRound, Users, Cpu, Database, Boxes, Building2, UserRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePermissionStore } from '../../../store/permissions';
-import { useUserStore } from '../../../store/user';
+import { isPersonalWorkspaceId, usePersonalGroupId, useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useThemeStore } from '../../../store/theme';
 import { useEventTriggersStore } from '../../../store/eventTriggers';
@@ -77,12 +77,13 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
     loadPermissions: state.loadPermissions,
   })));
   const email = useUserStore(state => state.currentUser?.email);
+  const personalGroupId = usePersonalGroupId();
   const groupId = useGroupStore(state => state.currentGroupId);
   const teamspaces = useGroupStore(state => state.groups);
   const fetchMyGroups = useGroupStore(state => state.fetchMyGroups);
   const currentGroup = useGroupStore(state => state.getCurrentGroup());
   const permissionsReady = !isLoading && (isSystemAdmin || isPersonalWorkspaceManager || userRole !== null);
-  const isWorkspaceAdmin = isSystemAdmin || userRole === 'admin' || (!!groupId?.startsWith('user_') && isPersonalWorkspaceManager);
+  const isWorkspaceAdmin = isSystemAdmin || userRole === 'admin' || (isPersonalWorkspaceId(groupId, personalGroupId) && isPersonalWorkspaceManager);
   const access = useMemo(() => ({ isSystemAdmin, isWorkspaceAdmin, isEditor: userRole === 'editor' }), [isSystemAdmin, isWorkspaceAdmin, userRole]);
   const [scope, setScope] = useState<SettingsScope>('workspace');
   const [selected, setSelected] = useState<SettingsSectionId>(() => readSettingsNavigation()?.section || 'overview');
@@ -94,7 +95,7 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   const canConfigureCurrent = getSettingsSections('workspace', access).length > 0;
   const administeredTeamspaces = teamspaces.filter(group => group.status === 'active' && (
     (group.id === groupId && canConfigureCurrent) || isSystemAdmin || group.user_role === 'ADMIN' ||
-    (group.id.startsWith('user_') && isPersonalWorkspaceManager)
+    (isPersonalWorkspaceId(group.id, personalGroupId) && isPersonalWorkspaceManager)
   ));
   const scopeOptions = [
     { id: 'personal', scope: 'personal' as const, label: 'My preferences', icon: UserRound },

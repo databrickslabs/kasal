@@ -22,8 +22,13 @@ from src.utils.user_context import GroupContext
 @pytest.fixture
 def mock_group_context():
     """Create a mock group context."""
+    # Admin of one workspace: DELETE /traces/ checks the role
+    # (see test_execution_trace_router_roles.py).
     return GroupContext(
-        group_ids=["group-123"], group_email="test@example.com", user_id="user-123"
+        group_ids=["group-123"],
+        group_email="test@example.com",
+        user_id="user-123",
+        user_role="admin",
     )
 
 

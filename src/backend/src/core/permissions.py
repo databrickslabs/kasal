@@ -163,6 +163,33 @@ def is_system_admin(group_context: GroupContext) -> bool:
     return False
 
 
+def is_personal_scope(group_context: GroupContext) -> bool:
+    """True only when the scope is exactly the user's own personal workspace.
+
+    The personal workspace is the id stored on the user (``personal_group_id``),
+    never a name prefix: team ids are a slug of the team name, so a team named
+    "User Marketing" gets an id starting with ``user_`` too.
+    """
+    personal_id = getattr(
+        getattr(group_context, "current_user", None), "personal_group_id", None
+    )
+    if not isinstance(personal_id, str) or not personal_id:
+        return False
+    return list(group_context.group_ids or []) == [personal_id]
+
+
+def can_clear_workspace_history(group_context: GroupContext) -> bool:
+    """Whether the caller may wipe the scope's whole run or trace history.
+
+    An admin of the scope may, and so may anyone in their own personal
+    workspace: there they are its only member, even when their role there is
+    editor.
+    """
+    return check_role_in_context(group_context, ["admin"]) or is_personal_scope(
+        group_context
+    )
+
+
 def is_workspace_admin(group_context: GroupContext) -> bool:
     """
     Check if the user is an admin of their current workspace.
@@ -188,10 +215,7 @@ def is_workspace_admin(group_context: GroupContext) -> bool:
             return True
 
         # Personal workspace - check if user has personal workspace manager permission
-        if (
-            group_context.primary_group_id
-            and group_context.primary_group_id.startswith("user_")
-        ):
+        if is_personal_scope(group_context):
             # User needs is_personal_workspace_manager to have admin rights in personal workspace
             return getattr(
                 group_context.current_user, "is_personal_workspace_manager", False
@@ -228,10 +252,7 @@ def get_effective_role(group_context: GroupContext) -> Optional[str]:
             return "admin"
 
         # Personal workspace logic
-        if (
-            group_context.primary_group_id
-            and group_context.primary_group_id.startswith("user_")
-        ):
+        if is_personal_scope(group_context):
             if getattr(
                 group_context.current_user, "is_personal_workspace_manager", False
             ):
