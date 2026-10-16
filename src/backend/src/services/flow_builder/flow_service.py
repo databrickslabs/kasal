@@ -71,8 +71,12 @@ class FlowService:
             # Generate a new UUID for the flow
             flow_uuid = str(uuid.uuid4())
 
-            # Ensure required fields exist in flow_config
+            # Ensure required fields exist in flow_config. Spread first: this
+            # used to list the keys to keep and dropped every other one the
+            # builder writes (routers, state, persistence, outcomes), so runs
+            # started from the stored flow (triggers, MCP, A2A) lost them.
             flow_config = {
+                **flow_config,
                 "id": flow_uuid,
                 "name": flow_config.get("name", flow_in.name),
                 "type": flow_config.get("type", "default"),
@@ -550,8 +554,10 @@ class FlowService:
             # Generate a new UUID for the flow
             flow_uuid = str(uuid.uuid4())
 
-            # Ensure required fields exist in flow_config
+            # Ensure required fields exist in flow_config (spread first, as in
+            # create_flow_with_group)
             flow_config = {
+                **flow_config,
                 "id": flow_uuid,
                 "name": flow_config.get("name", flow_in.name),
                 "type": flow_config.get("type", "default"),
