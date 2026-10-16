@@ -638,8 +638,11 @@ class PromptOptimizationService(
 
         # Execution payload bases (candidate fields are overlaid per eval).
         agent_name_by_id = {str(a.id): a.name for a in agents}
+        # "id" (rows already group-checked above): the run fills tool_configs and
+        # LLM overrides from the row by id; a name alone resolves nothing.
         agents_yaml = {
             str(a.name): {
+                "id": str(a.id),
                 "name": a.name,
                 "role": a.role,
                 "goal": a.goal,
@@ -652,6 +655,7 @@ class PromptOptimizationService(
         }
         tasks_yaml = {
             str(t.name): {
+                "id": str(t.id),
                 "name": t.name,
                 "description": t.description,
                 "expected_output": t.expected_output,

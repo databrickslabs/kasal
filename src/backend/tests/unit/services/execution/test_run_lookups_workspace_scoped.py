@@ -5,12 +5,14 @@ stored row: tool_configs when the payload has no key for them, and the agent's
 LLM overrides. The id comes from the payload, so it is not proof of ownership. A
 run in workspace A that names an agent or task of workspace B (by id, or by
 name) must not receive B's tool_configs or LLM overrides; the run continues
-with the payload alone. An id in A still fills in exactly as before.
+with the payload alone. An id in A still fills in exactly as before, and a run
+with no workspace at all fails before anything runs.
 
 Real AgentService / TaskService over a real SQLite database, so the group check
 being exercised is the one the services apply, not a mock of it.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -165,17 +167,27 @@ async def test_a_name_never_resolves_a_row_from_another_workspace(db):
 
 
 @pytest.mark.asyncio
-async def test_a_run_with_no_workspace_loads_no_rows(db):
-    agents, tasks = await _run(
-        db,
-        {f"agent_{A_AGENT}": _spec()},
-        {f"task_{A_TASK}": _task_spec()},
-        GroupContext(group_ids=[]),
-    )
+@pytest.mark.parametrize("context", [None, GroupContext(group_ids=[])])
+async def test_a_run_with_no_workspace_fails_before_anything_runs(db, context):
+    # Running it would read no catalog row, so it would run without the
+    # tool configs and approval gates its agents and tasks add.
+    update = AsyncMock()
+    with (
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            update,
+        ),
+        pytest.raises(ValueError, match="no workspace"),
+    ):
+        await _run(
+            db,
+            {f"agent_{A_AGENT}": _spec()},
+            {f"task_{A_TASK}": _task_spec()},
+            context,
+        )
 
-    assert not agents[0].get("tool_configs")
-    assert agents[0].get("temperature") is None
-    assert not tasks[0].get("tool_configs")
+    assert update.await_args.kwargs["status"] == "FAILED"
+    assert "no workspace" in update.await_args.kwargs["message"]
 
 
 @pytest.mark.asyncio
@@ -204,6 +216,24 @@ async def test_a_refused_lookup_is_logged_by_id_only(db):
             CALLER_A,
         )
 
-    warnings = " ".join(str(c) for c in log.warning.call_args_list)
+    warnings = " ".join(
+        str(c) for c in log.log.call_args_list if c.args[0] == logging.WARNING
+    )
     assert B_AGENT in warnings and B_TASK in warnings
     assert "b-secret-key" not in warnings
+
+
+@pytest.mark.asyncio
+async def test_a_spec_keyed_by_name_only_misses_quietly(db):
+    # No id to miss: a name-keyed entry is routine, so it is not a warning on
+    # every run (an id that misses still is, above).
+    with patch("src.services.execution.kasal_service.crew_logger") as log:
+        await _run(
+            db,
+            {"analyst": _spec(name=SHARED_NAME)},
+            {"analysis": _task_spec(name=SHARED_NAME)},
+            CALLER_A,
+        )
+
+    levels = {c.args[0] for c in log.log.call_args_list}
+    assert levels == {logging.DEBUG}

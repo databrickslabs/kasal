@@ -18,7 +18,11 @@ from src.db.session import routed_scoped_session
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.services.catalog.agents import AgentService
-from src.services.catalog.run_lookup import agent_for_run, task_for_run
+from src.services.catalog.run_lookup import (
+    agent_for_run,
+    require_run_workspace,
+    task_for_run,
+)
 from src.services.catalog.tasks import TaskService
 
 # Sync flow repository removed - use async FlowRepository instead
@@ -89,10 +93,10 @@ class KasalExecutionService:
             Dictionary with execution results
         """
         try:
-            # Execution is already created with RUNNING status, just log the progress
-            crew_logger.info(
-                f"Starting crew execution {execution_id} (already has RUNNING status)"
-            )
+            # No workspace is not a legitimate run: FAIL it (except below) rather
+            # than run it with the catalog's settings and approval gates left out.
+            require_run_workspace(group_context)
+            crew_logger.info("Starting crew execution %s", execution_id)
 
             # Log the configuration inputs
             if config.inputs:

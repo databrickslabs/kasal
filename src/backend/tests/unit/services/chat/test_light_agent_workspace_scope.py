@@ -5,6 +5,7 @@ tool_configs it reads them from the stored agent named by the spec's id. The id
 comes from the request, so a turn in workspace A naming an agent of workspace B
 must build its agent WITHOUT B's tool_configs: the turn still runs, with the
 spec's own tools and no stored overrides. An agent of A still fills in as before.
+A turn with no workspace at all fails before its agent is built.
 
 The agent read goes through the real AgentService over a real SQLite database;
 only the parts of a turn that are not under test (tool factory, model build,
@@ -112,6 +113,11 @@ async def _turn(maker, agent_id, group_context):
         result = await run_light_agent(
             f"chat-{uuid.uuid4()}", config, group_context=group_context
         )
+    return result, build
+
+
+async def _built_tool_configs(maker, agent_id, group_context):
+    result, build = await _turn(maker, agent_id, group_context)
     assert result["status"] == ExecutionStatus.COMPLETED.value
     return build.await_args.kwargs["tool_configs"]
 
@@ -121,17 +127,22 @@ CALLER_A = GroupContext(group_ids=[A], group_email="a@example.com")
 
 @pytest.mark.asyncio
 async def test_another_workspaces_agent_lends_no_tool_configs(db):
-    tool_configs = await _turn(db, B_AGENT, CALLER_A)
+    tool_configs = await _built_tool_configs(db, B_AGENT, CALLER_A)
 
     assert "b-secret-key" not in str(tool_configs)
     assert not tool_configs
 
 
 @pytest.mark.asyncio
-async def test_a_turn_with_no_workspace_reads_no_agent(db):
-    assert not await _turn(db, A_AGENT, GroupContext(group_ids=[]))
+@pytest.mark.parametrize("context", [None, GroupContext(group_ids=[])])
+async def test_a_turn_with_no_workspace_fails_before_its_agent_is_built(db, context):
+    result, build = await _turn(db, A_AGENT, context)
+
+    assert result["status"] == ExecutionStatus.FAILED.value
+    assert "no workspace" in result["error"]
+    build.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_an_agent_in_the_turns_own_workspace_still_fills_in(db):
-    assert await _turn(db, A_AGENT, CALLER_A) == A_CONFIGS
+    assert await _built_tool_configs(db, A_AGENT, CALLER_A) == A_CONFIGS

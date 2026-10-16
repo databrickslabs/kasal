@@ -85,8 +85,7 @@ class LightAgentService:
         # chat silently read local SQLite: an MCP server enabled for the workspace
         # gave "Added 1 explicit MCP servers" in Agent Builder and "Added 0" here.
         from src.db.session import routed_scoped_session
-        from src.services.catalog.agents import AgentService
-        from src.services.catalog.run_lookup import agent_for_run
+        from src.services.chat.catalog_agent import fill_tool_configs_from_catalog
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.logs.queue import enqueue_log
         from src.utils.user_context import UserContext
@@ -137,24 +136,9 @@ class LightAgentService:
                     "Light agent execution requires exactly one agent in the config"
                 )
 
-            # Best-effort: merge DB tool_configs when the spec lacks them (catalog
-            # agents of THIS workspace only; a miss skips it). Chat agents carry theirs.
-            if not agent_spec.get("tool_configs"):
-                try:
-                    async with routed_scoped_session() as db_session:
-                        db_agent = await agent_for_run(
-                            AgentService(db_session),
-                            str(agent_spec.get("id", ""))
-                            .replace("agent_", "")
-                            .replace("agent-", ""),
-                            group_context,
-                        )
-                        if db_agent and getattr(db_agent, "tool_configs", None):
-                            agent_spec["tool_configs"] = db_agent.tool_configs
-                except Exception as enrich_err:  # noqa: BLE001
-                    logger.debug(
-                        f"[light_agent] tool_configs enrichment skipped: {enrich_err}"
-                    )
+            # The catalog agent of THIS workspace fills missing tool_configs; a
+            # turn with no workspace is refused (see chat/catalog_agent.py).
+            await fill_tool_configs_from_catalog(agent_spec, group_context)
 
             # ── Prompt = the (already user-grounded) first task description ────
             prompt = ""

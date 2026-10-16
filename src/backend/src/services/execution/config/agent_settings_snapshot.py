@@ -29,8 +29,10 @@ async def snapshot_agent_settings(
 ) -> None:
     if not group_context or not group_context.primary_group_id:
         return
-    # Only reached from ExecutionService.create_execution, whose session is set.
-    service = AgentService(cast(AsyncSession, session))
+    # Internal callers (GEPA evals, chat fast path, deck edits) create runs with
+    # ExecutionService(session=None). There is nothing to freeze with then: the
+    # worker's own group-checked read fills the settings in from the row.
+    service = AgentService(cast(AsyncSession, session)) if session else None
     agents: Dict[str, Any] = {}
     for key, original in config.agents_yaml.items():
         spec = dict(original)
@@ -39,6 +41,9 @@ async def snapshot_agent_settings(
         try:
             agent_id = str(UUID(raw_id))
         except ValueError:
+            agents[key] = spec
+            continue
+        if service is None:
             agents[key] = spec
             continue
         agent = await service.get_with_group_check(agent_id, group_context)

@@ -40,6 +40,36 @@ def run_group_ids(group_context: Optional[GroupContext]) -> List[str]:
     return [g for g in (getattr(group_context, "group_ids", None) or []) if g]
 
 
+def require_run_workspace(group_context: Optional[GroupContext]) -> List[str]:
+    """The run's group ids, or ``ValueError``: a run with none is not started.
+
+    Every entry point resolves a workspace before it starts a run (the API from
+    the caller, schedules and triggers from their row, MCP/A2A from the
+    publication). A run without one would read no catalog row, and so run
+    without the tool configs and approval gates its agents and tasks add.
+    """
+    group_ids = run_group_ids(group_context)
+    if not group_ids:
+        raise ValueError("This run has no workspace (no group ids); not started")
+    return group_ids
+
+
+def _miss_level(entity_id: object) -> int:
+    """WARNING when a catalog id missed; DEBUG for a key that is not one.
+
+    Catalog ids are UUIDs. A spec keyed by name with no id (or a generated
+    chat agent) cannot name a row, so its miss is routine and stays out of
+    every run's log at warning level.
+    """
+    if isinstance(entity_id, uuid.UUID):
+        return logging.WARNING
+    try:
+        uuid.UUID(str(entity_id))
+    except ValueError:
+        return logging.DEBUG
+    return logging.WARNING
+
+
 async def _scoped_read(
     kind: str,
     entity_id: Optional[_Id],
@@ -54,7 +84,12 @@ async def _scoped_read(
         return None
     row = await read(entity_id, group_context)
     if row is None:
-        log.warning("%s %s not found in this run's workspace", kind, entity_id)
+        log.log(
+            _miss_level(entity_id),
+            "%s %s not found in this run's workspace",
+            kind,
+            entity_id,
+        )
     return row
 
 
@@ -98,6 +133,6 @@ async def crew_for_run(
     try:
         key = crew_id if isinstance(crew_id, uuid.UUID) else uuid.UUID(str(crew_id))
     except ValueError:
-        log.warning("Crew %s not found in this run's workspace", crew_id)
+        log.debug("Crew %s not found in this run's workspace", crew_id)
         return None
     return await _scoped_read("Crew", key, service.get_by_group, group_context, log)

@@ -442,8 +442,9 @@ class TestSavedAgentEffort:
             AgentService, "get_with_group_check", AsyncMock(return_value=row)
         )
         config = CrewConfig(agents_yaml={f"agent_agent-{agent_id}": {"max_iter": 5}})
+        session = object()  # the service is patched; any session will do
         await snapshot_agent_settings(
-            config, None, SimpleNamespace(primary_group_id="space")
+            config, session, SimpleNamespace(primary_group_id="space")
         )
         snapshot = config.model_dump(mode="json")
         agent = next(iter(snapshot["agents_yaml"].values()))
@@ -455,6 +456,13 @@ class TestSavedAgentEffort:
         assert agent["execution_effort"] == {"tier": "high"}
         other = CrewConfig(agents_yaml={agent_id: {}})
         await snapshot_agent_settings(
-            other, None, SimpleNamespace(primary_group_id="another")
+            other, session, SimpleNamespace(primary_group_id="another")
         )
         assert other.agents_yaml[agent_id] == {}
+        # No session (GEPA evals, chat fast path): nothing is frozen and nothing
+        # is read; the worker's group-checked read fills the row in instead.
+        unfrozen = CrewConfig(agents_yaml={agent_id: {}})
+        await snapshot_agent_settings(
+            unfrozen, None, SimpleNamespace(primary_group_id="space")
+        )
+        assert unfrozen.agents_yaml[agent_id] == {}

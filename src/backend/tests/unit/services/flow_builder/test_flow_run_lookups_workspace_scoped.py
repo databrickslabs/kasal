@@ -60,6 +60,13 @@ B_TASK = "bbbbbbbb-1111-4000-8000-00000000000b"
 A_AGENT = "aaaaaaaa-0000-4000-8000-00000000000a"
 B_AGENT = "bbbbbbbb-0000-4000-8000-00000000000b"
 B_SECRET = "b-secret-key"
+#: Policy the canvas keeps under a task node's data.config.
+CANVAS_POLICY = {
+    "guardrail": '{"type": "minimum_number"}',
+    "llm_guardrail": {"description": "cites a source", "llm_model": "m"},
+    "human_input": True,
+    "max_retries": 2,
+}
 
 CHILD = r"""
 import base64, json, os, pickle, sys
@@ -77,6 +84,7 @@ execution_id, flow_config, inputs, group_context = pickle.loads(
     base64.b64decode(sys.stdin.read())
 )
 seen = {"agents": [], "tasks": [], "mcp": None, "starts": [], "listeners": []}
+POLICY = ("guardrail", "llm_guardrail", "human_input", "max_retries")
 
 
 def _arg(args, kwargs, name):
@@ -96,10 +104,12 @@ async def agent(*args, **kwargs):  # what reaches the agent build
 
 async def task(*args, **kwargs):  # what reaches the task build
     row = _arg(args, kwargs, "task_data")
+    spec = TaskConfig._task_data_to_spec(row)  # what the shared builder reads
     seen["tasks"].append({
         "id": str(getattr(row, "id", None)),
         "description": getattr(row, "description", None),
         "tool_configs": getattr(row, "tool_configs", None),
+        "policy": {k: spec.get(k) for k in POLICY},
     })
     return SimpleNamespace(
         agent=kwargs.get("agent"), async_execution=False, context=None,
@@ -145,6 +155,7 @@ def _canvas(task_id, agent_id, label):
                     "label": f"{label} task",
                     "description": f"{label} canvas description",
                     "expected_output": "o",
+                    "config": CANVAS_POLICY,
                 },
             },
             {
@@ -329,6 +340,16 @@ class TestAnotherWorkspacesRows:
         assert "Imported canvas description" in {
             t["description"] for t in seen["tasks"]
         }
+
+    def test_the_canvas_fallback_keeps_the_tasks_guardrails(self, runs):
+        # Code guardrail, LLM guardrail, human input and retries live under
+        # the node's data.config; a fallback without them runs unchecked.
+        (fallback,) = [
+            t
+            for t in runs["workspace_a"]["tasks"]
+            if t["description"] == "Imported canvas description"
+        ]
+        assert fallback["policy"] == CANVAS_POLICY
 
 
 class TestTheRunsOwnWorkspace:

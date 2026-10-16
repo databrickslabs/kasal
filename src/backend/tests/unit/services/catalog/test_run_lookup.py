@@ -5,6 +5,7 @@ ids. The run-scoped reads do not: no group ids, no row. A row of another
 workspace reads exactly like an absent one, and the warning names the id only.
 """
 
+import logging
 import uuid
 from unittest.mock import MagicMock
 
@@ -20,6 +21,7 @@ from src.services.catalog.crews import CrewService
 from src.services.catalog.run_lookup import (
     agent_for_run,
     crew_for_run,
+    require_run_workspace,
     run_group_ids,
     task_for_run,
 )
@@ -101,9 +103,21 @@ async def test_a_row_of_another_workspace_reads_as_not_found(session, kind):
     log = MagicMock()
     row = await read(service, IDS[(B, kind)], GroupContext(group_ids=[A]), log)
     assert row is None
-    (message, *args), _ = log.warning.call_args
+    (level, message, *args), _ = log.log.call_args
+    assert level == logging.WARNING  # an id that misses is worth a warning
     assert str(IDS[(B, kind)]) in (message % tuple(args))
-    assert "secret" not in str(log.warning.call_args)
+    assert "secret" not in str(log.log.call_args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["agent", "task"])
+async def test_a_key_that_is_not_an_id_misses_at_debug(session, kind):
+    # A name-keyed spec (no id) or a generated chat agent cannot name a row.
+    read, service = _reads(session)[kind]
+    log = MagicMock()
+    row = await read(service, "Research Analyst", GroupContext(group_ids=[A]), log)
+    assert row is None
+    assert log.log.call_args.args[0] == logging.DEBUG
 
 
 @pytest.mark.asyncio
@@ -121,7 +135,7 @@ async def test_a_crew_id_that_is_not_a_uuid_is_a_miss(session):
         CrewService(session), "not-a-uuid", GroupContext(group_ids=[A]), log
     )
     assert row is None
-    log.warning.assert_called_once()
+    log.debug.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -135,3 +149,10 @@ async def test_a_crew_id_given_as_a_string_still_resolves(session):
 def test_run_group_ids_drops_empty_entries():
     assert run_group_ids(GroupContext(group_ids=[A, "", None])) == [A]
     assert run_group_ids(None) == []
+
+
+def test_a_run_with_no_workspace_is_refused():
+    assert require_run_workspace(GroupContext(group_ids=[A])) == [A]
+    for context in (None, GroupContext(group_ids=[])):
+        with pytest.raises(ValueError, match="no workspace"):
+            require_run_workspace(context)
