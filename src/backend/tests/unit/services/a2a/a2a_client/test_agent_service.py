@@ -9,15 +9,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core.exceptions import ForbiddenError
 from src.schemas.a2a_agent import A2AAgentCreate, A2AAgentUpdate
 from src.services.a2a.a2a_client.agent_service import A2AAgentService
 
 
 class _Ctx:
+    """A Kasal (system) admin: the only caller who manages global agents."""
+
     group_ids = ["acme_corp"]
     primary_group_id = "acme_corp"
     group_email = "admin@example.com"
     access_token = "user-token"
+    current_user = SimpleNamespace(is_system_admin=True)
+
+
+class _WorkspaceAdmin(_Ctx):
+    """An admin of one workspace: not a system admin."""
+
+    user_role = "admin"
+    current_user = SimpleNamespace(
+        is_system_admin=False, is_personal_workspace_manager=True
+    )
 
 
 def _service():
@@ -313,7 +326,7 @@ class TestGlobalVersusWorkspace:
     async def test_global_availability_only_applies_to_a_base_row(self):
         service = _service()
         service.repository.get = AsyncMock(return_value=_row(group_id="acme_corp"))
-        assert await service.set_global_availability(1, False) is None
+        assert await service.set_global_availability(1, False, _Ctx()) is None
 
     @pytest.mark.asyncio
     async def test_deleting_a_global_agent_removes_every_workspace_opt_in(self):
@@ -322,11 +335,35 @@ class TestGlobalVersusWorkspace:
         service = _service()
         service.repository.get = AsyncMock(return_value=_row(name="Researcher"))
 
-        assert await service.delete_agent(1) is True
+        assert await service.delete_agent(1, _Ctx()) is True
         service.repository.delete_overrides_by_name.assert_awaited_with("Researcher")
 
     @pytest.mark.asyncio
     async def test_a_workspace_override_cannot_be_deleted_through_the_global_path(self):
         service = _service()
         service.repository.get = AsyncMock(return_value=_row(group_id="acme_corp"))
-        assert await service.delete_agent(1) is False
+        assert await service.delete_agent(1, _Ctx()) is False
+
+    @pytest.mark.asyncio
+    async def test_a_workspace_admin_cannot_change_the_global_registry(self):
+        """Every write to a base row is a system-admin act, checked in the
+        service as well as at the router."""
+        service = _service()
+        base = _row(name="Researcher")
+        service.repository.get = AsyncMock(return_value=base)
+        caller = _WorkspaceAdmin()
+        for call in (
+            lambda: service.create_agent(
+                A2AAgentCreate(name="R", card_url="https://remote.example.com"),
+                caller,
+            ),
+            lambda: service.update_agent(1, A2AAgentUpdate(description="x"), caller),
+            lambda: service.delete_agent(1, caller),
+            lambda: service.set_global_availability(1, False, caller),
+        ):
+            with pytest.raises(ForbiddenError):
+                await call()
+        service.repository.insert.assert_not_awaited()
+        service.repository.remove.assert_not_awaited()
+        service.repository.save.assert_not_awaited()
+        assert base.enabled is True and base.description is None

@@ -19,6 +19,16 @@ def _clear_tool_list_cache():
     tool_list_cache._cache.clear()
 
 
+def _system_admin():
+    return GroupContext(
+        group_ids=["g1"],
+        group_email="admin@example.com",
+        email_domain="example.com",
+        user_role="admin",
+        current_user=SimpleNamespace(is_system_admin=True),
+    )
+
+
 def mk_tool(
     id=1, title="T", enabled=True, group_id=None, config=None, icon="i", description="d"
 ):
@@ -145,18 +155,19 @@ async def test_update_and_delete_tool_paths():
     svc = ToolService(session=SimpleNamespace())
     svc.repository = AsyncMock()
 
-    # update: not found
+    # global availability: not found
     svc.repository.get = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError):
-        await svc.update_tool(5, ToolUpdate(description="z"))
+        await svc.set_global_availability(5, False, _system_admin())
 
-    # update: success
+    # global availability: success for a system admin
     existing = mk_tool(5, title="E")
-    updated = mk_tool(5, title="E", description="z")
+    updated = mk_tool(5, title="E", enabled=False)
     svc.repository.get = AsyncMock(return_value=existing)
     svc.repository.update = AsyncMock(return_value=updated)
-    out = await svc.update_tool(5, ToolUpdate(description="z"))
-    assert out.description == "z"
+    out = await svc.set_global_availability(5, False, _system_admin())
+    assert out.enabled is False
+    svc.repository.update.assert_awaited_once_with(5, {"enabled": False})
 
     # update with group check: forbidden
     t_g2 = mk_tool(7, title="TG", group_id="g2")
@@ -191,16 +202,6 @@ async def test_update_and_delete_tool_paths():
         ),
     )
     assert out2.description == "ok"
-
-    # delete: not found
-    svc.repository.get = AsyncMock(return_value=None)
-    with pytest.raises(NotFoundError):
-        await svc.delete_tool(10)
-
-    # delete: success
-    svc.repository.get = AsyncMock(return_value=mk_tool(10))
-    svc.repository.delete = AsyncMock(return_value=True)
-    assert await svc.delete_tool(10) is True
 
     # delete with group check: forbidden
     svc.repository.get = AsyncMock(return_value=mk_tool(11, group_id="g2"))
@@ -237,18 +238,6 @@ async def test_update_and_delete_tool_paths():
 async def test_toggle_paths_base_and_group():
     svc = ToolService(session=SimpleNamespace())
     svc.repository = AsyncMock()
-
-    # toggle (simple): not found
-    svc.repository.toggle_enabled = AsyncMock(return_value=None)
-    with pytest.raises(NotFoundError) as ei:
-        await svc.toggle_tool_enabled(1)
-    assert ei.value.status_code == 404
-
-    # toggle (simple): success
-    toggled = mk_tool(1, enabled=False)
-    svc.repository.toggle_enabled = AsyncMock(return_value=toggled)
-    res = await svc.toggle_tool_enabled(1)
-    assert res.enabled is False and "successfully" in res.message
 
     # toggle with group check: base tool -> create copy when no existing mapping
     base = mk_tool(20, title="B", group_id=None, enabled=True)
@@ -310,19 +299,6 @@ async def test_config_endpoints():
         return_value=mk_tool(1, title="X", config={"a": 1})
     )
     assert (await svc.get_tool_config_by_name("X")) == {"a": 1}
-
-    # update_tool_configuration_by_title not found
-    svc.repository.update_configuration_by_title = AsyncMock(return_value=None)
-    with pytest.raises(NotFoundError) as ei:
-        await svc.update_tool_configuration_by_title("Y", {"b": 2})
-    assert ei.value.status_code == 404
-
-    # update_tool_configuration_by_title success
-    svc.repository.update_configuration_by_title = AsyncMock(
-        return_value=mk_tool(2, title="Y", config={"b": 2})
-    )
-    out = await svc.update_tool_configuration_by_title("Y", {"b": 2})
-    assert out.config.get("b") == 2
 
     # get_all_tool_configurations_for_group
     tool1 = ToolResponse.model_validate(mk_tool(3, title="A", config={"x": 1}))
@@ -496,13 +472,14 @@ async def test_tool_mutation_invalidates_enabled_tools_cache():
     svc = _make_cached_service()
     await svc.get_enabled_tools_for_group(None)
 
-    svc.repository.toggle_enabled = AsyncMock(return_value=mk_tool(1, enabled=False))
-    await svc.toggle_tool_enabled(1)
+    svc.repository.get = AsyncMock(return_value=mk_tool(1))
+    svc.repository.update = AsyncMock(return_value=mk_tool(1, enabled=False))
+    await svc.set_global_availability(1, False, _system_admin())
 
     await svc.get_enabled_tools_for_group(None)
     assert (
         svc.repository.find_enabled.await_count == 2
-    )  # cache was cleared by the toggle
+    )  # cache was cleared by the availability change
 
 
 @pytest.mark.asyncio

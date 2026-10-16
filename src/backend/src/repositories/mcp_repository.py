@@ -1,5 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
+from sqlalchemy import ColumnElement
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,26 +39,41 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def find_enabled(self) -> List[MCPServer]:
+    def _base_or_in(self, group_ids: Sequence[str]) -> ColumnElement[bool]:
+        """Base rows (no group) plus the rows of ``group_ids``, never another
+        group's rows."""
+        if not group_ids:
+            return self.model.group_id.is_(None)
+        return or_(
+            self.model.group_id.is_(None), self.model.group_id.in_(list(group_ids))
+        )
+
+    async def find_enabled(self, group_ids: Sequence[str]) -> List[MCPServer]:
         """
-        Find all enabled MCP servers.
+        Find the enabled MCP servers visible to ``group_ids``: base rows plus
+        those groups' own rows.
 
         Returns:
             List of enabled MCP servers
         """
-        query = select(self.model).where(self.model.enabled == True)
+        query = select(self.model).where(
+            (self.model.enabled == True) & self._base_or_in(group_ids)
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_global_enabled(self) -> List[MCPServer]:
+    async def find_global_enabled(self, group_ids: Sequence[str]) -> List[MCPServer]:
         """
-        Find all globally enabled MCP servers.
+        Find the globally enabled MCP servers visible to ``group_ids``: base
+        rows plus those groups' own rows.
 
         Returns:
             List of globally enabled MCP servers
         """
         query = select(self.model).where(
-            (self.model.enabled == True) & (self.model.global_enabled == True)
+            (self.model.enabled == True)
+            & (self.model.global_enabled == True)
+            & self._base_or_in(group_ids)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())

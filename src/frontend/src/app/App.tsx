@@ -19,7 +19,6 @@ import { ErrorBoundary } from '../shared/errors/ErrorBoundary';
 // Lazy load heavy components to reduce initial bundle size
 const RunHistory = lazy(() => import('../features/executions/components/ExecutionHistory'));
 const WorkflowDesigner = lazy(() => import('./workspace/index'));
-const ToolForm = lazy(() => import('../features/tools/components/ToolForm'));
 const Documentation = lazy(() => import('../features/help/documentation/index').then(module => ({ default: module.Documentation })));
 const ConverterPage = lazy(() => import('../features/conversion/components/ConverterPage'));
 const ConfigEditorPage = lazy(() => import('../features/configuration/editor/ConfigEditorPage'));
@@ -130,7 +129,6 @@ function App() {
               <Route path="/workflow" element={<WorkflowDesigner />} />
               <Route path="/nemo" element={<Navigate to="/workflow" replace />} />
               <Route path="/runs" element={<RunHistory />} />
-              <Route path="/tools" element={<ToolForm />} />
               <Route path="/converter" element={<ConverterPage />} />
               <Route path="/config-editor" element={<ConfigEditorPage />} />
               <Route path="/triggers" element={<TriggersPanel />} />

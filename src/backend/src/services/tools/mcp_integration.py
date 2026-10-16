@@ -136,7 +136,9 @@ class MCPIntegration:
 
             # 1. Add all enabled servers (they are all available to all agents/tasks)
             if include_global:
-                enabled_response = await mcp_service.get_enabled_servers()
+                enabled_response = await mcp_service.get_enabled_servers(
+                    [group_id] if group_id else []
+                )
                 for server in enabled_response.servers:
                     payload = server.model_dump()
                     name = payload.get("name")

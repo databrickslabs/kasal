@@ -1,6 +1,8 @@
 import logging
 from typing import Any, List, Optional
 
+from src.core.exceptions import ForbiddenError
+from src.core.permissions import is_system_admin
 from src.models.template import PromptTemplate
 from src.repositories.template_repository import TemplateRepository
 from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
@@ -396,11 +398,17 @@ class TemplateService:
 
         Returns:
             True if deleted, False if not found or not authorized
+
+        Raises:
+            ForbiddenError: for a global template (no group) unless the caller
+                is a system admin — it is every workspace's template
         """
         # First check if template exists and belongs to group
         template = await self.get_with_group_check(id, group_context)
         if not template:
             return False
+        if template.group_id is None and not is_system_admin(group_context):
+            raise ForbiddenError("Only system admins can delete global templates")
 
         result = await self.repository.delete(id)
         await TemplateService.invalidate_template_cache()

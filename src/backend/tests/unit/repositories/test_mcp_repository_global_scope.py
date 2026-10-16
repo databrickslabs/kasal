@@ -212,3 +212,29 @@ async def test_picker_source_excludes_globally_disabled_even_for_admins(session)
     svc = MCPService(session)
     resp = await svc.get_all_servers_effective("ws1", enabled_only=False)
     assert _names(resp.servers) == ["live"]
+
+
+# ── Enabled / global listings: base rows plus the caller's groups only ───────
+
+
+@pytest.mark.asyncio
+async def test_enabled_listing_excludes_another_groups_servers(session):
+    repo = MCPServerRepository(session)
+    await _add(session, "base", group_id=None)
+    await _add(session, "ours", group_id="ws1")
+    await _add(session, "theirs", group_id="ws2")
+    await _add(session, "ours_off", group_id="ws1", enabled=False)
+
+    assert _names(await repo.find_enabled(["ws1"])) == ["base", "ours"]
+    assert _names(await repo.find_enabled([])) == ["base"]
+
+
+@pytest.mark.asyncio
+async def test_global_listing_excludes_another_groups_servers(session):
+    repo = MCPServerRepository(session)
+    for name, group_id in (("base", None), ("ours", "ws1"), ("theirs", "ws2")):
+        srv = await _add(session, name, group_id=group_id)
+        srv.global_enabled = True
+    await session.flush()
+
+    assert _names(await repo.find_global_enabled(["ws1"])) == ["base", "ours"]
