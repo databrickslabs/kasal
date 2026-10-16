@@ -18,6 +18,8 @@ from src.utils.user_context import GroupContext
 
 CONFIRM_FLAG = "--confirm"
 DELETE_ROLES = ["admin", "editor"]
+# The intent ``source`` slash_commands.detect_slash_command sets.
+SLASH_COMMAND_SOURCE = "slash_command"
 _MAX_SUGGESTIONS = 5
 
 Kind = Literal["crew", "flow"]
@@ -107,9 +109,20 @@ async def delete_from_chat(
     group_context: Optional[GroupContext],
     crew_service: CrewService,
     flow_service: FlowService,
+    source: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Handle ``/delete <kind> <args>`` and return the chat reply."""
+    """Handle ``/delete <kind> <args>`` and return the chat reply.
+
+    ``source`` is where the intent came from. Only a slash command the user
+    typed deletes anything: a delete intent from the language-model classifier
+    is refused, whatever arguments it carries.
+    """
     result_type = "catalog_delete" if kind == "crew" else "flow_delete"
+    if source != SLASH_COMMAND_SOURCE:
+        return {
+            "type": result_type,
+            "message": f"To delete a {kind}, type `/delete {kind} <name>`.",
+        }
     if not can_delete(group_context):
         return {
             "type": result_type,

@@ -157,6 +157,28 @@ async def test_duplicate_names_delete_nothing_and_list_ids():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["llm", "cache", None])
+async def test_a_classified_delete_intent_deletes_nothing(source):
+    """Only a slash command the user typed deletes, whatever the arguments say."""
+    svc = _service(flows=[_item(FLOW_ID, "Weekly Report")])
+    classified = {
+        "intent": "flow_delete",
+        "confidence": 0.99,
+        "extracted_info": {"args": f"{FLOW_ID} --confirm"},
+        "suggested_prompt": "remove the weekly report flow",
+        "source": source,
+        "suggested_tools": [],
+    }
+    svc.detect_intent = AsyncMock(return_value=classified)
+    request = DispatcherRequest(message="please remove the weekly report", model="m")
+
+    result = await svc.dispatch(request, group_context=_context("admin"))
+
+    assert _deleted(svc) == 0
+    assert "/delete flow <name>" in result["generation_result"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_help_lists_delete_only_for_editors_and_admins():
     svc = _service()
 

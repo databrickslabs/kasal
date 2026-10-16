@@ -1724,7 +1724,6 @@ Please analyze this message and provide your intent classification."""
                     IntentType.CATALOG_DELETE,
                     IntentType.FLOW_DELETE,
                 ):
-                    # Editors and admins only; exact name or id; asks to confirm.
                     generation_result = await delete_from_chat(
                         (
                             "crew"
@@ -1735,6 +1734,7 @@ Please analyze this message and provide your intent classification."""
                         group_context,
                         self.catalog_service,
                         self.flow_service,
+                        dispatcher_response.source,  # only a typed command deletes
                     )
 
                 else:
