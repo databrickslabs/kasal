@@ -65,7 +65,8 @@ def _patch_deploy_pat(pat_groups, capture=None, existing_app=None):
       - EncryptionUtils.decrypt_value → returns a fake token;
       - the workspace-host lookup;
       - WorkspaceClient (so no real SDK client is built). Its ``apps.get``
-        returns ``existing_app``, or raises NotFound when that is None.
+        returns ``existing_app``, raises it when it is an exception, or raises
+        NotFound when it is None.
 
     ``capture`` (optional dict) receives ``groups`` = the group_ids tried, in
     order, and ``run`` = the patched ``_run_deployment``.
@@ -77,6 +78,8 @@ def _patch_deploy_pat(pat_groups, capture=None, existing_app=None):
     workspace_client = MagicMock()
     if existing_app is None:
         workspace_client.return_value.apps.get.side_effect = NotFound("no such app")
+    elif isinstance(existing_app, BaseException):
+        workspace_client.return_value.apps.get.side_effect = existing_app
     else:
         workspace_client.return_value.apps.get.return_value = existing_app
     run = AsyncMock()
@@ -306,6 +309,30 @@ class TestExistingAppIsNotReplaced:
 
         with pytest.raises(ConflictError, match="research-crew"):
             await self._start(service, obo_context, description)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("make_error", ["databricks", "network"])
+    async def test_refuses_when_the_app_cannot_be_read(
+        self, service, obo_context, make_error
+    ):
+        """Only NotFound means "new app"; any other failure must not deploy."""
+        from databricks.sdk.errors import PermissionDenied
+
+        from src.core.exceptions import KasalError
+
+        error = (
+            PermissionDenied("not allowed")
+            if make_error == "databricks"
+            else ConnectionError("reset by peer")
+        )
+        service.export_service.export_crew = AsyncMock(return_value=_export_result())
+        with _patch_deploy_pat({"g1"}, existing_app=error) as tried:
+            with pytest.raises(KasalError, match="Could not check") as raised:
+                await service.start_deployment(
+                    "crew-1", AppDeploymentConfig(), obo_context
+                )
+        assert raised.value.status_code == 503
+        tried["run"].assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

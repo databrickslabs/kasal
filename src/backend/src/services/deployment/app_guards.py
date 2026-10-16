@@ -10,7 +10,8 @@ Two things the deploy must not do on a user's say-so:
 * **Replace an app it did not create.** Every app this flow creates carries a
   description naming the crew that deployed it. An existing app with that
   name is redeployed only when it came from the same crew, or from a Kasal
-  deploy made before the crew id was recorded.
+  deploy made before the crew id was recorded. When the app cannot be read,
+  the deploy is refused rather than assumed new.
 """
 
 import logging
@@ -18,9 +19,9 @@ import re
 from typing import List, Optional
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import DatabricksError, NotFound
+from databricks.sdk.errors import NotFound
 
-from src.core.exceptions import BadRequestError, ConflictError
+from src.core.exceptions import BadRequestError, ConflictError, KasalError
 
 logger = logging.getLogger(__name__)
 
@@ -95,17 +96,23 @@ def overwrite_refusal(
 def refuse_foreign_app(client: WorkspaceClient, app_name: str, crew_id: str) -> None:
     """Raise ConflictError when ``app_name`` exists and this crew did not deploy it.
 
-    Blocking (one SDK call): run it off the event loop. An app that does not
-    exist, or that this PAT cannot read, is left to the deploy step, where
-    creating over an unreadable app fails with an error.
+    Blocking (one SDK call): run it off the event loop. Only a NotFound answer
+    lets a deploy create the app. Any other failure to read it refuses the
+    deploy (503): a transient error now and a successful read in the deploy
+    step must not redeploy over someone else's app.
     """
     try:
         existing = client.apps.get(name=app_name)
     except NotFound:
         return
-    except DatabricksError as exc:
-        logger.info("Could not read app %s before deploy: %s", app_name, exc)
-        return
+    except Exception as exc:  # noqa: BLE001 — every failure other than NotFound refuses
+        logger.warning("Could not read app %s before deploy: %s", app_name, exc)
+        raise KasalError(
+            f"Could not check whether app '{app_name}' already exists, so nothing "
+            "was deployed. Try again, and check that the workspace's personal "
+            "access token can read Databricks Apps.",
+            status_code=503,
+        ) from exc
     reason = overwrite_refusal(existing.description, crew_id, app_name)
     if reason:
         raise ConflictError(reason)
