@@ -26,20 +26,19 @@ def mock_session():
     """Create a mock async database session."""
     session = AsyncMock()
     session.bind = None
+    session.get_bind = MagicMock(
+        return_value=SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    )
     return session
 
 
 @pytest.fixture
 def mock_repository():
-    """Create a mock DatabaseBackupRepository."""
+    """A mock DatabaseBackupRepository; PostgreSQL sessions are in 'public'."""
     repo = AsyncMock()
-    repo.create_sqlite_backup = AsyncMock()
-    repo.create_postgres_backup = AsyncMock()
-    repo.restore_sqlite_backup = AsyncMock()
-    repo.restore_postgres_backup = AsyncMock()
+    repo.get_current_schema = AsyncMock(return_value="public")
     repo.list_backups = AsyncMock(return_value=[])
     repo.cleanup_old_backups = AsyncMock(return_value={"success": True, "deleted": []})
-    repo.get_database_info = AsyncMock()
     return repo
 
 
@@ -709,9 +708,9 @@ class TestExportToVolume:
 
     @pytest.mark.asyncio
     async def test_export_general_exception(self, service):
-        """Unhandled exceptions are caught and returned as error dict."""
+        """Unhandled exceptions in the export body are returned as error dict."""
         with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+            "src.services.databricks.lakebase.management.os.path.isabs",
             side_effect=RuntimeError("boom"),
         ):
             result = await service.export_to_volume(catalog="c", schema="s")
@@ -1126,9 +1125,9 @@ class TestImportFromVolume:
 
     @pytest.mark.asyncio
     async def test_import_general_exception(self, service):
-        """Unhandled exceptions are caught and returned as error dict."""
+        """Unhandled exceptions in the import body are returned as error dict."""
         with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+            "src.services.databricks.lakebase.management.os.path.isabs",
             side_effect=RuntimeError("kaboom"),
         ):
             result = await service.import_from_volume(

@@ -10,6 +10,7 @@ from sqlalchemy.engine import CursorResult, Result
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import settings
+from src.core.exceptions import BadRequestError
 from src.core.logger import LoggerManager
 from src.repositories.database_backup_repository import DatabaseBackupRepository
 
@@ -23,6 +24,14 @@ logger = LoggerManager.get_instance().system
 def _rowcount(result: Result[Any]) -> int:
     """Rows affected by a DML statement (its Result is a CursorResult)."""
     return cast(CursorResult[Any], result).rowcount
+
+
+_SCHEMA_NOT_COVERED = (
+    "{action} is not available for this database: in-app backup and restore "
+    "only cover PostgreSQL tables in schema 'public', and this database keeps "
+    "them in '{schema}' (Lakebase does). Protect a Lakebase database with "
+    "Lakebase point-in-time restore or a branch instead."
+)
 
 
 class DatabaseManagementService:
@@ -60,6 +69,29 @@ class DatabaseManagementService:
         )
         self.user_token = user_token
 
+    async def _backup_database_type(self, session: AsyncSession, action: str) -> str:
+        """'sqlite' or 'postgres': the database ``action`` will act on.
+
+        Decided by the session in use, never by settings: inside Databricks Apps
+        the settings name the boot SQLite file while requests run on Lakebase.
+        Raises BadRequestError where in-app backup cannot cover the data, rather
+        than backing up or restoring a database the app does not use.
+        """
+        db_type = DatabaseBackupRepository.get_database_type(session)
+        if db_type == "unknown":
+            dialect = DatabaseBackupRepository.dialect_name(session) or "unknown"
+            raise BadRequestError(
+                f"{action} is not supported for this database ({dialect}); "
+                "in-app backup and restore support SQLite and PostgreSQL."
+            )
+        if db_type == "postgres":
+            schema = await self.repository.get_current_schema(session)
+            if schema != "public":
+                raise BadRequestError(
+                    _SCHEMA_NOT_COVERED.format(action=action, schema=schema)
+                )
+        return db_type
+
     async def export_to_volume(
         self,
         catalog: str,
@@ -80,10 +112,9 @@ class DatabaseManagementService:
         Returns:
             Export result with volume path and Databricks URL
         """
+        db_session = session if session else self.session
+        db_type = await self._backup_database_type(db_session, "Export")
         try:
-            # Determine database type
-            db_type = DatabaseBackupRepository.get_database_type()
-
             # Generate backup filename with timestamp and appropriate extension
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -129,27 +160,14 @@ class DatabaseManagementService:
                     backup_filename = f"kasal_backup_{timestamp}.sql"
                     postgres_export_format = "sql"
 
-                # Use provided session or injected session for PostgreSQL
-                if session:
-                    # Use provided session parameter
-                    backup_result = await self.repository.create_postgres_backup(
-                        catalog=catalog,
-                        schema=schema,
-                        volume_name=volume_name,
-                        backup_filename=backup_filename,
-                        export_format=postgres_export_format,
-                        session=session,
-                    )
-                else:
-                    # Use injected session from constructor
-                    backup_result = await self.repository.create_postgres_backup(
-                        catalog=catalog,
-                        schema=schema,
-                        volume_name=volume_name,
-                        backup_filename=backup_filename,
-                        export_format=postgres_export_format,
-                        session=self.session,
-                    )
+                backup_result = await self.repository.create_postgres_backup(
+                    catalog=catalog,
+                    schema=schema,
+                    volume_name=volume_name,
+                    backup_filename=backup_filename,
+                    export_format=postgres_export_format,
+                    session=db_session,
+                )
 
                 # For PostgreSQL, we don't have an original file size
                 original_size_mb = None
@@ -263,18 +281,12 @@ class DatabaseManagementService:
         Returns:
             Import result
         """
+        # Validate filename to prevent path traversal
+        if ".." in backup_filename or "/" in backup_filename or "\\" in backup_filename:
+            return {"success": False, "error": "Invalid backup filename"}
+        db_session = session if session else self.session
+        db_type = await self._backup_database_type(db_session, "Import")
         try:
-            # Validate filename to prevent path traversal
-            if (
-                ".." in backup_filename
-                or "/" in backup_filename
-                or "\\" in backup_filename
-            ):
-                return {"success": False, "error": "Invalid backup filename"}
-
-            # Determine database type
-            db_type = DatabaseBackupRepository.get_database_type()
-
             # Determine backup type from filename
             backup_type = "unknown"
             if backup_filename.endswith(".db"):
@@ -320,25 +332,13 @@ class DatabaseManagementService:
                 )
 
             elif db_type == "postgres":
-                # Use provided session or injected session for PostgreSQL
-                if session:
-                    # Use provided session parameter
-                    restore_result = await self.repository.restore_postgres_backup(
-                        catalog=catalog,
-                        schema=schema,
-                        volume_name=volume_name,
-                        backup_filename=backup_filename,
-                        session=session,
-                    )
-                else:
-                    # Use injected session from constructor
-                    restore_result = await self.repository.restore_postgres_backup(
-                        catalog=catalog,
-                        schema=schema,
-                        volume_name=volume_name,
-                        backup_filename=backup_filename,
-                        session=self.session,
-                    )
+                restore_result = await self.repository.restore_postgres_backup(
+                    catalog=catalog,
+                    schema=schema,
+                    volume_name=volume_name,
+                    backup_filename=backup_filename,
+                    session=db_session,
+                )
             else:
                 return {
                     "success": False,
@@ -490,7 +490,9 @@ class DatabaseManagementService:
             except Exception as e:
                 logger.warning(f"Could not check Lakebase status: {e}")
 
-            db_type = DatabaseBackupRepository.get_database_type()
+            db_type = DatabaseBackupRepository.get_database_type(
+                session or self.session
+            )
 
             # Check the actual session type to determine if we're really using Lakebase
             # Even if Lakebase is configured, the session might be SQLite if connection failed
@@ -698,7 +700,7 @@ class DatabaseManagementService:
             # stays intact and the purge is atomic. (PostgreSQL/Lakebase: each
             # checkout is already private, so this just uses the normal factory.)
             async with get_isolated_db_session() as session:
-                if DatabaseBackupRepository.get_database_type() == "sqlite":
+                if DatabaseBackupRepository.get_database_type(session) == "sqlite":
                     await session.execute(_sql_text("PRAGMA defer_foreign_keys=ON"))
 
                 # Instantiate repositories with the isolated session
@@ -785,7 +787,7 @@ class DatabaseManagementService:
                 # 7. VACUUM SQLite to reclaim disk space after bulk deletes. VACUUM
                 #    cannot run inside a transaction, so issue it on an AUTOCOMMIT
                 #    connection after the purge has committed.
-                if DatabaseBackupRepository.get_database_type() == "sqlite":
+                if DatabaseBackupRepository.get_database_type(session) == "sqlite":
                     try:
                         raw_conn = await session.connection(
                             execution_options={"isolation_level": "AUTOCOMMIT"}
