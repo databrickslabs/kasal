@@ -21,7 +21,7 @@
   "src/backend/src/services/databricks/lakebase/migration.py::LakebaseMigrationService.migrate_table_data_sync": 219,
   "src/backend/src/services/databricks/lakebase/service.py::LakebaseService.migrate_existing_data": 234,
   "src/backend/src/services/databricks/lakebase/service.py::LakebaseService.migrate_existing_data_stream": 677,
-  "src/backend/src/services/execution/config/embedder_config_builder.py::EmbedderConfigBuilder._configure_databricks_embedder": 228,
+  "src/backend/src/services/execution/config/embedder_config_builder.py::EmbedderConfigBuilder._configure_databricks_embedder": 223,
   "src/backend/src/services/execution/engine_service.py::KasalEngineService.run_execution": 222,
   "src/backend/src/services/execution/harnesses/crewai/llm.py::build_kasal_backed_llm": 202,
   "src/backend/src/services/execution/kasal_service.py::KasalExecutionService.prepare_and_run_crew": 404,

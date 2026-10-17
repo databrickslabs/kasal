@@ -9,6 +9,7 @@ Handles embedder setup for:
 - Other providers
 """
 
+import functools
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.databricks_app import DatabricksAppInstallation
@@ -29,6 +30,32 @@ def _loggable_embedder(embedder: object) -> str:
     config = embedder.get("config")
     keys = sorted(config) if isinstance(config, dict) else []
     return f"provider={embedder.get('provider')} config_keys={keys}"
+
+
+def _queue_embedding_usage(
+    usage: Dict[str, int],
+    model: str,
+    workspace_url: Optional[str],
+    token: Optional[str],
+) -> None:
+    """Hand one embedding batch's token usage to the usage-telemetry worker.
+
+    The logfood request is a separate GET to the workspace with a 5 s timeout;
+    the embedding returns its vectors without waiting for it.
+    """
+    from src.core.llm.usage_telemetry import submit_telemetry
+    from src.utils.telemetry import KasalProduct, send_logfood_telemetry_sync
+
+    submit_telemetry(
+        functools.partial(
+            send_logfood_telemetry_sync,
+            usage=usage,
+            model=model,
+            product_context=KasalProduct.EMBEDDING,
+            workspace_url=workspace_url,
+            token=token,
+        )
+    )
 
 
 class EmbedderConfigBuilder:
@@ -311,7 +338,6 @@ class EmbedderConfigBuilder:
                         from src.utils.telemetry import (
                             KasalProduct,
                             get_user_agent_header,
-                            send_logfood_telemetry_sync,
                         )
 
                         headers.update(get_user_agent_header(KasalProduct.EMBEDDING))
@@ -327,16 +353,12 @@ class EmbedderConfigBuilder:
                                     for item in result["data"]
                                 ]
 
-                                # Send token usage to Databricks logfood
-                                usage = result.get("usage", {})
-                                if usage:
-                                    auth_token = self.user_token or self.api_key
-                                    send_logfood_telemetry_sync(
-                                        usage=usage,
-                                        model=self.model,
-                                        product_context=KasalProduct.EMBEDDING,
-                                        workspace_url=workspace_url,
-                                        token=auth_token,
+                                if result.get("usage"):
+                                    _queue_embedding_usage(
+                                        result["usage"],
+                                        self.model,
+                                        workspace_url,
+                                        self.user_token or self.api_key,
                                     )
 
                                 return cast(Embeddings, embeddings)

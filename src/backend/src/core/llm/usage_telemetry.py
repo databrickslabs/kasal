@@ -14,12 +14,22 @@ anything — one source of truth for token counts, one place that forwards them.
 
 Registration is idempotent and happens at ``llm_manager`` import, which every
 process that runs an LLM performs (API process and execution subprocesses alike).
+
+Off the call path. The bus runs handlers inline, on the thread that made the
+LLM call, so this handler only queues the send. One daemon thread per process
+owns a long-lived event loop and makes the requests: an LLM call never waits on
+the workspace API, and a telemetry failure never reaches it. The queue is
+bounded and drops when full. A send still queued when a run subprocess exits
+through ``os._exit`` is lost; that is acceptable for best-effort telemetry.
 """
 
 import asyncio
+import functools
 import logging
 import os
-from typing import Any, Optional, TypeGuard, cast
+import queue
+import threading
+from typing import Any, Callable, Optional, TypeGuard, cast
 
 from src.core.events import BaseEvent, LLMCallCompletedEvent
 from src.core.events.bus import event_bus
@@ -27,6 +37,66 @@ from src.core.events.bus import event_bus
 logger = logging.getLogger(__name__)
 
 _registered = False
+
+#: Sends waiting for the worker. A slow or unreachable workspace API costs
+#: dropped telemetry, never memory and never the caller's time.
+MAX_PENDING_SENDS = 256
+
+_pending: "queue.Queue[Callable[[], object]]" = queue.Queue(maxsize=MAX_PENDING_SENDS)
+_worker: Optional[threading.Thread] = None
+_worker_lock = threading.Lock()
+
+
+def _drain_forever() -> None:
+    """Worker body: run each queued send, on this thread's own loop.
+
+    One loop for the life of the process, so loop-bound state the send relies
+    on (the cached auth context) has a stable home instead of a throwaway
+    ``asyncio.run`` loop per call.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    while True:
+        send = _pending.get()
+        try:
+            result = send()
+            if asyncio.iscoroutine(result):
+                loop.run_until_complete(result)
+        except Exception as e:  # noqa: BLE001 — telemetry is best-effort
+            logger.debug("Token telemetry send failed: %s", e)
+        finally:
+            _pending.task_done()
+
+
+def _ensure_worker() -> None:
+    global _worker
+    if _worker is not None and _worker.is_alive():
+        return
+    with _worker_lock:
+        if _worker is None or not _worker.is_alive():
+            _worker = threading.Thread(
+                target=_drain_forever, name="kasal-usage-telemetry", daemon=True
+            )
+            _worker.start()
+
+
+def submit_telemetry(send: Callable[[], object]) -> bool:
+    """Queue ``send`` for the telemetry worker. Never blocks, never raises.
+
+    ``send`` runs on the worker thread; if it returns a coroutine, the worker
+    runs that on its loop. Returns False when the send was dropped.
+    """
+    try:
+        _ensure_worker()
+        _pending.put_nowait(send)
+        return True
+    except queue.Full:
+        logger.debug(
+            "[TokenTelemetry] %d sends pending; dropping one", MAX_PENDING_SENDS
+        )
+    except Exception as e:  # noqa: BLE001 — telemetry is best-effort
+        logger.debug("Token telemetry not queued: %s", e)
+    return False
 
 
 def _resolve_user_token() -> Optional[str]:
@@ -74,42 +144,41 @@ def _product_context(source: Any) -> str:
 
 
 def _on_llm_call_completed(source: Any, event: BaseEvent) -> None:
-    """Forward one call's usage. Never raises — the bus logs, but telemetry must
-    not be able to disturb a run either way."""
-    usage = getattr(event, "usage", None)
-    if not _should_send(usage):
-        return
-
-    # An LLMCallCompletedEvent (registered below); read defensively all the same.
-    model = cast(
-        str, getattr(event, "model", None) or getattr(source, "model", "unknown")
-    )
-    product_context = _product_context(source)
-    logger.info(
-        "[TokenTelemetry] model=%s context=%s tokens=%s",
-        model,
-        product_context,
-        usage.get("total_tokens", 0),
-    )
-
+    """Queue one call's usage for the worker. Never raises and never waits —
+    the bus logs, but telemetry must not be able to disturb a run either way."""
     try:
+        usage = getattr(event, "usage", None)
+        if not _should_send(usage):
+            return
+
+        # An LLMCallCompletedEvent (registered below); read defensively all the same.
+        model = cast(
+            str, getattr(event, "model", None) or getattr(source, "model", "unknown")
+        )
+        product_context = _product_context(source)
+        logger.info(
+            "[TokenTelemetry] model=%s context=%s tokens=%s",
+            model,
+            product_context,
+            usage.get("total_tokens", 0),
+        )
+
         from src.utils.telemetry import send_logfood_telemetry
 
-        # skip_db_auth=True: this runs inside an LLM worker thread, and opening a
-        # database session here conflicts with the transaction the request holds.
-        coro = send_logfood_telemetry(
-            usage=usage,
-            model=model,
-            product_context=product_context,
-            user_token=_resolve_user_token(),
-            skip_db_auth=True,
+        # Resolved HERE, on the calling thread: the user token lives in a
+        # contextvar the worker thread cannot see.
+        # skip_db_auth=True: telemetry must never open a database session; the
+        # caller may be inside a request's transaction.
+        submit_telemetry(
+            functools.partial(
+                send_logfood_telemetry,
+                usage=dict(usage),
+                model=model,
+                product_context=product_context,
+                user_token=_resolve_user_token(),
+                skip_db_auth=True,
+            )
         )
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            asyncio.run(coro)
-        else:
-            loop.create_task(coro)
     except Exception as e:  # noqa: BLE001 — telemetry is best-effort
         logger.debug("Token telemetry failed: %s", e)
 
