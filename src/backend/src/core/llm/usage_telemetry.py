@@ -19,16 +19,22 @@ Off the call path. The bus runs handlers inline, on the thread that made the
 LLM call, so this handler only queues the send. One daemon thread per process
 owns a long-lived event loop and makes the requests: an LLM call never waits on
 the workspace API, and a telemetry failure never reaches it. The queue is
-bounded and drops when full. A send still queued when a run subprocess exits
-through ``os._exit`` is lost; that is acceptable for best-effort telemetry.
+bounded and drops when full. Before a process exits, ``flush`` gives queued
+sends a bounded chance to go out: it is registered with ``atexit`` (the API
+process, and the crew child, which leaves through ``sys.exit``) and called by
+``flush_queues_before_exit`` (the flow child, which leaves through
+``os._exit``, where ``atexit`` never runs). A send still pending after that is
+dropped, which is acceptable for best-effort telemetry.
 """
 
 import asyncio
+import atexit
 import functools
 import logging
 import os
 import queue
 import threading
+import time
 from typing import Any, Callable, Optional, TypeGuard, cast
 
 from src.core.events import BaseEvent, LLMCallCompletedEvent
@@ -50,9 +56,11 @@ _worker_lock = threading.Lock()
 def _drain_forever() -> None:
     """Worker body: run each queued send, on this thread's own loop.
 
-    One loop for the life of the process, so loop-bound state the send relies
-    on (the cached auth context) has a stable home instead of a throwaway
-    ``asyncio.run`` loop per call.
+    One loop for the life of the process instead of a throwaway
+    ``asyncio.run`` loop per call. The auth the send resolves is cached in
+    ``utils/databricks_auth`` in plain module-level dicts, not in anything
+    bound to a loop, and this thread now writes those dicts too, alongside the
+    request and LLM threads that already did.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -78,6 +86,34 @@ def _ensure_worker() -> None:
                 target=_drain_forever, name="kasal-usage-telemetry", daemon=True
             )
             _worker.start()
+            # Idempotent: atexit.unregister drops any earlier registration.
+            atexit.unregister(flush)
+            atexit.register(flush)
+
+
+def flush(timeout: float = 2.0) -> bool:
+    """Wait up to ``timeout`` seconds for queued sends to finish.
+
+    True when the queue drained, False when the time ran out. Never raises and
+    never waits longer than ``timeout``: a stuck send leaves the rest unsent,
+    it does not hold the process open.
+    """
+    try:
+        deadline = time.monotonic() + timeout
+        with _pending.all_tasks_done:
+            while _pending.unfinished_tasks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.debug(
+                        "[TokenTelemetry] %d sends unsent at exit",
+                        _pending.unfinished_tasks,
+                    )
+                    return False
+                _pending.all_tasks_done.wait(remaining)
+        return True
+    except Exception as e:  # noqa: BLE001 — never disturb a process exit
+        logger.debug("Token telemetry flush failed: %s", e)
+        return False
 
 
 def submit_telemetry(send: Callable[[], object]) -> bool:

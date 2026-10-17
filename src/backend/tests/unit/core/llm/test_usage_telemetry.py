@@ -223,6 +223,41 @@ class TestOffTheCallPath:
         assert elapsed < 1.0
 
 
+class TestFlushAtExit:
+    """A run subprocess exits right after its last LLM call; the send that
+    call queued must get a bounded chance to go out first."""
+
+    def test_flush_delivers_a_queued_send(self):
+        delivered = threading.Event()
+
+        def _slowish():
+            time.sleep(0.3)
+            delivered.set()
+
+        assert usage_telemetry.submit_telemetry(_slowish)
+        assert usage_telemetry.flush(timeout=2.0) is True
+        assert delivered.is_set()
+
+    def test_flush_gives_up_on_time_when_the_worker_is_stuck(self):
+        release = threading.Event()
+        try:
+            assert usage_telemetry.submit_telemetry(lambda: release.wait(5))
+            began = time.monotonic()
+            drained = usage_telemetry.flush(timeout=0.3)
+            elapsed = time.monotonic() - began
+        finally:
+            release.set()
+
+        assert drained is False
+        assert elapsed < 0.8, f"flush blocked {elapsed:.2f}s past its timeout"
+
+    def test_flush_is_registered_to_run_at_exit(self):
+        with patch("atexit.register") as register:
+            usage_telemetry._worker = None  # force a (re)start
+            usage_telemetry.submit_telemetry(lambda: None)
+        assert usage_telemetry.flush in [c.args[0] for c in register.call_args_list]
+
+
 class TestRegistration:
     def test_registers_on_the_engine_bus_once(self):
         from src.core.events.bus import event_bus

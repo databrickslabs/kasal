@@ -155,6 +155,13 @@ class TestFlushQueuesBeforeExit:
         for q in (a, b):
             assert q.mock_calls[:2] == [call.close(), call.join_thread()]
 
+    def test_flushes_queued_usage_telemetry_first(self):
+        """The flow child exits through os._exit, which skips atexit; this is
+        the only chance its last LLM call's usage send gets."""
+        with patch("src.core.llm.usage_telemetry.flush") as flush:
+            flush_queues_before_exit(MagicMock(), timeout=5)
+        flush.assert_called_once_with(timeout=2.0)
+
     def test_bounded_when_nobody_reads(self):
         stuck = MagicMock()
         stuck.join_thread.side_effect = lambda: time.sleep(5)
