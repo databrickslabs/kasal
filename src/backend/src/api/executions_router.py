@@ -358,7 +358,7 @@ async def generate_execution_name(
     This endpoint analyzes the given agent and task configurations and generates
     a short, memorable name (2-4 words) that captures the essence of the execution.
     """
-    return await service.generate_execution_name(request)
+    return await service.generate_execution_name(request, group_context)
 
 
 @router.post("/{execution_id}/stop", response_model=StopExecutionResponse)

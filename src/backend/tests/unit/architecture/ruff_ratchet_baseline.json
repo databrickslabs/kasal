@@ -721,7 +721,7 @@
   "src/services/settings/engine.py::TRY400": 11,
   "src/services/settings/models.py::B904": 2,
   "src/services/settings/models.py::BLE001": 2,
-  "src/services/settings/models.py::G004": 18,
+  "src/services/settings/models.py::G004": 17,
   "src/services/settings/models.py::S110": 1,
   "src/services/settings/models.py::TRY400": 5,
   "src/services/skills/uc_sync.py::BLE001": 2,

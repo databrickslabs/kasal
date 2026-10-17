@@ -182,17 +182,22 @@ class TemplateService:
         """
         return await self.find_by_name_with_group_check(name, group_context)
 
-    async def find_by_name(self, name: str) -> Optional[PromptTemplate]:
+    async def find_by_name(
+        self, name: str, group_context: Optional[GroupContext] = None
+    ) -> Optional[PromptTemplate]:
         """
-        Find a prompt template by name.
+        Find a prompt template by name: the current group's own row when it has
+        one, else the global row. Nothing else is returned.
 
         Args:
             name: Name to search for
+            group_context: The caller's group; without one, the global row only
 
         Returns:
             PromptTemplate if found, else None
         """
-        return await self.repository.find_by_name(name)
+        gid = group_context.primary_group_id if group_context else None
+        return await self.repository.find_by_name(name, gid)
 
     async def find_by_name_with_group_check(
         self, name: str, group_context: Optional[GroupContext]
@@ -518,7 +523,10 @@ class TemplateService:
         return count
 
     async def _get_template_content_instance(
-        self, name: str, default_template: Optional[str] = None
+        self,
+        name: str,
+        default_template: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> str:
         """
         Get the content of a template by name (instance method).
@@ -526,12 +534,13 @@ class TemplateService:
         Args:
             name: Name of the template
             default_template: Default template to use if not found
+            group_context: The caller's group (see :meth:`find_by_name`)
 
         Returns:
             Template content
         """
         try:
-            template = await self.find_by_name(name)
+            template = await self.find_by_name(name, group_context)
             if template:
                 return template.template
             elif default_template:
@@ -546,7 +555,10 @@ class TemplateService:
             return ""
 
     async def get_template_content(
-        self, name: str, default_template: Optional[str] = None
+        self,
+        name: str,
+        default_template: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> str:
         """
         Get the content of a template by name.
@@ -554,11 +566,15 @@ class TemplateService:
         Args:
             name: Name of the template
             default_template: Default template to use if not found
+            group_context: The caller's group. Its own row wins; without one,
+                only the global row is read
 
         Returns:
             Template content
         """
-        return await self._get_template_content_instance(name, default_template)
+        return await self._get_template_content_instance(
+            name, default_template, group_context
+        )
 
     async def _get_effective_template_content_instance(
         self, name: str, group_context: Optional[GroupContext]

@@ -12,7 +12,7 @@ async def test_generate_execution_name_success(monkeypatch):
 
     # Stub template content
     class FakeTemplateService:
-        async def get_template_content(self, name: str):
+        async def get_template_content(self, name: str, group_context=None):
             return "Name template"
 
     # Stub log service
@@ -47,7 +47,7 @@ async def test_generate_execution_name_fallback_on_exception(monkeypatch):
     from src.services.execution import naming as module
 
     class FakeTemplateService:
-        async def get_template_content(self, name: str):
+        async def get_template_content(self, name: str, group_context=None):
             return "Name template"
 
     class FakeLogService:
@@ -224,7 +224,9 @@ async def test_get_name_template_opens_standalone_session_when_none():
         out = await svc._get_name_template()
 
     assert out == "TEMPLATE BODY"
-    fake_template.get_template_content.assert_awaited_once_with("generate_job_name")
+    fake_template.get_template_content.assert_awaited_once_with(
+        "generate_job_name", group_context=None
+    )
 
 
 @pytest.mark.asyncio
@@ -319,4 +321,6 @@ async def test_generate_execution_name_none_session_end_to_end(monkeypatch):
         out = await svc.generate_execution_name(req)
 
     assert out.name == "Cool Run"
-    fake_template.get_template_content.assert_awaited_once_with("generate_job_name")
+    fake_template.get_template_content.assert_awaited_once_with(
+        "generate_job_name", group_context=None
+    )

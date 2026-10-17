@@ -120,7 +120,7 @@ class ToolService:
 
         Shows:
         1. Default tools (group_id = null) - visible to everyone
-        2. Group-specific tools - visible only to members of that group
+        2. The current workspace's (``primary_group_id``) own tools
         3. If a tool has both default and group versions, the group version takes precedence
 
         Args:
@@ -147,10 +147,11 @@ class ToolService:
             if tool.group_id is None:
                 tools_by_title[tool.title] = tool
 
-        # Then, override with group-specific tools if they exist
+        # Then, override with the CURRENT workspace's own tools: the primary
+        # group only, never any other id in ``group_ids``.
+        primary_group_id = group_context.primary_group_id
         for tool in all_tools:
-            if tool.group_id in group_context.group_ids:
-                # This will override the default if it exists
+            if tool.group_id == primary_group_id:
                 tools_by_title[tool.title] = tool
 
         # Convert back to list, dropping personal-workspace-only tools (Gmail)
@@ -596,19 +597,23 @@ class ToolService:
     # Removed enable_all_tools and disable_all_tools methods for security reasons
     # Individual tool enabling now requires security disclaimer confirmation
 
-    async def get_tool_config_by_name(self, tool_name: str) -> Optional[Dict[str, Any]]:
+    async def get_tool_config_by_name(
+        self, tool_name: str, group_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Get a tool's configuration by its name/title.
 
         Args:
             tool_name: Name/title of the tool
+            group_id: The caller's teamspace. Its own row wins when it has one;
+                otherwise (and always, without a group) the global row. Another
+                teamspace's row is never read.
 
         Returns:
             Tool configuration dictionary or None if not found
         """
         try:
-            # Get tool by title
-            tool = await self.repository.find_by_title(tool_name)
+            tool = await self.repository.find_by_title(tool_name, group_id)
             if not tool:
                 logger.warning(f"Tool with name '{tool_name}' not found")
                 return None

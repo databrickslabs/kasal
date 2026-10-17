@@ -921,7 +921,7 @@ class DispatcherService:
         semantic_analysis = self._analyze_message_semantics(message)
         # Get prompt template from database
         system_prompt = await self.template_service.get_template_content(
-            "detect_intent"
+            "detect_intent", group_context=group_context
         )
 
         if not system_prompt:

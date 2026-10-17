@@ -1143,7 +1143,7 @@ class TestExecutionService:
 
         assert result == {"name": "Generated Execution Name"}
         execution_service.execution_name_service.generate_execution_name.assert_called_once_with(
-            request
+            request, None
         )
 
     @pytest.mark.asyncio
