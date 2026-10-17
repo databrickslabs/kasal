@@ -29,6 +29,26 @@ import type { ReasoningConfig } from '../types/workflow/crew';
 
 type ToolConfigs = Record<string, unknown>;
 
+/**
+ * Ignore Run while an earlier click is still starting its run.
+ *
+ * Before the POST, a click spends a second or two on the tool list and the
+ * agent and task refreshes, and the button only turns into Stop once the job
+ * exists. A second click in that window used to start a second, billed run.
+ */
+let runStartInFlight = false;
+function oneStartAtATime<A extends unknown[]>(start: (...args: A) => Promise<void>) {
+  return async (...args: A): Promise<void> => {
+    if (runStartInFlight) return;
+    runStartInFlight = true;
+    try {
+      await start(...args);
+    } finally {
+      runStartInFlight = false;
+    }
+  };
+}
+
 const isPlainObject = (v: unknown): v is ToolConfigs =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -346,7 +366,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     const originTab = useBuilderCanvasStore.getState().canvases.find(
       tab => tab.id === useBuilderCanvasStore.getState().activeCanvasId
     );
-    set({ isExecuting: true });
+    // The collected values belong to this run only; a later run asks again.
+    set({ isExecuting: true, inputVariables: {} });
 
     try {
       const hasAgentNodes = nodes.some(node => node.type === 'agentNode');
@@ -591,7 +612,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     const originTab = useBuilderCanvasStore.getState().canvases.find(
       tab => tab.id === useBuilderCanvasStore.getState().activeCanvasId
     );
-    set({ isExecuting: true });
+    // The collected values belong to this run only; a later run asks again.
+    set({ isExecuting: true, inputVariables: {} });
 
     try {
       // Count the types of nodes for better debugging
@@ -882,7 +904,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     set({ selectedModel: event.target.value as string });
   },
 
-  handleRunClick: async (type) => {
+  handleRunClick: oneStartAtATime(async (type: 'crew' | 'flow') => {
     const state = get();
 
     console.log('[CrewExecution] handleRunClick called with type:', type);
@@ -1101,7 +1123,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         set({ isExecuting: false });
       }
     }
-  },
+  }),
 
   executeWithVariables: async (variables: Record<string, string>) => {
     const state = get();
