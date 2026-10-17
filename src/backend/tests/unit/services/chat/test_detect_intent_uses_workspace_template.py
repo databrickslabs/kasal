@@ -66,7 +66,7 @@ async def _system_prompt(svc, group_id):
         await svc.detect_intent(
             "build me a research crew",
             "test-model",
-            group_context=GroupContext(group_ids=[group_id], group_email="u@x.com"),
+            group_context=GroupContext(group_ids=[group_id], group_email="u@example.com"),
         )
     messages = completion.await_args.kwargs.get("messages") or (
         completion.await_args.args[0]
