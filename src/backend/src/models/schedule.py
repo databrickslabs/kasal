@@ -47,6 +47,16 @@ class Schedule(Base):
         JSON, nullable=True
     )  # Flow-specific configuration
 
+    # The saved crew a crew schedule runs. Set, each run is rebuilt from that
+    # crew's current definition; agents_yaml/tasks_yaml are then a masked copy
+    # kept for display. NULL: the schedule runs its stored copy.
+    crew_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # IANA name ("Europe/Berlin") the cron line is read in. NULL: the server's
+    # own clock, which is how schedules saved before this column still run.
+    timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     # Common fields
     inputs: Mapped[Any] = mapped_column(
         JSON, default=dict, nullable=True

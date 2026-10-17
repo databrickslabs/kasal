@@ -73,6 +73,38 @@ describe('ScheduleRunDialog', () => {
     );
   });
 
+  it('sends the browser timezone with the cron line and names it', async () => {
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockImplementation(function (this: Intl.DateTimeFormat) {
+        return { ...real.call(this), timeZone: 'Europe/Berlin' };
+      });
+    try {
+      renderDialog();
+      expect(screen.getByText('Times are in Europe/Berlin')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Create schedule'));
+      await waitFor(() =>
+        expect(createScheduleFromExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ cron_expression: '0 9 * * *', timezone: 'Europe/Berlin' }),
+        ),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("shows the server's reason when the run cannot be scheduled", async () => {
+    createScheduleFromExecution.mockRejectedValueOnce({
+      response: { data: { detail: 'This run cannot be scheduled: its inputs were masked.' } },
+    });
+    renderDialog();
+    fireEvent.click(screen.getByText('Create schedule'));
+    expect(
+      await screen.findByText('This run cannot be scheduled: its inputs were masked.'),
+    ).toBeInTheDocument();
+  });
+
   it('the Advanced disclosure reveals the cron, and editing it takes over', () => {
     renderDialog();
     fireEvent.click(screen.getByText('Advanced: edit as a cron expression'));

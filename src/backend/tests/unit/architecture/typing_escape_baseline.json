@@ -742,7 +742,7 @@
   "src/services/trace/queue.py::cast": 1,
   "src/services/trace/recordings.py::Any": 6,
   "src/services/trace/row_view.py::Any": 4,
-  "src/services/trace/service.py::Any": 4,
+  "src/services/trace/service.py::Any": 3,
   "src/services/trace/usage.py::Any": 2,
   "src/services/trace/writer.py::Any": 6,
   "src/services/triggers/emit_service.py::Any": 19,

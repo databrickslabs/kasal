@@ -157,6 +157,22 @@ async def _ensure_execution_history_columns(conn: AsyncConnection) -> None:
     )
 
 
+async def _ensure_schedule_columns(conn: AsyncConnection) -> None:
+    """schedule: the saved crew a schedule runs and the IANA timezone its cron
+    line is read in. NULL keeps a schedule on its stored copy and the server's
+    clock, which is how every schedule saved before them behaves. Because
+    SQLAlchemy selects every mapped column, a missing one breaks every read of
+    the table — the scheduler loop included."""
+    await ensure_columns(
+        conn,
+        "schedule",
+        [
+            ("crew_id", "TEXT", "UUID"),
+            ("timezone", "VARCHAR(64)", "VARCHAR(64)"),
+        ],
+    )
+
+
 async def _ensure_crew_columns(conn: AsyncConnection) -> None:
     """crews.reasoning_config — the saved reasoning budget. The removed planner
     columns (crews.planning / planning_llm, schedule.planning) are deliberately

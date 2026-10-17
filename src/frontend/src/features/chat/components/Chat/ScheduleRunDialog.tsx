@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
 import { ScheduleService } from '../../../../api/execution/ScheduleService';
+import {
+  browserTimeZone,
+  refusalDetail,
+  timeZoneNote,
+} from '../../../workflow/scheduling/timeZone';
 
 /**
  * Chat-native "Run this on a schedule" dialog for one finished run.
  *
- * The run's stored configuration is the template (POST /schedules/from-execution
- * with the message's execution id), so what gets scheduled is exactly what just
- * ran — same agents, tasks, tools and model.
+ * The run is the template (POST /schedules/from-execution with the message's
+ * execution id). A run of a saved crew or flow schedules that crew or flow, so
+ * each run picks up its current definition and real credentials; any other run
+ * schedules its stored copy. The browser's timezone goes with the cron line, so
+ * "09:00" means 09:00 where the user is.
  *
  * Built for people who have never seen a cron line: pick how often, pick when,
  * read the plain-English summary. The cron expression is composed from those
@@ -145,6 +152,7 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
   const [customCron, setCustomCron] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const timeZone = browserTimeZone();
 
   const cron = customCron ?? composeCron(freq, time, weekday, monthday);
   const summary = customCron === null ? describeChoice(freq, time, weekday, monthday) : `Runs on the cron line ${customCron}`;
@@ -157,10 +165,11 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
         name: name.trim(),
         cron_expression: cron.trim(),
         execution_id: executionId,
+        timezone: timeZone,
       });
       onCreated(saved.name);
-    } catch {
-      setError('Could not create the schedule');
+    } catch (e) {
+      setError(refusalDetail(e, 'Could not create the schedule'));
       setSaving(false);
     }
   };
@@ -209,7 +218,7 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
               Run this on a schedule
             </div>
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Re-runs exactly what just ran — same agents, tasks and model
+              Re-runs this workflow — its saved crew or flow when it has one
             </div>
           </div>
           {!embedded && <button
@@ -333,6 +342,9 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
             }}
           >
             {summary}
+            <div className="mt-1 text-[11px]" style={sectionLabel}>
+              {timeZoneNote(timeZone)}
+            </div>
           </div>
 
           {!advanced ? (

@@ -143,8 +143,11 @@ explicit "Context from the triggering event" block, so a subscriber authored
 without knowledge of its producer still sees the hand-off.
 
 Emission only happens for runs of a **saved** crew/flow — an ad-hoc run has no
-identity for a rule to match. Scheduled runs of a saved crew carry their
-`crew_id` and emit like any other.
+identity for a rule to match. A schedule made from a run of a saved crew stores
+that crew's `crew_id`, so its runs carry it and emit like any other. A schedule
+of a chat answer or an unsaved canvas has no saved crew, so its runs do not
+emit. Chat runs of a saved crew do not send its `crew_id` yet, so they do not
+emit either.
 
 ## Chains and the hop cap
 

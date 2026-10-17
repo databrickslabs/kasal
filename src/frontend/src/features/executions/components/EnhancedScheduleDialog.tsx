@@ -24,6 +24,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useTranslation } from 'react-i18next';
+import { browserTimeZone, timeZoneNote } from '../../workflow/scheduling/timeZone';
 
 interface EnhancedScheduleDialogProps {
   open: boolean;
@@ -385,6 +386,10 @@ const EnhancedScheduleDialog: React.FC<EnhancedScheduleDialogProps> = ({
               </Typography>
             </Box>
           )}
+          {/* The caller sends this zone with the cron line. */}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            {timeZoneNote(browserTimeZone())}
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={loading}>

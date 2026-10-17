@@ -2,9 +2,23 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.utils.cron_utils import load_timezone
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+TIMEZONE_DESCRIPTION = (
+    "IANA timezone the cron line is read in, e.g. 'Europe/Berlin' (the "
+    "browser's). Omitted or null: the server's clock (UTC on Databricks Apps)."
+)
+
+
+def _known_timezone(value: Optional[str]) -> Optional[str]:
+    """``value`` if it names an IANA zone; blank is no zone."""
+    if value is None or not value.strip():
+        return None
+    load_timezone(value.strip())  # ValueError -> 422 naming the bad zone
+    return value.strip()
 
 
 class ScheduleBase(BaseModel):
@@ -53,6 +67,9 @@ class ScheduleBase(BaseModel):
             "not when the schedule is saved."
         ),
     )
+    timezone: Optional[str] = Field(None, description=TIMEZONE_DESCRIPTION)
+
+    _check_timezone = field_validator("timezone")(_known_timezone)
 
     @model_validator(mode="after")
     def validate_execution_type_requirements(self) -> "ScheduleBase":
@@ -90,6 +107,9 @@ class ScheduleCreateFromExecution(BaseModel):
         ),
     )
     is_active: bool = Field(default=True, description="Whether the schedule is active")
+    timezone: Optional[str] = Field(None, description=TIMEZONE_DESCRIPTION)
+
+    _check_timezone = field_validator("timezone")(_known_timezone)
 
 
 class ScheduleUpdate(ScheduleBase):
@@ -131,6 +151,13 @@ class ScheduleResponse(BaseModel):
     flow_config: Optional[Dict[str, Any]] = Field(
         None, description="Flow-specific configuration"
     )
+    crew_id: Optional[UUID] = Field(
+        None,
+        description=(
+            "The saved crew each run is rebuilt from; agents_yaml/tasks_yaml "
+            "are then a masked copy for display."
+        ),
+    )
 
     # Common fields
     inputs: Dict[str, Any] = Field(
@@ -141,6 +168,7 @@ class ScheduleResponse(BaseModel):
         default_factory=lambda: DEFAULT_ENGINE_MODEL,
         description="Model to use for the job",
     )
+    timezone: Optional[str] = Field(None, description=TIMEZONE_DESCRIPTION)
 
     # Timestamps
     last_run_at: Optional[datetime] = Field(

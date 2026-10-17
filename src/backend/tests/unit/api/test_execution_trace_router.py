@@ -329,51 +329,14 @@ class TestExecutionTraceRouter:
         assert response.status_code == 500
         assert "Internal server error" in response.json()["detail"]
 
-    # Test create_trace endpoint
-    @patch(
-        "src.api.execution_trace_router.ExecutionTraceService.create_trace_with_group"
-    )
-    def test_create_trace_success(self, mock_create_trace, client, mock_group_context):
-        """Test successful trace creation."""
-        trace_data = {
-            "run_id": 456,
-            "job_id": "job-123",
-            "event_source": "agent",
-            "event_type": "execution",
-            "input_data": {"step": 1, "action": "start"},
-            "output_data": {"result": "success"},
-        }
-
-        mock_create_trace.return_value = {"id": 123, **trace_data}
+    # POST /traces/ was an unused endpoint and has been removed; runs write
+    # their own traces.
+    def test_post_traces_is_gone(self, client, mock_group_context):
+        trace_data = {"job_id": "job-123", "event_type": "execution"}
 
         response = client.post("/traces/", json=trace_data)
 
-        assert response.status_code == 201
-        data = response.json()
-        assert data["id"] == 123
-        assert data["run_id"] == 456
-        assert data["job_id"] == "job-123"
-
-    @patch(
-        "src.api.execution_trace_router.ExecutionTraceService.create_trace_with_group"
-    )
-    def test_create_trace_exception(
-        self, mock_create_trace, client, mock_group_context
-    ):
-        """Test exception handling in create_trace."""
-        mock_create_trace.side_effect = Exception("Database error")
-
-        trace_data = {
-            "run_id": 456,
-            "job_id": "job-123",
-            "event_source": "agent",
-            "event_type": "execution",
-        }
-
-        response = client.post("/traces/", json=trace_data)
-
-        assert response.status_code == 500
-        assert "Internal server error" in response.json()["detail"]
+        assert response.status_code in (404, 405)
 
     # Test delete_traces_by_run_id endpoint
     @patch(
