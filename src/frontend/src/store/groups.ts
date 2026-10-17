@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { GroupService, GroupWithRole } from '../api/groups/GroupService';
 import { useUserStore } from './user';
-import { getTabGroupId, setTabGroupId } from '../shared/api/tabGroup';
+import {
+  adoptTabGroupId, getOwnTabGroupId, getSharedGroupId, getTabGroupId, setTabGroupId,
+} from '../shared/api/tabGroup';
 
 interface GroupState {
   groups: GroupWithRole[];
@@ -69,10 +71,13 @@ export const useGroupStore = create<GroupState>()(
         const allGroups = [personalGroup, ...userGroups.filter(g => g.id !== primaryGroupId)];
         
         // Only a successful membership response can invalidate the selection.
-        const tabGroupId = getTabGroupId();
-        const prevCurrent = get().currentGroupId || tabGroupId;
-        const isPrevValid = !!prevCurrent && allGroups.some(g => g.id === prevCurrent);
-        const effectiveGroupId = isPrevValid ? (prevCurrent as string) : primaryGroupId;
+        // Start from this tab's own group, never the shared fallback: in a tab
+        // that opened with nothing stored, that is whatever another tab picked since.
+        const ownGroupId = getOwnTabGroupId();
+        const requestGroupId = getTabGroupId();
+        const prevCurrent = get().currentGroupId || ownGroupId;
+        const isMember = (id: string | null) => !!id && allGroups.some(g => g.id === id);
+        const effectiveGroupId = isMember(prevCurrent) ? (prevCurrent as string) : primaryGroupId;
 
         // Update store with groups and effective current group
         set({
@@ -81,11 +86,14 @@ export const useGroupStore = create<GroupState>()(
           currentGroupId: effectiveGroupId
         });
 
-        // Persist only when this tab's group changes — "not set yet" or "stale →
-        // reset to personal". Comparing with the shared key instead made every tab
-        // that reloaded its groups write its own group over the other tabs' choice.
-        if (effectiveGroupId !== tabGroupId) {
-          setTabGroupId(effectiveGroupId);
+        // Pin the tab whenever its own group changes — "not pinned yet" or "stale →
+        // reset to personal". Seed new tabs too, unless another tab's valid choice
+        // is already the default: tabs must not overwrite each other's selection.
+        if (effectiveGroupId !== ownGroupId) {
+          if (isMember(getSharedGroupId())) adoptTabGroupId(effectiveGroupId);
+          else setTabGroupId(effectiveGroupId);
+        }
+        if (effectiveGroupId !== requestGroupId) {
           window.dispatchEvent(new CustomEvent('group-changed', { detail: { groupId: effectiveGroupId } }));
         }
       } catch (error) {

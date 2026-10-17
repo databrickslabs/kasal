@@ -40,14 +40,25 @@ function write(storage: Storage | null, key: string, value: string | null): void
 }
 
 // Set when the server refused this tab's teamspace during this page's life.
-// Kept in memory on purpose: a reload re-reads everything under a fresh scope.
+// The stored '' carries the same state across a reload or Duplicate tab.
 let lostGroupId: string | null = null;
 
 /** This tab's teamspace, or null when it has none. */
 export function getTabGroupId(): string | null {
   const own = read(tabStorage, TAB_GROUP_KEY);
   if (own !== null) return own || null;
-  // Not pinned yet (no selection existed when the tab opened).
+  // Not pinned yet: the tab opened before any selection existed. fetchMyGroups
+  // pins it (adoptTabGroupId) as soon as the user's groups are known.
+  return read(sharedStorage(), SHARED_GROUP_KEY);
+}
+
+/** This tab's own stored teamspace, never the shared fallback; null when unpinned or lost. */
+export function getOwnTabGroupId(): string | null {
+  return read(tabStorage, TAB_GROUP_KEY) || null;
+}
+
+/** The last selection in any tab (the seed for new tabs). */
+export function getSharedGroupId(): string | null {
   return read(sharedStorage(), SHARED_GROUP_KEY);
 }
 
@@ -58,30 +69,35 @@ export function pinTabGroup(): void {
   if (last) write(tabStorage, TAB_GROUP_KEY, last);
 }
 
-/** The user (or the membership check) chose this tab's teamspace. */
+/** The user (or the membership check) chose this tab's teamspace. Also seeds new tabs. */
 export function setTabGroupId(groupId: string): void {
+  adoptTabGroupId(groupId);
+  write(sharedStorage(), SHARED_GROUP_KEY, groupId);
+}
+
+/** Pin this tab to `groupId` without touching other tabs' default. */
+export function adoptTabGroupId(groupId: string): void {
   lostGroupId = null;
   write(tabStorage, TAB_GROUP_KEY, groupId);
-  write(sharedStorage(), SHARED_GROUP_KEY, groupId);
 }
 
 /**
  * The server refused `deniedGroupId`: if that is this tab's teamspace, drop it
- * until the user picks one. A late denial for a teamspace the tab has already
- * left does not touch the current one.
+ * until the user picks one. A denial for any other teamspace (or for a request
+ * that carried none) leaves the tab's teamspace alone.
  */
 export function markTabGroupAccessLost(deniedGroupId?: string | null): void {
   const groupId = getTabGroupId();
-  if (deniedGroupId && deniedGroupId !== groupId) return;
-  lostGroupId = groupId ?? '';
+  if (!deniedGroupId || deniedGroupId !== groupId) return;
+  lostGroupId = groupId;
   write(tabStorage, TAB_GROUP_KEY, '');
   // Do not seed new tabs into a teamspace the user can no longer open.
-  if (groupId && read(sharedStorage(), SHARED_GROUP_KEY) === groupId) {
+  if (read(sharedStorage(), SHARED_GROUP_KEY) === groupId) {
     write(sharedStorage(), SHARED_GROUP_KEY, null);
   }
 }
 
 /** True once this tab has lost its teamspace and the user has not picked another. */
 export function tabGroupAccessLost(): boolean {
-  return lostGroupId !== null;
+  return lostGroupId !== null || read(tabStorage, TAB_GROUP_KEY) === '';
 }
