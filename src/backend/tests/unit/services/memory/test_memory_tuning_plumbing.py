@@ -1,12 +1,17 @@
 """Every Memory Tuning knob reaches the layer that uses it — nothing is
 silently dropped between the panel and the code."""
 
+import inspect
+from unittest.mock import patch
+
+import pytest
+
 from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendType,
     MemoryTuningConfig,
 )
-from src.services.memory.engine import Memory
+from src.services.memory.engine import Memory, MemoryRecord
 from src.services.memory.run.crew_memory import CrewMemoryService
 from src.services.memory.storage.factory import MemoryBackendFactory
 
@@ -45,6 +50,69 @@ class TestStorageSide:
             "recency_half_life_days": 14.0,
             "relevance_threshold": 0.4,
         }
+
+
+def _embedder(texts):
+    """Deterministic 3-d embedding: one axis per topic word."""
+    if isinstance(texts, str):
+        texts = [texts]
+    return [
+        [float("deploy" in t), float("lunch" in t), 1.0 if not t else 0.1]
+        for t in (x.lower() for x in texts)
+    ]
+
+
+class TestLocalBackendTakesEveryWeight:
+    """Moving the Keyword weight slider used to raise TypeError inside
+    ``_create_local_storage``; the broad except turned that into "no storage",
+    and memory went off for every run in the teamspace."""
+
+    def _storage(self, tmp_path, tuning):
+        with patch(
+            "src.utils.storage_paths.db_storage_path", return_value=str(tmp_path)
+        ):
+            return CrewMemoryService({"group_id": "grp"})._create_local_storage(
+                {"embedder": None}, _embedder, _config(tuning)
+            )
+
+    def test_keyword_weight_keeps_memory_on_and_recalls(self, tmp_path):
+        storage = self._storage(tmp_path, MemoryTuningConfig(keyword_weight=0.2))
+
+        assert storage is not None, "memory turned off by the keyword weight"
+        assert storage.KEYWORD_WEIGHT == 0.2
+        storage.save([MemoryRecord(content="We deploy on Fridays", scope="/grp")])
+        hits = storage.search(
+            _embedder("when do we deploy")[0],
+            scope_prefix="/grp",
+            query_text="when do we deploy",
+        )
+        assert [r.content for r, _ in hits] == ["We deploy on Fridays"]
+
+    def test_the_keyword_weight_changes_the_score(self, tmp_path):
+        """Reaching the backend is not enough — it must be the weight used."""
+        scores = {}
+        for weight in (0.0, 0.5):
+            storage = self._storage(
+                tmp_path / str(weight), MemoryTuningConfig(keyword_weight=weight)
+            )
+            storage.save([MemoryRecord(content="We deploy on Fridays", scope="/grp")])
+            [(_, scores[weight])] = storage.search(
+                _embedder("deploy fridays")[0],
+                scope_prefix="/grp",
+                query_text="deploy fridays",
+            )
+        assert scores[0.5] == pytest.approx(scores[0.0] + 0.5)
+
+    def test_every_scoring_knob_is_a_parameter_of_both_backends(self):
+        """A knob added to ``_scoring_kwargs`` must exist on BOTH stores, or
+        the one that lacks it raises and memory goes off there."""
+        from src.services.memory.storage.lakebase import LakebaseStorageBackend
+        from src.services.memory.storage.local import LocalStorageBackend
+
+        knobs = set(MemoryBackendFactory._scoring_kwargs(_config()))
+        for backend in (LocalStorageBackend, LakebaseStorageBackend):
+            params = set(inspect.signature(backend.__init__).parameters)
+            assert knobs <= params, (backend.__name__, knobs - params)
 
 
 class TestEngineSide:

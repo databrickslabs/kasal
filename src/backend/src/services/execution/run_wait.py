@@ -153,7 +153,14 @@ def flush_queues_before_exit(*queues: Any, timeout: float = 30.0) -> None:
     finish writing. The wait runs in a helper thread bounded by ``timeout``,
     because it only completes while the parent is reading. A parent that has
     died must not leave the child hanging forever on a full pipe.
+
+    Queued usage telemetry gets a bounded chance (2 s) first: ``os._exit``
+    skips ``atexit``, so this is the only flush it gets on the flow path. The
+    result is already with its feeder thread, so the wait delays nothing.
     """
+    from src.core.llm.usage_telemetry import flush as flush_usage_telemetry
+
+    flush_usage_telemetry(timeout=2.0)
 
     def _flush() -> None:
         for q in queues:
