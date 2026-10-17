@@ -39,7 +39,9 @@ class ScheduleRepository:
         # Calculate next run time if not provided
         if "next_run_at" not in schedule_data:
             schedule_data["next_run_at"] = calculate_next_run_from_last(
-                schedule_data["cron_expression"]
+                schedule_data["cron_expression"],
+                None,
+                schedule_data.get("timezone"),
             )
 
         # Create schedule
@@ -127,10 +129,12 @@ class ScheduleRepository:
         for field, value in schedule_data.items():
             setattr(schedule, field, value)
 
-        # If cron expression is updated, recalculate next run time
-        if "cron_expression" in schedule_data:
+        # A new cron line or timezone moves the next run
+        if "cron_expression" in schedule_data or "timezone" in schedule_data:
             schedule.next_run_at = calculate_next_run_from_last(
-                schedule_data["cron_expression"], schedule.last_run_at
+                schedule.cron_expression,
+                schedule.last_run_at,
+                getattr(schedule, "timezone", None),
             )
 
         await self.session.flush()
@@ -180,12 +184,23 @@ class ScheduleRepository:
         # If activating, recalculate next run time
         if schedule.is_active:
             schedule.next_run_at = calculate_next_run_from_last(
-                schedule.cron_expression, schedule.last_run_at
+                schedule.cron_expression,
+                schedule.last_run_at,
+                getattr(schedule, "timezone", None),
             )
 
         await self.session.flush()
         await self.session.refresh(schedule)
 
+        return schedule
+
+    async def deactivate(self, schedule_id: int) -> Optional[Schedule]:
+        """Switch a schedule off (``is_active = False``); None if not found."""
+        schedule = await self.find_by_id(schedule_id)
+        if not schedule:
+            return None
+        schedule.is_active = False
+        await self.session.flush()
         return schedule
 
     async def update_after_execution(
@@ -216,7 +231,9 @@ class ScheduleRepository:
         # Update last run time and calculate next run time
         schedule.last_run_at = execution_time_naive
         schedule.next_run_at = calculate_next_run_from_last(
-            schedule.cron_expression, execution_time_naive
+            schedule.cron_expression,
+            execution_time_naive,
+            getattr(schedule, "timezone", None),
         )
 
         await self.session.flush()

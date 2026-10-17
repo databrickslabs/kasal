@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material';
 
 // --- Mocks that must be defined before importing the component ---
@@ -89,11 +89,12 @@ vi.mock('../../../api/execution/ExecutionLogs', () => ({
   },
 }));
 
+const mockCreateScheduleFromExecution = vi.fn();
+const mockCreateSchedule = vi.fn();
 vi.mock('../../../api/execution/ScheduleService', () => ({
   ScheduleService: {
-    getInstance: () => ({
-      createScheduleFromRun: vi.fn(),
-    }),
+    createScheduleFromExecution: (...a: unknown[]) => mockCreateScheduleFromExecution(...a),
+    createSchedule: (...a: unknown[]) => mockCreateSchedule(...a),
   },
 }));
 
@@ -188,6 +189,35 @@ describe('Job history sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Details for News flow' }));
     expect(screen.getByRole('region', { name: 'Details for News flow' })).toHaveTextContent('test-model');
     expect(screen.getByText('2.0m')).toBeVisible();
+  });
+  it('schedules a run from the run itself, on the browser clock', async () => {
+    const real = Intl.DateTimeFormat.prototype.resolvedOptions;
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockImplementation(function (this: Intl.DateTimeFormat) {
+        return { ...real.call(this), timeZone: 'Europe/Berlin' };
+      });
+    // What the list holds: the run's stored, masked configuration.
+    mockRuns = [{ id: 'run-1', job_id: 'job-1', run_name: 'Research report', status: 'COMPLETED',
+      created_at: '2026-09-06T10:00:00Z',
+      inputs: { agents_yaml: { a: { role: 'R', tool_configs: { T: { client_secret: '***REDACTED***' } } } },
+        tasks_yaml: { t: { description: 'D' } } } } as unknown as Run];
+    try {
+      renderHistory();
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for Research report' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Schedule execution' }));
+      expect(await screen.findByText('Times are in Europe/Berlin')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Schedule Job' }));
+      await waitFor(() =>
+        expect(mockCreateScheduleFromExecution).toHaveBeenCalledWith(
+          expect.objectContaining({ execution_id: 'run-1', timezone: 'Europe/Berlin' }),
+        ),
+      );
+      // The masked copy never goes back to the server as a schedule's config.
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
   it.each([false, true])('keeps run actions and secondary details reachable on compact=%s', async compact => {
     mockIsMobile = compact;

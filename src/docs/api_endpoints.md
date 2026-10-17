@@ -451,6 +451,31 @@ Commonly set: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SERPER_API_KEY`,
 | `GET`/`POST` | `/schedules/jobs` | Databricks job bindings |
 | `PUT` | `/schedules/jobs/{job_id}` | Update a job binding |
 
+**Timezone.** A schedule's cron line is read in its `timezone`, an IANA name
+such as `Europe/Berlin`. The schedule dialogs send the browser's timezone, so
+"every day at 09:00" means 09:00 where the user is: 07:00 UTC in summer and
+08:00 UTC in winter for Berlin. `next_run_at` and `last_run_at` stay naive UTC.
+A schedule with no timezone (every schedule saved before the field existed, or
+one created through the API without it) is read on the server's clock, which is
+UTC on Databricks Apps. An unknown timezone name is rejected with a 422.
+
+**What a schedule from a past run runs.** `POST /schedules/from-execution`
+schedules what the run was built from, not the run's stored copy, because that
+copy is masked (`***REDACTED***` in place of every secret):
+
+- A run of a saved crew stores the crew's `crew_id`. Each scheduled run is
+  rebuilt from the crew as it is then, and records that `crew_id`, so
+  emit-on-completion rules match it. `agents_yaml`/`tasks_yaml` on the schedule
+  are a masked copy for display.
+- A run of a saved flow stores the flow's `flow_id` and no nodes, so each run
+  loads the saved flow.
+- A run with neither (a chat answer, an unsaved canvas) keeps its stored copy.
+  If masking removed something from it, the request is refused with a 400 that
+  says so.
+
+`PUT /schedules/{schedule_id}` changes only the fields it is sent. A flow
+schedule's edit must still send `execution_type: "flow"`.
+
 A scheduled run names no harness, so it takes the configured default — see
 below.
 

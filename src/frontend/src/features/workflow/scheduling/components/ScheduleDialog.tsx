@@ -31,7 +31,8 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { ScheduleService } from '../../../../api/execution/ScheduleService';
+import { ScheduleCreate, ScheduleService } from '../../../../api/execution/ScheduleService';
+import { browserTimeZone, formatScheduleTime, timeZoneLabel, timeZoneNote } from '../timeZone';
 import { toast } from 'react-hot-toast';
 import InfoIcon from '@mui/icons-material/Info';
 import { Schedule, ScheduleDialogProps, ConfigViewerDialogProps } from '../../../../types/execution/schedule';
@@ -129,6 +130,14 @@ const ScheduleDialog: React.FC<ScheduleDialogProps & { embedded?: boolean }> = (
   const [isConfigViewerOpen, setIsConfigViewerOpen] = useState(false);
   const [_inputs, setInputs] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
+  const editingSchedule = schedules.find(s => s.id === editingScheduleId);
+  // A schedule keeps its zone. One saved before schedules had a zone stays on
+  // the server's clock until its timing is changed here: the hour picked then
+  // is on the editor's clock.
+  const timingChanged = Boolean(editingSchedule)
+    && cronExpression.trim() !== (editingSchedule?.cron_expression ?? '').trim();
+  const editTimeZone = editingSchedule?.timezone
+    || (timingChanged ? browserTimeZone() : undefined);
 
   const resetForm = useCallback(() => {
     setName('');
@@ -252,20 +261,31 @@ const ScheduleDialog: React.FC<ScheduleDialogProps & { embedded?: boolean }> = (
       setLoading(true);
       
       if (dialogMode === 'edit' && editingScheduleId) {
-        // When editing, keep the existing configuration
-        const existingSchedule = schedules.find(s => s.id === editingScheduleId);
+        // When editing, keep the existing configuration. The server changes
+        // only the fields sent, so a flow schedule sends its type and flow and
+        // stays a flow.
+        const existingSchedule = editingSchedule;
         if (!existingSchedule) {
           toast.error('Schedule not found');
           return;
         }
-        const scheduleData = {
+        const target: Partial<ScheduleCreate> = existingSchedule.execution_type === 'flow'
+          ? {
+              flow_id: existingSchedule.flow_id ?? undefined,
+              nodes: existingSchedule.nodes ?? undefined,
+              edges: existingSchedule.edges ?? undefined,
+            }
+          : { agents_yaml: existingSchedule.agents_yaml, tasks_yaml: existingSchedule.tasks_yaml };
+        const scheduleData: ScheduleCreate = {
           name,
           cron_expression: cronExpression,
-          agents_yaml: existingSchedule.agents_yaml,
-          tasks_yaml: existingSchedule.tasks_yaml,
+          execution_type: existingSchedule.execution_type,
+          ...target,
           inputs: existingSchedule.inputs,
           is_active: existingSchedule.is_active,
-          model: existingSchedule.model
+          model: existingSchedule.model,
+          // Left out, the server keeps the stored zone (NULL: server time).
+          ...(editTimeZone ? { timezone: editTimeZone } : {}),
         };
         
         await ScheduleService.updateSchedule(editingScheduleId, scheduleData);
@@ -543,13 +563,12 @@ const ScheduleDialog: React.FC<ScheduleDialogProps & { embedded?: boolean }> = (
                       <Typography component="span" variant="body2" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
                         {schedule.cron_expression}
                       </Typography>
+                      <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+                        ({timeZoneLabel(schedule.timezone)})
+                      </Typography>
                       {schedule.next_run_at && (
                         <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-                          • Next run: {(() => {
-                            // Backend stores in UTC without timezone info, treat as UTC
-                            const utcDate = new Date(schedule.next_run_at + 'Z');
-                            return utcDate.toLocaleString();
-                          })()}
+                          • Next run: {formatScheduleTime(schedule.next_run_at)}
                         </Typography>
                       )}
                     </Box>
@@ -664,6 +683,9 @@ const ScheduleDialog: React.FC<ScheduleDialogProps & { embedded?: boolean }> = (
                   </Typography>
                 </Box>
               )}
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {timeZoneNote(editTimeZone)}
+              </Typography>
 
               <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
                 <Button

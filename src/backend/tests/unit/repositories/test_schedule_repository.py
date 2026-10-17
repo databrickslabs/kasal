@@ -176,8 +176,9 @@ class TestScheduleRepositoryCreate:
                 mock_async_session.refresh.assert_called_once_with(created_schedule)
 
                 # Verify next_run_at was calculated
+                # No timezone in the data: the server's clock (None).
                 mock_calc_next.assert_called_once_with(
-                    sample_schedule_data["cron_expression"]
+                    sample_schedule_data["cron_expression"], None, None
                 )
 
     @pytest.mark.asyncio
@@ -407,7 +408,7 @@ class TestScheduleRepositoryUpdate:
                 assert schedule.cron_expression == "0 12 * * *"
                 assert schedule.next_run_at == new_next_run
                 mock_calc_next.assert_called_once_with(
-                    "0 12 * * *", schedule.last_run_at
+                    "0 12 * * *", schedule.last_run_at, None
                 )
 
     @pytest.mark.asyncio
@@ -496,7 +497,7 @@ class TestScheduleRepositoryToggleActive:
                 assert schedule.is_active is True
                 assert schedule.next_run_at == new_next_run
                 mock_calc_next.assert_called_once_with(
-                    schedule.cron_expression, schedule.last_run_at
+                    schedule.cron_expression, schedule.last_run_at, None
                 )
                 mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(schedule)
@@ -567,7 +568,7 @@ class TestScheduleRepositoryUpdateAfterExecution:
                 assert schedule.next_run_at == new_next_run
                 # The service calls calculate_next_run_from_last with timezone-naive datetime
                 mock_calc_next.assert_called_once_with(
-                    schedule.cron_expression, expected_time
+                    schedule.cron_expression, expected_time, None
                 )
                 mock_async_session.flush.assert_called_once()
                 mock_async_session.refresh.assert_called_once_with(schedule)
@@ -798,5 +799,5 @@ class TestScheduleRepositoryEdgeCases:
                 assert schedule.last_run_at == expected_time
                 # The service calls calculate_next_run_from_last with timezone-naive datetime
                 mock_calc_next.assert_called_once_with(
-                    schedule.cron_expression, expected_time
+                    schedule.cron_expression, expected_time, None
                 )

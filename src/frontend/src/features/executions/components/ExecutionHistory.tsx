@@ -21,8 +21,9 @@ import RunActivityRow from './RunActivityRow';
 import RunActivityOverview, { matchesRunFilter, type RunFilter } from './RunActivityOverview';
 import ExecutionHistorySkeleton from './ExecutionHistorySkeleton';
 import { refreshRecipeIndexIfStale } from './recipeIndexCache';
-import { Run, runService } from '../../../api/execution/ExecutionHistoryService';
+import { Run } from '../../../api/execution/ExecutionHistoryService';
 import { ScheduleService } from '../../../api/execution/ScheduleService';
+import { browserTimeZone, refusalDetail } from '../../workflow/scheduling/timeZone';
 import { ResultValue } from '../../../types/execution/result';
 import {
   LazyShowResult, LazyShowTraceTimeline, LazyShowLogs, LazyRecipeEffectivenessDialog, MountWhenOpened, LazyDialogBoundary,
@@ -36,7 +37,6 @@ import { useRunHistory } from '../../../hooks/global/useExecutionHistory';
 import { useRunStatusStore } from '../../../store/runStatus';
 import RunActions from './ExecutionActions';
 import RunDialogs from './RunDialogs';
-import { AgentYaml, TaskYaml } from '../../../types/workflow/crewPayload';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { usePermissionStore } from '../../../store/permissions';
@@ -45,24 +45,6 @@ import { isPersonalWorkspaceId, usePersonalGroupId } from '../../../store/user';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
-}
-
-interface ScheduleCreateData {
-  name: string;
-  cron_expression: string;
-  execution_type?: 'crew' | 'flow';
-  // Crew fields
-  agents_yaml?: Record<string, AgentYaml>;
-  tasks_yaml?: Record<string, TaskYaml>;
-  // Flow fields
-  flow_id?: string;
-  nodes?: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>;
-  edges?: Array<{ id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string }>;
-  flow_config?: Record<string, unknown>;
-  // Common fields
-  inputs?: Record<string, unknown>;
-  is_active?: boolean;
-  model?: string;
 }
 
 interface RunHistoryProps {
@@ -349,142 +331,25 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
       return;
     }
 
-    // History rows are list summaries; the crew/flow configuration and the run
-    // inputs being scheduled live on the detail endpoint.
-    const scheduleRun = await runService.withPayload(selectedRunForSchedule);
-
-    // Determine execution type from the run
-    const executionType = scheduleRun.execution_type ||
-                         scheduleRun.inputs?.execution_type ||
-                         'crew';
-
-    // Check if this is a flow execution
-    const isFlowExecution = executionType === 'flow';
-
-    if (isFlowExecution) {
-      // Handle flow execution scheduling
-      const flow_id = scheduleRun.flow_id || scheduleRun.inputs?.flow_id;
-      const nodes = scheduleRun.inputs?.nodes;
-      const edges = scheduleRun.inputs?.edges;
-      const flow_config = scheduleRun.inputs?.flow_config;
-
-      // Validate flow configuration
-      if (!flow_id && !(nodes && edges && nodes.length > 0 && edges.length >= 0)) {
-        console.error('CRITICAL: Flow execution missing configuration', {
-          executionId: scheduleRun.id,
-          jobId: scheduleRun.job_id,
-          runName: scheduleRun.run_name,
-          hasFlowId: !!flow_id,
-          hasNodes: !!nodes,
-          hasEdges: !!edges,
-          nodesCount: nodes?.length || 0,
-          edgesCount: edges?.length || 0
-        });
-
-        toast.error('❌ Cannot schedule: This flow execution is missing its flow configuration. Please create a new execution with proper configuration instead.', {
-          duration: 10000,
-        });
-        return;
-      }
-
-      try {
-        const scheduleData: ScheduleCreateData = {
-          name: scheduleName,
-          cron_expression: cronExpression,
-          execution_type: 'flow',
-          flow_id: flow_id,
-          nodes: nodes,
-          edges: edges,
-          flow_config: flow_config || {},
-          inputs: scheduleRun.inputs?.inputs || {},
-          is_active: true,
-          model: scheduleRun.inputs?.model,
-        };
-
-        await ScheduleService.createSchedule(scheduleData);
-        setScheduleDialogOpen(false);
-        setSelectedRunForSchedule(null);
-        setScheduleName('');
-        setCronExpression('0 0 * * *');
-        toast.success('Flow schedule created successfully');
-      } catch (error) {
-        console.error('Error scheduling flow job:', error);
-        toast.error('Failed to schedule flow job');
-      }
-    } else {
-      // Handle crew execution scheduling (existing logic)
-      let agents_yaml = null;
-      let tasks_yaml = null;
-
-      // First try to get from the inputs object (this is where the complete config is stored)
-      if (scheduleRun.inputs?.agents_yaml) {
-        agents_yaml = scheduleRun.inputs.agents_yaml;
-      }
-      if (scheduleRun.inputs?.tasks_yaml) {
-        tasks_yaml = scheduleRun.inputs.tasks_yaml;
-      }
-
-      // Fallback to direct properties (now properly populated from backend)
-      if (!agents_yaml && scheduleRun.agents_yaml) {
-        try {
-          agents_yaml = typeof scheduleRun.agents_yaml === 'string'
-            ? JSON.parse(scheduleRun.agents_yaml)
-            : scheduleRun.agents_yaml;
-        } catch (e) {
-          console.warn('Failed to parse agents_yaml string:', e);
-        }
-      }
-      if (!tasks_yaml && scheduleRun.tasks_yaml) {
-        try {
-          tasks_yaml = typeof scheduleRun.tasks_yaml === 'string'
-            ? JSON.parse(scheduleRun.tasks_yaml)
-            : scheduleRun.tasks_yaml;
-        } catch (e) {
-          console.warn('Failed to parse tasks_yaml string:', e);
-        }
-      }
-
-      // Validate crew configuration
-      if (!agents_yaml || !tasks_yaml || Object.keys(agents_yaml).length === 0 || Object.keys(tasks_yaml).length === 0) {
-        console.error('CRITICAL: Crew execution missing configuration', {
-          executionId: scheduleRun.id,
-          jobId: scheduleRun.job_id,
-          runName: scheduleRun.run_name,
-          hasInputs: !!scheduleRun.inputs,
-          hasAgentsYaml: !!agents_yaml,
-          hasTasksYaml: !!tasks_yaml,
-          agentsYamlKeys: agents_yaml ? Object.keys(agents_yaml) : [],
-          tasksYamlKeys: tasks_yaml ? Object.keys(tasks_yaml) : []
-        });
-
-        toast.error('❌ Cannot schedule: This execution is missing its agent and task configuration. Please create a new execution with proper configuration instead.', {
-          duration: 10000,
-        });
-        return;
-      }
-
-      try {
-        const scheduleData: ScheduleCreateData = {
-          name: scheduleName,
-          cron_expression: cronExpression,
-          execution_type: 'crew',
-          agents_yaml: agents_yaml,
-          tasks_yaml: tasks_yaml,
-          inputs: scheduleRun.inputs?.inputs || {},
-          is_active: true,
-          model: scheduleRun.inputs?.model,
-        };
-
-        await ScheduleService.createSchedule(scheduleData);
-        setScheduleDialogOpen(false);
-        setSelectedRunForSchedule(null);
-        setScheduleName('');
-        setCronExpression('0 0 * * *');
-        toast.success('Crew schedule created successfully');
-      } catch (error) {
-        console.error('Error scheduling crew job:', error);
-        toast.error('Failed to schedule crew job');
-      }
+    // The server builds the schedule from the run: a run of a saved crew or
+    // flow schedules that crew or flow (with its real credentials), anything
+    // else its stored copy — never the masked configuration this list shows.
+    try {
+      await ScheduleService.createScheduleFromExecution({
+        name: scheduleName,
+        cron_expression: cronExpression,
+        execution_id: selectedRunForSchedule.id,
+        is_active: true,
+        timezone: browserTimeZone(),
+      });
+      setScheduleDialogOpen(false);
+      setSelectedRunForSchedule(null);
+      setScheduleName('');
+      setCronExpression('0 0 * * *');
+      toast.success('Schedule created successfully');
+    } catch (error) {
+      console.error('Error scheduling job:', error);
+      toast.error(refusalDetail(error, 'Failed to schedule job'), { duration: 10000 });
     }
   };
 
