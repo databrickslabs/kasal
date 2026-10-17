@@ -19,6 +19,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.core.exceptions import BadRequestError
+from src.models.crew import Crew
 from src.models.event_subscription import EmitRule, EventSubscription
 from src.models.execution_history import ExecutionHistory
 from src.models.flow import Flow
@@ -40,7 +41,8 @@ from src.utils.sensitive_data_utils import REDACTED_PLACEHOLDER
 from src.utils.user_context import GroupContext
 
 MODULE = "src.services.scheduling.scheduler"
-BUILD = "src.services.catalog.crew_config.build_crew_execution_config_by_id"
+BUILD = "src.services.scheduling.saved_targets.project_saved_crew"
+LOOKUP = "src.services.catalog.run_lookup.crew_for_run"
 CREW_ID = uuid.UUID("6f0c2a52-1b7e-4b8e-9c3a-2f6d7e8a9b10")
 FLOW_ID = uuid.UUID("0d3f8e1a-7c2b-4d5e-8f9a-1b2c3d4e5f60")
 GROUP = "team-a"
@@ -228,6 +230,7 @@ async def session():
             Schedule,
             ExecutionHistory,
             Flow,
+            Crew,
             TriggerQueue,
             EventSubscription,
             EmitRule,
@@ -368,11 +371,53 @@ class TestAScheduledRunOfASavedCrew:
             crew_id=str(CREW_ID),
         )
 
-        with patch(BUILD, new=AsyncMock(return_value=None)):
-            start = await _fire_config(session, schedule, config)
+        # The real lookup, on a crews table without that crew: definitely gone.
+        start = await _fire_config(session, schedule, config)
 
         start.assert_not_called()
         await _assert_retired(session, schedule, "saved crew")
+
+    @pytest.mark.asyncio
+    async def test_a_lookup_that_fails_skips_the_run_and_keeps_the_schedule(
+        self, session
+    ):
+        from sqlalchemy.exc import OperationalError
+
+        from src.utils.cron_utils import calculate_next_run_from_last
+
+        fired = datetime.now(timezone.utc)
+        # What the loop stored before handing the run over.
+        upcoming = calculate_next_run_from_last("0 9 * * *", fired, "Europe/Berlin")
+        schedule = Schedule(
+            name="Nightly report",
+            cron_expression="0 9 * * *",
+            execution_type="crew",
+            agents_yaml=MASKED_AGENTS,
+            tasks_yaml=SAVED_TASKS,
+            crew_id=CREW_ID,
+            timezone="Europe/Berlin",
+            next_run_at=upcoming,
+            group_id=GROUP,
+        )
+        session.add(schedule)
+        await session.commit()
+        config = CrewConfig(
+            agents_yaml=MASKED_AGENTS,
+            tasks_yaml=SAVED_TASKS,
+            execution_type="crew",
+            crew_id=str(CREW_ID),
+        )
+        dropped = OperationalError("SELECT crews", {}, Exception("connection lost"))
+
+        with patch(LOOKUP, new=AsyncMock(side_effect=dropped)):
+            start = await _fire_config(session, schedule, config, fired)
+
+        start.assert_not_called()
+        await session.refresh(schedule)
+        assert schedule.is_active is True
+        assert schedule.next_run_at == upcoming
+        runs = (await session.execute(ExecutionHistory.__table__.select())).all()
+        assert runs == []
 
     @pytest.mark.asyncio
     async def test_a_deleted_saved_flow_turns_the_schedule_off_and_says_why(
@@ -396,7 +441,7 @@ class TestAScheduledRunOfASavedCrew:
         await _assert_retired(session, schedule, "saved flow")
 
 
-async def _fire_config(session, schedule, config):
+async def _fire_config(session, schedule, config, fired=None):
     """Run ``schedule`` once with ``config``; returns the run-start mock."""
 
     async def smart_session():
@@ -411,7 +456,7 @@ async def _fire_config(session, schedule, config):
         ),
     ):
         await SchedulerService(session).run_schedule_job(
-            schedule.id, config, datetime.now(timezone.utc)
+            schedule.id, config, fired or datetime.now(timezone.utc)
         )
     return start
 
@@ -520,3 +565,59 @@ class TestTheSchedulerLoop:
         job.assert_not_called()
         assert not service._running_tasks
         await _assert_retired(session, schedule, "timezone")
+
+    @pytest.mark.asyncio
+    async def test_a_failing_retire_does_not_stop_the_next_due_schedule(self):
+        def due(id_, tz):
+            return SimpleNamespace(
+                id=id_,
+                name=f"Schedule {id_}",
+                cron_expression="0 9 * * *",
+                execution_type="crew",
+                agents_yaml=SAVED_AGENTS,
+                tasks_yaml=SAVED_TASKS,
+                inputs={},
+                model="databricks-llama",
+                flow_id=None,
+                nodes=None,
+                edges=None,
+                flow_config=None,
+                crew_id=None,
+                timezone=tz,
+                next_run_at=None,
+                last_run_at=None,
+                is_active=True,
+            )
+
+        broken, healthy = due(1, "Mars/Olympus_Mons"), due(2, "Europe/Berlin")
+        repo = MagicMock(
+            find_due_schedules=AsyncMock(return_value=[broken, healthy]),
+            find_all=AsyncMock(return_value=[]),
+        )
+        session = MagicMock(commit=AsyncMock())
+
+        async def smart_session():
+            yield session
+
+        service = SchedulerService(MagicMock())
+        with (
+            patch(f"{MODULE}.ScheduleRepository", return_value=repo),
+            patch(
+                f"{MODULE}.get_smart_db_session", side_effect=lambda: smart_session()
+            ),
+            patch(
+                f"{MODULE}.retire_schedule",
+                new=AsyncMock(side_effect=RuntimeError("database gone")),
+            ) as retire,
+            patch.object(service, "run_schedule_job", new=AsyncMock()) as job,
+            patch(f"{MODULE}.asyncio.sleep", side_effect=asyncio.CancelledError),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await service.check_and_run_schedules()
+        for task in service._running_tasks:
+            task.cancel()
+
+        retire.assert_awaited_once()
+        assert [c.args[0] for c in job.call_args_list] == [2]
+        assert healthy.next_run_at is not None
+        assert broken.next_run_at is None  # still due: retried next tick

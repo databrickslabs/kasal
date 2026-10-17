@@ -105,17 +105,27 @@ async def project_saved_crew(
 ) -> Optional[Tuple[Entries, Entries]]:
     """The saved crew's current ``(agents_yaml, tasks_yaml)``, or None.
 
-    None covers a deleted crew, another workspace's crew, and a crew none of
-    whose agents or tasks the workspace can read. Secrets come back decrypted.
-    """
-    from src.services.catalog.crew_config import build_crew_execution_config_by_id
+    None means the lookup answered "not there": a deleted crew, another
+    workspace's crew, or a crew none of whose agents or tasks the workspace
+    can read. A database error RAISES, so a caller can tell a crew that is gone
+    from one it could not reach this time. Secrets come back decrypted.
 
-    projected = await build_crew_execution_config_by_id(
-        session, str(crew_id), group_context
-    )
-    if not projected or not projected[0] or not projected[1]:
+    Not ``build_crew_execution_config_by_id``: it turns every error into None,
+    which would retire a healthy schedule over a dropped connection.
+    """
+    from src.services.catalog.crew_config import build_crew_execution_config
+    from src.services.catalog.crews import CrewService
+    from src.services.catalog.run_lookup import crew_for_run
+
+    crew = await crew_for_run(CrewService(session), crew_id, group_context, logger)
+    if crew is None:
         return None
-    return projected[0], projected[1]
+    agents_yaml, tasks_yaml = await build_crew_execution_config(
+        session, crew, group_context
+    )
+    if not agents_yaml or not tasks_yaml:
+        return None
+    return agents_yaml, tasks_yaml
 
 
 class SavedTargetGone(ValueError):
@@ -129,10 +139,12 @@ async def use_saved_target(
 
     A crew schedule with a ``crew_id`` is rebuilt from that crew. A flow
     schedule with a ``flow_id`` and no stored nodes must still find its flow.
-    Raises ``SavedTargetGone`` when the crew or flow was deleted (or is no
-    longer the workspace's): running the masked display copy instead would
-    send ``***REDACTED***`` as the secret, and a flow run would fail later
-    with nothing recorded.
+    Raises ``SavedTargetGone`` only when the lookup says the crew or flow is
+    not there (deleted, or no longer the workspace's): running the masked
+    display copy instead would send ``***REDACTED***`` as the secret, and a
+    flow run would fail later with nothing recorded. Any other error, such as
+    a database error, propagates unchanged: the run is skipped and the
+    schedule stays on.
     """
     if (config.execution_type or "crew") == "flow":
         await _require_saved_flow(session, config, group_context)

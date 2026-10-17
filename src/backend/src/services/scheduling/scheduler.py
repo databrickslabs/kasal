@@ -709,6 +709,22 @@ class SchedulerService:
                     f"Error updating schedule {schedule_id} after job failure: {update_error}"
                 )
 
+    async def _retire_quietly(
+        self, schedule: Schedule, reason: str, when: datetime
+    ) -> None:
+        """``retire_schedule`` on its own session, logging rather than raising.
+
+        The loop's session and the rest of this tick's due schedules are left
+        alone if it fails; the schedule stays due and is tried next tick.
+        """
+        try:
+            async with asynccontextmanager(get_smart_db_session)() as session:
+                await retire_schedule(session, schedule, reason, when)
+        except Exception:  # noqa: BLE001 — one schedule must not stop the rest
+            logger_manager.scheduler.exception(
+                "Could not turn off schedule %s; trying again next tick", schedule.id
+            )
+
     async def check_and_run_schedules(self) -> None:
         """
         Check for due schedules and run them.
@@ -816,8 +832,7 @@ class SchedulerService:
                                 schedule_timezone(schedule),
                             )
                         except ValueError as unreadable:
-                            await retire_schedule(
-                                session,
+                            await self._retire_quietly(
                                 schedule,
                                 f"Its cron line or timezone cannot be read "
                                 f"({unreadable}), so the schedule was turned off.",
