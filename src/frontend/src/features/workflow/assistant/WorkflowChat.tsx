@@ -38,7 +38,6 @@ import { useCrewExecutionStore } from '../../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from './store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../../store/knowledgeConfigStore';
 import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
-import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../../api/chat/ChatHistoryService';
 import { useBuilderModels } from '../../../hooks/global/useEnabledModels';
 import TraceService from '../../../api/execution/TraceService';
@@ -79,6 +78,7 @@ import { builderTranscript } from './utils/builderTranscript';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import BuilderCatalogAction from './components/BuilderCatalogAction';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
+import { showUploadedAgentsOnCanvas, wireKnowledgeFileIntoTasks } from './utils/knowledgeUploadWiring';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
 import SlashCommandMenu from './components/SlashCommandMenu';
 import { openConversationCanvas } from './utils/conversationCanvas';
@@ -1454,147 +1454,17 @@ showSessionList && (
                 onFilesUploaded={(files) => {
                   console.log('Knowledge files uploaded:', files);
                 }}
-                onTasksUpdated={async (uploadedFilePath) => {
-                  console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
-
-                  // Find the agent connected to tasks (for agent_id in tool_configs)
-                  const agentNode = nodes.find(n => n.type === 'agentNode');
-                  const agentId = agentNode?.data?.agentId || agentNode?.id;
-                  console.log('[WorkflowChat] Found agent for access control:', agentId);
-
-                  // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
-                  const updatedNodes = nodes.map(node => {
-                    if (node.type === 'taskNode') {
-                      const currentTools = node.data.tools || [];
-                      const currentToolConfigs = node.data.tool_configs || {};
-
-                      // Add DatabricksKnowledgeSearchTool to tools array if not present
-                      const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
-                                                currentTools.includes('36');
-                      const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
-
-                      // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
-                      const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
-                      const updatedToolConfigs = {
-                        ...currentToolConfigs,
-                        DatabricksKnowledgeSearchTool: {
-                          ...currentToolConfigs.DatabricksKnowledgeSearchTool,
-                          file_paths: existingFilePaths.includes(uploadedFilePath)
-                            ? existingFilePaths
-                            : [...existingFilePaths, uploadedFilePath],
-                          agent_id: agentId  // Add agent_id for access control filtering
-                        }
-                      };
-
-
-                      // Update the task in the backend
-                      if (node.data.taskId) {
-                        import('../../../api/workflow/TaskService').then(({ TaskService }) => {
-                          TaskService.updateTask(node.data.taskId, {
-                            tools: updatedTools,
-                            tool_configs: updatedToolConfigs
-                          }).catch(err => {
-                            console.error(`Failed to update task ${node.data.taskId}:`, err);
-                          });
-                        });
-                      }
-
-                      return {
-                        ...node,
-                        data: {
-                          ...node.data,
-                          tools: updatedTools,
-                          tool_configs: updatedToolConfigs
-                        }
-                      };
-                    }
-                    return node;
-                  });
-
-                  setNodes(updatedNodes as FlowNode[]);
-                  console.log('[WorkflowChat] Task nodes updated successfully');
-                }}
-                onAgentsUpdated={(updatedAgents) => {
-
-
-
-
-
-
-// Check if any agent has knowledge sources
-                  const hasKnowledgeSources = updatedAgents.some(agent =>
-                    agent.knowledge_sources && agent.knowledge_sources.length > 0
-                  );
-
-                  // Update the canvas nodes with the updated agent data
-                  const updatedNodes = nodes.map(node => {
-                    if (node.type === 'agentNode') {
-                      const updatedAgent = updatedAgents.find(a => {
-                        // Try multiple matching strategies
-                        const matches =
-                          a.id === node.data.agentId ||  // Match by agentId
-                          a.id === node.data.id ||        // Match by id
-                          (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
-                          `agent-${a.name}` === node.id;  // Match by name pattern
-
-                        return matches;
-                      });
-
-                      if (updatedAgent) {
-                        return {
-                          ...node,
-                          data: {
-                            ...node.data,
-                            ...updatedAgent,  // Update all agent fields
-                            agentId: updatedAgent.id,  // Ensure agentId is set
-                            tools: updatedAgent.tools,  // Explicitly set tools array
-                            knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
-                          }
-                        };
-                      }
-                    }
-
-                    // Update task nodes to add DatabricksKnowledgeSearchTool if knowledge sources exist
-                    if (node.type === 'taskNode' && hasKnowledgeSources) {
-                      const currentTools = node.data.tools || [];
-                      const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
-                                                currentTools.includes('36');
-
-                      // Add the tool if it doesn't exist
-                      if (!hasKnowledgeTool) {
-                        return {
-                          ...node,
-                          data: {
-                            ...node.data,
-                            tools: [...currentTools, 'DatabricksKnowledgeSearchTool']
-                          }
-                        };
-                      }
-                    }
-
-                    return node;
-                  });
-                  setNodes(updatedNodes as FlowNode[]);
-
-
-
-                }}
+                // Read the canvas as each file lands; the upload loop keeps
+                // the callbacks of the render in which the files were picked.
+                onTasksUpdated={wireKnowledgeFileIntoTasks}
+                onAgentsUpdated={showUploadedAgentsOnCanvas}
                 // Pass only agents that are currently on the canvas
                 availableAgents={nodes
                   .filter(node => node.type === 'agentNode')
-                  .map(node => {
-
-
-
-
-
-
-
-                    return {
-                      ...node.data,
-                      id: node.data.agentId || node.data.id  // Ensure we have an ID
-                    };
-                  })}
+                  .map(node => ({
+                    ...node.data,
+                    id: node.data.agentId || node.data.id  // Ensure we have an ID
+                  }))}
                     compact={true}
                   />
             </Box>
