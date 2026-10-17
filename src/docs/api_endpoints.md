@@ -358,7 +358,6 @@ Per-agent, per-task and per-tool events for a run — what the timeline renders.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/traces/` | List traces |
-| `POST` | `/traces/` | Record a trace |
 | `DELETE` | `/traces/` | Delete every trace in the selected teamspace (same rule as `DELETE /executions/history`) |
 | `GET` | `/traces/{trace_id}` | One trace row |
 | `DELETE` | `/traces/{trace_id}` | Delete one |
@@ -370,6 +369,9 @@ Per-agent, per-task and per-tool events for a run — what the timeline renders.
 | `DELETE` | `/traces/execution/{run_id}` | Delete by numeric run id |
 
 Note the trailing slash on the collection routes.
+
+There is no `POST /traces/`. Runs write their own traces; the API only reads and
+deletes them.
 
 ---
 

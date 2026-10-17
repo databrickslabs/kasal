@@ -831,82 +831,15 @@ class TestCreateTrace:
 
 
 # =========================================================================
-# create_trace_with_group
+# create_trace_with_group (removed)
 # =========================================================================
-class TestCreateTraceWithGroup:
+def test_there_is_no_client_facing_create():
+    """POST /traces/ was unused and is removed, with its service method.
+    Runs write traces through create_trace."""
+    from src.services.trace import ExecutionTraceService
 
-    @pytest.mark.asyncio
-    async def test_creates_when_authorized(
-        self, service, mock_trace_repo, mock_history_repo
-    ):
-        mock_history_repo.get_run_by_job_id = AsyncMock(
-            return_value=_make_execution_obj()
-        )
-        created = _make_trace_obj(id=20)
-        mock_trace_repo.create = AsyncMock(return_value=created)
-
-        ctx = _make_group_context()
-        result = await service.create_trace_with_group({"job_id": "j1"}, ctx)
-        assert result.id == 20
-
-    @pytest.mark.asyncio
-    async def test_raises_when_not_authorized(self, service, mock_history_repo):
-        mock_history_repo.get_run_by_job_id = AsyncMock(return_value=None)
-
-        ctx = _make_group_context()
-        with pytest.raises(ValueError, match="Not authorized"):
-            await service.create_trace_with_group({"job_id": "j1"}, ctx)
-
-    @pytest.mark.asyncio
-    async def test_creates_when_no_job_id(self, service, mock_trace_repo):
-        """When job_id is not in trace_data, no group check is done."""
-        created = _make_trace_obj(id=21, job_id=None)
-        mock_trace_repo.create = AsyncMock(return_value=created)
-
-        ctx = _make_group_context()
-        result = await service.create_trace_with_group({}, ctx)
-        assert result.id == 21
-
-    @pytest.mark.asyncio
-    async def test_creates_when_job_id_empty_string(self, service, mock_trace_repo):
-        """Empty string job_id should skip group check."""
-        created = _make_trace_obj(id=22, job_id="")
-        mock_trace_repo.create = AsyncMock(return_value=created)
-
-        ctx = _make_group_context()
-        result = await service.create_trace_with_group({"job_id": ""}, ctx)
-        assert result.id == 22
-
-    @pytest.mark.asyncio
-    async def test_creates_when_no_group_context(self, service, mock_trace_repo):
-        """No group context should skip authorization."""
-        created = _make_trace_obj(id=23)
-        mock_trace_repo.create = AsyncMock(return_value=created)
-
-        result = await service.create_trace_with_group({"job_id": "j1"}, None)
-        assert result.id == 23
-
-    @pytest.mark.asyncio
-    async def test_creates_when_group_ids_empty(self, service, mock_trace_repo):
-        """Empty group_ids list should skip authorization."""
-        created = _make_trace_obj(id=24)
-        mock_trace_repo.create = AsyncMock(return_value=created)
-
-        ctx = _make_group_context(group_ids=[])
-        result = await service.create_trace_with_group({"job_id": "j1"}, ctx)
-        assert result.id == 24
-
-    @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.create = AsyncMock(side_effect=SQLAlchemyError("db"))
-        with pytest.raises(SQLAlchemyError):
-            await service.create_trace_with_group({}, _make_group_context())
-
-    @pytest.mark.asyncio
-    async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.create = AsyncMock(side_effect=RuntimeError("nope"))
-        with pytest.raises(RuntimeError):
-            await service.create_trace_with_group({}, _make_group_context())
+    assert not hasattr(ExecutionTraceService, "create_trace_with_group")
+    assert hasattr(ExecutionTraceService, "create_trace")
 
 
 # =========================================================================

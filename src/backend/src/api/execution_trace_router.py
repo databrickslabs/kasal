@@ -7,7 +7,7 @@ execution traces.
 
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
@@ -410,25 +410,6 @@ async def get_trace_by_id(
     if not trace:
         raise NotFoundError(f"Trace with ID {trace_id} not found")
     return trace
-
-
-@router.post(
-    "/", response_model=ExecutionTraceItem, status_code=status.HTTP_201_CREATED
-)
-async def create_trace(
-    trace_data: dict, service: ExecutionTraceServiceDep, group_context: GroupContextDep
-) -> ExecutionTraceItem:
-    """
-    Create a new execution trace with group assignment.
-
-    Args:
-        trace_data: Dictionary with trace data
-        group_context: Group context from headers for authorization
-
-    Returns:
-        Created ExecutionTraceItem
-    """
-    return await service.create_trace_with_group(trace_data, group_context)
 
 
 @router.delete("/execution/{run_id}", response_model=DeleteTraceResponse)

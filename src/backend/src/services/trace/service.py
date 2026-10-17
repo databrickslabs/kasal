@@ -540,44 +540,6 @@ class ExecutionTraceService:
             logger.error(f"Error creating trace: {str(e)}")
             raise
 
-    async def create_trace_with_group(
-        self, trace_data: Dict[str, Any], group_context: GroupContext
-    ) -> ExecutionTraceItem:
-        """
-        Create a new trace with group verification.
-
-        Args:
-            trace_data: Dictionary with trace data
-            group_context: Group context for authorization
-
-        Returns:
-            Created ExecutionTraceItem
-        """
-        try:
-            # If job_id is provided, verify it belongs to the group
-            if (
-                "job_id" in trace_data
-                and trace_data["job_id"]
-                and group_context
-                and group_context.group_ids
-            ):
-                execution = await self.execution_service.get_run_by_job_id(
-                    trace_data["job_id"], group_ids=group_context.group_ids
-                )
-                if not execution:
-                    raise ValueError("Not authorized to create trace for this job")
-
-            trace = await self.repository.create(trace_data)
-
-            return ExecutionTraceItem.model_validate(trace)
-
-        except SQLAlchemyError as e:
-            logger.error(f"Database error creating trace: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error creating trace: {str(e)}")
-            raise
-
     async def delete_trace(self, trace_id: int) -> Optional[DeleteTraceResponse]:
         """
         Delete a specific trace by ID.
