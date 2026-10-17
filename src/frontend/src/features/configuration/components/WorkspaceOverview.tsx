@@ -34,6 +34,7 @@ import { MCPService } from '../../../api/tools/MCPService';
 import type { MCPServerConfig } from '../../../types/config/mcp';
 import { apiClient } from '../../../shared/api/client';
 import type { MLflowSettings } from '../../../types/config/mlflow';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 interface WorkspaceInfo {
   name: string;
@@ -58,7 +59,7 @@ function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOv
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedGroupId = localStorage.getItem('selectedGroupId');
+  const selectedGroupId = getTabGroupId();
   const personalGroupId = usePersonalGroupId();
   const isPersonalWorkspace = isPersonalWorkspaceId(selectedGroupId, personalGroupId);
   const userRole = usePermissionStore(state => state.userRole);

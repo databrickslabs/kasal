@@ -25,6 +25,7 @@ import { useRunStatusStore } from '../../../store/runStatus';
 import { isPersonalWorkspaceId, useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useUILayoutStore } from '../../../store/uiLayout';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 // Kasal's brand accent (chat.css --accent), used ONLY while chat mode is
 // active — the builder canvases are MUI-themed and keep their original
@@ -85,8 +86,10 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
 
   const switchToGroup = async (group: GroupWithRole) => {
     try {
-      // Don't switch if we're already on this group
-      if (currentGroup?.id === group.id) {
+      // Don't switch if this tab is already on this group. After the server
+      // refused the tab's group the menu still shows it, and picking it again
+      // must re-pin the tab.
+      if (currentGroup?.id === group.id && getTabGroupId() === group.id) {
         handleClose();
         return;
       }

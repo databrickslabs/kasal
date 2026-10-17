@@ -9,6 +9,7 @@ import { runService } from '../../../../api/execution/ExecutionHistoryService';
 import { useTaskExecutionStore } from '../../../../store/taskExecutionStore';
 import { useChatMessagesStore } from '../store/chatMessagesStore';
 import { extractTaskId, extractTaskName, mapEventToStatus } from '../../../../utils/taskIdUtils';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 export const useExecutionMonitoring = (
   sessionId: string,
@@ -50,7 +51,7 @@ export const useExecutionMonitoring = (
   // Retain the last run across mode unmounts AND browser refreshes. The job
   // endpoint remains authoritative: a restored id is reconciled below, so a
   // run that finished while away restores its result instead of staying busy.
-  const recoveryKey = `kasal-builder-run:${localStorage.getItem('selectedGroupId') || 'default'}:${sessionId}`;
+  const recoveryKey = `kasal-builder-run:${getTabGroupId() || 'default'}:${sessionId}`;
   const recoveryKeyRef = useRef(recoveryKey);
   recoveryKeyRef.current = recoveryKey;
   // A settled run must not be restored as running. The binding outlived the run

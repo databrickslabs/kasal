@@ -2,9 +2,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import CanvasRunButton from './CanvasRunButton';
 import { useBuilderExecutionControls } from '../../store/builderExecutionControls';
+import { useCrewExecutionStore } from '../../store/crewExecution';
 
 const edge = { id: 'link', source: 'one', target: 'two' };
-afterEach(() => useBuilderExecutionControls.setState({ crew: null, flow: null }));
+afterEach(() => {
+  useBuilderExecutionControls.setState({ crew: null, flow: null });
+  useCrewExecutionStore.setState({ isStartingRun: false });
+});
 
 describe('canvas execution control', () => {
   it.each(['crew', 'flow'] as const)('runs and stops the active %s', mode => {
@@ -41,5 +45,17 @@ describe('canvas execution control', () => {
     rerender(<CanvasRunButton mode="flow" hasNodes edges={[]} onRun={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Run Flow' })).toBeEnabled();
     expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('shows that a run is starting and takes no second click meanwhile', () => {
+    const run = vi.fn();
+    useCrewExecutionStore.setState({ isStartingRun: true });
+    render(<CanvasRunButton mode="crew" hasNodes edges={[]} onRun={run} />);
+    const button = screen.getByRole('button', { name: 'Starting Crew' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(run).not.toHaveBeenCalled();
+    act(() => useCrewExecutionStore.setState({ isStartingRun: false }));
+    expect(screen.getByRole('button', { name: 'Run Crew' })).toBeEnabled();
   });
 });

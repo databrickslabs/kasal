@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { GroupService, GroupWithRole } from '../api/groups/GroupService';
 import { useUserStore } from './user';
+import {
+  adoptTabGroupId, getOwnTabGroupId, getSharedGroupId, getTabGroupId, setTabGroupId,
+} from '../shared/api/tabGroup';
 
 interface GroupState {
   groups: GroupWithRole[];
@@ -21,7 +24,8 @@ export const useGroupStore = create<GroupState>()(
   devtools((set, get) => ({
     groups: [],
     isLoading: false,
-    currentGroupId: localStorage.getItem('selectedGroupId'),
+    // This tab's own teamspace (see shared/api/tabGroup).
+    currentGroupId: getTabGroupId(),
 
     getCurrentGroup: () => {
       const { groups, currentGroupId } = get();
@@ -67,10 +71,13 @@ export const useGroupStore = create<GroupState>()(
         const allGroups = [personalGroup, ...userGroups.filter(g => g.id !== primaryGroupId)];
         
         // Only a successful membership response can invalidate the selection.
-        const selectedFromStorage = localStorage.getItem('selectedGroupId');
-        const prevCurrent = get().currentGroupId || selectedFromStorage;
-        const isPrevValid = !!prevCurrent && allGroups.some(g => g.id === prevCurrent);
-        const effectiveGroupId = isPrevValid ? (prevCurrent as string) : primaryGroupId;
+        // Start from this tab's own group, never the shared fallback: in a tab
+        // that opened with nothing stored, that is whatever another tab picked since.
+        const ownGroupId = getOwnTabGroupId();
+        const requestGroupId = getTabGroupId();
+        const prevCurrent = get().currentGroupId || ownGroupId;
+        const isMember = (id: string | null) => !!id && allGroups.some(g => g.id === id);
+        const effectiveGroupId = isMember(prevCurrent) ? (prevCurrent as string) : primaryGroupId;
 
         // Update store with groups and effective current group
         set({
@@ -79,10 +86,14 @@ export const useGroupStore = create<GroupState>()(
           currentGroupId: effectiveGroupId
         });
 
-        // Persist whenever the effective group differs from what's stored — covers
-        // both "not set yet" and "stored group was stale/invalid → reset to personal".
-        if (effectiveGroupId !== selectedFromStorage) {
-          localStorage.setItem('selectedGroupId', effectiveGroupId);
+        // Pin the tab whenever its own group changes — "not pinned yet" or "stale →
+        // reset to personal". Seed new tabs too, unless another tab's valid choice
+        // is already the default: tabs must not overwrite each other's selection.
+        if (effectiveGroupId !== ownGroupId) {
+          if (isMember(getSharedGroupId())) adoptTabGroupId(effectiveGroupId);
+          else setTabGroupId(effectiveGroupId);
+        }
+        if (effectiveGroupId !== requestGroupId) {
           window.dispatchEvent(new CustomEvent('group-changed', { detail: { groupId: effectiveGroupId } }));
         }
       } catch (error) {
@@ -98,8 +109,9 @@ export const useGroupStore = create<GroupState>()(
 
     setCurrentGroup: (groupId: string) => {
       set({ currentGroupId: groupId });
-      localStorage.setItem('selectedGroupId', groupId);
-      
+      // This tab, and the default for tabs opened later.
+      setTabGroupId(groupId);
+
       // Fire custom event for other components
       const event = new CustomEvent('group-changed', { 
         detail: { groupId } 

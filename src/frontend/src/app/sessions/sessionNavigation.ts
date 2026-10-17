@@ -5,6 +5,7 @@ import { useSessionStore, cancelSessionNavigation } from './sessionStore';
 import { useExecutionStore } from '../../features/chat/store/executionStore';
 import { useSessionPreferences } from './sessionPreferences';
 import { builderSessionKey, type WorkspaceSession } from './sessionIndex';
+import { getTabGroupId } from '../../shared/api/tabGroup';
 
 export const modeLabels: Record<AppMode, string> = { chat: 'Chat', crew: 'Agent Builder', flow: 'Flow Builder' };
 
@@ -48,7 +49,7 @@ export async function openWorkspaceSession(session: WorkspaceSession) {
     useExecutionStore.getState().restoreSessionState(session.id);
   } else {
     const tab = useBuilderCanvasStore.getState().getCanvas(session.id);
-    if (!tab || useBuilderCanvasStore.getState().unavailableSessionIds.includes(tab.chatSessionId || tab.id) || tab.group_id !== (localStorage.getItem('selectedGroupId') || '')) return;
+    if (!tab || useBuilderCanvasStore.getState().unavailableSessionIds.includes(tab.chatSessionId || tab.id) || tab.group_id !== (getTabGroupId() || '')) return;
     useBuilderCanvasStore.getState().setActiveCanvas(tab.id);
   }
   useUILayoutStore.getState().setAppMode(session.mode);

@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { reportApiFailure } from './errors';
 import { devBackendOrigin } from './backendOrigin';
+import {
+  getTabGroupId, markTabGroupAccessLost, pinTabGroup, tabGroupAccessLost, TEAMSPACE_REQUIRED_MESSAGE,
+} from './tabGroup';
 
 export const config = {
   apiUrl:
@@ -17,19 +20,31 @@ export const apiClient = axios.create({
   },
 });
 
+// The client loads once per page: this is when the tab opens.
+pinTabGroup();
+
+const isRead = (method?: string) => ['get', 'head', 'options'].includes((method ?? 'get').toLowerCase());
+
 // Add a request interceptor to include group context headers
 apiClient.interceptors.request.use(
   (config) => {
-    // Add group context headers if available
-    const selectedGroupId = localStorage.getItem('selectedGroupId');
+    // This tab's own teamspace: a switch in another tab must not move it.
+    const selectedGroupId = getTabGroupId();
 
     // Identity/membership discovery must work even when a saved selection is stale.
     const identityDiscovery = (config.method ?? 'get').toLowerCase() === 'get'
       && /\/(?:users\/me|groups\/my-groups)\/?(?:\?|$)/.test(config.url ?? '');
     if (identityDiscovery) {
       delete config.headers['group_id'];
-    } else if (selectedGroupId && !('group_id' in config.headers)) {
-      config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
+    } else if (!('group_id' in config.headers)) {
+      if (selectedGroupId) {
+        config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
+      } else if (!isRead(config.method) && tabGroupAccessLost()) {
+        // Without a header the backend would scope the write to every teamspace
+        // the user belongs to and store it in one of them. Refuse it instead.
+        reportApiFailure({ status: 0, url: config.url, code: 'teamspace_required' });
+        throw new Error(TEAMSPACE_REQUIRED_MESSAGE);
+      }
     }
 
     // For local development: simulate Databricks Apps auth header
@@ -62,14 +77,13 @@ apiClient.interceptors.response.use(
       && (original.method ?? 'get').toLowerCase() === 'get'
       && !/\/chat-history(?:\/|$)/.test(original.url ?? '')) {
       original._groupAccessRetry = true;
-      try {
-        localStorage.removeItem('selectedGroupId');
-      } catch { /* localStorage may be unavailable */ }
+      // Writes from this tab are refused until the user picks a teamspace.
+      markTabGroupAccessLost(original.headers?.['group_id']);
       if (original.headers) {
         delete original.headers['group_id'];
       }
-      // Retry with the header cleared — the request interceptor reads the (now
-      // removed) localStorage value, so no group_id header is attached.
+      // Retry with the header cleared — the tab has no teamspace now, so the
+      // request interceptor attaches no group_id header.
       return apiClient(original);
     }
 

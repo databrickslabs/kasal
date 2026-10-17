@@ -24,6 +24,7 @@ import {
 
 import { toSession, toMessage, packExtras } from './messageCodec';
 import type { NamedSessionWire, MessageWire } from './messageCodec';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 const BASE = '/chat-history';
 
@@ -59,7 +60,7 @@ export async function createSession(title: string, _groupId?: string): Promise<C
  * can present).
  */
 export async function listSessions(groupId?: string): Promise<ChatSession[]> {
-  const scope = groupId ?? localStorage.getItem('selectedGroupId') ?? '';
+  const scope = groupId ?? getTabGroupId() ?? '';
   const PER_PAGE = 100;
   const MAX_PAGES = 20;
   const all: NamedSessionWire[] = [];
@@ -344,7 +345,7 @@ const markMigrated = (ids: Set<string>): void => {
 
 export async function migrateLocalSessionsToServer(): Promise<number> {
   await initLocalDb();
-  const groupId = localStorage.getItem('selectedGroupId') || undefined;
+  const groupId = getTabGroupId() || undefined;
   // Only migrate sessions belonging to the CURRENT workspace (plus untagged
   // pre-scoping ones) — the server tags rows with the request's group header,
   // so migrating another workspace's sessions here would mis-tag them.

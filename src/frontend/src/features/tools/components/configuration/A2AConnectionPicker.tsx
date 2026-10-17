@@ -4,6 +4,7 @@ import { A2AAgentService, type A2AAgent } from '../../../../api/tools/A2AAgentSe
 import { usePermissionStore } from '../../../../store/permissions';
 import CapabilitySection from './CapabilitySection';
 import CapabilityRow from './CapabilityRow';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 export default function A2AConnectionPicker({ searchQuery, disabled }: { searchQuery: string; disabled?: boolean }) {
   const admin = usePermissionStore(s => s.isWorkspaceAdmin());
@@ -13,10 +14,10 @@ export default function A2AConnectionPicker({ searchQuery, disabled }: { searchQ
   const [busy, setBusy] = useState(false);
   const [browse, setBrowse] = useState(false);
   const [revision, setRevision] = useState(0);
-  const owner = useRef(localStorage.getItem('selectedGroupId'));
+  const owner = useRef(getTabGroupId());
   const mounted = useRef(true);
   const operating = useRef(false);
-  const active = () => mounted.current && owner.current === localStorage.getItem('selectedGroupId');
+  const active = () => mounted.current && owner.current === getTabGroupId();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     let cancelled = false;

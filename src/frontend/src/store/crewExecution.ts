@@ -9,6 +9,7 @@ import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManif
 import { ToolService } from '../api/tools/ToolService';
 import { placeholdersInFlowNodes } from '../utils/flowInputs';
 import { getDefaultModel } from '../config/defaultModel';
+import { getTabGroupId } from '../shared/api/tabGroup';
 
 interface RunHistoryItem {
   id: string;
@@ -27,6 +28,33 @@ export type { ReasoningConfig } from '../types/workflow/crew';
 import type { ReasoningConfig } from '../types/workflow/crew';
 
 type ToolConfigs = Record<string, unknown>;
+
+/**
+ * Ignore Run (and the inputs dialog's confirm) while an earlier one is still
+ * starting its run.
+ *
+ * Before the POST, a click spends a second or two on the tool list and the
+ * agent and task refreshes, and the button only turns into Stop once the job
+ * exists. A second click in that window used to start a second, billed run.
+ * `onStarting` lets the button show the start in progress.
+ */
+let runStartInFlight = false;
+function oneStartAtATime<A extends unknown[]>(
+  onStarting: (starting: boolean) => void,
+  start: (...args: A) => Promise<void>,
+) {
+  return async (...args: A): Promise<void> => {
+    if (runStartInFlight) return;
+    runStartInFlight = true;
+    onStarting(true);
+    try {
+      await start(...args);
+    } finally {
+      runStartInFlight = false;
+      onStarting(false);
+    }
+  };
+}
 
 const isPlainObject = (v: unknown): v is ToolConfigs =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -132,6 +160,8 @@ export const DEFAULT_REASONING_CONFIG: ReasoningConfig = {
 interface CrewExecutionState {
   // Execution state
   isExecuting: boolean;
+  /** A Run click (or the inputs dialog's confirm) is still starting its run. */
+  isStartingRun: boolean;
   selectedModel: string;
   /**
    * Which agent runtime runs the next job: 'kasal' | 'crewai', or '' for the
@@ -228,6 +258,7 @@ interface CrewExecutionState {
 export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   // Initial state
   isExecuting: false,
+  isStartingRun: false,
   selectedModel: getDefaultModel(),
   // Empty means "whatever Configuration -> Engines says". Persisted like the
   // process type so a choice survives a reload.
@@ -345,7 +376,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     const originTab = useBuilderCanvasStore.getState().canvases.find(
       tab => tab.id === useBuilderCanvasStore.getState().activeCanvasId
     );
-    set({ isExecuting: true });
+    // The collected values belong to this run only; a later run asks again.
+    set({ isExecuting: true, inputVariables: {} });
 
     try {
       const hasAgentNodes = nodes.some(node => node.type === 'agentNode');
@@ -528,7 +560,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `Crew Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: getTabGroupId() // Include the group ID for security filtering
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -590,7 +622,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     const originTab = useBuilderCanvasStore.getState().canvases.find(
       tab => tab.id === useBuilderCanvasStore.getState().activeCanvasId
     );
-    set({ isExecuting: true });
+    // The collected values belong to this run only; a later run asks again.
+    set({ isExecuting: true, inputVariables: {} });
 
     try {
       // Count the types of nodes for better debugging
@@ -664,7 +697,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          groupId: getTabGroupId(), // Include the group ID for security filtering
           isFlow: true // Flag to indicate this is a flow execution
         }
       });
@@ -847,7 +880,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: getTabGroupId() // Include the group ID for security filtering
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -881,7 +914,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     set({ selectedModel: event.target.value as string });
   },
 
-  handleRunClick: async (type) => {
+  handleRunClick: oneStartAtATime(starting => set({ isStartingRun: starting }), async (type: 'crew' | 'flow') => {
     const state = get();
 
     console.log('[CrewExecution] handleRunClick called with type:', type);
@@ -1100,26 +1133,24 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         set({ isExecuting: false });
       }
     }
-  },
+  }),
 
-  executeWithVariables: async (variables: Record<string, string>) => {
+  executeWithVariables: oneStartAtATime(starting => set({ isStartingRun: starting }), async (variables: Record<string, string>) => {
     const state = get();
+    // Run exactly what the dialog was opened for (handleRunClick is its only
+    // opener). Nothing pending means that run already started: start nothing.
+    const pending = state.pendingVariableExecution;
+    if (!pending) return;
     set({
       inputVariables: variables,
       showInputVariablesDialog: false,
+      pendingVariableExecution: null,
       isExecuting: true
     });
 
     try {
-      // Run exactly what the dialog was opened for. Falling back to the
-      // store's nodes only when nothing is pending keeps older callers working.
-      const pending = state.pendingVariableExecution;
-      const executionType = pending?.type ?? 'crew';
-      const nodes = pending?.nodes ?? state.nodes;
-      const edges = pending?.edges ?? state.edges;
-      set({ pendingVariableExecution: null });
-
-      if (executionType === 'crew') {
+      const { nodes, edges } = pending;
+      if (pending.type === 'crew') {
         await state.executeCrew(nodes, edges);
       } else {
         // Get savedFlowId from tab manager for flow executions
@@ -1136,7 +1167,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     } finally {
       set({ isExecuting: false });
     }
-  }
+  })
 }));
 
 // Expose store on window for debugging

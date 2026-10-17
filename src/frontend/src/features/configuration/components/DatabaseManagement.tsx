@@ -51,6 +51,7 @@ import LakebaseSetupOptions from './LakebaseSetupOptions';
 import LakebasePreflightPanel from './LakebasePreflightPanel';
 import { APIKeysService } from '../../../api/config/APIKeysService';
 import { apiErrorMessage, isErrorWithResponse } from './apiErrorMessage';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 
 interface BackupFile {
@@ -474,11 +475,9 @@ const DatabaseManagement: React.FC = () => {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Add group context if available
-      const selectedGroupId = localStorage.getItem('selectedGroupId');
-      if (selectedGroupId) {
-        headers['group_id'] = selectedGroupId;
-      }
+      // Add this tab's group context if available
+      const selectedGroupId = getTabGroupId();
+      if (selectedGroupId) headers['group_id'] = selectedGroupId;
 
       // Use streaming endpoint with backend URL from config
       const response = await fetch(`${config.apiUrl}/database-management/lakebase/migrate/stream`, {

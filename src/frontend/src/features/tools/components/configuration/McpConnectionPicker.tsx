@@ -6,6 +6,7 @@ import { usePermissionStore } from '../../../../store/permissions';
 import CapabilitySection from './CapabilitySection';
 import CapabilityRow from './CapabilityRow';
 import DatabricksMcpPicker from './DatabricksMcpPicker';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 export interface McpConnectionPickerProps {
   /** Omit onChange for workspace connection management without a run selection. */
@@ -32,8 +33,8 @@ export default function McpConnectionPicker({ selectedNames = [], onChange, disa
   const latest = useRef({ selectedNames, onChange });
   latest.current = { selectedNames, onChange };
   const operating = useRef(false);
-  const ownerGroup = useRef(localStorage.getItem('selectedGroupId'));
-  const active = () => mounted.current && ownerGroup.current === localStorage.getItem('selectedGroupId');
+  const ownerGroup = useRef(getTabGroupId());
+  const active = () => mounted.current && ownerGroup.current === getTabGroupId();
 
   useEffect(() => {
     mounted.current = true;

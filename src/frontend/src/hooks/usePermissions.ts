@@ -23,19 +23,13 @@ export const usePermissionLoader = () => {
       loadPermissions(customEvent.detail.groupId);
     };
 
-    // Listen for storage events (when selectedGroupId changes)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'selectedGroupId' && e.newValue) {
-        loadPermissions(e.newValue);
-      }
-    };
-
+    // Only this tab's own switch counts. A switch in another tab changes the
+    // shared localStorage key (a 'storage' event here) but not this tab's
+    // teamspace, so this tab keeps its permissions.
     window.addEventListener('group-changed', handleGroupChange);
-    window.addEventListener('storage', handleStorageChange);
 
     return () => {
       window.removeEventListener('group-changed', handleGroupChange);
-      window.removeEventListener('storage', handleStorageChange);
     };
   }, [loadPermissions]);
 

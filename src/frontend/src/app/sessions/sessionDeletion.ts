@@ -9,10 +9,11 @@ import { switchWorkspaceMode } from './sessionNavigation';
 import { useSessionPreferences } from './sessionPreferences';
 import type { WorkspaceSession } from './sessionIndex';
 import { pauseBuilderSessionWrites } from './builderSessionLifecycle';
+import { getTabGroupId } from '../../shared/api/tabGroup';
 
 /** Delete a session, not its saved catalog configuration or execution records. */
 export async function deleteArchivedSession(session: WorkspaceSession, groupId: string) {
-  if (groupId !== (localStorage.getItem('selectedGroupId') || '')) {
+  if (groupId !== (getTabGroupId() || '')) {
     throw new Error('The teamspace changed. Reopen the archive and try again.');
   }
   const tab = session.mode === 'chat' ? undefined : useBuilderCanvasStore.getState().getCanvas(session.id);
@@ -50,7 +51,7 @@ export async function deleteArchivedSession(session: WorkspaceSession, groupId: 
     const wasActive = useBuilderCanvasStore.getState().activeCanvasId === tab.id;
     useBuilderCanvasStore.getState().closeCanvas(tab.id);
     const mode = useUILayoutStore.getState().appMode;
-    if (wasActive && mode !== 'chat' && groupId === (localStorage.getItem('selectedGroupId') || '')) {
+    if (wasActive && mode !== 'chat' && groupId === (getTabGroupId() || '')) {
       switchWorkspaceMode(mode);
     }
   }

@@ -1,11 +1,12 @@
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import type { Run } from '../../../../types/execution/run';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 /** Capture the originating session before a resume request can outlive its pane. */
 export function checkpointResumeHandler(run: Run): (jobId: string) => void {
   const tab = useBuilderCanvasStore.getState().getActiveCanvas();
-  const groupId = localStorage.getItem('selectedGroupId');
+  const groupId = getTabGroupId();
   return jobId => {
     if (tab?.chatSessionId) {
       useBuilderCanvasStore.setState(state => ({ canvases: state.canvases.map(item => item.id === tab.id
@@ -15,7 +16,7 @@ export function checkpointResumeHandler(run: Run): (jobId: string) => void {
       catch { /* In-memory monitoring remains available when storage is blocked. */ }
     }
     // Never attach a late response to another session or teamspace.
-    if (localStorage.getItem('selectedGroupId') === groupId && (!tab || useBuilderCanvasStore.getState().activeCanvasId === tab.id)) {
+    if (getTabGroupId() === groupId && (!tab || useBuilderCanvasStore.getState().activeCanvasId === tab.id)) {
       useCrewExecutionStore.getState().setJobId(jobId);
       window.dispatchEvent(new CustomEvent('jobCreated', { detail: {
         jobId, jobName: run.run_name, status: 'running', groupId,

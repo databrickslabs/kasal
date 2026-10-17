@@ -9,6 +9,7 @@ import { PublicationService } from '../../../api/workflow/PublicationService';
 import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
 import { subscribeToModels, useModelsStore } from '../../../store/models';
 import { MODEL_EXPLICIT_STORAGE_KEY, resolveChatModel } from '../utils/autoModel';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -208,7 +209,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   loadCatalog: async () => {
     const version = ++catalogRequestVersion;
-    const groupId = localStorage.getItem('selectedGroupId') || get().config.groupId;
+    const groupId = getTabGroupId() || get().config.groupId;
     // Clear the previous teamspace's data while checking what Chat can reach.
     set({ savedCrews: [], savedFlows: [], catalogLoaded: false, catalogError: null });
     const [crews, flows, chatPublished] = await Promise.all([
@@ -216,7 +217,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       listSavedFlows().catch(() => [] as CatalogItem[]),
       PublicationService.listChatPublished().catch(() => null),
     ]);
-    if (version !== catalogRequestVersion || groupId !== (localStorage.getItem('selectedGroupId') || get().config.groupId)) return;
+    if (version !== catalogRequestVersion || groupId !== (getTabGroupId() || get().config.groupId)) return;
     // Publication is required for Chat visibility. A failed lookup must never
     // turn the saved builder catalog into the Chat catalog.
     if (chatPublished === null) {

@@ -41,6 +41,7 @@ import {
   ApiKeyUpdate,
  
 } from '../../../../api/index';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 // Extended interfaces for editing with masked values
 interface ApiKeyWithMasked extends ApiKey {
@@ -451,7 +452,7 @@ function APIKeys(): JSX.Element {
 
         {/* Shared Workspace Warning */}
         {(() => {
-          const selectedGroupId = localStorage.getItem('selectedGroupId');
+          const selectedGroupId = getTabGroupId();
           const isSharedWorkspace = selectedGroupId && !isPersonalWorkspaceId(selectedGroupId, personalGroupId);
 
           if (isSharedWorkspace) {

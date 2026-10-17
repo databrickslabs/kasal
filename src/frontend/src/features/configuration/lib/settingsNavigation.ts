@@ -3,6 +3,7 @@ import { usePermissionStore } from '../../../store/permissions';
 import { useRunStatusStore } from '../../../store/runStatus';
 import { isOwnPersonalWorkspace } from '../../../store/user';
 import { settingsSections, type SettingsSectionId } from '../components/settingsSections';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 const KEY = 'kasal-settings-teamspace-navigation';
 interface SettingsNavigation { groupId: string; section: SettingsSectionId }
@@ -11,7 +12,7 @@ interface SettingsNavigation { groupId: string; section: SettingsSectionId }
 export function readSettingsNavigation(): SettingsNavigation | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(KEY) || 'null');
-    return value && value.groupId === localStorage.getItem('selectedGroupId') && settingsSections.some(section => section.id === value.section) ? value : null;
+    return value && value.groupId === getTabGroupId() && settingsSections.some(section => section.id === value.section) ? value : null;
   } catch { return null; }
 }
 

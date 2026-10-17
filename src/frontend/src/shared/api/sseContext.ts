@@ -1,3 +1,4 @@
+import { getTabGroupId } from './tabGroup';
 /**
  * Native EventSource cannot set the development auth headers used by apiClient.
  * For a direct loopback stream, carry the same non-secret local identity and
@@ -16,7 +17,7 @@ export function withLocalSseContext(url: string): string {
   if (!['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) return url;
 
   const email = import.meta.env.VITE_DEV_USER_EMAIL || 'dev@localhost';
-  const groupId = window.localStorage?.getItem('selectedGroupId');
+  const groupId = getTabGroupId();
   parsed.searchParams.set('_sse_email', email);
   if (groupId) parsed.searchParams.set('_sse_group_id', groupId);
   return parsed.toString();
