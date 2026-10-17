@@ -93,6 +93,7 @@ class LocalStorageBackend:
         db_path: str | Path,
         embedder: Any = None,
         semantic_weight: float | None = None,
+        keyword_weight: float | None = None,
         recency_weight: float | None = None,
         importance_weight: float | None = None,
         recency_half_life_days: float | None = None,
@@ -100,9 +101,13 @@ class LocalStorageBackend:
     ):
         self.db_path = Path(db_path)
         self.embedder = embedder
-        # Tuning overrides; class constants are the defaults.
+        # Tuning overrides; class constants are the defaults. Every key
+        # MemoryBackendFactory._scoring_kwargs can emit must be accepted here:
+        # an unknown one raises, and the caller then runs with memory off.
         if semantic_weight is not None:
             self.SEMANTIC_WEIGHT = float(semantic_weight)
+        if keyword_weight is not None:
+            self.KEYWORD_WEIGHT = float(keyword_weight)
         if recency_weight is not None:
             self.RECENCY_WEIGHT = float(recency_weight)
         if importance_weight is not None:
