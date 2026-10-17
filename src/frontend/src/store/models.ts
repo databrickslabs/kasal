@@ -4,6 +4,7 @@ import { fetchEnabledModelRows, toModelRecord } from '../api/config/EnabledModel
 import { DecisionConfigService } from '../api/config/DecisionConfigService';
 import { ModelService } from '../api/config/ModelService';
 import { getDefaultModel } from '../config/defaultModel';
+import { getTabGroupId } from '../shared/api/tabGroup';
 
 /**
  * The workspace's enabled models, the default model and Auto's availability —
@@ -50,7 +51,7 @@ export interface ModelsState {
 /** The workspace every request is scoped to (see shared/api/client.ts). */
 export function currentModelsGroup(): string {
   try {
-    return localStorage.getItem('selectedGroupId') ?? '';
+    return getTabGroupId() ?? '';
   } catch {
     return '';
   }

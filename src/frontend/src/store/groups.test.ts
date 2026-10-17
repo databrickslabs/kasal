@@ -25,6 +25,8 @@ async function freshStore() {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  // Each test is a freshly opened tab: no teamspace of its own yet.
+  sessionStorage.clear();
 });
 
 describe('useGroupStore.fetchMyGroups — stored-group validation', () => {

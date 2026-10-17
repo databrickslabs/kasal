@@ -9,6 +9,7 @@ import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManif
 import { ToolService } from '../api/tools/ToolService';
 import { placeholdersInFlowNodes } from '../utils/flowInputs';
 import { getDefaultModel } from '../config/defaultModel';
+import { getTabGroupId } from '../shared/api/tabGroup';
 
 interface RunHistoryItem {
   id: string;
@@ -528,7 +529,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `Crew Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: getTabGroupId() // Include the group ID for security filtering
         }
       });
       console.log('[CrewExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);
@@ -664,7 +665,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `Flow Execution (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId'), // Include the group ID for security filtering
+          groupId: getTabGroupId(), // Include the group ID for security filtering
           isFlow: true // Flag to indicate this is a flow execution
         }
       });
@@ -847,7 +848,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           jobId: response.execution_id || response.job_id,
           jobName: response.run_name || `${tabName || 'Unnamed Tab'} (${new Date().toLocaleTimeString()})`,
           status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
+          groupId: getTabGroupId() // Include the group ID for security filtering
         }
       });
       console.log('[TabExecution] Dispatching jobCreated event:', jobCreatedEvent.detail);

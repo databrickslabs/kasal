@@ -3,6 +3,7 @@ import { ExtendedRun } from '../types/execution/run';
 import { runService } from '../api/execution/ExecutionHistoryService';
 import { Trace } from '../types/execution/trace';
 import { appendTraceBatch } from '../features/executions/trace/lib/traceIndex';
+import { getTabGroupId } from '../shared/api/tabGroup';
 
 // Re-export Trace type to ensure consistency across the app
 export type { Trace };
@@ -55,7 +56,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       const { jobId, jobName, status, groupId } = event.detail || {};
       if (jobId) {
         // SECURITY FIX: Only add the run if it belongs to the current user's selected workspace
-        const selectedGroupId = localStorage.getItem('selectedGroupId');
+        const selectedGroupId = getTabGroupId();
 
         // If the event includes a groupId, check if it matches the selected workspace
         if (groupId && groupId !== selectedGroupId) {
@@ -284,7 +285,7 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
         const response = await runService.getRuns(50, 0);
 
         // SECURITY: Filter runs by group_id before processing
-        const selectedGroupId = localStorage.getItem('selectedGroupId');
+        const selectedGroupId = getTabGroupId();
         const securityFilteredRuns = response.runs.filter(run => {
           // Only include runs that belong to the selected group
           if (!selectedGroupId || !run.group_id) {

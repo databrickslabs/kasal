@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { GroupService } from '../api/groups/GroupService';
 import { isOwnPersonalWorkspace, isPersonalWorkspaceId, useUserStore } from './user';
+import { getTabGroupId } from '../shared/api/tabGroup';
 
 // Define permission types based on backend privileges
 export const Permissions = {
@@ -242,7 +243,7 @@ export const usePermissionStore = create<PermissionState>()(
             });
 
             // Get the selected group from localStorage (set by workspace selector)
-            const targetGroupId = groupId || localStorage.getItem('selectedGroupId');
+            const targetGroupId = groupId || getTabGroupId();
 
             // If it's a personal workspace, determine role based on permissions
             if (isPersonalWorkspaceId(targetGroupId, currentUserFromStore?.personal_group_id)) {
@@ -459,7 +460,7 @@ export const usePermissionStore = create<PermissionState>()(
         isOperator: () => get().userRole === 'operator',
         isWorkspaceAdmin: () => {
           const { userRole, isSystemAdmin, isPersonalWorkspaceManager } = get();
-          const groupId = localStorage.getItem('selectedGroupId');
+          const groupId = getTabGroupId();
           const isPersonalWorkspace = isOwnPersonalWorkspace(groupId);
 
           if (isSystemAdmin) return true;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { GroupService, GroupWithRole } from '../api/groups/GroupService';
 import { useUserStore } from './user';
+import { getTabGroupId, setTabGroupId } from '../shared/api/tabGroup';
 
 interface GroupState {
   groups: GroupWithRole[];
@@ -21,7 +22,8 @@ export const useGroupStore = create<GroupState>()(
   devtools((set, get) => ({
     groups: [],
     isLoading: false,
-    currentGroupId: localStorage.getItem('selectedGroupId'),
+    // This tab's own teamspace (see shared/api/tabGroup).
+    currentGroupId: getTabGroupId(),
 
     getCurrentGroup: () => {
       const { groups, currentGroupId } = get();
@@ -67,8 +69,8 @@ export const useGroupStore = create<GroupState>()(
         const allGroups = [personalGroup, ...userGroups.filter(g => g.id !== primaryGroupId)];
         
         // Only a successful membership response can invalidate the selection.
-        const selectedFromStorage = localStorage.getItem('selectedGroupId');
-        const prevCurrent = get().currentGroupId || selectedFromStorage;
+        const tabGroupId = getTabGroupId();
+        const prevCurrent = get().currentGroupId || tabGroupId;
         const isPrevValid = !!prevCurrent && allGroups.some(g => g.id === prevCurrent);
         const effectiveGroupId = isPrevValid ? (prevCurrent as string) : primaryGroupId;
 
@@ -79,10 +81,11 @@ export const useGroupStore = create<GroupState>()(
           currentGroupId: effectiveGroupId
         });
 
-        // Persist whenever the effective group differs from what's stored — covers
-        // both "not set yet" and "stored group was stale/invalid → reset to personal".
-        if (effectiveGroupId !== selectedFromStorage) {
-          localStorage.setItem('selectedGroupId', effectiveGroupId);
+        // Persist only when this tab's group changes — "not set yet" or "stale →
+        // reset to personal". Comparing with the shared key instead made every tab
+        // that reloaded its groups write its own group over the other tabs' choice.
+        if (effectiveGroupId !== tabGroupId) {
+          setTabGroupId(effectiveGroupId);
           window.dispatchEvent(new CustomEvent('group-changed', { detail: { groupId: effectiveGroupId } }));
         }
       } catch (error) {
@@ -98,8 +101,9 @@ export const useGroupStore = create<GroupState>()(
 
     setCurrentGroup: (groupId: string) => {
       set({ currentGroupId: groupId });
-      localStorage.setItem('selectedGroupId', groupId);
-      
+      // This tab, and the default for tabs opened later.
+      setTabGroupId(groupId);
+
       // Fire custom event for other components
       const event = new CustomEvent('group-changed', { 
         detail: { groupId } 

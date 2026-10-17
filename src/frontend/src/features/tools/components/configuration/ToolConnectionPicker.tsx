@@ -5,6 +5,7 @@ import CapabilityRow from './CapabilityRow';
 import { ToolService, type Tool } from '../../../../api/tools/ToolService';
 import { GroupToolService } from '../../../../api/groups/GroupToolService';
 import { usePermissionStore } from '../../../../store/permissions';
+import { getTabGroupId } from '../../../../shared/api/tabGroup';
 
 /** Enabled built-in tools and inline teamspace opt-in, shared by both builders. */
 export default function ToolConnectionPicker({ selectedIds = [], onChange, disabled = false, searchQuery }: {
@@ -19,12 +20,12 @@ export default function ToolConnectionPicker({ selectedIds = [], onChange, disab
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
-  const owner = useRef(localStorage.getItem('selectedGroupId'));
+  const owner = useRef(getTabGroupId());
   const mounted = useRef(true);
   const operating = useRef(false);
   const latest = useRef({ selectedIds, onChange });
   latest.current = { selectedIds, onChange };
-  const active = () => mounted.current && owner.current === localStorage.getItem('selectedGroupId');
+  const active = () => mounted.current && owner.current === getTabGroupId();
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     let cancelled = false;

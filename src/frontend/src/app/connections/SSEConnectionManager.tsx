@@ -14,6 +14,7 @@ import { useRunStatusStore } from '../../store/runStatus';
 import { useGlobalExecutionSSE } from '../../hooks/global/useSSE';
 import { useTracePolling } from '../../hooks/global/useTracePolling';
 import { createTraceBatcher } from '../../features/executions/trace/lib/traceBatcher';
+import { getTabGroupId } from '../../shared/api/tabGroup';
 
 /**
  * Generate user-friendly error message based on error type
@@ -55,14 +56,14 @@ const GlobalSSEConnection: React.FC = () => {
   const setSSEError = useRunStatusStore(state => state.setSSEError);
   const addTraces = useRunStatusStore(state => state.addTraces);
   const traceBatcher = useMemo(() => createTraceBatcher(
-    addTraces, () => localStorage.getItem('selectedGroupId'),
+    addTraces, () => getTabGroupId(),
   ), [addTraces]);
   useEffect(() => () => traceBatcher.flush(), [traceBatcher]);
 
   // CRITICAL: Wrap callbacks in useCallback to provide stable references
   const onMessage = useCallback((eventData: any) => {
     // Check group_id for security filtering
-    const selectedGroupId = localStorage.getItem('selectedGroupId');
+    const selectedGroupId = getTabGroupId();
 
     // Handle execution updates from the global stream
     if (eventData.event === 'execution_update' && eventData.data) {

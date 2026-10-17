@@ -53,10 +53,16 @@ async function load() {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+/** The user switches this tab to another workspace (same module graph as `load`). */
+async function switchWorkspace(groupId: string) {
+  (await import('../shared/api/tabGroup')).setTabGroupId(groupId);
+}
+
 describe('store/models', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    sessionStorage.clear(); // a freshly opened tab, seeded from the last selection
     localStorage.setItem('selectedGroupId', 'g1');
     fetchRows.mockResolvedValue([row('a'), row('b')]);
     getDecisionConfig.mockResolvedValue({ enabled: false, api_key_configured: false, available: false });
@@ -135,7 +141,7 @@ describe('store/models', () => {
     now.mockReturnValue(1_000_000 + MODELS_FRESH_MS + 1);
     await useModelsStore.getState().ensureFresh();
     expect(fetchRows).toHaveBeenCalledTimes(2);
-    localStorage.setItem('selectedGroupId', 'g2');
+    await switchWorkspace('g2');
     await useModelsStore.getState().ensureFresh();
     expect(fetchRows).toHaveBeenCalledTimes(3);
     expect(useModelsStore.getState().loadedForGroup).toBe('g2');
@@ -146,7 +152,7 @@ describe('store/models', () => {
     const { useModelsStore } = await load();
     await useModelsStore.getState().refresh();
     fetchRows.mockResolvedValueOnce([row('g2-model')]);
-    localStorage.setItem('selectedGroupId', 'g2');
+    await switchWorkspace('g2');
     window.dispatchEvent(new CustomEvent('group-changed', { detail: { groupId: 'g2' } }));
     await flush();
     await flush();
@@ -169,7 +175,7 @@ describe('store/models', () => {
     const slow = deferred<ReturnType<typeof row>[]>();
     fetchRows.mockReturnValueOnce(slow.promise).mockResolvedValueOnce([row('g2-model')]);
     const pending = useModelsStore.getState().refresh();
-    localStorage.setItem('selectedGroupId', 'g2');
+    await switchWorkspace('g2');
     slow.resolve([row('g1-model')]);
     await pending;
     await flush();

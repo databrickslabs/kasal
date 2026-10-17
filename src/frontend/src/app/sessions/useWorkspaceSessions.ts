@@ -9,10 +9,11 @@ import { useUserStore } from '../../store/user';
 import { usePermissionStore } from '../../store/permissions';
 import { connectBuilderSessions } from './builderSessionLifecycle';
 import { describeSessionLoadError, SessionLoadError } from './sessionLoadError';
+import { getTabGroupId } from '../../shared/api/tabGroup';
 
 /** Own session initialization once, outside either mode's mount lifecycle. */
 export function useWorkspaceSessions() {
-  const [groupId, setGroupId] = useState(() => localStorage.getItem('selectedGroupId') || '');
+  const [groupId, setGroupId] = useState(() => getTabGroupId() || '');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const retryRef = useRef(() => {});
@@ -47,7 +48,7 @@ export function useWorkspaceSessions() {
         if (canBuild) {
           try {
             const release = await connectBuilderSessions(
-              localStorage.getItem('selectedGroupId') || '', useSessionStore.getState().sessions, cancelled,
+              getTabGroupId() || '', useSessionStore.getState().sessions, cancelled,
               cause => { if (!cancelled()) failures.push(describeSessionLoadError(cause, 'builders')); });
             if (cancelled()) { release(); return; }
             disconnect = release;
@@ -73,7 +74,7 @@ export function useWorkspaceSessions() {
     retryRef.current = () => { if (user) void restore(true); };
     if (user) void restore(true);
     const changeGroup = () => {
-      const gid = localStorage.getItem('selectedGroupId') || '';
+      const gid = getTabGroupId() || '';
       setGroupId(gid);
       useBuilderCanvasStore.setState({ activeCanvasId: null, hydrated: false });
       void restore(false);

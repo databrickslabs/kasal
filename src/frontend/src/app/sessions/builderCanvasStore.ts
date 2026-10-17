@@ -3,6 +3,7 @@ import { Node, Edge } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
 import { ReasoningConfig } from '../../types/workflow/crew';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { getTabGroupId } from '../../shared/api/tabGroup';
 
 // Execution configuration per canvas
 export interface CanvasExecutionConfig {
@@ -155,7 +156,7 @@ export const useBuilderCanvasStore = create<BuilderCanvasState>()(
       createCanvas: (name?: string, viewMode?: 'crew' | 'flow', options?: { sessionDraft?: boolean }) => {
         const newCanvasId = uuidv4();
         // Get current group ID from localStorage
-        const currentGroupId = localStorage.getItem('selectedGroupId') || '';
+        const currentGroupId = getTabGroupId() || '';
 
         // Count canvases for this group only
         const groupCanvases = get().canvases.filter(canvas => canvas.group_id === currentGroupId);
@@ -509,7 +510,7 @@ export const useBuilderCanvasStore = create<BuilderCanvasState>()(
 
       // Teamspace filtering methods
       getCanvasesForCurrentGroup: () => {
-        const currentGroupId = localStorage.getItem('selectedGroupId') || '';
+        const currentGroupId = getTabGroupId() || '';
         return get().canvases.filter(canvas => canvas.group_id === currentGroupId);
       },
 

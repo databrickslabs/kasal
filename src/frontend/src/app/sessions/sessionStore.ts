@@ -19,6 +19,7 @@ import {
   resendMessageUpdate,
   clearSessionMessages,
 } from '../../features/chat/persistence/sessionApi';
+import { getTabGroupId } from '../../shared/api/tabGroup';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 let sessionNavigationVersion = 0;
@@ -241,7 +242,7 @@ function snapshotUpdate(sessionId: string, id: string, groupId: string | undefin
 // workspace's chats.
 const currentGroupId = (): string | undefined => {
   try {
-    return localStorage.getItem('selectedGroupId') || undefined;
+    return getTabGroupId() || undefined;
   } catch {
     return undefined;
   }

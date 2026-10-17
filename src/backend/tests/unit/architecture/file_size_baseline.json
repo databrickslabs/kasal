@@ -218,7 +218,7 @@
   "src/frontend/src/features/chat/store/executionStore.test.ts": 2085,
   "src/frontend/src/features/chat/store/executionStore.ts": 1921,
   "src/frontend/src/features/chat/utils/crewConfigBuilder.test.ts": 1038,
-  "src/frontend/src/features/configuration/components/DatabaseManagement.tsx": 1788,
+  "src/frontend/src/features/configuration/components/DatabaseManagement.tsx": 1787,
   "src/frontend/src/features/configuration/components/GroupManagement.tsx": 1272,
   "src/frontend/src/features/configuration/components/MCP/MCPConfiguration.tsx": 975,
   "src/frontend/src/features/configuration/components/Models/ModelConfiguration.tsx": 901,

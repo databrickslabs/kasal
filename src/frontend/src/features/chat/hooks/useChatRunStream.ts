@@ -34,6 +34,7 @@ import { cleanTaskLabel, taskHeaderLabel, summarizeTaskOutput } from '../utils/t
 import { extractResultText, extractA2uiSurface } from '../utils/resultExtraction';
 import { conversationHasAnswer, fetchRunOutcome, TERMINAL_RUN_STATUSES } from '../utils/runOutcome';
 import { GenerationCompleteData } from '../types/dispatcher';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
 
 interface UseChatRunStreamArgs {
   /** Written by the generation stream in ChatWorkspace, drained here. */
@@ -590,7 +591,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       // — so the 10s reconciliation loop can't finalize it if the poller is
       // retargeted to a newer job before the first status flip is observed.
       window.dispatchEvent(new CustomEvent('jobCreated', {
-        detail: { jobId, groupId: localStorage.getItem('selectedGroupId') || undefined },
+        detail: { jobId, groupId: getTabGroupId() || undefined },
       }));
     },
     [executionStream],
