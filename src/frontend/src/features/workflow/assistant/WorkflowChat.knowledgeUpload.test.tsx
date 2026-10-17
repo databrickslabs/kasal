@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from 'reactflow';
 import WorkflowChat from './WorkflowChat';
 import { useWorkflowStore } from '../../../store/workflow';
+import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
 import { TaskService } from '../../../api/workflow/TaskService';
 import type { Agent } from '../../../api/workflow/AgentService';
 
@@ -32,6 +33,7 @@ vi.mock('./KnowledgeFileUpload', () => ({
 }));
 vi.mock('../../../api/workflow/TaskService', () => ({ TaskService: { updateTask: vi.fn().mockResolvedValue({}) } }));
 vi.mock('../../chat/api/prompt', () => ({ improveChatPrompt: vi.fn() }));
+vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }), toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
 vi.mock('../../../api/execution/DispatcherService', () => ({ default: { dispatch: vi.fn() } }));
 vi.mock('../../../api/chat/ChatHistoryService', () => ({
   ChatHistoryService: {
@@ -79,10 +81,13 @@ describe('WorkflowChat knowledge upload wiring', () => {
     delete upload.onTasksUpdated;
     delete upload.onAgentsUpdated;
     useWorkflowStore.setState({ nodes: [agentNode, taskNode], edges: [] });
+    useBuilderCanvasStore.setState({ activeCanvasId: 'canvas-1' });
   });
 
+  const renderChat = () => render(<WorkflowChat nodes={useWorkflowStore.getState().nodes} edges={[]} chatSessionId="session" />);
+
   it('keeps every uploaded file and the edits made while the files were uploading', async () => {
-    render(<WorkflowChat nodes={useWorkflowStore.getState().nodes} edges={[]} chatSessionId="session" />);
+    renderChat();
     expect(upload.onTasksUpdated).toBeTypeOf('function');
 
     await upload.onTasksUpdated!('uploads/g/s/first.pdf');
@@ -102,5 +107,37 @@ describe('WorkflowChat knowledge upload wiring', () => {
     await waitFor(() => expect(lastTaskWrite()?.tool_configs?.[KNOWLEDGE]).toEqual(
       expect.objectContaining({ file_paths: ['uploads/g/s/first.pdf', 'uploads/g/s/second.pdf'] })));
     expect(Object.keys(lastTaskWrite()!).sort()).toEqual(['tool_configs', 'tools']);
+  });
+
+  it('does not wire a file into another canvas opened while it was embedding', async () => {
+    renderChat();
+    // The user switches canvas; the store now holds the other crew.
+    const otherTask: Node = { id: 'task-9', type: 'taskNode', position: { x: 0, y: 0 }, data: { taskId: 't9', label: 'Other', tools: [] } };
+    useBuilderCanvasStore.setState({ activeCanvasId: 'canvas-2' });
+    useWorkflowStore.setState({ nodes: [otherTask] });
+
+    await upload.onTasksUpdated!('uploads/g/s/late.pdf');
+    upload.onAgentsUpdated!([{ id: 'a1', name: 'Researcher', knowledge_sources: [{ source: 'uploads/g/s/late.pdf' }] } as unknown as Agent]);
+
+    expect(useWorkflowStore.getState().nodes).toEqual([otherTask]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(TaskService.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('saves a task\'s file list in order even when the first save answers last', async () => {
+    let finishFirst!: (task: unknown) => void;
+    vi.mocked(TaskService.updateTask).mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }) as never);
+    renderChat();
+
+    await upload.onTasksUpdated!('uploads/g/s/first.pdf');
+    await upload.onTasksUpdated!('uploads/g/s/second.pdf');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // The second list waits for the first save, so it cannot be overwritten by it.
+    expect(TaskService.updateTask).toHaveBeenCalledTimes(1);
+
+    finishFirst({});
+    await waitFor(() => expect(TaskService.updateTask).toHaveBeenCalledTimes(2));
+    expect(lastTaskWrite()?.tool_configs?.[KNOWLEDGE]).toEqual(
+      expect.objectContaining({ file_paths: ['uploads/g/s/first.pdf', 'uploads/g/s/second.pdf'] }));
   });
 });

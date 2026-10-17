@@ -236,7 +236,7 @@
   "src/frontend/src/features/workflow/agents/components/AgentForm.tsx": 1716,
   "src/frontend/src/features/workflow/agents/components/AgentNode.test.tsx": 1346,
   "src/frontend/src/features/workflow/assistant/WorkflowChat.test.tsx": 1488,
-  "src/frontend/src/features/workflow/assistant/WorkflowChat.tsx": 1587,
+  "src/frontend/src/features/workflow/assistant/WorkflowChat.tsx": 1586,
   "src/frontend/src/features/workflow/assistant/components/ChatMessageItem.test.tsx": 1013,
   "src/frontend/src/features/workflow/assistant/components/MessageRenderer.test.tsx": 855,
   "src/frontend/src/features/workflow/assistant/utils/nodeGenerationHandlers.ts": 975,

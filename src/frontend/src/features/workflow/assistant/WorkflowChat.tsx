@@ -78,7 +78,7 @@ import { builderTranscript } from './utils/builderTranscript';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import BuilderCatalogAction from './components/BuilderCatalogAction';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
-import { showUploadedAgentsOnCanvas, wireKnowledgeFileIntoTasks } from './utils/knowledgeUploadWiring';
+import { useKnowledgeUploadWiring } from './hooks/useKnowledgeUploadWiring';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
 import SlashCommandMenu from './components/SlashCommandMenu';
 import { openConversationCanvas } from './utils/conversationCanvas';
@@ -168,6 +168,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   // Lets the composer's "+" menu open the knowledge-file picker, whose input
   // and chips live inside KnowledgeFileUpload.
   const knowledgeUploadRef = useRef<KnowledgeFileUploadHandle>(null);
+  const knowledgeUploadWiring = useKnowledgeUploadWiring();
   const { setNodes, setEdges } = useWorkflowStore(useShallow(s => ({ setNodes: s.setNodes, setEdges: s.setEdges })));
   const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore(useShallow(s => ({
     setInputMode: s.setInputMode, inputMode: s.inputMode, setInputVariables: s.setInputVariables, executeCrew: s.executeCrew, executeFlow: s.executeFlow })));
@@ -1454,10 +1455,8 @@ showSessionList && (
                 onFilesUploaded={(files) => {
                   console.log('Knowledge files uploaded:', files);
                 }}
-                // Read the canvas as each file lands; the upload loop keeps
-                // the callbacks of the render in which the files were picked.
-                onTasksUpdated={wireKnowledgeFileIntoTasks}
-                onAgentsUpdated={showUploadedAgentsOnCanvas}
+                // Bound to this canvas; they read it as each file lands.
+                {...knowledgeUploadWiring}
                 // Pass only agents that are currently on the canvas
                 availableAgents={nodes
                   .filter(node => node.type === 'agentNode')
