@@ -285,7 +285,7 @@ class TestSeedAsyncRaceConditionUpdate:
     @pytest.mark.asyncio
     async def test_seed_async_race_condition_updates_existing(self):
         """Lines 826-831: template not in existing_names but found in DB check."""
-        mock_existing_template = MagicMock()
+        mock_existing_template = MagicMock(is_active=False)
 
         # Use a single-item DEFAULT_TEMPLATES to keep it simple
         test_templates = [DEFAULT_TEMPLATES[0]]
@@ -325,7 +325,7 @@ class TestSeedAsyncRaceConditionUpdate:
         # Should have updated the existing template's fields (race condition path)
         assert mock_existing_template.description == test_templates[0]["description"]
         assert mock_existing_template.template == test_templates[0]["template"]
-        assert mock_existing_template.is_active == test_templates[0]["is_active"]
+        assert mock_existing_template.is_active is False  # not part of what ships
         assert mock_existing_template.updated_at is not None
 
 
@@ -335,7 +335,7 @@ class TestSeedAsyncUpdateExistingNames:
     @pytest.mark.asyncio
     async def test_seed_async_updates_template_in_existing_names(self):
         """Lines 847-858: template is in existing_names, fetched and updated."""
-        mock_existing_template = MagicMock()
+        mock_existing_template = MagicMock(is_active=False)
         test_templates = [DEFAULT_TEMPLATES[0]]
         template_name = test_templates[0]["name"]
 
@@ -371,10 +371,10 @@ class TestSeedAsyncUpdateExistingNames:
             with patch("src.seeds.prompt_templates.DEFAULT_TEMPLATES", test_templates):
                 await seed_async()
 
-        # Should have updated existing template
+        # Should have updated existing template, leaving is_active as it was
         assert mock_existing_template.description == test_templates[0]["description"]
         assert mock_existing_template.template == test_templates[0]["template"]
-        assert mock_existing_template.is_active == test_templates[0]["is_active"]
+        assert mock_existing_template.is_active is False
 
 
 class TestSeedAsyncCommitExceptions:

@@ -4,9 +4,9 @@ Seed the model_configs table with default model configuration definitions.
 
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 
 from src.db.session import async_session_factory
 from src.models.model_config import ModelConfig
@@ -823,6 +823,16 @@ REMOVED_MODEL_KEYS = [
 ]
 
 
+def _global_row(key: str) -> Select[Tuple[ModelConfig]]:
+    """SELECT the global (``group_id IS NULL``) row for ``key``, deterministically."""
+    return (
+        select(ModelConfig)
+        .where(ModelConfig.key == key, ModelConfig.group_id.is_(None))
+        .order_by(ModelConfig.id)
+        .limit(1)
+    )
+
+
 async def seed_async() -> None:
     """Seed model configurations into the database using async session."""
     logger.info("Seeding model_configs table (async)...")
@@ -894,17 +904,24 @@ async def seed_async() -> None:
                         models_error += 1
                         continue
 
-                    # Use upsert approach: try to find existing model first
-                    result = await session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == model_key)
-                    )
+                    # Upsert the GLOBAL row only. A key-only lookup could land on
+                    # a workspace's override and rewrite it instead.
+                    result = await session.execute(_global_row(model_key))
                     existing_model = result.scalars().first()
 
                     if existing_model and model_key not in DEFAULT_MODELS:
                         # Preserve administrator-tuned limits for a custom endpoint.
                         continue
                     if existing_model:
-                        # Update existing model config
+                        # A catalog model's definition ships with each release:
+                        # a corrected limit (27ff4315 cut an output cap to stop
+                        # 400s) must reach existing installs. So an admin's edit
+                        # to these fields is reset on boot; that is accepted.
+                        # `enabled` stays the admin's (forcing it switched off
+                        # every self-hosted model), as do the endpoint keys in
+                        # params (merge_seed_params) and the thinking settings.
+                        from src.services.llm.endpoints import merge_seed_params
+
                         existing_model.name = model_data["name"]
                         existing_model.provider = model_data["provider"]
                         existing_model.temperature = model_data["temperature"]
@@ -915,25 +932,12 @@ async def seed_async() -> None:
                         existing_model.extended_thinking = model_data.get(
                             "extended_thinking", False
                         )
-                        # Sampling parameters and endpoint refusals. Seeded like
-                        # every other field, so a corrected value ships with a
-                        # release rather than needing a hand-edited row — but
-                        # the endpoint an admin saved (api_base, tool options)
-                        # is theirs: replacing params wholesale erased it on
-                        # every restart.
-                        from src.services.llm.endpoints import merge_seed_params
-
                         existing_model.params = merge_seed_params(
                             model_data.get("params"), existing_model.params
                         )
                         existing_model.unsupported_params = model_data.get(
                             "unsupported_params"
                         )
-                        # Preserve the operator's enable/disable choice across reseeds.
-                        # Forcing enabled=(provider=="databricks") here disabled any
-                        # self-hosted vllm/ollama model on EVERY restart (they aren't
-                        # "databricks"), silently breaking local setups. New installs
-                        # still get the databricks default via the insert branch below.
                         existing_model.updated_at = datetime.now().replace(tzinfo=None)
                         logger.debug(f"Updating existing model: {model_key}")
                         models_updated += 1
@@ -969,16 +973,20 @@ async def seed_async() -> None:
 
             # Prune retired models (e.g. Claude 3) from existing installations —
             # the upsert loop above never deletes, so removed keys would linger.
+            # Every row of the key goes, workspace overrides included (as
+            # delete_by_key does): an override of a retired model would still
+            # resolve, with no catalog row left to delete it through.
             # Resilient per-key: a prune failure must never break seeding.
             models_removed = 0
             for removed_key in REMOVED_MODEL_KEYS:
                 try:
                     result = await session.execute(
-                        select(ModelConfig).filter(ModelConfig.key == removed_key)
+                        select(ModelConfig).where(ModelConfig.key == removed_key)
                     )
-                    stale = result.scalars().first()
-                    if stale is not None:
+                    stale_rows = list(result.scalars().all())
+                    for stale in stale_rows:
                         await session.delete(stale)
+                    if stale_rows:
                         models_removed += 1
                         logger.debug(f"Removed retired model: {removed_key}")
                 except Exception as prune_error:

@@ -351,11 +351,12 @@ class TestSeedAsyncFunction:
 
     @pytest.mark.asyncio
     async def test_seed_async_prunes_removed_models(self):
-        """Retired models found in the DB are deleted (one delete per removed key)."""
+        """Every row of a retired key is deleted, workspace overrides included."""
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        # Every lookup returns a row, so each removed key gets deleted.
+        # Every lookup returns a row: the global one plus one override per key.
         mock_result.scalars.return_value.first.return_value = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [MagicMock(), MagicMock()]
         mock_session.execute.return_value = mock_result
 
         mock_context = AsyncMock()
@@ -367,7 +368,7 @@ class TestSeedAsyncFunction:
         ):
             await seed_async()
 
-        assert mock_session.delete.await_count == len(REMOVED_MODEL_KEYS)
+        assert mock_session.delete.await_count == 2 * len(REMOVED_MODEL_KEYS)
         mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
