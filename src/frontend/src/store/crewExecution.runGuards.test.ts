@@ -47,13 +47,30 @@ it('starts one run when Run is clicked twice while the first start is in flight'
   vi.mocked(ToolService.listEnabledTools).mockReturnValueOnce(new Promise(resolve => { releaseTools = resolve; }));
 
   const first = useCrewExecutionStore.getState().handleRunClick('crew');
+  // The button can show that the run is starting.
+  expect(useCrewExecutionStore.getState().isStartingRun).toBe(true);
   const second = useCrewExecutionStore.getState().handleRunClick('crew');
   releaseTools([]);
   await Promise.all([first, second]);
 
   expect(jobExecutionService.executeJob).toHaveBeenCalledTimes(1);
+  expect(useCrewExecutionStore.getState().isStartingRun).toBe(false);
 
   // Once that start has finished, Run works again.
   await useCrewExecutionStore.getState().handleRunClick('crew');
   expect(jobExecutionService.executeJob).toHaveBeenCalledTimes(2);
+});
+
+it('starts nothing when the inputs dialog confirms again', async () => {
+  // A crew on the store's own nodes: what a run without a pending dialog fell back to.
+  useCrewExecutionStore.setState({ nodes: crewB, edges: [] });
+  useCrewExecutionStore.setState({ pendingVariableExecution: { nodes: crewA, edges: [], type: 'crew' } });
+
+  const confirm = useCrewExecutionStore.getState().executeWithVariables;
+  await Promise.all([confirm({ topic: 'AI' }), confirm({ topic: 'AI' })]);
+  await confirm({ topic: 'AI' });
+
+  expect(jobExecutionService.executeJob).toHaveBeenCalledTimes(1);
+  const ranNodes = vi.mocked(jobExecutionService.executeJob).mock.calls[0][0] as Node[];
+  expect(ranNodes.find(n => n.type === 'taskNode')!.data.description).toBe('Research {topic}');
 });
