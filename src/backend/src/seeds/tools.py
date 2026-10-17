@@ -12,6 +12,7 @@ from sqlalchemy import select
 from src.db.session import async_session_factory
 from src.models.group_tool import GroupTool
 from src.models.tool import Tool
+from src.repositories.tool_repository import TOOL_ID_FLOOR
 from src.seeds.errors import SeederIncomplete
 
 # Configure logging
@@ -741,10 +742,12 @@ async def seed_async() -> None:
     # per-group config for a tool that cannot be built goes with it.
     # Workspace rows are not this seeder's: their ids are never in the seed
     # list, so without the group filter every one was deleted on each startup.
+    # Nor are ids at or above TOOL_ID_FLOOR: those rows were made at runtime.
     seeded_ids = {row[0] for row in tools_data}
     async with async_session_factory() as session:
+        not_seeded = (Tool.id.notin_(seeded_ids), Tool.id < TOOL_ID_FLOOR)
         result = await session.execute(
-            select(Tool).filter(Tool.id.notin_(seeded_ids), Tool.group_id.is_(None))
+            select(Tool).filter(*not_seeded, Tool.group_id.is_(None))
         )
         stale = result.scalars().all()
         stale_ids = [tool.id for tool in stale]

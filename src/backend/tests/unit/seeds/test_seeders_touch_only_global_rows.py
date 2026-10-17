@@ -133,6 +133,20 @@ async def test_tool_seed_id_held_by_a_workspace_row_does_not_fail(factory):
     assert (row.title, row.group_id) == ("Ours", WS_A)
 
 
+@pytest.mark.asyncio
+async def test_tool_cleanup_keeps_global_rows_created_at_runtime(factory):
+    async with factory() as s:
+        # Created by the app, so its id is at the floor, not from a past seed.
+        s.add(Tool(id=10_000, title="Runtime", description="d", icon="i"))
+        await s.commit()
+
+    await tool_seed.seed_async()
+
+    assert [t.title for t in await _all(factory, Tool, Tool.id == 10_000)] == [
+        "Runtime"
+    ]
+
+
 # ── Models ───────────────────────────────────────────────────────────────────
 
 
