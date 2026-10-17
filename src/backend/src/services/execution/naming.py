@@ -21,6 +21,7 @@ from src.services.llm.manager import LLMManager
 
 if TYPE_CHECKING:
     from src.services.catalog.templates import TemplateService
+    from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -107,17 +108,22 @@ class ExecutionNameService:
             log_service=log_service, template_service=template_service, session=session
         )
 
-    async def _get_name_template(self) -> str:
-        """Fetch the ``generate_job_name`` template, opening a standalone session
-        when none was injected (so the read never hits a ``None`` session)."""
+    async def _get_name_template(
+        self, group_context: Optional["GroupContext"] = None
+    ) -> str:
+        """Fetch the ``generate_job_name`` template — the workspace's own when it
+        has one — opening a standalone session when none was injected (so the
+        read never hits a ``None`` session)."""
         if self.template_service is not None:
-            return await self.template_service.get_template_content("generate_job_name")
+            return await self.template_service.get_template_content(
+                "generate_job_name", group_context=group_context
+            )
         from src.db.session import routed_scoped_session
         from src.services.catalog.templates import TemplateService
 
         async with routed_scoped_session() as session:
             return await TemplateService(session).get_template_content(
-                "generate_job_name"
+                "generate_job_name", group_context=group_context
             )
 
     async def _log_llm_interaction(
@@ -167,13 +173,16 @@ class ExecutionNameService:
                 pass
 
     async def generate_execution_name(
-        self, request: ExecutionNameGenerationRequest
+        self,
+        request: ExecutionNameGenerationRequest,
+        group_context: Optional["GroupContext"] = None,
     ) -> ExecutionNameGenerationResponse:
         """
         Generate a descriptive name for an execution based on agents and tasks configuration.
 
         Args:
             request: Request containing agents and tasks configuration
+            group_context: The workspace; its own ``generate_job_name`` wins
 
         Returns:
             Response containing the generated name
@@ -183,7 +192,7 @@ class ExecutionNameService:
             # was injected — the chat auto-execute path builds this service with
             # session=None). This template already includes instructions to only
             # return the name without explanations.
-            system_message = await self._get_name_template()
+            system_message = await self._get_name_template(group_context)
 
             # Fallback if template is not found (shouldn't happen if seeds are run)
             if not system_message:

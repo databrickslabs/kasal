@@ -898,7 +898,11 @@ class TestGenerateTemplatesEdgeCases:
 
             await service.generate_templates(request)
 
-        mock_ts_inst.get_template_content.assert_awaited_once_with("generate_templates")
+        mock_ts_inst.get_template_content.assert_awaited_once()
+        call = mock_ts_inst.get_template_content.await_args
+        assert call.args == ("generate_templates",)
+        # The service's own workspace, so its template override applies.
+        assert call.kwargs["group_context"].primary_group_id == service.group_id
 
     @pytest.mark.asyncio
     async def test_generic_exception_reraises(self, service):

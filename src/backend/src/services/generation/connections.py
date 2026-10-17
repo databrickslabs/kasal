@@ -14,6 +14,7 @@ from src.schemas.connection import ConnectionRequest, ConnectionResponse
 from src.services.catalog.templates import TemplateService
 from src.services.llm.manager import LLMManager
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -163,13 +164,14 @@ class ConnectionService:
             raise ValueError(error_detail)
 
     async def generate_connections(
-        self, request: ConnectionRequest
+        self, request: ConnectionRequest, group_context: Optional[GroupContext] = None
     ) -> ConnectionResponse:
         """
         Generate connections between agents and tasks.
 
         Args:
             request: Connection request containing agents and tasks
+            group_context: The workspace; its own ``generate_connections`` wins
 
         Returns:
             ConnectionResponse with assignments and dependencies
@@ -200,13 +202,15 @@ class ConnectionService:
                 # "" and made this path fail as "template not found".
                 system_message = await TemplateService(
                     self.session
-                ).get_template_content("generate_connections")
+                ).get_template_content(
+                    "generate_connections", group_context=group_context
+                )
             else:
                 # No session: the static helper opens its own. This called the
                 # INSTANCE method on the class, so "generate_connections" landed
                 # in ``self`` and ``name`` was missing — a TypeError every time.
                 system_message = await TemplateService.get_effective_template_content(
-                    "generate_connections", None
+                    "generate_connections", group_context
                 )
 
             if not system_message:

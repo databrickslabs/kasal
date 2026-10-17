@@ -582,6 +582,7 @@ class ExecutionService:
         agents_yaml: Dict[str, Any],
         tasks_yaml: Dict[str, Any],
         model: Optional[str],
+        group_context: Optional[GroupContext] = None,
     ) -> None:
         """Generate the descriptive run name OFF the critical path and apply it.
 
@@ -596,7 +597,9 @@ class ExecutionService:
             request = ExecutionNameGenerationRequest(
                 agents_yaml=agents_yaml, tasks_yaml=tasks_yaml, model=model
             )
-            response = await name_service.generate_execution_name(request)
+            response = await name_service.generate_execution_name(
+                request, group_context
+            )
             new_name = (response.name or "").strip()
             if not new_name:
                 return
@@ -1634,10 +1637,7 @@ class ExecutionService:
             # routes its own fresh session — no explicit detach needed.
             asyncio.create_task(
                 ExecutionService._generate_run_name_async(
-                    execution_id=execution_id,
-                    agents_yaml=agents_yaml,
-                    tasks_yaml=tasks_yaml,
-                    model=model,
+                    execution_id, agents_yaml, tasks_yaml, model, group_context
                 )
             )
 
@@ -2007,18 +2007,14 @@ class ExecutionService:
         }
 
     async def generate_execution_name(
-        self, request: ExecutionNameGenerationRequest
+        self,
+        request: ExecutionNameGenerationRequest,
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, str]:
-        """
-        Generate a descriptive name for an execution based on agents and tasks configuration.
-
-        Args:
-            request: The execution name generation request
-
-        Returns:
-            Dict containing the generated name
-        """
-        response = await self.execution_name_service.generate_execution_name(request)
+        """``{"name": ...}`` for a run, from the workspace's naming template."""
+        response = await self.execution_name_service.generate_execution_name(
+            request, group_context
+        )
         return {"name": response.name}
 
     def _extract_agents_tasks_from_flow_config(self, config: CrewConfig) -> tuple:

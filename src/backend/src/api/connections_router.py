@@ -62,7 +62,7 @@ async def generate_connections(
     logging.getLogger().info(
         f"Generating connections for {len(request.agents)} agents and {len(request.tasks)} tasks"
     )
-    connections = await service.generate_connections(request)
+    connections = await service.generate_connections(request, group_context)
 
     # Log the number of assignments and dependencies
     logging.getLogger().info(
