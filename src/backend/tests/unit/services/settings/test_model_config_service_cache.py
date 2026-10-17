@@ -578,10 +578,13 @@ class TestGetModelConfigCaching:
         svc, repo = self._svc()
         await svc.get_model_config("mkey")
         repo.update = AsyncMock(return_value=mk_model("mkey"))
+        repo.find_global_by_key = AsyncMock(return_value=mk_model("mkey"))
         await svc.update_model_config("mkey", {"name": "Updated"})
         await svc.get_model_config("mkey")
-        # find_by_key: 1 (initial get) + 1 (update existence check) + 1 (refetch after invalidation)
-        assert repo.find_by_key.await_count == 3
+        # find_by_key: 1 (initial get) + 1 (refetch after invalidation); the
+        # update's existence check reads the global row.
+        assert repo.find_by_key.await_count == 2
+        repo.find_global_by_key.assert_awaited_once_with("mkey")
 
     @pytest.mark.asyncio
     async def test_toggle_invalidates_model_entry(self, clean_model_cache):

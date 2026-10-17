@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import ColumnElement, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.template import PromptTemplate
@@ -49,13 +49,24 @@ class TemplateRepository:
         await self.session.flush()
         return template
 
-    async def find_by_name(self, name: str) -> Optional[PromptTemplate]:
+    async def find_by_name(
+        self, name: str, group_id: Optional[str] = None
+    ) -> Optional[PromptTemplate]:
+        """The template ``name`` resolves to for one teamspace.
+
+        That teamspace's own row when ``group_id`` is given and one exists, else
+        the global row. Nothing else is returned. Without ``group_id`` it
+        is the global row only.
         """
-        Find a prompt template by name (no group filter). If multiple rows exist
-        across groups, returns the first one (undefined order). Prefer to use
-        find_by_name_and_group for deterministic behavior.
-        """
-        query = select(self.model).where(self.model.name == name)
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.name == name) & scope)
+            .order_by(self.model.group_id.is_(None), self.model.id)
+            .limit(1)
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 
@@ -67,13 +78,15 @@ class TemplateRepository:
         returns the global/base template row.
         """
         if group_id is None:
-            query = select(self.model).where(
-                (self.model.name == name) & (self.model.group_id.is_(None))
-            )
+            scope: ColumnElement[bool] = self.model.group_id.is_(None)
         else:
-            query = select(self.model).where(
-                (self.model.name == name) & (self.model.group_id == group_id)
-            )
+            scope = self.model.group_id == group_id
+        query = (
+            select(self.model)
+            .where((self.model.name == name) & scope)
+            .order_by(self.model.id)
+            .limit(1)
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 

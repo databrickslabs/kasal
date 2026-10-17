@@ -267,14 +267,19 @@ async def resync_postgres_sequences() -> None:
             )
             tables = [row[0] for row in result.fetchall()]
 
+            from src.repositories.tool_repository import TOOL_ID_FLOOR
+
             for table_name in tables:
                 try:
                     if not safe_id_re.match(table_name):
                         continue
                     seq_name = f"{table_name}_id_seq"
+                    # tools ids below the floor are reserved for seeded tools,
+                    # so the sequence never hands one out.
+                    floor = TOOL_ID_FLOOR if table_name == "tools" else 1
                     await session.execute(
                         sa_text(
-                            f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM \"{table_name}\"), 0) + 1, false)"
+                            f"SELECT setval('{seq_name}', GREATEST(COALESCE((SELECT MAX(id) FROM \"{table_name}\"), 0) + 1, {int(floor)}), false)"
                         )
                     )
                 except Exception:

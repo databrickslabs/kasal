@@ -68,10 +68,10 @@ async def test_basic_find_and_update_and_delete():
     created = await svc.create_model_config(Dummy())
     assert created.key == "c"
 
-    # update: missing returns None; then success path updates by id
-    repo.find_by_key = AsyncMock(return_value=None)
+    # update: the global row only; missing returns None, else updates by id
+    repo.find_global_by_key = AsyncMock(return_value=None)
     assert await svc.update_model_config("nope", {}) is None
-    repo.find_by_key = AsyncMock(return_value=mk_model("d"))
+    repo.find_global_by_key = AsyncMock(return_value=mk_model("d"))
     repo.update = AsyncMock(return_value=mk_model("d", name="NN"))
     upd = await svc.update_model_config("d", {"name": "NN"})
     assert upd.name == "NN"

@@ -10,13 +10,13 @@ invalidation on mutations. See src/core/cache.py for cache implementation.
 
 import asyncio
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.cache import endpoint_health_cache, model_config_cache
-from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
+from src.core.exceptions import ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.models.model_config import ModelConfig
 from src.repositories.model_config_repository import ModelConfigRepository
@@ -59,6 +59,21 @@ _HOSTED_RANK = 3
 # How long to wait for a TCP connect when probing a self-hosted endpoint. Long
 # enough for a LAN box, short enough that a dead host costs a blink.
 _PROBE_TIMEOUT_SECONDS = 0.75
+
+#: Columns a group's override row copies from the catalog row it overrides.
+_OVERRIDE_COPY_FIELDS = (
+    "key",
+    "name",
+    "provider",
+    "temperature",
+    "context_window",
+    "max_output_tokens",
+    "extended_thinking",
+    "thinking_budget_tokens",
+    "reasoning_effort",
+    "params",
+    "unsupported_params",
+)
 
 
 async def _endpoint_reachable(url: str) -> bool:
@@ -151,7 +166,8 @@ class ModelConfigService:
 
     async def find_by_key(self, key: str) -> Optional[ModelConfig]:
         """
-        Get a model configuration by its key from the repository.
+        Get a model configuration by its key: this service's group's own row
+        when it has one, else the global row. Nothing else is returned.
 
         Args:
             key: The model key to find
@@ -159,7 +175,11 @@ class ModelConfigService:
         Returns:
             Model configuration if found, None otherwise
         """
-        return await self.repository.find_by_key(key)
+        rows = await self._resolve_rows(key, key)
+        if rows is None:
+            return None
+        row, definition = rows
+        return row if definition is row else self._overlay(definition, row)
 
     async def create_model_config(
         self, model_data: Any, group_id: Optional[str] = None
@@ -193,14 +213,9 @@ class ModelConfigService:
         # Create new model
         result = await self.repository.create(model_dict)
 
-        # Invalidate cache - both default and group-specific if provided
-        await model_config_cache.invalidate("__default__", "models")
-        await model_config_cache.invalidate(
-            "__default__", f"model:{model_dict.get('key', model_data.key)}"
-        )
-        if group_id:
-            await model_config_cache.invalidate(group_id, "models")
-        logger.info("[CACHE INVALIDATE] Model config cache invalidated after create")
+        # A catalog row is every group's: drop every group's entries.
+        await model_config_cache.clear()
+        logger.info("[CACHE INVALIDATE] Model config cache cleared after create")
 
         return result
 
@@ -208,18 +223,18 @@ class ModelConfigService:
         self, key: str, model_data: Any, group_id: Optional[str] = None
     ) -> Optional[ModelConfig]:
         """
-        Update an existing model configuration.
+        Update an existing catalog (global) model configuration.
 
         Args:
             key: Key of the model to update
             model_data: Updated model data
-            group_id: Optional group ID for cache invalidation
+            group_id: Unused; kept for callers. Every group's cache is dropped.
 
         Returns:
             Updated model configuration, or None if not found
         """
-        # Check if model exists
-        existing_model = await self.repository.find_by_key(key)
+        # The catalog row, never a group's override of it.
+        existing_model = await self.repository.find_global_by_key(key)
         if not existing_model:
             return None
 
@@ -234,15 +249,9 @@ class ModelConfigService:
         # Update model
         result = await self.repository.update(existing_model.id, model_dict)
 
-        # Invalidate cache - both default and group-specific if provided
-        await model_config_cache.invalidate("__default__", "models")
-        await model_config_cache.invalidate("__default__", f"model:{key}")
-        if group_id:
-            await model_config_cache.invalidate(group_id, "models")
-        # Also invalidate the model's own group if it has one
-        if existing_model.group_id:
-            await model_config_cache.invalidate(existing_model.group_id, "models")
-        logger.info("[CACHE INVALIDATE] Model config cache invalidated after update")
+        # Every group resolves this row: drop every group's entries.
+        await model_config_cache.clear()
+        logger.info("[CACHE INVALIDATE] Model config cache cleared after update")
 
         return result
 
@@ -267,19 +276,11 @@ class ModelConfigService:
             if not updated:
                 return None
 
-            # Get the updated model
+            # Get the updated (global) model
             result = await self.repository.find_by_key(key)
 
-            # Invalidate cache
-            await model_config_cache.invalidate("__default__", "models")
-            await model_config_cache.invalidate("__default__", f"model:{key}")
-            if group_id:
-                await model_config_cache.invalidate(group_id, "models")
-            if result and result.group_id:
-                await model_config_cache.invalidate(result.group_id, "models")
-            logger.info(
-                "[CACHE INVALIDATE] Model config cache invalidated after toggle"
-            )
+            await model_config_cache.clear()
+            logger.info("[CACHE INVALIDATE] Model config cache cleared after toggle")
 
             return result
         except Exception as e:
@@ -303,24 +304,12 @@ class ModelConfigService:
         """
         logger.info(f"Service: Attempting to delete model with key: {key}")
 
-        # Get the model first to know its group_id for cache invalidation
-        existing_model = await self.repository.find_by_key(key)
-        model_group_id = existing_model.group_id if existing_model else None
-
-        # Use the dedicated repository method for deletion by key
+        # Deletes the catalog row and every group's override of it.
         result = await self.repository.delete_by_key(key)
 
         if result:
-            # Invalidate cache
-            await model_config_cache.invalidate("__default__", "models")
-            await model_config_cache.invalidate("__default__", f"model:{key}")
-            if group_id:
-                await model_config_cache.invalidate(group_id, "models")
-            if model_group_id:
-                await model_config_cache.invalidate(model_group_id, "models")
-            logger.info(
-                "[CACHE INVALIDATE] Model config cache invalidated after delete"
-            )
+            await model_config_cache.clear()
+            logger.info("[CACHE INVALIDATE] Model config cache cleared after delete")
 
         return result
 
@@ -394,60 +383,20 @@ class ModelConfigService:
 
             # Read-through TTL cache (PERF-005): this runs on EVERY LLM
             # completion, which previously meant a DB round trip per call.
-            # find_by_key is global (not group-filtered), so the cache entry
-            # lives under "__default__" and mutations invalidate it exactly.
+            # Keyed by THIS group: the row it resolves to is the group's own.
             # API keys are never cached here — only the model row fields.
+            cache_group = self.group_id or "__default__"
             cached = await model_config_cache.get(
-                "__default__", f"model:{normalized_key}"
+                cache_group, f"model:{normalized_key}"
             )
             if cached is not None:
                 config = dict(cached)
             else:
-                # Try the full model name first (supports HF-style names like
-                # "mlx-community/model-name"), then fall back to the normalized
-                # key (strips provider prefix e.g. "databricks/model" → "model").
-                model_config = await self.repository.find_by_key(model)
-                if not model_config:
-                    model_config = await self.repository.find_by_key(normalized_key)
-                if model_config:
-                    config = {
-                        "key": model_config.key,
-                        "name": model_config.name,
-                        "provider": model_config.provider,
-                        "temperature": model_config.temperature,
-                        "context_window": model_config.context_window,
-                        "max_output_tokens": model_config.max_output_tokens,
-                        "extended_thinking": model_config.extended_thinking,
-                        # Thinking depth. Which one applies is the model's
-                        # property, not a choice — transport.thinking_mode()
-                        # decides, and the wrong one is a 400.
-                        "thinking_budget_tokens": getattr(
-                            model_config, "thinking_budget_tokens", None
-                        ),
-                        "reasoning_effort": getattr(
-                            model_config, "reasoning_effort", None
-                        ),
-                        "enabled": model_config.enabled,
-                        # The declared sampling surface. `ModelConfig.params` /
-                        # `.unsupported_params` exist, the resolver
-                        # (`services/llm/params.py`) exists, and
-                        # `configure_kasal_llm` reads both off THIS dict — which
-                        # never carried them, so the entire feature was
-                        # unreachable: every row's declaration resolved to an
-                        # empty bag and every endpoint's refusal list to nothing.
-                        # Silent in both directions, because "no params" is
-                        # indistinguishable from "params not plumbed".
-                        # `getattr`, matching `_as_config` and the
-                        # `extended_thinking` line above: a row here is not
-                        # always a full ORM object (the seed-backed and cached
-                        # shapes are plainer), and a missing column must read as
-                        # "declared nothing", never raise on the way to a model
-                        # that would otherwise have worked.
-                        "params": getattr(model_config, "params", None),
-                        "unsupported_params": getattr(
-                            model_config, "unsupported_params", None
-                        ),
-                    }
+                rows = await self._resolve_rows(model, normalized_key)
+                if rows:
+                    row, definition = rows
+                    config = self._as_config(definition)
+                    config["enabled"] = row.enabled
                 else:
                     # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
                     config = get_model_config(normalized_key) or {}
@@ -456,7 +405,7 @@ class ModelConfigService:
                             f"Model configuration not found for model: {model}"
                         )
                 await model_config_cache.set(
-                    "__default__", f"model:{normalized_key}", dict(config)
+                    cache_group, f"model:{normalized_key}", dict(config)
                 )
 
             # Get API key for the provider using class method
@@ -528,9 +477,54 @@ class ModelConfigService:
             logger.error(f"Error getting model configuration: {str(e)}")
             raise KasalError(detail=f"Failed to get model configuration: {str(e)}")
 
+    async def _resolve_rows(
+        self, model: str, normalized_key: str
+    ) -> Optional[Tuple[ModelConfig, ModelConfig]]:
+        """``(row, definition)`` this group resolves a model to, or None.
+
+        ``row`` is the group's own override when it has one, else the global
+        row. An override changes ``enabled`` only (the toggle is the one thing a
+        group can change), so ``definition`` — how to call the model: endpoint,
+        limits, sampling and thinking settings — is the global row whenever one
+        exists. An override made before a system admin's edit, or one that
+        never carried those columns, therefore cannot drop them.
+        """
+        # Try the full model name first (supports HF-style names like
+        # "mlx-community/model-name"), then fall back to the normalized
+        # key (strips provider prefix e.g. "databricks/model" → "model").
+        row = await self.repository.find_by_key(model, self.group_id)
+        if not row and normalized_key != model:
+            row = await self.repository.find_by_key(normalized_key, self.group_id)
+        if not row:
+            return None
+        definition = row
+        if getattr(row, "group_id", None) is not None:
+            definition = await self.repository.find_global_by_key(row.key) or row
+        return row, definition
+
+    @staticmethod
+    def _overlay(definition: ModelConfig, override: ModelConfig) -> ModelConfig:
+        """The catalog row as one group sees it: its definition, the group's
+        ``enabled`` (and the override's id and group, which identify it).
+
+        A new, transient object that is never added to a session, so reading
+        it can never write to either row.
+        """
+        columns = ModelConfig.__table__.columns.keys()
+        view = ModelConfig(**{c: getattr(definition, c, None) for c in columns})
+        view.id = override.id
+        view.group_id = override.group_id
+        view.enabled = override.enabled
+        return view
+
     @staticmethod
     def _as_config(m: Any) -> Dict[str, Any]:
-        """Model row -> the config dict shape get_model_config returns."""
+        """Model row -> the config dict shape get_model_config returns.
+
+        ``getattr`` throughout: a row here is not always a full ORM object (the
+        seed-backed and cached shapes are plainer), and a missing column must
+        read as "declared nothing", never raise.
+        """
         return {
             "key": m.key,
             "name": m.name,
@@ -542,11 +536,11 @@ class ModelConfigService:
             "thinking_budget_tokens": getattr(m, "thinking_budget_tokens", None),
             "reasoning_effort": getattr(m, "reasoning_effort", None),
             "enabled": m.enabled,
-            # See get_model_config: these two columns are the declared sampling
-            # surface, and a dict that omits them silently disarms it. This
-            # builder serves the SUBSTITUTION path, which is how a Databricks
-            # model on a workspace-less deployment becomes the local vLLM one —
-            # exactly the model whose row carries a frequency_penalty.
+            # The declared sampling surface: configure_kasal_llm reads both off
+            # this dict, and a dict that omits them silently disarms it. This
+            # builder also serves the SUBSTITUTION path, which is how a
+            # Databricks model on a workspace-less deployment becomes the local
+            # vLLM one — exactly the model whose row carries a frequency_penalty.
             "params": getattr(m, "params", None),
             "unsupported_params": getattr(m, "unsupported_params", None),
         }
@@ -699,11 +693,13 @@ class ModelConfigService:
             if model.group_id is None:
                 models_by_key[model.key] = model
 
-        # Then, override with the workspace's own models if they exist
+        # Then the workspace's own overrides: its `enabled` on the global row
         for model in all_models:
             if model.group_id == scope_group_id:
-                # This will override the default if it exists
-                models_by_key[model.key] = model
+                base = models_by_key.get(model.key)
+                models_by_key[model.key] = (
+                    self._overlay(base, model) if base is not None else model
+                )
 
         # Convert back to list
         result = list(models_by_key.values())
@@ -762,14 +758,12 @@ class ModelConfigService:
         self, key: str, enabled: bool, group_context: GroupContext
     ) -> Optional[ModelConfig]:
         """
-        Toggle the enabled status of a model with group verification.
+        Toggle a model for the current group (``primary_group_id``) only.
 
-        For default models (group_id = null):
-        - Creates a group-specific copy with the toggled state
-        - Ensures each group has their own enabled/disabled settings
-
-        For group-specific models:
-        - Only the owning group can toggle them
+        The first toggle stores the group's override: a complete copy of the
+        catalog row with the requested ``enabled``. Later toggles flip that
+        row. Only this group resolves it (see ``ModelConfigRepository.
+        find_by_key``), and at run time it contributes only ``enabled``.
 
         Args:
             key: Key of the model to toggle
@@ -783,117 +777,66 @@ class ModelConfigService:
             HTTPException: If not authorized or toggle fails
         """
         try:
-            # First get the model (could be default or group-specific)
+            # The row this group toggles: its own override of ``key``, else the
+            # global row. The group is the CURRENT one (``primary_group_id``),
+            # never any other id in ``group_ids``.
+            primary_group_id = group_context.primary_group_id if group_context else None
             all_models = await self.repository.find_all()
-
-            # Find the model (prefer group-specific over default)
             target_model = None
             default_model = None
-
             for model in all_models:
-                if model.key == key:
-                    if model.group_id is None:
-                        default_model = model
-                    elif (
-                        group_context
-                        and group_context.group_ids
-                        and model.group_id in group_context.group_ids
-                    ):
-                        target_model = model
-                        break
-
-            # If no group-specific model found, use default
-            if not target_model:
-                target_model = default_model
+                if model.key != key:
+                    continue
+                if model.group_id is None:
+                    default_model = default_model or model
+                elif primary_group_id and model.group_id == primary_group_id:
+                    target_model = target_model or model
+            target_model = target_model or default_model
 
             if not target_model:
                 logger.warning(f"Model with key {key} not found")
                 return None
 
             # Must have a valid group context to toggle models
-            if not group_context or not group_context.group_ids:
+            if primary_group_id is None or group_context is None:
                 logger.warning(f"No group context provided for toggling model {key}")
                 raise ForbiddenError(detail="Group context required to toggle models")
 
-            primary_group_id = group_context.primary_group_id
-            if primary_group_id is None:
-                raise ForbiddenError(detail="Group context required to toggle models")
-
-            # Helper to invalidate cache after mutation
             async def _invalidate_cache() -> None:
                 await model_config_cache.invalidate(primary_group_id, "models")
+                await model_config_cache.invalidate(primary_group_id, f"model:{key}")
                 await model_config_cache.invalidate("__default__", "models")
                 logger.info(
                     f"[CACHE INVALIDATE] Model config cache invalidated for group {primary_group_id}"
                 )
 
-            # If it's a default model (group_id = null), create a group-specific copy
             if target_model.group_id is None:
-                # Check if a group-specific version already exists
                 existing_group_model = await self.repository.find_by_key_and_group(
                     key, primary_group_id
                 )
-
-                if existing_group_model:
-                    # Toggle the existing group-specific model in its group scope
-                    await self.repository.toggle_enabled_in_group(
-                        existing_group_model.key, primary_group_id, enabled
-                    )
-                    await _invalidate_cache()
-                    return await self.repository.find_by_key_and_group(
-                        key, primary_group_id
-                    )
-                else:
-                    # Create a new group-specific copy with toggled state
+                if not existing_group_model:
+                    # The group's override: a COMPLETE copy of the catalog row
+                    # (a partial one dropped the endpoint, refusals and thinking
+                    # settings), resolved by this group only.
                     model_data = {
-                        "key": target_model.key,
-                        "name": target_model.name,
-                        "provider": (
-                            target_model.provider
-                            if hasattr(target_model, "provider")
-                            else None
-                        ),
-                        "temperature": (
-                            target_model.temperature
-                            if hasattr(target_model, "temperature")
-                            else None
-                        ),
-                        "context_window": (
-                            target_model.context_window
-                            if hasattr(target_model, "context_window")
-                            else None
-                        ),
-                        "max_output_tokens": (
-                            target_model.max_output_tokens
-                            if hasattr(target_model, "max_output_tokens")
-                            else None
-                        ),
-                        "extended_thinking": (
-                            target_model.extended_thinking
-                            if hasattr(target_model, "extended_thinking")
-                            else False
-                        ),
-                        "enabled": enabled,  # Use the requested state
-                        "group_id": primary_group_id,
-                        "created_by_email": group_context.group_email,
+                        field: getattr(target_model, field, None)
+                        for field in _OVERRIDE_COPY_FIELDS
                     }
+                    model_data.update(
+                        enabled=enabled,
+                        group_id=primary_group_id,
+                        created_by_email=group_context.group_email,
+                    )
                     result = await self.repository.create(model_data)
                     await _invalidate_cache()
                     return result
 
-            # For group-specific models, check authorization
-            if target_model.group_id not in group_context.group_ids:
-                logger.warning(f"Model with key {key} not authorized for group")
-                raise NotFoundError(detail=f"Model with key {key} not found")
-
-            # Toggle the group-specific model in its group scope
+            # Toggle the group's own override in its group scope
             await self.repository.toggle_enabled_in_group(
-                target_model.key, target_model.group_id, enabled
+                key, primary_group_id, enabled
             )
             await _invalidate_cache()
-            return await self.repository.find_by_key_and_group(
-                key, target_model.group_id
-            )
+            return await self.repository.find_by_key_and_group(key, primary_group_id)
 
         except KasalError:
             raise

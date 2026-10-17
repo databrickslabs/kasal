@@ -1,6 +1,6 @@
 from typing import Any, List, Optional, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,17 +34,25 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_by_key(self, key: str) -> Optional[ModelConfig]:
-        """
-        Find a model configuration by key.
+    async def find_by_key(
+        self, key: str, group_id: Optional[str] = None
+    ) -> Optional[ModelConfig]:
+        """The row ``key`` resolves to for one teamspace.
 
-        Args:
-            key: Model configuration key to search for
-
-        Returns:
-            ModelConfig if found, else None
+        That teamspace's own row (its override) when ``group_id`` is given and
+        one exists, else the global row. Nothing else is returned. Without
+        ``group_id`` it is the global row only. Ordered, so the answer never
+        depends on the order the database returns rows in.
         """
-        query = select(self.model).where(self.model.key == key)
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.key == key) & scope)
+            .order_by(self.model.group_id.is_(None), self.model.id)
+            .limit(1)
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 
@@ -61,8 +69,11 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         Returns:
             ModelConfig if found, else None
         """
-        query = select(self.model).where(
-            (self.model.key == key) & (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.key == key) & (self.model.group_id == group_id))
+            .order_by(self.model.id)
+            .limit(1)
         )
         result = await self.session.execute(query)
         return result.scalars().first()
@@ -84,8 +95,8 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
 
     async def toggle_enabled(self, key: str, enabled: bool) -> bool:
         """
-        Toggle the enabled status by key (first match). Avoid using this for
-        group-specific toggles; use toggle_enabled_in_group instead.
+        Toggle the enabled status of the global row for ``key``. Avoid using
+        this for group-specific toggles; use toggle_enabled_in_group instead.
         """
         try:
             model = await self.find_by_key(key)
@@ -193,13 +204,14 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
 
     async def delete_by_key(self, key: str) -> bool:
         """
-        Delete a model configuration by key.
+        Delete a catalog model: its global row and every teamspace's override
+        of it (an override of a model that no longer exists means nothing).
 
         Args:
             key: Key of the model configuration to delete
 
         Returns:
-            True if model was found and deleted, False otherwise
+            True if the global row was found and deleted, False otherwise
         """
         import logging
 
@@ -256,11 +268,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
 
     async def find_global_by_key(self, key: str) -> Optional[ModelConfig]:
         """Find a global (system-wide) model configuration by key."""
-        query = select(self.model).where(
-            (self.model.key == key) & (self.model.group_id.is_(None))
-        )
-        result = await self.session.execute(query)
-        return result.scalars().first()
+        return await self.find_by_key(key)
 
     async def toggle_global_enabled(self, key: str, enabled: bool) -> bool:
         """Toggle enabled for the global model with the given key. Returns True if updated."""

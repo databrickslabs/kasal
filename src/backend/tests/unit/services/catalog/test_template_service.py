@@ -65,7 +65,7 @@ class FakeRepo:
     async def delete_all(self):
         return len(self.active_templates)
 
-    async def find_by_name(self, name):
+    async def find_by_name(self, name, group_id=None):
         return self._find_by_name_return
 
     async def find_by_name_and_group(self, name, group_id):
