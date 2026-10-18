@@ -75,16 +75,16 @@ class TestModelConfigServiceFindEnabledModels:
         service = ModelConfigService(session=session)
 
         mock_models = [
-            Mock(id=1, key="gpt-4", enabled=True),
-            Mock(id=2, key="claude-3", enabled=True),
+            Mock(id=1, key="gpt-4", enabled=True, group_id=None),
+            Mock(id=2, key="claude-3", enabled=True, group_id=None),
+            Mock(id=3, key="off", enabled=False, group_id=None),
         ]
-        service.repository.find_enabled_models = AsyncMock(return_value=mock_models)
+        service.repository.find_in_scope = AsyncMock(return_value=mock_models)
 
         result = await service.find_enabled_models()
 
-        assert len(result) == 2
-        assert all(m.enabled for m in result)
-        service.repository.find_enabled_models.assert_called_once()
+        assert [m.key for m in result] == ["gpt-4", "claude-3"]
+        service.repository.find_in_scope.assert_called_once_with(None)
 
     @pytest.mark.asyncio
     async def test_find_enabled_models_empty(self):
@@ -92,7 +92,7 @@ class TestModelConfigServiceFindEnabledModels:
         session = AsyncMock()
         service = ModelConfigService(session=session)
 
-        service.repository.find_enabled_models = AsyncMock(return_value=[])
+        service.repository.find_in_scope = AsyncMock(return_value=[])
 
         result = await service.find_enabled_models()
 

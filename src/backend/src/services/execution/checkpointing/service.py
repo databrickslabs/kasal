@@ -58,7 +58,12 @@ class CheckpointService:
             execution.status, execution.checkpoint_status
         )
 
-        current_keys = await self._current_content_keys(execution, group_context)
+        # Compared against the run's saved definition in its own workspace.
+        from src.services.catalog.run_lookup import scope_to_run
+
+        current_keys = await self._current_content_keys(
+            execution, scope_to_run(group_context, execution)
+        )
         changed_at = self._first_changed(units, current_keys)
 
         return {

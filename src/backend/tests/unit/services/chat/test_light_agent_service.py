@@ -445,43 +445,32 @@ def test_resolve_group_id_falls_back_to_first_group_id():
     assert LightAgentService._resolve_group_id(config, ctx) == "g1"
 
 
-def test_resolve_group_id_uses_allocated_personal_workspace():
-    """Personal scope is the allocated ID, including collision-safe IDs."""
+def test_resolve_group_id_skips_an_empty_leading_group_id():
     config = SimpleNamespace(group_id=None)
-    ctx = SimpleNamespace(
-        primary_group_id=None,
-        group_ids=[],
-        group_email="person@example.com",
-        current_user=SimpleNamespace(
-            personal_group_id="user_person_example_com_1234abcd"
+    ctx = SimpleNamespace(primary_group_id="", group_ids=["", "g2"])
+    assert LightAgentService._resolve_group_id(config, ctx) == "g2"
+
+
+@pytest.mark.parametrize(
+    "ctx",
+    [
+        None,
+        SimpleNamespace(primary_group_id=None, group_ids=[], group_email=None),
+        # An email alone is not a workspace: nothing is derived from it.
+        SimpleNamespace(
+            primary_group_id=None,
+            group_ids=[],
+            group_email="person@example.com",
+            current_user=SimpleNamespace(personal_group_id="user_person_1234abcd"),
         ),
-    )
-    assert (
+    ],
+)
+def test_resolve_group_id_without_a_workspace_is_refused(ctx):
+    """No "default" group and no workspace derived from the email. The turn
+    already refuses this earlier (fill_tool_configs_from_catalog)."""
+    config = SimpleNamespace(group_id=None)
+    with pytest.raises(ValueError, match="no workspace"):
         LightAgentService._resolve_group_id(config, ctx)
-        == "user_person_example_com_1234abcd"
-    )
-
-
-def test_resolve_group_id_rejects_unallocated_personal_workspace():
-    config = SimpleNamespace(group_id=None)
-    ctx = SimpleNamespace(
-        primary_group_id=None,
-        group_ids=[],
-        group_email="person@example.com",
-    )
-    with pytest.raises(ValueError, match="personal workspace has not been allocated"):
-        LightAgentService._resolve_group_id(config, ctx)
-
-
-def test_resolve_group_id_defaults_when_no_group_or_email():
-    config = SimpleNamespace(group_id=None)
-    ctx = SimpleNamespace(primary_group_id=None, group_ids=[], group_email=None)
-    assert LightAgentService._resolve_group_id(config, ctx) == "default"
-
-
-def test_resolve_group_id_handles_missing_group_context():
-    config = SimpleNamespace(group_id=None)
-    assert LightAgentService._resolve_group_id(config, None) == "default"
 
 
 # ── _event_matches_run — bus event → this run attribution ─────────────────────

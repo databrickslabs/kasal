@@ -945,17 +945,24 @@ class ExecutionHistoryService:
         An edit saved now belongs to that gate alone, so only that gate hands it
         on when the flow resumes. Resolved here, from the run's own approvals,
         rather than taken from the client. None unless exactly one is pending.
+
+        The run is found in the caller's ``group_ids``, and its approvals are
+        read for the run's own group only: an approval belongs to the group of
+        the run that raised it.
         """
         from src.models.hitl_approval import HITLApprovalStatus
         from src.services.hitl.service import HITLService
 
-        approvals = await HITLService(self.session).get_approvals_for_execution(job_id)
-        pending = [
-            a
-            for a in approvals
-            if a.status == HITLApprovalStatus.PENDING
-            and (not group_ids or a.group_id in group_ids)
-        ]
+        run = await self.history_repo.get_execution_by_job_id(
+            job_id, group_ids=group_ids
+        )
+        run_group_id = getattr(run, "group_id", None)
+        if not run_group_id:
+            return None
+        approvals = await HITLService(self.session).get_approvals_for_execution(
+            job_id, run_group_id
+        )
+        pending = [a for a in approvals if a.status == HITLApprovalStatus.PENDING]
         if len(pending) != 1:
             return None
         return {"approval_id": pending[0].id, "gate_node_id": pending[0].gate_node_id}

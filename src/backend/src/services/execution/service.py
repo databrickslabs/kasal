@@ -1550,25 +1550,16 @@ class ExecutionService:
 
             # The crew equivalent: which saved crew this run was built from, so a
             # later resume can rebuild from the current definition instead of the
-            # snapshot stored above. Malformed ids are dropped rather than
-            # raised on — the run itself does not need the link, and failing a
-            # kickoff over a bad optional reference would be a worse trade.
+            # snapshot stored above. Only a crew of the run's workspace is
+            # linked; any other id (or a malformed one) records None, and the
+            # run still starts: it does not need the link.
             crew_id = getattr(config, "crew_id", None)
             if execution_type != "flow" and crew_id:
-                import uuid as uuid_module
+                from src.services.catalog.run_lookup import crew_id_to_record
 
-                try:
-                    execution_data["crew_id"] = (
-                        uuid_module.UUID(crew_id)
-                        if isinstance(crew_id, str)
-                        else crew_id
-                    )
-                except (TypeError, ValueError):
-                    logger.warning(
-                        f"[ExecutionService.create_execution] Ignoring unparseable "
-                        f"crew_id {crew_id!r}; this run will resume from its "
-                        f"stored inputs instead of the saved crew"
-                    )
+                execution_data["crew_id"] = await crew_id_to_record(
+                    self.session, crew_id, group_context
+                )
 
             # A flow resume has always created a new execution; it just never
             # recorded WHICH run it came from. Stamping the same link the crew
@@ -1847,6 +1838,7 @@ class ExecutionService:
         from src.repositories.execution_history_repository import (
             ExecutionHistoryRepository,
         )
+        from src.services.catalog.run_lookup import scope_to_run
         from src.services.execution.checkpointing import (
             lifecycle,
             normalize,
@@ -1866,6 +1858,8 @@ class ExecutionService:
         source = await repo.get_execution_by_job_id(execution_id, group_ids=group_ids)
         if not source:
             raise ValueError(f"Execution {execution_id} not found")
+        # Rebuilt and filed in the source run's own workspace from here on.
+        group_context = scope_to_run(group_context, source)
 
         execution_type = (source.execution_type or "crew").lower()
         if execution_type not in ("crew", "flow"):

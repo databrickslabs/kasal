@@ -46,6 +46,8 @@ from tests.unit.services.catalog.crew_workspaces import (
     A_WRITER,
     B_CREW,
     CALLER_A,
+    A,
+    B,
     routed_to,
     seeded_database,
 )
@@ -240,3 +242,35 @@ async def test_a_resumed_crew_is_rebuilt_with_its_agents_temperature(db):
     assert config.agents_yaml["Researcher"]["id"] == A_RESEARCHER
     assert {k: t["agent"] for k, t in config.tasks_yaml.items()} == EDGE_AGENTS
     assert resume_inputs["agents_yaml"]["Writer"]["temperature"] == 80
+
+
+SNAPSHOT = {
+    "agents_yaml": {"old": {"role": "old"}},
+    "tasks_yaml": {"old": {"description": "old"}},
+    "inputs": {},
+}
+
+
+async def _resumed_roles(maker, source, group_ids):
+    """A caller with no workspace selected: its context spans both."""
+    caller = GroupContext(group_ids=group_ids, group_email="ab@example.com")
+    async with maker() as session:
+        config, _, _ = await build_crew_resume_config(
+            session, source, SNAPSHOT, None, None, caller
+        )
+    return [a["role"] for a in config.agents_yaml.values()]
+
+
+@pytest.mark.asyncio
+async def test_a_multi_group_resume_is_rebuilt_from_its_runs_crew(db):
+    """The run is in B, the second of the caller's groups; so is its crew."""
+    source = SimpleNamespace(crew_id=B_CREW, job_id="run-b", group_id=B)
+    assert await _resumed_roles(db, source, [A, B]) == ["bravo agent"]
+
+
+@pytest.mark.asyncio
+async def test_a_resume_reads_its_crew_only_in_the_runs_workspace(db):
+    """A run in A naming B's crew: B is in the caller's scope (first, even)
+    but not the run's, so the resume falls back to the stored snapshot."""
+    source = SimpleNamespace(crew_id=B_CREW, job_id="run-a", group_id=A)
+    assert await _resumed_roles(db, source, [B, A]) == ["old"]

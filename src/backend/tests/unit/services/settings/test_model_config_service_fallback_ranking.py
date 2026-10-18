@@ -40,7 +40,9 @@ async def test_basic_find_and_update_and_delete():
     repo.find_all = AsyncMock(
         return_value=[mk_model("a"), mk_model("b", enabled=False)]
     )
-    repo.find_enabled_models = AsyncMock(return_value=[mk_model("a")])
+    repo.find_in_scope = AsyncMock(
+        return_value=[mk_model("a"), mk_model("b", enabled=False)]
+    )
     repo.find_by_key = AsyncMock(side_effect=[mk_model("a"), None])
 
     out_all = await svc.find_all()

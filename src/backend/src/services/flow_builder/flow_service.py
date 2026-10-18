@@ -95,20 +95,24 @@ class FlowService:
                 if not isinstance(action, dict):
                     raise ValueError(f"Invalid action format: {action}")
 
-            # Validate crew_id if provided - for multi-crew flows, crew_id may not exist
-            # Set to None if the crew doesn't exist to avoid FK constraint violations
+            # Keep crew_id only for a crew of the workspace the flow is saved
+            # into (the current one, where group_id below puts it). A crew that
+            # does not exist, or is another workspace's, is dropped (multi-crew
+            # flows may name none), which also avoids an FK violation.
             validated_crew_id = None
             if flow_in.crew_id:
                 # Crews are CrewService's domain.
                 from src.services.catalog.crews import CrewService
 
-                existing_crew = await CrewService(self.session).get(flow_in.crew_id)
+                existing_crew = await CrewService(self.session).get_by_group(
+                    flow_in.crew_id, group_context
+                )
                 if existing_crew:
                     validated_crew_id = flow_in.crew_id
                     logger.info(f"Validated crew_id: {validated_crew_id}")
                 else:
                     logger.warning(
-                        f"crew_id {flow_in.crew_id} not found in database, setting to None for multi-crew flow"
+                        f"crew_id {flow_in.crew_id} not found in this workspace, setting to None for multi-crew flow"
                     )
 
             # Create flow dictionary with validated data and group info

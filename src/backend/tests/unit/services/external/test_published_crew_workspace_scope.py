@@ -74,7 +74,7 @@ async def test_an_imported_crews_foreign_rows_are_left_out(session):
         reasoning_config=None,
     )
     crews = MagicMock()
-    crews.get = AsyncMock(return_value=crew)
+    crews.get_by_group = AsyncMock(return_value=crew)
     service = MagicMock()
     service.create_execution = AsyncMock(
         return_value={"execution_id": "run-1", "status": "pending"}
@@ -100,3 +100,43 @@ async def test_an_imported_crews_foreign_rows_are_left_out(session):
     assert [a["role"] for a in config.agents_yaml.values()] == [f"{A} role"]
     assert [t["id"] for t in config.tasks_yaml.values()] == [A_TASK]
     assert f"{B}-key" not in str(config.agents_yaml) + str(config.tasks_yaml)
+
+
+@pytest.mark.asyncio
+async def test_the_published_crew_is_loaded_only_from_the_publications_workspace():
+    """The crew row itself is workspace-checked, not only the rows it lists."""
+    from tests.unit.services.catalog.crew_workspaces import (
+        A_CREW,
+        B_CREW,
+        CALLER_A,
+        seeded_database,
+    )
+
+    service = MagicMock()
+    service.create_execution = AsyncMock(
+        return_value={"execution_id": "run-1", "status": "pending"}
+    )
+    caller = ExternalCaller(
+        group_context=CALLER_A, protocol="mcp", identifier="a@example.com"
+    )
+
+    def _publication(crew_id):
+        return SimpleNamespace(
+            entity_type="crew",
+            entity_id=str(crew_id),
+            external_name="research",
+            group_id=CALLER_A.primary_group_id,
+        )
+
+    async with seeded_database() as maker:
+        with patch(
+            "src.services.execution.service.ExecutionService", return_value=service
+        ):
+            async with maker() as session:
+                with pytest.raises(ValueError, match="no longer exists"):
+                    await start_run(caller, _publication(B_CREW), session=session)
+                service.create_execution.assert_not_awaited()
+
+                await start_run(caller, _publication(A_CREW), session=session)
+    config = service.create_execution.await_args.kwargs["config"]
+    assert list(config.agents_yaml) == ["Researcher", "Writer"]

@@ -667,7 +667,7 @@ class TestFlowServiceNameUniqueness:
             with patch("src.services.catalog.crews.CrewService") as MockCrewService:
                 mock_crew_service = AsyncMock()
                 MockCrewService.return_value = mock_crew_service
-                mock_crew_service.get.return_value = None
+                mock_crew_service.get_by_group.return_value = None
 
                 flow_create = FlowCreate(**flow_create_data)
                 result = await flow_service.create_flow_with_group(

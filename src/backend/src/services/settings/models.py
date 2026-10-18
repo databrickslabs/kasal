@@ -156,13 +156,15 @@ class ModelConfigService:
         return await self.repository.find_all()
 
     async def find_enabled_models(self) -> List[ModelConfig]:
-        """
-        Get all enabled model configurations from the repository.
+        """The enabled models as this service's group resolves them.
 
-        Returns:
-            List of enabled model configurations
+        For each key, the group's own row when it has one, else the global
+        row; never another group's row. Without a group, the global rows.
+        Serves the run-time fallbacks (``_local_fallback_config`` and
+        ``LLMManager.load_fallback_candidates``), which run for one group.
         """
-        return await self.repository.find_enabled_models()
+        rows = await self.repository.find_in_scope(self.group_id)
+        return [m for m in self._effective(rows, self.group_id) if m.enabled]
 
     async def find_by_key(self, key: str) -> Optional[ModelConfig]:
         """
@@ -517,6 +519,24 @@ class ModelConfigService:
         view.enabled = override.enabled
         return view
 
+    @classmethod
+    def _effective(
+        cls, rows: List[ModelConfig], group_id: Optional[str]
+    ) -> List[ModelConfig]:
+        """One model per key as ``group_id`` sees it.
+
+        The global row, with the group's own override (its ``enabled``) laid
+        over it; a key only the group has is its own row. Rows of any other
+        group are ignored, so ``rows`` may hold more than the group's scope.
+        """
+        by_key: Dict[str, ModelConfig] = {m.key: m for m in rows if m.group_id is None}
+        if group_id:
+            for m in rows:
+                if m.group_id == group_id:
+                    base = by_key.get(m.key)
+                    by_key[m.key] = cls._overlay(base, m) if base is not None else m
+        return list(by_key.values())
+
     @staticmethod
     def _as_config(m: Any) -> Dict[str, Any]:
         """Model row -> the config dict shape get_model_config returns.
@@ -678,31 +698,8 @@ class ModelConfigService:
         )
         all_models = await self.repository.find_all()
 
-        # If no group context, show only default models
-        if not scope_group_id:
-            default_models = [model for model in all_models if model.group_id is None]
-            # Cache and return
-            await model_config_cache.set(cache_group_id, "models", default_models)
-            return default_models
-
-        # Build a dictionary to handle overrides: model_key -> model
-        models_by_key = {}
-
-        # First, add all default models (group_id = null)
-        for model in all_models:
-            if model.group_id is None:
-                models_by_key[model.key] = model
-
-        # Then the workspace's own overrides: its `enabled` on the global row
-        for model in all_models:
-            if model.group_id == scope_group_id:
-                base = models_by_key.get(model.key)
-                models_by_key[model.key] = (
-                    self._overlay(base, model) if base is not None else model
-                )
-
-        # Convert back to list
-        result = list(models_by_key.values())
+        # Without a group, the default models only; else with its overrides.
+        result = self._effective(all_models, scope_group_id)
 
         # =========================================================================
         # CACHE: Store result for future requests

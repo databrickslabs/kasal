@@ -307,18 +307,35 @@ Rules:
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
         ucmv_raw = _get("ucmv_output")
         if not ucmv_raw:
-            # DB fallback (same as the UCMV Validator): allows running the
-            # Genie-space flow standalone after a previous UCMV Generator run.
+            # DB fallback: this run's own UCMV Generator output first, in one
+            # read (a flow's crews share its job id). Only a run with none of
+            # its own (the Genie-space flow run standalone after an earlier
+            # UCMV run) takes the latest in the teamspace.
             try:
                 from src.services.tools.metric_view_validator_tool import (
                     MetricViewValidatorTool,
                 )
 
-                latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+                latest = (
+                    MetricViewValidatorTool._fetch_latest_ucmv_from_db(
+                        job_id, attempts=1
+                    )
+                    if job_id
+                    else {}
+                )
                 if isinstance(latest, dict) and latest.get("yaml"):
                     logger.info(
-                        "[GenieConfigGen] ucmv_output not injected — using latest UCMV Generator output from DB"
+                        "[GenieConfigGen] ucmv_output not injected — using this run's UCMV Generator output from DB"
                     )
+                else:
+                    latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
+                    if isinstance(latest, dict) and latest.get("yaml"):
+                        logger.info(
+                            "[GenieConfigGen] ucmv_output not injected and run %s has no UCMV output of its own — using the latest UCMV Generator output in this teamspace",
+                            job_id,
+                        )
+                if isinstance(latest, dict) and latest.get("yaml"):
                     ucmv_raw = json.dumps(latest)
             except Exception as e:
                 logger.warning(
