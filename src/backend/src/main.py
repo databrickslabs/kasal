@@ -44,7 +44,6 @@ from src.core.logger import (  # noqa: E402 - import follows module initializati
 from src.core.paths import BACKEND_ROOT  # noqa: E402
 from src.db.session import (  # noqa: E402 - import follows module initialization
     async_session_factory,
-    get_db,
 )
 from src.services.execution.cleanup import (  # noqa: E402 - import follows module initialization
     ExecutionCleanupService,
@@ -487,13 +486,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if db_initialized:
         system_logger.info("Initializing scheduler...")
         try:
-            # Get database connection
-            db_gen = get_db()
-            db = await anext(db_gen)
-
-            # Initialize scheduler service
-            scheduler = SchedulerService(db)
-            await scheduler.start_scheduler()
+            # The scheduler loop opens a routed session per tick; nothing it
+            # runs queries the session it is constructed with.
+            async with async_session_factory() as db:
+                scheduler = SchedulerService(db)
+                await scheduler.start_scheduler()
             system_logger.info("Scheduler started successfully.")
         except Exception as e:
             system_logger.error(f"Failed to start scheduler: {e}")

@@ -1,7 +1,7 @@
 """
 Additional unit tests for src/db/session.py to push coverage above 50%.
 Focuses on SwappableSessionFactory, retry_db_operation decorator,
-routed_scoped_session, get_db edge cases, get_smart_engine, and dispose_engines.
+routed_scoped_session, get_smart_engine, and dispose_engines.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch

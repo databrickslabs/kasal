@@ -119,7 +119,7 @@ class TestMemoryBackendBaseService:
             group_id, config.name
         )
         mock_uow.memory_backend_repository.create.assert_called_once()
-        service.session.commit.assert_not_called()  # get_db() auto-commits
+        service.session.commit.assert_not_called()  # SessionDep commits it
 
     @pytest.mark.asyncio
     async def test_create_memory_backend_duplicate_name(
@@ -299,7 +299,7 @@ class TestMemoryBackendBaseService:
         # Assert
         assert result is True
         mock_uow.memory_backend_repository.delete.assert_called_once_with(backend_id)
-        service.session.commit.assert_not_called()  # get_db() auto-commits
+        service.session.commit.assert_not_called()  # SessionDep commits it
 
     @pytest.mark.asyncio
     async def test_delete_last_backend_fails(self, service, mock_uow, sample_backend):
@@ -358,7 +358,7 @@ class TestMemoryBackendBaseService:
         mock_uow.memory_backend_repository.set_default.assert_called_once_with(
             group_id, backend_id
         )
-        service.session.commit.assert_not_called()  # get_db() auto-commits
+        service.session.commit.assert_not_called()  # SessionDep commits it
 
     @pytest.mark.asyncio
     async def test_get_memory_stats(self, service, mock_uow, sample_backend):
@@ -404,7 +404,7 @@ class TestMemoryBackendBaseService:
             group_id
         )
         mock_uow.memory_backend_repository.create.assert_called_once()
-        service.session.commit.assert_not_called()  # get_db() auto-commits
+        service.session.commit.assert_not_called()  # SessionDep commits it
 
     @pytest.mark.asyncio
     async def test_delete_disabled_configurations(self, service, mock_uow):
@@ -431,4 +431,4 @@ class TestMemoryBackendBaseService:
         mock_uow.memory_backend_repository.delete.assert_called_once_with(
             "disabled-123"
         )
-        service.session.commit.assert_not_called()  # get_db() auto-commits
+        service.session.commit.assert_not_called()  # SessionDep commits it

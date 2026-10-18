@@ -196,7 +196,6 @@ def _make_lifespan_patches(settings_overrides: dict, extra_patches: dict = None)
         "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
             return_value=0
         ),
-        "src.main.get_db": None,  # handled separately
         "src.main.async_session_factory": None,  # handled separately
         "src.main.start_hitl_timeout_service": AsyncMock(),
         "src.main.trace_broadcast_service": None,
@@ -299,7 +298,6 @@ class TestLifespanStartup:
                     ),
                     "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
                     "src.main.SchedulerService": None,
-                    "src.main.get_db": None,
                     "src.main.async_session_factory": None,
                     "src.main.os.path.exists": MagicMock(return_value=True),
                     "src.main.os.path.getsize": MagicMock(return_value=1024),
@@ -327,11 +325,6 @@ class TestLifespanStartup:
 
             mock_sched = AsyncMock()
             mocks["src.main.SchedulerService"].return_value = mock_sched
-
-            async def fake_db_gen():
-                yield MagicMock()
-
-            mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_sess = self._make_session_mock()
             mocks["src.main.async_session_factory"].return_value = mock_sess
@@ -476,7 +469,6 @@ class TestLifespanStartup:
                         side_effect=side_effect
                     ),
                     "src.main.SchedulerService": None,
-                    "src.main.get_db": None,
                     "src.main.async_session_factory": None,
                     "src.main.os.path.exists": MagicMock(return_value=True),
                     "src.main.os.path.getsize": MagicMock(return_value=1024),
@@ -504,11 +496,6 @@ class TestLifespanStartup:
 
             mock_sched = AsyncMock()
             mocks["src.main.SchedulerService"].return_value = mock_sched
-
-            async def fake_db_gen():
-                yield MagicMock()
-
-            mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_sess = self._make_session_mock()
             mocks["src.main.async_session_factory"].return_value = mock_sess
@@ -598,7 +585,6 @@ class TestLifespanStartup:
                         return_value=0
                     ),
                     "src.main.SchedulerService": None,
-                    "src.main.get_db": None,
                     "src.repositories.engine_config_repository.EngineConfigRepository": None,
                     "src.db.database_router.is_lakebase_enabled": AsyncMock(
                         return_value=False
@@ -619,11 +605,6 @@ class TestLifespanStartup:
 
             mock_sched = AsyncMock()
             mocks["src.main.SchedulerService"].return_value = mock_sched
-
-            async def fake_db_gen():
-                yield MagicMock()
-
-            mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_repo = AsyncMock()
             mock_repo.get_otel_app_telemetry_enabled = AsyncMock(return_value=False)

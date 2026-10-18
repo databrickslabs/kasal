@@ -12,7 +12,7 @@ from src.core.databricks_app import is_production
 from src.core.exceptions import ForbiddenError, KasalError, UnauthorizedError
 from src.db.base import Base
 from src.db.database_router import get_smart_db_session
-from src.db.session import get_db, get_local_db
+from src.db.session import get_local_db
 from src.utils.request_identity import (
     resolve_request_identity,
     running_in_databricks_apps,
@@ -48,6 +48,19 @@ async def _commit_before_response(
     await session.commit()
 
 
+async def _commit_local_before_response(
+    session: Annotated[AsyncSession, Depends(get_local_db)],
+) -> AsyncIterator[AsyncSession]:
+    """The LOCAL database session, committed when the handler returns.
+
+    The same timing as ``_commit_before_response``, over ``get_local_db``
+    instead of the router, so a commit failure on a Lakebase admin route is a
+    500 rather than a 2xx for an unsaved config.
+    """
+    yield session
+    await session.commit()
+
+
 # The request session, routed to SQLite/PostgreSQL or Lakebase, committed before
 # the response is sent. Every consumer in one request shares it.
 SessionDep = Annotated[AsyncSession, Depends(_commit_before_response, scope="function")]
@@ -56,11 +69,11 @@ SessionDep = Annotated[AsyncSession, Depends(_commit_before_response, scope="fun
 WriteSessionDep = Annotated[
     AsyncSession, Depends(get_smart_db_session, scope="function")
 ]
-# Keep legacy session dependency for backward compatibility if needed
-LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
-# Always use the LOCAL database (SQLite/PG), bypassing Lakebase swap.
-# Used for bootstrap config tables like database_configs.
-LocalSessionDep = Annotated[AsyncSession, Depends(get_local_db)]
+# Always the LOCAL database (SQLite/PG), never Lakebase: the bootstrap config
+# tables such as database_configs live there. Committed before the response.
+LocalSessionDep = Annotated[
+    AsyncSession, Depends(_commit_local_before_response, scope="function")
+]
 
 
 #: Returned when the selected workspace (``group_id`` header) is not one of the

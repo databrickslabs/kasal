@@ -7,10 +7,8 @@ import logging
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import get_db
-from src.dependencies.providers import GroupContextDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.conversion import (  # History; Jobs; Saved Configs
     ConversionHistoryCreate,
     ConversionHistoryFilter,
@@ -37,7 +35,7 @@ router = APIRouter(prefix="/api/converters", tags=["converters"])
 
 
 def get_converter_service(
-    session: Annotated[AsyncSession, Depends(get_db)],
+    session: SessionDep,
     group_context: GroupContextDep,
 ) -> ConverterService:
     """

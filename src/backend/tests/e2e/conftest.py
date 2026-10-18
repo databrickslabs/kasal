@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from src.db.base import Base
-from src.db.session import get_db
+from src.db.database_router import get_smart_db_session
 from src.main import app
 
 # Override test database URL
@@ -65,10 +65,11 @@ async def test_db_session(test_db_engine) -> AsyncGenerator[AsyncSession, None]:
 async def async_client(test_db_session) -> AsyncGenerator[AsyncClient, None]:
     """Create an async HTTP client for testing."""
 
-    async def override_get_db():
+    async def override_session():
         yield test_db_session
 
-    app.dependency_overrides[get_db] = override_get_db
+    # Every request session (SessionDep) comes from the router.
+    app.dependency_overrides[get_smart_db_session] = override_session
 
     async with AsyncClient(app=app, base_url="http://test") as client:
         yield client

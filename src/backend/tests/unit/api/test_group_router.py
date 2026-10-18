@@ -19,7 +19,6 @@ from src.dependencies.admin_auth import (
     get_system_admin_user,
     require_authenticated_user,
 )
-from src.dependencies.providers import get_db
 from src.models.enums import (
     GroupStatus,
     GroupUserRole,
@@ -77,9 +76,6 @@ def app(mock_db_session, mock_current_user, mock_group_context):
     app.include_router(router)
     register_exception_handlers(app)
 
-    async def override_get_db():
-        return mock_db_session
-
     def override_auth():
         return mock_current_user
 
@@ -95,7 +91,6 @@ def app(mock_db_session, mock_current_user, mock_group_context):
 
     from src.dependencies.providers import get_group_context
 
-    app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[require_authenticated_user] = override_auth
     app.dependency_overrides[get_authenticated_user] = override_auth
     app.dependency_overrides[get_admin_user] = override_auth

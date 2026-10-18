@@ -280,7 +280,6 @@ else:
 
     # Default engine selection
     # When USE_NULLPOOL=true, default to NullPool to avoid cross-loop issues under reload
-    # get_db() still routes to pooled sessions where safe (main app loop) when USE_NULLPOOL=false
     if use_nullpool:
         logger.info(
             "USE_NULLPOOL=true - Event loop isolation mode enabled (defaulting to NullPool engine)"
@@ -616,27 +615,6 @@ async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
 # get a session outside a request — routed_scoped_session — and nothing to
 # remember at the spawn site. A task that genuinely needs its own private
 # connection uses get_isolated_db_session().
-
-
-# Create separate session factories for pooled and nullpool engines
-pooled_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-nullpool_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-
-if not str(settings.DATABASE_URI).startswith("sqlite"):
-    # For PostgreSQL, create session factories for both engines
-    pooled_session_factory = async_sessionmaker(
-        pooled_engine,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
-
-    nullpool_session_factory = async_sessionmaker(
-        nullpool_engine,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
 
 
 # (was: ``safe_async_session`` — a third session helper, now DELETED.)
@@ -1014,79 +992,13 @@ async def init_db() -> None:
         raise
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency function that yields db sessions with smart engine selection.
-
-    Uses the appropriate session factory based on context:
-    - Pooled session for FastAPI requests (best performance)
-    - NullPool session for background tasks (event loop isolation)
-
-    Yields:
-        AsyncSession: SQLAlchemy async session
-    """
-    # Default to async_session_factory; in tests (pytest), this allows monkeypatching
-    smart_session_factory: Optional[_SessionFactory] = async_session_factory
-
-    # In normal runtime (not under pytest), select appropriate factory by context
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
-        if str(settings.DATABASE_URI).startswith("sqlite"):
-            # SQLite always uses the same session factory
-            smart_session_factory = async_session_factory
-        else:
-            # PostgreSQL: ALWAYS use smart selection regardless of USE_NULLPOOL setting
-            try:
-                current_loop = asyncio.get_running_loop()
-
-                # Check if we're in a background task (different event loop)
-                if main_event_loop and current_loop != main_event_loop:
-                    logger.debug(
-                        f"Background context (loop {id(current_loop)}) - using NullPool session"
-                    )
-                    smart_session_factory = nullpool_session_factory
-                else:
-                    # We're in the main event loop - ALWAYS use pooled sessions for performance!
-                    logger.debug(
-                        f"Main app context (loop {id(current_loop)}) - using POOLED session"
-                    )
-                    # CRITICAL: Always use pooled_session_factory for main app, not async_session_factory
-                    smart_session_factory = pooled_session_factory
-            except RuntimeError:
-                # No event loop running - use NullPool for safety
-                logger.debug("No event loop - using NullPool session")
-                smart_session_factory = nullpool_session_factory
-            except Exception as e:
-                logger.warning(
-                    f"Error detecting context: {e} - using NullPool for safety"
-                )
-                # Fallback to NullPool for safety (not the default factory which might be wrong)
-                smart_session_factory = nullpool_session_factory
-
-    # No "database is locked" retry: a yield dependency may yield only ONCE, and
-    # nothing before the yield touches the database. A lock error from the
-    # handler or the commit is raised as itself.
-    # Only None on SQLite, whose branch never selects the PG factories.
-    assert smart_session_factory is not None
-    async with smart_session_factory() as session:
-        # Publish session into ContextVar so that
-        # routed_scoped_session() returns the same session
-        tokens = _enter_request_session(session)
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            _exit_request_session(tokens)
-            # Ensure session is properly closed
-            await session.close()
-
-
 async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield a session connected to the LOCAL database (SQLite/PG),
     bypassing the Lakebase swap.  Used for bootstrap config tables
-    like database_configs that are never migrated to Lakebase."""
+    like database_configs that are never migrated to Lakebase.
+
+    Routes take it through ``LocalSessionDep``, which commits before the
+    response is sent; this request-scoped teardown runs after it."""
     async with _local_session_factory() as session:
         tokens = _enter_request_session(session)
         try:
@@ -1100,8 +1012,8 @@ async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-# get_sync_db removed - use get_db() instead
-# All database operations must be async
+# get_db (the old request dependency) and get_sync_db are gone: inside a
+# request use SessionDep, outside one routed_scoped_session().
 
 
 # Graceful engine disposal to avoid event-loop mismatch on shutdown

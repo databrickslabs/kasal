@@ -417,12 +417,10 @@ ignore_imports = [
     "src.api.mcp_router -> src.repositories.databricks_config_repository",
     "src.api.mcp_router -> src.repositories.mcp_repository",
     "src.api.sse_router -> src.repositories.execution_history_repository",
-    # --- router -> db (10 import lines, 7 edges) ---
+    # --- router -> db (9 import lines, 6 edges) ---
     # Background worker owning a fresh routed session (sanctioned helper, but it
     # belongs in the service that runs the job).
     "src.api.builder_generation_router -> src.db.session",
-    # Legacy get_db dependency: switch to the SessionDep in src.dependencies.
-    "src.api.converter_router -> src.db.session",
     # _local_session_factory / dispose_engines: belongs in a LakebaseService.
     "src.api.database_management_router -> src.db.session",
     # get_lakebase_session + raw f-string SQL: belongs in services/memory/storage.
