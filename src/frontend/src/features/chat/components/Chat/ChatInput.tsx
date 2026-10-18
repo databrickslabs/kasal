@@ -86,6 +86,8 @@ interface ChatInputProps {
    * typed meanwhile has to reach the second composer.
    */
   draftRef?: React.MutableRefObject<string>;
+  /** Changes when the parent rewrote `draftRef` itself: the composer shows it. */
+  draftVersion?: number;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -161,6 +163,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   sending = false,
   onCancelSending,
   draftRef,
+  draftVersion,
   models,
   selectedModel,
   onModelChange,
@@ -199,6 +202,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (draftRef) draftRef.current = next;
     setValueState(next);
   }, [draftRef]);
+  useEffect(() => {
+    if (draftRef && draftVersion !== undefined) setValueState(draftRef.current);
+  }, [draftRef, draftVersion]);
   // Rotating landing placeholder: advance a hint index while idle (empty + blurred)
   // on the landing composer; freeze on focus/typing; honor reduced-motion.
   const [focused, setFocused] = useState(false);

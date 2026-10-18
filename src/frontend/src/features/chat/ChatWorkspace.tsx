@@ -132,6 +132,16 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
 
   const chatThemeIsDark = useThemeStore((s) => s.isDarkMode);
 
+  // The composer's draft, kept here so a send cancelled before it went out can
+  // put its text back (ahead of anything typed since); draftVersion re-shows it.
+  const composerDraftRef = useRef('');
+  const [draftVersion, setDraftVersion] = useState(0);
+  const restoreDraft = useCallback((text: string) => {
+    const typedSince = composerDraftRef.current.trim();
+    composerDraftRef.current = typedSince ? `${text}\n\n${composerDraftRef.current}` : text;
+    setDraftVersion((version) => version + 1);
+  }, []);
+
   // --- Initialize stores on mount ---
   useEffect(() => {
     useAppStore.getState().init();
@@ -374,6 +384,7 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
       setPendingRun({ sessionId, label: flow.name || 'flow', run: () => handleExecuteFlow(flow) }),
     getCurrentSessionId: () => useSessionStore.getState().currentSessionId,
     ensureSession: () => useSessionStore.getState().ensureSession(),
+    restoreDraft,
   });
 
 
@@ -456,6 +467,8 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
               // meanwhile stays in the composer rather than being dropped.
               isSending={dispatcher.dispatching}
               onCancelSending={dispatcher.cancelDispatch}
+              draftRef={composerDraftRef}
+              draftVersion={draftVersion}
               isExecuting={viewIsExecuting}
               isGenerating={viewIsGenerating}
               executionContext={viewExecutionContext}

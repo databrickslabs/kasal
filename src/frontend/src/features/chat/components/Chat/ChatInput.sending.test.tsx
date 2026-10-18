@@ -120,4 +120,15 @@ describe('ChatContainer forwards the sending state to its composer', () => {
     expect(screen.getByText('/jobs')).toBeInTheDocument();
     expect(composer()).toHaveValue('');
   });
+
+  it('shows text the workspace put back into the draft', () => {
+    const draftRef = { current: '' };
+    const { rerender } = render(
+      <ChatContainer {...props} messages={[message]} onSend={vi.fn()} isLoading={false} draftRef={draftRef} draftVersion={0} />);
+
+    draftRef.current = 'first question';
+    rerender(<ChatContainer {...props} messages={[message]} onSend={vi.fn()} isLoading={false} draftRef={draftRef} draftVersion={1} />);
+
+    expect(composer()).toHaveValue('first question');
+  });
 });

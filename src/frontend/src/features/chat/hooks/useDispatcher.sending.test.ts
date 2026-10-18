@@ -101,7 +101,12 @@ describe('useDispatcher while a message is in flight', () => {
     expect(result.current.dispatching).toBe(false);
     await act(async () => { await first; });
     expect(opts.updateMessageInTargetSession).toHaveBeenCalledWith('session-1', expect.any(String),
-      expect.objectContaining({ content: expect.stringContaining('Stopped waiting') }));
+      expect.objectContaining({ content: expect.stringContaining('Cancelled here') }));
+    // It says the run may still finish, and where; it does not ask for a resend.
+    const reply = vi.mocked(opts.updateMessageInTargetSession).mock.calls[0][2].content as string;
+    expect(reply).toContain('can still finish');
+    expect(reply).toContain('Activity > Executions');
+    expect(reply).not.toMatch(/send .* again/i);
 
     // The next message is dispatched, and the cancelled one cannot release its guard.
     const finishSecond = holdDispatch();
@@ -117,6 +122,27 @@ describe('useDispatcher while a message is in flight', () => {
     mockedDispatch.mockRejectedValueOnce(new Error('Bad gateway'));
     const { result } = renderHook(() => useDispatcher(options()));
     await act(async () => { await result.current.sendMessage('first question'); });
+    expect(result.current.dispatching).toBe(false);
+  });
+
+  it('cancel while the conversation is being created sends nothing and puts the text back', async () => {
+    let created!: (id: string) => void;
+    const opts = {
+      ...options(),
+      ensureSession: vi.fn(() => new Promise<string>((resolve) => { created = resolve; })),
+      restoreDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useDispatcher(opts));
+
+    let send!: Promise<void>;
+    await act(async () => { send = result.current.sendMessage('first question'); });
+    await act(async () => { result.current.cancelDispatch(); });
+    await act(async () => { created('session-1'); await send; });
+
+    expect(opts.saveUserMessage).not.toHaveBeenCalled();
+    expect(opts.addMessage).not.toHaveBeenCalled();
+    expect(mockedDispatch).not.toHaveBeenCalled();
+    expect(opts.restoreDraft).toHaveBeenCalledWith('first question');
     expect(result.current.dispatching).toBe(false);
   });
 });

@@ -61,6 +61,8 @@ interface UseDispatcherOptions {
    *  turn doesn't register the run under an empty owner (the "first prompt
    *  renders empty" bug, which only surfaces under remote-DB latency). */
   ensureSession: () => Promise<string>;
+  /** Put typed text back in the composer (a send cancelled before it went out). */
+  restoreDraft?: (text: string) => void;
 }
 
 /**
@@ -360,6 +362,14 @@ export function useDispatcher(options: UseDispatcherOptions) {
         return;
       }
 
+      // Cancelled while the conversation was being created: nothing was saved
+      // or sent, so the text goes back where it was typed.
+      if (inFlight.signal.aborted) {
+        if (!displayAs && options.restoreDraft) options.restoreDraft(message);
+        else useSessionStore.getState().addNotice(`Not sent:\n\n${quoteBack(displayAs || message)}`);
+        return;
+      }
+
       // Intercept "ec" / "execute crew" locally
       const lower = message.toLowerCase().trim();
       if (
@@ -402,6 +412,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
       });
 
       let dispatchMessage = message;
+      // Whether the request went out: a cancel after it may still start a run.
+      let sent = false;
       const { skipContinuation } = useExecutionStore.getState();
       if (skipContinuation) useExecutionStore.getState().setSkipContinuation(false);
       // Hidden steering text (e.g. attached-knowledge note): sent to the crew
@@ -423,6 +435,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
         // drops unknown names with only a server-side warning). No request is
         // made when nothing is selected.
         const selectedSkills = await reconcileSelectedSkills();
+        if (inFlight.signal.aborted) throw new Error('Cancelled before it was sent');
+        sent = true;
         const result = await dispatch(dispatchMessage, model, tools, {
           // ChatMode runs the generated crew on the backend (the crew canvas
           // doesn't — it runs via Play, so it omits this and defaults false).
@@ -594,11 +608,13 @@ export function useDispatcher(options: UseDispatcherOptions) {
       } catch (error) {
         const errMsg =
           error instanceof Error ? error.message : 'Unknown error';
-        // The request may still be answered on the server; this chat just
-        // stopped waiting for it.
-        const content = inFlight.signal.aborted
-          ? 'Stopped waiting for an answer. Send the message again if you still need one.'
-          : `Failed to process your request: ${errMsg}`;
+        // Aborting the request does not stop the server, which may still
+        // build and run the crew.
+        const content = !inFlight.signal.aborted
+          ? `Failed to process your request: ${errMsg}`
+          : sent
+            ? 'Cancelled here. The request may already have reached the server, so a run it started can still finish; it would appear under Activity > Executions.'
+            : 'Cancelled before it was sent.';
         if (originSessionId) {
           options.updateMessageInTargetSession(originSessionId, assistantId, {
             content,
