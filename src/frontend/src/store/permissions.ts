@@ -69,6 +69,9 @@ export const Permissions = {
 } as const;
 
 export type PermissionType = typeof Permissions[keyof typeof Permissions];
+
+/** The persisted slice's key (the "v2" forced a cache refresh after the 3-tier migration). */
+const PERSIST_KEY = 'permission-store-v2';
 export type UserRole = 'admin' | 'editor' | 'operator';
 
 // Define role-permission mappings (matching backend)
@@ -173,6 +176,9 @@ interface PermissionState {
   getVisibleMenuItems: () => string[];
   getDisabledFeatures: () => string[];
 }
+
+// The store used to persist here, shared by every tab. Drop what it left behind.
+try { localStorage.removeItem(PERSIST_KEY); } catch { /* storage blocked */ }
 
 export const usePermissionStore = create<PermissionState>()(
   devtools(
@@ -506,7 +512,7 @@ export const usePermissionStore = create<PermissionState>()(
         },
       }),
       {
-        name: 'permission-store-v2', // Updated to force cache refresh after 3-tier migration
+        name: PERSIST_KEY,
         // Per tab, like the teamspace the role belongs to (shared/api/tabGroup.ts):
         // in localStorage a reload showed the role another tab loaded last.
         storage: createJSONStorage(() => sessionStorage),

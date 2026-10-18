@@ -59,4 +59,13 @@ describe('permission store per tab', () => {
     (await openTab(new TabStorage())).getState().setUserRole('admin');
     expect(localStorage.getItem('permission-store-v2')).toBeNull();
   });
+
+  it('clears the role an older version left in shared storage', async () => {
+    localStorage.setItem('permission-store-v2', JSON.stringify({ state: { userRole: 'admin' }, version: 0 }));
+
+    const store = await openTab(new TabStorage());
+
+    expect(localStorage.getItem('permission-store-v2')).toBeNull();
+    expect(store.getState().userRole).toBeNull();
+  });
 });
