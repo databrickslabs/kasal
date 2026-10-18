@@ -30,8 +30,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional, Union
-from uuid import UUID
+from typing import Any, Dict, Optional
 
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
@@ -322,18 +321,14 @@ async def start_run(
         return await _start_flow(caller, publication, entity_id, inputs, session)
 
     from src.services.catalog.crews import CrewService
+    from src.services.catalog.run_lookup import crew_for_run
     from src.services.execution.service import ExecutionService
 
-    crew_service = CrewService(session)
-    # entity_id is persisted as a string on the publication (it is an external
-    # identifier there), but Crew.id is a UUID column — asyncpg rejects a str
-    # with "'str' object has no attribute 'hex'".
-    crew_key: Union[UUID, str]
-    try:
-        crew_key = UUID(entity_id)
-    except (ValueError, AttributeError, TypeError):
-        crew_key = entity_id
-    crew = await crew_service.get(crew_key)
+    # Read in the publication's workspace (the caller is narrowed to it above),
+    # like the agents and tasks the crew lists. crew_for_run coerces the string
+    # entity_id to the UUID the column binds; another workspace's crew, or an
+    # id that is not a UUID, reads as gone.
+    crew = await crew_for_run(CrewService(session), entity_id, caller.group_context)
     if crew is None:
         raise ValueError(f"Published crew {entity_id} no longer exists")
 

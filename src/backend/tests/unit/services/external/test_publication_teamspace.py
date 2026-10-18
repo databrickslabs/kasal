@@ -98,7 +98,9 @@ class TestStartRunUsesThePublicationsGroup:
             return_value={"execution_id": "run-1", "status": "pending"}
         )
         crews = MagicMock()
-        crews.get = AsyncMock(return_value=SimpleNamespace(reasoning_config=None))
+        crews.get_by_group = AsyncMock(
+            return_value=SimpleNamespace(reasoning_config=None)
+        )
         yaml = ({"a": {"role": "r", "llm": "m"}}, {"t": {"description": "d"}})
         with (
             _patch_from_email(),
