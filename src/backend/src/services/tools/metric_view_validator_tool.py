@@ -575,12 +575,19 @@ class MetricViewValidatorTool(BaseTool):
         return self._fetch_latest_ucmv_from_db(job_id) if job_id else {}
 
     @staticmethod
-    def _fetch_latest_ucmv_from_db(job_id: Optional[str] = None) -> dict:
+    def _fetch_latest_ucmv_from_db(
+        job_id: Optional[str] = None, attempts: int = 5
+    ) -> dict:
         """The latest UCMV Generator output in this workspace (YAML and all).
 
         With ``job_id``, from that run only (the validator's own lookup). The
         Genie config generator and visual mapper call it without one, to run
         standalone after an earlier UCMV run in the same workspace.
+
+        ``attempts`` bounds the retries (3s apart) that wait for a generator's
+        write to commit. The Genie config generator and visual mapper pass 1
+        for their own-run lookup: a flow's crews share its job id, so a run's
+        own output is there on the first read or not at all.
         """
         from src.services.tools.tool_session_provider import ToolSessionProvider
 
@@ -639,7 +646,8 @@ class MetricViewValidatorTool(BaseTool):
 
         from src.utils.asyncio_utils import create_and_run_loop
 
-        for attempt in range(5):
+        for attempt in range(attempts):
+            last = attempt == attempts - 1
             try:
                 result: Optional[dict] = create_and_run_loop(_query())
                 if result and isinstance(result, dict) and "yaml" in result:
@@ -647,13 +655,13 @@ class MetricViewValidatorTool(BaseTool):
                         f"[Validator] Found UCMV YAML in DB (attempt {attempt + 1})"
                     )
                     return result
-                if attempt < 4:
+                if not last:
                     logger.info(
-                        f"[Validator] UCMV not in DB yet (attempt {attempt+1}/5), retrying in 3s..."
+                        f"[Validator] UCMV not in DB yet (attempt {attempt+1}/{attempts}), retrying in 3s..."
                     )
                     time.sleep(3)
             except Exception as e:
                 logger.warning(f"[Validator] DB query attempt {attempt+1} failed: {e}")
-                if attempt < 4:
+                if not last:
                     time.sleep(2)
         return {}
