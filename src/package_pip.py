@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Build the pip wheel for Kasal.
 
-    python src/package_pip.py            # build frontend if missing, then wheel
+    python src/package_pip.py            # build frontend if missing or stale, then wheel
     python src/package_pip.py --skip-frontend
     python src/package_pip.py --sdist    # also build the sdist
 
-Steps: ensure src/frontend_static exists (running the npm lifecycle when not),
+Steps: ensure src/frontend_static exists and is newer than every file in
+src/frontend/src (running the npm lifecycle when not),
 strip __pycache__ from the backend tree (hatch force-include copies verbatim),
 then `uv build` at the repository root. The wheel lands in dist/.
 """
@@ -14,19 +15,30 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 
 
+def _stale(index: Path) -> bool:
+    """True when a UI source file changed after the last frontend build."""
+    built = index.stat().st_mtime
+    sources = (SRC / "frontend" / "src").rglob("*")
+    return any(f.is_file() and f.stat().st_mtime > built for f in sources)
+
+
 def ensure_frontend(skip: bool) -> None:
     index = SRC / "frontend_static" / "index.html"
-    if index.exists():
-        print(f"frontend_static present: {index.parent}")
+    if index.exists() and not _stale(index):
+        print(f"frontend_static present and current: {index.parent}")
         return
     if skip:
-        sys.exit("src/frontend_static missing and --skip-frontend given")
+        if not index.exists():
+            sys.exit("src/frontend_static missing and --skip-frontend given")
+        print("WARNING: packaging a frontend_static older than src/frontend/src")
+        return
     print("Building frontend (npm run build in src/)…")
     npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
     subprocess.run([npm_cmd, "run", "build"], cwd=str(SRC), check=True)
@@ -54,12 +66,15 @@ def main() -> None:
     strip_pycache()
     build_args = ["uv", "build"] + ([] if args.sdist else ["--wheel"])
     subprocess.run(build_args, cwd=str(ROOT), check=True)
-    wheels = sorted((ROOT / "dist").glob("kasal-*.whl"))
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    built = sorted((ROOT / "dist").glob(f"kasal-{version}[-.]*"))
+    wheels = [path for path in built if path.suffix == ".whl"]
     if not wheels:
-        sys.exit("no wheel produced")
-    print(f"\nBuilt: {wheels[-1]}")
-    print("Install locally:  pip install " + str(wheels[-1]))
-    print("Publish to PyPI:  uv publish  (needs a PyPI token)")
+        sys.exit(f"no kasal {version} wheel produced")
+    print(f"\nBuilt: {', '.join(str(path) for path in built)}")
+    print(f"Install locally:  pip install {wheels[0]}")
+    # Name the files: dist/ keeps older versions, which PyPI refuses to re-upload.
+    print(f"Publish to PyPI:  uv publish dist/kasal-{version}*  (needs a PyPI token)")
 
 
 if __name__ == "__main__":

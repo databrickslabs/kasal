@@ -4,7 +4,7 @@ Kasal ships as a single wheel: the FastAPI backend and the **built** React UI
 in one package, with a `kasal` command that serves both on one port.
 
 ```bash
-pip install kasal        # once published — or: pip install dist/kasal-*.whl
+pip install kasal        # from PyPI — or: pip install dist/kasal-<version>-py3-none-any.whl
 export LOCAL_DEV_AUTH=true
 kasal                    # UI + API on http://127.0.0.1:8000
 ```
@@ -54,12 +54,20 @@ Dependencies are **not** duplicated: `hatch_build.py` (root) reads them from
 ## Building and publishing
 
 ```bash
-python src/package_pip.py            # builds frontend if missing → dist/kasal-*.whl
-python src/package_pip.py --sdist    # wheel + sdist
-uv publish                           # needs a PyPI token (UV_PUBLISH_TOKEN)
+python src/package_pip.py --sdist    # wheel + sdist → dist/kasal-<version>*
+uv publish dist/kasal-<version>*     # needs a PyPI token (UV_PUBLISH_TOKEN)
 ```
 
-The name `kasal` was unclaimed on PyPI as of 2026-08-30. `dist/` and
+The wheel's version is the root `pyproject.toml` version, which matches
+`settings.VERSION` (see "Releasing a version" in
+[Continuous integration](./continuous-integration.md)). `kasal --version` reads it
+from the installed package. The packager rebuilds the UI when
+`src/frontend_static` is missing or older than `src/frontend/src`, so a wheel
+never ships a stale UI; `--skip-frontend` packages what is there and warns.
+Name the files when publishing: `dist/` keeps older builds, and PyPI refuses
+to re-upload a version it already has.
+
+Kasal is published on PyPI as [`kasal`](https://pypi.org/project/kasal/). `dist/` and
 `src/frontend_static/` are gitignored build artifacts; the root
 `pyproject.toml` does not affect the Databricks App deploy (`src/deploy.py`
 stages the backend's own pyproject into its bundle).
