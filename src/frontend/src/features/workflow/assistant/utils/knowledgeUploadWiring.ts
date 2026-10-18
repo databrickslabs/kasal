@@ -72,19 +72,24 @@ export function wireKnowledgeFileIntoTasks(uploadedFilePath: string): void {
   }));
 }
 
-/** The task's tools and tool_configs without `path` in its knowledge search; null when it has none. */
+/**
+ * The task's tools and tool_configs without `path` in its knowledge search;
+ * null when it has none. With the last file gone the search tool goes too: the
+ * backend reads an empty `file_paths` as "search every file in the teamspace".
+ */
 function withoutKnowledgeFile(data: Node['data'], path: string): TaskToolPatch | null {
+  const tools: string[] = data.tools || [];
   const toolConfigs: ToolConfigs = data.tool_configs || {};
   const knowledge = toolConfigs[KNOWLEDGE_TOOL];
   const filePaths = (knowledge?.file_paths as string[] | undefined) || [];
   if (!filePaths.includes(path)) return null;
-  return {
-    tools: data.tools || [],
-    tool_configs: {
-      ...toolConfigs,
-      [KNOWLEDGE_TOOL]: { ...knowledge, file_paths: filePaths.filter(p => p !== path) },
-    },
-  };
+  const remaining = filePaths.filter(p => p !== path);
+  if (remaining.length > 0) {
+    return { tools, tool_configs: { ...toolConfigs, [KNOWLEDGE_TOOL]: { ...knowledge, file_paths: remaining } } };
+  }
+  const otherConfigs = { ...toolConfigs };
+  delete otherConfigs[KNOWLEDGE_TOOL];
+  return { tools: tools.filter(tool => tool !== KNOWLEDGE_TOOL && tool !== '36'), tool_configs: otherConfigs };
 }
 
 /** A detached file is no longer searched: take its path out of every task that has it. */

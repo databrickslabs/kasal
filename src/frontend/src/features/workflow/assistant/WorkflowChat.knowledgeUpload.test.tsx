@@ -159,4 +159,19 @@ describe('WorkflowChat knowledge upload wiring', () => {
     await waitFor(() => expect(lastTaskWrite()?.tool_configs?.[KNOWLEDGE]).toEqual(
       expect.objectContaining({ file_paths: ['uploads/g/s/second.pdf'] })));
   });
+
+  it('detaching the last file takes the search tool off the task', async () => {
+    // An empty file list reads as "search every file in the teamspace".
+    renderChat();
+    await upload.onTasksUpdated!('uploads/g/s/only.pdf');
+    expect(liveTask().data.tools).toContain(KNOWLEDGE);
+
+    upload.onTaskFileRemoved!('uploads/g/s/only.pdf');
+
+    expect(liveTask().data.tools).toEqual(['SerperDevTool']);
+    expect(liveTask().data.tool_configs).toEqual({ SerperDevTool: { n_results: 5 } });
+    await waitFor(() => expect(lastTaskWrite()).toEqual({
+      tools: ['SerperDevTool'], tool_configs: { SerperDevTool: { n_results: 5 } },
+    }));
+  });
 });
