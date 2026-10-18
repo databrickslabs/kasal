@@ -617,29 +617,6 @@ async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
 # connection uses get_isolated_db_session().
 
 
-# Session factories for the pooled and NullPool PostgreSQL engines. Nothing
-# selects them since get_db was removed: request sessions come from the router,
-# whose local branch uses async_session_factory.
-pooled_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-nullpool_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-
-if not str(settings.DATABASE_URI).startswith("sqlite"):
-    # For PostgreSQL, create session factories for both engines
-    pooled_session_factory = async_sessionmaker(
-        pooled_engine,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
-
-    nullpool_session_factory = async_sessionmaker(
-        nullpool_engine,
-        expire_on_commit=False,
-        autoflush=False,
-        autocommit=False,
-    )
-
-
 # (was: ``safe_async_session`` — a third session helper, now DELETED.)
 # It wrapped the raw ``async_session_factory`` and swallowed errors from
 # ``session.close()``, for crew/flow subprocess work where a SQLite connection

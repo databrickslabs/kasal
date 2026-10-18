@@ -4,7 +4,7 @@
   "src/backend/src/core/llm/transport/completion.py": 1259,
   "src/backend/src/core/logger.py": 838,
   "src/backend/src/db/lakebase_session.py": 852,
-  "src/backend/src/db/session.py": 1098,
+  "src/backend/src/db/session.py": 1075,
   "src/backend/src/main.py": 941,
   "src/backend/src/repositories/database_backup_repository.py": 1283,
   "src/backend/src/repositories/databricks_volume_repository.py": 1115,

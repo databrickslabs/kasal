@@ -13,7 +13,8 @@ moment a client could act on the reply.
 """
 
 import sqlite3
-from typing import Any, Dict, List
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiosqlite
@@ -45,10 +46,9 @@ def _sqlite_pragmas(dbapi_connection, _record):
     dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 
-@pytest.fixture
-async def factory(tmp_path):
+@asynccontextmanager
+async def _database(path) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """A throwaway SQLite file shaped like the app's, and a sessionmaker on it."""
-    path = tmp_path / "commit.db"
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{path}",
         poolclass=StaticPool,
@@ -63,9 +63,17 @@ async def factory(tmp_path):
                 "REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)"
             )
         )
-    sessions = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
-    yield path, sessions
-    await engine.dispose()
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def factory(tmp_path):
+    path = tmp_path / "commit.db"
+    async with _database(path) as sessions:
+        yield path, sessions
 
 
 @pytest.fixture
@@ -79,6 +87,42 @@ def routed_db(factory):
         patch.object(session_module, "async_session_factory", sessions),
     ):
         yield path
+
+
+@pytest.fixture
+async def lakebase_db(tmp_path, routed_db):
+    """Lakebase enabled: the router hands out sessions on a SECOND file.
+
+    ``routed_db`` stays in place, so a route that does not go through the
+    router (as the old ``get_db`` did not) writes to the first file instead.
+    """
+    path = tmp_path / "lakebase.db"
+    async with _database(path) as sessions:
+
+        @asynccontextmanager
+        async def lakebase_session(*_args, **_kwargs):
+            async with sessions() as session:
+                try:
+                    yield session
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        config = {"instance_name": "test-instance", "endpoint": "example.com"}
+        with (
+            patch.object(router, "is_lakebase_enabled", AsyncMock(return_value=True)),
+            patch.object(
+                router, "get_lakebase_config_from_db", AsyncMock(return_value=config)
+            ),
+            patch.object(router, "get_lakebase_session", lakebase_session),
+            patch.object(router, "record_successful_connection", MagicMock()),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                AsyncMock(return_value=None),
+            ),
+        ):
+            yield path
 
 
 @pytest.fixture
@@ -201,6 +245,19 @@ class TestGetDbRoutes:
 
         assert response.status_code == 500
         assert at_reply["names"] == []
+        assert (await _observe(routed_db))["names"] == []
+
+    @pytest.mark.parametrize("cls,method,verb,url,body,result", GET_DB_ROUTES)
+    async def test_with_lakebase_enabled_the_write_lands_in_lakebase(
+        self, routed_db, lakebase_db, cls, method, verb, url, body, result
+    ):
+        """The session comes from the ROUTER: get_db used the local snapshot
+        factory, so with Lakebase on these routes wrote to the wrong database."""
+        with patch.object(cls, method, _writer("saved", None, result)):
+            response, at_reply = await _call(lakebase_db, verb, url, json=body)
+
+        assert response.status_code in (200, 202)
+        assert at_reply == {"names": ["saved"], "write_lock_free": True}
         assert (await _observe(routed_db))["names"] == []
 
 
