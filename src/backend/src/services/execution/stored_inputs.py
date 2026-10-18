@@ -53,10 +53,11 @@ def mask_run_inputs(inputs: Dict[str, object]) -> Dict[str, object]:
     """``inputs`` as a run record may keep it, for every launch path.
 
     No run credentials, and every credential string masked in the agents' and
-    tasks' :data:`CREDENTIAL_FIELDS` and in the user ``inputs``. Strings only:
-    a count such as ``max_tokens`` survives a resume that reads it back. A deep
-    copy; the run itself keeps the unmasked config. Empty input comes back as
-    it was.
+    tasks' :data:`CREDENTIAL_FIELDS` and in the user ``inputs``. Strings only,
+    under the keys ``is_sensitive_key`` names: a count such as ``max_tokens``
+    survives, as a number or a string, for a resume or a schedule that reads it
+    back. A deep copy; the run itself keeps the unmasked config. Empty input
+    comes back as it was.
     """
     if not inputs:
         return inputs

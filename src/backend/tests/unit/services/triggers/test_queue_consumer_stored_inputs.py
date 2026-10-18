@@ -13,9 +13,8 @@ from src.utils.sensitive_data_utils import REDACTED_PLACEHOLDER
 MODULE = "src.services.triggers.queue_consumer_service"
 SECRET = "sp-secret-value-123"
 PAT = "dapi-pat-value-456"
-#: An event input. The run's event context also copies inputs into the task
-#: description, which is prose, not a credential field; only ``inputs`` is
-#: checked for it here.
+#: An event input. The run's event context copies unreferenced inputs into the
+#: first task's description; a secret one must be masked there.
 INPUT_SECRET = "event-input-secret-789"
 
 AGENTS = {
@@ -85,6 +84,7 @@ async def test_stored_inputs_are_masked_and_the_run_gets_plaintext():
 
     stored = create_record.await_args.kwargs["inputs"]
     assert SECRET not in json.dumps(stored) and PAT not in json.dumps(stored)
+    assert INPUT_SECRET not in json.dumps(stored)
     pbi = stored["agents_yaml"]["analyst"]["tool_configs"]["Power BI Tool"]
     assert pbi == {"client_secret": REDACTED_PLACEHOLDER, "tenant_id": "t"}
     callback = stored["tasks_yaml"]["extract"]["callback_config"]
@@ -93,7 +93,41 @@ async def test_stored_inputs_are_masked_and_the_run_gets_plaintext():
     assert stored["inputs"] == {"topic": "t", "client_secret": REDACTED_PLACEHOLDER}
 
     launched = run.await_args.kwargs["config"]
+    assert INPUT_SECRET not in launched.tasks_yaml["extract"]["description"]
     assert launched.agents_yaml == AGENTS
     for field in ("tool_configs", "callback_config", "config"):
         assert launched.tasks_yaml["extract"][field] == TASKS["extract"][field]
     assert launched.inputs["client_secret"] == INPUT_SECRET
+
+
+def _event_config(inputs):
+    from src.schemas.execution import CrewConfig
+
+    return CrewConfig(
+        agents_yaml={"a": {"role": "r"}},
+        tasks_yaml={"t1": {"description": "Do.", "expected_output": "X"}},
+        inputs=inputs,
+        execution_type="crew",
+    )
+
+
+def test_a_secret_event_input_is_masked_in_the_description():
+    config = _event_config(
+        {
+            "topic": "sales",
+            "max_tokens": "4000",
+            "api_key": INPUT_SECRET,
+            "payload": {"color": "black", "access_token": INPUT_SECRET},
+        }
+    )
+    TriggerQueueConsumerService()._inject_event_context(config, "crew")
+
+    description = config.tasks_yaml["t1"]["description"]
+    assert INPUT_SECRET not in description
+    assert f"- api_key: {REDACTED_PLACEHOLDER}" in description
+    assert "- topic: sales" in description
+    assert "- max_tokens: 4000" in description
+    assert '"color": "black"' in description
+    # The run still gets every value through its inputs.
+    assert config.inputs["api_key"] == INPUT_SECRET
+    assert config.inputs["payload"]["access_token"] == INPUT_SECRET

@@ -178,6 +178,30 @@ class TestCrewNodes:
             assert session.get(Crew, crew_id).nodes == nodes
 
 
+class TestKeysMaskingShows:
+    """Masking shows a string count such as ``max_tokens``; storage does not."""
+
+    def test_an_encrypted_value_read_and_saved_again_stays_encrypted(self, engine):
+        from src.utils.sensitive_data_utils import encrypt_value
+
+        with Session(engine) as session:
+            tool_id = _tool(session).id
+            session.commit()
+        old = {"T": {"max_tokens": encrypt_value("4000"), "tokens": encrypt_value("t")}}
+        _write_raw(engine, "tools", "config", tool_id, old)
+
+        with Session(engine) as session:
+            tool = session.get(Tool, tool_id)
+            assert tool.config == {"T": {"max_tokens": "4000", "tokens": "t"}}
+            tool.config = {**tool.config, "label": "edited"}
+            session.commit()
+
+        stored = _raw(engine, "tools", "config", tool_id)
+        assert stored["label"] == "edited"
+        assert stored["T"]["max_tokens"].startswith("ENC:")
+        assert stored["T"]["tokens"].startswith("ENC:")
+
+
 def _decrypt_spy():
     return patch.object(
         EncryptionUtils, "decrypt_value", wraps=EncryptionUtils.decrypt_value

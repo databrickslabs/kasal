@@ -32,6 +32,11 @@ from src.db.session import routed_scoped_session
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
 from src.schemas.execution import CrewConfig
 from src.services.execution.stored_inputs import mask_run_inputs
+from src.utils.sensitive_data_utils import (
+    REDACTED_PLACEHOLDER,
+    is_sensitive_key,
+    mask_sensitive_strings,
+)
 from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().system
@@ -43,6 +48,17 @@ TRIGGER_TYPE = "lakebase_queue"
 def _backoff_at(attempts: int) -> datetime:
     """Exponential backoff visibility time, capped at 5 minutes."""
     return datetime.utcnow() + timedelta(seconds=min(300, (2 ** max(0, attempts)) * 10))
+
+
+def _masked_event_input(key: str, value: object) -> object:
+    """An event input as the task's description may show it.
+
+    The whole value under a secret key, whatever its type; under any other key,
+    the secret strings nested in it.
+    """
+    if is_sensitive_key(key):
+        return REDACTED_PLACEHOLDER
+    return mask_sensitive_strings(value)
 
 
 class TriggerQueueConsumerService:
@@ -361,6 +377,13 @@ class TriggerQueueConsumerService:
         as an explicit context block instead; later tasks see it through normal
         task-output chaining. A task that DOES reference ``{payload}`` (or any
         event key) keeps full control — nothing is appended for that key.
+
+        The description is stored with the run and shown in its trace, so a
+        secret is masked in the block. Masking is by key name only
+        (``is_sensitive_key``, at any depth); a secret value under an ordinary
+        key is shown as it is. A secret input that no template references
+        therefore reaches no prompt at all: the run still receives the real
+        value in ``config.inputs``, but no task text carries it.
         """
         if execution_type != "crew" or not config.tasks_yaml or not config.inputs:
             return
@@ -378,9 +401,10 @@ class TriggerQueueConsumerService:
         task = config.tasks_yaml[first]
         if not isinstance(task, dict):
             return
+        shown = {k: _masked_event_input(k, v) for k, v in leftover.items()}
         lines = "\n".join(
             f"- {k}: {json.dumps(v) if isinstance(v, (dict, list)) else v}"
-            for k, v in leftover.items()
+            for k, v in shown.items()
         )
         task["description"] = (
             str(task.get("description") or "")

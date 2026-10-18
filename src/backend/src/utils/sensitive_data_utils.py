@@ -6,20 +6,21 @@ including encryption, decryption, and masking for logs and API responses.
 """
 
 import logging
+import re
 import threading
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from src.utils.encryption_utils import EncryptionUtils
 
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-# Sensitive key patterns - any key containing these substrings will be treated as sensitive
+# Sensitive key patterns - any key containing these substrings will be treated as
+# sensitive. A bare "token" is judged by words instead (see _names_a_token).
 SENSITIVE_KEY_PATTERNS: Set[str] = {
     "secret",
     "password",
-    "token",
     "api_key",
     "apikey",
     "credential",
@@ -30,6 +31,41 @@ SENSITIVE_KEY_PATTERNS: Set[str] = {
     "refresh_token",
     "bearer",
 }
+
+#: Words that make any key mentioning tokens a count or a limit of them, not a
+#: credential: ``max_tokens``, ``token_count``, ``output_token_cap``.
+TOKEN_LIMIT_WORDS: Set[str] = {
+    "max",
+    "min",
+    "num",
+    "count",
+    "limit",
+    "budget",
+    "total",
+    "usage",
+    "cap",
+    "threshold",
+}
+
+#: LLM-usage words that make a key a count only beside the PLURAL "tokens":
+#: ``prompt_tokens`` and ``tokens_before`` are counts, while ``input_token``
+#: and ``token_after_refresh`` still name a credential.
+TOKEN_USAGE_WORDS: Set[str] = {
+    "used",
+    "prompt",
+    "completion",
+    "input",
+    "output",
+    "cache",
+    "cached",
+    "thinking",
+    "reasoning",
+    "before",
+    "after",
+}
+
+# One word of a key: an ALLCAPS run, a Capitalised or lowercase word, or digits.
+_KEY_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 
 # Exact key matches that should always be treated as sensitive
 SENSITIVE_EXACT_KEYS: Set[str] = {
@@ -60,9 +96,38 @@ SENSITIVE_HEADER_PATTERNS: Set[str] = {
 }
 
 
+def _key_words(key: str) -> List[str]:
+    """``key`` as lowercase words: ``maxTokens`` and ``MAX_TOKENS`` -> max, tokens."""
+    return [word.lower() for word in _KEY_WORD.findall(key)]
+
+
+def _names_a_token(key: str) -> bool:
+    """Whether ``key`` names token credentials rather than counting tokens.
+
+    A word ending in "token" or "tokens" names them (``token``, ``user_token``,
+    ``accessToken``, ``authtoken``, ``api_tokens``). The key counts them
+    instead when it also has a limit word (:data:`TOKEN_LIMIT_WORDS`:
+    ``max_tokens``, ``token_limit``), or the plural "tokens" with a usage word
+    (:data:`TOKEN_USAGE_WORDS`: ``prompt_tokens``, ``tokens_before``).
+    ``tokenizer`` names neither.
+    """
+    words = _key_words(key)
+    plural = any(word.endswith("tokens") for word in words)
+    if not plural and not any(word.endswith("token") for word in words):
+        return False
+    if any(word in TOKEN_LIMIT_WORDS for word in words):
+        return False
+    return not (plural and any(word in TOKEN_USAGE_WORDS for word in words))
+
+
 def is_sensitive_key(key: str) -> bool:
     """
     Check if a key name indicates sensitive data.
+
+    The rule for MASKING: API responses, run records, logs, display and
+    export. A count or a limit of tokens (``max_tokens``, ``prompt_tokens``)
+    is not sensitive, so it stays visible. Encryption at rest uses the broader
+    ``encrypts_at_rest``, which also covers those keys.
 
     Args:
         key: The key name to check
@@ -81,7 +146,18 @@ def is_sensitive_key(key: str) -> bool:
         if pattern in key_lower:
             return True
 
-    return False
+    return _names_a_token(key)
+
+
+def encrypts_at_rest(key: str) -> bool:
+    """Whether a string under ``key`` is encrypted at rest (SensitiveJSON).
+
+    The rule for ENCRYPTION, on write and on read alike: every key
+    ``is_sensitive_key`` names, plus any key containing "token". Broader than
+    the masking rule on purpose, so a value encrypted before masking learned to
+    tell a count from a credential stays encrypted when its row is saved again.
+    """
+    return is_sensitive_key(key) or "token" in key.lower()
 
 
 def is_encrypted(value: str) -> bool:
@@ -156,7 +232,8 @@ def decrypt_value(encrypted_value: str) -> str:
 
 
 def _seal(value: object, sensitive: bool, recursive: bool) -> object:
-    """``value`` with each non-empty string under a sensitive key encrypted.
+    """``value`` with each non-empty string under a key that
+    ``encrypts_at_rest`` encrypted.
 
     A dict's entries are judged by their own key; a list's items by the key the
     list sits under, so ``{"servers": [{"token": ...}]}`` and
@@ -195,7 +272,7 @@ def encrypt_sensitive_fields(
     if not data or not isinstance(data, dict):
         return data
     return {
-        key: _seal(value, isinstance(key, str) and is_sensitive_key(key), recursive)
+        key: _seal(value, isinstance(key, str) and encrypts_at_rest(key), recursive)
         for key, value in data.items()
     }
 
@@ -253,8 +330,9 @@ def _decrypt_or_keep(value: str) -> str:
 def _open(value: object, sensitive: bool, recursive: bool) -> object:
     """``value`` with each encrypted string under a sensitive key decrypted.
 
-    The mirror of ``_seal``: only where encryption could have happened, so an
-    ``ENC:``-looking string under an ordinary key (a prompt) is left alone.
+    The mirror of ``_seal``, by the same rule (``encrypts_at_rest``): only where
+    encryption happens, so an ``ENC:``-looking string under an ordinary key (a
+    prompt) is left alone.
     """
     if recursive and isinstance(value, dict):
         return decrypt_sensitive_fields(value)
@@ -271,8 +349,8 @@ def decrypt_sensitive_fields(
     """
     Decrypt sensitive fields in a dictionary (e.g., tool_configs).
 
-    Decrypts the ``ENC:`` strings under sensitive keys, the same keys
-    ``encrypt_sensitive_fields`` encrypts, in nested dictionaries and lists too.
+    Decrypts the ``ENC:`` strings under the keys ``encrypt_sensitive_fields``
+    encrypts (``encrypts_at_rest``), in nested dictionaries and lists too.
     A value that cannot be decrypted is returned still encrypted, never blanked.
 
     Args:
@@ -285,7 +363,7 @@ def decrypt_sensitive_fields(
     if not data or not isinstance(data, dict):
         return data
     return {
-        key: _open(value, isinstance(key, str) and is_sensitive_key(key), recursive)
+        key: _open(value, isinstance(key, str) and encrypts_at_rest(key), recursive)
         for key, value in data.items()
     }
 
@@ -299,8 +377,7 @@ def mask_sensitive_strings(value: object, sensitive: bool = False) -> object:
     """A copy of ``value`` with each non-empty string under a sensitive key masked.
 
     For API responses. Unlike ``mask_sensitive_fields`` it leaves numbers and
-    booleans alone (``max_tokens`` matches the "token" pattern), handles a list
-    at the root, and never mutates its input.
+    booleans alone, handles a list at the root, and never mutates its input.
     """
     if isinstance(value, dict):
         return {

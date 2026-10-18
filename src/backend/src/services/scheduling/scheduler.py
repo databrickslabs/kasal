@@ -29,6 +29,7 @@ from src.schemas.scheduler import (
 )
 from src.services.execution.kasal_service import JobStatus, KasalExecutionService
 from src.services.execution.service import ExecutionService
+from src.services.execution.stored_inputs import mask_run_inputs
 from src.services.scheduling.retire import retire_schedule
 from src.services.scheduling.saved_targets import (
     SavedTargetGone,
@@ -39,7 +40,6 @@ from src.services.scheduling.saved_targets import (
 )
 from src.utils.cron_utils import calculate_next_run_from_last, ensure_utc
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from src.utils.sensitive_data_utils import mask_sensitive_fields
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -597,22 +597,12 @@ class SchedulerService:
                         f"Running scheduled crew job {job_id} for schedule {schedule_id}"
                     )
 
-                # Prepare job configuration based on execution type
-                # SECURITY: Mask sensitive fields (client_secret, password, token, etc.) before storage
-                config_dict = {
-                    "agents_yaml": (
-                        mask_sensitive_fields(config.agents_yaml)
-                        if config.agents_yaml
-                        else {}
-                    ),
-                    "tasks_yaml": (
-                        mask_sensitive_fields(config.tasks_yaml)
-                        if config.tasks_yaml
-                        else {}
-                    ),
-                    "inputs": (
-                        mask_sensitive_fields(config.inputs) if config.inputs else {}
-                    ),
+                # The run's record. It is masked below by the rule every launch
+                # path shares; the run itself is handed ``config``.
+                config_dict: Dict[str, object] = {
+                    "agents_yaml": config.agents_yaml or {},
+                    "tasks_yaml": config.tasks_yaml or {},
+                    "inputs": config.inputs or {},
                     "model": config.model,
                     "execution_type": execution_type,
                 }
@@ -649,7 +639,7 @@ class SchedulerService:
                     session,
                     job_id=job_id,
                     run_name=run_name,
-                    inputs=config_dict,
+                    inputs=mask_run_inputs(config_dict),
                     execution_type=execution_type,
                     group_id=schedule.group_id,
                     group_email=schedule.created_by_email,
