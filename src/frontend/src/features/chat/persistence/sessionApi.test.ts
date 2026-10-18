@@ -63,7 +63,7 @@ describe('sessionApi - sessions', () => {
   it('creates a session via the API and maps timestamps as UTC', async () => {
     mockPost.mockResolvedValue({
       data: {
-        id: 's1', title: 'My Chat', user_id: 'u@x.com', group_id: 'g1',
+        id: 's1', title: 'My Chat', user_id: 'u@example.com', group_id: 'g1',
         created_at: '2026-06-11T07:00:00', updated_at: '2026-06-11T07:00:00',
       },
     });

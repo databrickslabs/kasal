@@ -57,7 +57,10 @@ async def test_get_all_tools_for_group_override_logic():
     svc.repository.list = AsyncMock(return_value=[t_base, t_group, t_other])
 
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     resp = await svc.get_all_tools_for_group(gc)
     titles = sorted([t.title for t in resp.tools])
@@ -96,7 +99,10 @@ async def test_get_enabled_tools_for_group_merges_config_and_filters():
     module.GroupToolRepository = FakeGRepo
 
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     # primary_group_id is a property in dataclass via group_ids[0]
     out = await svc.get_enabled_tools_for_group(gc)
@@ -143,7 +149,7 @@ async def test_get_tool_by_id_and_with_group_check_paths():
             group_context=GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="editor",
             ),
         )
@@ -179,7 +185,7 @@ async def test_update_and_delete_tool_paths():
             GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="editor",
             ),
         )
@@ -197,7 +203,7 @@ async def test_update_and_delete_tool_paths():
         GroupContext(
             group_ids=["g1"],
             group_email="u@x",
-            email_domain="x.com",
+            email_domain="example.com",
             user_role="editor",
         ),
     )
@@ -211,7 +217,7 @@ async def test_update_and_delete_tool_paths():
             GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="editor",
             ),
         )
@@ -226,7 +232,7 @@ async def test_update_and_delete_tool_paths():
             GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="editor",
             ),
         )
@@ -250,7 +256,10 @@ async def test_toggle_paths_base_and_group():
     out = await svc.toggle_tool_enabled_with_group_check(
         20,
         GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role="admin",
         ),
     )
     assert out.enabled is False
@@ -265,7 +274,10 @@ async def test_toggle_paths_base_and_group():
     out2 = await svc.toggle_tool_enabled_with_group_check(
         20,
         GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role="admin",
         ),
     )
     assert out2.enabled is False
@@ -280,7 +292,7 @@ async def test_toggle_paths_base_and_group():
             GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="editor",
             ),
         )
@@ -308,7 +320,10 @@ async def test_config_endpoints():
     )
     cfgs = await svc.get_all_tool_configurations_for_group(
         GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role="admin",
         )
     )
     assert cfgs == {"A": {"x": 1}, "B": {"y": 2}}
@@ -323,7 +338,7 @@ async def test_config_endpoints():
             GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="admin",
             ),
         )
@@ -339,7 +354,7 @@ async def test_config_endpoints():
             GroupContext(
                 group_ids=["g1"],
                 group_email="u@x",
-                email_domain="x.com",
+                email_domain="example.com",
                 user_role="admin",
             ),
         )
@@ -361,7 +376,10 @@ async def test_config_endpoints():
         "A",
         {"q": 1},
         GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role="admin",
         ),
     )
     assert out2.config == {"q": 1}
@@ -380,7 +398,10 @@ async def test_config_endpoints():
         "A",
         {"q": 2},
         GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role="admin",
         ),
     )
     assert out3.config == {"q": 2}
@@ -397,7 +418,10 @@ async def test_config_endpoints():
         "A",
         {"n": 1},
         GroupContext(
-            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="example.com",
+            user_role="admin",
         ),
     )
     assert out4.config == {"n": 1}
@@ -431,10 +455,16 @@ async def test_enabled_tools_second_call_served_from_cache():
 async def test_enabled_tools_cache_is_group_scoped():
     svc = _make_cached_service()
     gc1 = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     gc2 = GroupContext(
-        group_ids=["g2"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g2"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
 
     from src.services.tools import tool_service as module
@@ -505,7 +535,10 @@ async def test_group_tool_mutation_invalidates_enabled_tools_cache():
         )
     )
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     await gsvc.set_group_tool_enabled(1, True, gc)
 

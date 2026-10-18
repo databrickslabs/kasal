@@ -306,7 +306,7 @@ class TestExtractMeasuresFallback:
                 tenant_id="t",
                 client_id="c",
                 client_secret=None,
-                username="sa@x.com",
+                username="sa@example.com",
                 password="pw",
             )
         assert len(out) == 1
@@ -314,7 +314,7 @@ class TestExtractMeasuresFallback:
         assert out[0]["dax_expression"] == "SUM(a)"
         # SA branch used username/password
         _, kw = gen.get_fabric_token.call_args
-        assert kw["username"] == "sa@x.com"
+        assert kw["username"] == "sa@example.com"
 
     def test_falls_through_to_sp_when_no_sa(self):
         tool = UCMetricViewGeneratorTool()
@@ -403,12 +403,12 @@ class TestExtractMqueryFallback:
                 tenant_id="t",
                 client_id="c",
                 client_secret=None,
-                username="sa@x.com",
+                username="sa@example.com",
                 password="pw",
             )
         assert len(out) == 1 and out[0]["table_name"] == "Fact"
         _, kw = gen.get_fabric_token.call_args
-        assert kw["username"] == "sa@x.com"
+        assert kw["username"] == "sa@example.com"
 
     def test_sp_fallback_when_no_sa(self):
         tool = UCMetricViewGeneratorTool()

@@ -42,8 +42,8 @@ def _auth(workspace_url=CONFIGURED):
 def _gc(role):
     return GroupContext(
         group_ids=["g1"],
-        group_email=f"{role}@x.com",
-        email_domain="x.com",
+        group_email=f"{role}@example.com",
+        email_domain="example.com",
         user_role=role,
     )
 

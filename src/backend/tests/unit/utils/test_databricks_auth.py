@@ -61,9 +61,9 @@ class TestAuthContext:
             token="t",
             workspace_url="https://h.com",
             auth_method="obo",
-            user_identity="u@x.com",
+            user_identity="u@example.com",
         )
-        assert ctx.user_identity == "u@x.com"
+        assert ctx.user_identity == "u@example.com"
 
     def test_url_normalization_no_https(self):
         ctx = AuthContext(token="t", workspace_url="host.com/", auth_method="pat")
@@ -114,10 +114,10 @@ class TestAuthContext:
             token="t",
             workspace_url="https://h.com",
             auth_method="obo",
-            user_identity="u@x.com",
+            user_identity="u@example.com",
         )
         r = repr(ctx)
-        assert "obo" in r and "u@x.com" in r
+        assert "obo" in r and "u@example.com" in r
 
     def test_repr_service(self):
         ctx = AuthContext(
@@ -927,7 +927,7 @@ class TestGetAuthContext:
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         mock_user = MagicMock()
-        mock_user.user_name = "u@x.com"
+        mock_user.user_name = "u@example.com"
         mock_user.application_id = None
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_user
@@ -944,8 +944,8 @@ class TestGetAuthContext:
                     return_value=mock_client,
                 ),
             ):
-                result = await get_auth_context(user_token="user_tok")
-            assert result.auth_method == "obo" and result.user_identity == "u@x.com"
+                ctx = await get_auth_context(user_token="user_tok")
+            assert ctx.auth_method == "obo" and ctx.user_identity == "u@example.com"
         finally:
             self._restore(s)
 
@@ -1756,7 +1756,7 @@ class TestGetCurrentDatabricksUser:
     @pytest.mark.asyncio
     async def test_user_name(self):
         mu = MagicMock()
-        mu.user_name = "u@x.com"
+        mu.user_name = "u@example.com"
         mc = MagicMock()
         mc.current_user.me.return_value = mu
         with patch(
@@ -1765,7 +1765,7 @@ class TestGetCurrentDatabricksUser:
             return_value=mc,
         ):
             u, e = await get_current_databricks_user(user_token="t")
-        assert u == "u@x.com" and e is None
+        assert u == "u@example.com" and e is None
 
     @pytest.mark.asyncio
     async def test_application_id(self):
@@ -2054,7 +2054,7 @@ class TestDatabricksAuthHttpxMethods:
         auth = self._mk(api_token="t", workspace_host="https://h.com")
         mr = MagicMock()
         mr.status_code = 200
-        mr.json.return_value = {"userName": "u@x.com"}
+        mr.json.return_value = {"userName": "u@example.com"}
         mc = AsyncMock()
         mc.get.return_value = mr
         with patch("src.utils.databricks_auth.httpx.AsyncClient") as M:
@@ -2134,7 +2134,7 @@ class TestOboValidationCache:
         for k, v in s.items():
             setattr(_databricks_auth, f"_{k}", v)
 
-    def _mock_client(self, user_name="u@x.com"):
+    def _mock_client(self, user_name="u@example.com"):
         mock_user = MagicMock()
         mock_user.user_name = user_name
         mock_user.application_id = None
@@ -2161,8 +2161,8 @@ class TestOboValidationCache:
             ):
                 r1 = await get_auth_context(user_token="cache-tok-1")
                 r2 = await get_auth_context(user_token="cache-tok-1")
-            assert r1.user_identity == "u@x.com"
-            assert r2.user_identity == "u@x.com"
+            assert r1.user_identity == "u@example.com"
+            assert r2.user_identity == "u@example.com"
             assert r2.auth_method == "obo"
             assert mock_wc.call_count == 1  # cached on second call
         finally:
@@ -2257,7 +2257,7 @@ class TestOboValidationCache:
         # Fill with expired entries up to the cap: put() prunes them
         for i in range(m._OBO_VALIDATION_CACHE_MAX):
             m._OBO_VALIDATION_CACHE[f"h{i}"] = (None, 0.0)
-        m._obo_cache_put("fresh", "id@x.com")
+        m._obo_cache_put("fresh", "id@example.com")
         assert list(m._OBO_VALIDATION_CACHE) == ["fresh"]
         # Fill with live entries up to the cap: put() clears rather than grow unbounded
         import time as _time
@@ -2265,7 +2265,7 @@ class TestOboValidationCache:
         live = _time.time() + 1000
         for i in range(m._OBO_VALIDATION_CACHE_MAX):
             m._OBO_VALIDATION_CACHE[f"l{i}"] = (None, live)
-        m._obo_cache_put("fresh2", "id2@x.com")
+        m._obo_cache_put("fresh2", "id2@example.com")
         assert list(m._OBO_VALIDATION_CACHE) == ["fresh2"]
 
 

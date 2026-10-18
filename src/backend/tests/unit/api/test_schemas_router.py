@@ -28,8 +28,8 @@ def gc():
     """Create a valid GroupContext for testing."""
     return GroupContext(
         group_ids=["g1"],
-        group_email="u@x.com",
-        email_domain="x.com",
+        group_email="u@example.com",
+        email_domain="example.com",
         user_role="admin",
     )
 
@@ -376,7 +376,9 @@ class TestCatalogMutationsAreSystemAdminOnly:
     def _as(self, system_admin):
         from unittest.mock import patch
 
-        user = SimpleNamespace(id="u", email="u@x.com", is_system_admin=system_admin)
+        user = SimpleNamespace(
+            id="u", email="u@example.com", is_system_admin=system_admin
+        )
         return patch(
             "src.dependencies.admin_auth.require_authenticated_user",
             new=AsyncMock(return_value=user),

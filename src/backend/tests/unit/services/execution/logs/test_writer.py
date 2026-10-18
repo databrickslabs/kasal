@@ -234,7 +234,9 @@ class TestGetExecutionLogsByGroup:
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_primary_group_id(self):
-        gc = GroupContext(group_ids=[], group_email="u@x.com", email_domain="x.com")
+        gc = GroupContext(
+            group_ids=[], group_email="u@example.com", email_domain="example.com"
+        )
         execution_mock = SimpleNamespace(id=1, job_id="exec-1")
         with patch(_HIST_REPO_PATCH) as hist_cls:
             hist_cls.return_value.get_execution_by_job_id = AsyncMock(
@@ -300,7 +302,9 @@ class TestGetExecutionLogsByGroup:
     @pytest.mark.asyncio
     async def test_group_ids_none_when_no_primary_group(self):
         """When primary_group_id is falsy, group_ids should be None for the query."""
-        gc = GroupContext(group_ids=None, group_email="u@x.com", email_domain="x.com")
+        gc = GroupContext(
+            group_ids=None, group_email="u@example.com", email_domain="example.com"
+        )
         with patch(_HIST_REPO_PATCH) as hist_cls:
             hist_cls.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
             await self.service.get_execution_logs_by_group("exec-1", gc)
@@ -1293,7 +1297,9 @@ class TestEdgeCases:
             service = ExecutionLogsService(mock_session)
 
         # group_ids=[] means primary_group_id is None (empty list)
-        gc = GroupContext(group_ids=[], group_email="u@x.com", email_domain="x.com")
+        gc = GroupContext(
+            group_ids=[], group_email="u@example.com", email_domain="example.com"
+        )
         execution_mock = SimpleNamespace(id=1, job_id="exec-1")
 
         with patch(_HIST_REPO_PATCH) as hist_cls:

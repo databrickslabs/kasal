@@ -191,7 +191,10 @@ async def test_group_aware_listing_and_toggle_with_group():
     other = mk_model("k2", group_id=None, enabled=True)
     repo.find_all = AsyncMock(return_value=[default, override, other])
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     eff = await svc.find_all_for_group(gc)
     assert any(m.key == "k1" and m.group_id == "g1" for m in eff)

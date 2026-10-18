@@ -10,7 +10,7 @@ from src.utils.user_context import GroupContext
 
 
 def _ctx(group_ids=None):
-    return GroupContext(group_ids=group_ids or ["g1"], group_email="u@x.com")
+    return GroupContext(group_ids=group_ids or ["g1"], group_email="u@example.com")
 
 
 def _svc():

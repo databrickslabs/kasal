@@ -33,12 +33,14 @@ from src.utils.user_context import GroupContext
 
 
 def _ctx(group, email):
-    return GroupContext(group_ids=[group], group_email=email, email_domain="x.com")
+    return GroupContext(
+        group_ids=[group], group_email=email, email_domain="example.com"
+    )
 
 
-A = _ctx("tenant-a", "alice@x.com")
-A2 = _ctx("tenant-a", "arthur@x.com")  # same tenant, other user
-B = _ctx("tenant-b", "bob@x.com")
+A = _ctx("tenant-a", "alice@example.com")
+A2 = _ctx("tenant-a", "arthur@example.com")  # same tenant, other user
+B = _ctx("tenant-b", "bob@example.com")
 
 
 @pytest_asyncio.fixture

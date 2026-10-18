@@ -118,10 +118,10 @@ class TestIdentity:
 
     def test_two_users_get_distinct_keys(self):
         a = RateLimitMiddleware._identity(
-            _scope("/api/x", [(b"x-forwarded-email", b"a@x.com")])
+            _scope("/api/x", [(b"x-forwarded-email", b"a@example.com")])
         )
         b = RateLimitMiddleware._identity(
-            _scope("/api/x", [(b"x-forwarded-email", b"b@x.com")])
+            _scope("/api/x", [(b"x-forwarded-email", b"b@example.com")])
         )
         assert a != b
 
@@ -180,7 +180,7 @@ class TestActiveEnforcement:
         mw = _active_mw(app, "3/minute")
         assert mw._active is True
 
-        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@x.com")])
+        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@example.com")])
         statuses = [(await _invoke(mw, scope))[0] for _ in range(5)]
         assert statuses == [200, 200, 200, 429, 429]
         assert app.calls == 3  # blocked requests never reach the app
@@ -190,8 +190,8 @@ class TestActiveEnforcement:
         app = RecordingApp()
         mw = _active_mw(app, "2/minute")
 
-        a = _scope("/api/v1/agents", [(b"x-forwarded-email", b"a@x.com")])
-        b = _scope("/api/v1/agents", [(b"x-forwarded-email", b"b@x.com")])
+        a = _scope("/api/v1/agents", [(b"x-forwarded-email", b"a@example.com")])
+        b = _scope("/api/v1/agents", [(b"x-forwarded-email", b"b@example.com")])
         # Exhaust user A
         assert (await _invoke(mw, a))[0] == 200
         assert (await _invoke(mw, a))[0] == 200
@@ -203,7 +203,7 @@ class TestActiveEnforcement:
     async def test_sse_never_limited(self):
         app = RecordingApp()
         mw = _active_mw(app, "2/minute")
-        sse = _scope("/api/v1/sse/x/stream", [(b"x-forwarded-email", b"u@x.com")])
+        sse = _scope("/api/v1/sse/x/stream", [(b"x-forwarded-email", b"u@example.com")])
         statuses = [(await _invoke(mw, sse))[0] for _ in range(6)]
         assert statuses == [200] * 6  # exempt path is never throttled
 
@@ -211,7 +211,7 @@ class TestActiveEnforcement:
     async def test_429_response_shape(self):
         app = RecordingApp()
         mw = _active_mw(app, "1/minute")
-        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@x.com")])
+        scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@example.com")])
         await _invoke(mw, scope)  # consume the single token
         status, sent = await _invoke(mw, scope)  # this one is blocked
 

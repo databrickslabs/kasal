@@ -26,20 +26,22 @@ async def test_get_ui_config_delegates_to_service():
 async def test_update_ui_config_allows_workspace_admin():
     svc = MagicMock()
     svc.update_config = AsyncMock(return_value=UIConfigResponse(enabled=True))
-    ctx = MagicMock(group_email="admin@x.com")
+    ctx = MagicMock(group_email="admin@example.com")
     with patch("src.api.ui_config_router.is_workspace_admin", return_value=True):
         out = await update_ui_config(UIConfigUpdate(enabled=True), svc, ctx)
     assert out.enabled is True
     svc.update_config.assert_awaited_once()
     # created_by_email is threaded from the group context
-    assert svc.update_config.await_args.kwargs["created_by_email"] == "admin@x.com"
+    assert (
+        svc.update_config.await_args.kwargs["created_by_email"] == "admin@example.com"
+    )
 
 
 @pytest.mark.asyncio
 async def test_update_ui_config_blocks_non_admin():
     svc = MagicMock()
     svc.update_config = AsyncMock()
-    ctx = MagicMock(group_email="user@x.com")
+    ctx = MagicMock(group_email="user@example.com")
     with patch("src.api.ui_config_router.is_workspace_admin", return_value=False):
         with pytest.raises(ForbiddenError):
             await update_ui_config(UIConfigUpdate(enabled=True), svc, ctx)

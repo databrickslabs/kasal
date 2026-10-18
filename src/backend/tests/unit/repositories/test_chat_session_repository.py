@@ -62,7 +62,7 @@ class TestCreate:
             {
                 "id": "s1",
                 "title": "T",
-                "user_id": "u@x.com",
+                "user_id": "u@example.com",
                 "group_id": "g1",
             }
         )
@@ -89,7 +89,7 @@ class TestListByGroupAndUser:
     async def test_lists_rows(self, repo, mock_session):
         rows = [ChatSession(id="s1"), ChatSession(id="s2")]
         mock_session.execute = AsyncMock(return_value=_scalars_result(rows))
-        result = await repo.list_by_group_and_user(["g1"], "u@x.com")
+        result = await repo.list_by_group_and_user(["g1"], "u@example.com")
         assert result == rows
         # Query is ordered by updated_at desc and group+user scoped
         stmt = str(mock_session.execute.await_args.args[0])

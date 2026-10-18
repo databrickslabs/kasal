@@ -55,10 +55,12 @@ async def test_membership_resolved_once_within_ttl():
 @pytest.mark.asyncio
 async def test_distinct_emails_are_cached_separately():
     """Different users do not share a cache entry."""
-    mock_exec = AsyncMock(side_effect=[(_user("a@x.com"), []), (_user("b@x.com"), [])])
+    mock_exec = AsyncMock(
+        side_effect=[(_user("a@example.com"), []), (_user("b@example.com"), [])]
+    )
     with patch("src.utils.asyncio_utils.execute_db_operation_smart", mock_exec):
-        await GroupContext._get_user_group_memberships_with_roles("a@x.com")
-        await GroupContext._get_user_group_memberships_with_roles("b@x.com")
+        await GroupContext._get_user_group_memberships_with_roles("a@example.com")
+        await GroupContext._get_user_group_memberships_with_roles("b@example.com")
 
     assert mock_exec.await_count == 2
 

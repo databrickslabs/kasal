@@ -75,7 +75,10 @@ async def test_list_and_enabled_and_global(monkeypatch):
     from src.utils.user_context import GroupContext
 
     gc = GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        group_ids=["g1"],
+        group_email="u@x",
+        email_domain="example.com",
+        user_role="admin",
     )
     all_tools = SimpleNamespace(tools=tools_list, count=2)
     svc.get_all_tools = AsyncMock(return_value=all_tools)

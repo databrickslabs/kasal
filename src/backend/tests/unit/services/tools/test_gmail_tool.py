@@ -72,7 +72,7 @@ def _aiohttp_session(responses):
 
 
 def _tool(
-    user_token="obo-token", group_id="user_alice_x_com", user_email="alice@x.com"
+    user_token="obo-token", group_id="user_alice_x_com", user_email="alice@example.com"
 ) -> GmailTool:
     # Default: personal workspace (group_id == generate_individual_group_id(email)).
     return GmailTool(
@@ -104,7 +104,7 @@ class TestPersonalWorkspaceEnforcement:
     @pytest.mark.asyncio
     async def test_refuses_in_a_shared_workspace(self):
         # Shared workspace: group_id is NOT the user's personal workspace.
-        tool = _tool(group_id="bi-specialist", user_email="alice@x.com")
+        tool = _tool(group_id="bi-specialist", user_email="alice@example.com")
         result = await tool._run_async(action="search")
         assert "Switch to your Personal Space to use Gmail" in result
 
@@ -121,7 +121,7 @@ class TestPersonalWorkspaceEnforcement:
 
     @pytest.mark.asyncio
     async def test_shared_workspace_check_blocks_before_network(self):
-        tool = _tool(group_id="bi-specialist", user_email="alice@x.com")
+        tool = _tool(group_id="bi-specialist", user_email="alice@example.com")
         session_cm, session = _aiohttp_session([])
         with (
             _patch_workspace(),

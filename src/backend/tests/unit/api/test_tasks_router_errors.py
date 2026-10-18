@@ -23,7 +23,10 @@ from src.utils.user_context import GroupContext
 
 def gc(role="admin"):
     return GroupContext(
-        group_ids=["g1"], group_email="u@x.com", email_domain="x.com", user_role=role
+        group_ids=["g1"],
+        group_email="u@example.com",
+        email_domain="example.com",
+        user_role=role,
     )
 
 

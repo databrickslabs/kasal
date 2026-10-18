@@ -136,11 +136,11 @@ class TestGetFabricTokenGrants:
 
         with patch("requests.post", side_effect=_post):
             tok = gen.get_fabric_token(
-                TENANT_ID, CLIENT_ID, None, username="sa@x.com", password="pw"
+                TENANT_ID, CLIENT_ID, None, username="sa@example.com", password="pw"
             )
         assert tok == "fab-sa"
         assert cap["data"]["grant_type"] == "password"
-        assert cap["data"]["username"] == "sa@x.com"
+        assert cap["data"]["username"] == "sa@example.com"
         assert cap["data"]["scope"] == "https://api.fabric.microsoft.com/.default"
 
 

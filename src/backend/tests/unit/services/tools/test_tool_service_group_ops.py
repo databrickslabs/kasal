@@ -522,7 +522,7 @@ async def test_gmail_hidden_in_shared_workspace():
     ctx = make_group_context(
         group_ids=["bi-specialist"],
         primary_group_id="bi-specialist",
-        group_email="alice@x.com",
+        group_email="alice@example.com",
     )
     result = await svc.get_all_tools_for_group(ctx)
     titles = {t.title for t in result.tools}
@@ -540,11 +540,11 @@ async def test_gmail_visible_in_personal_workspace():
             make_tool(id=2, title="PerplexityTool", group_id=None),
         ]
     )
-    # generate_individual_group_id("alice@x.com") == "user_alice_x_com"
+    # generate_individual_group_id("alice@example.com") == "user_alice_x_com"
     ctx = make_group_context(
         group_ids=["user_alice_x_com"],
         primary_group_id="user_alice_x_com",
-        group_email="alice@x.com",
+        group_email="alice@example.com",
     )
     ctx.current_user.personal_group_id = "user_alice_x_com"
     result = await svc.get_all_tools_for_group(ctx)
@@ -576,7 +576,7 @@ async def test_gmail_hidden_in_enabled_tools_for_shared_workspace():
         ctx = make_group_context(
             group_ids=["bi-specialist"],
             primary_group_id="bi-specialist",
-            group_email="alice@x.com",
+            group_email="alice@example.com",
         )
         result = await svc._build_enabled_tools_for_group(ctx)
 

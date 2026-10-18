@@ -496,7 +496,7 @@ async def test_get_or_create_user_by_email_existing_user_no_update_login():
     with patch("src.services.groups.users.UserRepository") as Repo:
         repo = AsyncMock()
         existing = SimpleNamespace(
-            id="u1", email="e@x.com", personal_group_id="user_existing"
+            id="u1", email="e@example.com", personal_group_id="user_existing"
         )
         repo.get_by_email = AsyncMock(return_value=existing)
         Repo.return_value = repo
@@ -506,7 +506,7 @@ async def test_get_or_create_user_by_email_existing_user_no_update_login():
         with patch.object(
             svc, "_handle_first_user_admin_setup", new=AsyncMock()
         ) as setup:
-            out = await svc.get_or_create_user_by_email("e@x.com")
+            out = await svc.get_or_create_user_by_email("e@example.com")
             assert out is existing
             setup.assert_not_awaited()
 
@@ -519,14 +519,14 @@ async def test_get_or_create_user_by_email_create_new_and_first_user_admin():
         repo.get_by_email = AsyncMock(return_value=None)
         repo.get_by_username = AsyncMock(side_effect=[None, None])
         created = SimpleNamespace(
-            id="u2", email="new@x.com", personal_group_id="user_new"
+            id="u2", email="new@example.com", personal_group_id="user_new"
         )
         repo.create = AsyncMock(return_value=created)
         repo.grant_first_system_admin = AsyncMock(return_value=True)
         Repo.return_value = repo
 
         svc = UserService(session)
-        out = await svc.get_or_create_user_by_email("new@x.com")
+        out = await svc.get_or_create_user_by_email("new@example.com")
         assert out is created
         # A newly created user goes through the first-admin bootstrap
         repo.grant_first_system_admin.assert_awaited_once_with("u2")

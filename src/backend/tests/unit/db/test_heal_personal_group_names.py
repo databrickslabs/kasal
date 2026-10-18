@@ -23,7 +23,7 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
             await conn.exec_driver_sql('CREATE TABLE "groups" (id TEXT, name TEXT)')
             await conn.exec_driver_sql(
                 'INSERT INTO "groups" VALUES '
-                "('user_u_x_com', 'Personal Workspace - u@x.com'), "
+                "('user_u_x_com', 'Personal Workspace - u@example.com'), "
                 "('user_no_mail', 'Personal Workspace'), "
                 "('acme_corp',   'Acme Corp'), "
                 "('ws_admins',   'Workspace Admins')"  # user-authored name: untouched
@@ -36,7 +36,7 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
                     await conn.exec_driver_sql('SELECT id, name FROM "groups"')
                 ).fetchall()
             }
-            assert rows["user_u_x_com"] == "Personal Space - u@x.com"
+            assert rows["user_u_x_com"] == "Personal Space - u@example.com"
             assert rows["user_no_mail"] == "Personal Space"
             assert rows["acme_corp"] == "Acme Corp"
             assert rows["ws_admins"] == "Workspace Admins"

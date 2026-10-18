@@ -29,7 +29,7 @@ from tests.unit.api.conftest import register_exception_handlers
 
 def gc(role="user"):
     return GroupContext(
-        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+        group_ids=["g1"], group_email="u@x", email_domain="example.com", user_role=role
     )
 
 

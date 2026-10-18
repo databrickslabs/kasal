@@ -568,7 +568,7 @@ class TestNamedSessionSchemas:
         row = ChatSession(
             id="s1",
             title="T",
-            user_id="u@x.com",
+            user_id="u@example.com",
             group_id="g1",
             created_at=datetime(2026, 6, 11),
             updated_at=datetime(2026, 6, 11),
