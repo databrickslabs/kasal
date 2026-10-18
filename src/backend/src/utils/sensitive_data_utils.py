@@ -32,10 +32,9 @@ SENSITIVE_KEY_PATTERNS: Set[str] = {
     "bearer",
 }
 
-#: Words that make a key mentioning tokens a count or a limit of them, not a
-#: credential: ``max_tokens``, ``prompt_tokens``, ``token_count``,
-#: ``tokens_before``.
-TOKEN_QUANTITY_WORDS: Set[str] = {
+#: Words that make any key mentioning tokens a count or a limit of them, not a
+#: credential: ``max_tokens``, ``token_count``, ``output_token_cap``.
+TOKEN_LIMIT_WORDS: Set[str] = {
     "max",
     "min",
     "num",
@@ -44,9 +43,15 @@ TOKEN_QUANTITY_WORDS: Set[str] = {
     "budget",
     "total",
     "usage",
-    "used",
     "cap",
     "threshold",
+}
+
+#: LLM-usage words that make a key a count only beside the PLURAL "tokens":
+#: ``prompt_tokens`` and ``tokens_before`` are counts, while ``input_token``
+#: and ``token_after_refresh`` still name a credential.
+TOKEN_USAGE_WORDS: Set[str] = {
+    "used",
     "prompt",
     "completion",
     "input",
@@ -100,15 +105,19 @@ def _names_a_token(key: str) -> bool:
     """Whether ``key`` names token credentials rather than counting tokens.
 
     A word ending in "token" or "tokens" names them (``token``, ``user_token``,
-    ``accessToken``, ``authtoken``, ``api_tokens``), unless the key also has a
-    quantity word (:data:`TOKEN_QUANTITY_WORDS`): ``max_tokens``,
-    ``prompt_tokens`` and ``token_limit`` count them. ``tokenizer`` names
-    neither.
+    ``accessToken``, ``authtoken``, ``api_tokens``). The key counts them
+    instead when it also has a limit word (:data:`TOKEN_LIMIT_WORDS`:
+    ``max_tokens``, ``token_limit``), or the plural "tokens" with a usage word
+    (:data:`TOKEN_USAGE_WORDS`: ``prompt_tokens``, ``tokens_before``).
+    ``tokenizer`` names neither.
     """
     words = _key_words(key)
-    return any(word.endswith(("token", "tokens")) for word in words) and not any(
-        word in TOKEN_QUANTITY_WORDS for word in words
-    )
+    plural = any(word.endswith("tokens") for word in words)
+    if not plural and not any(word.endswith("token") for word in words):
+        return False
+    if any(word in TOKEN_LIMIT_WORDS for word in words):
+        return False
+    return not (plural and any(word in TOKEN_USAGE_WORDS for word in words))
 
 
 def is_sensitive_key(key: str) -> bool:
