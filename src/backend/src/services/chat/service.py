@@ -1462,26 +1462,17 @@ class LightAgentService:
         server enabled only for this workspace resolves to 0 servers under
         ``"default"`` (find_by_names_group_scope matches group_id exactly), so
         chat "answer mode" silently dropped MCP tools while crew/research kept them.
+
+        Otherwise the turn's own group id. A turn with none is refused (and
+        already was, by ``fill_tool_configs_from_catalog``); no group is ever
+        derived from the email or defaulted.
         """
-        resolved: Optional[str] = (
-            getattr(config, "group_id", None)
-            or getattr(group_context, "primary_group_id", None)
-            or (
-                (getattr(group_context, "group_ids", None) or [None])[0]
-                if group_context
-                else None
-            )
+        from src.services.catalog.run_lookup import require_run_workspace
+
+        resolved: Optional[str] = getattr(config, "group_id", None) or getattr(
+            group_context, "primary_group_id", None
         )
-        if resolved:
-            return resolved
-        # Personal-workspace fallback uses the allocated ID. Re-deriving it
-        # from email could select a different workspace when IDs collide.
-        email = getattr(group_context, "group_email", None)
-        if email and "@" in email:
-            return GroupContext.personal_workspace_id_of(
-                getattr(group_context, "current_user", None), email
-            )
-        return "default"
+        return resolved or require_run_workspace(group_context)[0]
 
     @staticmethod
     def _build_mcp_configs(
