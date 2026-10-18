@@ -23,7 +23,6 @@
   "src/db/session.py::KASAL_LOG_DATABASE": 1,
   "src/db/session.py::KASAL_REQUIRE_LAKEBASE_RESOURCE": 1,
   "src/db/session.py::LOG_DIR": 1,
-  "src/db/session.py::PYTEST_CURRENT_TEST": 1,
   "src/db/session.py::SQL_DEBUG": 1,
   "src/db/session.py::USE_NULLPOOL": 1,
   "src/main.py::KASAL_DEBUG_ALL": 1,

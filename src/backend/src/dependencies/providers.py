@@ -12,7 +12,7 @@ from src.core.databricks_app import is_production
 from src.core.exceptions import ForbiddenError, KasalError, UnauthorizedError
 from src.db.base import Base
 from src.db.database_router import get_smart_db_session
-from src.db.session import get_db, get_local_db
+from src.db.session import get_local_db
 from src.utils.request_identity import (
     resolve_request_identity,
     running_in_databricks_apps,
@@ -69,8 +69,6 @@ SessionDep = Annotated[AsyncSession, Depends(_commit_before_response, scope="fun
 WriteSessionDep = Annotated[
     AsyncSession, Depends(get_smart_db_session, scope="function")
 ]
-# Keep legacy session dependency for backward compatibility if needed
-LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
 # Always the LOCAL database (SQLite/PG), never Lakebase: the bootstrap config
 # tables such as database_configs live there. Committed before the response.
 LocalSessionDep = Annotated[
