@@ -95,16 +95,16 @@ class TestFindByKeyAndGroup:
         assert result is None
 
 
-class TestFindEnabledModels:
+class TestFindInScope:
 
     @pytest.mark.asyncio
-    async def test_returns_enabled_models(self, repo, mock_session):
+    async def test_returns_the_rows_in_scope(self, repo, mock_session):
         configs = [MagicMock(spec=ModelConfig, enabled=True)]
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = configs
         mock_session.execute.return_value = mock_result
 
-        result = await repo.find_enabled_models()
+        result = await repo.find_in_scope("group-1")
 
         assert len(result) == 1
 

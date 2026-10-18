@@ -56,7 +56,7 @@
   "src/backend/src/services/prompt_optimization/crew_runner.py": 905,
   "src/backend/src/services/recipes/recipes.py": 1060,
   "src/backend/src/services/scheduling/scheduler.py": 1187,
-  "src/backend/src/services/settings/models.py": 845,
+  "src/backend/src/services/settings/models.py": 842,
   "src/backend/src/services/tools/databricks_jobs_tool.py": 1953,
   "src/backend/src/services/tools/genie_tool.py": 902,
   "src/backend/src/services/tools/mcp_adapter.py": 944,

@@ -78,17 +78,20 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def find_enabled_models(self) -> List[ModelConfig]:
-        """
-        Find all enabled model configurations.
+    async def find_in_scope(self, group_id: Optional[str] = None) -> List[ModelConfig]:
+        """The rows one teamspace can resolve: the global rows and its own.
 
-        Returns:
-            List of enabled model configurations ordered by key
+        Never another teamspace's row. Without ``group_id``, the global rows
+        only. ``enabled`` is not filtered here: a teamspace's own row can turn
+        a global model off (or on), so the caller merges first, then filters.
         """
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
         query = (
             select(self.model)
-            .where(self.model.enabled.is_(True))
-            .order_by(self.model.key)
+            .where(scope)
+            .order_by(self.model.key, self.model.group_id.is_(None), self.model.id)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
