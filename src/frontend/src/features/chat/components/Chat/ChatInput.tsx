@@ -76,6 +76,8 @@ const SLASH_COMMANDS: { command: string; arg?: string; description: string }[] =
 interface ChatInputProps {
   onSend: (message: string, meta?: SendMeta) => void;
   disabled?: boolean;
+  /** The previous message is still being sent: Send waits, and what is typed stays. */
+  sending?: boolean;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -148,6 +150,7 @@ const prefersReducedMotion = () =>
 const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   disabled = false,
+  sending = false,
   models,
   selectedModel,
   onModelChange,
@@ -386,7 +389,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleSend = () => {
     const trimmed = value.trim();
-    if (!trimmed || disabled || isUploading) return;
+    // While `sending`, the text stays in the composer (see the status line).
+    if (!trimmed || disabled || isUploading || sending) return;
 
     setCommandHistory((prev) => [...prev.slice(-50), trimmed]);
     setHistoryIndex(-1);
@@ -726,6 +730,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
             }}
           />
         </div>
+        {sending && value.trim() && (
+          <div role="status" className="px-5 pb-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            Still sending your last message. This one stays here until it has gone.
+          </div>
+        )}
 
         {/* Attachment chips */}
         {attachments.length > 0 && (
@@ -829,11 +838,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
               return (
             <button
               onClick={stopMode ? handleStop : runMode ? onRunPending : handleSend}
-              disabled={stopMode ? isStopping : disabled || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
+              disabled={stopMode ? isStopping : disabled || sending || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
               title={
                 stopMode ? (isStopping ? 'Stopping execution…' : 'Stop execution') : isUploading
                   ? 'Waiting for attachments to finish uploading…'
-                  : runMode
+                  : sending
+                    ? 'Still sending your last message…'
+                    : runMode
                     ? `Run “${pendingRunLabel}”`
                     : undefined
               }
@@ -852,7 +863,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             >
               {stopMode && !isStopping ? (
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-              ) : isStopping || disabled || isUploading || isGenerating ? (
+              ) : isStopping || disabled || sending || isUploading || isGenerating ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />

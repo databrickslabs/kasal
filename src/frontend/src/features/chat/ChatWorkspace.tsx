@@ -452,6 +452,9 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = () => {
               onBuildInstead={handleBuildInstead}
               onStopExecution={handleStopExecution}
               isLoading={viewIsLoading}
+              // One dispatch at a time, in every session: a message typed
+              // meanwhile stays in the composer rather than being dropped.
+              isSending={dispatcher.dispatching}
               isExecuting={viewIsExecuting}
               isGenerating={viewIsGenerating}
               executionContext={viewExecutionContext}

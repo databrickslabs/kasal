@@ -87,6 +87,8 @@ interface ChatContainerProps {
   onBuildInstead?: (messageId: string) => void;
   onStopExecution?: () => void;
   isLoading: boolean;
+  /** A message is still being sent: the composer keeps what is typed until it has gone. */
+  isSending?: boolean;
   isExecuting?: boolean;
   isGenerating?: boolean;
   executionContext?: ExecutionContext | null;
@@ -136,6 +138,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onBuildInstead,
   onStopExecution,
   isLoading,
+  isSending,
   isExecuting,
   isGenerating,
   hideLiveTimeline,
@@ -353,6 +356,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 onSend(message, meta);
               }}
               disabled={isLoading}
+              sending={isSending}
               models={models}
               selectedModel={selectedModel}
               onModelChange={onModelChange}
@@ -517,6 +521,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         <ChatInput
           onSend={onSend}
           disabled={isLoading}
+          sending={isSending}
           models={models}
           selectedModel={selectedModel}
           onModelChange={onModelChange}

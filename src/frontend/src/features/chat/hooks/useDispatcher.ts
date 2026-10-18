@@ -1,6 +1,6 @@
 import { useChatEffortStore } from '../../../store/chatEffort';
 import type { ImageRef } from '../types/chat';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
 import { useSessionStore } from '../../../app/sessions/sessionStore';
@@ -268,8 +268,18 @@ function crewToGenerationData(result: unknown): GenerationCompleteData {
   return { agents, tasks };
 }
 
+/** Typed text quoted back, so a message that could not be sent can be copied. */
+const quoteBack = (text: string) => text.split('\n').map((line) => `> ${line}`).join('\n');
+
 export function useDispatcher(options: UseDispatcherOptions) {
   const isDispatchingRef = useRef(false);
+  // The guard as state: the composer holds a message typed while one is in
+  // flight (ChatInput `sending`) instead of clearing it into a dropped send.
+  const [dispatching, setDispatching] = useState(false);
+  const setGuard = useCallback((on: boolean) => {
+    isDispatchingRef.current = on;
+    setDispatching(on);
+  }, []);
   // Store last generated crew for "ec"/"execute crew" command
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
   // Hold options in a ref (updated each render) so sendMessage can be a STABLE
@@ -295,8 +305,15 @@ export function useDispatcher(options: UseDispatcherOptions) {
       images?: ImageRef[],
     ) => {
       const options = optionsRef.current;
-      if (isDispatchingRef.current) return;
-      isDispatchingRef.current = true;
+      if (isDispatchingRef.current) {
+        // The composer waits for the dispatch; a send that gets here anyway
+        // (Build instead, a library load) is shown back, never dropped.
+        useSessionStore.getState().addNotice(
+          `Your message was not sent because the previous one is still being sent. Please send it again when it has gone:\n\n${quoteBack(displayAs || message)}`,
+        );
+        return;
+      }
+      setGuard(true);
 
       // Capture the session ID NOW, before any async work, so all operations
       // target the correct session even if the user switches sessions during the
@@ -315,13 +332,12 @@ export function useDispatcher(options: UseDispatcherOptions) {
       try {
         originSessionId = await options.ensureSession();
       } catch (error) {
-        isDispatchingRef.current = false;
+        setGuard(false);
         const reason = error instanceof Error ? error.message : 'Unknown error';
         // The composer already cleared, so the text is quoted back to copy.
         // Shown, never stored: addMessage would create a session just to hold it.
-        const typed = (displayAs || message).split('\n').map((line) => `> ${line}`).join('\n');
         useSessionStore.getState().addNotice(
-          `Your message could not be sent because the conversation could not be created (${reason}). Please send it again:\n\n${typed}`,
+          `Your message could not be sent because the conversation could not be created (${reason}). Please send it again:\n\n${quoteBack(displayAs || message)}`,
         );
         return;
       }
@@ -335,7 +351,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       ) {
         options.addMessage('user', message);
         options.onExecuteGenerated(lastGeneratedRef.current);
-        isDispatchingRef.current = false;
+        setGuard(false);
         return;
       }
 
@@ -572,20 +588,21 @@ export function useDispatcher(options: UseDispatcherOptions) {
           });
         }
       } finally {
-        isDispatchingRef.current = false;
+        setGuard(false);
       }
     },
-    []
+    [setGuard]
   );
 
   const setLastGenerated = useCallback((data: GenerationCompleteData) => {
     lastGeneratedRef.current = data;
   }, []);
 
-  // Stable object identity (all members are stable): keeps ChatWorkspace's
-  // handleSend — which depends on the whole dispatcher — from churning per render.
+  // Stable object identity between dispatches (the callbacks are stable, and
+  // `dispatching` flips once at each end): ChatWorkspace re-renders on it, but
+  // not on every render.
   return useMemo(
-    () => ({ sendMessage, isDispatching: isDispatchingRef, setLastGenerated }),
-    [sendMessage, setLastGenerated],
+    () => ({ sendMessage, isDispatching: isDispatchingRef, dispatching, setLastGenerated }),
+    [sendMessage, dispatching, setLastGenerated],
   );
 }
