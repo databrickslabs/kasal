@@ -52,6 +52,13 @@ export interface CrewExecutionConfig {
    * generated (unsaved) crew.
    */
   crew_id?: string;
+  /**
+   * Sent with `crew_id`. A resume rebuilds a saved crew's run from the saved
+   * crew, which would drop what the chat applied to this run (memory off,
+   * Agent Bricks endpoints, the request added to the first task); a "chat"
+   * run resumes from its own stored definition instead.
+   */
+  trigger_type?: 'chat';
 }
 
 export interface FlowExecutionConfig {
@@ -259,7 +266,7 @@ export function buildCrewConfig(plan: {
     model: model || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,
-    ...(plan.id ? { crew_id: plan.id } : {}),
+    ...(plan.id ? { crew_id: plan.id, trigger_type: 'chat' as const } : {}),
   };
 }
 

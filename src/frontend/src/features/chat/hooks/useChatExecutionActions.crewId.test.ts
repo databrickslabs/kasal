@@ -6,6 +6,11 @@
  * crew_id, so the backend recorded none and none of those ever fired for a
  * crew run from the chat. The backend records `crew_id` from the request
  * (tests/unit/services/execution/test_execution_crew_link.py).
+ *
+ * It is marked trigger_type "chat": the chat changes the crew for this run
+ * (memory off, Agent Bricks endpoints, the request in the first task), so a
+ * resume must use the run's own snapshot rather than rebuild from the saved
+ * crew (checkpointing/resume_config.py).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
@@ -43,6 +48,15 @@ describe('chat runs of a saved crew', () => {
     expect(createExecution).toHaveBeenCalledOnce();
     expect(vi.mocked(createExecution).mock.calls[0][0]).toEqual(expect.objectContaining({ crew_id: CREW_ID }));
     expect(handleStartExecutionStream).toHaveBeenCalledWith('job-1', undefined);
+  });
+
+  it('marks the run as a chat run, so its resume keeps what the chat applied', async () => {
+    const { result } = renderHook(() => useChatExecutionActions({ handleStartExecutionStream: vi.fn() }));
+
+    await act(async () => { await result.current.handleExecuteCrew(plan); });
+
+    expect(vi.mocked(createExecution).mock.calls[0][0]).toEqual(
+      expect.objectContaining({ crew_id: CREW_ID, trigger_type: 'chat' }));
   });
 
   it('a plan with no saved crew carries no crew id', () => {

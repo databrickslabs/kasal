@@ -1548,11 +1548,9 @@ class ExecutionService:
                     f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
                 )
 
-            # The crew equivalent: which saved crew this run was built from, so a
-            # later resume can rebuild from the current definition instead of the
-            # snapshot stored above. Malformed ids are dropped rather than
-            # raised on — the run itself does not need the link, and failing a
-            # kickoff over a bad optional reference would be a worse trade.
+            # The crew equivalent: the saved crew this run was built from, which a
+            # resume rebuilds from unless trigger_type is "chat" (resume_config.py).
+            # A malformed id is dropped: failing a kickoff over it would be worse.
             crew_id = getattr(config, "crew_id", None)
             if execution_type != "flow" and crew_id:
                 import uuid as uuid_module
@@ -1569,6 +1567,8 @@ class ExecutionService:
                         f"crew_id {crew_id!r}; this run will resume from its "
                         f"stored inputs instead of the saved crew"
                     )
+            if getattr(config, "trigger_type", None):
+                execution_data["trigger_type"] = config.trigger_type
 
             # A flow resume has always created a new execution; it just never
             # recorded WHICH run it came from. Stamping the same link the crew

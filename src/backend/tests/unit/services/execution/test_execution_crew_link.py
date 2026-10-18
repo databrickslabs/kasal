@@ -60,6 +60,25 @@ class TestCrewLink:
         assert "crew_id" not in await created_execution_data(crew_config())
 
     @pytest.mark.asyncio
+    async def test_a_chat_run_is_recorded_as_one(self):
+        # What tells its resume to keep the snapshot (resume_config.py).
+        data = await created_execution_data(
+            crew_config(crew_id=CREW_ID, trigger_type="chat")
+        )
+        assert data["trigger_type"] == "chat"
+        assert data["crew_id"] == uuid.UUID(CREW_ID)
+
+    @pytest.mark.asyncio
+    async def test_a_run_without_a_trigger_type_keeps_the_default(self):
+        assert "trigger_type" not in await created_execution_data(crew_config())
+
+    def test_a_client_cannot_claim_another_trigger(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            crew_config(trigger_type="scheduled")
+
+    @pytest.mark.asyncio
     async def test_unparseable_crew_id_does_not_fail_the_run(self):
         # The link is optional context for a LATER resume. Refusing to start a
         # crew over a malformed optional reference would be a far worse trade.

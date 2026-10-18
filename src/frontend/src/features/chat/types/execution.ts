@@ -31,6 +31,8 @@ export interface ExecutionConfig {
   flow_config?: Record<string, unknown>;
   /** The saved crew a crew run was built from (see CrewExecutionConfig). */
   crew_id?: string;
+  /** A chat run: it resumes from its own stored definition (see CrewExecutionConfig). */
+  trigger_type?: 'chat';
 }
 
 /** What Auto resolved to, on a response to a request that asked for `auto`. */
