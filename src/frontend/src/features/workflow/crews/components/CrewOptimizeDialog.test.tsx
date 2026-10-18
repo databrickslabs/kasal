@@ -252,11 +252,13 @@ describe('judge lifecycle', () => {
     await screen.findByText('accuracy');
     await userEvent.click(screen.getByText('+ Custom criteria'));
     expect(screen.getAllByRole('combobox', { name: 'Judge model' })).toHaveLength(1);
-    await userEvent.type(screen.getByLabelText(/Criteria name/), 'freshness');
-    await userEvent.type(
-      screen.getByLabelText(/Evaluation criteria/),
-      'Listings must be recent.',
-    );
+    // One input event per field. `type` sent one per character (33 here), and
+    // each re-rendered the whole dialog, which is what ran past the timeout
+    // under a loaded machine.
+    await userEvent.click(screen.getByLabelText(/Criteria name/));
+    await userEvent.paste('freshness');
+    await userEvent.click(screen.getByLabelText(/Evaluation criteria/));
+    await userEvent.paste('Listings must be recent.');
     await userEvent.click(screen.getByRole('button', { name: 'Add criteria' }));
     await waitFor(() =>
       expect(service.createJudge).toHaveBeenCalledWith(
