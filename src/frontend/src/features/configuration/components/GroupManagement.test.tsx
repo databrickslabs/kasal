@@ -46,6 +46,7 @@ vi.mock('../../../api/groups/UserService', () => ({
   UserService: {
     getInstance: vi.fn(() => ({
       getUsers: mocks.mockGetUsers,
+      getAllUsers: mocks.mockGetUsers,
     })),
   },
 }));

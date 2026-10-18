@@ -44,6 +44,16 @@ export class UserService {
     return response.data;
   }
 
+  /** Every user, a page at a time: GET /users returns at most `pageSize` (1000 max) per call. */
+  async getAllUsers(pageSize = 1000): Promise<User[]> {
+    const users: User[] = [];
+    for (let skip = 0; ; skip += pageSize) {
+      const page = await this.getUsers('', skip, pageSize);
+      users.push(...page);
+      if (page.length < pageSize) return users;
+    }
+  }
+
   async provisionUser(email: string): Promise<User> {
     const response = await apiClient.post<User>('/users', { email });
     return response.data;

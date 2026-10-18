@@ -154,7 +154,8 @@ const GroupManagement: React.FC = () => {
     setLoadingUsers(true);
     try {
       const userService = UserService.getInstance();
-      const usersData = await userService.getUsers();
+      // All of them: the Personal Space check needs every user's id.
+      const usersData = await userService.getAllUsers();
       setAvailableUsers(usersData);
     } catch (error) {
       console.error('Error loading users:', error);
