@@ -46,6 +46,12 @@ export interface CrewExecutionConfig {
   memory_workspace_scope?: boolean;
   /** Direct Chat execution; the backend applies its execution defaults. */
   chat_mode_type?: string;
+  /**
+   * The saved crew this run was built from. The backend records it on the run,
+   * which is what completion rules and trigger chains match on. Absent for a
+   * generated (unsaved) crew.
+   */
+  crew_id?: string;
 }
 
 export interface FlowExecutionConfig {
@@ -86,6 +92,8 @@ function isTaskNode(node: FlowNode): boolean {
 }
 
 export function buildCrewConfig(plan: {
+  /** The saved crew's id, when the plan is one (catalog load, routed run). */
+  id?: string;
   name?: string;
   nodes: unknown[];
   edges: unknown[];
@@ -251,6 +259,7 @@ export function buildCrewConfig(plan: {
     model: model || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,
+    ...(plan.id ? { crew_id: plan.id } : {}),
   };
 }
 

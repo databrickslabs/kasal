@@ -29,6 +29,8 @@ export interface ExecutionConfig {
   edges?: unknown[];
   flow_id?: string;
   flow_config?: Record<string, unknown>;
+  /** The saved crew a crew run was built from (see CrewExecutionConfig). */
+  crew_id?: string;
 }
 
 /** What Auto resolved to, on a response to a request that asked for `auto`. */
