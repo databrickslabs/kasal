@@ -4,11 +4,10 @@ API endpoints for flow executions.
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, status
 
 from src.core.exceptions import BadRequestError, NotFoundError
-from src.dependencies.providers import GroupContextDep, get_db
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.flow_execution import FlowExecutionRequest
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
@@ -23,7 +22,7 @@ router = APIRouter(
 async def execute_flow(
     request: FlowExecutionRequest,
     group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db),
+    db: SessionDep,
 ) -> Dict[str, Any]:
     """
     Start a flow execution asynchronously.
@@ -65,7 +64,7 @@ async def execute_flow(
 async def get_flow_execution(
     execution_id: int,
     group_context: GroupContextDep,
-    db: AsyncSession = Depends(get_db),
+    db: SessionDep,
 ) -> Any:
     """
     Get details of a flow execution.
@@ -95,7 +94,7 @@ async def get_flow_execution(
 
 @router.get("/by-flow/{flow_id}", response_model=None)
 async def get_flow_executions_by_flow(
-    flow_id: str, group_context: GroupContextDep, db: AsyncSession = Depends(get_db)
+    flow_id: str, group_context: GroupContextDep, db: SessionDep
 ) -> Any:
     """
     Get all executions for a specific flow.
