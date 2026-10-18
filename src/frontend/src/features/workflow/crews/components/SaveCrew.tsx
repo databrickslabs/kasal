@@ -10,7 +10,7 @@ import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasSto
 import { useUnmountSafeTimeout } from '../../../../hooks/global/useUnmountSafeTimeout';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useAppStore as useChatAppStore } from '../../../chat/store/appStore';
-import { crewSaveTarget } from './crewSaveTarget';
+import { resolveCrewSaveTarget } from './crewSaveTarget';
 
 /** Refresh the chat-mode catalog rail so agent-builder saves show up there
  * immediately (the rail otherwise only reloads on mount/workspace change). */
@@ -357,9 +357,11 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
     }
 
     // A canvas bound to a catalog crew holds that crew's own rows: never POST
-    // a second crew over them (see crewSaveTarget).
+    // a second crew over them, unless that crew is gone (see crewSaveTarget).
     const tab = activeCanvasId ? useBuilderCanvasStore.getState().getCanvas(activeCanvasId) : null;
-    const target = crewSaveTarget(tab, name);
+    setIsSaving(true);
+    const target = await resolveCrewSaveTarget(tab, name);
+    setIsSaving(false);
     if (target.kind === 'refuse') {
       setError(target.message);
       pendingSave.current?.onError?.(new Error(target.message));
