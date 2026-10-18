@@ -2,7 +2,11 @@ import { useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import type { Agent } from '../../../../api/workflow/AgentService';
-import { showUploadedAgentsOnCanvas, wireKnowledgeFileIntoTasks } from '../utils/knowledgeUploadWiring';
+import {
+  showUploadedAgentsOnCanvas,
+  unwireKnowledgeFileFromTasks,
+  wireKnowledgeFileIntoTasks,
+} from '../utils/knowledgeUploadWiring';
 
 /**
  * The knowledge-upload callbacks, bound to the canvas on screen now.
@@ -12,6 +16,9 @@ import { showUploadedAgentsOnCanvas, wireKnowledgeFileIntoTasks } from '../utils
  * one the upload started on. If the user switches canvas before a file has
  * embedded, the workflow store holds another crew by then, and wiring the file
  * would attach it to the wrong tasks: skip it and say so.
+ *
+ * Detaching runs on the click, on the canvas on screen, and only touches tasks
+ * that search that exact path.
  */
 export function useKnowledgeUploadWiring() {
   const canvasId = useBuilderCanvasStore(state => state.activeCanvasId);
@@ -26,6 +33,7 @@ export function useKnowledgeUploadWiring() {
     return {
       onTasksUpdated: (path: string) => { if (stillOnCanvas(path)) wireKnowledgeFileIntoTasks(path); },
       onAgentsUpdated: (agents: Agent[]) => { if (stillOnCanvas()) showUploadedAgentsOnCanvas(agents); },
+      onTaskFileRemoved: (path: string) => unwireKnowledgeFileFromTasks(path),
     };
   }, [canvasId]);
 }

@@ -72,6 +72,39 @@ export function wireKnowledgeFileIntoTasks(uploadedFilePath: string): void {
   }));
 }
 
+/** The task's tools and tool_configs without `path` in its knowledge search; null when it has none. */
+function withoutKnowledgeFile(data: Node['data'], path: string): TaskToolPatch | null {
+  const toolConfigs: ToolConfigs = data.tool_configs || {};
+  const knowledge = toolConfigs[KNOWLEDGE_TOOL];
+  const filePaths = (knowledge?.file_paths as string[] | undefined) || [];
+  if (!filePaths.includes(path)) return null;
+  return {
+    tools: data.tools || [],
+    tool_configs: {
+      ...toolConfigs,
+      [KNOWLEDGE_TOOL]: { ...knowledge, file_paths: filePaths.filter(p => p !== path) },
+    },
+  };
+}
+
+/** A detached file is no longer searched: take its path out of every task that has it. */
+export function unwireKnowledgeFileFromTasks(removedFilePath: string): void {
+  if (!removedFilePath) return;
+  const patches = new Map<string, TaskToolPatch>();
+  for (const node of useWorkflowStore.getState().nodes) {
+    if (node.type !== 'taskNode') continue;
+    const patch = withoutKnowledgeFile(node.data, removedFilePath);
+    if (!patch) continue;
+    patches.set(node.id, patch);
+    if (node.data.taskId) persistTaskTools(node.data.taskId, patch);
+  }
+  if (patches.size === 0) return;
+  useWorkflowStore.getState().setNodes(current => current.map(node => {
+    const patch = patches.get(node.id);
+    return patch ? { ...node, data: { ...node.data, ...patch } } : node;
+  }));
+}
+
 const isAgentOfNode = (agent: Agent, node: Node) =>
   agent.id === node.data.agentId ||
   agent.id === node.data.id ||
