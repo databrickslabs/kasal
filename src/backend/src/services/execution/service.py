@@ -1927,6 +1927,9 @@ class ExecutionService:
         # rebuilds from the saved crew instead of freezing at the first one.
         if getattr(source, "crew_id", None):
             execution_data["crew_id"] = source.crew_id
+        # A chat run, and each resume of it, resumes from its snapshot.
+        if getattr(source, "trigger_type", None) == "chat":
+            execution_data["trigger_type"] = "chat"
 
         created = await ExecutionStatusService.create_execution(
             execution_data, group_context=group_context

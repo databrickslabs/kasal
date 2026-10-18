@@ -490,3 +490,35 @@ class TestTheResumeChain:
             await asyncio.sleep(0)
 
         assert "crew_id" not in create_exec.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_a_chat_run_stays_a_chat_run_down_the_chain(
+        self, service, group_context
+    ):
+        """A "chat" run resumes from its snapshot, not the saved crew. The
+        resumed run carries the mark, so its own resume does the same."""
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        row.crew_id = "crew-uuid"
+        row.trigger_type = "chat"
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p, create_p as create_exec, uuid_p:
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert create_exec.await_args.args[0]["trigger_type"] == "chat"
+
+    @pytest.mark.asyncio
+    async def test_other_trigger_types_are_not_carried(self, service, group_context):
+        """Who started the source run does not describe who resumed it."""
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        row.trigger_type = "scheduled"
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p, create_p as create_exec, uuid_p:
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert "trigger_type" not in create_exec.await_args.args[0]
