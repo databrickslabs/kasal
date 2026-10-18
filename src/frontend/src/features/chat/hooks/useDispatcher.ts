@@ -280,6 +280,17 @@ export function useDispatcher(options: UseDispatcherOptions) {
     isDispatchingRef.current = on;
     setDispatching(on);
   }, []);
+  // The dispatch holding the guard. Cancel aborts its request and releases the
+  // guard at once; the cancelled dispatch, when it unwinds, must not release a
+  // guard a later dispatch now holds.
+  const inFlightRef = useRef<AbortController | null>(null);
+  const cancelDispatch = useCallback(() => {
+    const inFlight = inFlightRef.current;
+    if (!inFlight) return;
+    inFlightRef.current = null;
+    inFlight.abort();
+    setGuard(false);
+  }, [setGuard]);
   // Store last generated crew for "ec"/"execute crew" command
   const lastGeneratedRef = useRef<GenerationCompleteData | null>(null);
   // Hold options in a ref (updated each render) so sendMessage can be a STABLE
@@ -314,6 +325,13 @@ export function useDispatcher(options: UseDispatcherOptions) {
         return;
       }
       setGuard(true);
+      const inFlight = new AbortController();
+      inFlightRef.current = inFlight;
+      const release = () => {
+        if (inFlightRef.current !== inFlight) return; // cancelled: already released
+        inFlightRef.current = null;
+        setGuard(false);
+      };
 
       // Capture the session ID NOW, before any async work, so all operations
       // target the correct session even if the user switches sessions during the
@@ -332,7 +350,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       try {
         originSessionId = await options.ensureSession();
       } catch (error) {
-        setGuard(false);
+        release();
         const reason = error instanceof Error ? error.message : 'Unknown error';
         // The composer already cleared, so the text is quoted back to copy.
         // Shown, never stored: addMessage would create a session just to hold it.
@@ -351,7 +369,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       ) {
         options.addMessage('user', message);
         options.onExecuteGenerated(lastGeneratedRef.current);
-        setGuard(false);
+        release();
         return;
       }
 
@@ -432,7 +450,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // backend default is true, so carrying it on every request would put
           // a field in the payload that never says anything.
           ...(skipContinuation ? { allow_continuation: false } : {}),
-        }, message);
+        }, message, inFlight.signal);
 
         // Auto's pick joins the run activity before the answer streams in.
         postModelSelection(result.model_selection, originSessionId);
@@ -576,19 +594,21 @@ export function useDispatcher(options: UseDispatcherOptions) {
       } catch (error) {
         const errMsg =
           error instanceof Error ? error.message : 'Unknown error';
+        // The request may still be answered on the server; this chat just
+        // stopped waiting for it.
+        const content = inFlight.signal.aborted
+          ? 'Stopped waiting for an answer. Send the message again if you still need one.'
+          : `Failed to process your request: ${errMsg}`;
         if (originSessionId) {
           options.updateMessageInTargetSession(originSessionId, assistantId, {
-            content: `Failed to process your request: ${errMsg}`,
+            content,
             isStreaming: false,
           });
         } else {
-          options.updateMessage(assistantId, {
-            content: `Failed to process your request: ${errMsg}`,
-            isStreaming: false,
-          });
+          options.updateMessage(assistantId, { content, isStreaming: false });
         }
       } finally {
-        setGuard(false);
+        release();
       }
     },
     [setGuard]
@@ -602,7 +622,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
   // `dispatching` flips once at each end): ChatWorkspace re-renders on it, but
   // not on every render.
   return useMemo(
-    () => ({ sendMessage, isDispatching: isDispatchingRef, dispatching, setLastGenerated }),
-    [sendMessage, dispatching, setLastGenerated],
+    () => ({ sendMessage, isDispatching: isDispatchingRef, dispatching, cancelDispatch, setLastGenerated }),
+    [sendMessage, dispatching, cancelDispatch, setLastGenerated],
   );
 }

@@ -29,9 +29,9 @@ interface UseChatCommandsArgs {
 }
 
 export function useChatCommands({ dispatcher, executionStream, handleRefine, lastGeneratedRef, lastUserPromptRef, setPendingRun }: UseChatCommandsArgs) {
-  // Only the stable callback: the dispatcher object also changes when a
+  // Only the stable members: the dispatcher object also changes when a
   // dispatch starts and ends, and handleSend must not churn with it.
-  const { sendMessage } = dispatcher;
+  const { sendMessage, isDispatching } = dispatcher;
 
   const addMessage = useSessionStore((s) => s.addMessage);
   const clearMessages = useSessionStore((s) => s.clearMessages);
@@ -264,6 +264,14 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
   // command under the hood but shows a friendly label in the transcript.
   const handleLoadFromLibrary = useCallback(
     async (kind: 'crew' | 'flow', name: string) => {
+      // The load is a dispatch, and one is in flight: say so here rather than
+      // open a new chat that the load can then never reach.
+      if (isDispatching.current) {
+        useSessionStore.getState().addNotice(
+          `Your last message is still being sent. Open the ${kind} "${name}" again once it has gone.`,
+        );
+        return;
+      }
       if (currentSessionId) {
         useExecutionStore.getState().saveSessionState(currentSessionId);
       }
@@ -271,7 +279,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
       useExecutionStore.getState().restoreSessionState(newId);
       void handleSend(`/load ${kind} ${name}`, { displayAs: `Open ${kind}: ${name}` });
     },
-    [handleSend, currentSessionId],
+    [handleSend, currentSessionId, isDispatching],
   );
 
   const handleStopExecution = useCallback(async () => {

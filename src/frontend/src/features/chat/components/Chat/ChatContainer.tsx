@@ -89,6 +89,8 @@ interface ChatContainerProps {
   isLoading: boolean;
   /** A message is still being sent: the composer keeps what is typed until it has gone. */
   isSending?: boolean;
+  /** Stop waiting for the message still being sent. */
+  onCancelSending?: () => void;
   isExecuting?: boolean;
   isGenerating?: boolean;
   executionContext?: ExecutionContext | null;
@@ -139,6 +141,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onStopExecution,
   isLoading,
   isSending,
+  onCancelSending,
   isExecuting,
   isGenerating,
   hideLiveTimeline,
@@ -158,6 +161,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusAfterSend = useRef(false);
+  // The typed text, shared by both composers: the first message swaps the
+  // landing composer for the conversation one, and a draft typed while it was
+  // still sending must survive the swap.
+  const draftRef = useRef('');
   // The first send replaces the landing composer with the conversation composer.
   useLayoutEffect(() => {
     if (!focusAfterSend.current) return;
@@ -357,6 +364,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               }}
               disabled={isLoading}
               sending={isSending}
+              onCancelSending={onCancelSending}
+              draftRef={draftRef}
               models={models}
               selectedModel={selectedModel}
               onModelChange={onModelChange}
@@ -522,6 +531,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           onSend={onSend}
           disabled={isLoading}
           sending={isSending}
+          onCancelSending={onCancelSending}
+          draftRef={draftRef}
           models={models}
           selectedModel={selectedModel}
           onModelChange={onModelChange}

@@ -34,11 +34,14 @@ const answer: DispatchResult = {
   service_called: null,
 };
 
-/** A dispatch that answers only when the test says so. */
+/** A dispatch that answers only when the test says so, and rejects when aborted, as axios does. */
 function holdDispatch(): () => Promise<void> {
   let finish!: () => void;
   mockedDispatch.mockImplementationOnce(
-    () => new Promise((resolve) => { finish = () => resolve(answer); }),
+    (_message, _model, _tools, _settings, _prompt, signal) => new Promise((resolve, reject) => {
+      finish = () => resolve(answer);
+      signal?.addEventListener('abort', () => reject(new Error('canceled')));
+    }),
   );
   return async () => { finish(); };
 }
@@ -81,5 +84,39 @@ describe('useDispatcher while a message is in flight', () => {
     expect(notice).toContain('> second question\n> with detail');
 
     await act(async () => { await finish(); await first; });
+  });
+
+  it('cancel aborts the request and frees the chat for the next message', async () => {
+    holdDispatch();
+    const opts = options();
+    const { result } = renderHook(() => useDispatcher(opts));
+
+    let first!: Promise<void>;
+    await act(async () => { first = result.current.sendMessage('first question'); });
+    const signal = mockedDispatch.mock.calls[0][5] as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    await act(async () => { result.current.cancelDispatch(); });
+    expect(signal.aborted).toBe(true);
+    expect(result.current.dispatching).toBe(false);
+    await act(async () => { await first; });
+    expect(opts.updateMessageInTargetSession).toHaveBeenCalledWith('session-1', expect.any(String),
+      expect.objectContaining({ content: expect.stringContaining('Stopped waiting') }));
+
+    // The next message is dispatched, and the cancelled one cannot release its guard.
+    const finishSecond = holdDispatch();
+    let second!: Promise<void>;
+    await act(async () => { second = result.current.sendMessage('second question'); });
+    expect(mockedDispatch).toHaveBeenCalledTimes(2);
+    expect(result.current.dispatching).toBe(true);
+    await act(async () => { await finishSecond(); await second; });
+    expect(result.current.dispatching).toBe(false);
+  });
+
+  it('a dispatch that fails frees the chat too', async () => {
+    mockedDispatch.mockRejectedValueOnce(new Error('Bad gateway'));
+    const { result } = renderHook(() => useDispatcher(options()));
+    await act(async () => { await result.current.sendMessage('first question'); });
+    expect(result.current.dispatching).toBe(false);
   });
 });

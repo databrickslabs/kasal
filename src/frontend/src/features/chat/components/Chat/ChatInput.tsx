@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { AssetService } from '../../../../api/chat/AssetService';
 import AssetThumb from './AssetThumb';
 import { isImageFile, measureImage } from '../../utils/imageFiles';
@@ -78,6 +78,14 @@ interface ChatInputProps {
   disabled?: boolean;
   /** The previous message is still being sent: Send waits, and what is typed stays. */
   sending?: boolean;
+  /** Stop waiting for the message that is still being sent. */
+  onCancelSending?: () => void;
+  /**
+   * The typed text, when the parent keeps it. ChatContainer swaps the landing
+   * composer for the conversation one when the first message appears; text
+   * typed meanwhile has to reach the second composer.
+   */
+  draftRef?: React.MutableRefObject<string>;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -151,6 +159,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   disabled = false,
   sending = false,
+  onCancelSending,
+  draftRef,
   models,
   selectedModel,
   onModelChange,
@@ -182,7 +192,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // slide-in motion, not the placement.
   const menuAnimClass =
     menuPlacement === 'down' ? 'animate-slide-down' : 'animate-slide-up';
-  const [value, setValue] = useState('');
+  const [value, setValueState] = useState(() => draftRef?.current ?? '');
+  // Written as it is set, not after the commit: a send that also posts a
+  // message swaps composers in the same render, and the new one must read ''.
+  const setValue = useCallback((next: string) => {
+    if (draftRef) draftRef.current = next;
+    setValueState(next);
+  }, [draftRef]);
   // Rotating landing placeholder: advance a hint index while idle (empty + blurred)
   // on the landing composer; freeze on focus/typing; honor reduced-motion.
   const [focused, setFocused] = useState(false);
@@ -363,7 +379,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       el.style.height = Math.min(el.scrollHeight, 160) + 'px';
       el.setSelectionRange(el.value.length, el.value.length);
     });
-  }, [prefill]);
+  }, [prefill, setValue]);
 
   // Rotate the landing placeholder through the deliverable hints while the composer
   // is idle (empty + blurred). Frozen on focus/typing and when reduced-motion is on.
@@ -730,9 +746,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
             }}
           />
         </div>
-        {sending && value.trim() && (
-          <div role="status" className="px-5 pb-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            Still sending your last message. This one stays here until it has gone.
+        {sending && (
+          <div role="status" className="flex items-center gap-2 px-5 pb-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            {value.trim()
+              ? 'Still sending your last message. This one stays here until it has gone.'
+              : 'Sending your last message…'}
+            {onCancelSending && (
+              <button type="button" onClick={onCancelSending} className="underline hover:opacity-80"
+                title="Stop waiting for an answer to your last message">
+                Cancel
+              </button>
+            )}
           </div>
         )}
 

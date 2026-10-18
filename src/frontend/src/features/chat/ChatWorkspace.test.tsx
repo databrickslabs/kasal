@@ -172,7 +172,7 @@ vi.mock('../../store/theme', () => ({ useThemeStore: storeHook(h.theme) }));
 vi.mock('./hooks/useDispatcher', () => ({
   useDispatcher: (opts: Record<string, (...a: unknown[]) => unknown>) => {
     Object.assign(h.dispatcherOpts, opts);
-    return { sendMessage: h.dispatcherSend, setLastGenerated: h.setLastGenerated };
+    return { sendMessage: h.dispatcherSend, setLastGenerated: h.setLastGenerated, isDispatching: { current: false } };
   },
 }));
 vi.mock('./hooks/useExecutionStream', () => ({
