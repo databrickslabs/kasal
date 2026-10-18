@@ -100,7 +100,7 @@ describe('Saving a canvas bound to a catalog crew', () => {
   });
 
   it('when the bound crew has been deleted, a new name creates a new crew', async () => {
-    vi.mocked(CrewService.getCrew).mockRejectedValue({ response: { status: 404 } });
+    vi.mocked(CrewService.getCrew).mockRejectedValue({ response: { status: 404, data: { detail: 'Crew not found' } } });
     vi.mocked(CrewService.saveCrew).mockResolvedValue({ id: 'crew-2', name: 'Research crew v2' } as never);
 
     saveAs('Research crew v2');
@@ -113,10 +113,13 @@ describe('Saving a canvas bound to a catalog crew', () => {
     await waitFor(() => expect(useBuilderCanvasStore.getState().getCanvas(tabId)?.savedCrewId).toBe('crew-2'));
   });
 
-  it('still refuses a new name when the bound crew cannot be checked', async () => {
+  it.each([
+    ['the check fails', { response: { status: 500 } }],
+    ['a 404 does not come from the crews API (a proxy, say)', { response: { status: 404, data: 'Not Found' } }],
+  ])('still refuses a new name when %s', async (_label, failure) => {
     const shown = vi.fn();
     window.addEventListener('saveError', shown);
-    vi.mocked(CrewService.getCrew).mockRejectedValue({ response: { status: 500 } });
+    vi.mocked(CrewService.getCrew).mockRejectedValue(failure);
 
     saveAs('Research crew v2');
 

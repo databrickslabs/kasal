@@ -29,11 +29,15 @@ export function crewSaveTarget(tab: SaveTab | null | undefined, name: string): C
   };
 }
 
+/** What GET /crews/{id} answers for a crew that does not exist (crews_router). */
+const CREW_NOT_FOUND = 'Crew not found';
+
 /**
  * `crewSaveTarget`, except that a bound crew which has since been deleted no
  * longer holds the canvas: with no crew left to share the rows, a new name
- * creates a new crew. Only a definite 404 counts as deleted; when the check
- * itself fails, the refusal stands.
+ * creates a new crew. Only the API's own "Crew not found" counts as deleted (a
+ * bare 404 from a proxy does not); when the check fails otherwise, the refusal
+ * stands.
  */
 export async function resolveCrewSaveTarget(
   tab: SaveTab | null | undefined,
@@ -45,7 +49,7 @@ export async function resolveCrewSaveTarget(
     await CrewService.getCrew(target.crewId);
     return target;
   } catch (error) {
-    const status = (error as { response?: { status?: number } })?.response?.status;
-    return status === 404 ? { kind: 'create' } : target;
+    const response = (error as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
+    return response?.status === 404 && response.data?.detail === CREW_NOT_FOUND ? { kind: 'create' } : target;
   }
 }
