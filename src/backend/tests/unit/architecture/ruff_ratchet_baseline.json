@@ -402,7 +402,7 @@
   "src/services/execution/runtime/guardrail.py::BLE001": 1,
   "src/services/execution/service.py::B904": 4,
   "src/services/execution/service.py::BLE001": 14,
-  "src/services/execution/service.py::G004": 101,
+  "src/services/execution/service.py::G004": 100,
   "src/services/execution/service.py::S110": 1,
   "src/services/execution/service.py::TRY400": 12,
   "src/services/execution/status.py::BLE001": 5,

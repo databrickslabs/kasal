@@ -131,8 +131,11 @@ async def build_crew_resume_config(
     identities come from, so it reports the true number in its own log line
     rather than this guessing.
     """
+    # Rebuilt in the source run's own workspace, never elsewhere in the scope.
+    from src.services.catalog.run_lookup import scope_to_run
+
     agents_yaml, tasks_yaml, rebuilt = await _rebuild_crew_definition(
-        session, source, stored_inputs, group_context
+        session, source, stored_inputs, scope_to_run(group_context, source)
     )
 
     if not agents_yaml or not tasks_yaml:
@@ -205,8 +208,10 @@ async def build_flow_resume_config(
 
     restored = sum(1 for u in units if resume_at is None or int(u["key"]) < resume_at)
 
+    from src.services.catalog.run_lookup import scope_to_run
+
     definition = await _rebuild_flow_definition(
-        session, source, stored_inputs, group_context
+        session, source, stored_inputs, scope_to_run(group_context, source)
     )
 
     return (

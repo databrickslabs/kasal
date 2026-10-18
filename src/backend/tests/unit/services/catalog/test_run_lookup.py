@@ -7,6 +7,7 @@ workspace reads exactly like an absent one, and the warning names the id only.
 
 import logging
 import uuid
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -144,6 +145,30 @@ async def test_a_crew_id_given_as_a_string_still_resolves(session):
         CrewService(session), str(IDS[(A, "crew")]), GroupContext(group_ids=[A])
     )
     assert row is not None and row.id == IDS[(A, "crew")]
+
+
+@pytest.mark.asyncio
+async def test_a_new_run_records_only_a_crew_of_its_workspace(session):
+    from src.services.catalog.run_lookup import crew_id_to_record
+
+    in_a = GroupContext(group_ids=[A])
+    own, other = IDS[(A, "crew")], IDS[(B, "crew")]
+    assert await crew_id_to_record(session, str(own), in_a) == own
+    assert await crew_id_to_record(session, other, in_a) is None
+    assert await crew_id_to_record(session, "not-a-uuid", in_a) is None
+    assert await crew_id_to_record(session, own, GroupContext(group_ids=[])) is None
+
+
+def test_a_context_narrows_to_its_runs_group_never_beyond_it():
+    from src.services.catalog.run_lookup import scope_to_run
+
+    both = GroupContext(group_ids=[A, B], group_email="ab@example.com")
+    narrowed = scope_to_run(both, SimpleNamespace(group_id=B))
+    assert (narrowed.group_ids, narrowed.group_email) == ([B], "ab@example.com")
+    # A group outside the caller's scope, or none, leaves the context as is.
+    assert scope_to_run(both, SimpleNamespace(group_id="c")) is both
+    assert scope_to_run(both, SimpleNamespace(group_id=None)) is both
+    assert scope_to_run(None, SimpleNamespace(group_id=B)) is None
 
 
 def test_run_group_ids_drops_empty_entries():

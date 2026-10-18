@@ -460,6 +460,26 @@ class TestTheResumeChain:
         assert create_exec.await_args.args[0]["crew_id"] == "crew-uuid"
 
     @pytest.mark.asyncio
+    async def test_a_multi_group_resume_is_filed_in_the_runs_own_group(self, service):
+        """With no workspace selected the context spans every workspace the
+        user is in; the resumed run belongs to the source run's workspace."""
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        row.group_id = "group-2"
+        both = GroupContext(
+            group_ids=["group-1", "group-2"], group_email="user@example.com"
+        )
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p as run_bg, create_p as create_exec, uuid_p:
+            await service.resume_execution("job-1", both)
+            await asyncio.sleep(0)
+
+        assert create_exec.await_args.kwargs["group_context"].group_ids == ["group-2"]
+        assert run_bg.call_args.kwargs["group_context"].group_ids == ["group-2"]
+        assert ExecutionService.executions[NEW_JOB_ID]["group_id"] == "group-2"
+
+    @pytest.mark.asyncio
     async def test_a_run_with_no_crew_link_records_none(self, service, group_context):
         row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
         patcher, _ = patch_repo(row)

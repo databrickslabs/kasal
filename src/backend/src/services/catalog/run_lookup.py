@@ -17,9 +17,12 @@ what "not found" means for its run: skip the stored settings, or fall back to
 data the run already owns.
 """
 
+import dataclasses
 import logging
 import uuid
 from typing import Awaitable, Callable, List, Optional, TypeVar, Union
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.agent import Agent
 from src.models.crew import Crew
@@ -52,6 +55,27 @@ def require_run_workspace(group_context: Optional[GroupContext]) -> List[str]:
     if not group_ids:
         raise ValueError("This run has no workspace (no group ids); not started")
     return group_ids
+
+
+def scope_to_run(
+    group_context: Optional[GroupContext], run: object
+) -> Optional[GroupContext]:
+    """The context narrowed to an existing run's own group.
+
+    With no workspace selected a context spans every workspace the user is in.
+    Work done FOR one run (a resume, its checkpoint preview, the resumed run's
+    record) belongs to that run's workspace, so its crew, flow, agents and
+    tasks are read there and nowhere else. Only a group already in the
+    context's scope is taken; otherwise the context is returned unchanged.
+    """
+    group_id = getattr(run, "group_id", None)
+    if (
+        not isinstance(group_context, GroupContext)
+        or not isinstance(group_id, str)
+        or group_id not in run_group_ids(group_context)
+    ):
+        return group_context
+    return dataclasses.replace(group_context, group_ids=[group_id])
 
 
 def _miss_level(entity_id: object) -> int:
@@ -136,3 +160,30 @@ async def crew_for_run(
         log.debug("Crew %s not found in this run's workspace", crew_id)
         return None
     return await _scoped_read("Crew", key, service.get_by_group, group_context, log)
+
+
+async def crew_id_to_record(
+    session: Optional[AsyncSession],
+    crew_id: Union[uuid.UUID, str, None],
+    group_context: Optional[GroupContext],
+) -> Optional[uuid.UUID]:
+    """The saved-crew link a new run records: its crew's id, or None.
+
+    The id comes with the request; the run is filed in the context's current
+    workspace, and a resume later rebuilds from this link. So it is recorded
+    only for a crew of that workspace. Anything else (another workspace's crew,
+    a deleted one, an id that is not a UUID) records None, with a warning.
+    Without a session the read is routed.
+    """
+    if session is None:
+        from src.db.session import routed_scoped_session
+
+        async with routed_scoped_session() as routed:
+            return await crew_id_to_record(routed, crew_id, group_context)
+    crew = await crew_for_run(CrewService(session), crew_id, group_context)
+    if crew is None:
+        logger.warning(
+            "Run records no crew link: crew %s is not in its workspace", crew_id
+        )
+        return None
+    return crew.id
