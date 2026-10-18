@@ -188,6 +188,39 @@ async def test_a_save_with_no_waiting_gate_is_replayed_nowhere(gate_db):
     assert await _pass("G1", "crew_a", A_OUTPUT) == A_OUTPUT
 
 
+@pytest.mark.asyncio
+async def test_the_stamp_reads_only_approvals_of_the_runs_own_group(gate_db):
+    """A caller with two groups in scope saves on a run of one of them. The
+    waiting gate is that run's group's approval; a row for the same job id in
+    the caller's other group is not the run's and is not counted."""
+    from src.services.execution.history import ExecutionHistoryService
+
+    g1 = await _raise_approval(gate_db, "G1", 1)
+    async with _session(gate_db) as s:
+        s.add(
+            HITLApproval(
+                execution_id=JOB,
+                flow_id="flow-other",
+                gate_node_id="G9",
+                crew_sequence=1,
+                gate_config={},
+                group_id="group_b",
+                status=HITLApprovalStatus.PENDING,
+            )
+        )
+        await s.commit()
+
+    async with _session(gate_db) as s:
+        result = await ExecutionHistoryService(s).update_result(
+            JOB, G1_EDIT, group_ids=["group_b", GROUP]
+        )
+        await s.commit()
+    assert result["success"]
+
+    stored = await _checkpoint(gate_db)
+    assert stored["edited_config_gate"] == {"approval_id": g1, "gate_node_id": "G1"}
+
+
 def test_edit_for_gate_needs_a_matching_stamp():
     data = {
         "edited_config": {"k": 1},
