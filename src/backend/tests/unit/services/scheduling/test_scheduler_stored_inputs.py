@@ -24,7 +24,9 @@ def _config():
                 "role": "Writer",
                 "llm": "databricks-llama",
                 "max_tokens": 4096,
-                "tool_configs": {"PowerBITool": {"client_secret": SECRET}},
+                "tool_configs": {
+                    "PowerBITool": {"client_secret": SECRET, "token_ttl": 3600}
+                },
             }
         },
         tasks_yaml={"t": {"description": "Write the report", "agent": "writer"}},
@@ -69,9 +71,10 @@ async def test_the_record_keeps_counts_and_masks_secrets():
     stored = executions.create_run_record.await_args.kwargs["inputs"]
     writer = stored["agents_yaml"]["writer"]
     assert writer["max_tokens"] == 4096
-    assert writer["tool_configs"]["PowerBITool"]["client_secret"] == (
-        REDACTED_PLACEHOLDER
-    )
+    pbi = writer["tool_configs"]["PowerBITool"]
+    assert pbi["client_secret"] == REDACTED_PLACEHOLDER
+    # A number under a secret-looking key is not a secret: kept, not masked.
+    assert pbi["token_ttl"] == 3600
     assert stored["inputs"] == {
         "topic": "sales",
         "max_tokens": "4000",
@@ -80,7 +83,5 @@ async def test_the_record_keeps_counts_and_masks_secrets():
 
     handed = executions.run_crew_execution.await_args.kwargs["config"]
     assert handed.inputs["api_key"] == SECRET
-    assert (
-        handed.agents_yaml["writer"]["tool_configs"]["PowerBITool"]["client_secret"]
-        == SECRET
-    )
+    handed_pbi = handed.agents_yaml["writer"]["tool_configs"]["PowerBITool"]
+    assert handed_pbi == {"client_secret": SECRET, "token_ttl": 3600}

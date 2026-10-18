@@ -379,8 +379,11 @@ class TriggerQueueConsumerService:
         event key) keeps full control — nothing is appended for that key.
 
         The description is stored with the run and shown in its trace, so a
-        secret (by ``is_sensitive_key``) is masked in the block. The run still
-        gets the real value through ``config.inputs``.
+        secret is masked in the block. Masking is by key name only
+        (``is_sensitive_key``, at any depth); a secret value under an ordinary
+        key is shown as it is. A secret input that no template references
+        therefore reaches no prompt at all: the run still receives the real
+        value in ``config.inputs``, but no task text carries it.
         """
         if execution_type != "crew" or not config.tasks_yaml or not config.inputs:
             return
