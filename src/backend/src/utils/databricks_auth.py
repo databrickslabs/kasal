@@ -295,15 +295,14 @@ def _obo_cache_get(token_hash: str) -> Optional[Tuple[Optional[str]]]:
 
 def _obo_cache_put(token_hash: str, identity: Optional[str]) -> None:
     if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
-        now = time.time()
-        for key in [k for k, (_, exp) in _OBO_VALIDATION_CACHE.items() if exp <= now]:
+        # Scan a copy: request, LLM and telemetry threads write the live dict.
+        now, snapshot = time.time(), _OBO_VALIDATION_CACHE.copy()
+        for key in [k for k, (_, exp) in snapshot.items() if exp <= now]:
             _OBO_VALIDATION_CACHE.pop(key, None)
         if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
             _OBO_VALIDATION_CACHE.clear()
-    _OBO_VALIDATION_CACHE[token_hash] = (
-        identity,
-        time.time() + _OBO_VALIDATION_TTL_SECONDS,
-    )
+    expires_at = time.time() + _OBO_VALIDATION_TTL_SECONDS
+    _OBO_VALIDATION_CACHE[token_hash] = (identity, expires_at)
 
 
 # PAT lookup cache (PERF-005). Without it, every LLM completion paid a fresh

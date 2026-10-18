@@ -80,7 +80,7 @@
   "src/backend/src/services/tools/tool_factory.py": 2122,
   "src/backend/src/services/tools/uc_metric_view_generator_tool.py": 1704,
   "src/backend/src/services/trace/service.py": 827,
-  "src/backend/src/utils/databricks_auth.py": 1550,
+  "src/backend/src/utils/databricks_auth.py": 1549,
   "src/backend/tests/integration/test_chat_history_workflow.py": 1449,
   "src/backend/tests/unit/api/test_execution_trace_router.py": 879,
   "src/backend/tests/unit/api/test_group_router.py": 802,
