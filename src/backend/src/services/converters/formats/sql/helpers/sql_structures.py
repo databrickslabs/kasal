@@ -42,25 +42,13 @@ class SQLStructureExpander:
     def process_definition(
         self, definition: KPIDefinition, options: Optional[SQLTranslationOptions] = None
     ) -> SQLDefinition:
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write("=== SQL STRUCTURE PROCESSOR CALLED ===\n")
-            if definition.structures:
-                f.write(f"Found {len(definition.structures)} structures\n")
-                for name, struct in definition.structures.items():
-                    f.write(f"Structure {name}: {len(struct.filters)} filters\n")
-            if definition.kpis:
-                f.write(f"Found {len(definition.kpis)} KBIs\n")
-                for kpi in definition.kpis:
-                    f.write(
-                        f"KPI {kpi.technical_name}: apply_structures={kpi.apply_structures}\n"
-                    )
         """
         Process a KPI definition and expand KBIs with applied structures for SQL
-        
+
         Args:
             definition: Original KPI definition with structures
             options: SQL translation options
-            
+
         Returns:
             Expanded SQL definition with combined KBI+structure measures
         """
@@ -230,17 +218,9 @@ class SQLStructureExpander:
         sql_structures = {}
 
         for struct_name, structure in structures.items():
-            # Add logging to a file to debug what's happening
-            with open("/tmp/sql_debug.log", "a") as f:
-                f.write(f"Processing structure: {struct_name}\n")
-                f.write(f"Structure filters: {structure.filters}\n")
-
             converted_filters = self._convert_filters_to_sql(
                 structure.filters, definition
             )
-
-            with open("/tmp/sql_debug.log", "a") as f:
-                f.write(f"Converted structure filters: {converted_filters}\n")
 
             sql_structure = SQLStructure(
                 description=structure.description,
@@ -256,9 +236,12 @@ class SQLStructureExpander:
                 )
 
             sql_structures[struct_name] = sql_structure
-
-            with open("/tmp/sql_debug.log", "a") as f:
-                f.write(f"Final SQL structure filters: {sql_structure.filters}\n")
+            self.logger.debug(
+                "structure %s: filters %s -> %s",
+                struct_name,
+                structure.filters,
+                sql_structure.filters,
+            )
 
         return sql_structures
 
@@ -362,11 +345,6 @@ class SQLStructureExpander:
     ) -> List[str]:
         """Convert SAP BW style filters to SQL WHERE conditions"""
         from .sql_aggregations import SQLFilterProcessor
-
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write(
-                f"_convert_filters_to_sql: definition.filters = {definition.filters}\n"
-            )
 
         processor = SQLFilterProcessor(self.dialect)
         return processor.process_filters(
@@ -509,17 +487,11 @@ class SQLStructureExpander:
     ) -> KPI:
         """Create a combined KPI that incorporates the SQL structure"""
 
-        # Debug logging
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write(f"Creating combined KBI: {combined_name}\n")
-            f.write(f"Base KBI filters: {base_kbi.filters}\n")
-            f.write(f"SQL structure filters: {sql_structure.filters}\n")
-
         # Combine filters from base KBI and SQL structure
         combined_filters = list(base_kbi.filters) + list(sql_structure.filters)
-
-        with open("/tmp/sql_debug.log", "a") as f:
-            f.write(f"Combined filters: {combined_filters}\n")
+        self.logger.debug(
+            "combined KBI %s: filters %s", combined_name, combined_filters
+        )
 
         # Determine aggregation type and formula
         if sql_structure.formula:

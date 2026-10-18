@@ -3,10 +3,13 @@ SQL Aggregation Builders for YAML2DAX SQL Translation
 Provides comprehensive SQL aggregation support for various SQL dialects
 """
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
 from ..models import SQLAggregationType, SQLDialect
+
+logger = logging.getLogger(__name__)
 
 
 class SQLAggregationBuilder:
@@ -493,28 +496,20 @@ class SQLFilterProcessor:
             try:
                 # Handle special $query_filter expansion
                 if filter_condition.strip() == "$query_filter":
-                    with open("/tmp/sql_debug.log", "a") as f:
-                        f.write(
-                            f"SQLFilterProcessor: Found $query_filter, definition_filters = {definition_filters}\n"
-                        )
-
                     # Expand $query_filter into individual filter conditions
                     if "query_filter" in definition_filters:
                         query_filters = definition_filters["query_filter"]
-                        with open("/tmp/sql_debug.log", "a") as f:
-                            f.write(
-                                f"SQLFilterProcessor: Expanding query_filters = {query_filters}\n"
-                            )
-
                         if isinstance(query_filters, dict):
                             for filter_name, filter_value in query_filters.items():
                                 processed = self._process_single_filter(
                                     filter_value, variables
                                 )
-                                with open("/tmp/sql_debug.log", "a") as f:
-                                    f.write(
-                                        f"SQLFilterProcessor: Processed {filter_name}: {filter_value} -> {processed}\n"
-                                    )
+                                logger.debug(
+                                    "query filter %s: %s -> %s",
+                                    filter_name,
+                                    filter_value,
+                                    processed,
+                                )
                                 if processed:
                                     processed_filters.append(processed)
                         else:
@@ -524,10 +519,9 @@ class SQLFilterProcessor:
                             if processed:
                                 processed_filters.append(processed)
                     else:
-                        with open("/tmp/sql_debug.log", "a") as f:
-                            f.write(
-                                "SQLFilterProcessor: No 'query_filter' found in definition_filters\n"
-                            )
+                        logger.debug(
+                            "$query_filter used, but the definition has no query_filter"
+                        )
                     continue
 
                 processed = self._process_single_filter(filter_condition, variables)
