@@ -106,7 +106,7 @@ class TestResolveViaLetEvaluation:
 
 class TestExtractSourceTableParametricIntegration:
     """extract_source_table falls back to the let-evaluator when a source's
-    physical table is BUILT from parameters (nehme's literal extractor can't)."""
+    physical table is BUILT from parameters (the literal extractor can't)."""
 
     _M = (
         'let Object = "hub_product_" & Table_Version, '

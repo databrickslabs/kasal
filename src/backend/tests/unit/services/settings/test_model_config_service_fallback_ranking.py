@@ -296,14 +296,14 @@ class TestLocalFallbackConfig:
         # The endpoint is the model's own setting (Configuration → Models);
         # KAT_BASE_URL is no longer read.
         model = mk_model("KAT-Coder", provider="custom")
-        model.params = {"api_base": "http://10.0.0.61:8082/v1"}
+        model.params = {"api_base": "http://kat.example.com:8082/v1"}
         svc = self._svc([model])
         monkeypatch.setenv("KAT_BASE_URL", "http://ignored.example.com/v1")
         probe = AsyncMock(return_value=reachable)
         monkeypatch.setattr("src.services.settings.models._endpoint_reachable", probe)
         _patch_keys(monkeypatch, None)
         out = await svc._local_fallback_config()
-        probe.assert_awaited_once_with("http://10.0.0.61:8082/v1")
+        probe.assert_awaited_once_with("http://kat.example.com:8082/v1")
         if reachable:
             assert out["key"] == "KAT-Coder"
             assert out["provider"] == "custom"

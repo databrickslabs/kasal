@@ -182,7 +182,7 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
     ``expressions`` (optional): the model's ``{name: raw_M}`` named/shared expressions.
     When given, a source whose physical table is BUILT from parameters at model-open
     time — ``FromClause = Catalog & "." & Db & "." & Object`` inside a ``let`` block —
-    is resolved via ``mquery_let_evaluator`` (which nehme's literal-FROM extractor and
+    is resolved via ``mquery_let_evaluator`` (which the literal-FROM extractor and
     ``PbiParameterResolver`` can't handle, since the table NAME itself is parametric).
     Fail-open: falls through to the literal-extraction logic below on any miss.
     """
