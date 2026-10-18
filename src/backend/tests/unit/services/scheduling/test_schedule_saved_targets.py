@@ -33,6 +33,7 @@ from src.repositories.event_subscription_repository import (
 from src.repositories.trigger_queue_repository import TriggerQueueRepository
 from src.schemas.execution import CrewConfig
 from src.schemas.schedule import ScheduleCreateFromExecution
+from src.services.execution.stored_inputs import mask_run_inputs
 from src.services.scheduling import saved_targets
 from src.services.scheduling.scheduler import SchedulerService
 from src.services.triggers.emit_service import EmitService
@@ -189,6 +190,21 @@ class TestScheduleFromARun:
                 await _create(
                     _service(_run(crew_id=CREW_ID, inputs=inputs)), _request()
                 )
+
+    @pytest.mark.asyncio
+    async def test_a_run_whose_inputs_hold_a_count_can_be_scheduled(self):
+        # Stored the way every launch path stores a run: through the masker.
+        stored = mask_run_inputs(
+            {
+                "agents_yaml": SAVED_AGENTS,
+                "tasks_yaml": SAVED_TASKS,
+                "inputs": {"topic": "sales", "max_tokens": "4000"},
+            }
+        )
+        service = _service(_run(crew_id=CREW_ID, inputs=stored))
+        with patch(BUILD, new=AsyncMock(return_value=(SAVED_AGENTS, SAVED_TASKS))):
+            created = await _create(service, _request())
+        assert created["inputs"] == {"topic": "sales", "max_tokens": "4000"}
 
     @pytest.mark.asyncio
     async def test_a_saved_flow_run_is_scheduled_by_reference(self):
