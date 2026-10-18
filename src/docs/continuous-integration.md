@@ -9,6 +9,7 @@ The GitHub Actions workflows in `.github/workflows/`, what each job checks, whic
 - [Run the checks locally](#run-the-checks-locally)
 - [Ratchets](#ratchets)
 - [Report-only checks and their follow-ups](#report-only-checks-and-their-follow-ups)
+- [Releasing a version](#releasing-a-version)
 
 ## Workflows at a glance
 
@@ -132,6 +133,16 @@ These checks run but cannot fail a pull request yet. Each workflow file records 
 - **Frontend coverage**: set the per-path floors in `vitest.config.ts` from the first report, remove `VITEST_COVERAGE_REPORT_ONLY`, then drop `continue-on-error`.
 - **`alembic upgrade head` from empty**: the migration history has several roots and no baseline revision, so it cannot build a database from nothing. Add a baseline (or squash), then make the step gate and add `alembic check`.
 - **Full-history secret scan**: triage the historical hits, rotate anything real, record the rest in a `.gitleaksignore`, then let the weekly scan gate.
+
+## Releasing a version
+
+Kasal has one version number, `VERSION` in `src/backend/src/config/settings.py`. The app reports it as the version on every Databricks User-Agent and in the OpenAPI document. Keep it plain `X.Y.Z`: the Databricks SDK rejects anything else when it builds the User-Agent, and the app would fail to start.
+
+To release:
+
+1. Set the new number in `settings.VERSION`, in both `pyproject.toml` files (the repository root and `src/backend`), and in `src/frontend/package.json` and `package-lock.json`. Then run `uv lock` in `src/backend`. `tests/unit/config/test_version.py` fails while any of them disagree.
+2. Merge, then tag the release commit `v<version>`.
+3. Run `.github/scripts/create_marketplace_tag.sh <version> <branch>` for the Marketplace tag. It refuses a number that differs from `settings.VERSION` on that branch.
 
 ## See also
 

@@ -108,6 +108,17 @@ else
     exit 1
 fi
 
+# The tag must carry the number the code reports (settings.VERSION, the version
+# on every Databricks User-Agent), or the two drift apart again.
+CODE_VERSION=$(git show "$SOURCE_REF:src/backend/src/config/settings.py" \
+    | sed -nE 's/^ *VERSION: ClassVar\[str\] = "([^"]+)".*/\1/p')
+if [ "$CODE_VERSION" != "$VERSION" ]; then
+    echo "❌ Error: $SOURCE_REF reports version '${CODE_VERSION:-none}' in settings.VERSION, not '$VERSION'"
+    echo "Bump settings.VERSION, both pyproject.toml files and src/frontend/package.json first."
+    exit 1
+fi
+echo "✅ Version $VERSION matches settings.VERSION on $SOURCE_REF"
+
 # Check if marketplace tag already exists
 if git rev-parse "$MARKETPLACE_TAG" >/dev/null 2>&1; then
     echo "⚠️  Warning: Tag $MARKETPLACE_TAG already exists locally"

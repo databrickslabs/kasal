@@ -1,6 +1,6 @@
 [project]
 name = "kasal-backend"
-version = "0.1.0"
+version = "2.0.0"
 description = "Kasal Backend - AI Agent Workflow Orchestration Platform"
 requires-python = ">=3.11,<3.12"
 dependencies = [

@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: ClassVar[str] = (
         "A modern backend API for the Kasal application"
     )
-    VERSION: ClassVar[str] = "0.1.0"
+    # The release number, plain X.Y.Z (the Databricks SDK's User-Agent rejects
+    # anything else). Bump it with both pyproject.toml files and the frontend
+    # package.json; tests/unit/config/test_version.py checks that they agree.
+    VERSION: ClassVar[str] = "2.0.0"
     API_V1_STR: ClassVar[str] = "/api/v1"
 
     # The localhost dev-server origins are the default OUTSIDE Databricks Apps

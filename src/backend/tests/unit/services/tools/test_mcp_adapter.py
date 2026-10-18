@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from src.config.settings import settings
 from src.core.exceptions import MCPConnectionError
 from src.services.tools.mcp_adapter import (
     MCPAdapter,
@@ -15,6 +16,8 @@ from src.services.tools.mcp_adapter import (
     _is_http_auth_error,
     _log_exception_group,
 )
+
+MCP_UA = f"kasal_mcp/{settings.VERSION}"
 
 
 class TestMCPAdapter:
@@ -161,10 +164,7 @@ class TestMCPAdapter:
 
                 mock_connect.assert_called_once_with(
                     adapter.server_url,
-                    headers={
-                        "Authorization": "Bearer token",
-                        "User-Agent": "kasal_mcp/0.1.0",
-                    },
+                    headers={"Authorization": "Bearer token", "User-Agent": MCP_UA},
                     timeout=30,
                 )
                 mock_session.initialize.assert_called_once()
@@ -602,7 +602,7 @@ class TestMCPAdapterRetry:
                     adapter.server_url,
                     headers={
                         "Authorization": "Bearer test-token",
-                        "User-Agent": "kasal_mcp/0.1.0",
+                        "User-Agent": MCP_UA,
                     },
                     timeout=5,
                 )

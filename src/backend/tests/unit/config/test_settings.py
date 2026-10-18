@@ -34,7 +34,6 @@ class TestSettings:
             settings.PROJECT_DESCRIPTION
             == "A modern backend API for the Kasal application"
         )
-        assert settings.VERSION == "0.1.0"
         assert settings.API_V1_STR == "/api/v1"
         assert settings.CORS_ORIGINS == [
             "http://localhost:3000",
