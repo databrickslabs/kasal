@@ -21,6 +21,7 @@ Element.prototype.scrollIntoView = vi.fn();
 const upload: {
   onTasksUpdated?: (path: string) => void | Promise<void>;
   onAgentsUpdated?: (agents: Agent[]) => void;
+  onTaskFileRemoved?: (path: string) => void;
 } = {};
 
 vi.mock('./KnowledgeFileUpload', () => ({
@@ -28,6 +29,7 @@ vi.mock('./KnowledgeFileUpload', () => ({
     // Keep the FIRST render's callbacks, as the upload loop does.
     upload.onTasksUpdated ??= props.onTasksUpdated;
     upload.onAgentsUpdated ??= props.onAgentsUpdated;
+    upload.onTaskFileRemoved ??= props.onTaskFileRemoved;
     return null;
   },
 }));
@@ -80,6 +82,7 @@ describe('WorkflowChat knowledge upload wiring', () => {
     vi.clearAllMocks();
     delete upload.onTasksUpdated;
     delete upload.onAgentsUpdated;
+    delete upload.onTaskFileRemoved;
     useWorkflowStore.setState({ nodes: [agentNode, taskNode], edges: [] });
     useBuilderCanvasStore.setState({ activeCanvasId: 'canvas-1' });
   });
@@ -139,5 +142,36 @@ describe('WorkflowChat knowledge upload wiring', () => {
     await waitFor(() => expect(TaskService.updateTask).toHaveBeenCalledTimes(2));
     expect(lastTaskWrite()?.tool_configs?.[KNOWLEDGE]).toEqual(
       expect.objectContaining({ file_paths: ['uploads/g/s/first.pdf', 'uploads/g/s/second.pdf'] }));
+  });
+
+  it('detaching a file takes it out of the task\'s knowledge search', async () => {
+    renderChat();
+    await upload.onTasksUpdated!('uploads/g/s/first.pdf');
+    await upload.onTasksUpdated!('uploads/g/s/second.pdf');
+
+    expect(upload.onTaskFileRemoved).toBeTypeOf('function');
+    upload.onTaskFileRemoved!('uploads/g/s/first.pdf');
+
+    const config = (liveTask().data.tool_configs as Record<string, { file_paths?: string[] }>)[KNOWLEDGE];
+    expect(config.file_paths).toEqual(['uploads/g/s/second.pdf']);
+    expect(liveTask().data.tool_configs.SerperDevTool).toEqual({ n_results: 5 });
+    // The saved task loses it too, so the next run does not search it.
+    await waitFor(() => expect(lastTaskWrite()?.tool_configs?.[KNOWLEDGE]).toEqual(
+      expect.objectContaining({ file_paths: ['uploads/g/s/second.pdf'] })));
+  });
+
+  it('detaching the last file takes the search tool off the task', async () => {
+    // An empty file list reads as "search every file in the teamspace".
+    renderChat();
+    await upload.onTasksUpdated!('uploads/g/s/only.pdf');
+    expect(liveTask().data.tools).toContain(KNOWLEDGE);
+
+    upload.onTaskFileRemoved!('uploads/g/s/only.pdf');
+
+    expect(liveTask().data.tools).toEqual(['SerperDevTool']);
+    expect(liveTask().data.tool_configs).toEqual({ SerperDevTool: { n_results: 5 } });
+    await waitFor(() => expect(lastTaskWrite()).toEqual({
+      tools: ['SerperDevTool'], tool_configs: { SerperDevTool: { n_results: 5 } },
+    }));
   });
 });

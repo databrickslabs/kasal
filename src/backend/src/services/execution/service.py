@@ -1548,11 +1548,9 @@ class ExecutionService:
                     f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
                 )
 
-            # The crew equivalent: which saved crew this run was built from, so a
-            # later resume can rebuild from the current definition instead of the
-            # snapshot stored above. Only a crew of the run's workspace is
-            # linked; any other id (or a malformed one) records None, and the
-            # run still starts: it does not need the link.
+            # The saved crew this run was built from, which a resume rebuilds from
+            # (unless trigger_type is "chat", resume_config.py). Only a crew of the
+            # run's workspace is linked; any other or malformed id records None.
             crew_id = getattr(config, "crew_id", None)
             if execution_type != "flow" and crew_id:
                 from src.services.catalog.run_lookup import crew_id_to_record
@@ -1560,11 +1558,12 @@ class ExecutionService:
                 execution_data["crew_id"] = await crew_id_to_record(
                     self.session, crew_id, group_context
                 )
+            if getattr(config, "trigger_type", None):
+                execution_data["trigger_type"] = config.trigger_type
 
-            # A flow resume has always created a new execution; it just never
-            # recorded WHICH run it came from. Stamping the same link the crew
-            # path uses means one resume chain shape for both, so the run detail
-            # view does not need two ways to ask "what was this resumed from?".
+            # A flow resume creates a new execution; stamping the same link the
+            # crew path uses gives one resume chain shape for both, so the run
+            # detail view has one way to ask "what was this resumed from?".
             resumed_from = getattr(config, "resume_from_execution_id", None)
             if resumed_from:
                 try:
@@ -1909,10 +1908,9 @@ class ExecutionService:
         execution_data: Dict[str, Any] = {
             "job_id": new_execution_id,
             "status": ExecutionStatus.RUNNING.value,
-            # The definition that will actually RUN, which is the rebuilt one
-            # when there was a saved crew/flow to rebuild from. Storing the old
-            # snapshot here would make the new run's record describe work it
-            # did not do, and send a second resume back to the stale text.
+            # The definition that will actually RUN (the rebuilt one when there
+            # was a saved crew/flow). The old snapshot here would describe work
+            # the run did not do, and send a second resume back to stale text.
             "inputs": ExecutionService.sanitize_for_database(
                 self._mask_inputs_sensitive_data(resume_inputs)
             ),
@@ -1925,10 +1923,8 @@ class ExecutionService:
             execution_data["flow_id"] = source.flow_id
         if source.flow_uuid:
             execution_data["flow_uuid"] = source.flow_uuid
-        # Carry the crew link down the resume chain. Without it the SECOND
-        # resume of a run would have nothing to rebuild from and would fall
-        # back to a snapshot — which is not stale here, but would freeze at the
-        # first resume and stop picking up later edits.
+        # Carry the crew link down the resume chain, so a SECOND resume still
+        # rebuilds from the saved crew instead of freezing at the first one.
         if getattr(source, "crew_id", None):
             execution_data["crew_id"] = source.crew_id
 

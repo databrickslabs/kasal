@@ -46,6 +46,7 @@ vi.mock('../../../api/groups/UserService', () => ({
   UserService: {
     getInstance: vi.fn(() => ({
       getUsers: mocks.mockGetUsers,
+      getAllUsers: mocks.mockGetUsers,
     })),
   },
 }));
@@ -267,5 +268,39 @@ describe('GroupManagement', () => {
       }
     );
     expect(refreshSelector).toBeDefined();
+  });
+
+  it('recognises Personal Spaces by the stored id, not by a user_ prefix', async () => {
+    // A Personal Space is a user's stored personal_group_id (the rule the backend
+    // applies when it refuses to duplicate one). A team whose id happens to
+    // start with user_ is still a team.
+    mocks.mockGetGroups.mockResolvedValue([
+      { id: 'pg_4f1c', name: 'Personal Space - alice', auto_created: true, user_count: 1, created_at: '2024-01-03T00:00:00Z' },
+      { id: 'user_marketing_1a2b', name: 'User Marketing', auto_created: true, user_count: 4, created_at: '2024-01-04T00:00:00Z' },
+    ]);
+    mocks.mockGetUsers.mockResolvedValue([
+      { id: 'u-alice', email: 'alice@example.com', personal_group_id: 'pg_4f1c' },
+    ]);
+    const usersLoaded = () => waitFor(() => expect(mocks.mockGetUsers).toHaveBeenCalled());
+
+    const team = renderWithProviders(<GroupManagement />);
+    await usersLoaded();
+    fireEvent.click(await screen.findByLabelText('Actions for User Marketing'));
+    expect(screen.getByRole('menuitem', { name: 'Duplicate Teamspace' })).toBeInTheDocument();
+    team.unmount();
+
+    const personal = renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByLabelText('Actions for Personal Space - alice'));
+    expect(screen.getByRole('menuitem', { name: 'Delete Teamspace' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('menuitem', { name: 'Duplicate Teamspace' })).toBeNull());
+    personal.unmount();
+
+    renderWithProviders(<GroupManagement />);
+    await screen.findByText('User Marketing');
+    fireEvent.click(screen.getByLabelText('Create teamspace'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Start from' }));
+    expect(screen.getByRole('option', { name: 'Duplicate User Marketing' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Duplicate Personal Space - alice' })).toBeNull();
   });
 });

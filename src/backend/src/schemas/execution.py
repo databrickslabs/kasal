@@ -131,6 +131,17 @@ class CrewConfig(BaseModel):
             "run started from an unsaved canvas."
         ),
     )
+    # Only "chat": a client may say a run came from the chat, never claim to
+    # be a schedule or a trigger.
+    trigger_type: Optional[Literal["chat"]] = Field(
+        None,
+        description=(
+            "How the run was started, recorded on the run. 'chat' for a chat "
+            "run of a saved crew: the chat applies run-only changes to the "
+            "crew's definition, so its resume uses the stored snapshot rather "
+            "than rebuilding from crew_id. Absent means 'api'."
+        ),
+    )
     # Flow configuration fields (for flow scheduling)
     nodes: Optional[List[Dict[str, Any]]] = Field(
         None, description="Flow nodes configuration"

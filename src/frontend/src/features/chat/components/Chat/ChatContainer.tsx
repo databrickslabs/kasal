@@ -87,6 +87,14 @@ interface ChatContainerProps {
   onBuildInstead?: (messageId: string) => void;
   onStopExecution?: () => void;
   isLoading: boolean;
+  /** A message is still being sent: the composer keeps what is typed until it has gone. */
+  isSending?: boolean;
+  /** Stop waiting for the message still being sent. */
+  onCancelSending?: () => void;
+  /** The composer draft, when the parent keeps it (it can put text back); see draftRef below. */
+  draftRef?: React.MutableRefObject<string>;
+  /** Bumped when the parent rewrote `draftRef`. */
+  draftVersion?: number;
   isExecuting?: boolean;
   isGenerating?: boolean;
   executionContext?: ExecutionContext | null;
@@ -136,6 +144,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onBuildInstead,
   onStopExecution,
   isLoading,
+  isSending,
+  onCancelSending,
+  draftRef: parentDraftRef,
+  draftVersion,
   isExecuting,
   isGenerating,
   hideLiveTimeline,
@@ -155,6 +167,11 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusAfterSend = useRef(false);
+  // The typed text, shared by both composers: the first message swaps the
+  // landing composer for the conversation one, and a draft typed while it was
+  // still sending must survive the swap.
+  const ownDraftRef = useRef('');
+  const draftRef = parentDraftRef ?? ownDraftRef;
   // The first send replaces the landing composer with the conversation composer.
   useLayoutEffect(() => {
     if (!focusAfterSend.current) return;
@@ -353,6 +370,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 onSend(message, meta);
               }}
               disabled={isLoading}
+              sending={isSending}
+              onCancelSending={onCancelSending}
+              draftRef={draftRef}
+              draftVersion={draftVersion}
               models={models}
               selectedModel={selectedModel}
               onModelChange={onModelChange}
@@ -517,6 +538,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         <ChatInput
           onSend={onSend}
           disabled={isLoading}
+          sending={isSending}
+          onCancelSending={onCancelSending}
+          draftRef={draftRef}
+          draftVersion={draftVersion}
           models={models}
           selectedModel={selectedModel}
           onModelChange={onModelChange}

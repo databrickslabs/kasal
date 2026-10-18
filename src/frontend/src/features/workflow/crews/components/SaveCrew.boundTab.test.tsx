@@ -13,7 +13,7 @@ import { CrewService } from '../../../../api/workflow/CrewService';
 import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 
 vi.mock('../../../../api/workflow/CrewService', () => ({
-  CrewService: { saveCrew: vi.fn(), updateCrew: vi.fn(), getCrews: vi.fn() },
+  CrewService: { saveCrew: vi.fn(), updateCrew: vi.fn(), getCrews: vi.fn(), getCrew: vi.fn() },
 }));
 vi.mock('../../../chat/store/appStore', () => ({
   useAppStore: { getState: () => ({ loadCatalog: vi.fn(async () => undefined) }) },
@@ -37,6 +37,7 @@ beforeEach(() => {
   store.updateCanvasCrewInfo(tabId, 'crew-1', 'Research crew');
   vi.mocked(CrewService.updateCrew).mockResolvedValue({ id: 'crew-1', name: 'Research crew' } as never);
   vi.mocked(CrewService.saveCrew).mockResolvedValue({ id: 'crew-2', name: 'Other' } as never);
+  vi.mocked(CrewService.getCrew).mockResolvedValue({ id: 'crew-1', name: 'Research crew' } as never);
 });
 
 function saveAs(name: string) {
@@ -96,5 +97,35 @@ describe('Saving a canvas bound to a catalog crew', () => {
     await waitFor(() => expect(CrewService.saveCrew).toHaveBeenCalledOnce());
     expect(CrewService.saveCrew).toHaveBeenCalledWith(expect.objectContaining({ name: 'Fresh crew' }));
     expect(CrewService.updateCrew).not.toHaveBeenCalled();
+  });
+
+  it('when the bound crew has been deleted, a new name creates a new crew', async () => {
+    vi.mocked(CrewService.getCrew).mockRejectedValue({ response: { status: 404, data: { detail: 'Crew not found' } } });
+    vi.mocked(CrewService.saveCrew).mockResolvedValue({ id: 'crew-2', name: 'Research crew v2' } as never);
+
+    saveAs('Research crew v2');
+
+    await waitFor(() => expect(CrewService.saveCrew).toHaveBeenCalledOnce());
+    expect(CrewService.getCrew).toHaveBeenCalledWith('crew-1');
+    expect(CrewService.saveCrew).toHaveBeenCalledWith(expect.objectContaining({ name: 'Research crew v2' }));
+    expect(CrewService.updateCrew).not.toHaveBeenCalled();
+    // The canvas now belongs to the crew it was saved as.
+    await waitFor(() => expect(useBuilderCanvasStore.getState().getCanvas(tabId)?.savedCrewId).toBe('crew-2'));
+  });
+
+  it.each([
+    ['the check fails', { response: { status: 500 } }],
+    ['a 404 does not come from the crews API (a proxy, say)', { response: { status: 404, data: 'Not Found' } }],
+  ])('still refuses a new name when %s', async (_label, failure) => {
+    const shown = vi.fn();
+    window.addEventListener('saveError', shown);
+    vi.mocked(CrewService.getCrew).mockRejectedValue(failure);
+
+    saveAs('Research crew v2');
+
+    await waitFor(() => expect(shown).toHaveBeenCalledOnce());
+    expect((shown.mock.calls[0][0] as CustomEvent).detail.message).toContain('is open from the catalog');
+    expect(CrewService.saveCrew).not.toHaveBeenCalled();
+    window.removeEventListener('saveError', shown);
   });
 });

@@ -11,7 +11,9 @@ export async function dispatch(
   model?: string,
   tools?: string[],
   runSettings?: DispatchRunSettings,
-  originalPrompt?: string
+  originalPrompt?: string,
+  /** Aborts the request: the user stopped waiting for this answer. */
+  signal?: AbortSignal,
 ): Promise<DispatchResult> {
   const request: DispatcherRequest = { message };
   // ChatMode always builds a crew. "create a task"/"create an agent" entity
@@ -58,10 +60,9 @@ export async function dispatch(
     if (runSettings.allow_continuation === false) request.allow_continuation = false;
   }
 
-  const response = await getClient().post<DispatchResult>(
-    '/dispatcher/dispatch',
-    request
-  );
+  const response = signal
+    ? await getClient().post<DispatchResult>('/dispatcher/dispatch', request, { signal })
+    : await getClient().post<DispatchResult>('/dispatcher/dispatch', request);
   return response.data;
 }
 

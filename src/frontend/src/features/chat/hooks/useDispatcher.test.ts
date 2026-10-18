@@ -211,6 +211,7 @@ describe('useDispatcher', () => {
         undefined,
         expect.objectContaining({ session_id: 'created-session' }),
         'build me a crew',
+        expect.any(AbortSignal),
       );
     });
   });
@@ -279,7 +280,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('/help');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined, RUN_SETTINGS, '/help');
+      expect(mockedDispatch).toHaveBeenCalledWith('/help', undefined, undefined, RUN_SETTINGS, '/help', expect.any(AbortSignal));
     });
 
     it('does NOT augment messages already containing a crew hint', async () => {
@@ -291,7 +292,7 @@ describe('useDispatcher', () => {
         await hook.current.sendMessage('build me a crew', 'my-model');
       });
 
-      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined, RUN_SETTINGS, 'build me a crew');
+      expect(mockedDispatch).toHaveBeenCalledWith('build me a crew', 'my-model', undefined, RUN_SETTINGS, 'build me a crew', expect.any(AbortSignal));
     });
 
     it('does NOT augment in chat (light agent) mode — sends the literal message', async () => {
@@ -310,6 +311,7 @@ describe('useDispatcher', () => {
         undefined,
         RUN_SETTINGS,
         'do something cool',
+        expect.any(AbortSignal),
       );
     });
 
@@ -336,6 +338,7 @@ describe('useDispatcher', () => {
         ['DatabricksKnowledgeSearchTool'],
         RUN_SETTINGS,
         'build me a crew',
+        expect.any(AbortSignal),
       );
     });
 
@@ -358,6 +361,7 @@ describe('useDispatcher', () => {
           undefined,
           { ...RUN_SETTINGS, agentbricks_endpoints: ['ep-1'] },
           'do something cool',
+          expect.any(AbortSignal),
         );
       } finally {
         // Reset so the shared store doesn't leak into other tests.
@@ -964,7 +968,7 @@ describe('useDispatcher', () => {
       // The displayed user message uses displayAs, not the raw message.
       expect(opts.saveUserMessage).toHaveBeenCalledWith('session-1', 'Open crew: My Plan', undefined);
       // The raw message is still dispatched (slash command -> not augmented).
-      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined, RUN_SETTINGS, '/crew open p1');
+      expect(mockedDispatch).toHaveBeenCalledWith('/crew open p1', undefined, undefined, RUN_SETTINGS, '/crew open p1', expect.any(AbortSignal));
     });
   });
 
