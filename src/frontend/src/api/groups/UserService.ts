@@ -9,6 +9,8 @@ export interface User {
   status: string;
   is_system_admin: boolean;
   is_personal_workspace_manager: boolean;
+  /** This user's Personal Space id, as allocated by the backend. */
+  personal_group_id?: string | null;
   created_at: string;
   updated_at: string;
   last_login: string | null;
