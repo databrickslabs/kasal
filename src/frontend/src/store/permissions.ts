@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { createJSONStorage, devtools, persist } from 'zustand/middleware';
 import { GroupService } from '../api/groups/GroupService';
 import { isOwnPersonalWorkspace, isPersonalWorkspaceId, useUserStore } from './user';
 import { getTabGroupId } from '../shared/api/tabGroup';
@@ -507,6 +507,9 @@ export const usePermissionStore = create<PermissionState>()(
       }),
       {
         name: 'permission-store-v2', // Updated to force cache refresh after 3-tier migration
+        // Per tab, like the teamspace the role belongs to (shared/api/tabGroup.ts):
+        // in localStorage a reload showed the role another tab loaded last.
+        storage: createJSONStorage(() => sessionStorage),
         partialize: (state) => ({
           userRole: state.userRole,
           allowAgentBuilder: state.allowAgentBuilder,
