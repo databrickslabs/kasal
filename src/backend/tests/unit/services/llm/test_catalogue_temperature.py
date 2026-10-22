@@ -130,16 +130,15 @@ class TestRejectingEndpointsAreStillProtected:
 
         assert "temperature" not in kwargs
 
+    @pytest.mark.parametrize(
+        "model", ["databricks-gemini-3-8-flash", "databricks-gemini-4-argon"]
+    )
     @pytest.mark.asyncio
-    async def test_a_gemini_38_row_temperature_is_not_sent(self):
-        """Gemini 3.8 rejects temperature, including the seeded default 0.7."""
+    async def test_a_gemini_row_temperature_is_not_sent(self, model):
+        """Gemini 3.8 rejects temperature, including the seeded default 0.7;
+        Gemini 4 Argon withholds it until measured."""
         kwargs = await _built_kwargs(
-            _config(
-                "databricks-gemini-3-8-flash",
-                "databricks",
-                0.7,
-                extra={"max_output_tokens": 65536},
-            ),
+            _config(model, "databricks", 0.7, extra={"max_output_tokens": 65536}),
             None,
         )
 

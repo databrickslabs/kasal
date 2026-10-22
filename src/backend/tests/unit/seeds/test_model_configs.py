@@ -616,6 +616,7 @@ class TestAuditedDatabricksModels:
         "databricks-deepseek-v4-pro-0813",
         "databricks-gemini-3-7-flash",
         "databricks-gemini-3-8-flash",
+        "databricks-gemini-4-argon",
         "databricks-glm-5-3",
         "databricks-glm-5-3-flash",
         "databricks-gpt-5-5",
@@ -649,6 +650,12 @@ class TestAuditedDatabricksModels:
             assert config["context_window"] > 0
             assert config["max_output_tokens"] > 0
             assert key not in REMOVED_MODEL_KEYS
+
+    def test_gemini_4_argon_seeded_with_provider_limits(self):
+        """Google's gemini-4-argon limits, which Databricks matches."""
+        config = DEFAULT_MODELS["databricks-gemini-4-argon"]
+        assert config["context_window"] == 1048576
+        assert config["max_output_tokens"] == 65536
 
     def test_gemini_3_1_flash_lite_no_longer_pruned(self):
         """It used to be (wrongly) in REMOVED_MODEL_KEYS; the workspace now serves

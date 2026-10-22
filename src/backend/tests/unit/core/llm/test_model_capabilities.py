@@ -53,6 +53,7 @@ class TestReasoningStyle:
             ("databricks-gpt-6-luna", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gpt-5-5-pro", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gemini-3-8-flash", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-gemini-4-argon", ReasoningStyle.REASONING_EFFORT),
             ("databricks-grok-4-6", ReasoningStyle.REASONING_EFFORT),
             ("databricks-glm-5-3", ReasoningStyle.REASONING_EFFORT),
             ("databricks-kimi-k3", ReasoningStyle.REASONING_EFFORT),
@@ -117,6 +118,8 @@ class TestAllowedEfforts:
                 ("none", "low", "medium", "high", "xhigh", "max"),
             ),
             ("databricks-gemini-3-8-flash", ("low", "medium", "high")),
+            # Reasoning-only: Databricks rejects "none" and "minimal" outright.
+            ("databricks-gemini-4-argon", ("low", "medium", "high")),
             ("databricks-gemini-3-1-pro", ("minimal", "low", "medium", "high")),
             ("databricks-grok-4-6", ("low", "medium", "high", "xhigh")),
             ("databricks-glm-5-3", ("low", "high", "max")),
@@ -246,6 +249,7 @@ class TestEveryEntryIsSourced:
             "databricks-gpt-6-sol",
             "databricks-gpt-6-luna",
             "databricks-gemini-3-8-flash",
+            "databricks-gemini-4-argon",
             "databricks-glm-5-3",
         ):
             capability = model_capability(model)

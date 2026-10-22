@@ -400,6 +400,25 @@ _GEMINI_38 = ModelCapability(
     ),
 )
 
+#: Gemini 4 Argon is reasoning-only: Databricks documents low/medium (default)/
+#: high and rejects "none" and "minimal" rather than remapping them. Temperature
+#: is undocumented and not yet measured; it is withheld as on Gemini 3.8, whose
+#: endpoint 400s on it, because sending a refused parameter fails every request
+#: while omitting an accepted one only keeps the endpoint default.
+_GEMINI_4_ARGON = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("low", "medium", "high"),
+    returns_text=False,
+    text_requires="reasoning-text availability is not documented",
+    refuses=("temperature",),
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note=(
+        "Gemini 4 Argon always reasons; defaults to medium and accepts low, "
+        "medium, and high. Temperature is withheld pending a live check."
+    ),
+)
+
 #: Earlier Gemini 3 endpoints now document minimal as their no-reasoning mode.
 _GEMINI_3 = ModelCapability(
     style=ReasoningStyle.REASONING_EFFORT,
@@ -541,7 +560,8 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("gpt-5-mini", _GPT5_MINIMAL),
     ("gpt-5-nano", _GPT5_MINIMAL),
     ("gpt-5", _GPT5_MINIMAL),
-    # Gemini 3.7/3.8 reject minimal; earlier Gemini 3 endpoints accept it.
+    # Gemini 4 Argon and 3.7/3.8 reject minimal; earlier Gemini 3 endpoints accept it.
+    ("gemini-4-argon", _GEMINI_4_ARGON),
     ("gemini-3-8", _GEMINI_38),
     ("gemini-3.8", _GEMINI_38),
     ("gemini-3-7", _GEMINI_37),

@@ -50,6 +50,8 @@ class TestModelRejectsTemperature:
             # Live endpoint regression: the catalogue's 0.7 default made every
             # Gemini 3.8 request fail before generation.
             "databricks-gemini-3-8-flash",
+            # Withheld as a precaution until measured (see model_capabilities).
+            "databricks-gemini-4-argon",
         ],
     )
     def test_rejecting_models(self, model):
@@ -132,6 +134,7 @@ class TestModelSupportsReasoningEffort:
             "databricks-gemini-3-5-flash",
             "databricks-gemini-3-1-flash-lite",
             "databricks-gemini-3-8-flash",
+            "databricks-gemini-4-argon",
             "databricks-grok-4-6",
             "databricks-glm-5-3",
             "databricks-kimi-k3",

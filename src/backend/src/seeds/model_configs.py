@@ -512,6 +512,17 @@ DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
         "context_window": 1048576,
         "max_output_tokens": 65536,
     },
+    "databricks-gemini-4-argon": {
+        # GA per Databricks' supported-models page (2026-10-19); cross-geography
+        # routing required. Limits are Google's gemini-4-argon values (1,048,576
+        # shared context, 65,536 synchronous output), which Databricks matches.
+        # Reasoning-only: model_capabilities withholds temperature.
+        "name": "databricks-gemini-4-argon",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
     "databricks-gemma-3-12b": {
         "name": "databricks-gemma-3-12b",
         "temperature": 0.7,
