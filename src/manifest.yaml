@@ -18,7 +18,8 @@ resource_specs:
 # The public Marketplace AppManifest resource_specs schema does not yet expose
 # a database/postgres spec. Add a Database app resource with key "lakebase" and
 # permission CAN_CONNECT_AND_CREATE in the installation's resource selection.
-# app.yaml requires that binding, so an incomplete install cannot deploy using SQLite.
+# Without it Kasal runs on the container's SQLite file; set
+# KASAL_REQUIRE_LAKEBASE_RESOURCE to 'true' in app.yaml to refuse that.
 # Keep user_api_scopes equal to get_desired_oauth_scopes() in src/deploy.py, in the
 # same order; tests/unit/test_deploy_scopes.py fails when the two lists differ.
 user_api_scopes:

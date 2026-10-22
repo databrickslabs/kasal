@@ -14,7 +14,13 @@ runtime bindings are in `src/app.yaml`.
 | `sql-warehouse` | SQL warehouse for trace queries and SQL operations | Can use |
 | `volume` | Existing UC volume for generated files; its parent catalog/schema is used for new trace tables | Can read and write |
 | `serving-endpoint` | Ready, chat-capable serving endpoint supporting tool calls | Can query |
-| `lakebase` | Lakebase project, branch and database | Can connect and create |
+| `lakebase` (optional) | Lakebase project, branch and database | Can connect and create |
+
+**Without `lakebase`**, Kasal starts on the app container's SQLite file and logs
+a warning. That file is not guaranteed to survive a restart or redeploy, so use
+it for trials only. To make the resource mandatory, uncomment
+`KASAL_REQUIRE_LAKEBASE_RESOURCE` in `src/app.yaml`: `src/deploy.py` then
+refuses to deploy without it, and the app refuses to start.
 
 **Lakebase Marketplace limitation:** the public AppManifest schema currently
 has no database/postgres `resource_specs` field. Attach a native **Database**

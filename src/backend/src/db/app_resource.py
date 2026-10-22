@@ -1,6 +1,7 @@
 """Connect to the exact Lakebase database selected in Databricks Apps resources."""
 
 import asyncio
+import logging
 import re
 import uuid
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 from sqlalchemy.engine import URL
 
 from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
+
+logger = logging.getLogger(__name__)
 
 _ENDPOINT_PATH = re.compile(r"projects/[^/]+/branches/[^/]+/endpoints/[^/]+")
 _BRANCH_PATH = re.compile(r"projects/[^/]+/branches/[^/]+")
@@ -135,6 +138,21 @@ async def resource_token(client: Any, resource: LakebaseAppResource) -> str:
         )
     resolved: str = credential.token
     return resolved
+
+
+def check_sqlite_fallback(required: bool) -> None:
+    """Refuse, or warn about, a Databricks App starting without a Lakebase resource."""
+    if required:
+        raise RuntimeError(
+            "Attach the 'lakebase' database resource before deploying Kasal"
+        )
+    logger.warning(
+        "No 'lakebase' database resource is attached: Kasal is using the app "
+        "container's SQLite file, which is not guaranteed to survive a restart or "
+        "redeploy. "
+        "Attach a Lakebase Database resource named 'lakebase' to keep data, or set "
+        "KASAL_REQUIRE_LAKEBASE_RESOURCE=true in app.yaml to refuse to start without one."
+    )
 
 
 def resource_url(resource: LakebaseAppResource) -> str:

@@ -19,10 +19,12 @@ env:
     valueFrom: volume
   - name: KASAL_DEFAULT_MODEL
     valueFrom: serving-endpoint
+  # Optional: without a 'lakebase' resource Kasal runs on the container's
+  # SQLite file. Uncomment to refuse to deploy or start without one.
   - name: KASAL_LAKEBASE_RESOURCE
     valueFrom: lakebase
-  - name: KASAL_REQUIRE_LAKEBASE_RESOURCE
-    value: 'true'
+  # - name: KASAL_REQUIRE_LAKEBASE_RESOURCE
+  #   value: 'true'
 
   # Logging Configuration
   - name: KASAL_LOG_LEVEL

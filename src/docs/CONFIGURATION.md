@@ -87,6 +87,7 @@ Kasal uses SQLite or PostgreSQL through async SQLAlchemy, or Lakebase inside Dat
 - **`src/entrypoint.py`**: `--db-type` defaults to `sqlite` with `SQLITE_DB_PATH` defaulting to `src/kasal.db`, and it exports `DATABASE_TYPE`, `DATABASE_URI`/`DATABASE_URL` and `SYNC_DATABASE_URI` directly, so the crew and flow subprocesses agree with the server. With `--db-type postgres`, a `postgresql://` (or `postgres://`) `--db-url` is rewritten to `postgresql+asyncpg://`; with no `--db-url`, it falls back to a local `postgres` database on `localhost:5432`.
 - **The `kasal` command from the pip package (`packaging/kasal/cli.py`)**: defaults `DATABASE_TYPE` to `sqlite` and `SQLITE_DB_PATH` to `~/.kasal/kasal.db` (or `<--data-dir>/kasal.db`), without overriding values already in the environment. It does not set `LOCAL_DEV_AUTH`. For more information, see [installing Kasal with pip](./PIP_PACKAGE.md).
 - **Databricks Apps with a Lakebase resource attached**: when `PGHOST`, `PGDATABASE` and `PGUSER` are injected by the platform, `init_db` uses the Lakebase resource and the variables above do not apply.
+- **Databricks Apps without a Lakebase resource**: Kasal uses the entrypoint's SQLite file and logs a warning at startup. That file is not guaranteed to survive a restart or redeploy, so use it for trials only. Set `KASAL_REQUIRE_LAKEBASE_RESOURCE=true` in `src/app.yaml` to refuse to deploy or start without the resource.
 
 To use PostgreSQL or another SQLite file locally, set `DATABASE_TYPE=postgres` (with the `POSTGRES_*` variables) or `SQLITE_DB_PATH` on every command you run, not only on the server.
 
@@ -103,7 +104,7 @@ The database variables are:
 | `POSTGRES_USER` | `postgres` | PostgreSQL user | `src/backend/src/config/settings.py` |
 | `POSTGRES_PASSWORD` | `postgres` | PostgreSQL password | `src/backend/src/config/settings.py` |
 | `POSTGRES_DB` | `kasal` | PostgreSQL database name | `src/backend/src/config/settings.py` |
-| `KASAL_REQUIRE_LAKEBASE_RESOURCE` | Unset (`src/app.yaml`: `true`) | When `true` inside Databricks Apps, startup fails unless the `lakebase` resource is attached | `src/backend/src/db/session.py` |
+| `KASAL_REQUIRE_LAKEBASE_RESOURCE` | Unset (commented out in `src/app.yaml`) | When `true` inside Databricks Apps, startup fails unless the `lakebase` resource is attached, and `src/deploy.py` refuses to deploy without it. Unset, Kasal starts on the container's SQLite file and logs a warning | `src/backend/src/db/session.py`, `src/deployment_resources.py` |
 | `KASAL_LAKEBASE_RESOURCE` | Empty | Lakebase endpoint name, injected from the app resource by `src/app.yaml` | `src/backend/src/core/databricks_app.py` |
 | `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPORT` | Unset; `PGPORT` `5432` | Injected by Databricks Apps for an attached Lakebase resource. All of host, database and user are required once any is set | `src/backend/src/core/databricks_app.py` |
 

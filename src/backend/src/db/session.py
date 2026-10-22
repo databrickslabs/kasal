@@ -754,10 +754,10 @@ async def init_db() -> None:
 
         await initialize_resource_database()
         return
-    if is_databricks_app() and os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true":
-        raise RuntimeError(
-            "Attach the 'lakebase' database resource before deploying Kasal"
-        )
+    if is_databricks_app():
+        from src.db.app_resource import check_sqlite_fallback
+
+        check_sqlite_fallback(os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true")
     try:
         # Import all models to ensure they're registered
         import importlib

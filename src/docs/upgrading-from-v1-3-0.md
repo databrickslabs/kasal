@@ -31,13 +31,14 @@ itself on the first start.
 
 ## What changes
 
-- **A `lakebase` Database resource is required.** `src/app.yaml` binds
-  `KASAL_LAKEBASE_RESOURCE` to a resource named `lakebase` and sets
-  `KASAL_REQUIRE_LAKEBASE_RESOURCE` to `true`. Without that resource the app stops
-  at startup with `Attach the 'lakebase' database resource before deploying
-  Kasal`, and `src/deploy.py` refuses to deploy unless exactly one Database
-  resource named `lakebase` is attached. Kasal no longer falls back to the
-  container's SQLite file in Databricks Apps.
+- **Attach a `lakebase` Database resource to keep your data.** `src/app.yaml`
+  binds `KASAL_LAKEBASE_RESOURCE` to a resource named `lakebase`. Without it,
+  Kasal starts on the container's SQLite file and logs a warning, so an upgraded
+  app with no resource comes up empty. If a Database resource is attached,
+  `src/deploy.py` refuses to deploy unless it is the only one and is named
+  `lakebase`. To make the resource mandatory, uncomment
+  `KASAL_REQUIRE_LAKEBASE_RESOURCE` in `src/app.yaml`: the app then stops at
+  startup with `Attach the 'lakebase' database resource before deploying Kasal`.
 - **The installation owns the database.** Kasal reads the connection from the
   resource. The Lakebase connection form in **Configuration → Database
   Management** is hidden, saving a manual Lakebase configuration returns 400, and
