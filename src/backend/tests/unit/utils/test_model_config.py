@@ -50,7 +50,7 @@ class TestModelRejectsTemperature:
             # Live endpoint regression: the catalogue's 0.7 default made every
             # Gemini 3.8 request fail before generation.
             "databricks-gemini-3-8-flash",
-            # Withheld as a precaution until measured (see model_capabilities).
+            # Measured 2026-10-23: "does not support the temperature parameter".
             "databricks-gemini-4-argon",
         ],
     )
@@ -134,7 +134,6 @@ class TestModelSupportsReasoningEffort:
             "databricks-gemini-3-5-flash",
             "databricks-gemini-3-1-flash-lite",
             "databricks-gemini-3-8-flash",
-            "databricks-gemini-4-argon",
             "databricks-grok-4-6",
             "databricks-glm-5-3",
             "databricks-kimi-k3",
@@ -169,6 +168,9 @@ class TestModelSupportsReasoningEffort:
             "Qwen3-Coder-30B-A3B-Instruct",
             "databricks-meta-llama-3-3-70b-instruct",
             "gpt-4o",
+            # Measured 2026-10-23: 400 'Unknown name "reasoning_effort" at
+            # generation_config' at every value.
+            "databricks-gemini-4-argon",
             # o1 predates reasoning_effort.
             "o1",
             "o1-preview",

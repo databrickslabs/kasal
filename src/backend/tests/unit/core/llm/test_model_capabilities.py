@@ -53,7 +53,6 @@ class TestReasoningStyle:
             ("databricks-gpt-6-luna", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gpt-5-5-pro", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gemini-3-8-flash", ReasoningStyle.REASONING_EFFORT),
-            ("databricks-gemini-4-argon", ReasoningStyle.REASONING_EFFORT),
             ("databricks-grok-4-6", ReasoningStyle.REASONING_EFFORT),
             ("databricks-glm-5-3", ReasoningStyle.REASONING_EFFORT),
             ("databricks-kimi-k3", ReasoningStyle.REASONING_EFFORT),
@@ -61,6 +60,8 @@ class TestReasoningStyle:
             # Thinking arrives with nothing requested.
             ("databricks-inkling", ReasoningStyle.REASONING_EFFORT),
             ("databricks-kimi-k2-7-code", ReasoningStyle.UNPROMPTED),
+            # Always reasons; the endpoint rejects every reasoning control.
+            ("databricks-gemini-4-argon", ReasoningStyle.UNPROMPTED),
         ],
     )
     def test_style(self, model, expected):
@@ -118,8 +119,8 @@ class TestAllowedEfforts:
                 ("none", "low", "medium", "high", "xhigh", "max"),
             ),
             ("databricks-gemini-3-8-flash", ("low", "medium", "high")),
-            # Reasoning-only: Databricks rejects "none" and "minimal" outright.
-            ("databricks-gemini-4-argon", ("low", "medium", "high")),
+            # Measured: the endpoint 400s on reasoning_effort at any value.
+            ("databricks-gemini-4-argon", ()),
             ("databricks-gemini-3-1-pro", ("minimal", "low", "medium", "high")),
             ("databricks-grok-4-6", ("low", "medium", "high", "xhigh")),
             ("databricks-glm-5-3", ("low", "high", "max")),

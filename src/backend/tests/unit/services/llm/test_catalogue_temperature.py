@@ -136,7 +136,7 @@ class TestRejectingEndpointsAreStillProtected:
     @pytest.mark.asyncio
     async def test_a_gemini_row_temperature_is_not_sent(self, model):
         """Gemini 3.8 rejects temperature, including the seeded default 0.7;
-        Gemini 4 Argon withholds it until measured."""
+        so does Gemini 4 Argon (measured 2026-10-23)."""
         kwargs = await _built_kwargs(
             _config(model, "databricks", 0.7, extra={"max_output_tokens": 65536}),
             None,

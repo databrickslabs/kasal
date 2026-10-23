@@ -400,22 +400,25 @@ _GEMINI_38 = ModelCapability(
     ),
 )
 
-#: Gemini 4 Argon is reasoning-only: Databricks documents low/medium (default)/
-#: high and rejects "none" and "minimal" rather than remapping them. Temperature
-#: is undocumented and not yet measured; it is withheld as on Gemini 3.8, whose
-#: endpoint 400s on it, because sending a refused parameter fails every request
-#: while omitting an accepted one only keeps the endpoint default.
+#: Gemini 4 Argon always reasons, and its Databricks endpoint accepts no request
+#: to steer it, whatever the reasoning doc says. Measured on 2026-10-23, every
+#: value of ``reasoning_effort`` returned 400 ``Unknown name "reasoning_effort"
+#: at 'generation_config'`` (so did ``reasoning``); a thinking budget returned
+#: "not supported for this model. Use thinking level instead", every
+#: thinking-level form then failed on "budget_tokens field is missing", and
+#: ``thinking: disabled`` returned "Thinking can't be turned off". Only the
+#: endpoint default works, so there is nothing to send. Temperature 400s with
+#: "does not support the temperature parameter".
 _GEMINI_4_ARGON = ModelCapability(
-    style=ReasoningStyle.REASONING_EFFORT,
-    efforts=("low", "medium", "high"),
+    style=ReasoningStyle.UNPROMPTED,
     returns_text=False,
     text_requires="reasoning-text availability is not documented",
     refuses=("temperature",),
-    evidence="documented",
-    source=DATABRICKS_REASON_DOC,
+    evidence="measured",
+    source="live endpoint (Databricks reasoning doc lists efforts it rejects)",
     note=(
-        "Gemini 4 Argon always reasons; defaults to medium and accepts low, "
-        "medium, and high. Temperature is withheld pending a live check."
+        "Gemini 4 Argon always reasons at the endpoint default; its Databricks "
+        "endpoint rejects reasoning_effort, thinking and temperature."
     ),
 )
 
@@ -560,7 +563,8 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("gpt-5-mini", _GPT5_MINIMAL),
     ("gpt-5-nano", _GPT5_MINIMAL),
     ("gpt-5", _GPT5_MINIMAL),
-    # Gemini 4 Argon and 3.7/3.8 reject minimal; earlier Gemini 3 endpoints accept it.
+    # Gemini 4 Argon takes no effort at all; 3.7/3.8 reject minimal; earlier
+    # Gemini 3 endpoints accept it.
     ("gemini-4-argon", _GEMINI_4_ARGON),
     ("gemini-3-8", _GEMINI_38),
     ("gemini-3.8", _GEMINI_38),

@@ -841,7 +841,7 @@ class DatabricksRetryLLM(LLM):
             self._emit_fallback_span(reason, candidate, method)
             self._get_crew_logger().warning(
                 f"[DatabricksRetryLLM] model fallback ({reason}): "
-                f"{self._current_model_key()} -> {candidate.name}"
+                f"{self._current_model_key()} -> {candidate.name}: {str(exc)[:300]}"
             )
             try:
                 return fallback_llm.call(**call_kwargs)
@@ -891,7 +891,7 @@ class DatabricksRetryLLM(LLM):
             self._emit_fallback_span(reason, candidate, method)
             self._get_crew_logger().warning(
                 f"[DatabricksRetryLLM] model fallback ({reason}): "
-                f"{self._current_model_key()} -> {candidate.name}"
+                f"{self._current_model_key()} -> {candidate.name}: {str(exc)[:300]}"
             )
             try:
                 return await fallback_llm.acall(**call_kwargs)
