@@ -31,9 +31,12 @@ ENGINE_NAME = "kasal"
 ENGINE_TYPE = "system"
 
 JEV_API_BASE = "jev_api_base"
-#: Decision model connection: "jev" or "openrouter" (see services/decisions/connection).
+#: Decision model connection: "jev", "openrouter" or "databricks"
+#: (see services/decisions/connection).
 DECISION_CONNECTION = "decision_connection"
 OPENROUTER_API_BASE = "openrouter_api_base"
+#: The model the Databricks connection asks; empty uses the Databricks-hosted Jev.
+DATABRICKS_DECISION_MODEL = "databricks_decision_model"
 AGENT_MAX_EXECUTION_TIME = "agent_max_execution_time"
 
 #: Built-in defaults (unchanged from the former env defaults).

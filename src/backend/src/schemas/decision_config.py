@@ -14,11 +14,13 @@ class DecisionConfigResponse(BaseModel):
     api_key_configured: bool = False
     # Enabled, keyed and a provider URL set: the chat model selector offers Auto.
     available: bool = False
-    # The deployment's connection ("jev" or "openrouter") and the workspace key
-    # it needs (JEV_API_KEY or OPENROUTER_API_KEY); ``api_key_configured`` is
-    # about that key.
+    # The deployment's connection ("jev", "openrouter" or "databricks") and the
+    # workspace key it needs (JEV_API_KEY or OPENROUTER_API_KEY; None for
+    # Databricks, which uses the workspace's own Databricks auth).
+    # ``api_key_configured`` is about that credential: for Databricks, whether
+    # the workspace's host and token resolve.
     connection: str = "jev"
-    api_key_name: str = "JEV_API_KEY"
+    api_key_name: str | None = "JEV_API_KEY"
 
 
 class DecisionRecommendationRequest(BaseModel):

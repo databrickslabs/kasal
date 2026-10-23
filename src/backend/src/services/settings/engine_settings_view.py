@@ -3,6 +3,7 @@
 Keeps the router thin and EngineConfigService free of the budget/Jev rules.
 """
 
+import re
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -39,6 +40,7 @@ def _effective(stored: Dict[str, str]) -> Dict[str, Any]:
         "jev_api_base": connection.jev_api_base,
         "decision_connection": connection.kind,
         "openrouter_api_base": connection.openrouter_api_base,
+        "databricks_decision_model": connection.databricks_model,
         "agent_max_execution_time": _as_int(
             stored.get(es.AGENT_MAX_EXECUTION_TIME),
             es.DEFAULT_AGENT_MAX_EXECUTION_TIME,
@@ -93,9 +95,14 @@ async def update_view(
         kind = (sent["decision_connection"] or "").strip().lower()
         if kind and kind not in decision_connection.CONNECTIONS:
             raise BadRequestError(
-                "The decision model connection must be 'jev' or 'openrouter'"
+                "The decision model connection must be 'jev', 'openrouter' or "
+                "'databricks'"
             )
         values[es.DECISION_CONNECTION] = kind
+    if "databricks_decision_model" in sent:
+        values[es.DATABRICKS_DECISION_MODEL] = _model_name(
+            sent["databricks_decision_model"]
+        )
     if "agent_max_execution_time" in sent:
         value = sent["agent_max_execution_time"]
         values[es.AGENT_MAX_EXECUTION_TIME] = "" if value is None else str(value)
@@ -122,6 +129,22 @@ def _http_url(raw: Optional[str], label: str) -> str:
     if url and (parsed.scheme not in ("http", "https") or not parsed.netloc):
         raise BadRequestError(f"The {label} URL must be an http:// or https:// address")
     return url
+
+
+#: A model id such as ``system.ai.openjev-qwen35-4b``: one token, no spaces. It
+#: travels in the request body (``model``), never in the URL.
+_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}")
+
+
+def _model_name(raw: Optional[str]) -> str:
+    """``raw`` stripped; empty resets it to the Databricks-hosted Jev."""
+    name = (raw or "").strip()
+    if name and not _MODEL_NAME.fullmatch(name):
+        raise BadRequestError(
+            "The Databricks decision model must be a model name such as "
+            f"{decision_connection.DATABRICKS_DEFAULT_MODEL}"
+        )
+    return name
 
 
 def _advanced_values(sent: Dict[str, Any]) -> Dict[str, str]:

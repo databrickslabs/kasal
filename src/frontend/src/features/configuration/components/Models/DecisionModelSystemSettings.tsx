@@ -14,19 +14,22 @@ import { useTranslation } from 'react-i18next';
 import { EngineConfigService } from '../../../../api/config/EngineConfigService';
 import type { EngineSettings } from '../../../../types/config/engines';
 import {
+  DATABRICKS_DEFAULT_DECISION_MODEL,
   DECISION_CONNECTIONS,
   decisionConnection,
   type DecisionConnectionId,
 } from './decisionModelProvider';
+import DecisionModelDatabricksField, { MODEL_ID } from './DecisionModelDatabricksField';
 import { notifyModelsChanged } from '../../../../store/models';
 
 const K = 'configuration.models.decisionModel';
 
-/** The form: the chosen connection and each connection's URL. */
+/** The form: the chosen connection, each URL, and the Databricks model. */
 interface Form {
   connection: DecisionConnectionId;
   jev: string;
   openrouter: string;
+  databricksModel: string;
 }
 
 function formOf(settings: EngineSettings): Form {
@@ -34,26 +37,36 @@ function formOf(settings: EngineSettings): Form {
     connection: decisionConnection(settings.decision_connection).id,
     jev: settings.jev_api_base ?? '',
     openrouter: settings.openrouter_api_base ?? '',
+    databricksModel: settings.databricks_decision_model || DATABRICKS_DEFAULT_DECISION_MODEL,
   };
+}
+
+/** The model to save: null keeps the default, so it follows Kasal's default. */
+function modelToSave(model: string): string | null {
+  const trimmed = model.trim();
+  return trimmed && trimmed !== DATABRICKS_DEFAULT_DECISION_MODEL ? trimmed : null;
 }
 
 const HTTP_URL = /^https?:\/\/[^\s/]+/;
 
 /**
  * System administration → Models: how this deployment reaches its decision
- * model — the Jev API or OpenRouter, each with its own URL. Each workspace
- * still opts in on its own (Workspace settings → Models) with the key its
- * connection needs; an empty Jev API URL keeps the Jev connection off.
+ * model — the Jev API or OpenRouter, each with its own URL, or Databricks (the
+ * workspace AI Gateway), with a model and no URL. Each workspace still opts in
+ * on its own (Workspace settings → Models) with the credential its connection
+ * needs; an empty Jev API URL keeps the Jev connection off.
  *
- * The values are the `decision_connection`, `jev_api_base` and
- * `openrouter_api_base` system settings, read and written through the
- * engine-settings API. Hidden unless the API lets the viewer read them
- * (system admins).
+ * The values are the `decision_connection`, `jev_api_base`,
+ * `openrouter_api_base` and `databricks_decision_model` system settings, read
+ * and written through the engine-settings API. Hidden unless the API lets the
+ * viewer read them (system admins).
  */
 const DecisionModelSystemSettings: React.FC = () => {
   const { t } = useTranslation();
   const [stored, setStored] = useState<Form | undefined>(undefined);
-  const [draft, setDraft] = useState<Form>({ connection: 'jev', jev: '', openrouter: '' });
+  const [draft, setDraft] = useState<Form>({
+    connection: 'jev', jev: '', openrouter: '', databricksModel: DATABRICKS_DEFAULT_DECISION_MODEL,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -77,13 +90,17 @@ const DecisionModelSystemSettings: React.FC = () => {
   if (stored === undefined) return null;
 
   const connection = DECISION_CONNECTIONS[draft.connection];
-  const url = draft[draft.connection].trim();
-  const invalid = [draft.jev, draft.openrouter].some((v) => v.trim() !== '' && !HTTP_URL.test(v.trim()));
-  const unencrypted = !invalid && url.startsWith('http://');
+  const urlKey = draft.connection === 'openrouter' ? 'openrouter' : 'jev';
+  const url = connection.urlName ? draft[urlKey].trim() : '';
+  const model = draft.databricksModel.trim();
+  const urlInvalid = [draft.jev, draft.openrouter].some((v) => v.trim() !== '' && !HTTP_URL.test(v.trim()));
+  const invalid = urlInvalid || (model !== '' && !MODEL_ID.test(model));
+  const unencrypted = !urlInvalid && url.startsWith('http://');
   const changed = draft.connection !== stored.connection
     || draft.jev.trim() !== stored.jev
-    || draft.openrouter.trim() !== stored.openrouter;
-  const urlLabel = t(`${K}.urlLabel`, { defaultValue: '{{name}} API URL', name: connection.urlName });
+    || draft.openrouter.trim() !== stored.openrouter
+    || modelToSave(draft.databricksModel) !== modelToSave(stored.databricksModel);
+  const urlLabel = t(`${K}.urlLabel`, { defaultValue: '{{name}} API URL', name: connection.urlName ?? '' });
 
   const edit = (patch: Partial<Form>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
@@ -99,6 +116,7 @@ const DecisionModelSystemSettings: React.FC = () => {
         decision_connection: draft.connection,
         jev_api_base: draft.jev.trim() || null,
         openrouter_api_base: draft.openrouter.trim() || null,
+        databricks_decision_model: modelToSave(draft.databricksModel),
       });
       setStored(formOf(result));
       setDraft(formOf(result));
@@ -119,6 +137,10 @@ const DecisionModelSystemSettings: React.FC = () => {
       defaultValue: 'Jev, through OpenRouter, chooses among your enabled models; the chosen model '
         + 'then answers through its own provider. Only enabled models ever answer.',
     }),
+    databricks: t(`${K}.connectionDatabricksHelp`, {
+      defaultValue: "Jev on the workspace's AI Gateway chooses among your enabled models. No URL and "
+        + 'no API key; decisions stay on Databricks.',
+    }),
   };
 
   return (
@@ -127,11 +149,16 @@ const DecisionModelSystemSettings: React.FC = () => {
         {t(`${K}.title`, { defaultValue: 'Decision model' })}
       </Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-        {t(`${K}.systemCaption`, {
-          defaultValue: 'Applies to every workspace. Each workspace admin still turns the decision model on '
-            + "for their workspace in its Models settings, with the workspace's own {{key}}.",
-          key: connection.apiKeyName,
-        })}
+        {connection.apiKeyName
+          ? t(`${K}.systemCaption`, {
+            defaultValue: 'Applies to every workspace. Each workspace admin still turns the decision model on '
+              + "for their workspace in its Models settings, with the workspace's own {{key}}.",
+            key: connection.apiKeyName,
+          })
+          : t(`${K}.systemCaptionDatabricks`, {
+            defaultValue: 'Applies to every workspace. Each workspace admin still turns the decision model on '
+              + "for their workspace in its Models settings; it uses the workspace's own Databricks credentials.",
+          })}
       </Typography>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -166,17 +193,23 @@ const DecisionModelSystemSettings: React.FC = () => {
         ))}
       </RadioGroup>
       <Stack direction="row" spacing={1} alignItems="flex-start">
+        {connection.urlName === null ? (
+          <DecisionModelDatabricksField
+            value={draft.databricksModel}
+            onChange={(value) => edit({ databricksModel: value })}
+          />
+        ) : (
         <TextField
           size="small"
           label={urlLabel}
-          value={draft[draft.connection]}
-          onChange={(e) => edit(draft.connection === 'jev' ? { jev: e.target.value } : { openrouter: e.target.value })}
+          value={draft[urlKey]}
+          onChange={(e) => edit(urlKey === 'jev' ? { jev: e.target.value } : { openrouter: e.target.value })}
           placeholder={connection.placeholder}
-          error={invalid}
+          error={urlInvalid}
           color={unencrypted ? 'warning' : undefined}
           FormHelperTextProps={unencrypted ? { sx: { color: 'warning.main' } } : undefined}
           helperText={
-            invalid
+            urlInvalid
               ? t(`${K}.urlScheme`, { defaultValue: 'Must start with http:// or https://' })
               : unencrypted
                 ? t(`${K}.urlUnencrypted`, {
@@ -195,6 +228,7 @@ const DecisionModelSystemSettings: React.FC = () => {
           inputProps={{ 'aria-label': urlLabel }}
           sx={{ flex: 1, maxWidth: 480 }}
         />
+        )}
         <Button
           size="small"
           variant="outlined"
