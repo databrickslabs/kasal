@@ -39,10 +39,10 @@ describe('EngineSystemSettings', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('no longer edits the Jev API URL (it moved to System administration → Models)', async () => {
+  it('no longer edits the TypeSafe API URL (it moved to System administration → Models)', async () => {
     render(<EngineSystemSettings />);
     await screen.findByText('Advanced');
-    expect(screen.queryByLabelText('Jev API URL')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('TypeSafe API URL')).not.toBeInTheDocument();
   });
 
   it('resets a run budget field to its default by sending null', async () => {

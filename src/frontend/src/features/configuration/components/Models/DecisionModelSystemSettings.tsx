@@ -51,10 +51,10 @@ const HTTP_URL = /^https?:\/\/[^\s/]+/;
 
 /**
  * System administration → Models: how this deployment reaches its decision
- * model — the Jev API or OpenRouter, each with its own URL, or Databricks (the
+ * model — TypeSafe or OpenRouter, each with its own URL, or Databricks (the
  * workspace AI Gateway), with a model and no URL. Each workspace still opts in
  * on its own (Workspace settings → Models) with the credential its connection
- * needs; an empty Jev API URL keeps the Jev connection off.
+ * needs; an empty TypeSafe API URL keeps the TypeSafe connection off.
  *
  * The values are the `decision_connection`, `jev_api_base`,
  * `openrouter_api_base` and `databricks_decision_model` system settings, read
@@ -132,7 +132,7 @@ const DecisionModelSystemSettings: React.FC = () => {
   };
 
   const explanation = {
-    jev: t(`${K}.connectionJevHelp`, { defaultValue: 'Jev chooses among your enabled models.' }),
+    jev: t(`${K}.connectionJevHelp`, { defaultValue: 'Jev, straight from TypeSafe, chooses among your enabled models.' }),
     openrouter: t(`${K}.connectionOpenRouterHelp`, {
       defaultValue: 'Jev, through OpenRouter, chooses among your enabled models; the chosen model '
         + 'then answers through its own provider. Only enabled models ever answer.',
@@ -219,7 +219,7 @@ const DecisionModelSystemSettings: React.FC = () => {
                 : connection.urlRequired
                   ? t(`${K}.urlHelp`, {
                     defaultValue: 'Where the {{name}} decisions API lives. Empty keeps the decision model off for every workspace.',
-                    name: 'Jev',
+                    name: 'TypeSafe',
                   })
                   : t(`${K}.urlHelpOpenRouter`, {
                     defaultValue: "OpenRouter's API. Empty uses its public API.",

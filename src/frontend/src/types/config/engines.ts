@@ -5,7 +5,7 @@ export type BudgetTable = Record<string, Record<string, number>>;
 export interface EngineSettings {
   /** The Jev decisions API URL; null when not set (Jev then stays off). */
   jev_api_base: string | null;
-  /** How the decision model is reached: the Jev API, OpenRouter or Databricks. */
+  /** How the decision model is reached: TypeSafe, OpenRouter or Databricks. */
   decision_connection?: 'jev' | 'openrouter' | 'databricks';
   /** OpenRouter's API URL (its public API when not set). */
   openrouter_api_base?: string | null;

@@ -27,7 +27,7 @@ function openApiKeys() {
 
 /**
  * Workspace settings → Models: this workspace's decision-model opt-in. The key
- * is the one the deployment's connection needs (JEV_API_KEY for the Jev API,
+ * is the one the deployment's connection needs (JEV_API_KEY for TypeSafe,
  * OPENROUTER_API_KEY for OpenRouter) from API Keys; Databricks needs none and
  * uses the workspace's Databricks credentials. The connection and its URL
  * are the deployment's (System administration → Models). Only workspace admins may

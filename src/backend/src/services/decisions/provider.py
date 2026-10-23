@@ -3,7 +3,7 @@
 Every connection speaks TypeSafe's System One shapes (``model``, ``state``,
 ``questions`` in; ``answers`` out):
 
-- Jev API: ``POST {jev_api_base}/v1/systemone`` with model ``jev-1.13.0``.
+- TypeSafe: ``POST {jev_api_base}/v1/systemone`` with model ``jev-1.13.0``.
 - OpenRouter: ``POST {openrouter_api_base}/systemone`` with model
   ``typesafe/jev-1.13``. OpenRouter documents this route as compatible with
   TypeSafe's SDKs (see "Under the OpenRouter connection" in
@@ -16,7 +16,7 @@ Every connection speaks TypeSafe's System One shapes (``model``, ``state``,
 
 Under OpenRouter only Auto (``model_selection``) asks: the other policies stay
 off there, exactly as before, until someone decides to send their state to
-OpenRouter as well. Databricks serves every policy, as the Jev API does.
+OpenRouter as well. Databricks serves every policy, as TypeSafe does.
 """
 
 from dataclasses import dataclass
@@ -51,7 +51,7 @@ class WorkspaceCredential:
         return f"WorkspaceCredential(host={self.host!r})"
 
 
-#: What ``evaluate`` accepts: a workspace API key (Jev API, OpenRouter) or the
+#: What ``evaluate`` accepts: a workspace API key (TypeSafe, OpenRouter) or the
 #: Databricks connection's credential.
 Credential = Union[str, WorkspaceCredential]
 
@@ -59,7 +59,7 @@ Credential = Union[str, WorkspaceCredential]
 def api_base(policy: Optional[str] = None) -> str | None:
     """The saved URL decisions for ``policy`` go to, or None when there is none.
 
-    Jev API: the URL a system admin set in System administration → Models.
+    TypeSafe: the URL a system admin set in System administration → Models.
     Deployment-owned configuration, never supplied by a prompt or tool result.
     There is deliberately no built-in default: a deployment that has not
     configured an endpoint does not call one.
@@ -123,7 +123,7 @@ def _target(credential: Credential, policy: Optional[str]) -> tuple[str, str, di
     base_url = api_base(policy)
     if base_url is None:
         raise ValueError(
-            "The Jev API URL is not configured (System administration → Models)"
+            "The TypeSafe API URL is not configured (System administration → Models)"
         )
     return base_url, credential, {}
 
@@ -133,7 +133,7 @@ async def evaluate(
 ) -> dict:
     base, token, headers = _target(credential, policy)
     if not base.startswith(("https://", "http://")):
-        raise ValueError("The Jev API URL must be an http:// or https:// address")
+        raise ValueError("The TypeSafe API URL must be an http:// or https:// address")
     async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
         response = await client.post(
             endpoint(base),

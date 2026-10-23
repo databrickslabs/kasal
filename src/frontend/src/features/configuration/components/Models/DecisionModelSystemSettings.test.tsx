@@ -40,10 +40,10 @@ describe('DecisionModelSystemSettings', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('offers the three connections, Jev API by default', async () => {
+  it('offers the three connections, TypeSafe by default', async () => {
     render(<DecisionModelSystemSettings />);
     expect(await screen.findByText('Decision model')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Jev API: Jev chooses among your enabled models/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /TypeSafe: Jev, straight from TypeSafe, chooses among your enabled models/ })).toBeChecked();
     expect(screen.getByRole('radio', { name: /OpenRouter: Jev, through OpenRouter, chooses among your enabled models/ })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: /Databricks: Jev on the workspace's AI Gateway/ })).not.toBeChecked();
     expect(screen.getByText(/workspace's own JEV_API_KEY/)).toBeInTheDocument();
@@ -146,7 +146,7 @@ describe('DecisionModelSystemSettings', () => {
       settings({ jev_api_base: 'http://jev.internal:8080' }),
     );
     render(<DecisionModelSystemSettings />);
-    const field = await screen.findByLabelText('Jev API URL');
+    const field = await screen.findByLabelText('TypeSafe API URL');
 
     fireEvent.change(field, { target: { value: 'http://jev.internal:8080' } });
     expect(screen.getByText(/Plain http is not encrypted/)).toBeInTheDocument();
@@ -161,12 +161,12 @@ describe('DecisionModelSystemSettings', () => {
     );
   });
 
-  it('saves the Jev API URL to the existing jev_api_base setting and refuses non-http addresses', async () => {
+  it('saves the TypeSafe API URL to the existing jev_api_base setting and refuses non-http addresses', async () => {
     vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
       settings({ jev_api_base: 'https://jev.example.com' }),
     );
     render(<DecisionModelSystemSettings />);
-    const field = await screen.findByLabelText('Jev API URL');
+    const field = await screen.findByLabelText('TypeSafe API URL');
 
     fireEvent.change(field, { target: { value: 'jev.example.com' } });
     expect(screen.getByText('Must start with http:// or https://')).toBeInTheDocument();
@@ -193,7 +193,7 @@ describe('DecisionModelSystemSettings', () => {
     );
     vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(settings());
     render(<DecisionModelSystemSettings />);
-    const field = await screen.findByLabelText('Jev API URL');
+    const field = await screen.findByLabelText('TypeSafe API URL');
     expect(field).toHaveValue('https://jev.example.com');
     fireEvent.change(field, { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -209,14 +209,14 @@ describe('DecisionModelSystemSettings', () => {
 
   it('shows the server reason when a save is refused', async () => {
     vi.mocked(EngineConfigService.updateSettings).mockRejectedValue({
-      response: { data: { detail: 'The Jev API URL must use https://' } },
+      response: { data: { detail: 'The TypeSafe API URL must use https://' } },
     });
     render(<DecisionModelSystemSettings />);
-    fireEvent.change(await screen.findByLabelText('Jev API URL'), {
+    fireEvent.change(await screen.findByLabelText('TypeSafe API URL'), {
       target: { value: 'https://jev.example.com' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('The Jev API URL must use https://')).toBeInTheDocument();
+    expect(await screen.findByText('The TypeSafe API URL must use https://')).toBeInTheDocument();
     expect(notifyModelsChanged).not.toHaveBeenCalled();
   });
 });

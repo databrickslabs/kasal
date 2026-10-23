@@ -1,7 +1,7 @@
 /**
- * How the deployment reaches its decision model: the native Jev API,
+ * How the deployment reaches its decision model: TypeSafe's own API,
  * OpenRouter, or Databricks (Jev on the workspace's own AI Gateway). The
- * choice is the `decision_connection` system setting. The Jev API and
+ * choice is the `decision_connection` system setting. TypeSafe and
  * OpenRouter each have their own URL setting and their own per-workspace API
  * key; Databricks has neither: it uses each workspace's Databricks credentials,
  * and its model is the `databricks_decision_model` setting.
@@ -29,10 +29,10 @@ export interface DecisionModelConnection {
 export const DECISION_CONNECTIONS: Record<DecisionConnectionId, DecisionModelConnection> = {
   jev: {
     id: 'jev',
-    name: 'Jev API',
+    name: 'TypeSafe',
     apiKeyName: 'JEV_API_KEY',
-    urlName: 'Jev',
-    placeholder: 'https://jev.example.com',
+    urlName: 'TypeSafe',
+    placeholder: 'https://typesafe.example.com',
     urlRequired: true,
     allPolicies: true,
   },
@@ -67,7 +67,7 @@ export const DATABRICKS_DECISION_MODELS = [
 
 export const DATABRICKS_DEFAULT_DECISION_MODEL: string = DATABRICKS_DECISION_MODELS[0].id;
 
-/** The connection for a stored id; anything unknown is the Jev API (the default). */
+/** The connection for a stored id; anything unknown is TypeSafe (the default). */
 export function decisionConnection(id: string | null | undefined): DecisionModelConnection {
   if (id === 'openrouter' || id === 'databricks') return DECISION_CONNECTIONS[id];
   return DECISION_CONNECTIONS.jev;

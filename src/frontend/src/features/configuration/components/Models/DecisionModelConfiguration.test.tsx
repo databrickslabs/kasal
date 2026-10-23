@@ -32,7 +32,7 @@ describe('DecisionModelConfiguration', () => {
   it('names the setting generically and the connection it uses', async () => {
     render(<DecisionModelConfiguration />);
     expect(screen.getByText('Decision model')).toBeInTheDocument();
-    expect(screen.getByText('Connection: Jev API')).toBeInTheDocument();
+    expect(screen.getByText('Connection: TypeSafe')).toBeInTheDocument();
     expect(screen.getByText(/sent to the decision model provider when enabled/)).toBeInTheDocument();
     expect(screen.queryByText(/Jev decisions/)).not.toBeInTheDocument();
   });
@@ -146,7 +146,7 @@ describe('DecisionModelConfiguration', () => {
     vi.mocked(DecisionConfigService.getConfig).mockResolvedValue({
       enabled: false, api_key_configured: true,
     });
-    const detail = 'No decision model is available on this deployment: a system admin must set the Jev API URL in System administration → Models';
+    const detail = 'No decision model is available on this deployment: a system admin must set the TypeSafe API URL in System administration → Models';
     vi.mocked(DecisionConfigService.saveConfig).mockRejectedValue({ response: { status: 400, data: { detail } } });
     render(<DecisionModelConfiguration />);
     const toggle = screen.getByRole('checkbox', TOGGLE);

@@ -124,7 +124,7 @@ class TestChooseModel:
             None,
         )
         assert result.picked == "1" and result.confidence == 0.61
-        assert result.summary() == "Auto (Jev) → key-beta (0.61)"
+        assert result.summary() == "Auto (Jev via TypeSafe) → key-beta (0.61)"
 
     @pytest.mark.asyncio
     async def test_a_low_confidence_none_still_falls_back(self):

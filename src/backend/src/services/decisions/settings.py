@@ -2,7 +2,7 @@
 
 Credentials belong to the existing API key service. Which key a workspace
 needs follows the deployment's connection (``connection.current()``):
-``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter. The
+``JEV_API_KEY`` for TypeSafe, ``OPENROUTER_API_KEY`` for OpenRouter. The
 Databricks connection needs no key: it is ready when the workspace's own
 Databricks host and credential resolve (``credentials.workspace_credential``).
 """
@@ -65,7 +65,7 @@ class DecisionSettingsService:
     async def _keyed(self, connection: Connection) -> bool:
         """Whether this workspace has the credential the connection spends.
 
-        A key in API Keys for the Jev API and OpenRouter; for Databricks, a
+        A key in API Keys for TypeSafe and OpenRouter; for Databricks, a
         workspace host and bearer that resolve (OBO, PAT or service principal).
         """
         if connection.key_name is None:
@@ -93,7 +93,7 @@ class DecisionSettingsService:
         if update.enabled and not connection.configured:
             raise BadRequestError(
                 "No decision model is available on this deployment: a system admin "
-                "must set the Jev API URL in System administration → Models"
+                "must set the TypeSafe API URL in System administration → Models"
             )
         if update.enabled and not keyed and connection.key_name is None:
             raise BadRequestError(
@@ -133,7 +133,7 @@ class DecisionSettingsService:
     async def credential(self) -> str | None:
         """The connection's decrypted key when this workspace opted in, on OUR session.
 
-        ``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter
+        ``JEV_API_KEY`` for TypeSafe, ``OPENROUTER_API_KEY`` for OpenRouter
         (where only Auto asks; see ``provider.OPENROUTER_POLICIES``). Always
         None for Databricks, which spends no key: ``decision_credential``
         resolves its workspace credential instead.

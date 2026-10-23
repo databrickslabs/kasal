@@ -34,7 +34,7 @@ from src.services.decisions.settings import DecisionSettingsService
 async def decision_credential(group_id: str) -> Credential | None:
     """The credential the connection spends when the workspace opted in, else None.
 
-    The workspace's API key for the Jev API and OpenRouter; for Databricks, the
+    The workspace's API key for TypeSafe and OpenRouter; for Databricks, the
     workspace's host and bearer (:func:`workspace_credential`).
     """
     databricks = current_connection().kind == DATABRICKS

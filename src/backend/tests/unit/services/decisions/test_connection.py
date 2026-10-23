@@ -1,4 +1,4 @@
-"""Decision model connections: Jev API or OpenRouter.
+"""Decision model connections: TypeSafe, OpenRouter or Databricks.
 
 The setting, the migration of an OpenRouter ``jev_api_base``, availability per
 connection and key, Auto under each connection, and the other policies
@@ -119,7 +119,7 @@ class TestEngineSettingsView:
             ({"decision_connection": "bedrock"}, "'jev', 'openrouter' or 'databricks'"),
             ({"openrouter_api_base": "ftp://example.com"}, "OpenRouter URL"),
             ({"openrouter_api_base": "openrouter.ai"}, "http:// or https://"),
-            ({"jev_api_base": "ftp://example.com"}, "Jev API URL"),
+            ({"jev_api_base": "ftp://example.com"}, "TypeSafe API URL"),
         ],
     )
     async def test_rejects_invalid_values(self, sent, message):

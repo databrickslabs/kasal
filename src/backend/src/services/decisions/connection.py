@@ -1,4 +1,4 @@
-"""How this deployment reaches its decision model: the Jev API, OpenRouter or Databricks.
+"""How this deployment reaches its decision model: TypeSafe, OpenRouter or Databricks.
 
 One system setting (``decision_connection``) picks the connection. The two
 third-party connections each have their own URL and their own per-workspace

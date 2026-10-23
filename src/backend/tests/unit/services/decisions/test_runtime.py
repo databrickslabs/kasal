@@ -72,7 +72,7 @@ async def test_an_undecryptable_key_falls_back_and_says_why(gateway, caplog):
 async def test_unconfigured_endpoint_is_off_without_reading_credentials(
     gateway, monkeypatch
 ):
-    """No Jev API URL: no credential lookup, no provider call, no trace."""
+    """No TypeSafe API URL: no credential lookup, no provider call, no trace."""
     credential, provider, trace = gateway
     monkeypatch.setitem(engine_settings._snapshot, engine_settings.JEV_API_BASE, "")
     assert await runtime.decide("test", {}, QUESTIONS, group_id="one") is None

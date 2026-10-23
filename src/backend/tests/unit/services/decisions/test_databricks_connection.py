@@ -3,7 +3,7 @@
 No URL setting and no API key: the host and bearer come from the workspace's
 Databricks auth (OBO, PAT, service principal). The model is configurable and
 defaults to the Databricks-hosted ``system.ai.openjev-qwen35-4b``. Every
-policy is served, as under the Jev API.
+policy is served, as under TypeSafe.
 """
 
 import json

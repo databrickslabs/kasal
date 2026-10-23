@@ -28,7 +28,7 @@ const BUDGET_FIELDS: Record<string, { label: string; helper: string; max: number
  * budgets and server-wide memory/knowledge settings. These replaced the
  * KASAL_AGENT_MAX_EXECUTION_TIME and KASAL_BUDGET_<MODE>_<FIELD> environment
  * variables, which a Databricks App never sets. The decision model's provider
- * URL (the Jev API URL) is stored in the same settings but edited under System
+ * URL (the TypeSafe API URL) is stored in the same settings but edited under System
  * administration → Models (`Models/DecisionModelSystemSettings`). Hidden
  * unless the API lets the viewer read them (system administrators).
  */

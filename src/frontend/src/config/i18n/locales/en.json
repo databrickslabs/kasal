@@ -105,7 +105,7 @@
         "title": "Decision model",
         "connection": "Connection: {{name}}",
         "connectionLabel": "Connection",
-        "connectionJevHelp": "Jev chooses among your enabled models.",
+        "connectionJevHelp": "Jev, straight from TypeSafe, chooses among your enabled models.",
         "connectionOpenRouterHelp": "Jev, through OpenRouter, chooses among your enabled models; the chosen model then answers through its own provider. Only enabled models ever answer.",
         "connectionDatabricksHelp": "Jev on the workspace's AI Gateway chooses among your enabled models. No URL and no API key; decisions stay on Databricks.",
         "disclosure": "Off by default. Enable a decision model for supported decisions in this workspace. When off, Kasal uses its existing approach. Unavailable or uncertain decision model answers also fall back to that approach. Relevant prompts and candidate content are sent to the decision model provider when enabled.",

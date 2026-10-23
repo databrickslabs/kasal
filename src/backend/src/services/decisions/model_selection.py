@@ -10,7 +10,7 @@ candidates), the workspace's
 default model is used, which is what the selector would have preselected
 before Auto existed.
 
-Every connection decides the same way: Jev through the Jev API, through
+Every connection decides the same way: Jev through TypeSafe, through
 OpenRouter's System One route, or on the workspace's Databricks AI Gateway
 (``provider.py``). Either way the candidates are
 the enabled models and nothing else, and ``choose_model`` checks the answer
@@ -31,7 +31,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.llm.model_capabilities import allowed_efforts, model_capability
 from src.models.model_config import ModelConfig
 from src.services.decisions import runtime
-from src.services.decisions.connection import DATABRICKS, JEV_ROUTER_KEY, OPENROUTER
+from src.services.decisions.connection import (
+    DATABRICKS,
+    JEV,
+    JEV_ROUTER_KEY,
+    OPENROUTER,
+)
 from src.services.decisions.connection import current as current_connection
 from src.services.decisions.policies import question
 from src.services.decisions.runtime import decide_with_reason, encoded_size
@@ -131,7 +136,11 @@ class RequestExcerpt(TypedDict):
 
 
 #: How the decision row names the connection Jev answered through.
-_VIA = {OPENROUTER: " via OpenRouter", DATABRICKS: " on Databricks"}
+_VIA = {
+    JEV: " via TypeSafe",
+    OPENROUTER: " via OpenRouter",
+    DATABRICKS: " on Databricks",
+}
 
 _IDS = RandomIdGenerator()
 

@@ -86,7 +86,7 @@ async def update_view(
     """Validate and save the fields the caller sent (``exclude_unset`` dict)."""
     values: Dict[str, str] = {}
     for field, key, label in (
-        ("jev_api_base", es.JEV_API_BASE, "Jev API"),
+        ("jev_api_base", es.JEV_API_BASE, "TypeSafe API"),
         ("openrouter_api_base", es.OPENROUTER_API_BASE, "OpenRouter"),
     ):
         if field in sent:

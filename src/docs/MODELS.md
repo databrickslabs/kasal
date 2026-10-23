@@ -49,7 +49,7 @@ Tool-calling and structured-output caveats, all observed in the codebase and rec
 
 ### Changes show up without a reload
 
-When an administrator enables, disables, adds, edits or deletes a model (Configuration → **Models**), turns the decision model on or off, or changes the Jev API URL, open chats and the Agent Builder and Flow Builder model menus update in place: there is no need to reload the page. Other open tabs of the same browser update too, and a model menu opened after a change made elsewhere (another administrator, another browser) refreshes its list, at most every 30 seconds. Switching workspace reloads the list for the new workspace.
+When an administrator enables, disables, adds, edits or deletes a model (Configuration → **Models**), turns the decision model on or off, or changes the TypeSafe API URL, open chats and the Agent Builder and Flow Builder model menus update in place: there is no need to reload the page. Other open tabs of the same browser update too, and a model menu opened after a change made elsewhere (another administrator, another browser) refreshes its list, at most every 30 seconds. Switching workspace reloads the list for the new workspace.
 
 If the model you had selected is no longer enabled, the selector falls back: in the chat to **Auto** when it is available, otherwise to the server's default model when it is enabled, otherwise to the first enabled model; in the builders to the default, otherwise the first enabled model. A model you picked yourself that is still enabled is never changed, and in the chat it comes back if it is enabled again. Agents saved with a model keep that model: the list updates, the saved agent does not.
 
@@ -61,8 +61,8 @@ In the chat, the **Model** row of the composer's **+** menu can be set to **Auto
 
 Auto appears at the top of the model list only when the decision model is available to your workspace:
 
-1. A system administrator has chosen the connection (System administration → **Models** → **Decision model**): **Jev API** with its URL set, or **OpenRouter**.
-2. Your workspace has the key that connection needs under **Configuration → API Keys**: `JEV_API_KEY` for the Jev API, `OPENROUTER_API_KEY` for OpenRouter.
+1. A system administrator has chosen the connection (System administration → **Models** → **Decision model**): **TypeSafe** with its URL set, or **OpenRouter**.
+2. Your workspace has the key that connection needs under **Configuration → API Keys**: `JEV_API_KEY` for TypeSafe, `OPENROUTER_API_KEY` for OpenRouter.
 3. A workspace administrator has turned on **Use a decision model** (Workspace settings → **Models** → **Decision model**).
 
 Under either connection, Auto first asks Jev which of your **enabled** models to use, then calls that model through its own provider. Under the **OpenRouter** connection the question goes to Jev through OpenRouter; the answer still comes from the chosen enabled model (for example Anthropic, with your `ANTHROPIC_API_KEY`), not from OpenRouter. Only enabled models ever answer an Auto message: Jev can only pick from that list, Kasal checks its pick against the list again, and a router model (Jev Router, `openrouter/auto`) is never offered. See [Under the OpenRouter connection](./DECISION_MODEL.md#under-the-openrouter-connection).
@@ -75,7 +75,7 @@ Auto is a default, not a lock. Open the **+** menu, select **Model**, and pick a
 
 ### Seeing which model Auto picked
 
-After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) starts with the decision, "Auto (Jev via OpenRouter) → claude-opus-5-5 (0.61)" (or "Auto (Jev) → …" under the Jev API), where the number is the probability Jev gave that model, followed by "LLM Request — claude-opus-5-5", the tool calls and "LLM Response — claude-opus-5-5". The decision and the calls share one trace id, in the run's rows and in its OpenTelemetry/MLflow trace, and the run's details show the model it ran on.
+After you send a message, the run activity under it shows a step such as "Auto → databricks-claude-opus-5-5". The run's trace (Run history) starts with the decision, "Auto (Jev via OpenRouter) → claude-opus-5-5 (0.61)" (or "Auto (Jev via TypeSafe) → …" under TypeSafe), where the number is the probability Jev gave that model, followed by "LLM Request — claude-opus-5-5", the tool calls and "LLM Response — claude-opus-5-5". The decision and the calls share one trace id, in the run's rows and in its OpenTelemetry/MLflow trace, and the run's details show the model it ran on.
 
 ### When the decision model cannot decide
 
@@ -85,7 +85,7 @@ A few chat actions that call a model directly, such as improving a prompt, draft
 
 ### Turning Auto on (administrators)
 
-Auto needs no setting of its own: it follows the decision model. A system administrator chooses the connection (Jev API with its URL, or OpenRouter) once for the deployment. Then, per workspace, someone who manages API keys adds the connection's key (`JEV_API_KEY` or `OPENROUTER_API_KEY`), and a workspace administrator turns on **Use a decision model**. Turning the decision model off removes Auto from the selector for that workspace. For what is sent to the provider and how each decision falls back, see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto) and [Configuration](./DECISION_MODEL.md#configuration) in the decision model guide.
+Auto needs no setting of its own: it follows the decision model. A system administrator chooses the connection (TypeSafe with its URL, or OpenRouter) once for the deployment. Then, per workspace, someone who manages API keys adds the connection's key (`JEV_API_KEY` or `OPENROUTER_API_KEY`), and a workspace administrator turns on **Use a decision model**. Turning the decision model off removes Auto from the selector for that workspace. For what is sent to the provider and how each decision falls back, see [Model selection (Auto)](./DECISION_MODEL.md#model-selection-auto) and [Configuration](./DECISION_MODEL.md#configuration) in the decision model guide.
 
 ## OpenRouter and Jev Router
 
