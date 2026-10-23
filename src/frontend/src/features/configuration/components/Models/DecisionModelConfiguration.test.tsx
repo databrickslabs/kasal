@@ -88,6 +88,28 @@ describe('DecisionModelConfiguration', () => {
     expect(screen.queryByText(/Ask the decision model/)).not.toBeInTheDocument();
   });
 
+  it('under Databricks, needs no API key and uses the workspace credentials', async () => {
+    vi.mocked(DecisionConfigService.getConfig).mockResolvedValue({
+      enabled: false, api_key_configured: false, connection: 'databricks', api_key_name: null,
+    });
+    const first = render(<DecisionModelConfiguration />);
+    expect(await screen.findByText('Connection: Databricks')).toBeInTheDocument();
+    expect(screen.getByText(/No Databricks credentials resolve for this workspace/)).toBeInTheDocument();
+    expect(screen.queryByText(/_API_KEY/)).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', TOGGLE)).toBeDisabled();
+    first.unmount();
+
+    vi.mocked(DecisionConfigService.getConfig).mockResolvedValue({
+      enabled: true, api_key_configured: true, connection: 'databricks', api_key_name: null,
+    });
+    render(<DecisionModelConfiguration />);
+    expect(await screen.findByText("Uses this workspace's Databricks credentials. No API key is needed.")).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', TOGGLE)).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Open API Keys' })).not.toBeInTheDocument();
+    // Every policy is served on Databricks, recommendations included.
+    expect(screen.getByText(/Ask the decision model/)).toBeInTheDocument();
+  });
+
   it('disables without overwriting the stored key', async () => {
     vi.mocked(DecisionConfigService.getConfig).mockResolvedValue({
       enabled: true, api_key_configured: true,

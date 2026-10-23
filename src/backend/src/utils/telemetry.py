@@ -61,6 +61,8 @@ class KasalProduct:
     # Model serving
     AGENTBRICKS = "agentbricks"
     DEPLOYMENT = "deployment"
+    #: The decision model (Jev) on the Databricks AI Gateway.
+    DECISIONS = "decisions"
 
     # Storage
     VOLUME = "volume"

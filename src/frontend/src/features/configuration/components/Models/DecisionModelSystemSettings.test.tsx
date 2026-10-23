@@ -40,12 +40,71 @@ describe('DecisionModelSystemSettings', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('offers the two connections, Jev API by default', async () => {
+  it('offers the three connections, Jev API by default', async () => {
     render(<DecisionModelSystemSettings />);
     expect(await screen.findByText('Decision model')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Jev API: Jev chooses among your enabled models/ })).toBeChecked();
     expect(screen.getByRole('radio', { name: /OpenRouter: Jev, through OpenRouter, chooses among your enabled models/ })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /Databricks: Jev on the workspace's AI Gateway/ })).not.toBeChecked();
     expect(screen.getByText(/workspace's own JEV_API_KEY/)).toBeInTheDocument();
+  });
+
+  it('under Databricks, asks for a model instead of a URL and defaults to the Databricks-hosted Jev', async () => {
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(settings({ decision_connection: 'databricks' }));
+    render(<DecisionModelSystemSettings />);
+    fireEvent.click(await screen.findByRole('radio', { name: /Databricks/ }));
+    // No URL and no API key for this connection.
+    expect(screen.queryByLabelText(/API URL/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/API_KEY/)).not.toBeInTheDocument();
+    expect(screen.getByText(/workspace's own Databricks credentials/)).toBeInTheDocument();
+    const field = screen.getByLabelText('Decision model on Databricks');
+    expect(field).toHaveValue('system.ai.openjev-qwen35-4b');
+    // The default is listed by name as a choice, not only used behind the scenes.
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    expect(await screen.findByRole('option', { name: /system\.ai\.openjev-qwen35-4b/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        decision_connection: 'databricks',
+        jev_api_base: null,
+        openrouter_api_base: null,
+        // The default is not pinned: an unset model follows Kasal's default.
+        databricks_decision_model: null,
+      }),
+    );
+    expect(notifyModelsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves a custom Databricks model id and keeps the preset on offer', async () => {
+    vi.mocked(EngineConfigService.getSettings).mockResolvedValue(
+      settings({ decision_connection: 'databricks', databricks_decision_model: 'system.ai.openjev-qwen35-4b' }),
+    );
+    vi.mocked(EngineConfigService.updateSettings).mockResolvedValue(
+      settings({ decision_connection: 'databricks', databricks_decision_model: 'typesafe/jev-preview' }),
+    );
+    render(<DecisionModelSystemSettings />);
+    const field = await screen.findByLabelText('Decision model on Databricks');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    fireEvent.change(field, { target: { value: 'typesafe/jev-preview' } });
+    expect(await screen.findByRole('option', { name: /system\.ai\.openjev-qwen35-4b/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(EngineConfigService.updateSettings).toHaveBeenCalledWith({
+        decision_connection: 'databricks',
+        jev_api_base: null,
+        openrouter_api_base: null,
+        databricks_decision_model: 'typesafe/jev-preview',
+      }),
+    );
+  });
+
+  it('refuses a Databricks model that is not one id', async () => {
+    vi.mocked(EngineConfigService.getSettings).mockResolvedValue(settings({ decision_connection: 'databricks' }));
+    render(<DecisionModelSystemSettings />);
+    const field = await screen.findByLabelText('Decision model on Databricks');
+    fireEvent.change(field, { target: { value: 'two words' } });
+    expect(screen.getByText('One model id, with no spaces.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
   it('saves the OpenRouter connection with its URL and names OPENROUTER_API_KEY', async () => {
@@ -63,6 +122,7 @@ describe('DecisionModelSystemSettings', () => {
         decision_connection: 'openrouter',
         jev_api_base: null,
         openrouter_api_base: 'https://openrouter.ai/api/v1',
+        databricks_decision_model: null,
       }),
     );
     expect(await screen.findByText('Decision model connection saved.')).toBeInTheDocument();
@@ -96,6 +156,7 @@ describe('DecisionModelSystemSettings', () => {
         decision_connection: 'jev',
         jev_api_base: 'http://jev.internal:8080',
         openrouter_api_base: null,
+        databricks_decision_model: null,
       }),
     );
   });
@@ -118,6 +179,7 @@ describe('DecisionModelSystemSettings', () => {
         decision_connection: 'jev',
         jev_api_base: 'https://jev.example.com',
         openrouter_api_base: null,
+        databricks_decision_model: null,
       }),
     );
     expect(await screen.findByText('Decision model connection saved.')).toBeInTheDocument();
@@ -140,6 +202,7 @@ describe('DecisionModelSystemSettings', () => {
         decision_connection: 'jev',
         jev_api_base: null,
         openrouter_api_base: null,
+        databricks_decision_model: null,
       }),
     );
   });

@@ -116,7 +116,7 @@ class TestEngineSettingsView:
     @pytest.mark.parametrize(
         "sent, message",
         [
-            ({"decision_connection": "bedrock"}, "'jev' or 'openrouter'"),
+            ({"decision_connection": "bedrock"}, "'jev', 'openrouter' or 'databricks'"),
             ({"openrouter_api_base": "ftp://example.com"}, "OpenRouter URL"),
             ({"openrouter_api_base": "openrouter.ai"}, "http:// or https://"),
             ({"jev_api_base": "ftp://example.com"}, "Jev API URL"),

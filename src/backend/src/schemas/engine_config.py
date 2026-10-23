@@ -149,10 +149,13 @@ class EngineSettings(BaseModel):
 
     #: The Jev decisions API URL; None when not set (Jev then stays off).
     jev_api_base: Optional[str] = None
-    #: How the decision model is reached: "jev" (the API above) or "openrouter".
+    #: How the decision model is reached: "jev" (the API above), "openrouter"
+    #: or "databricks" (the workspace's AI Gateway).
     decision_connection: str = "jev"
     #: OpenRouter's API URL (its public API when not set).
     openrouter_api_base: Optional[str] = None
+    #: The model the Databricks connection asks (the effective value).
+    databricks_decision_model: Optional[str] = None
     #: Wall-clock seconds for one agent call when the agent sets none (0 = off).
     agent_max_execution_time: int
     agent_max_execution_time_default: int
@@ -179,6 +182,7 @@ class EngineSettingsUpdate(BaseModel):
     jev_api_base: Optional[str] = None
     decision_connection: Optional[str] = None
     openrouter_api_base: Optional[str] = None
+    databricks_decision_model: Optional[str] = None
     agent_max_execution_time: Optional[int] = Field(default=None, ge=0, le=86400)
     #: {mode: {field: value}}; a null value resets that field to its default.
     budgets: Optional[Dict[str, Dict[str, Optional[int]]]] = None

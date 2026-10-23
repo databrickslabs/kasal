@@ -10,8 +10,9 @@ candidates), the workspace's
 default model is used, which is what the selector would have preselected
 before Auto existed.
 
-Both connections decide the same way: Jev through the Jev API, or Jev through
-OpenRouter's System One route (``provider.py``). Either way the candidates are
+Every connection decides the same way: Jev through the Jev API, through
+OpenRouter's System One route, or on the workspace's Databricks AI Gateway
+(``provider.py``). Either way the candidates are
 the enabled models and nothing else, and ``choose_model`` checks the answer
 against them again before anything is called. A router model (Jev Router,
 ``openrouter/auto``, ...) is never a candidate: it would hand the request to a
@@ -30,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.llm.model_capabilities import allowed_efforts, model_capability
 from src.models.model_config import ModelConfig
 from src.services.decisions import runtime
-from src.services.decisions.connection import JEV_ROUTER_KEY, OPENROUTER
+from src.services.decisions.connection import DATABRICKS, JEV_ROUTER_KEY, OPENROUTER
 from src.services.decisions.connection import current as current_connection
 from src.services.decisions.policies import question
 from src.services.decisions.runtime import decide_with_reason, encoded_size
@@ -129,6 +130,9 @@ class RequestExcerpt(TypedDict):
     length: int
 
 
+#: How the decision row names the connection Jev answered through.
+_VIA = {OPENROUTER: " via OpenRouter", DATABRICKS: " on Databricks"}
+
 _IDS = RandomIdGenerator()
 
 
@@ -185,7 +189,7 @@ class ModelSelection:
         """
         model = self.model or "the default model"
         if self.status == "selected":
-            via = " via OpenRouter" if self.connection == OPENROUTER else ""
+            via = _VIA.get(self.connection or "", "")
             p = f" ({self.confidence:.2f})" if self.confidence is not None else ""
             return f"Auto (Jev{via}) → {model}{p}"
         why = FALLBACK_REASONS.get(self.reason or "")

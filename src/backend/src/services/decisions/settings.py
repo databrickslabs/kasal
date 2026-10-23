@@ -1,8 +1,10 @@
-"""Workspace opt-in to the decision model (Jev, directly or through OpenRouter).
+"""Workspace opt-in to the decision model (Jev directly, through OpenRouter, or on Databricks).
 
 Credentials belong to the existing API key service. Which key a workspace
 needs follows the deployment's connection (``connection.current()``):
-``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter.
+``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter. The
+Databricks connection needs no key: it is ready when the workspace's own
+Databricks host and credential resolve (``credentials.workspace_credential``).
 """
 
 import logging
@@ -56,8 +58,20 @@ class DecisionSettingsService:
             connection, bool(row and row.enabled), await self._keyed(connection)
         )
 
+    async def opted_in(self) -> bool:
+        row = await self.repository.get(self.group_id)
+        return bool(row and row.enabled is True)
+
     async def _keyed(self, connection: Connection) -> bool:
-        """Whether this workspace has the key the deployment's connection spends."""
+        """Whether this workspace has the credential the connection spends.
+
+        A key in API Keys for the Jev API and OpenRouter; for Databricks, a
+        workspace host and bearer that resolve (OBO, PAT or service principal).
+        """
+        if connection.key_name is None:
+            from src.services.decisions.credentials import workspace_credential
+
+            return await workspace_credential(self.group_id) is not None
         key = await self.api_keys.find_by_name(connection.key_name)
         return bool(key and key.encrypted_value)
 
@@ -80,6 +94,13 @@ class DecisionSettingsService:
             raise BadRequestError(
                 "No decision model is available on this deployment: a system admin "
                 "must set the Jev API URL in System administration → Models"
+            )
+        if update.enabled and not keyed and connection.key_name is None:
+            raise BadRequestError(
+                "No Databricks workspace credential resolves for this workspace: "
+                "configure the workspace in Configuration > Databricks (or add "
+                "DATABRICKS_TOKEN in Configuration > API Keys) before enabling the "
+                "decision model"
             )
         if update.enabled and not keyed:
             raise BadRequestError(
@@ -113,7 +134,9 @@ class DecisionSettingsService:
         """The connection's decrypted key when this workspace opted in, on OUR session.
 
         ``JEV_API_KEY`` for the Jev API, ``OPENROUTER_API_KEY`` for OpenRouter
-        (where only Auto asks; see ``provider.OPENROUTER_POLICIES``).
+        (where only Auto asks; see ``provider.OPENROUTER_POLICIES``). Always
+        None for Databricks, which spends no key: ``decision_credential``
+        resolves its workspace credential instead.
 
         None when the workspace has not opted in or has no key. A key that
         exists but will not decrypt raises ``DecisionCredentialUnreadable``
@@ -124,10 +147,9 @@ class DecisionSettingsService:
         that runs from memory and kernel hot spots. ``find_by_name`` on the
         injected service keeps the group scoping and uses this session.
         """
-        row = await self.repository.get(self.group_id)
-        if not row or row.enabled is not True:
-            return None
         key_name = current_connection().key_name
+        if key_name is None or not await self.opted_in():
+            return None
         key = await self.api_keys.find_by_name(key_name)
         if not key or not key.encrypted_value:
             return None

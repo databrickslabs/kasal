@@ -28,7 +28,8 @@ function openApiKeys() {
 /**
  * Workspace settings → Models: this workspace's decision-model opt-in. The key
  * is the one the deployment's connection needs (JEV_API_KEY for the Jev API,
- * OPENROUTER_API_KEY for OpenRouter) from API Keys; the connection and its URL
+ * OPENROUTER_API_KEY for OpenRouter) from API Keys; Databricks needs none and
+ * uses the workspace's Databricks credentials. The connection and its URL
  * are the deployment's (System administration → Models). Only workspace admins may
  * change it — the API enforces that, and the Models section is shown to
  * workspace admins only.
@@ -118,9 +119,18 @@ const DecisionModelForm: React.FC = () => {
         } />
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Typography variant="body2" color="text.secondary">
-            {configured
-              ? t(`${K}.keyConfigured`, { defaultValue: 'Uses {{key}} from Configuration → API Keys.', key: connection.apiKeyName })
-              : t(`${K}.keyMissing`, { defaultValue: 'Add {{key}} in Configuration → API Keys, then reopen this panel.', key: connection.apiKeyName })}
+            {connection.apiKeyName === null
+              ? (configured
+                ? t(`${K}.workspaceAuthConfigured`, {
+                  defaultValue: "Uses this workspace's Databricks credentials. No API key is needed.",
+                })
+                : t(`${K}.workspaceAuthMissing`, {
+                  defaultValue: 'No Databricks credentials resolve for this workspace. Configure Databricks, or '
+                    + 'add DATABRICKS_TOKEN in Configuration → API Keys, then reopen this panel.',
+                }))
+              : configured
+                ? t(`${K}.keyConfigured`, { defaultValue: 'Uses {{key}} from Configuration → API Keys.', key: connection.apiKeyName })
+                : t(`${K}.keyMissing`, { defaultValue: 'Add {{key}} in Configuration → API Keys, then reopen this panel.', key: connection.apiKeyName })}
           </Typography>
           {!configured && !loading && (
             <Button size="small" onClick={openApiKeys}>
@@ -135,8 +145,8 @@ const DecisionModelForm: React.FC = () => {
             {t(`${K}.saving`, { defaultValue: 'Saving decision model settings…' })}
           </Typography>
         )}
-        {/* Recommendations need the native decision API; OpenRouter has none. */}
-        {enabled && !loading && !saving && connection.id === 'jev' && <DecisionModelRecommendation />}
+        {/* Recommendations are a policy of their own; OpenRouter serves Auto only. */}
+        {enabled && !loading && !saving && connection.allPolicies && <DecisionModelRecommendation />}
       </Stack>
     </Paper>
   );
