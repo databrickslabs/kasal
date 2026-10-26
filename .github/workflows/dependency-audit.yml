@@ -31,10 +31,12 @@ jobs:
       - name: Reject internal proxy hosts in committed lockfiles
         run: |
           set -euo pipefail
-          # Internal dev proxies are local-dev-only and must never be committed.
+          # Internal proxies are local-dev-only and must never be committed.
           # Committed lockfiles must reference public registries so the repo is
-          # portable and the Databricks Apps build (no VPN) can install.
-          patterns='npm-proxy\.dev\.databricks\.com|pypi-proxy\.dev\.databricks\.com'
+          # portable and the Databricks Apps build (no VPN) can install. Both the
+          # legacy *.dev hosts and the current *.cloud hosts (pypi-proxy.cloud,
+          # npm-proxy.cloud, pypi-pytorch-proxy, pypi-nvidia-proxy) are matched.
+          patterns='(npm|pypi|pypi-pytorch|pypi-nvidia)-proxy\.(dev|cloud)\.databricks\.com'
           files="src/backend/uv.lock src/frontend/package-lock.json"
           found=0
           for f in $files; do
