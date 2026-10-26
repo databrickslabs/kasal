@@ -14,7 +14,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.0.0",
     "date-fns": "^3.3.1",
-    "dompurify": "^3.4.14",
+    "dompurify": "^3.4.17",
     "force-graph": "^1.50.1",
     "github-markdown-css": "^5.5.1",
     "html-to-image": "^1.11.13",
@@ -103,6 +103,7 @@
   "overrides": {
     "react-floater": "^0.9.4",
     "deepmerge-ts": "^8.0.2",
+    "compression": "^1.8.2",
     "image-size": "file:./stubs/image-size"
   }
 }
