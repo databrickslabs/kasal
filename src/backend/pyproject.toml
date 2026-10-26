@@ -55,7 +55,7 @@ dependencies = [
     # Azure
     "azure-identity>=1.15.0",
     # AI/ML
-    "litellm[caching]==1.84.0", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.84.0 clears PYSEC-2026-388/390/2597-2600/3476-3479 + GHSA-69x8-hrgq-fjj8
+    "litellm[caching]==1.96.2", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.96.2 clears PYSEC-2026-4066 (and everything 1.84.0 cleared); never 1.107.0 (compromised release)
     "mcp>=1.28.1,<1.29.0", # Kasal's own MCP integration. The floor is set by
     # crewai, which requires ~=1.28.1; this was <1.27.0 and `uv` refused the
     # resolution outright. Kasal's own use is narrow — the sse / streamable-http
@@ -75,18 +75,24 @@ dependencies = [
     # pymupdf, pytube and youtube-transcript-api for nothing.
     #
     # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84;
-    # litellm is pinned independently above (==1.84.0, for completion_with_usage
+    # litellm is pinned independently above (==1.96.2, for completion_with_usage
     # only). The CrewAI engine runs on Kasal's own transport instead (a BaseLLM
     # subclass), so the extra is unnecessary and the two pins never have to move
     # together — and Databricks auth, retry/fallback, the
     # context-window clamp and every LLM event stay identical across engines.
-    "crewai==1.15.20",
+    # 1.15.21: the first release that lets opentelemetry-api and pyjwt take their
+    # security fixes (~=1.42 and >=2.13 -> <2 and <3). NEXT: 1.15.30 is the first
+    # to allow mcp>=1.30 and (via crewai-cli) uv>=0.13.4, clearing CVE-2026-59951
+    # and PYSEC-2026-4321; published 2026-10-24, so the PyPI proxy's 7-day hold
+    # serves it from 2026-10-31. Move the pin (and mcp to >=1.30) then.
+    "crewai==1.15.21",
     # Observability
-    # Pinned to the 3.16 line: the built-in judge bridge (services/prompt_optimization/
+    # Pinned to the 3.17 line: the built-in judge bridge (services/prompt_optimization/
     # builtin_judges/bridge.py) wraps mlflow internals (judges.adapters.utils.get_adapter),
     # pinned by tests/.../builtin_judges/test_bridge_contract.py. Re-run that test before
-    # widening. (>=3.11 was already required for Unity Catalog trace storage.)
-    "mlflow>=3.16,<3.17",
+    # widening. 3.17.2 is the floor that clears the 3.16 advisories.
+    # (>=3.11 was already required for Unity Catalog trace storage.)
+    "mlflow>=3.17.2,<3.18",
     "dspy>=3.3,<4", # MemAlign judge alignment (mlflow.genai.judges.optimizers) is built on DSPy; mlflow does not pull it in
     "opentelemetry-sdk>=1.27.0,<2.0.0",
     "opentelemetry-api>=1.27.0,<2.0.0",

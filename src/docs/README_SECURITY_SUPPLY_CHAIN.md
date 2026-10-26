@@ -114,14 +114,15 @@ declared in `src/backend/pyproject.toml` and locked (with sha256 hashes) in
 `src/backend/uv.lock`. There is **no `requirements.txt`**.
 
 ```text
-litellm[caching]==1.84.0   # pyproject.toml; sha256 hash-pinned for sdist + wheel in uv.lock
+litellm[caching]==1.96.2   # pyproject.toml; sha256 hash-pinned for sdist + wheel in uv.lock
 ```
 
 At the time of the incident Kasal pinned `1.74.9`, which predates the compromise window
-(`1.82.7`/`1.82.8` published March 24, 2026). The pin has since moved to `1.84.0`, a release
-after the two malicious versions were removed from PyPI; the move was made to clear later
-litellm advisories (see the comment on the pin in `pyproject.toml`). The two compromised
-versions must never appear in `uv.lock`.
+(`1.82.7`/`1.82.8` published March 24, 2026). The pin has since moved to `1.84.0` and then
+`1.96.2`, both releases after the two malicious versions were removed from PyPI; each move
+was made to clear later litellm advisories (see the comment on the pin in `pyproject.toml`).
+The compromised versions (`1.82.7`, `1.82.8`, and the later `1.107.0`) must never appear in
+`uv.lock`.
 
 The Kasal runtime's own transport (`src/backend/src/core/llm/transport/`) calls providers
 through provider SDK clients (OpenAI-compatible and Anthropic) rather than litellm. litellm is still imported by the CrewAI-harness

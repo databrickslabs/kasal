@@ -6,9 +6,10 @@ mlflow. When mlflow is upgraded and one fails, re-check the bridge against the
 new internals before changing the test — a silent drift would send judge calls
 to LiteLLM with environment credentials, or nowhere.
 
-Pinned to mlflow 3.16: ``pyproject.toml`` requires ``>=3.16,<3.17`` because of
+Pinned to mlflow 3.17: ``pyproject.toml`` requires ``>=3.17.2,<3.18`` because of
 this bridge, and the version assertion below catches an environment that
-drifted from it. Widen both together, after re-checking the internals.
+drifted from it. Widen both together, after re-checking the internals (re-checked
+for 3.17.2: every contract test below passed unchanged).
 """
 
 import inspect
@@ -21,7 +22,7 @@ from src.services.prompt_optimization.gepa import reflection
 
 
 def test_installed_mlflow_is_the_reviewed_minor():
-    assert mlflow.__version__.startswith("3.16."), (
+    assert mlflow.__version__.startswith("3.17."), (
         f"mlflow {mlflow.__version__}: re-verify builtin_judges/bridge.py "
         "against this version's judge adapters, then update this pin"
     )
