@@ -57,7 +57,7 @@ dependencies = [
     # AI/ML
     "litellm[caching]==1.96.2", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.96.2 clears PYSEC-2026-4066 (and everything 1.84.0 cleared); never 1.107.0 (compromised release)
     "mcp>=1.30.0,<1.31.0", # Kasal's own MCP integration. 1.30.0 clears
-    # CVE-2026-59951; crewai 1.15.21 still declares ~=1.28.1, so this is held by
+    # CVE-2026-59951; crewai 1.15.28 still declares ~=1.28.1, so this is held by
     # the override in [tool.uv] until the crewai 1.15.30 bump (which requires
     # >=1.30,<2 itself). Kasal's own use is narrow — the sse / streamable-http
     # clients, McpError, and the JSON-RPC server side — so the bump is contained,
@@ -81,13 +81,13 @@ dependencies = [
     # subclass), so the extra is unnecessary and the two pins never have to move
     # together — and Databricks auth, retry/fallback, the
     # context-window clamp and every LLM event stay identical across engines.
-    # 1.15.21: the first release that lets the OpenTelemetry family take its
-    # security fix (crewai and crewai-core declared ~=1.42.0; 1.15.21 allows <2).
-    # NEXT: 1.15.30 is the first to allow mcp>=1.30 and (via crewai-cli)
-    # uv>=0.13.4; published 2026-10-24, the PyPI proxy's 7-day hold serves it from
-    # about 2026-10-31. Until then [tool.uv] override-dependencies holds those two;
-    # drop the overrides when this pin moves.
-    "crewai==1.15.21",
+    # 1.15.28: the newest release through the PyPI proxy's 7-day hold. It already
+    # brings chromadb ~=1.5.9 (from ~=1.1), pyjwt >=2.15, oauthlib >=4 and
+    # instructor <1.16. NEXT: 1.15.30 is the first to allow mcp>=1.30 and (via
+    # crewai-cli) uv>=0.13.4; published 2026-10-24, the proxy serves it from about
+    # 2026-10-31. Until then [tool.uv] override-dependencies holds those two; drop
+    # the overrides when this pin moves.
+    "crewai==1.15.28",
     # Observability
     # Pinned to the 3.17 line: the built-in judge bridge (services/prompt_optimization/
     # builtin_judges/bridge.py) wraps mlflow internals (judges.adapters.utils.get_adapter),
@@ -148,7 +148,7 @@ dev = [
 package = false
 # Security overrides, until crewai 1.15.30 is through the PyPI proxy's 7-day hold
 # (published 2026-10-24; that release itself requires mcp>=1.30,<2 and, via
-# crewai-cli, uv>=0.13.4). crewai 1.15.21 still declares mcp~=1.28.1 and
+# crewai-cli, uv>=0.13.4). crewai 1.15.28 still declares mcp~=1.28.1 and
 # crewai-cli uv~=0.11.6, which would keep two advisories in the lock:
 #   - mcp 1.30.0 clears CVE-2026-59951 (stateful Streamable HTTP servers; Kasal
 #     only uses the client side, but the audit gates on it).
