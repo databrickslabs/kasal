@@ -233,7 +233,7 @@ jobs:
       # number whenever warnings are fixed; never raise it. Passed here rather
       # than in package.json so local `npm run lint` output is unchanged.
       - name: Lint (warnings may not grow)
-        run: npm run lint -- --max-warnings 914
+        run: npm run lint -- --max-warnings 913
       - run: npm run build
 
   # Coverage is a separate, non-blocking job: the test gate above stays exactly

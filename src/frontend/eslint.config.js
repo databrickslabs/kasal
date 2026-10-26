@@ -21,7 +21,9 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': [
         'warn',
-        { allowConstantExport: true },
+        // retryableLazy is our React.lazy wrapper (shared/errors/retryableLazy);
+        // plugin >=0.5 only recognises the built-in HOCs without this.
+        { allowConstantExport: true, extraHOCs: ['retryableLazy'] },
       ],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
