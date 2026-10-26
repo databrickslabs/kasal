@@ -17,7 +17,7 @@ asyncio-mqtt>=0.15.0
 
 # Mocking and fixtures
 factory-boy>=3.3.0
-faker>=19.3.0
+faker>=40.43.0
 
 # Database testing
 pytest-postgresql>=5.0.0
