@@ -200,10 +200,15 @@ def test_evaluate_workers_reach_llm_manager_with_key_and_group(
         assert call["model"] == "judge-key"
         assert call["group_ids"] == ["team-7"]
         assert call["token"] == "user-tok"
-    # ...from evaluate's worker threads, not the calling thread.
+    # ...from evaluate's worker threads, not the calling thread. mlflow 3.16 ran
+    # scorers on its MlflowGenAIEval* pool; 3.17 starts one MlflowScorer-<name>
+    # thread per scorer (mlflow/genai/scorers/base.py).
     assert llm_manager.threads
     assert threading.current_thread().name not in llm_manager.threads
-    assert all(name.startswith("MlflowGenAIEval") for name in llm_manager.threads)
+    assert all(
+        name.startswith(("MlflowGenAIEval", "MlflowScorer-"))
+        for name in llm_manager.threads
+    )
     assert result.metrics  # verdicts were aggregated
 
 
