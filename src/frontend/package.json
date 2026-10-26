@@ -44,7 +44,7 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.6.1",
     "uuid": "^14.0.2",
-    "zustand": "^4.5.7"
+    "zustand": "^5.0.15"
   },
   "scripts": {
     "start": "vite",
