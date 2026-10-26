@@ -44,6 +44,10 @@ updates:
       - dependency-name: "litellm"
       - dependency-name: "crewai*"
       - dependency-name: "mcp"
+      # 2.1 is a deliberate upgrade (stricter Row typing: 50 new mypy errors in
+      # db/ and repositories/); stay on the 2.0 line until it is planned.
+      - dependency-name: "sqlalchemy"
+        versions: [">=2.1"]
     groups:
       python-minor-patch:
         patterns: ["*"]
