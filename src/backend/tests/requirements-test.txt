@@ -21,7 +21,7 @@ faker>=19.3.0
 
 # Database testing
 pytest-postgresql>=5.0.0
-sqlalchemy-utils>=0.41.0
+sqlalchemy-utils>=0.43.0
 
 # FastAPI testing
 fastapi[all]>=0.103.0
