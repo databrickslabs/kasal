@@ -35,6 +35,14 @@ class TestAppCreation:
 
         assert app.version is not None
 
+    def test_app_reports_openapi_3_1(self):
+        """FastAPI 0.148 removed the openapi_version parameter: passing it made
+        `FastAPI(...)` raise TypeError at import, so the backend never started.
+        3.1.0 is FastAPI's default, which the app must still report."""
+        from src.main import app
+
+        assert app.openapi_version == "3.1.0"
+
     def test_app_has_lifespan(self):
         """Test that app has a lifespan handler configured."""
         from src.main import app

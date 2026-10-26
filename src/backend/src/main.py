@@ -724,8 +724,8 @@ app = FastAPI(
     # Move API docs to /api-docs
     docs_url="/api-docs" if settings.DOCS_ENABLED else None,
     redoc_url="/api-redoc" if settings.DOCS_ENABLED else None,
+    # OpenAPI 3.1.0 is the default; FastAPI 0.148 rejects an openapi_version kwarg.
     openapi_url="/api-openapi.json" if settings.DOCS_ENABLED else None,
-    openapi_version="3.1.0",  # Explicitly set OpenAPI version
 )
 
 # Add CORS middleware using origins from settings
