@@ -355,15 +355,14 @@ async def delete_all_databricks_configs(
     if not is_workspace_admin(group_context):
         raise ForbiddenError("Only workspace admins can delete memory configurations")
     # Get all memory backends for the group
-    backends = await service.get_memory_backends(require_group_id(group_context))
+    group_id = require_group_id(group_context)
+    backends = await service.get_memory_backends(group_id)
 
     deleted_count = 0
     for backend in backends:
         # Only delete Databricks backends
         if backend.backend_type == MemoryBackendType.DATABRICKS:
-            success = await service.delete_memory_backend(
-                group_context.primary_group_id, backend.id
-            )
+            success = await service.delete_memory_backend(group_id, backend.id)
             if success:
                 deleted_count += 1
                 logger.info(f"Deleted Databricks backend: {backend.id}")

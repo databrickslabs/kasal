@@ -623,6 +623,7 @@ class CrewGenerationService(
         _mode = getattr(request, "chat_mode_type", "chat") or "chat"
         _reasoning_effort = {"research": "medium", "deep": "high"}.get(_mode)
         _reasoning = _reasoning_effort is not None
+        _execution_effort = getattr(request, "execution_effort", None)
         _execution_type = "agent" if _mode == "chat" else "crew"
 
         # Everything else the mode implies — the per-task guardrail that was
@@ -643,14 +644,8 @@ class CrewGenerationService(
                 else {}
             )
             | (
-                {
-                    "execution_effort": request.execution_effort.model_dump(
-                        exclude_none=True
-                    )
-                }
-                if isinstance(
-                    getattr(request, "execution_effort", None), EffortSettings
-                )
+                {"execution_effort": _execution_effort.model_dump(exclude_none=True)}
+                if isinstance(_execution_effort, EffortSettings)
                 else {}
             )
             | (

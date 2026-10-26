@@ -66,7 +66,7 @@
   "src/backend/src/services/generation/crew/complete.py::CompleteGenerationMixin._process_crew_setup": 272,
   "src/backend/src/services/generation/crew/progressive.py::ProgressiveGenerationMixin._generate_crew_plan": 213,
   "src/backend/src/services/generation/crew/progressive.py::ProgressiveGenerationMixin.create_crew_progressive": 990,
-  "src/backend/src/services/generation/crews.py::CrewGenerationService.build_crew_config_from_generated": 277,
+  "src/backend/src/services/generation/crews.py::CrewGenerationService.build_crew_config_from_generated": 272,
   "src/backend/src/services/generation/tasks.py::TaskGenerationService._generate_task_impl": 278,
   "src/backend/src/services/knowledge/databricks_service.py::DatabricksKnowledgeService.upload_knowledge_file": 226,
   "src/backend/src/services/knowledge/embedding_service.py::KnowledgeEmbeddingService.embed_file": 214,

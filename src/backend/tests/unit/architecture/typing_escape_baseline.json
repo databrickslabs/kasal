@@ -585,7 +585,6 @@
   "src/services/memory/storage/lakebase.py::cast": 2,
   "src/services/memory/storage/lakebase_schema.py::Any": 1,
   "src/services/memory/storage/local.py::Any": 5,
-  "src/services/memory/storage/local.py::type-ignore": 1,
   "src/services/memory/storage/pg_codec.py::Any": 3,
   "src/services/memory/text.py::Any": 1,
   "src/services/mlflow/builder_trace.py::Any": 4,

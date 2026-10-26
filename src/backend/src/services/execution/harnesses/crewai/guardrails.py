@@ -57,8 +57,9 @@ def adapt_guardrail(guardrail: Any) -> Any:
         # CrewAI defers output_json/output_pydantic conversion until AFTER its
         # guardrails. Returning TaskOutput bypasses that conversion; returning
         # the accepted text invokes it and populates fields used by flow routes.
-        if valid and result is output and isinstance(getattr(output, "raw", None), str):
-            return True, output.raw
+        raw = getattr(output, "raw", None)
+        if valid and result is output and isinstance(raw, str):
+            return True, raw
         return valid, result
 
     validate.__name__ = type(guardrail.guardrail).__name__
