@@ -24,7 +24,7 @@ pytest-postgresql>=5.0.0
 sqlalchemy-utils>=0.41.0
 
 # FastAPI testing
-fastapi[all]>=0.103.0
+fastapi[all]>=0.148.0
 starlette>=0.27.0
 
 # Coverage reporting
