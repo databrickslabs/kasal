@@ -434,8 +434,8 @@ class TestGetAuthHeaders:
         assert headers is None and "boom" in err
 
     @pytest.mark.asyncio
-    async def test_user_token_sets_access_token(self):
-        """Line 484: user_token param triggers set_user_access_token."""
+    async def test_user_token_is_used_for_the_call(self):
+        """The user_token param is sent as OBO for this call (never stored)."""
         auth = _make_auth(
             config_loaded=True,
             user_access_token=None,
@@ -447,7 +447,7 @@ class TestGetAuthHeaders:
             auth, "_load_config", new_callable=AsyncMock, return_value=True
         ):
             headers, err = await auth.get_auth_headers(user_token="ut")
-        # After set_user_access_token, OBO path returns bearer headers
+        # The OBO path returns bearer headers carrying the caller's token
         assert headers is not None
         assert headers["Authorization"] == "Bearer ut"
 

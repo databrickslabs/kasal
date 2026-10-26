@@ -610,31 +610,28 @@ class DatabricksAuth:
             if not await self._load_config():
                 return None, "Failed to load Databricks configuration"
 
-            # Set user token if provided
-            if user_token:
-                self.set_user_access_token(user_token)
-
-            # Use unified authentication fallback chain: OBO → PAT → SPN
-            return await self._get_unified_auth_headers(mcp_server_url)
+            # Pass the user token per call, never store it: this instance is the
+            # process-wide singleton, so a stored token would serve the NEXT
+            # tokenless caller (memory sweep, MCP fallback) as this user.
+            return await self._get_unified_auth_headers(mcp_server_url, user_token)
 
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
             return None, str(e)
 
     async def _get_unified_auth_headers(
-        self, mcp_server_url: Optional[str] = None
+        self, mcp_server_url: Optional[str] = None, user_token: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
         Get authentication headers using unified fallback chain.
         Tries in order: OBO (user token) → PAT → SPN (service principal)
         """
         try:
-            # Method 1: Try OBO (On-Behalf-Of) with user access token
-            if self._user_access_token:
+            # Method 1: OBO — this call's token, else one set on a private instance
+            obo_token = user_token or self._user_access_token
+            if obo_token:
                 logger.info("Using OBO authentication with user access token")
-                return self._create_bearer_headers(
-                    self._user_access_token, mcp_server_url
-                )
+                return self._create_bearer_headers(obo_token, mcp_server_url)
 
             # Method 2: Try PAT (Personal Access Token)
             if self._api_token:
