@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Loader2, Maximize2, Undo2, Upload, X } from 'lucide-react';
+import { Download, Loader2, Maximize2, Undo2, Upload } from 'lucide-react';
 import ScaledFrame from '../Chat/ScaledFrame';
 import DeckPresentation from '../Chat/DeckPresentation';
 import ThumbnailRail from './ThumbnailRail';
@@ -430,7 +430,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
               )}
             </div>
             <button type="button" className={btn} onClick={onClose} title="Done (Esc)" style={{ background: 'var(--bg-active-chip)' }}>
-              <X size={14} /> Done
+              Done
             </button>
           </div>
         </div>

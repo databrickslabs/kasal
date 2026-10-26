@@ -150,6 +150,14 @@ describe('DeckStudio', () => {
     expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
   });
 
+  it('closes with a plain Done button, without an X icon beside it', () => {
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    const done = screen.getByTitle('Done (Esc)');
+    expect(done).toHaveTextContent(/^Done$/);
+    expect(done.querySelector('svg')).toBeNull();
+  });
+
   it('reattaches to running edits after closing and reopening, including parallel saves', async () => {
     const runs = [deferred<{ section: string; job_id: string }>(), deferred<{ section: string; job_id: string }>()];
     refineSlide.mockImplementation((_request, started) => {
