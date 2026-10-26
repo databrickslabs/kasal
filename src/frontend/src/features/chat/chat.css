@@ -579,3 +579,36 @@
   font: inherit;
   margin: 0;
 }
+/* The instruction bar's Model / Effort pickers: a pill holding a label, a bare
+   select and a chevron — the composer's chip look. One focus cue, on the pill;
+   without the select reset the browser's own outline doubled the ring. */
+.kasal-deck-studio .kasal-deck-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.kasal-deck-studio .kasal-deck-pick:hover {
+  background-color: var(--bg-rail-hover);
+}
+.kasal-deck-studio .kasal-deck-pick:focus-within {
+  border-color: var(--text-muted);
+}
+.kasal-deck-studio .kasal-deck-pick select {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: inherit;
+}

@@ -80,7 +80,7 @@ describe('DeckStudio', () => {
     expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
     fireEvent.change(picker, { target: { value: 'edit-model' } });
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(picker).toBeDisabled();
     await waitFor(() => expect(refineSlide).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'edit-model' }), expect.any(Function),
@@ -123,7 +123,7 @@ describe('DeckStudio', () => {
     fireEvent.change(screen.getByLabelText('Slide edit model'), { target: { value: '' } });
     fireEvent.click(screen.getByLabelText('Add a slide at position 2'));
     fireEvent.change(screen.getByLabelText('New slide instruction'), { target: { value: 'Explain tokens' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(refineSlide).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'add', model: null }), expect.any(Function),
     ));
@@ -340,7 +340,7 @@ describe('DeckStudio', () => {
     refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByLabelText('Move slide 2 up')).toBeDisabled();
     expect(screen.getByLabelText('Move slide 2 down')).toBeDisabled();
     expect(screen.getByText('Reordering available after slide edits finish saving')).toBeInTheDocument();
@@ -401,7 +401,7 @@ describe('DeckStudio', () => {
     refineSlide.mockResolvedValue({ section: slide('Two!'), model: 'm', attempts: 1, job_id: 'j' });
     render(<DeckStudio code={DECK} messageId="m1" initialIndex={1} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(refineSlide).toHaveBeenCalledTimes(1));
     expect(refineSlide.mock.calls[0][0]).toMatchObject({
       mode: 'refine',
@@ -429,7 +429,7 @@ describe('DeckStudio', () => {
     refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByTestId('slide-run')).toHaveAttribute('data-running', 'true');
     act(() => refineSlide.mock.calls[0][1]('failed-edit'));
     expect(screen.getByTestId('slide-run')).toHaveAttribute('data-job-id', 'failed-edit');
@@ -450,7 +450,7 @@ describe('DeckStudio', () => {
     refineSlide.mockReturnValue(new Promise(done => { resolve = done; }));
     const { unmount } = render(<DeckStudio code={DECK} messageId="m1" onDeckChange={async () => {}} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'bigger title' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(post).toHaveBeenCalledWith('owner', 'user', 'Slide 1: bigger title', undefined);
     unmount();
     useSessionStore.setState({ currentSessionId: 'other', messages: [] });
@@ -472,7 +472,7 @@ describe('DeckStudio', () => {
     refineSlide.mockResolvedValue({ section: slide('Two'), model: 'm', attempts: 1 });
     render(<DeckStudio code={DECK} messageId="m1" initialIndex={1} onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'x' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('unchanged'));
     expect(screen.queryByText(/1 edit/)).toBeNull();
   });
@@ -498,7 +498,7 @@ describe('DeckStudio', () => {
     expect(deckInMessage()).toEqual(['Cover', undefined, 'Cover', 'Two']);
     expect(screen.getByText('New slide 2 — what should it cover?')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('New slide instruction'), { target: { value: 'agenda' } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(deckInMessage()).toEqual(['Cover', 'New', 'Cover', 'Two']));
     expect(refineSlide.mock.calls[0][0]).toMatchObject({ mode: 'add', before: slide('Cover'), after: slide('Cover'), position: '2 of 4' });
     // The always-visible button appends one at the end; "leave it blank" keeps it.
@@ -539,7 +539,7 @@ describe('DeckStudio', () => {
   const submitSlide = (number: number, instruction = 'Improve this slide') => {
     fireEvent.click(screen.getByLabelText(`Select slide ${number}`));
     fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: instruction } });
-    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
   };
 
   it.each([[0, 1], [1, 0]])('merges parallel edits completing in order %s then %s, preserving focus and undo', async (first, second) => {

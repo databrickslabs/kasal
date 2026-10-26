@@ -34,7 +34,7 @@ it.each(['crew', 'flow'] as const)('edits, persists, reopens and undoes a deck i
   const view = render(<Transcript />);
   fireEvent.click(screen.getByTitle('Edit deck'));
   fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve title' } });
-  fireEvent.click(screen.getByText('Apply'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
   await waitFor(() => expect(screen.getByText('2 slides · 1 edit')).toBeInTheDocument());
   expect(DeckService.refineSlide).toHaveBeenCalledWith(expect.objectContaining({ model: 'builder-model' }), expect.any(Function));
   expect(ChatHistoryServiceEnhanced.updateMessageContent).toHaveBeenCalledWith('backend-message', expect.stringContaining('Refined'), 'team-a');
@@ -81,7 +81,7 @@ it('saves a refinement to its original owner after navigation', async () => {
   const view = render(<Transcript />);
   fireEvent.click(screen.getByTitle('Edit deck'));
   fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'Improve title' } });
-  fireEvent.click(screen.getByText('Apply'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
   view.unmount();
   useChatMessagesStore.getState().setCurrentSession('another-builder');
   localStorage.setItem('selectedGroupId', 'team-b');

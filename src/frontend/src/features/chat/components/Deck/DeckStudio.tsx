@@ -8,12 +8,14 @@ import SlideInstructionBar from './SlideInstructionBar';
 import DeckModelPicker from './DeckModelPicker';
 import DeckEffortPicker from './DeckEffortPicker';
 import { useDeckHistory } from './useDeckHistory';
+import { useSlideEditing } from './useSlideEditing';
 import { createDeckStudioStore, useDeckState, type DeckStudioStore } from './deckStudioStore';
 import RunProgress from '../Chat/RunProgress';
 import StepContent from '../Preview/StepContent';
 import type { RunStep } from '../Preview/traceEventStep';
 import type { TraceEntryData } from '../Chat/ChatMessage';
 import { DeckService } from '../../../../api/chat/DeckService';
+import { AssetService } from '../../../../api/chat/AssetService';
 import { useAppStore } from '../../store/appStore';
 import { useThemeStore } from '../../../../store/theme';
 import { useSessionStore } from '../../../../app/sessions/sessionStore';
@@ -23,6 +25,7 @@ import { hasPendingAssets } from '../../utils/assetRefs';
 import { SLIDE_W, clearRefined, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
 import { downloadDeckHtml, downloadDeckPdf, downloadDeckPptx, sanitizeDeckDocument } from '../../utils/deckExport';
 import { concreteModel } from '../../utils/autoModel';
+import { isImageFile, measureImage } from '../../utils/imageFiles';
 import { DEFAULT_EFFORT, type EffortSettings } from '../../../../types/workflow/effort';
 
 /**
@@ -33,6 +36,8 @@ import { DEFAULT_EFFORT, type EffortSettings } from '../../../../types/workflow/
  * instruction bar. An instruction sends ONLY that slide through the one-slide
  * generation call; the thumbnail pulses while it works, the slide swaps in
  * place, and Undo puts the previous deck back. Structural edits are instant.
+ * The slide itself is edited right on the stage — text, bullets, text boxes,
+ * images (see useSlideEditing).
  *
  * The message the deck lives in is the source of truth: every change is
  * written straight back into it, and the studio follows it — so the chat's
@@ -102,6 +107,22 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const shown = Math.min(selected, Math.max(0, count - 1));
   const stage = useMemo(() => stageFor(viewSlides[shown] ?? ''), [viewSlides, shown]);
 
+  // The slide is edited on the stage. Not while the model rewrites it or its
+  // images load: either would replace what is on screen.
+  const imageRef = useRef<HTMLInputElement>(null);
+  const pickImage = useCallback(() => imageRef.current?.click(), []);
+  const onSlide = useSlideEditing({
+    slides, viewSlides, shown, commit, onError: setError, onPickImage: pickImage,
+    editable: !working.has(shown) && !hasPendingAssets(viewSlides[shown] ?? ''),
+  });
+  // An action that reads the deck in the same click saves the slide first: the
+  // frame's own "focus left" save may not have arrived yet.
+  const afterSave = (run: () => void) => {
+    const saved = onSlide.flush();
+    if (saved) void saved.then(run);
+    else run();
+  };
+
   const structureSaving = saving && working.size === 0;
   const activity = activities[shown];
   const activityStep = activitySteps[shown];
@@ -112,13 +133,13 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     setActivitySteps({});
     setErrors({});
   };
-  const undo = () => {
+  const undo = () => afterSave(() => {
     if (active.current.size || savingRef.current) return;
     setError(null);
     void undoDeck().then(clearSlideActivity).catch(saveError);
-  };
+  });
 
-  const instant = (edit: SlideEdit) => {
+  const instant = (edit: SlideEdit) => afterSave(() => {
     if (active.current.size || savingRef.current) return;
     const plan = planSlideEdit(edit, current.current);
     if (plan.kind !== 'instant') return;
@@ -128,9 +149,10 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
       setSelected(plan.focus);
       if (edit.kind === 'blank') setBarMode({ kind: 'fill', at: edit.index });
     }).catch(saveError);
-  };
+  });
 
-  const apply = async (instruction: string) => {
+  const apply = (instruction: string) => afterSave(() => void applyInstruction(instruction));
+  const applyInstruction = async (instruction: string) => {
     const target = barMode.kind === 'fill' ? barMode.at : shown;
     if (active.current.has(target) || (savingRef.current && !active.current.size)) return;
     const edit: SlideEdit =
@@ -290,6 +312,24 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     }
   };
 
+  const replaceImageFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!isImageFile(file)) {
+      setError('Choose a PNG, JPEG, WebP or GIF image.');
+      return;
+    }
+    setError(null);
+    try {
+      const { width, height } = await measureImage(file);
+      const asset = await AssetService.upload(file, { sessionId: useSessionStore.getState().currentSessionId, width, height });
+      onSlide.replaceImage(`asset:${asset.id}`);
+    } catch {
+      setError('The image could not be uploaded. Try again.');
+    }
+  };
+
   const btn =
     'inline-flex items-center gap-1.5 rounded-md !px-2.5 !py-1.5 text-xs font-medium transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-40 disabled:hover:bg-transparent';
   const lastEdit = history[history.length - 1];
@@ -338,6 +378,14 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
               hidden
               data-testid="deck-html-input"
               onChange={importHtml}
+            />
+            <input
+              ref={imageRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              hidden
+              data-testid="deck-image-input"
+              onChange={replaceImageFile}
             />
             <button
               type="button"
@@ -409,9 +457,10 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
             <div className="min-h-0 flex-1 p-6">
               <div className="h-full w-full">
                 <ScaledFrame
-                  // Remount once the slide's images are in (see hasPendingAssets).
-                  key={hasPendingAssets(stage) ? 'pending' : 'ready'}
-                  html={stage}
+                  // Remount once the slide's images are in (see hasPendingAssets),
+                  // and when the editable slide is rebuilt (see useSlideEditing).
+                  key={onSlide.frameKey ? `edit-${onSlide.frameKey}` : hasPendingAssets(stage) ? 'pending' : 'ready'}
+                  html={onSlide.stage ?? stage}
                   baseWidth={SLIDE_W}
                   contain
                   upscale

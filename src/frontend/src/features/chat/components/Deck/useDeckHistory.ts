@@ -50,10 +50,13 @@ export function useDeckHistory(store: DeckStudioStore, code: string, writeBack: 
   }), [save, setHistory]);
 
   const undo = useCallback(() => {
-    const last = history[history.length - 1];
+    // Read live: an edit committed just before (typed text saved on the way
+    // to Undo) is not in this render's `history` yet.
+    const live = store.getState().history;
+    const last = live[live.length - 1];
     if (!last || pending.current) return Promise.resolve();
     return save(last.prev, () => setHistory(h => h.slice(0, -1)));
-  }, [history, save, pending, setHistory]);
+  }, [store, save, pending, setHistory]);
 
   return { deck, current, history, saving, pending, commit, undo };
 }

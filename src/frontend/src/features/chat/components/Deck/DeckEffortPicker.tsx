@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import { effortChoices } from '../../../../shared/components/EffortPicker';
 import { useModelsStore } from '../../../../store/models';
 import { EFFORT_LABELS, type EffortSettings, type EffortTier } from '../../../../types/workflow/effort';
@@ -22,7 +23,7 @@ export default function DeckEffortPicker({ value, onChange, model, disabled }: P
   const tiers = TIERS.filter((tier) => tier === value.tier || choices.includes(tier));
 
   return (
-    <label className="mr-2 inline-flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+    <label className={`kasal-deck-pick text-xs${disabled ? ' opacity-40' : ''}`}>
       Effort
       <select
         aria-label="Slide edit effort"
@@ -31,11 +32,10 @@ export default function DeckEffortPicker({ value, onChange, model, disabled }: P
         onChange={(event) => onChange({ tier: event.target.value as EffortTier })}
         // Arrow keys select a level; Escape closes the native menu, not the studio.
         onKeyDown={(event) => event.stopPropagation()}
-        className="rounded-md border px-2 py-1 focus:ring-2 focus:ring-blue-500/60 disabled:opacity-40"
-        style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', borderColor: 'var(--border-color)' }}
       >
         {tiers.map((tier) => <option key={tier} value={tier}>{EFFORT_LABELS[tier]}</option>)}
       </select>
+      <ChevronDown size={12} aria-hidden />
     </label>
   );
 }
