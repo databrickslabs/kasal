@@ -1,6 +1,12 @@
 # Dependency update PRs. Weekly, grouped, so a week's minor/patch bumps arrive
-# as one PR per ecosystem instead of dozens. Majors stay individual PRs: they
-# are the ones that need reading.
+# as one PR per ecosystem instead of dozens.
+#
+# Major versions are NOT proposed as version updates (uv, npm): each one is a
+# migration to plan, not a weekly PR — the first run on the default branch
+# opened 11 of them at once. The uv updater only refreshes uv.lock
+# (lockfile-only) instead of raising pyproject.toml floors, and litellm,
+# crewai* and mcp are left to the manual bump process (proxy hold, artifact
+# and hash verification — see the comments on their pins in pyproject.toml).
 #
 # CVE detection itself runs in .github/workflows/dependency-audit.yml; this
 # file is about getting the fixes proposed.
@@ -30,7 +36,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    versioning-strategy: lockfile-only
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "litellm"
+      - dependency-name: "crewai*"
+      - dependency-name: "mcp"
     groups:
       python-minor-patch:
         patterns: ["*"]
@@ -43,7 +56,10 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         patterns: ["*"]
