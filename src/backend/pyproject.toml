@@ -55,7 +55,7 @@ dependencies = [
     # Azure
     "azure-identity>=1.15.0",
     # AI/ML
-    "litellm[caching]==1.96.2", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.96.2 clears PYSEC-2026-4066 (and everything 1.84.0 cleared); never 1.107.0 (compromised release)
+    "litellm[caching]==1.106.0", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.96.2 clears PYSEC-2026-4066 (and everything 1.84.0 cleared); never 1.107.0 (compromised release)
     "mcp>=1.30.0,<1.31.0", # Kasal's own MCP integration. 1.30.0 clears
     # CVE-2026-59951; crewai 1.15.28 still declares ~=1.28.1, so this is held by
     # the override in [tool.uv] until the crewai 1.15.30 bump (which requires

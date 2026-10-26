@@ -9,7 +9,7 @@ pytest-timeout>=2.1.0
 
 # HTTP testing
 httpx>=0.24.0
-requests>=2.31.0
+requests>=2.34.2
 
 # Async testing support
 pytest-asyncio>=0.21.0
