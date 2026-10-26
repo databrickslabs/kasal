@@ -1,0 +1,71 @@
+/* A memory record rendered inside a small card: compact type, real tables. */
+.kasal-memory-md {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary, inherit);
+  overflow-wrap: anywhere;
+}
+.kasal-memory-md > :first-child {
+  margin-top: 0;
+}
+.kasal-memory-md > :last-child {
+  margin-bottom: 0;
+}
+.kasal-memory-md p,
+.kasal-memory-md ul,
+.kasal-memory-md ol,
+.kasal-memory-md blockquote,
+.kasal-memory-md pre {
+  margin: 0.35em 0;
+}
+.kasal-memory-md ul,
+.kasal-memory-md ol {
+  padding-left: 1.25em;
+}
+.kasal-memory-md h1,
+.kasal-memory-md h2,
+.kasal-memory-md h3,
+.kasal-memory-md h4,
+.kasal-memory-md h5,
+.kasal-memory-md h6 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0.6em 0 0.25em;
+}
+.kasal-memory-md h1 {
+  font-size: 14px;
+}
+.kasal-memory-md table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+  font-size: 12px;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.kasal-memory-md th,
+.kasal-memory-md td {
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  padding: 2px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.kasal-memory-md th {
+  font-weight: 600;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+}
+.kasal-memory-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.04));
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.kasal-memory-md pre {
+  white-space: pre-wrap;
+}
+.kasal-memory-md a {
+  color: inherit;
+  text-decoration: underline;
+}

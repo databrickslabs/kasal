@@ -1,0 +1,171 @@
+"""
+Embedding Queue Service for batching documentation embedding operations.
+
+This service queues embedding operations and processes them in batches
+to reduce database lock contention in SQLite.
+"""
+
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from src.core.logger import LoggerManager
+
+logger = LoggerManager.get_instance().system
+
+
+class EmbeddingQueueService:
+    """Service to batch documentation embedding operations."""
+
+    def __init__(self) -> None:
+        self.queue: List[Dict[str, Any]] = []
+        self.lock = asyncio.Lock()
+        self.batch_size = 10  # Process 10 embeddings at a time
+        self.flush_interval = 5.0  # Flush every 5 seconds
+        self._task: Optional[asyncio.Task[None]] = None
+        self._running = False
+
+    async def start(self) -> None:
+        """Start the background queue processor."""
+        if not self._running:
+            self._running = True
+            # Create the background task without awaiting it
+            self._task = asyncio.create_task(self._process_queue())
+            # Add error handling for the background task
+            self._task.add_done_callback(self._handle_task_error)
+            logger.info("Embedding queue service started")
+
+    def _handle_task_error(self, task: asyncio.Task[None]) -> None:
+        """Handle any errors from the background task."""
+        try:
+            # This will raise any exception that occurred in the task
+            task.result()
+        except asyncio.CancelledError:
+            logger.info("Embedding queue background task was cancelled")
+        except Exception as e:
+            logger.error(f"Embedding queue background task error: {e}")
+
+    async def stop(self) -> None:
+        """Stop the background queue processor."""
+        self._running = False
+        if self._task:
+            await self._task
+            logger.info("Embedding queue service stopped")
+
+    async def add_embedding(
+        self,
+        source: str,
+        title: str,
+        content: str,
+        embedding: List[float],
+        doc_metadata: Optional[Dict[str, Any]] = None,
+        group_id: Optional[str] = None,
+        file_path: Optional[str] = None,
+    ) -> None:
+        """Add an embedding to the queue for batch processing."""
+        async with self.lock:
+            self.queue.append(
+                {
+                    "source": source,
+                    "title": title,
+                    "content": content,
+                    "embedding": embedding,
+                    "doc_metadata": doc_metadata or {},
+                    "group_id": group_id,
+                    "file_path": file_path,
+                    "created_at": datetime.utcnow(),
+                }
+            )
+
+            # If queue is full, process immediately
+            if len(self.queue) >= self.batch_size:
+                await self._flush_queue()
+
+    async def _process_queue(self) -> None:
+        """Background task to periodically flush the queue."""
+        while self._running:
+            try:
+                await asyncio.sleep(self.flush_interval)
+                await self._flush_queue()
+            except Exception as e:
+                logger.error(f"Error processing embedding queue: {e}")
+
+    async def _flush_queue(self) -> None:
+        """Flush the queue and batch insert embeddings."""
+        async with self.lock:
+            if not self.queue:
+                return
+
+            batch = self.queue[: self.batch_size]
+            self.queue = self.queue[self.batch_size :]
+
+            if batch:
+                await self._batch_insert(batch)
+
+    async def _batch_insert(self, batch: List[Dict[str, Any]]) -> None:
+        """Perform batch insert of embeddings.
+
+        Router-aware: `documentationembedding` lives in Lakebase when it is
+        enabled, and the raw async_session_factory is a snapshot that only points
+        there if activate_lakebase() ran in this process — at boot or in a
+        subprocess, never on a runtime /lakebase/enable. Writing to the wrong
+        database here succeeds, so nothing looks broken; the embeddings simply
+        land where no search will ever read them.
+        """
+        from src.db.database_router import get_smart_db_session
+        from src.repositories.documentation_embedding_repository import (
+            DocumentationEmbeddingRepository,
+        )
+
+        try:
+            async for session in get_smart_db_session():
+                # Use bulk insert for efficiency
+                repository = DocumentationEmbeddingRepository(session)
+                await repository.bulk_insert_raw(batch)
+                await session.commit()
+                logger.info(f"Batch inserted {len(batch)} embeddings")
+        except Exception as e:
+            logger.error(f"Failed to batch insert embeddings: {e}")
+            # On failure, try individual inserts with retry
+            for item in batch:
+                await self._insert_with_retry(item)
+
+    async def _insert_with_retry(
+        self, item: Dict[str, Any], max_retries: int = 3
+    ) -> None:
+        """Insert a single embedding with retry logic.
+
+        Same router as _batch_insert — this is its per-item fallback, so a
+        mismatch would send the retry somewhere the batch did not go.
+        """
+        from src.db.database_router import get_smart_db_session
+        from src.repositories.documentation_embedding_repository import (
+            DocumentationEmbeddingRepository,
+        )
+
+        for attempt in range(max_retries):
+            try:
+                # Not `async for ...: break`: the break abandoned the generator,
+                # so the router's close never ran in this task.
+                async with asynccontextmanager(get_smart_db_session)() as session:
+                    repository = DocumentationEmbeddingRepository(session)
+                    await repository.insert_raw(item)
+                    await session.commit()
+                    logger.debug(f"Inserted embedding after {attempt + 1} attempts")
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2**attempt  # Exponential backoff
+                    logger.warning(
+                        f"Retry {attempt + 1}/{max_retries} after {wait_time}s: {e}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(
+                        f"Failed to insert embedding after {max_retries} attempts: {e}"
+                    )
+
+
+# Global singleton instance
+embedding_queue = EmbeddingQueueService()

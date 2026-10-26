@@ -1,0 +1,1044 @@
+"""
+Seed the model_configs table with default model configuration definitions.
+"""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, Tuple
+
+from sqlalchemy import Select, select
+
+from src.db.session import async_session_factory
+from src.models.model_config import ModelConfig
+from src.seeds.errors import SeederIncomplete
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Define default model configurations
+DEFAULT_MODELS: Dict[str, Dict[str, Any]] = {
+    # --- OpenAI ---
+    # Verified 2026-07-25 against developers.openai.com/api/docs/models and
+    # .../deprecations. The GPT-5.6 family is the current flagship line; every
+    # model previously seeded here is retired or scheduled:
+    #   gpt-4 / gpt-4-turbo / gpt-3.5-turbo  retired 2026-10-23
+    #   o1-preview                           shut down 2025-07-28
+    #   o3-deep-research / o4-mini-deep-research  shut down 2026-07-23
+    #   gpt-5                                shuts down 2026-12-11
+    #   gpt-5.2-chat-latest                  shuts down 2026-08-10
+    # GPT-6 direct API, verified against the OpenAI model catalog 2026-09-24.
+    "gpt-6-astra": {
+        "name": "gpt-6-astra",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-6-sol": {
+        "name": "gpt-6-sol",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-6-luna": {
+        "name": "gpt-6-luna",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-5.6-sol": {
+        "name": "gpt-5.6-sol",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-5.6-terra": {
+        "name": "gpt-5.6-terra",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    "gpt-5.6-luna": {
+        "name": "gpt-5.6-luna",
+        "temperature": 1,
+        "provider": "openai",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "extended_thinking": True,
+    },
+    # --- Gemini ---
+    # Verified 2026-07-25 against ai.google.dev/gemini-api/docs/models and
+    # .../latest-model. Only STABLE ids are seeded — the previous entries pointed
+    # at `-preview` suffixes (gemini-3-pro-preview, gemini-3-flash-preview) and
+    # gemini-2.0-flash, all of which Google now lists as Shut down.
+    # Latest stable direct Flash model, verified 2026-09-24.
+    "gemini-3.8-flash": {
+        "name": "gemini-3.8-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "gemini-3.6-flash": {
+        "name": "gemini-3.6-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "gemini-3.5-flash": {
+        "name": "gemini-3.5-flash",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "gemini-3.5-flash-lite": {
+        "name": "gemini-3.5-flash-lite",
+        "temperature": 1,
+        "provider": "gemini",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    # --- Anthropic ---
+    # Current direct Claude API models, verified 2026-09-24:
+    # https://platform.claude.com/docs/en/models/overview
+    # Preserve older model keys for saved workflows; new versions are separate.
+    "claude-opus-5-5": {
+        "name": "claude-opus-5-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "claude-fable-5-1": {
+        "name": "claude-fable-5-1",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "claude-opus-5": {
+        "name": "claude-opus-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "claude-sonnet-5": {
+        "name": "claude-sonnet-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "claude-haiku-4-5": {
+        "name": "claude-haiku-4-5",
+        "temperature": 0.7,
+        "provider": "anthropic",
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+    },
+    # --- Ollama ---
+    "llama3.2:latest": {
+        "name": "llama3.2:latest",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 128000,
+        "max_output_tokens": 4096,
+    },
+    "llama2:13b": {
+        "name": "llama2:13b",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 4096,
+        "max_output_tokens": 4096,
+    },
+    "qwen2.5:32b": {
+        "name": "qwen2.5:32b",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 32768,
+        "max_output_tokens": 4096,
+    },
+    "mistral-nemo:12b-instruct-2407-q2_K": {
+        "name": "mistral-nemo:12b-instruct-2407-q2_K",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 8192,
+        "max_output_tokens": 4096,
+    },
+    "llama3.2:3b-text-q8_0": {
+        "name": "llama3.2:3b-text-q8_0",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 8192,
+        "max_output_tokens": 4096,
+    },
+    "gemma2:27b": {
+        "name": "gemma2:27b",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 32768,
+        "max_output_tokens": 4096,
+    },
+    "deepseek-r1:32b": {
+        "name": "deepseek-r1:32b",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 32768,
+        "max_output_tokens": 4096,
+    },
+    "milkey/QwQ-32B-0305:q4_K_M": {
+        "name": "milkey/QwQ-32B-0305:q4_K_M",
+        "temperature": 0.7,
+        "provider": "ollama",
+        "context_window": 32768,
+        "max_output_tokens": 4096,
+    },
+    # --- DeepSeek ---
+    # Verified 2026-09-18 against DeepSeek's pricing and September 10 release.
+    # deepseek-flash now serves V4.1-Flash; V4 Pro remains available.
+    # Both support 1M context, 384K output, and top-level reasoning_effort.
+    "deepseek-flash": {
+        "name": "deepseek-flash",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
+    },
+    # Preserve saved agent keys while sending the current API identifier.
+    "deepseek-v4-flash": {
+        "name": "deepseek-flash",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
+    },
+    "deepseek-v4-pro": {
+        "name": "deepseek-v4-pro",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
+    },
+    # Compatibility aliases, NOT extra models. DeepSeek retired the v3.1 API
+    # names; these keys stay because agents already reference them (the API call
+    # uses the `name` field, not the key — see llm_manager.configure_crewai_llm —
+    # so they resolve to the v4 endpoints and keep working). Removing them would
+    # leave those agents pointing at a model that no longer exists.
+    "deepseek-v3.1-non-thinking": {
+        "name": "deepseek-flash",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
+    },
+    "deepseek-v3.1-thinking": {
+        "name": "deepseek-v4-pro",
+        "temperature": 0.7,
+        "provider": "deepseek",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "extended_thinking": True,
+    },
+    # --- vLLM (self-hosted, OpenAI-compatible) ---
+    "deepseek-r1-70b": {
+        "name": "deepseek-r1-70b",
+        "temperature": 0.6,
+        "provider": "vllm",
+        "context_window": 32768,
+        "max_output_tokens": 4096,
+    },
+    "Qwen3-Coder-30B-A3B-Instruct": {
+        # Self-hosted via vLLM (provider=vllm, endpoint from VLLM_BASE_URL).
+        # `name` is BOTH the UI label and the model id sent to the serving endpoint,
+        # so vLLM --served-model-name must match it exactly.
+        "name": "Qwen3-Coder-30B-A3B-Instruct",
+        "temperature": 0.6,
+        "provider": "vllm",
+        # Qwen3-Coder-30B-A3B is a MoE (~3.3B active): newer, faster and more
+        # reliable at the A2UI JSON format than dense 32B/14B models. Served from the
+        # AWQ-4bit build (cpatonn/...-AWQ-4bit). context_window=28672 MUST match vLLM
+        # --max-model-len: vLLM enforces prompt_tokens + max_tokens <= max-model-len
+        # and 400s "passed N input and requested M output" otherwise, so the window
+        # has to cover a large prompt PLUS max_output_tokens. At 0.85 util the
+        # GPU (shared with Ollama's embedder) fits ~31.8K of KV, so 28672 leaves
+        # margin. vLLM MUST be launched with --enable-auto-tool-choice
+        # --tool-call-parser qwen3_coder, else CrewAI planning/reasoning (which force
+        # tool_choice="function") 400 with "requires --tool-call-parser to be set".
+        # vLLM keeps legacy served-name aliases so older runs still resolve.
+        "context_window": 28672,
+        # 4096, not 8192, and the number is derived rather than picked.
+        #
+        # Compaction triggers at 0.85 x window (24,371 tokens) but does not
+        # account for the output request, while what the server actually serves
+        # is window - max_tokens. At 8192 that ceiling is 20,480 — BELOW the
+        # compaction threshold — so a tool-heavy conversation between 20,480 and
+        # 24,371 tokens is too big to serve and too small to be compacted. Every
+        # attempt 400s with "passed N input and requested 8192 output", the agent
+        # retries at the same size, and the run loops until it fails. Observed on
+        # a 4-tool-call knowledge-search turn: 20,481 + 8,192 = one token over.
+        #
+        # Keeping max_output <= 15% of the window (4,300 here) puts the servable
+        # input ceiling (24,576) ABOVE the compaction threshold, so the trimmer
+        # always gets to act first. A ~3B-active MoE producing a 20k-token prompt
+        # AND an 8k answer was not a real working point anyway.
+        "max_output_tokens": 4096,
+        # No `frequency_penalty` here: measured on this endpoint it made
+        # repetition worse, not better (clean stop at 2,343 tokens without it;
+        # truncated at 4,096 with 0.3). See services/llm/params.py.
+    },
+    # --- Kimi (Moonshot AI — OpenAI-compatible API at https://api.moonshot.ai/v1,
+    # override with KIMI_ENDPOINT; key = KIMI_API_KEY in the API Keys service) ---
+    # k2.5 / k2.6 removed 2026-07-25: superseded by the k2.7 coding line and K3.
+    "kimi-k2.7-code": {
+        "name": "kimi-k2.7-code",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 262144,
+        "max_output_tokens": 32768,
+    },
+    "kimi-k2.7-code-highspeed": {
+        # Same weights as kimi-k2.7-code served on faster infrastructure —
+        # tuned for coding-agent loops (higher throughput, higher per-token cost).
+        "name": "kimi-k2.7-code-highspeed",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 262144,
+        "max_output_tokens": 32768,
+    },
+    "kimi-k3": {
+        # K3 flagship (released 2026-07-16): 2.8T-param open MoE, native 1M-token
+        # context (1,048,576), default max output 131,072 per Moonshot docs.
+        "name": "kimi-k3",
+        "temperature": 0.7,
+        "provider": "kimi",
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+    },
+    # --- OpenRouter (OpenAI-compatible; key = OPENROUTER_API_KEY) ---
+    "jev-router": {
+        # TypeSafe's Jev Router: picks a model from OpenRouter's whole catalogue
+        # per request and answers with it. Only by hand: Auto never offers a
+        # router (model_selection.is_router_model), since its pick could be a
+        # model the workspace never enabled. OpenRouter lists a 1M context,
+        # router pricing and `supported_parameters: []`, so model_capabilities
+        # marks every sampling knob refused. The output cap is conservative: the
+        # model the router picks decides the real one.
+        "name": "typesafe/jev-router",
+        "temperature": 1,
+        "provider": "openrouter",
+        "context_window": 1000000,
+        "max_output_tokens": 32768,
+    },
+    # --- Databricks (sorted alphabetically) ---
+    "databricks-claude-fable-5": {
+        # Re-seeded 2026-08-05: Anthropic's 2026-06-12 export-control suspension
+        # has been lifted. Verified against the deployed workspace — the endpoint
+        # reports READY, advertises mlflow/v1/chat/completions (the API Kasal's
+        # transport uses) and serves completions. Like Opus 4.7+ it REJECTS
+        # `temperature` ("Model global.anthropic.claude-fable-5 does not support
+        # the temperature parameter"), which utils.model_config's existing
+        # "claude-fable" guard already covers — confirmed live both ways.
+        "name": "databricks-claude-fable-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-fable-5-1": {
+        "name": "databricks-claude-fable-5-1",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-claude-haiku-4-5": {
+        "name": "databricks-claude-haiku-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-opus-4-1": {
+        "name": "databricks-claude-opus-4-1",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+    },
+    "databricks-claude-opus-4-5": {
+        "name": "databricks-claude-opus-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-opus-4-6": {
+        "name": "databricks-claude-opus-4-6",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+    },
+    "databricks-claude-opus-4-7": {
+        "name": "databricks-claude-opus-4-7",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-opus-4-8": {
+        "name": "databricks-claude-opus-4-8",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-opus-5": {
+        "name": "databricks-claude-opus-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-opus-5-5": {
+        # Pay-per-token since 2026-09-22 (Databricks release notes). Databricks
+        # states Anthropic models keep the provider's limits: 1M context, 128K
+        # output. Reasoning cannot be disabled and `temperature` is refused; the
+        # capability registry (core/llm/model_capabilities) keeps it off the wire.
+        "name": "databricks-claude-opus-5-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-claude-sonnet-4-5": {
+        "name": "databricks-claude-sonnet-4-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-sonnet-4-6": {
+        "name": "databricks-claude-sonnet-4-6",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-claude-sonnet-5": {
+        "name": "databricks-claude-sonnet-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-deepseek-v4-flash-0731": {
+        "name": "databricks-deepseek-v4-flash-0731",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 393216,
+    },
+    "databricks-deepseek-v4-pro-0813": {
+        "name": "databricks-deepseek-v4-pro-0813",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 393216,
+    },
+    "databricks-gemini-3-1-flash-lite": {
+        "name": "databricks-gemini-3-1-flash-lite",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-1-pro": {
+        "name": "databricks-gemini-3-1-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-5-flash": {
+        "name": "databricks-gemini-3-5-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-5-flash-lite": {
+        "name": "databricks-gemini-3-5-flash-lite",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-6-flash": {
+        "name": "databricks-gemini-3-6-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-7-flash": {
+        "name": "databricks-gemini-3-7-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-8-flash": {
+        # Global endpoint: the workspace must have cross-geography routing enabled.
+        "name": "databricks-gemini-3-8-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-4-argon": {
+        # GA per Databricks' supported-models page (2026-10-19); cross-geography
+        # routing required. Limits are Google's gemini-4-argon values (1,048,576
+        # shared context, 65,536 synchronous output), which Databricks matches.
+        # Reasoning-only: model_capabilities withholds temperature.
+        "name": "databricks-gemini-4-argon",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemma-3-12b": {
+        "name": "databricks-gemma-3-12b",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 8192,
+    },
+    "databricks-glm-5-2": {
+        # UC system.ai model served ONLY via the AI Gateway (/ai-gateway/mlflow/v1);
+        # /serving-endpoints returns ENDPOINT_NOT_FOUND, so it needs
+        # DatabricksConfig.ai_gateway_enabled. Gateway rejects max_tokens > 25000.
+        "name": "system.ai.glm-5-2",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 25000,
+    },
+    "databricks-glm-5-3": {
+        "name": "databricks-glm-5-3",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-glm-5-3-flash": {
+        "name": "databricks-glm-5-3-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gpt-5": {
+        "name": "databricks-gpt-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-1": {
+        "name": "databricks-gpt-5-1",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-2": {
+        "name": "databricks-gpt-5-2",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-3-codex": {
+        "name": "databricks-gpt-5-3-codex",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-4": {
+        "name": "databricks-gpt-5-4",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-4-mini": {
+        "name": "databricks-gpt-5-4-mini",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-gpt-5-4-nano": {
+        "name": "databricks-gpt-5-4-nano",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 400000,
+        "max_output_tokens": 32000,
+    },
+    "databricks-gpt-5-5": {
+        # Responses API only; LLMManager routes this through DatabricksResponsesLLM.
+        "name": "databricks-gpt-5-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-5-pro": {
+        # Responses API only; optimized for the highest-accuracy workloads.
+        "name": "databricks-gpt-5-5-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-6-luna": {
+        "name": "databricks-gpt-5-6-luna",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-6-sol": {
+        "name": "databricks-gpt-5-6-sol",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-6-terra": {
+        "name": "databricks-gpt-5-6-terra",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-mini": {
+        "name": "databricks-gpt-5-mini",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 200000,
+        "max_output_tokens": 64000,
+    },
+    "databricks-gpt-5-nano": {
+        "name": "databricks-gpt-5-nano",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 32000,
+    },
+    # GPT-6 family. Endpoint names from Databricks' supported-models page (Sol
+    # and Luna pay-per-token since 2026-09-22). Databricks publishes no limits
+    # for them, so context/output mirror the direct-OpenAI gpt-6-* seeds above.
+    # All three are Responses API models (services/llm/manager.py).
+    "databricks-gpt-6-astra": {
+        "name": "databricks-gpt-6-astra",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-6-luna": {
+        "name": "databricks-gpt-6-luna",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-6-sol": {
+        "name": "databricks-gpt-6-sol",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-grok-4-6": {
+        "name": "databricks-grok-4-6",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 500000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-inkling": {
+        "name": "databricks-inkling",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 8192,
+    },
+    "databricks-kimi-k2-7-code": {
+        "name": "databricks-kimi-k2-7-code",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 262144,
+        "max_output_tokens": 32768,
+    },
+    "databricks-kimi-k3": {
+        "name": "databricks-kimi-k3",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+    },
+    "databricks-llama-4-maverick": {
+        "name": "databricks-llama-4-maverick",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 8000,
+    },
+    "databricks-meta-llama-3-1-8b-instruct": {
+        "name": "databricks-meta-llama-3-1-8b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 4096,
+    },
+    "databricks-meta-llama-3-3-70b-instruct": {
+        "name": "databricks-meta-llama-3-3-70b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 128000,
+        "max_output_tokens": 4096,
+    },
+    "databricks-qwen3-next-80b-a3b-instruct": {
+        "name": "databricks-qwen3-next-80b-a3b-instruct",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 262144,
+        # Endpoint caps output at 10000 ("max_tokens cannot exceed 10000"); a
+        # higher value 400s on real crew runs.
+        "max_output_tokens": 10000,
+    },
+    # --- Custom (self-hosted, OpenAI-compatible) ---
+    "KAT-Coder-V2.5-Dev": {
+        # Self-hosted via custom provider — endpoint from KAT_BASE_URL,
+        # key = KAT_API_KEY in the API Keys service.
+        "name": "KAT-Coder-V2.5-Dev",
+        "temperature": 0.6,
+        "provider": "custom",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+    },
+}
+
+# Alias for backwards compatibility - some modules import MODEL_CONFIGS
+MODEL_CONFIGS = DEFAULT_MODELS
+
+# Model keys that have been removed from the catalog and must be pruned from the
+# DB on seed (the upsert loop alone never deletes). Claude 3 is retired/superseded
+# by Claude 4.x (Databricks no longer serves Claude 3.7 Sonnet either).
+REMOVED_MODEL_KEYS = [
+    # Databricks deprecated this endpoint (returns BAD_REQUEST "This endpoint
+    # databricks-gemini-2-5-flash is deprecated"). It was a high-context (1M)
+    # fallback candidate, so DatabricksRetryLLM fell back to it and crashed a UCMV
+    # flow with a non-retryable BadRequestError. Pruned 2026-09-07.
+    "databricks-gemini-2-5-flash",
+    # DeepSeek, audited 2026-07-25 against api-docs.deepseek.com/quick_start/pricing.
+    # deepseek-chat / deepseek-reasoner were DEPRECATED on 2026/07/24 (they mapped
+    # to the non-thinking / thinking variants of deepseek-v4-flash). coder-v2 and
+    # v3 predate the v4 API entirely and are not servable. The two v4 models plus
+    # the two v3.1 compatibility aliases are all that remain.
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "deepseek-coder-v2",
+    "deepseek-v3",
+    # OpenAI, audited 2026-07-25 against developers.openai.com/api/docs/models
+    # and .../deprecations. Every one of these is retired or has a shutdown date;
+    # the GPT-5.6 family (sol/terra/luna) replaces them.
+    "gpt-4",  # retired 2026-10-23
+    "gpt-4-turbo",
+    "gpt-4o",  # retired 2026-10-23
+    "gpt-4o-mini",  # retired 2026-10-23
+    "gpt-3.5-turbo",  # retired 2026-10-23
+    "o1-preview",  # shut down 2025-07-28
+    "o1-mini",
+    "o3-deep-research",  # shut down 2026-07-23
+    "o4-mini-deep-research",  # shut down 2026-07-23
+    "gpt-5",  # shuts down 2026-12-11
+    "gpt-5.2",  # gpt-5.2-chat-latest shuts down 2026-08-10
+    # Anthropic direct API, audited 2026-07-25. The Claude 4.0 dated snapshots are
+    # deprecated; Claude 5 (opus/sonnet) + Haiku 4.5 are seeded in their place.
+    "claude-opus-4-20250514",
+    "claude-sonnet-4",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-3-7-sonnet-20250219",
+    "claude-3-7-sonnet-20250219-thinking",
+    "claude-3-opus-20240229",
+    # Gemini, audited 2026-07-25 against ai.google.dev/gemini-api/docs/models.
+    # gemini-2.0-flash is shut down; the two -preview ids were preview aliases
+    # that Google has since retired in favour of stable 3.5/3.6 releases.
+    "gemini-2.0-flash",
+    "gemini-3-pro",
+    "gemini-3-flash",
+    # Kimi (Moonshot), audited 2026-07-25: superseded by the k2.7 coding line and K3.
+    "kimi-k2.5",
+    "kimi-k2.6",
+    "databricks-claude-3-7-sonnet",
+    # Databricks deprecated the sonnet-4 endpoint (returns BAD_REQUEST "This
+    # endpoint databricks-claude-sonnet-4 is deprecated"). Superseded by
+    # sonnet-4-5; all Kasal defaults were repointed there. Prune from seeded DBs.
+    "databricks-claude-sonnet-4",
+    # (databricks-claude-fable-5 was pruned here while Anthropic's 2026-06-12
+    # export-control suspension was in force. The suspension has been lifted —
+    # verified 2026-08-05: the endpoint reports READY and serves completions — so
+    # it is back in DEFAULT_MODELS and must NOT be listed here, or the seeder
+    # would delete it again on every startup.)
+    # Audited 2026-06-20 against a serverless test workspace with a
+    # hello-world run through Kasal's own LLM path: these Databricks endpoints no
+    # longer work — removed/renamed in the workspace, or only support the
+    # Responses API (which Kasal's chat-completions path can't use). Pruned so
+    # they also leave the model picker on already-seeded DBs.
+    "databricks-gemini-3-flash",  # endpoint removed -> use gemini-3-5-flash / gemini-3-1-flash-lite
+    "databricks-gemini-3-pro",  # endpoint removed
+    "databricks-gpt-5-1-codex-max",  # endpoint removed
+    "databricks-gpt-5-1-codex-mini",  # endpoint removed
+    "databricks-gemini-2-5-pro",  # removed per request (superseded by gemini-3-5-flash / gemini-3-1-flash-lite)
+    "databricks-meta-llama-3-1-405b-instruct",  # NOT_FOUND (pay-per-token disabled)
+    # Reasoning model: answers the JSON-only planning prompt with a "thinking"
+    # preamble ("1. Analyze the Request: ..."), so crew planning fails with
+    # "Could not parse response as JSON". Not suited to one-shot JSON generation.
+    "databricks-qwen35-122b-a10b",
+    # GPT-OSS reasoning models fail crew runs (reasoning-block / JSON-planning
+    # quirks). Pruned per audit.
+    "databricks-gpt-oss-120b",
+    "databricks-gpt-oss-20b",
+]
+
+
+def _global_row(key: str) -> Select[Tuple[ModelConfig]]:
+    """SELECT the global (``group_id IS NULL``) row for ``key``, deterministically."""
+    return (
+        select(ModelConfig)
+        .where(ModelConfig.key == key, ModelConfig.group_id.is_(None))
+        .order_by(ModelConfig.id)
+        .limit(1)
+    )
+
+
+async def seed_async() -> None:
+    """Seed model configurations into the database using async session."""
+    logger.info("Seeding model_configs table (async)...")
+
+    # Counters for summary
+    models_added = 0
+    models_updated = 0
+    models_skipped = 0
+    models_error = 0
+
+    # Required fields for a valid model config
+    required_fields = [
+        "name",
+        "temperature",
+        "provider",
+        "context_window",
+        "max_output_tokens",
+    ]
+
+    # Use single session for all models to improve performance
+    async with async_session_factory() as session:
+        try:
+            # Process each model configuration using upsert approach
+            from src.core.databricks_app import DatabricksAppInstallation
+
+            models = dict(DEFAULT_MODELS)
+            installed_model = DatabricksAppInstallation.from_env().default_model
+            if installed_model and installed_model not in models:
+                # Custom serving endpoints are not necessarily in the bundled
+                # catalogue. Register the selected endpoint so the default is
+                # also selectable and resolves as Databricks on every path.
+                models[installed_model] = {
+                    "name": installed_model,
+                    "provider": "databricks",
+                    "temperature": 0.7,
+                    "context_window": 16000,
+                    "max_output_tokens": 2048,
+                }
+            for model_key, model_data in models.items():
+                try:
+                    # Validate model data structure
+                    missing_fields = [
+                        field for field in required_fields if field not in model_data
+                    ]
+                    if missing_fields:
+                        logger.error(
+                            f"Model {model_key} is missing required fields: {missing_fields}"
+                        )
+                        models_error += 1
+                        continue
+
+                    # Validate data types
+                    if not isinstance(model_data["temperature"], (int, float)):
+                        logger.error(f"Model {model_key}: temperature must be a number")
+                        models_error += 1
+                        continue
+
+                    if not isinstance(model_data["context_window"], int):
+                        logger.error(
+                            f"Model {model_key}: context_window must be an integer"
+                        )
+                        models_error += 1
+                        continue
+
+                    if not isinstance(model_data["max_output_tokens"], int):
+                        logger.error(
+                            f"Model {model_key}: max_output_tokens must be an integer"
+                        )
+                        models_error += 1
+                        continue
+
+                    # Upsert the GLOBAL row only. A key-only lookup could land on
+                    # a workspace's override and rewrite it instead.
+                    result = await session.execute(_global_row(model_key))
+                    existing_model = result.scalars().first()
+
+                    if existing_model and model_key not in DEFAULT_MODELS:
+                        # Preserve administrator-tuned limits for a custom endpoint.
+                        continue
+                    if existing_model:
+                        # A catalog model's definition ships with each release:
+                        # a corrected limit (27ff4315 cut an output cap to stop
+                        # 400s) must reach existing installs. So an admin's edit
+                        # to these fields is reset on boot; that is accepted.
+                        # `enabled` stays the admin's (forcing it switched off
+                        # every self-hosted model), as do the endpoint keys in
+                        # params (merge_seed_params) and the thinking settings.
+                        from src.services.llm.endpoints import merge_seed_params
+
+                        existing_model.name = model_data["name"]
+                        existing_model.provider = model_data["provider"]
+                        existing_model.temperature = model_data["temperature"]
+                        existing_model.context_window = model_data["context_window"]
+                        existing_model.max_output_tokens = model_data[
+                            "max_output_tokens"
+                        ]
+                        existing_model.extended_thinking = model_data.get(
+                            "extended_thinking", False
+                        )
+                        existing_model.params = merge_seed_params(
+                            model_data.get("params"), existing_model.params
+                        )
+                        existing_model.unsupported_params = model_data.get(
+                            "unsupported_params"
+                        )
+                        existing_model.updated_at = datetime.now().replace(tzinfo=None)
+                        logger.debug(f"Updating existing model: {model_key}")
+                        models_updated += 1
+                    else:
+                        # Add new model config - only Databricks-provider models are enabled by default
+                        model_config = ModelConfig(
+                            key=model_key,
+                            name=model_data["name"],
+                            provider=model_data["provider"],
+                            temperature=model_data["temperature"],
+                            context_window=model_data["context_window"],
+                            max_output_tokens=model_data["max_output_tokens"],
+                            extended_thinking=model_data.get(
+                                "extended_thinking", False
+                            ),
+                            params=model_data.get("params"),
+                            unsupported_params=model_data.get("unsupported_params"),
+                            enabled=(
+                                model_data.get("provider") == "databricks"
+                            ),  # Enable only Databricks-provider models by default
+                            created_at=datetime.now().replace(tzinfo=None),
+                            updated_at=datetime.now().replace(tzinfo=None),
+                        )
+                        session.add(model_config)
+                        logger.debug(f"Adding new model: {model_key}")
+                        models_added += 1
+
+                except Exception as model_error:
+                    logger.error(
+                        f"Error processing model {model_key}: {str(model_error)}"
+                    )
+                    models_error += 1
+
+            # Prune retired models (e.g. Claude 3) from existing installations —
+            # the upsert loop above never deletes, so removed keys would linger.
+            # Every row of the key goes, workspace overrides included (as
+            # delete_by_key does): an override of a retired model would still
+            # resolve, with no catalog row left to delete it through.
+            # Resilient per-key: a prune failure must never break seeding.
+            models_removed = 0
+            for removed_key in REMOVED_MODEL_KEYS:
+                try:
+                    result = await session.execute(
+                        select(ModelConfig).where(ModelConfig.key == removed_key)
+                    )
+                    stale_rows = list(result.scalars().all())
+                    for stale in stale_rows:
+                        await session.delete(stale)
+                    if stale_rows:
+                        models_removed += 1
+                        logger.debug(f"Removed retired model: {removed_key}")
+                except Exception as prune_error:
+                    logger.warning(
+                        f"Could not prune model {removed_key}: {str(prune_error)}"
+                    )
+
+            # Commit all changes at once
+            await session.commit()
+            logger.info(
+                f"Model configs seeding summary: Added {models_added}, Updated {models_updated}, Removed {models_removed}, Skipped {models_skipped}, Errors {models_error}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error seeding model configs: {str(e)}")
+            await session.rollback()
+            raise
+
+    # Raised after the commit: the valid models are kept, the run still fails.
+    # A retired-model prune failure above is NOT counted — it is best-effort.
+    if models_error:
+        raise SeederIncomplete("model_configs", models_error, len(models))
+
+
+async def seed() -> None:
+    """Main entry point for seeding model configurations."""
+    logger.info("Starting model configs seeding process...")
+    try:
+        await seed_async()
+        logger.info("Model configs seeding completed successfully")
+    except Exception as e:
+        logger.error(f"Error seeding model configs: {str(e)}")
+        import traceback
+
+        logger.error(f"Model configs seeding traceback: {traceback.format_exc()}")
+        # Re-raise: the runner still runs the other seeders, then reports this.
+        raise
+
+
+# For backwards compatibility or direct command-line usage
+if __name__ == "__main__":  # pragma: no cover
+    import asyncio
+
+    asyncio.run(seed())

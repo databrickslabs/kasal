@@ -1,0 +1,1179 @@
+"""
+Service for running Flow executions with CrewAI Flow.
+
+This file contains the FlowRunnerService which handles running flow executions in the system.
+It uses the BackendFlow class (from backend_flow.py) to interact with the CrewAI Flow engine.
+"""
+
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import BadRequestError, KasalError, NotFoundError
+from src.core.logger import LoggerManager
+from src.db.database_router import get_smart_db_session
+from src.repositories.flow_repository import FlowRepository
+from src.schemas.flow_execution import (
+    FlowExecutionStatus,
+)
+from src.services.execution.stored_inputs import strip_run_credentials
+from src.services.flow_builder.backend_flow import BackendFlow
+from src.services.flow_builder.data_access import build_flow_data_access
+from src.services.flow_builder.exceptions import FlowPausedForApprovalException
+from src.services.flow_builder.execution_service import FlowExecutionService
+
+# Initialize flow-specific logger
+logger = LoggerManager.get_instance().flow
+
+
+@asynccontextmanager
+async def _smart_db_session() -> AsyncIterator[AsyncSession]:
+    """Wrap get_smart_db_session as an async context manager for 'async with' usage.
+
+    get_smart_db_session is an async generator (for FastAPI DI). This wrapper
+    lets flow_runner_service use it with 'async with' while preserving proper
+    commit-on-success / rollback-on-error semantics.
+    """
+    gen: Any = get_smart_db_session().__aiter__()  # an async generator
+    session = await gen.__anext__()
+    try:
+        yield session
+    except BaseException:
+        await gen.aclose()
+        raise
+    else:
+        try:
+            await gen.__anext__()
+        except StopAsyncIteration:
+            pass
+
+
+class FlowRunnerService:
+    """Service for running Flow executions"""
+
+    def __init__(self, db: AsyncSession):
+        """Initialize with async database session"""
+        self.db = db
+        self.flow_execution_service = FlowExecutionService(db)
+        self.flow_repo = FlowRepository(db)
+        # No task/agent/tool/crew repositories here: they were constructed and NEVER
+        # read. The dynamic-flow path below builds its own bundle for BackendFlow.
+
+    async def _emit_error_span(
+        self,
+        job_id: str,
+        error_msg: str,
+        group_id: Optional[str] = None,
+        group_email: Optional[str] = None,
+    ) -> None:
+        """Emit an error span via OTel so it appears in the trace timeline.
+
+        Routes through the same OTel pipeline (TracerProvider → KasalDBSpanExporter)
+        as engine-level spans, so the error gets proper span_id / trace_id columns
+        and a consistent representation in the trace timeline.
+        """
+        try:
+            from types import SimpleNamespace
+
+            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+            from opentelemetry.trace import StatusCode
+
+            from src.services.otel_tracing.db_exporter import KasalDBSpanExporter
+            from src.services.otel_tracing.otel_config import (
+                create_kasal_tracer_provider,
+            )
+
+            group_context = None
+            if group_id or group_email:
+                group_context = SimpleNamespace(
+                    primary_group_id=group_id, group_email=group_email
+                )
+
+            provider = create_kasal_tracer_provider(
+                job_id=job_id,
+                service_name="kasal-flow-runner",
+            )
+            provider.add_span_processor(
+                SimpleSpanProcessor(KasalDBSpanExporter(job_id, group_context))
+            )
+
+            tracer = provider.get_tracer("kasal.flow_runner")
+            with tracer.start_as_current_span("kasal.flow.execution_failed") as span:
+                span.set_attribute("kasal.event_type", "flow_execution_failed")
+                span.set_attribute("kasal.job_id", job_id)
+                span.set_attribute("kasal.task_name", "Flow execution error")
+                span.set_attribute("kasal.output_content", error_msg)
+                span.set_attribute("kasal.extra.error", error_msg)
+                if group_id:
+                    span.set_attribute("kasal.group_id", group_id)
+                if group_email:
+                    span.set_attribute("kasal.group_email", group_email)
+                span.set_status(StatusCode.ERROR, error_msg)
+
+            provider.shutdown()
+            logger.info(f"Emitted OTel error span for job {job_id}: {error_msg[:200]}")
+        except Exception as span_err:
+            logger.warning(
+                f"Failed to emit OTel error span for job {job_id}: {span_err}"
+            )
+
+    @staticmethod
+    @asynccontextmanager
+    async def _safe_session() -> AsyncIterator[AsyncSession]:
+        """Create a smart-routed session with safe cleanup.
+
+        Routes through get_smart_db_session (Lakebase when enabled, local DB otherwise).
+        After long-running operations (like CrewAI kickoff), sessions can lose their
+        greenlet context, causing MissingGreenlet errors during cleanup.
+        This context manager suppresses those cleanup errors.
+        """
+        async with _smart_db_session() as session:
+            yield session
+
+    async def run_flow(
+        self,
+        flow_id: Optional[Union[uuid.UUID, str]],
+        job_id: str,
+        run_name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a flow execution.
+
+        Args:
+            flow_id: ID of the flow to run, or None for a dynamic flow
+            job_id: Job ID for tracking execution
+            run_name: Optional descriptive name for the execution
+            config: Additional configuration
+
+        Returns:
+            Execution result
+        """
+        if config:
+            logger.info(
+                f"run_flow: config keys {list(config.keys())}, "
+                f"{len(config.get('nodes', []))} nodes, "
+                f"{len(config.get('edges', []))} edges, "
+                f"flow_config present: {'flow_config' in config}"
+            )
+        try:
+            logger.info(
+                f"run_flow called with flow_id={flow_id}, job_id={job_id}, run_name={run_name}"
+            )
+
+            # Convert string to UUID if provided and not None
+            if flow_id is not None and isinstance(flow_id, str):
+                try:
+                    flow_id = uuid.UUID(flow_id)
+                    logger.info(f"Converted string flow_id to UUID: {flow_id}")
+                except ValueError as e:
+                    logger.error(f"Invalid UUID format for flow_id: {flow_id}")
+                    raise BadRequestError(
+                        detail=f"Invalid UUID format: {str(e)}",
+                    )
+
+            logger.info(f"Running flow execution for flow {flow_id}, job {job_id}")
+
+            if config is None:
+                config = {}
+
+            logger.info(f"Flow execution config keys: {config.keys()}")
+            if "flow_id" in config:
+                logger.info(f"Found flow_id in config: {config['flow_id']}")
+
+            # Check if flow_id from parameter is None but exists in config
+            if flow_id is None and "flow_id" in config:
+                flow_id_str = config["flow_id"]
+                try:
+                    flow_id = uuid.UUID(flow_id_str)
+                    logger.info(f"Using flow_id from config: {flow_id}")
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"Invalid flow_id in config: {flow_id_str}, ignoring"
+                    )
+
+            # Different execution paths based on whether we have nodes in config
+            nodes = config.get("nodes", [])
+            config.get("edges", [])
+
+            # Authorize saved definitions even when an earlier layer supplied nodes.
+            # Canvas flows may carry a new UUID before their first save.
+            if flow_id is not None:
+                flow = await self.flow_repo.get(flow_id)
+                if flow is not None:
+                    from src.services.flow_builder.flow_service import FlowService
+
+                    FlowService.require_execution_access(
+                        flow, config.get("group_context")
+                    )
+                elif not nodes:
+                    raise NotFoundError(
+                        detail="Flow not found",
+                    )
+
+                if not nodes and flow is not None:
+                    config["nodes"] = nodes = flow.nodes
+                    config["edges"] = flow.edges
+                    config["flow_config"] = flow.flow_config
+
+            # Validate nodes if this is a dynamic flow (no flow_id) or we have nodes in config
+            if flow_id is None and (not nodes or not isinstance(nodes, list)):
+                logger.error(
+                    f"No valid nodes provided for dynamic flow. Got: {type(nodes)}"
+                )
+                raise BadRequestError(
+                    detail="No valid nodes provided for dynamic flow. Nodes must be a non-empty array.",
+                )
+
+            # Extract group_id from config for multi-tenant isolation
+            group_id = config.get("group_id") if config else None
+            # "auto" anywhere in the flow becomes one enabled model for the run.
+            from src.services.execution.config import run_freeze
+
+            group_context = config.get("group_context")
+            auto = await run_freeze.resolve_mapping(config, self.db, group_context)
+
+            # The stored record drops the credentials; the flow body gets them.
+            sanitized_config = strip_run_credentials(config)
+
+            # Check if this is a resume scenario - if so, use existing execution record
+            resume_from_execution_id = (
+                config.get("resume_from_execution_id") if config else None
+            )
+
+            execution = None
+
+            if resume_from_execution_id:
+                # Runs are ExecutionService's domain.
+                from src.services.execution.service import ExecutionService
+
+                exec_service = ExecutionService(self.db)
+
+                from src.services.flow_builder.resume_authorization import (
+                    get_owned_resume_source,
+                    require_run_owner,
+                )
+
+                caller_groups = getattr(config.get("group_context"), "group_ids", None)
+                caller_groups = caller_groups or ([group_id] if group_id else [])
+                source = await get_owned_resume_source(
+                    exec_service, resume_from_execution_id, caller_groups
+                )
+
+                # A record may ALREADY exist for THIS job_id, because a
+                # checkpoint resume deliberately creates a NEW execution seeded
+                # from an old one before handing over. When it does, that is
+                # this run's own record — use it and leave the source alone.
+                #
+                # Reusing the SOURCE row here is what made a resume look like
+                # two jobs: the finished run it was resumed from got flipped
+                # back to RUNNING and never reached a terminal status again.
+                own_execution = await exec_service.get_run_by_job_id(str(job_id))
+                if own_execution is not None:
+                    require_run_owner(own_execution, caller_groups)
+                    execution = own_execution
+                    execution.status = FlowExecutionStatus.RUNNING.value
+                    await self.db.commit()
+                    logger.info(
+                        f"🔄 RESUME: using this run's own execution record "
+                        f"{execution.id} for job {job_id}; source "
+                        f"{resume_from_execution_id} left untouched"
+                    )
+                else:
+                    # LEGACY IN-PLACE RESUME: no record for this job_id, so the
+                    # caller means "continue that other run under its record".
+                    # This is the HITL path — HITLApproval.execution_id is a FK
+                    # to executionhistory.job_id — and it genuinely resumes the
+                    # SAME run. Older callers may pass the integer PK, so look
+                    # up by job_id first and fall back to the id.
+                    logger.info(
+                        f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}"
+                    )
+
+                    existing_execution = source
+
+                    if not existing_execution:
+                        logger.error(
+                            f"🔄 RESUME: Could not find execution for execution_id={resume_from_execution_id}"
+                        )
+                        raise NotFoundError(
+                            detail=f"Execution not found for resume: {resume_from_execution_id}",
+                        )
+
+                    execution = existing_execution
+                    execution.status = FlowExecutionStatus.RUNNING.value
+                    await self.db.commit()
+                    logger.info(
+                        f"🔄 RESUME: Found existing execution with ID {execution.id}, status set to RUNNING"
+                    )
+
+            if execution is None:
+                # NEW EXECUTION: Create a flow execution record via service layer.
+                # create_execution writes the row on a PRIVATE connection (see its
+                # docstring): the flow runs in a subprocess whose OTel trace writer
+                # inserts execution_trace rows keyed by job_id (FK ->
+                # executionhistory.job_id). On SQLite the request session rides the
+                # shared StaticPool connection and the subprocess's own connection
+                # can't reliably see this just-committed row, so every trace batch
+                # failed "FOREIGN KEY constraint failed" (crew already avoids this
+                # via ExecutionStatusService.create_execution's isolated session).
+                execution = await self.flow_execution_service.create_execution(
+                    flow_id=flow_id,  # None for ad-hoc executions, UUID for saved flows
+                    job_id=job_id,
+                    run_name=run_name,
+                    config=sanitized_config,
+                    group_id=group_id,
+                )
+                logger.info(
+                    f"Created flow execution record with ID {execution.id} for group {group_id}"
+                )
+                run_freeze.record(auto, job_id, group_context)
+
+            # Start the appropriate execution method based on flow_id
+            # IMPORTANT: Use await instead of create_task to ensure subprocess waits for completion
+            # This allows stdout capture in the finally block to get the actual CrewAI output
+            flow_result = None
+            if flow_id is not None:
+                logger.info(f"Starting execution for existing flow {flow_id}")
+                flow_result = await self._run_flow_execution(
+                    execution.id, flow_id, job_id, config
+                )
+            else:
+                logger.info("Starting execution for dynamic flow")
+                flow_result = await self._run_dynamic_flow(execution.id, job_id, config)
+
+            # Return the actual flow result instead of just a status message
+            if flow_result and flow_result.get("success"):
+                # Check if flow was paused for HITL approval - pass through the result as-is
+                if flow_result.get("hitl_paused") or flow_result.get(
+                    "paused_for_approval"
+                ):
+                    logger.info(
+                        f"🚦 run_flow: Passing through HITL pause result for {job_id}"
+                    )
+                    return flow_result  # Return the HITL pause result directly
+
+                return_dict = {
+                    "job_id": job_id,
+                    "execution_id": execution.id,
+                    "status": FlowExecutionStatus.COMPLETED,
+                    "result": flow_result.get("result"),
+                    "message": "Flow execution completed",
+                }
+                # Include flow_uuid for checkpoint/resume functionality
+                if flow_result.get("flow_uuid"):
+                    return_dict["flow_uuid"] = flow_result.get("flow_uuid")
+                return return_dict
+            else:
+                error_msg = (
+                    flow_result.get("error", "Unknown error")
+                    if flow_result
+                    else "No result returned"
+                )
+                return {
+                    "job_id": job_id,
+                    "execution_id": execution.id,
+                    "status": FlowExecutionStatus.FAILED,
+                    "error": error_msg,
+                    "message": f"Flow execution failed: {error_msg}",
+                }
+        except KasalError:
+            # Preserve application errors for the API exception handler.
+            raise
+        except Exception as e:
+            logger.error(f"Error running flow execution: {e}", exc_info=True)
+            raise KasalError(
+                detail=f"Error running flow execution: {str(e)}",
+            )
+
+    async def _run_dynamic_flow(
+        self, execution_id: int, job_id: str, config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Run a dynamic flow execution created from the configuration.
+
+        Args:
+            execution_id: ID of the flow execution record
+            job_id: Job ID for tracking
+            config: Configuration containing nodes, edges, and flow configuration
+
+        Returns:
+            Dict containing the flow execution result with 'success', 'result' or 'error' keys
+        """
+        # Create a session with safe cleanup to prevent stale-connection errors
+        # from corrupting successful results after long-running kickoff()
+        async with self._safe_session() as session:
+            # Create fresh service instance with the new session
+            flow_execution_service = FlowExecutionService(session)
+
+            try:
+                logger.info(
+                    f"Starting dynamic flow execution {execution_id} for job {job_id}"
+                )
+
+                # Update status to indicate we're preparing the flow
+                await flow_execution_service.update_execution_status(
+                    execution_id=execution_id, status=FlowExecutionStatus.PREPARING
+                )
+
+                # Provider API keys are NOT exported into os.environ: the
+                # process env is shared by every workspace. Each LLM and tool
+                # receives this workspace's key explicitly (LLMManager and
+                # ToolFactory read ApiKeysService for the run's group).
+
+                # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
+                from src.services.flow_builder.backend_flow import BackendFlow
+
+                # Initialize BackendFlow with the job_id (no flow_id for dynamic flows)
+                backend_flow = BackendFlow(job_id=job_id, flow_id=None)
+                # Owning SERVICES bound to the run's workspace — see data_access.
+                backend_flow.repositories = build_flow_data_access(
+                    session, (config or {}).get("group_context")
+                )
+
+                # CRITICAL: For dynamic flows, we need to populate _flow_data from config
+                # (not load from database since there's no flow_id)
+                if config:
+                    logger.info("Updating flow config with provided configuration")
+                    backend_flow.config.update(config)
+
+                    # Use the flow_config built by the frontend (buildFlowConfiguration utility)
+                    # This contains listeners, actions, and startingPoints in the NEW simple format
+                    flow_config = config.get("flow_config", {})
+                    nodes = config.get("nodes", [])
+                    edges = config.get("edges", [])
+
+                    logger.info(
+                        f"Using flow_config from frontend with {len(flow_config.get('listeners', []))} listeners, "
+                        f"{len(flow_config.get('actions', []))} actions, and {len(flow_config.get('startingPoints', []))} starting points"
+                    )
+
+                    backend_flow._flow_data = {
+                        "id": None,
+                        "name": f"Dynamic Flow {job_id[:8]}",
+                        "crew_id": None,
+                        "nodes": nodes,
+                        "edges": edges,
+                        "flow_config": flow_config,
+                    }
+                    logger.info(
+                        f"Constructed flow_data for dynamic flow with {len(nodes)} nodes and {len(flow_config.get('listeners', []))} listeners"
+                    )
+
+                # Update status to RUNNING
+                await flow_execution_service.update_execution_status(
+                    execution_id=execution_id, status=FlowExecutionStatus.RUNNING
+                )
+
+                logger.info("=" * 100)
+                logger.info(
+                    f"ABOUT TO EXECUTE DYNAMIC FLOW - execution_id: {execution_id}, job_id: {job_id}"
+                )
+                logger.info("=" * 100)
+
+                try:
+                    # Execute the flow and get the result
+                    logger.info(
+                        "Calling backend_flow.kickoff() - THIS IS THE MAIN EXECUTION POINT"
+                    )
+                    result = await backend_flow.kickoff()
+                    logger.info("=" * 100)
+                    logger.info(f"FLOW EXECUTION COMPLETED - result: {result}")
+                    logger.info("=" * 100)
+
+                    # CRITICAL: Create a fresh session for post-execution DB updates.
+                    # The original session may have a stale/dead SQLite connection after
+                    # the long-running kickoff() (minutes to hours). This prevents
+                    # "(sqlite3.OperationalError) no active connection" errors.
+                    async with _smart_db_session() as post_session:
+                        post_flow_service = FlowExecutionService(post_session)
+
+                        # Update the execution with the result
+                        if result.get("success", False):
+                            # Ensure result is a dictionary
+                            result_data = result.get("result", {})
+                            if not isinstance(result_data, dict):
+                                logger.warning(
+                                    f"Expected result to be a dictionary, got {type(result_data)}. Converting to dict."
+                                )
+                                try:
+                                    if hasattr(result_data, "to_dict"):
+                                        result_data = result_data.to_dict()
+                                    elif hasattr(result_data, "__dict__"):
+                                        result_data = result_data.__dict__
+                                    else:
+                                        result_data = {"content": str(result_data)}
+                                except Exception as conv_error:
+                                    logger.error(
+                                        f"Error converting result to dictionary: {conv_error}. Using fallback.",
+                                        exc_info=True,
+                                    )
+                                    result_data = {"content": str(result_data)}
+
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.COMPLETED,
+                                result=result_data,
+                            )
+
+                            # Save checkpoint info if flow_uuid is available (from @persist)
+                            flow_uuid = result.get("flow_uuid")
+                            if flow_uuid:
+                                try:
+                                    from src.services.execution.history import (
+                                        ExecutionHistoryService,
+                                    )
+
+                                    history_service = ExecutionHistoryService(
+                                        post_session
+                                    )
+                                    await history_service.set_checkpoint_active(
+                                        execution_id=execution_id,
+                                        flow_uuid=flow_uuid,
+                                        checkpoint_method="flow_complete",
+                                    )
+                                    logger.info(
+                                        f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}"
+                                    )
+                                except Exception as checkpoint_err:
+                                    logger.warning(
+                                        f"Could not save checkpoint info: {checkpoint_err}"
+                                    )
+
+                            logger.info(
+                                f"Successfully completed dynamic flow execution {execution_id}"
+                            )
+                            return_dict = {
+                                "success": True,
+                                "result": result_data,
+                                "execution_id": execution_id,
+                            }
+                            # Include flow_uuid for checkpoint/resume functionality
+                            if flow_uuid:
+                                return_dict["flow_uuid"] = flow_uuid
+                            return return_dict
+                        else:
+                            # Flow returned with success=False
+                            error_msg = result.get("error", "Flow execution failed")
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.FAILED,
+                                error=error_msg,
+                            )
+                            await self._emit_error_span(
+                                job_id, error_msg, group_id=config.get("group_id")
+                            )
+                            logger.error(
+                                f"Dynamic flow execution {execution_id} failed: {error_msg}"
+                            )
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "execution_id": execution_id,
+                            }
+
+                except FlowPausedForApprovalException as pause_exc:
+                    # Flow paused at HITL gate - this is not an error, it's a controlled pause
+                    logger.info(
+                        f"🚦 Flow paused for approval at gate {pause_exc.gate_node_id}"
+                    )
+                    logger.info(f"   Approval ID: {pause_exc.approval_id}")
+                    logger.info(f"   Execution ID: {pause_exc.execution_id}")
+                    logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
+
+                    # Fresh session for HITL status update
+                    async with _smart_db_session() as hitl_session:
+                        hitl_flow_service = FlowExecutionService(hitl_session)
+
+                        # Update execution status to WAITING_FOR_APPROVAL
+                        await hitl_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.WAITING_FOR_APPROVAL,  # HITL pause
+                            result={
+                                "hitl_paused": True,
+                                "approval_id": pause_exc.approval_id,
+                                "gate_node_id": pause_exc.gate_node_id,
+                                "message": pause_exc.message,
+                                "crew_sequence": pause_exc.crew_sequence,
+                            },
+                        )
+
+                        # Save checkpoint info for resume (resume data is in result field)
+                        logger.info(
+                            f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow_internal]"
+                        )
+                        logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
+                        if pause_exc.flow_uuid:
+                            try:
+                                from src.services.execution.history import (
+                                    ExecutionHistoryService,
+                                )
+
+                                history_service = ExecutionHistoryService(hitl_session)
+                                await history_service.set_checkpoint_active(
+                                    execution_id=execution_id,
+                                    flow_uuid=pause_exc.flow_uuid,
+                                    checkpoint_method="hitl_gate_pause",
+                                )
+                                logger.info(
+                                    f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}"
+                                )
+                            except Exception as checkpoint_err:
+                                logger.error(
+                                    f"❌ Could not save HITL checkpoint info: {checkpoint_err}",
+                                    exc_info=True,
+                                )
+                        else:
+                            logger.warning(
+                                "⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work."
+                            )
+
+                    return {
+                        "success": True,  # Not a failure - controlled pause
+                        "paused_for_approval": True,
+                        "hitl_paused": True,  # Critical: process_flow_executor.py checks this key
+                        "approval_id": pause_exc.approval_id,
+                        "gate_node_id": pause_exc.gate_node_id,
+                        "message": pause_exc.message,
+                        "execution_id": execution_id,
+                        "flow_uuid": pause_exc.flow_uuid,
+                        "crew_sequence": pause_exc.crew_sequence,
+                    }
+
+                except Exception as kickoff_error:
+                    logger.error(
+                        f"Error during backend_flow.kickoff() for dynamic flow {execution_id}: {kickoff_error}",
+                        exc_info=True,
+                    )
+                    # Fresh session for error status update
+                    async with _smart_db_session() as err_session:
+                        err_flow_service = FlowExecutionService(err_session)
+                        await err_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(kickoff_error),
+                        )
+                    await self._emit_error_span(
+                        job_id, str(kickoff_error), group_id=config.get("group_id")
+                    )
+                    return {
+                        "success": False,
+                        "error": str(kickoff_error),
+                        "execution_id": execution_id,
+                    }
+
+            except FlowPausedForApprovalException:
+                # Re-raise to handle at top level (shouldn't happen but just in case)
+                raise
+
+            except Exception as e:
+                logger.error(
+                    f"Error running dynamic flow execution {execution_id}: {e}",
+                    exc_info=True,
+                )
+                try:
+                    # Fresh session for outer error status update
+                    async with _smart_db_session() as outer_err_session:
+                        outer_err_service = FlowExecutionService(outer_err_session)
+                        await outer_err_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(e),
+                        )
+                except Exception as update_error:
+                    logger.error(
+                        f"Error updating flow execution {execution_id} status: {update_error}",
+                        exc_info=True,
+                    )
+                await self._emit_error_span(
+                    job_id, str(e), group_id=config.get("group_id")
+                )
+                return {"success": False, "error": str(e), "execution_id": execution_id}
+
+    async def _run_flow_execution(
+        self,
+        execution_id: int,
+        flow_id: Union[uuid.UUID, str],
+        job_id: str,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Run a flow execution for an existing flow.
+
+        Args:
+            execution_id: ID of the flow execution record
+            flow_id: ID of the flow to execute
+            job_id: Job ID for tracking
+            config: Additional configuration
+
+        Returns:
+            Dict containing the flow execution result with 'success', 'result' or 'error' keys
+        """
+        # Create a session with safe cleanup to prevent stale-connection errors
+        # from corrupting successful results after long-running kickoff()
+        async with self._safe_session() as session:
+            # Create fresh service instances with the new session
+            flow_execution_service = FlowExecutionService(session)
+
+            # Convert string to UUID if needed
+            if isinstance(flow_id, str):
+                try:
+                    flow_id = uuid.UUID(flow_id)
+                except ValueError as e:
+                    logger.error(f"Invalid UUID format for flow_id: {flow_id}")
+                    # Update status to FAILED via service layer
+                    await flow_execution_service.update_execution_status(
+                        execution_id=execution_id,
+                        status=FlowExecutionStatus.FAILED,
+                        error=f"Invalid UUID format: {str(e)}",
+                    )
+                    return {"success": False, "error": f"Invalid UUID format: {str(e)}"}
+
+            try:
+                logger.info(
+                    f"Starting flow execution {execution_id} for flow {flow_id}, job {job_id}"
+                )
+
+                # Update status to indicate we're preparing the flow
+                await flow_execution_service.update_execution_status(
+                    execution_id=execution_id, status=FlowExecutionStatus.PREPARING
+                )
+
+                # Provider API keys are NOT exported into os.environ: the
+                # process env is shared by every workspace. Each LLM and tool
+                # receives this workspace's key explicitly (LLMManager and
+                # ToolFactory read ApiKeysService for the run's group).
+
+                # Initialize BackendFlow with the flow_id and job_id
+                backend_flow = BackendFlow(job_id=job_id, flow_id=flow_id)
+                # Owning SERVICES bound to the run's workspace — see data_access.
+                backend_flow.repositories = build_flow_data_access(
+                    session, (config or {}).get("group_context")
+                )
+
+                # Log what we have in the config BEFORE loading from database
+                logger.info(
+                    f"[_run_flow_execution] Config keys before DB load: {list(config.keys())}"
+                )
+                logger.info(
+                    f"[_run_flow_execution] Has nodes in config: {'nodes' in config and bool(config.get('nodes'))}"
+                )
+                logger.info(
+                    f"[_run_flow_execution] Has flow_config in config: {'flow_config' in config}"
+                )
+                if "flow_config" in config:
+                    logger.info(
+                        f"[_run_flow_execution] flow_config keys from frontend: {list(config.get('flow_config', {}).keys())}"
+                    )
+
+                if not config.get("nodes"):
+                    from src.services.flow_builder.saved_flow_config import (
+                        hydrate_saved_flow,
+                    )
+
+                    await hydrate_saved_flow(backend_flow, config)
+
+                # CRITICAL: Ensure flow_config has startingPoints before execution
+                # If flow_config is missing startingPoints, build them from nodes/edges
+                if "nodes" in config and "edges" in config:
+                    flow_config = config.get("flow_config", {})
+
+                    if "startingPoints" not in flow_config or not flow_config.get(
+                        "startingPoints"
+                    ):
+                        logger.warning(
+                            "flow_config missing startingPoints - building from nodes/edges"
+                        )
+
+                        # Identify starting nodes (nodes with no incoming edges)
+                        nodes = config["nodes"]
+                        edges = config["edges"]
+
+                        node_ids = set(node["id"] for node in nodes)
+                        target_node_ids = set(edge["target"] for edge in edges)
+                        starting_node_ids = list(node_ids - target_node_ids)
+
+                        logger.info(
+                            f"Identified {len(starting_node_ids)} starting nodes: {starting_node_ids}"
+                        )
+
+                        # Build startingPoints array
+                        starting_points = []
+                        for node_id in starting_node_ids:
+                            node = next((n for n in nodes if n["id"] == node_id), None)
+                            if node:
+                                starting_points.append(
+                                    {
+                                        "nodeId": node_id,
+                                        "nodeType": node.get("type", "unknown"),
+                                        "nodeData": node.get("data", {}),
+                                    }
+                                )
+
+                        # Update flow_config with startingPoints
+                        if "flow_config" not in config:
+                            config["flow_config"] = {}
+
+                        config["flow_config"]["startingPoints"] = starting_points
+                        config["flow_config"]["nodes"] = nodes
+                        config["flow_config"]["edges"] = edges
+
+                        logger.info(
+                            f"Built startingPoints for flow_config: {len(starting_points)} starting points"
+                        )
+                    else:
+                        logger.info(
+                            f"flow_config already has {len(flow_config.get('startingPoints', []))} startingPoints"
+                        )
+
+                # If config is provided, update the backend flow's config
+                if config:
+                    logger.info("Updating flow config with provided configuration")
+                    backend_flow.config.update(config)
+
+                # Update status to RUNNING
+                await flow_execution_service.update_execution_status(
+                    execution_id=execution_id, status=FlowExecutionStatus.RUNNING
+                )
+
+                logger.info("=" * 100)
+                logger.info(
+                    f"ABOUT TO EXECUTE FLOW - execution_id: {execution_id}, flow_id: {flow_id}, job_id: {job_id}"
+                )
+                logger.info("=" * 100)
+
+                try:
+                    # Execute the flow and get the result
+                    logger.info(
+                        "Calling backend_flow.kickoff() - THIS IS THE MAIN EXECUTION POINT"
+                    )
+                    result = await backend_flow.kickoff()
+                    logger.info("=" * 100)
+                    logger.info(f"FLOW EXECUTION COMPLETED - result: {result}")
+                    logger.info("=" * 100)
+
+                    # CRITICAL: Create a fresh session for post-execution DB updates.
+                    # The original session may have a stale/dead SQLite connection after
+                    # the long-running kickoff() (minutes to hours). This prevents
+                    # "(sqlite3.OperationalError) no active connection" errors.
+                    async with _smart_db_session() as post_session:
+                        post_flow_service = FlowExecutionService(post_session)
+
+                        # Update the execution with the result
+                        if result.get("success", False):
+                            # Ensure result is a dictionary
+                            result_data = result.get("result", {})
+                            if not isinstance(result_data, dict):
+                                logger.warning(
+                                    f"Expected result to be a dictionary, got {type(result_data)}. Converting to dict."
+                                )
+                                try:
+                                    if hasattr(result_data, "to_dict"):
+                                        result_data = result_data.to_dict()
+                                    elif hasattr(result_data, "__dict__"):
+                                        result_data = result_data.__dict__
+                                    else:
+                                        result_data = {"content": str(result_data)}
+                                except Exception as conv_error:
+                                    logger.error(
+                                        f"Error converting result to dictionary: {conv_error}. Using fallback.",
+                                        exc_info=True,
+                                    )
+                                    result_data = {"content": str(result_data)}
+
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.COMPLETED,
+                                result=result_data,
+                            )
+
+                            # Save checkpoint info if flow_uuid is available (from @persist)
+                            flow_uuid = result.get("flow_uuid")
+                            if flow_uuid:
+                                try:
+                                    from src.services.execution.history import (
+                                        ExecutionHistoryService,
+                                    )
+
+                                    history_service = ExecutionHistoryService(
+                                        post_session
+                                    )
+                                    await history_service.set_checkpoint_active(
+                                        execution_id=execution_id,
+                                        flow_uuid=flow_uuid,
+                                        checkpoint_method="flow_complete",
+                                    )
+                                    logger.info(
+                                        f"Saved checkpoint info for execution {execution_id} with flow_uuid {flow_uuid}"
+                                    )
+                                except Exception as checkpoint_err:
+                                    logger.warning(
+                                        f"Could not save checkpoint info: {checkpoint_err}"
+                                    )
+
+                            logger.info(
+                                f"Updated flow execution {execution_id} with final status: COMPLETED"
+                            )
+                            return_dict = {
+                                "success": True,
+                                "result": result_data,
+                                "execution_id": execution_id,
+                            }
+                            # Include flow_uuid for checkpoint/resume functionality
+                            if flow_uuid:
+                                return_dict["flow_uuid"] = flow_uuid
+                            return return_dict
+                        else:
+                            error_msg = result.get("error", "Unknown error")
+                            await post_flow_service.update_execution_status(
+                                execution_id=execution_id,
+                                status=FlowExecutionStatus.FAILED,
+                                error=error_msg,
+                            )
+                            await self._emit_error_span(
+                                job_id, error_msg, group_id=config.get("group_id")
+                            )
+                            logger.info(
+                                f"Updated flow execution {execution_id} with final status: FAILED"
+                            )
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "execution_id": execution_id,
+                            }
+
+                except FlowPausedForApprovalException as pause_exc:
+                    # Flow paused at HITL gate - this is not an error, it's a controlled pause
+                    logger.info(
+                        f"🚦 Flow paused for approval at gate {pause_exc.gate_node_id}"
+                    )
+                    logger.info(f"   Approval ID: {pause_exc.approval_id}")
+                    logger.info(f"   Execution ID: {pause_exc.execution_id}")
+                    logger.info(f"   Crew sequence: {pause_exc.crew_sequence}")
+
+                    # Fresh session for HITL status update
+                    async with _smart_db_session() as hitl_session:
+                        hitl_flow_service = FlowExecutionService(hitl_session)
+
+                        # Update execution status to WAITING_FOR_APPROVAL
+                        await hitl_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.WAITING_FOR_APPROVAL,
+                            result={
+                                "hitl_paused": True,
+                                "approval_id": pause_exc.approval_id,
+                                "gate_node_id": pause_exc.gate_node_id,
+                                "message": pause_exc.message,
+                                "crew_sequence": pause_exc.crew_sequence,
+                            },
+                        )
+
+                        # Save checkpoint info for resume (resume data is in result field)
+                        logger.info(
+                            f"🔍 HITL checkpoint save check for execution {execution_id} [run_flow]"
+                        )
+                        logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
+                        if pause_exc.flow_uuid:
+                            try:
+                                from src.services.execution.history import (
+                                    ExecutionHistoryService,
+                                )
+
+                                history_service = ExecutionHistoryService(hitl_session)
+                                await history_service.set_checkpoint_active(
+                                    execution_id=execution_id,
+                                    flow_uuid=pause_exc.flow_uuid,
+                                    checkpoint_method="hitl_gate_pause",
+                                )
+                                logger.info(
+                                    f"✅ Saved HITL checkpoint for execution {execution_id} with flow_uuid={pause_exc.flow_uuid}"
+                                )
+                            except Exception as checkpoint_err:
+                                logger.error(
+                                    f"❌ Could not save HITL checkpoint info: {checkpoint_err}",
+                                    exc_info=True,
+                                )
+                        else:
+                            logger.warning(
+                                "⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work."
+                            )
+
+                    return {
+                        "success": True,
+                        "paused_for_approval": True,
+                        "approval_id": pause_exc.approval_id,
+                        "gate_node_id": pause_exc.gate_node_id,
+                        "message": pause_exc.message,
+                        "execution_id": execution_id,
+                        "flow_uuid": pause_exc.flow_uuid,
+                        "crew_sequence": pause_exc.crew_sequence,
+                    }
+
+                except Exception as kickoff_error:
+                    logger.error(
+                        f"Error executing flow {flow_id}: {kickoff_error}",
+                        exc_info=True,
+                    )
+                    # Fresh session for error status update
+                    async with _smart_db_session() as err_session:
+                        err_flow_service = FlowExecutionService(err_session)
+                        await err_flow_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(kickoff_error),
+                        )
+                    await self._emit_error_span(
+                        job_id, str(kickoff_error), group_id=config.get("group_id")
+                    )
+                    return {
+                        "success": False,
+                        "error": str(kickoff_error),
+                        "execution_id": execution_id,
+                    }
+
+            except FlowPausedForApprovalException:
+                # Re-raise to handle at caller level
+                raise
+
+            except Exception as e:
+                logger.error(
+                    f"Error in flow execution {execution_id}: {e}", exc_info=True
+                )
+                try:
+                    # Fresh session for outer error status update
+                    async with _smart_db_session() as outer_err_session:
+                        outer_err_service = FlowExecutionService(outer_err_session)
+                        await outer_err_service.update_execution_status(
+                            execution_id=execution_id,
+                            status=FlowExecutionStatus.FAILED,
+                            error=str(e),
+                        )
+                except Exception as update_error:
+                    logger.error(
+                        f"Error updating flow execution {execution_id} status: {update_error}",
+                        exc_info=True,
+                    )
+                await self._emit_error_span(
+                    job_id, str(e), group_id=config.get("group_id")
+                )
+                return {"success": False, "error": str(e), "execution_id": execution_id}
+
+    async def get_flow_execution(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get flow execution details.
+
+        Args:
+            execution_id: ID of the flow execution
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, an execution that belongs to a different group is
+                reported as not found (prevents cross-tenant IDOR).
+
+        Returns:
+            Dictionary with execution details
+        """
+        try:
+            execution = await self.flow_execution_service.get_execution(execution_id)
+
+            if not execution:
+                return {
+                    "success": False,
+                    "error": f"Flow execution with ID {execution_id} not found",
+                }
+
+            # SECURITY: enforce tenant isolation. A record that belongs to a
+            # group the caller is not a member of is treated as not found.
+            if group_ids and execution.group_id and execution.group_id not in group_ids:
+                logger.warning(
+                    f"Access denied: flow execution {execution_id} belongs to group "
+                    f"{execution.group_id}, caller groups={group_ids}"
+                )
+                return {
+                    "success": False,
+                    "error": f"Flow execution with ID {execution_id} not found",
+                }
+
+            # Get node executions if any
+            nodes = await self.flow_execution_service.get_node_executions(execution_id)
+
+            return {
+                "success": True,
+                "execution": {
+                    "id": execution.id,
+                    "flow_id": execution.flow_id,
+                    "job_id": execution.job_id,
+                    "status": execution.status,
+                    "result": execution.result,
+                    "error": execution.error,
+                    "created_at": execution.created_at,
+                    # ExecutionHistory has no updated_at (reading it raised, so
+                    # every details request failed); the list view omits it too.
+                    "completed_at": execution.completed_at,
+                    "nodes": [
+                        {
+                            "id": node.id,
+                            "node_id": node.node_id,
+                            "status": node.status,
+                            "agent_id": node.agent_id,
+                            "task_id": node.task_id,
+                            "result": node.result,
+                            "error": node.error,
+                            "created_at": node.created_at,
+                            "updated_at": node.updated_at,
+                            "completed_at": node.completed_at,
+                        }
+                        for node in nodes
+                    ],
+                },
+            }
+        except Exception as e:
+            logger.error(f"Error getting flow execution: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "execution_id": execution_id}
+
+    async def get_flow_executions_by_flow(
+        self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get all executions for a specific flow.
+
+        Args:
+            flow_id: ID of the flow
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, executions belonging to other groups are excluded.
+
+        Returns:
+            Dictionary with list of executions
+        """
+        try:
+            executions = await self.flow_execution_service.get_executions_by_flow(
+                flow_id
+            )
+
+            # SECURITY: drop executions that belong to other tenants.
+            if group_ids:
+                executions = [
+                    e
+                    for e in executions
+                    if not getattr(e, "group_id", None) or e.group_id in group_ids
+                ]
+
+            return {
+                "success": True,
+                "flow_id": flow_id,
+                "executions": [
+                    {
+                        "id": execution.id,
+                        "job_id": execution.job_id,
+                        "status": execution.status,
+                        "created_at": execution.created_at,
+                        "completed_at": execution.completed_at,
+                    }
+                    for execution in executions
+                ],
+            }
+        except Exception as e:
+            logger.error(f"Error getting flow executions: {e}", exc_info=True)
+            return {"success": False, "error": str(e), "flow_id": flow_id}

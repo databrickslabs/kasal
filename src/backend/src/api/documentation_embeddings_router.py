@@ -1,0 +1,189 @@
+"""
+API endpoints for documentation embeddings.
+
+This module provides endpoints for managing and searching documentation embeddings.
+"""
+
+from typing import Annotated, Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Header, Query
+
+from src.core.exceptions import ForbiddenError, NotFoundError
+from src.core.logger import LoggerManager
+from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.documentation_embedding import (
+    DocumentationEmbedding as DocumentationEmbeddingModel,
+)
+from src.schemas.documentation_embedding import (
+    DocumentationEmbedding as DocumentationEmbeddingSchema,
+)
+from src.schemas.documentation_embedding import (
+    DocumentationEmbeddingCreate,
+)
+from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
+from src.utils.request_identity import resolve_request_identity
+
+logger = LoggerManager.get_instance().api
+
+router = APIRouter(
+    prefix="/documentation-embeddings",
+    tags=["documentation-embeddings"],
+    responses={404: {"description": "Not found"}},
+)
+
+
+# Dependency to get DocumentationEmbeddingService
+def get_documentation_embedding_service(
+    session: SessionDep,
+) -> DocumentationEmbeddingService:
+    """
+    Dependency provider for DocumentationEmbeddingService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        DocumentationEmbeddingService instance with session
+    """
+    return DocumentationEmbeddingService(session)
+
+
+# Type alias for cleaner function signatures
+DocumentationEmbeddingServiceDep = Annotated[
+    DocumentationEmbeddingService, Depends(get_documentation_embedding_service)
+]
+
+
+@router.post("/", response_model=DocumentationEmbeddingSchema)
+async def create_documentation_embedding(
+    embedding: DocumentationEmbeddingCreate,
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
+    x_forwarded_access_token: Optional[str] = Header(
+        None, alias="X-Forwarded-Access-Token"
+    ),
+    x_auth_request_access_token: Optional[str] = Header(
+        None, alias="X-Auth-Request-Access-Token"
+    ),
+) -> DocumentationEmbeddingModel:
+    """Create a new documentation embedding."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError(
+            "Only editors and admins can create documentation embeddings"
+        )
+    # Shared resolver: X-Forwarded-* only inside Databricks Apps.
+    user_token = resolve_request_identity(
+        forwarded_access_token=x_forwarded_access_token,
+        auth_request_access_token=x_auth_request_access_token,
+    ).access_token
+    result = await service.create_documentation_embedding(
+        embedding, user_token=user_token
+    )
+    return result
+
+
+@router.get("/search", response_model=List[DocumentationEmbeddingSchema])
+async def search_documentation_embeddings(
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
+    query_embedding: List[float] = Query(..., description="Query embedding vector"),
+    limit: int = Query(5, ge=1, le=20, description="Maximum number of results"),
+) -> List[DocumentationEmbeddingModel]:
+    """Search for similar documentation embeddings."""
+    results = await service.search_similar_embeddings(
+        query_embedding=query_embedding, limit=limit
+    )
+    return results
+
+
+@router.get("/", response_model=List[DocumentationEmbeddingSchema])
+async def get_documentation_embeddings(
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
+    skip: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(
+        100, ge=1, le=1000, description="Maximum number of items to return"
+    ),
+    source: Optional[str] = Query(None, description="Filter by source"),
+    title: Optional[str] = Query(None, description="Filter by title (partial match)"),
+) -> List[Dict[str, Any]]:
+    """Get documentation embeddings with optional filtering."""
+    if source:
+        results = await service.search_by_source(source, skip, limit)
+    elif title:
+        results = await service.search_by_title(title, skip, limit)
+    else:
+        results = await service.get_documentation_embeddings(skip, limit)
+
+    # Convert to dict and clear embeddings to avoid serialization issues
+    # Embeddings are large and not needed in list views
+    result_dicts = []
+    for result in results:
+        result_dict = {
+            "id": result.id,
+            "source": result.source,
+            "title": result.title,
+            "content": result.content,
+            "doc_metadata": result.doc_metadata,
+            "created_at": result.created_at,
+            "updated_at": result.updated_at,
+            "embedding": [],  # Clear embedding for list view
+        }
+        result_dicts.append(result_dict)
+
+    return result_dicts
+
+
+@router.get("/recent", response_model=List[DocumentationEmbeddingSchema])
+async def get_recent_documentation_embeddings(
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of recent items"),
+) -> List[DocumentationEmbeddingModel]:
+    """Get the most recently created documentation embeddings."""
+    results = await service.get_recent_embeddings(limit)
+    return results
+
+
+@router.get("/{embedding_id}", response_model=DocumentationEmbeddingSchema)
+async def get_documentation_embedding(
+    embedding_id: int,
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
+) -> DocumentationEmbeddingModel:
+    """Get a specific documentation embedding by ID."""
+    result = await service.get_documentation_embedding(embedding_id)
+
+    if not result:
+        raise NotFoundError("Documentation embedding not found")
+
+    return result
+
+
+@router.delete("/{embedding_id}", response_model=None)
+async def delete_documentation_embedding(
+    embedding_id: int,
+    service: DocumentationEmbeddingServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Delete a documentation embedding by ID."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError(
+            "Only editors and admins can delete documentation embeddings"
+        )
+    success = await service.delete_documentation_embedding(embedding_id)
+
+    if not success:
+        raise NotFoundError("Documentation embedding not found")
+
+    return {"message": "Documentation embedding deleted successfully"}
+
+
+# NOTE: the /seed-all endpoint is gone — it ran the crewai-docs scraper
+# (src/seeds/documentation.py), removed with the crewai→kasal engine migration.
+# The CRUD/search endpoints above stay: the knowledge file-upload feature
+# stores its vectors in the same documentation_embeddings table.

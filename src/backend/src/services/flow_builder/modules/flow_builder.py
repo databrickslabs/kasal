@@ -1,0 +1,1655 @@
+"""
+Flow builder module for CrewAI flow execution.
+
+This module handles the building of CrewAI flows from configuration.
+
+ARCHITECTURE:
+This module orchestrates flow building using several specialized sub-modules:
+- flow_config.py: MCP requirements collection from flow tasks
+- flow_processors.py: Processing of starting points, listeners, and routers
+- flow_methods.py: Dynamic method creation for flow execution
+
+The FlowBuilder class coordinates these modules to construct complete CrewAI flows.
+"""
+
+from typing import Any, Callable, Dict, Final, List, Optional, cast
+
+from src.core.logger import LoggerManager
+from src.services.execution.kernel.execution_callback import create_execution_callbacks
+from src.services.flow_builder.conversation.state_model import (
+    DictLikeState,
+    build_state_model,
+)
+from src.services.flow_builder.conversation.turn import (
+    ConversationState,
+    is_conversational,
+)
+from src.services.flow_builder.modules.connection_approval import route_approval_gates
+from src.services.flow_builder.modules.crew_completion import track_completion
+from src.services.flow_builder.modules.flow_conditions import (
+    report_no_route,
+)
+
+# Import new modular components
+from src.services.flow_builder.modules.flow_config import FlowConfigManager
+from src.services.flow_builder.modules.flow_eval_context import (
+    build_eval_context,
+    coerce_scalar_value,
+)
+from src.services.flow_builder.modules.flow_methods import (
+    FlowMethodFactory,
+)
+from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+from src.services.flow_builder.modules.route_listener import route_listener_factory
+from src.services.flow_builder.modules.router_dependencies import (
+    build_crew_to_method,
+    resolve_router_upstream,
+    route_method_name,
+    validate_router_upstreams,
+)
+from src.services.flow_builder.runtime import Flow as CrewAIFlow
+from src.services.flow_builder.runtime import and_, or_, router
+from src.utils.safe_eval import safe_eval
+
+# The @persist decorator is available since CrewAI 0.98.0
+# Import: from crewai.flow.persistence import persist
+# Usage: @persist() at class level or method level for state checkpointing
+
+
+# Initialize logger - use flow logger for flow execution
+logger = LoggerManager.get_instance().flow
+
+
+def pick_legacy_route(condition_value: Any, route_names: Any) -> Any:
+    """Select a route by value when a router has no condition expression.
+
+    Coerces ``condition_value`` first (so a crew that emitted the field as
+    ``"true"``/``"True"`` routes identically to a JSON bool), then matches:
+    exact route-name equality, then bool→named-route (success/true, failed/
+    false/failure). Falls back to the first route. Pure + unit-testable.
+    """
+    cv = coerce_scalar_value(condition_value)
+    names = list(route_names or [])
+    for route_name in names:
+        if cv == route_name:
+            return route_name
+        if cv is True and route_name in ("success", "true"):
+            return route_name
+        if cv is False and route_name in ("failed", "false", "failure"):
+            return route_name
+    return names[0] if names else "default"
+
+
+# Bare names that user-authored flow router/state expressions may call. These
+# mirror the safe numeric/string helpers injected into the evaluation context;
+# everything else is rejected by safe_eval (no dunder/introspection access).
+#: The one route name that means "when nothing else matched". A wire value
+#: shared with the frontend (flowConfigBuilder.DEFAULT_ROUTE_NAME); it was four
+#: bare literals here, two of which mean something different.
+DEFAULT_ROUTE: Final[str] = "default"
+
+from src.services.flow_builder.checkpoint_skip import (  # noqa: E402 - import follows module initialization
+    CrewSkipPolicy,
+)
+
+_FLOW_CONDITION_CALLS = frozenset(
+    {"int", "float", "str", "bool", "len", "abs", "min", "max", "where"}
+)
+
+
+def _identity_of(crew_name: str, tasks: Any) -> Optional[str]:
+    """A crew's content hash, or None when it cannot be taken.
+
+    Best-effort: without it an outcome still triggers by name, and reuse simply
+    declines to replay anything for that crew — slower, never wrong.
+    """
+    try:
+        from src.services.flow_builder.checkpoint_identity import compute_crew_identity
+
+        return compute_crew_identity(crew_name, tasks or [])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[flow-outcome] could not hash crew {crew_name!r}: {exc}")
+        return None
+
+
+class FlowBuilder:
+    """
+    Helper class for building CrewAI flows.
+    """
+
+    @staticmethod
+    async def build_flow(
+        flow_data: Dict[str, Any],
+        repositories: Optional[Dict[str, Any]] = None,
+        callbacks: Any = None,
+        group_context: Any = None,
+        restore_uuid: Optional[str] = None,
+        resume_from_crew_sequence: Optional[int] = None,
+        resume_from_execution_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> Any:
+        """
+        Build a CrewAI flow from flow data.
+
+        Args:
+            flow_data: Flow data from the database
+            repositories: Dictionary of repositories (optional)
+            callbacks: Dictionary of callbacks (optional)
+            group_context: Group context for multi-tenant isolation (optional)
+            restore_uuid: UUID of a previous flow execution to resume from (optional)
+            resume_from_crew_sequence: Sequence of the crew to RESUME AT (optional).
+                Crews with sequence < this value are skipped and replaced by
+                their checkpointed output; this crew and everything after it
+                re-run. Note the strict <: passing a completed crew's own
+                sequence RE-RUNS that crew rather than skipping it.
+            resume_from_execution_id: Execution ID of checkpoint to resume from (optional).
+                Used to query execution traces for previous crew outputs.
+            user_token: User access token for OBO authentication (optional)
+            group_id: Group ID for multi-tenant isolation (optional)
+
+        Returns:
+            CrewAIFlow: A configured CrewAI Flow instance
+        """
+        logger.info("Building the flow")
+        if resume_from_crew_sequence is not None:
+            logger.info(
+                f"Resume from crew sequence: {resume_from_crew_sequence} "
+                f"(will skip crews 1-{resume_from_crew_sequence - 1}, "
+                f"running {resume_from_crew_sequence} onward)"
+            )
+        if resume_from_execution_id is not None:
+            logger.info(
+                f"Resume from execution ID: {resume_from_execution_id} (will query traces for checkpoint data)"
+            )
+
+        if not flow_data:
+            logger.error("No flow data provided")
+            raise ValueError("No flow data provided")
+
+        try:
+            # Parse flow configuration
+            flow_config = flow_data.get("flow_config", {})
+
+            if not flow_config:
+                logger.warning("No flow_config found in flow data")
+                # Try to parse flow_config from a string if needed
+                if isinstance(flow_data.get("flow_config"), str):
+                    try:
+                        import json
+
+                        flow_config = json.loads(
+                            cast(str, flow_data.get("flow_config"))
+                        )
+                        logger.info("Successfully parsed flow_config from string")
+                    except Exception as e:
+                        logger.error(f"Failed to parse flow_config string: {e}")
+
+            flow_keys = sorted(flow_config) if isinstance(flow_config, dict) else []
+            logger.info(f"Flow configuration keys for processing: {flow_keys}")
+
+            # Inject top-level edges and nodes into flow_config so that
+            # downstream code (HITL gate detection, checkpoint checks) can find them.
+            # The flow JSON stores edges/nodes at the top level, not inside flow_config.
+            if "edges" not in flow_config and flow_data.get("edges"):
+                flow_config["edges"] = flow_data["edges"]
+            if "nodes" not in flow_config and flow_data.get("nodes"):
+                flow_config["nodes"] = flow_data["nodes"]
+
+            # Check edges for checkpoint flag and enable persistence if any edge has checkpoint=true
+            # This allows checkpoint/resume functionality when users enable checkpoints on edges
+            edges = flow_data.get("edges", [])
+            has_checkpoint_edge = any(
+                edge.get("data", {}).get("checkpoint", False) for edge in edges
+            )
+            # A conversational flow REQUIRES persistence — the conversation IS
+            # the checkpoint. Asking for a conversation and then also having to
+            # tick a per-edge checkpoint is two switches for one intent, and
+            # missing the second one produces a flow that declares it holds a
+            # conversation, writes nothing, and starts from scratch every turn
+            # with nothing anywhere saying why.
+            state_declaration = (flow_config.get("state") or {}) if flow_config else {}
+            wants_conversation = bool(
+                isinstance(state_declaration, dict)
+                and state_declaration.get("conversational")
+            )
+            if wants_conversation and not has_checkpoint_edge:
+                logger.info(
+                    "Flow holds a conversation, enabling persistence: its state "
+                    "has to survive between turns"
+                )
+            has_approval = any(
+                (edge.get("data", {}).get("hitl") or {}).get("enabled")
+                for edge in edges
+            )
+            if has_checkpoint_edge or wants_conversation or has_approval:
+                if has_checkpoint_edge:
+                    logger.info(
+                        "Found edge(s) with checkpoint=true, enabling flow persistence"
+                    )
+                # Ensure persistence config exists and is enabled
+                if "persistence" not in flow_config:
+                    flow_config["persistence"] = {}
+                flow_config["persistence"]["enabled"] = True
+                flow_config["persistence"]["level"] = "flow"
+
+            # Check for starting points
+            starting_points = flow_config.get("startingPoints", [])
+            if not starting_points:
+                logger.error("No starting points defined in flow configuration")
+                raise ValueError("No starting points defined in flow configuration")
+
+            # Check for listeners
+            listeners = flow_config.get("listeners", [])
+            logger.info(f"Found {len(listeners)} listeners in flow config")
+
+            # Check for routers (conditional routing)
+            routers = flow_config.get("routers", [])
+            logger.info(f"Found {len(routers)} routers in flow config")
+
+            # CRITICAL: Collect MCP requirements from tasks before creating agents
+            # This follows the same pattern as regular crew execution in crew_preparation.py
+            agent_mcp_requirements = (
+                await FlowConfigManager.collect_agent_mcp_requirements(
+                    flow_config, repositories, group_context
+                )
+            )
+            logger.info(
+                f"Collected MCP requirements for {len(agent_mcp_requirements)} agents from flow tasks"
+            )
+
+            # Parse all tasks, agents, and tools
+            all_agents: Dict[str, Any] = {}
+            all_tasks: Dict[str, Any] = {}
+
+            # Process all starting points first to collect tasks and agents using FlowProcessorManager
+            # Note: FlowProcessorManager returns method names, but we need the actual task objects
+            # So we'll still populate all_tasks dict here
+            starting_point_methods = await FlowProcessorManager.process_starting_points(
+                flow_config, all_tasks, repositories, group_context, callbacks
+            )
+            logger.info(
+                f"FlowProcessorManager returned {len(starting_point_methods)} starting point methods"
+            )
+
+            # Process all listener tasks using FlowProcessorManager
+            listener_methods = await FlowProcessorManager.process_listeners(
+                flow_config, all_tasks, repositories, group_context, callbacks
+            )
+            logger.info(
+                f"FlowProcessorManager returned {len(listener_methods)} listener methods"
+            )
+
+            # Process router tasks using FlowProcessorManager
+            router_configs = await FlowProcessorManager.process_routers(
+                flow_config, all_tasks, repositories, group_context, callbacks
+            )
+            logger.info(
+                f"FlowProcessorManager returned {len(router_configs)} router configs"
+            )
+
+            # Build all_agents from all_tasks
+            for task_id, task_obj in all_tasks.items():
+                if hasattr(task_obj, "agent") and task_obj.agent:
+                    agent = task_obj.agent
+                    if hasattr(agent, "role"):
+                        all_agents[agent.role] = agent
+
+            # Now build the flow class with proper structure
+            # Create a dynamic flow class
+            logger.info("=" * 100)
+            logger.info("ABOUT TO CREATE DYNAMIC FLOW CLASS")
+            logger.info("=" * 100)
+            logger.info(f"Starting points count: {len(starting_points)}")
+            logger.info(f"Listeners count: {len(listeners)}")
+            logger.info(f"Routers count: {len(routers)}")
+            logger.info(f"All agents count: {len(all_agents)}")
+            logger.info(f"All tasks count: {len(all_tasks)}")
+
+            # Log details of starting points
+            logger.info(f"All tasks available: {list(all_tasks.keys())}")
+            logger.info(f"Starting points structure: {starting_points}")
+
+            # Extract task IDs from starting points based on their structure
+            # Starting points can be:
+            # 1. Simple format: {"taskId": "...", "crewId": "..."}
+            # 2. Node format: {"nodeType": "crewNode", "nodeData": {"allTasks": [...]}}
+            # 3. Node format: {"nodeType": "agentNode", "nodeData": {"taskId": "..."}}
+
+            extracted_task_ids = []
+            for i, sp in enumerate(starting_points):
+                logger.info(f"Starting point {i} type: {sp.get('nodeType', 'simple')}")
+
+                node_type = sp.get("nodeType")
+                if node_type == "crewNode":
+                    # For crew nodes, extract tasks from allTasks
+                    node_data = sp.get("nodeData", {})
+                    all_tasks_in_node = node_data.get("allTasks", [])
+                    for task in all_tasks_in_node:
+                        task_id = task.get("id")
+                        if task_id:
+                            extracted_task_ids.append(task_id)
+                            logger.info(
+                                f"  ✅ Extracted task ID from crewNode: {task_id}"
+                            )
+                elif node_type == "agentNode":
+                    # Agent nodes don't have tasks, skip them
+                    logger.info("  ⏭️  Skipping agentNode (no tasks)")
+                    continue
+                else:
+                    # Simple format - try to get taskId directly
+                    task_id = sp.get("taskId") or sp.get("task_id")
+                    if task_id:
+                        extracted_task_ids.append(task_id)
+                        logger.info(
+                            f"  ✅ Extracted task ID from simple format: {task_id}"
+                        )
+
+            logger.info(
+                f"Extracted {len(extracted_task_ids)} task IDs from starting points: {extracted_task_ids}"
+            )
+
+            # Validate extracted task IDs
+            for task_id in extracted_task_ids:
+                if task_id in all_tasks:
+                    logger.info(f"  ✅ Task {task_id} found in all_tasks")
+                else:
+                    logger.error(f"  ❌ Task {task_id} NOT found in all_tasks!")
+                    logger.error(f"  Available task IDs: {list(all_tasks.keys())}")
+
+            # Outputs for the crews this resume skips: read from the written
+            # checkpoint, falling back to the legacy trace reconstruction for
+            # executions that predate it. See flow_builder/checkpoint_resume.py.
+            from src.services.flow_builder.checkpoint_resume import (
+                load_resume_outputs,
+            )
+
+            checkpoint_outputs, checkpoint_identities = await load_resume_outputs(
+                resume_from_execution_id,
+                repositories,
+                from_unit=resume_from_crew_sequence,
+                group_ids=(
+                    getattr(group_context, "group_ids", None)
+                    or ([group_id] if group_id else [])
+                ),
+            )
+
+            # Pass the processed listener_methods (with crew grouping) instead of raw listeners
+            dynamic_flow = await FlowBuilder._create_dynamic_flow(
+                starting_point_methods,
+                listener_methods,
+                routers,
+                all_agents,
+                all_tasks,
+                flow_config,
+                callbacks,
+                group_context,
+                restore_uuid,
+                resume_from_crew_sequence,
+                checkpoint_outputs,
+                user_token=user_token,
+                group_id=group_id,
+                checkpoint_identities=checkpoint_identities,
+                resume_from_execution_id=resume_from_execution_id,
+            )
+
+            logger.info("=" * 100)
+            logger.info(
+                f"✅ Dynamic flow created successfully, type: {type(dynamic_flow)}"
+            )
+            logger.info("=" * 100)
+
+            # Log the methods we've added to help diagnose issues.
+            # NOTE: filter out dunders BEFORE calling getattr — pydantic v2 exposes
+            # ``__signature__`` as a class-only descriptor on model instances, so
+            # ``getattr(instance, '__signature__')`` raises AttributeError. The
+            # ``and`` short-circuits on the name check; the getattr default is a
+            # belt-and-suspenders guard against any other raising descriptor.
+            flow_methods = [
+                method
+                for method in dir(dynamic_flow)
+                if not method.startswith("_")
+                and callable(getattr(dynamic_flow, method, None))
+            ]
+            logger.info(f"Flow has {len(flow_methods)} public methods: {flow_methods}")
+
+            # Specifically check for start methods
+            start_methods = [m for m in flow_methods if m.startswith("starting_point_")]
+            if start_methods:
+                logger.info(
+                    f"✅ Found {len(start_methods)} start methods: {start_methods}"
+                )
+            else:
+                logger.error("❌ NO START METHODS FOUND in created flow!")
+                logger.error(
+                    "This is a critical error - flow cannot execute without start methods"
+                )
+            return dynamic_flow
+        except Exception as e:
+            logger.error(f"Error building flow: {e}", exc_info=True)
+            raise ValueError(f"Failed to build flow: {str(e)}")
+
+    # Removed: _collect_agent_mcp_requirements_from_flow
+    # Now using FlowConfigManager.collect_agent_mcp_requirements from flow_config.py module
+
+    @staticmethod
+    async def _create_dynamic_flow(
+        starting_points: List[Any],
+        listener_crews: List[Any],
+        routers: List[Any],
+        all_agents: Dict[str, Any],
+        all_tasks: Dict[str, Any],
+        flow_config: Optional[Dict[str, Any]] = None,
+        callbacks: Any = None,
+        group_context: Any = None,
+        restore_uuid: Optional[str] = None,
+        resume_from_crew_sequence: Optional[int] = None,
+        checkpoint_outputs: Optional[Dict[str, Any]] = None,
+        user_token: Optional[str] = None,
+        group_id: Optional[str] = None,
+        checkpoint_identities: Optional[Dict[str, Any]] = None,
+        resume_from_execution_id: Optional[str] = None,
+    ) -> Any:
+        """
+        Create a dynamic flow class with all start, listener, and router methods.
+
+        IMPORTANT: Creates ONE listener per crew, not per task. Tasks within a crew execute
+        sequentially using task.context (set up by FlowProcessorManager.process_listeners).
+
+        Args:
+            starting_points: List of tuples (method_name, task_ids, task_objects, crew_name) for starting point crews
+            listener_crews: List of tuples from process_listeners:
+                (method_name, crew_id, task_ids, task_objects, crew_name, listen_to_task_ids, condition_type)
+                Each tuple represents ONE listener crew (with sequential tasks inside)
+            routers: List of original router configuration dictionaries from flow_config
+            all_agents: Dictionary of configured agents
+            all_tasks: Dictionary of configured tasks (with task.context dependencies set)
+            flow_config: Flow configuration including state and persistence settings
+            callbacks: Dictionary of callback handlers for execution logging
+            group_context: Group context for multi-tenant isolation
+            restore_uuid: UUID of a previous flow execution to resume from (optional)
+            resume_from_crew_sequence: Sequence of the crew to RESUME AT (optional).
+                Crews with sequence < this value are skipped and replaced by
+                their checkpointed output; this crew and everything after it
+                re-run. Note the strict <: passing a completed crew's own
+                sequence RE-RUNS that crew rather than skipping it.
+            checkpoint_outputs: Checkpoint outputs from previous execution (optional)
+            user_token: User access token for OBO authentication (optional)
+            group_id: Group ID for multi-tenant isolation (optional)
+
+        Returns:
+            CrewAIFlow: An instance of the dynamically created flow class
+        """
+        # Extract state and persistence configuration
+        # `or {}` rather than a default: a stored config can carry an explicit
+        # `"state": null`, and `.get("state", {})` returns that null, so every
+        # read below would fail on NoneType.
+        state_config = (flow_config.get("state") or {}) if flow_config else {}
+        persistence_config = flow_config.get("persistence", {}) if flow_config else {}
+
+        state_enabled = state_config.get("enabled", False)
+        state_type = state_config.get("type", "unstructured")
+        state_model = state_config.get("model")
+        state_initial_values = state_config.get("initialValues", {})
+
+        # A declared state schema becomes the flow's actual state class. Until
+        # now `state_model` was read here and passed nowhere, so `Flow`'s typed
+        # state support was unreachable and every flow ran on a bare dict — which
+        # accepts any key, so a misspelled input landed in state, the condition
+        # reading the correct name saw nothing, and the flow branched as though
+        # the value had never been given. `_merge_inputs` raises on an unknown
+        # field for a typed state; this is what lets that raise fire.
+        #
+        # Falls back to the dict when there is no usable schema, which is every
+        # flow authored so far.
+        # A conversational flow starts from ConversationState, which brings the
+        # turn contract (`messages` with an append reducer, `last_user_message`,
+        # `last_intent`, `session_ready`) that a multi-turn thread needs and no
+        # flow author should have to redeclare. Its own channels are added on
+        # top.
+        conversational = is_conversational(state_config)
+        state_base = ConversationState if conversational else DictLikeState
+        # `conversational` implies state: asking for a turn contract and then
+        # running on an untyped dict would give the flow nowhere to keep the
+        # conversation.
+        state_class = (
+            build_state_model(state_model, base=state_base)
+            if (state_enabled or conversational)
+            else None
+        )
+        if state_class is not None:
+            logger.info(
+                f"Typed flow state: {sorted(state_class.model_fields)} "
+                f"(declared type: {state_type})"
+            )
+        elif state_enabled and state_model:
+            logger.info("State schema present but not usable; running on a dict state")
+
+        persistence_enabled = persistence_config.get("enabled", False)
+        persistence_level = persistence_config.get("level", "none")
+
+        logger.info(f"State enabled: {state_enabled}, type: {state_type}")
+        logger.info(
+            f"Persistence enabled: {persistence_enabled}, level: {persistence_level}"
+        )
+
+        # CRITICAL: Build all methods FIRST, then create class WITH them
+        # The FlowMeta metaclass processes @start() and @listen() decorators during class creation
+        # Adding methods via setattr() after class creation doesn't work!
+
+        # Dictionary to collect all class methods
+        class_methods: Dict[str, Any] = {}
+
+        # Create __init__ method for state management
+        # IMPORTANT: Must accept **kwargs to support @persist decorator which passes 'persistence' kwarg
+        def create_init_method() -> Callable[..., None]:
+            if state_enabled:
+
+                def __init__(self: Any, **kwargs: Any) -> None:
+                    super(type(self), self).__init__(**kwargs)
+                    if state_initial_values:
+                        self.state.update(state_initial_values)
+
+            else:
+
+                def __init__(self: Any, **kwargs: Any) -> None:
+                    super(type(self), self).__init__(**kwargs)
+
+            return __init__
+
+        class_methods["__init__"] = create_init_method()
+
+        # The flow carries its own config, so a generated method can ask what
+        # the GRAPH looks like — which crews are terminal, whether this flow
+        # holds a conversation. A closure cannot know that: it sees one crew.
+        class_methods["_kasal_flow_config"] = flow_config
+        # method name -> crew name. A goal is chosen by CREW name (that is what
+        # a person asks for); the runtime narrows by METHOD name (that is what
+        # it executes). This is the only place both are known.
+        class_methods["_kasal_method_crews"] = {}
+        # crew -> content hash, taken from the SAME runtime task objects the
+        # resume path hashes. An outcome then names a crew AND what that crew
+        # was, so a stored answer is replayed only while the crew is unchanged.
+        class_methods["_kasal_crew_identities"] = {}
+
+        # `Flow._build_initial_state` reads this off the class. Set it only when
+        # a schema compiled — leaving it None is what keeps the dict behaviour.
+        if state_class is not None:
+            class_methods["initial_state"] = state_class
+
+        # Log persistence and resume configuration
+        if persistence_enabled:
+            logger.info(f"Persistence enabled at level: {persistence_level}")
+            if restore_uuid:
+                logger.info(f"Flow will resume from checkpoint: {restore_uuid}")
+
+        # Track crew sequence for checkpoint resume support
+        # When resume_from_crew_sequence is provided, crews with sequence < that value will be skipped
+        # (The resume_from value is the sequence of the crew TO RUN, not the last completed)
+        crew_sequence_counter = 0  # Will be incremented to 1 for first crew
+        # Decided ONCE for the whole flow, before any crew is built: a crew's
+        # verdict depends on crews that may be built after it (declaration
+        # order is not dependency order), so it cannot be answered lazily.
+        # Is this run continuing ITSELF (a gate approved, a pause released), or
+        # resuming a checkpoint written by a DIFFERENT run? Only the second can
+        # have been edited in between — see CrewSkipPolicy.decide.
+        this_job_id = (
+            (callbacks or {}).get("job_id") if isinstance(callbacks, dict) else None
+        )
+        same_execution = bool(
+            resume_from_execution_id
+            and this_job_id
+            and str(resume_from_execution_id) == str(this_job_id)
+        )
+        skip_policy = CrewSkipPolicy.decide(
+            resume_from_crew_sequence,
+            checkpoint_identities,
+            starting_points=starting_points,
+            listener_crews=listener_crews,
+            flow_config=flow_config,
+            same_execution=same_execution,
+        )
+        if resume_from_crew_sequence is not None:
+            logger.info("=" * 100)
+            logger.info(
+                f"CHECKPOINT RESUME MODE - Will skip crews with sequence < {resume_from_crew_sequence} (will run sequence {resume_from_crew_sequence} and beyond)"
+            )
+            logger.info("=" * 100)
+
+        # Add start methods for each starting point (now receiving tuples with crew info)
+        logger.info("=" * 100)
+        logger.info(
+            f"ADDING START METHODS - Processing {len(starting_points)} starting point crews"
+        )
+        logger.info("=" * 100)
+
+        # Get frontend starting points config for crew name lookup
+        frontend_starting_points = (
+            flow_config.get("startingPoints", []) if flow_config else []
+        )
+
+        # starting_points now contains tuples: (method_name, task_ids_list, task_objects_list, crew_name, crew_data)
+        for i, starting_point_info in enumerate(starting_points):
+            # Unpack the tuple
+            method_name, task_ids, crew_tasks, db_crew_name, crew_data = (
+                starting_point_info
+            )
+
+            # Increment sequence counter for each crew (1-indexed to match frontend)
+            crew_sequence_counter += 1
+            current_crew_sequence = crew_sequence_counter
+
+            # CRITICAL: Use crew name from flow config (frontend), not from database
+            # The flow config has the user-facing crew name, database might have agent role
+            crew_name = db_crew_name  # Default to database name
+            for sp_config in frontend_starting_points:
+                # Match by taskId to find the corresponding frontend config
+                sp_task_id = sp_config.get("taskId")
+                if sp_task_id and str(sp_task_id) in [str(tid) for tid in task_ids]:
+                    # Use crewName from frontend config
+                    frontend_crew_name = sp_config.get("crewName")
+                    if frontend_crew_name:
+                        crew_name = frontend_crew_name
+                        logger.info(
+                            f"  Using crew name from flow config: '{crew_name}' (database had: '{db_crew_name}')"
+                        )
+                    break
+
+            logger.info(
+                f"Creating start method for crew: {crew_name} (sequence: {current_crew_sequence})"
+            )
+            logger.info(f"  Method name: {method_name}")
+            logger.info(f"  Task IDs: {task_ids}")
+            logger.info(f"  Number of tasks: {len(crew_tasks)}")
+
+            # May this crew's stored output stand in for running it? Both the
+            # resume point and what has changed since decide that — see
+            # flow_builder/checkpoint_skip.py.
+            should_skip_crew = skip_policy.may_skip(
+                crew_name, crew_tasks, current_crew_sequence
+            )
+
+            if should_skip_crew:
+                logger.info(
+                    f"  ⏭️  SKIPPING crew '{crew_name}' (sequence {current_crew_sequence} < resume_from {resume_from_crew_sequence})"
+                )
+                # Get checkpoint output for this crew if available
+                crew_checkpoint_output = None
+                if checkpoint_outputs:
+                    crew_checkpoint_output = checkpoint_outputs.get(crew_name)
+                    if crew_checkpoint_output:
+                        logger.info(f"  📦 Found checkpoint output for '{crew_name}'")
+                    else:
+                        logger.warning(
+                            f"  ⚠️ No checkpoint output found for '{crew_name}' in checkpoint_outputs"
+                        )
+                # Create a stub method that returns the checkpoint output to allow flow to continue
+                class_methods[method_name] = (
+                    FlowMethodFactory.create_skipped_crew_method(
+                        method_name=method_name,
+                        crew_name=crew_name,
+                        crew_sequence=current_crew_sequence,
+                        is_starting_point=True,
+                        checkpoint_output=crew_checkpoint_output,
+                    )
+                )
+                logger.info(
+                    f"  ✅ Created SKIP method '{method_name}' for crew '{crew_name}' (checkpoint resume)"
+                )
+            elif crew_tasks:
+                logger.info(
+                    f"  Creating method: {method_name} with {len(crew_tasks)} tasks"
+                )
+
+                # Use FlowMethodFactory to create the starting point method with ALL tasks
+                class_methods["_kasal_method_crews"][method_name] = crew_name
+                class_methods["_kasal_crew_identities"][crew_name] = _identity_of(
+                    crew_name, crew_tasks
+                )
+                class_methods[method_name] = (
+                    FlowMethodFactory.create_starting_point_crew_method(
+                        method_name=method_name,
+                        task_list=crew_tasks,
+                        crew_name=crew_name,
+                        callbacks=callbacks,
+                        group_context=group_context,
+                        create_execution_callbacks=create_execution_callbacks,
+                        crew_data=crew_data,
+                        user_token=user_token,
+                        group_id=group_id,
+                    )
+                )
+                logger.info(
+                    f"  ✅ Created start method '{method_name}' for crew '{crew_name}' with {len(crew_tasks)} sequential tasks"
+                )
+            else:
+                logger.error(
+                    f"  ❌ No tasks found for crew '{crew_name}', skipping start method creation"
+                )
+
+        # Add listener methods for each listener CREW (not per task!)
+        # listener_crews contains processed tuples with crew grouping from FlowProcessorManager
+        logger.info("=" * 100)
+        logger.info(
+            f"ADDING LISTENER METHODS - Processing {len(listener_crews)} listener crews (crew-level orchestration)"
+        )
+        logger.info("=" * 100)
+
+        # Get frontend listeners config for crew name lookup
+        listeners = flow_config.get("listeners", []) if flow_config else []
+
+        # Build a mapping from method name to crew sequence for HITL gates
+        # This allows us to pass the SOURCE crew sequence (not the target crew sequence)
+        method_to_sequence = {}
+        for starting_point_info in starting_points:
+            sp_method_name, sp_task_ids, sp_task_objects, sp_crew_name, sp_crew_data = (
+                starting_point_info
+            )
+            # Find the sequence number for this starting point from the counter used above
+            # Starting points are numbered 1, 2, 3, ... in order
+            sp_sequence = starting_points.index(starting_point_info) + 1
+            method_to_sequence[sp_method_name] = sp_sequence
+            logger.info(f"  Mapped method '{sp_method_name}' to sequence {sp_sequence}")
+
+        # Map each router route's target task IDs → the route-listener method that
+        # runs that branch. A listener wired after a router branch (e.g. a final
+        # "report" crew listening to both branch crews) lists those branch tasks in
+        # its listenToTaskIds. Without this map the resolution below finds no match
+        # and falls back to the start method, so the listener fires in PARALLEL with
+        # the router instead of after the branch. The naming here must match the
+        # route-listener creation further down: f"route_{router_name}_{route_name}_{i}".
+        route_task_to_method = {}
+        for _ri, _router_config in enumerate(routers):
+            _r_name = _router_config.get("name", f"router_{_ri}")
+            for _route_name, _route_tasks in _router_config.get("routes", {}).items():
+                _route_method = route_method_name(_r_name, _route_name, _ri)
+                for _rt in _route_tasks:
+                    _tid = _rt.get("id") if isinstance(_rt, dict) else None
+                    if _tid is not None:
+                        route_task_to_method[str(_tid)] = _route_method
+        if route_task_to_method:
+            logger.info(
+                f"  Router route target task→method map: {route_task_to_method}"
+            )
+
+        # listener_crews is a list of tuples:
+        # (method_name, crew_id, task_ids, task_objects, crew_name, listen_to_task_ids, condition_type, crew_data)
+        for listener_info in listener_crews:
+            # Unpack the tuple
+            (
+                method_name,
+                crew_id,
+                task_ids,
+                listener_tasks,
+                db_crew_name,
+                listen_to_task_ids,
+                condition_type,
+                crew_data,
+            ) = listener_info
+
+            # Increment sequence counter for each crew (1-indexed to match frontend)
+            crew_sequence_counter += 1
+            current_crew_sequence = crew_sequence_counter
+
+            # CRITICAL: Use crew name from flow config (frontend), not from database
+            # The flow config has the user-facing crew name, database might have agent role
+            crew_name = db_crew_name  # Default to database name
+            for listener_config in listeners:
+                # Match by crew_id to find the corresponding listener config
+                if listener_config.get("crewId") == crew_id:
+                    # Use name or crewName from frontend config (these are the actual crew names)
+                    frontend_crew_name = listener_config.get(
+                        "name"
+                    ) or listener_config.get("crewName")
+                    if frontend_crew_name:
+                        crew_name = frontend_crew_name
+                        logger.info(
+                            f"  Using crew name from flow config: '{crew_name}' (database had: '{db_crew_name}')"
+                        )
+                    break
+
+            logger.info(
+                f"Creating listener for crew: {crew_name} (crew_id: {crew_id}, sequence: {current_crew_sequence})"
+            )
+            logger.info(f"  Method name: {method_name}")
+            logger.info(f"  Task IDs: {task_ids}")
+            logger.info(f"  Number of tasks: {len(listener_tasks)}")
+            logger.info(f"  Listening to task IDs: {listen_to_task_ids}")
+            logger.info(f"  Condition type: {condition_type}")
+
+            # Skip if no tasks
+            if not listener_tasks:
+                logger.warning(f"  ⏭️  Skipping listener crew {crew_name} - no tasks")
+                continue
+
+            # Skip if no listen_to targets
+            if not listen_to_task_ids:
+                logger.warning(
+                    f"  ⏭️  Skipping listener crew {crew_name} - no listen targets"
+                )
+                continue
+
+            # Find the method(s) to listen to
+            # First check starting point methods
+            method_names = []
+            for starting_point_info in starting_points:
+                (
+                    sp_method_name,
+                    sp_task_ids,
+                    sp_task_objects,
+                    sp_crew_name,
+                    sp_crew_data,
+                ) = starting_point_info
+                # Check if any task in this starting point matches our listen targets
+                for sp_task_id in sp_task_ids:
+                    if str(sp_task_id) in [str(tid) for tid in listen_to_task_ids]:
+                        if sp_method_name not in method_names:
+                            method_names.append(sp_method_name)
+                            logger.info(
+                                f"  Found starting point {sp_method_name} matches listen target {sp_task_id}"
+                            )
+                        break
+
+            # Then check other listener crew methods (enables listener-to-listener chaining)
+            if not method_names:
+                for other_listener_info in listener_crews:
+                    (
+                        ol_method_name,
+                        ol_crew_id,
+                        ol_task_ids,
+                        ol_tasks,
+                        ol_crew_name,
+                        ol_listen_to,
+                        ol_condition,
+                        ol_crew_data,
+                    ) = other_listener_info
+                    if ol_method_name == method_name:
+                        continue  # Skip self
+                    for ol_task_id in ol_task_ids:
+                        if str(ol_task_id) in [str(tid) for tid in listen_to_task_ids]:
+                            if ol_method_name not in method_names:
+                                method_names.append(ol_method_name)
+                                logger.info(
+                                    f"  Found listener {ol_method_name} (crew '{ol_crew_name}') matches listen target {ol_task_id}"
+                                )
+                            break
+
+            # Finally, check router route targets so a listener chained AFTER a router
+            # branch triggers when that branch's crew finishes — not when the router's
+            # source crew finishes. This is additive (a route task id is owned only by
+            # its route listener), and for an OR listener spanning multiple branches it
+            # collects every branch method so or_(...) fires after whichever ran.
+            for listen_id in listen_to_task_ids:
+                rt_method = route_task_to_method.get(str(listen_id))
+                if rt_method and rt_method not in method_names:
+                    method_names.append(rt_method)
+                    logger.info(
+                        f"  Found router route method {rt_method} matches listen target {listen_id}"
+                    )
+
+            logger.info(f"  Matched {len(method_names)} methods: {method_names}")
+
+            # Default to first starting point if no matches found
+            default_start_method = (
+                starting_points[0][0] if starting_points else "starting_point_0"
+            )
+
+            # Check if incoming edge has HITL enabled
+            # The edge data contains hitl config when HITL is configured on the connection
+            edges_for_hitl = flow_config.get("edges", []) if flow_config else []
+            nodes_for_hitl = flow_config.get("nodes", []) if flow_config else []
+
+            # Build a mapping from node ID to crew ID (node.data.crewId)
+            node_to_crew_map = {}
+            for node in nodes_for_hitl:
+                node_id = node.get("id", "")
+                node_crew_id = node.get("data", {}).get("crewId", "")
+                if node_id and node_crew_id:
+                    node_to_crew_map[node_id] = node_crew_id
+
+            hitl_edge = None
+            for edge in edges_for_hitl:
+                edge_data = edge.get("data", {})
+                hitl_config = edge_data.get("hitl", {})
+                # Check if this edge targets our listener crew
+                # Edge target can be:
+                # - A node ID like "crew-{crewId}-{timestamp}"
+                # - A UUID node ID that maps to a crewId in node.data.crewId
+                # - A direct crew_id or task_id
+                target_node_id = edge.get("target", "")
+
+                # Resolve the crew ID from the target node
+                target_crew_id = node_to_crew_map.get(target_node_id, "")
+
+                # Match by:
+                # 1. Direct crew_id match (edge target == crew_id)
+                # 2. Node ID contains crew_id (e.g., "crew-abc123-timestamp" contains "abc123")
+                # 3. Resolved crew ID from node mapping matches our crew_id
+                # 4. Task ID match (edge targets a specific task)
+                is_match = (
+                    target_node_id == crew_id
+                    or crew_id in target_node_id
+                    or target_crew_id == crew_id
+                    or target_node_id in [str(tid) for tid in task_ids]
+                )
+
+                if is_match and hitl_config.get("enabled", False):
+                    hitl_edge = edge
+                    logger.info(
+                        f"  🚦 Found HITL-enabled edge to this listener: {edge.get('id', 'unknown')}"
+                    )
+                    logger.info(
+                        f"     Edge target: {target_node_id}, Resolved crew: {target_crew_id}, Listener crew_id: {crew_id}"
+                    )
+                    logger.info(f"     HITL config: {hitl_config}")
+                    break
+
+            # If HITL is enabled on the incoming edge, create an HITL gate method
+            hitl_gate_method_name = None
+            if hitl_edge:
+                edge_id = hitl_edge.get("id", f"edge_{crew_id}")
+                hitl_config = hitl_edge.get("data", {}).get("hitl", {})
+
+                # Build gate config from edge HITL data
+                gate_config = {
+                    # WHAT is being gated. Without these the approval card
+                    # falls back to its tool wording and asks the reader to
+                    # approve "a tool" for what is actually a flow step — the
+                    # card is shared with tool approval on purpose, so the gate
+                    # has to say which kind it is.
+                    "kind": "flow_gate",
+                    "step_name": crew_name,
+                    "message": hitl_config.get(
+                        "message", "Please review and approve to continue"
+                    ),
+                    "timeout_seconds": hitl_config.get("timeout_seconds", 86400),
+                    "timeout_action": hitl_config.get("timeout_action", "auto_reject"),
+                    "require_comment": hitl_config.get("require_comment", False),
+                    "allowed_approvers": hitl_config.get("allowed_approvers", []),
+                }
+
+                # The gate should listen to the source crew's method
+                source_method = (
+                    method_names[0] if method_names else default_start_method
+                )
+
+                # Get the SOURCE crew's sequence (the crew that completed BEFORE the gate)
+                # NOT the current (target) crew's sequence
+                source_crew_sequence = method_to_sequence.get(source_method, 1)
+
+                # Create HITL gate method name
+                hitl_gate_method_name = f"hitl_gate_edge_{edge_id}"
+                logger.info(f"  🚦 Creating HITL gate method: {hitl_gate_method_name}")
+                logger.info(
+                    f"     Gate listens to: {source_method} (sequence: {source_crew_sequence})"
+                )
+                logger.info(f"     Gate config: {gate_config}")
+                logger.info(
+                    f"     ⚠️  IMPORTANT: Using SOURCE crew sequence ({source_crew_sequence}), NOT target crew sequence ({current_crew_sequence})"
+                )
+
+                # Create the HITL gate method using the factory
+                class_methods[hitl_gate_method_name] = (
+                    FlowMethodFactory.create_hitl_gate_method(
+                        method_name=hitl_gate_method_name,
+                        gate_node_id=edge_id,
+                        gate_config=gate_config,
+                        previous_method_name=source_method,
+                        crew_sequence=source_crew_sequence,  # FIXED: Use SOURCE crew sequence, not target
+                        callbacks=callbacks,
+                        group_context=group_context,
+                    )
+                )
+                logger.info(
+                    f"  ✅ Created HITL gate method '{hitl_gate_method_name}' for edge"
+                )
+
+            # Build the method condition based on condition_type
+            # If HITL gate was created, listener should listen to the gate instead
+            if hitl_gate_method_name:
+                # Listener now listens to the HITL gate, not the source crew
+                method_condition: Any = hitl_gate_method_name
+                logger.info(f"  Using HITL gate condition: {method_condition}")
+            elif condition_type == "AND" and len(method_names) > 1:
+                method_condition = and_(*method_names)
+                logger.info(f"  Using AND condition for {len(method_names)} methods")
+            elif condition_type == "OR" and len(method_names) > 1:
+                method_condition = or_(*method_names)
+                logger.info(f"  Using OR condition for {len(method_names)} methods")
+            else:
+                # Single method or NONE condition
+                method_condition = (
+                    method_names[0] if method_names else default_start_method
+                )
+                logger.info(f"  Using simple condition: {method_condition}")
+
+            # Same decision as the starting points, asked in build order so a
+            # crew after an edited one inherits the re-run.
+            should_skip_crew = skip_policy.may_skip(
+                crew_name, listener_tasks, current_crew_sequence
+            )
+
+            if should_skip_crew:
+                logger.info(
+                    f"  ⏭️  SKIPPING listener crew '{crew_name}' (sequence {current_crew_sequence} < resume_from {resume_from_crew_sequence})"
+                )
+                # Get checkpoint output for this crew if available
+                crew_checkpoint_output = None
+                if checkpoint_outputs:
+                    crew_checkpoint_output = checkpoint_outputs.get(crew_name)
+                    if crew_checkpoint_output:
+                        logger.info(f"  📦 Found checkpoint output for '{crew_name}'")
+                    else:
+                        logger.warning(
+                            f"  ⚠️ No checkpoint output found for '{crew_name}' in checkpoint_outputs"
+                        )
+                # Create a stub listener method that returns the checkpoint output to allow flow to continue
+                class_methods[method_name] = (
+                    FlowMethodFactory.create_skipped_crew_method(
+                        method_name=method_name,
+                        crew_name=crew_name,
+                        crew_sequence=current_crew_sequence,
+                        is_starting_point=False,
+                        method_condition=method_condition,
+                        condition_type=(
+                            condition_type
+                            if condition_type in ["AND", "OR"]
+                            else "NONE"
+                        ),
+                        checkpoint_output=crew_checkpoint_output,
+                    )
+                )
+                logger.info(
+                    f"  ✅ Created SKIP listener '{method_name}' for crew '{crew_name}' (checkpoint resume)"
+                )
+            else:
+                # Create ONE listener method for the entire crew
+                # Tasks within the crew will execute sequentially (task.context was set by process_listeners)
+                class_methods["_kasal_method_crews"][method_name] = crew_name
+                class_methods["_kasal_crew_identities"][crew_name] = _identity_of(
+                    crew_name, listener_tasks
+                )
+                class_methods[method_name] = FlowMethodFactory.create_listener_method(
+                    method_name=method_name,
+                    listener_tasks=listener_tasks,  # All tasks in this crew (with task.context for ordering)
+                    method_condition=method_condition,
+                    condition_type=(
+                        condition_type if condition_type in ["AND", "OR"] else "NONE"
+                    ),
+                    callbacks=callbacks,
+                    group_context=group_context,
+                    create_execution_callbacks=create_execution_callbacks,
+                    crew_name=crew_name,
+                    crew_data=crew_data,
+                    user_token=user_token,
+                    group_id=group_id,
+                )
+                logger.info(
+                    f"  ✅ Created listener '{method_name}' for crew '{crew_name}' with {len(listener_tasks)} sequential tasks, listening to: {method_condition}"
+                )
+
+            # Track this listener method's sequence for potential downstream HITL gates
+            method_to_sequence[method_name] = current_crew_sequence
+
+        # Process HITL gate nodes and create gate methods
+        # HITL gates pause the flow for human approval before continuing
+        hitl_gates = flow_config.get("hitlGates", []) if flow_config else []
+        nodes = flow_config.get("nodes", []) if flow_config else []
+        edges = flow_config.get("edges", []) if flow_config else []
+
+        # Also check for HITL gate nodes in the nodes array by type
+        # This handles cases where HITL gates are defined as regular nodes
+        for node in nodes:
+            node_type = node.get("type", "")
+            if node_type == "hitlGateNode":
+                node_id = node.get("id", "")
+                node_data = node.get("data", {})
+
+                # Build gate config from node data
+                gate_config = {
+                    "kind": "flow_gate",
+                    "step_name": (
+                        node_data.get("label") or node_data.get("name") or ""
+                    ),
+                    "message": node_data.get("message", "Approval required to proceed"),
+                    "timeout_seconds": node_data.get(
+                        "timeout_seconds", 86400
+                    ),  # 24 hours default
+                    "timeout_action": node_data.get("timeout_action", "auto_reject"),
+                    "require_comment": node_data.get("require_comment", False),
+                    "allowed_approvers": node_data.get("allowed_approvers", []),
+                }
+
+                # Find the previous node this gate is connected to (incoming edge)
+                previous_method_name = None
+                incoming_edges = [e for e in edges if e.get("target") == node_id]
+                if incoming_edges:
+                    source_node_id = incoming_edges[0].get("source", "")
+                    # Map source node to method name
+                    # Check starting points first
+                    for sp_info in starting_points:
+                        (
+                            sp_method_name,
+                            sp_task_ids,
+                            sp_tasks,
+                            sp_crew_name,
+                            sp_crew_data,
+                        ) = sp_info
+                        # Check if source matches any task ID in this starting point's crew
+                        if source_node_id in [str(tid) for tid in sp_task_ids]:
+                            previous_method_name = sp_method_name
+                            break
+                        # Also check node_id pattern
+                        if (
+                            source_node_id == sp_crew_data.get("id")
+                            if sp_crew_data
+                            else None
+                        ):
+                            previous_method_name = sp_method_name
+                            break
+
+                    # Check listeners if not found in starting points
+                    if not previous_method_name:
+                        for listener_info in listener_crews:
+                            (
+                                l_method_name,
+                                l_crew_id,
+                                l_task_ids,
+                                l_tasks,
+                                l_crew_name,
+                                l_listen_to,
+                                l_condition,
+                                l_crew_data,
+                            ) = listener_info
+                            if source_node_id in [str(tid) for tid in l_task_ids]:
+                                previous_method_name = l_method_name
+                                break
+                            if source_node_id == l_crew_id:
+                                previous_method_name = l_method_name
+                                break
+
+                if not previous_method_name:
+                    logger.warning(
+                        f"HITL gate {node_id} has no incoming connection - using default start method"
+                    )
+                    previous_method_name = (
+                        starting_points[0][0] if starting_points else "starting_point_0"
+                    )
+
+                # Create the HITL gate method
+                gate_method_name = f"hitl_gate_{node_id}"
+                logger.info(
+                    f"Creating HITL gate method: {gate_method_name} listening to {previous_method_name}"
+                )
+
+                class_methods[gate_method_name] = (
+                    FlowMethodFactory.create_hitl_gate_method(
+                        method_name=gate_method_name,
+                        gate_node_id=node_id,
+                        gate_config=gate_config,
+                        previous_method_name=previous_method_name,
+                        crew_sequence=crew_sequence_counter,
+                        callbacks=callbacks,
+                        group_context=group_context,
+                    )
+                )
+                logger.info(f"  ✅ Created HITL gate method '{gate_method_name}'")
+
+                # Store mapping so listeners can listen to this gate instead of the previous crew
+                # This is stored in gate_config with the node_id as key
+                hitl_gates.append(
+                    {
+                        "id": node_id,
+                        "method_name": gate_method_name,
+                        "listens_to": previous_method_name,
+                    }
+                )
+
+        logger.info(f"Processed {len(hitl_gates)} HITL gate nodes")
+
+        crew_to_method = build_crew_to_method(
+            listener_crews,
+            starting_points,
+            frontend_starting_points,
+            routers,
+            all_tasks,
+        )
+        router_dependencies: Dict[str, str] = {}
+        logger.info(f"Crew -> method map for routers: {crew_to_method}")
+
+        # Add router methods for conditional routing
+        for i, router_config in enumerate(routers):
+            router_name = router_config.get("name", f"router_{i}")
+            listen_to_crew_id = router_config.get("listenToCrewId")
+            routes = router_config.get(
+                "routes", {}
+            )  # Dict of route_name -> task configs
+            condition_expr = router_config.get(
+                "condition"
+            )  # Legacy: single Python condition expression
+            route_conditions = router_config.get(
+                "routeConditions", {}
+            )  # New: per-route conditions
+            condition_field = router_config.get("conditionField", "success")
+
+            # Resolve the crew the router waits for into the method built for it.
+            default_method = (
+                starting_points[0][0] if starting_points else "starting_point_0"
+            )
+            listen_to_method = resolve_router_upstream(
+                router_config, crew_to_method, default_method
+            )
+
+            # Create router method
+            def router_factory(
+                router_routes: Any,
+                router_condition_expr: Any,
+                router_route_conditions: Any,
+                router_condition_field: Any,
+                router_method_name: str,
+            ) -> Any:
+                @router(listen_to_method)
+                def route_method(self: Any, *args: Any, **kwargs: Any) -> Any:
+                    logger.info(f"Router {router_method_name} evaluating condition")
+
+                    # Build evaluation context for condition evaluation
+
+                    # If we have per-route conditions (routeConditions), evaluate each route's condition
+                    if router_route_conditions:
+                        try:
+                            eval_context = build_eval_context(self, args, kwargs)
+                            logger.info(
+                                f"Evaluating per-route conditions for routes: {list(router_route_conditions.keys())}"
+                            )
+                            logger.info(f"Context keys: {list(eval_context.keys())}")
+                            logger.info(
+                                f"State contents: {eval_context.get('state', {})}"
+                            )
+
+                            # Evaluate EVERY route and return all that matched.
+                            #
+                            # This used to return on the first true condition, so
+                            # a batch containing both politics and sports ran only
+                            # whichever route happened to come first in the dict —
+                            # a silent, ordering-dependent coin flip the author
+                            # never chose. The runtime emits each returned name as
+                            # its own signal, so a list runs every matching branch.
+                            outcomes = []
+                            matched: list[str] = []
+                            for (
+                                route_name,
+                                route_condition,
+                            ) in router_route_conditions.items():
+                                if route_condition:
+                                    logger.info(
+                                        f"Evaluating condition for route '{route_name}': {route_condition}"
+                                    )
+                                    try:
+                                        condition_result = safe_eval(
+                                            route_condition,
+                                            eval_context,
+                                            allowed_call_names=_FLOW_CONDITION_CALLS,
+                                        )
+                                        logger.info(
+                                            f"Route '{route_name}' condition evaluated to: {condition_result}"
+                                        )
+                                        outcomes.append(
+                                            (
+                                                route_name,
+                                                route_condition,
+                                                condition_result,
+                                            )
+                                        )
+                                        if condition_result:
+                                            logger.info(
+                                                f"Router {router_method_name} taking route: {route_name}"
+                                            )
+                                            matched.append(route_name)
+                                    except Exception as route_err:
+                                        logger.warning(
+                                            f"Error evaluating condition for route '{route_name}': {route_err}"
+                                        )
+                                        outcomes.append(
+                                            (
+                                                route_name,
+                                                route_condition,
+                                                f"ERROR {type(route_err).__name__}: {route_err}",
+                                            )
+                                        )
+                                        continue
+
+                            if matched:
+                                logger.info(
+                                    "Router %s taking %d route(s): %s",
+                                    router_method_name,
+                                    len(matched),
+                                    matched,
+                                )
+                                # ONE match returns the bare name, exactly as
+                                # before — that is the overwhelmingly common case
+                                # and everything downstream (checkpoints, method
+                                # outputs, logs) already reads that shape. Only a
+                                # genuine multi-match returns a list, which is the
+                                # behaviour that did not exist at all before.
+                                return matched[0] if len(matched) == 1 else matched
+
+                            # Nothing matched. Say so ONCE, loudly, with what the
+                            # state actually held.
+                            #
+                            # Whoever wrote these conditions could not see state
+                            # while writing them, and this is the only moment they
+                            # can. Previously both arms logged at INFO — a router
+                            # that quietly took 'default', or quietly stopped the
+                            # flow, was indistinguishable from one that never ran.
+                            report_no_route(
+                                router_method_name,
+                                outcomes,
+                                eval_context.get("state"),
+                                has_default=DEFAULT_ROUTE in router_routes,
+                            )
+                            return (
+                                DEFAULT_ROUTE
+                                if DEFAULT_ROUTE in router_routes
+                                else None
+                            )
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error evaluating router conditions: {e}",
+                                exc_info=True,
+                            )
+                            return None
+
+                    # Legacy: single condition expression (deprecated but still supported)
+                    elif router_condition_expr:
+                        try:
+                            eval_context = build_eval_context(self, args, kwargs)
+
+                            logger.info(
+                                f"Evaluating legacy condition: {router_condition_expr}"
+                            )
+                            logger.info(f"Context keys: {list(eval_context.keys())}")
+                            logger.info(
+                                f"State contents: {eval_context.get('state', {})}"
+                            )
+
+                            # Evaluate the condition
+                            condition_result = safe_eval(
+                                router_condition_expr,
+                                eval_context,
+                                allowed_call_names=_FLOW_CONDITION_CALLS,
+                            )
+                            logger.info(f"Condition evaluated to: {condition_result}")
+
+                            # If condition is True, take the default route; otherwise don't route
+                            if condition_result:
+                                default_route = (
+                                    list(router_routes.keys())[0]
+                                    if router_routes
+                                    else "default"
+                                )
+                                logger.info(
+                                    f"Router {router_method_name} condition True, taking route: {default_route}"
+                                )
+                                return default_route
+                            else:
+                                logger.info(
+                                    f"Router {router_method_name} condition False, no route taken"
+                                )
+                                return None
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error evaluating router condition: {e}", exc_info=True
+                            )
+                            logger.warning(
+                                "Router condition evaluation failed - no route taken (flow stops)"
+                            )
+                            return None
+                    else:
+                        # No condition expression - use simple value matching (legacy behavior)
+                        condition_value = None
+
+                        # Try to get condition from kwargs (result from previous method)
+                        if kwargs and router_condition_field in kwargs:
+                            condition_value = kwargs.get(router_condition_field)
+                        # Try to get from self.state if it exists
+                        elif hasattr(self, "state") and hasattr(
+                            self.state, router_condition_field
+                        ):
+                            condition_value = getattr(
+                                self.state, router_condition_field
+                            )
+                        elif (
+                            hasattr(self, "state")
+                            and isinstance(self.state, dict)
+                            and router_condition_field in self.state
+                        ):
+                            condition_value = self.state.get(router_condition_field)
+                        # Default routing based on args
+                        elif args:
+                            # If we have a result, check if it's successful
+                            result = args[0]
+                            if hasattr(result, router_condition_field):
+                                condition_value = getattr(
+                                    result, router_condition_field
+                                )
+                            elif (
+                                isinstance(result, dict)
+                                and router_condition_field in result
+                            ):
+                                condition_value = result.get(router_condition_field)
+
+                        # Legacy value matching. Coercion ("true"/"True" → bool) and
+                        # bool routing live in the shared pick_legacy_route helper so
+                        # this branch is unit-testable and no longer silently fails on
+                        # string-form booleans.
+                        chosen = pick_legacy_route(
+                            condition_value, list(router_routes.keys())
+                        )
+                        logger.info(
+                            f"Router {router_method_name} taking route (legacy match): {chosen}"
+                        )
+                        return chosen
+
+                route_method.__name__ = router_method_name
+                route_method.__qualname__ = router_method_name
+                # Every route this router COULD emit. The runtime subtracts the
+                # ones it actually took to work out which route listeners can
+                # never fire this turn, so an AND join downstream stops waiting
+                # for branches that were not chosen instead of hanging forever.
+                route_method._kasal_routes = list(router_routes)
+                # Also set the inner function's __name__ so that FlowMethod.__get__
+                # creates bound copies with the correct name (it re-wraps _meth,
+                # picking up __name__ from _meth, not from the wrapper's __dict__)
+                if hasattr(route_method, "_meth"):
+                    route_method._meth.__name__ = router_method_name
+                    route_method._meth.__qualname__ = router_method_name
+                return route_method
+
+            # Add router method to flow
+            router_method_name = f"router_{router_name}_{i}"
+            logger.info(f"[ROUTER DEBUG] Creating router {router_method_name}")
+            logger.info(f"[ROUTER DEBUG]   routes: {routes}")
+            logger.info(
+                f"[ROUTER DEBUG]   route_conditions (full dict): {route_conditions}"
+            )
+            logger.info(f"[ROUTER DEBUG]   condition_expr (legacy): {condition_expr}")
+            logger.info(
+                f"[ROUTER DEBUG]   listenToCrewId: {listen_to_crew_id} "
+                f"-> {listen_to_method}"
+            )
+            bound_router = router_factory(
+                routes,
+                condition_expr,
+                route_conditions,
+                condition_field,
+                router_method_name,
+            )
+            class_methods[router_method_name] = bound_router
+            router_dependencies[router_method_name] = listen_to_method
+            logger.info(
+                f"Created router method {router_method_name} with routes: {list(routes.keys())}"
+            )
+
+            # Add listener methods for each route
+            for route_name, route_tasks in routes.items():
+                logger.info(
+                    f"Creating route listener for route '{route_name}' with {len(route_tasks)} tasks"
+                )
+                logger.info(f"  Route tasks: {route_tasks}")
+                logger.info(f"  All tasks available: {list(all_tasks.keys())}")
+
+                route_task_objs = [
+                    all_tasks[t.get("id")]
+                    for t in route_tasks
+                    if t.get("id") in all_tasks
+                ]
+                logger.info(
+                    f"  Found {len(route_task_objs)} task objects for route listener"
+                )
+
+                if route_task_objs:
+                    route_listener_name = route_method_name(router_name, route_name, i)
+
+                    # Try to get crew name from route tasks configuration
+                    route_crew_name: Any = None
+                    if route_tasks and len(route_tasks) > 0:
+                        route_crew_name = route_tasks[0].get("crewName") or route_tasks[
+                            0
+                        ].get("crew_name")
+
+                    bound_route_listener = route_listener_factory(
+                        route_task_objs,
+                        route_listener_name,
+                        callbacks,
+                        group_context,
+                        route_name,
+                        route_crew_name,
+                        listen_to_method,
+                        route_approval_gates(
+                            flow_config or {},
+                            router_config,
+                            route_tasks,
+                            route_crew_name,
+                            listen_to_method,
+                            method_to_sequence.get(listen_to_method, 1),
+                            callbacks,
+                            group_context,
+                        ),
+                        (
+                            (checkpoint_outputs or {}).get(route_crew_name)
+                            if same_execution
+                            else None
+                        ),
+                    )
+                    class_methods[route_listener_name] = bound_route_listener
+                    crew_sequence_counter += 1
+                    method_to_sequence[route_listener_name] = crew_sequence_counter
+                    logger.info(
+                        f"Created route listener {route_listener_name} for crew '{route_crew_name}' listening to router '{router_method_name}' for route '{route_name}'"
+                    )
+
+        # Gate resume points follow completed crews, regardless of router declaration order.
+        crew_methods = {entry[0] for entry in starting_points + listener_crews}
+        crew_methods.update(crew_to_method.values())
+        for name in crew_methods:
+            if name in class_methods:
+                class_methods[name] = track_completion(class_methods[name], name)
+        validate_router_upstreams(router_dependencies, class_methods)
+
+        # CRITICAL: Create the DynamicFlow class WITH all methods using type()
+        # This allows the FlowMeta metaclass to process @start() and @listen() decorators
+        logger.info("=" * 100)
+        logger.info(f"CREATING DYNAMICFLOW CLASS with {len(class_methods)} methods")
+        logger.info(f"  persistence_enabled: {persistence_enabled}")
+        logger.info(f"  restore_uuid: {restore_uuid}")
+        logger.info("=" * 100)
+
+        DynamicFlow = type(
+            "DynamicFlow",  # Class name
+            (CrewAIFlow,),  # Base classes (includes FlowMeta metaclass)
+            class_methods,  # All methods in dictionary
+        )
+        logger.info("✅ DynamicFlow class created with FlowMeta metaclass processing")
+
+        # Apply @persist decorator if persistence is enabled
+        # This enables checkpoint/resume functionality via CrewAI's flow persistence
+        if persistence_enabled:
+            try:
+                from src.services.flow_builder.runtime import persist
+
+                # Persist flow state into Kasal's OWN database (SQLite in dev,
+                # Lakebase/Postgres in prod) instead of CrewAI's default stray SQLite
+                # file, so checkpoints survive restarts and are queryable by the app.
+                try:
+                    from src.services.flow_builder.kasal_flow_persistence import (
+                        KasalFlowPersistence,
+                    )
+
+                    # The group is stamped on every checkpoint row this run
+                    # writes. It was available here all along and simply never
+                    # passed, which is why `flow_states` was the one table in
+                    # the checkpoint path with no tenant column to filter on.
+                    DynamicFlow = persist(
+                        persistence=KasalFlowPersistence(group_id=group_id)
+                    )(DynamicFlow)
+                    logger.info(
+                        "✅ Applied @persist decorator (Kasal DB-backed flow state persistence)"
+                    )
+                except Exception as kasal_err:
+                    # Fall back to CrewAI's default persistence so flows still run
+                    # (resume durability is reduced) rather than failing the build.
+                    logger.warning(
+                        f"Kasal DB-backed persistence unavailable, falling back to default: {kasal_err}"
+                    )
+                    DynamicFlow = persist()(DynamicFlow)
+                    logger.info(
+                        "✅ Applied @persist decorator for flow state checkpointing (default backend)"
+                    )
+            except ImportError as e:
+                logger.warning(
+                    f"Could not import persist decorator (may require CrewAI 0.98.0+): {e}"
+                )
+            except Exception as e:
+                logger.warning(f"Error applying @persist decorator: {e}")
+
+        # Create an instance of our properly defined flow
+        # Note: State restoration happens at kickoff time when 'id' is passed in inputs
+        # (see backend_flow.py kickoff_async - passes inputs={"id": restore_uuid})
+        # The @persist decorator handles loading state from persistence based on that id
+        if restore_uuid and persistence_enabled:
+            logger.info(
+                f"Flow will resume from checkpoint {restore_uuid} when kickoff is called with id in inputs"
+            )
+        flow_instance = DynamicFlow()
+
+        # Log summary of created methods
+        logger.info("=" * 100)
+        logger.info("FLOW CREATION SUMMARY")
+        logger.info("=" * 100)
+
+        # Count and list all flow methods
+        start_methods = [m for m in dir(DynamicFlow) if m.startswith("start_flow_")]
+        listener_methods = [m for m in dir(DynamicFlow) if m.startswith("listen_task_")]
+        router_methods = [
+            m
+            for m in dir(DynamicFlow)
+            if m.startswith("router_") or m.startswith("route_")
+        ]
+
+        logger.info(f"✅ Created {len(start_methods)} start methods: {start_methods}")
+        logger.info(
+            f"✅ Created {len(listener_methods)} listener methods: {listener_methods}"
+        )
+        logger.info(
+            f"✅ Created {len(router_methods)} router methods: {router_methods}"
+        )
+        logger.info(
+            f"Total flow methods: {len(start_methods) + len(listener_methods) + len(router_methods)}"
+        )
+        logger.info("=" * 100)
+
+        logger.info("Flow configured successfully with proper flow structure")
+
+        return flow_instance

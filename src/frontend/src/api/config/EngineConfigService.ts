@@ -1,0 +1,220 @@
+import { apiClient } from '../../shared/api/client';
+import type { EngineSettings, EngineSettingsPatch } from '../../types/config/engines';
+
+export interface EngineConfig {
+  id: number;
+  engine_name: string;
+  engine_type: string;
+  config_key: string;
+  config_value: string;
+  enabled: boolean;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EngineConfigListResponse {
+  configs: EngineConfig[];
+  count: number;
+}
+
+export interface KasalFlowConfigUpdate {
+  flow_enabled: boolean;
+}
+
+export interface KasalFlowStatusResponse {
+  flow_enabled: boolean;
+}
+
+
+
+export interface HarnessDescription {
+  /** 'kasal' | 'crewai' — the wire value, also what the run row records. */
+  name: string;
+  label?: string;
+  version?: string;
+  available: boolean;
+  /**
+   * Why a harness cannot run here. Rendered beside a disabled option: a
+   * greyed-out engine with no reason is what people open a ticket about.
+   */
+  unavailable_reason?: string;
+  /**
+   * What this harness supports — checkpoint_resume, tool_approval, flow, export…
+   * The UI disables what the selected harness cannot do rather than offering a
+   * control that fails at run time.
+   */
+  capabilities: string[];
+}
+
+export interface HarnessResponse {
+  /** The harness runs DEFAULT to when they do not name one themselves. */
+  harness: string;
+  harnesses: HarnessDescription[];
+}
+
+
+export class EngineConfigService {
+  private static baseUrl = `/engine-config`;
+
+  /**
+   * Get all engine configurations
+   */
+  static async getEngineConfigs(): Promise<EngineConfigListResponse> {
+    const response = await apiClient.get<EngineConfigListResponse>(`${this.baseUrl}`);
+    return response.data;
+  }
+
+  /**
+   * Get enabled engine configurations
+   */
+  static async getEnabledEngineConfigs(): Promise<EngineConfigListResponse> {
+    const response = await apiClient.get<EngineConfigListResponse>(`${this.baseUrl}/enabled`);
+    return response.data;
+  }
+
+  /**
+   * Get engine configuration by engine name
+   */
+  static async getEngineConfig(engineName: string): Promise<EngineConfig> {
+    const response = await apiClient.get<EngineConfig>(`${this.baseUrl}/engine/${engineName}`);
+    return response.data;
+  }
+
+  /**
+   * Get engine configuration by engine name and config key
+   */
+  static async getEngineConfigByKey(engineName: string, configKey: string): Promise<EngineConfig> {
+    const response = await apiClient.get<EngineConfig>(`${this.baseUrl}/engine/${engineName}/config/${configKey}`);
+    return response.data;
+  }
+
+  /**
+   * Get CrewAI flow enabled status
+   */
+  static async getKasalFlowEnabled(): Promise<KasalFlowStatusResponse> {
+    const response = await apiClient.get<KasalFlowStatusResponse>(`${this.baseUrl}/kasal/flow-enabled`);
+    return response.data;
+  }
+
+  /**
+   * Set CrewAI flow enabled status
+   */
+  static async setKasalFlowEnabled(enabled: boolean): Promise<{ success: boolean; flow_enabled: boolean }> {
+    const response = await apiClient.patch<{ success: boolean; flow_enabled: boolean }>(
+      `${this.baseUrl}/kasal/flow-enabled`,
+      { flow_enabled: enabled }
+    );
+    return response.data;
+  }
+
+  /**
+   * The harness runs default to, plus every harness's availability and
+   * capabilities. A run may still name its own — see the model picker.
+   */
+  static async getHarness(): Promise<HarnessResponse> {
+    const response = await apiClient.get<HarnessResponse>(`${this.baseUrl}/harness`);
+    return response.data;
+  }
+
+  /**
+   * Change the DEFAULT harness. A run that names its own is unaffected, and
+   * so is any run already in flight — each keeps what its row records.
+   */
+  static async setHarness(harness: string): Promise<HarnessResponse> {
+    const response = await apiClient.put<HarnessResponse>(
+      `${this.baseUrl}/harness`,
+      { harness }
+    );
+    return response.data;
+  }
+
+  /**
+   * Get OTel App Telemetry configuration (system-level)
+   */
+  static async getOtelAppTelemetryConfig(): Promise<{ otel_app_telemetry_enabled: boolean; otel_app_telemetry_log_level: string }> {
+    const response = await apiClient.get<{ otel_app_telemetry_enabled: boolean; otel_app_telemetry_log_level: string }>(`${this.baseUrl}/kasal/otel-app-telemetry`);
+    return response.data;
+  }
+
+  /**
+   * @deprecated Use getOtelAppTelemetryConfig instead
+   */
+  static async getOtelAppTelemetryEnabled(): Promise<{ otel_app_telemetry_enabled: boolean; otel_app_telemetry_log_level: string }> {
+    return this.getOtelAppTelemetryConfig();
+  }
+
+  /**
+   * Update OTel App Telemetry configuration (system-level)
+   */
+  static async setOtelAppTelemetryConfig(params: { enabled?: boolean; log_level?: string }): Promise<{ success: boolean; otel_app_telemetry_enabled?: boolean; otel_app_telemetry_log_level?: string }> {
+    const response = await apiClient.patch<{ success: boolean; otel_app_telemetry_enabled?: boolean; otel_app_telemetry_log_level?: string }>(
+      `${this.baseUrl}/kasal/otel-app-telemetry`,
+      params
+    );
+    return response.data;
+  }
+
+  /**
+   * @deprecated Use setOtelAppTelemetryConfig instead
+   */
+  static async setOtelAppTelemetryEnabled(enabled: boolean): Promise<{ success: boolean; otel_app_telemetry_enabled?: boolean }> {
+    return this.setOtelAppTelemetryConfig({ enabled });
+  }
+
+  /**
+   * Get the event-trigger feature enabled status (system-level)
+   */
+  static async getEventTriggersEnabled(): Promise<{ event_triggers_enabled: boolean }> {
+    const response = await apiClient.get<{ event_triggers_enabled: boolean }>(
+      `${this.baseUrl}/kasal/event-triggers`,
+    );
+    return response.data;
+  }
+
+  /**
+   * Enable/disable the event-trigger feature (system-level)
+   */
+  static async setEventTriggersEnabled(
+    enabled: boolean,
+  ): Promise<{ success: boolean; event_triggers_enabled: boolean }> {
+    const response = await apiClient.patch<{ success: boolean; event_triggers_enabled: boolean }>(
+      `${this.baseUrl}/kasal/event-triggers`,
+      { enabled },
+    );
+    return response.data;
+  }
+
+  /**
+   * Toggle engine configuration enabled status
+   */
+  static async toggleEngineEnabled(engineName: string, enabled: boolean): Promise<EngineConfig> {
+    const response = await apiClient.patch<EngineConfig>(
+      `${this.baseUrl}/engine/${engineName}/toggle`,
+      { enabled }
+    );
+    return response.data;
+  }
+
+  /**
+   * Update engine configuration value
+   */
+  static async updateConfigValue(engineName: string, configKey: string, configValue: string): Promise<EngineConfig> {
+    const response = await apiClient.patch<EngineConfig>(
+      `${this.baseUrl}/engine/${engineName}/config/${configKey}/value`,
+      { config_value: configValue }
+    );
+    return response.data;
+  }
+
+  /** Configuration → Engines system settings (system administrators only). */
+  static async getSettings(): Promise<EngineSettings> {
+    const response = await apiClient.get<EngineSettings>(`${this.baseUrl}/settings`);
+    return response.data;
+  }
+
+  static async updateSettings(patch: EngineSettingsPatch): Promise<EngineSettings> {
+    const response = await apiClient.patch<EngineSettings>(`${this.baseUrl}/settings`, patch);
+    return response.data;
+  }
+}

@@ -1,0 +1,1001 @@
+"""
+Service for accessing and managing execution history.
+
+This module provides functions for retrieving and managing execution history
+from the database.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional, Sequence
+
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.repositories.execution_logs_repository import ExecutionLogsRepository
+from src.schemas.execution_history import (
+    DeleteResponse,
+    ExecutionHistoryItem,
+    ExecutionHistoryList,
+    ExecutionOutput,
+    ExecutionOutputDebug,
+    ExecutionOutputDebugList,
+    ExecutionOutputList,
+)
+from src.services.execution.listing import result_preview
+from src.services.execution.stored_inputs import mask_run_inputs
+
+logger = logging.getLogger(__name__)
+
+
+def _summary_item(row: Any) -> ExecutionHistoryItem:
+    """A list item from an ``execution_summary_columns`` projection row."""
+    return ExecutionHistoryItem.model_validate(
+        {
+            "id": row.id,
+            "job_id": row.job_id,
+            "run_name": row.run_name,
+            "status": row.status,
+            "error": row.error,
+            "created_at": row.created_at,
+            "execution_type": row.execution_type or row.input_execution_type,
+            "harness": row.harness,
+            "model": row.model,
+            "group_email": row.group_email,
+            "mlflow_trace_id": row.mlflow_trace_id,
+            "mlflow_experiment_name": row.mlflow_experiment_name,
+            "mlflow_evaluation_run_id": row.mlflow_evaluation_run_id,
+            "flow_uuid": str(row.flow_uuid) if row.flow_uuid else None,
+            "checkpoint_status": row.checkpoint_status,
+            "checkpoint_method": row.checkpoint_method,
+            "result_preview": result_preview(row.result_preview),
+        }
+    )
+
+
+class ExecutionHistoryService:
+    """Service for accessing and managing execution history."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        execution_history_repository: Optional[ExecutionHistoryRepository] = None,
+        execution_logs_repository: Optional[ExecutionLogsRepository] = None,
+    ) -> None:
+        """
+        Initialize the service with session and optionally a repository.
+
+        Args:
+            session: Database session from FastAPI DI
+            execution_history_repository: Optional repository instance (for testing)
+            execution_logs_repository: Optional logs repository instance (for testing)
+        """
+        self.session = session
+        self.history_repo = execution_history_repository or ExecutionHistoryRepository(
+            session
+        )
+        self.logs_repo = execution_logs_repository or ExecutionLogsRepository(session)
+
+    def _mask_inputs_sensitive_data(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Execution inputs as the history API returns them.
+
+        The same rule as when they are stored, so rows written before a field
+        was masked come back masked too: ``stored_inputs.mask_run_inputs``.
+        """
+        return mask_run_inputs(inputs)
+
+    async def get_execution_history(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        group_ids: Optional[List[str]] = None,
+        include_payload: bool = False,
+    ) -> ExecutionHistoryList:
+        """
+        Get paginated execution history with group-based filtering.
+
+        Args:
+            limit: Maximum number of items to return
+            offset: Number of items to skip
+            group_ids: List of group IDs for group-based filtering
+            include_payload: Return each run's full ``result``, masked ``input``
+                and ``agents_yaml``/``tasks_yaml``. Off by default: rows are
+                summaries carrying a ``result_preview``.
+
+        Returns:
+            ExecutionHistoryList with paginated execution history items and metadata
+        """
+        try:
+            # Use the repository to get the paginated data and total count
+            runs, total_count = await self.history_repo.get_execution_history(
+                limit=limit, offset=offset, group_ids=group_ids, full=include_payload
+            )
+            if not include_payload:
+                return ExecutionHistoryList(
+                    executions=[_summary_item(row) for row in runs],
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                )
+
+            # Convert each run to a pydantic model, handling string results properly
+            import json
+
+            execution_items = []
+            for run in runs:
+                run_dict = run.__dict__.copy() if hasattr(run, "__dict__") else {}
+
+                # Handle string results
+                if hasattr(run, "result") and isinstance(run.result, str):
+                    run_dict["result"] = {"content": run.result}
+
+                # Extract agents_yaml and tasks_yaml from inputs if available
+                if hasattr(run, "inputs") and run.inputs:
+                    # Mask sensitive data in inputs before returning
+                    masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
+                    # Convert agents_yaml and tasks_yaml to JSON strings for the schema
+                    if "agents_yaml" in masked_inputs:
+                        run_dict["agents_yaml"] = (
+                            json.dumps(masked_inputs["agents_yaml"])
+                            if isinstance(masked_inputs["agents_yaml"], dict)
+                            else masked_inputs.get("agents_yaml", "")
+                        )
+                    if "tasks_yaml" in masked_inputs:
+                        run_dict["tasks_yaml"] = (
+                            json.dumps(masked_inputs["tasks_yaml"])
+                            if isinstance(masked_inputs["tasks_yaml"], dict)
+                            else masked_inputs.get("tasks_yaml", "")
+                        )
+
+                    # Keep the full masked inputs for the input field
+                    run_dict["input"] = masked_inputs
+
+                # Create a model-compatible dictionary for validation
+                execution_items.append(ExecutionHistoryItem.model_validate(run_dict))
+
+            return ExecutionHistoryList(
+                executions=execution_items,
+                total=total_count,
+                limit=limit,
+                offset=offset,
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving execution history: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving execution history: {str(e)}", exc_info=True)
+            raise
+
+    async def get_execution_by_id(
+        self, execution_id: int, tenant_ids: Optional[List[str]] = None
+    ) -> Optional[ExecutionHistoryItem]:
+        """
+        Get a specific execution by ID with group-based tenant filtering.
+
+        Args:
+            execution_id: ID of the execution to retrieve
+            tenant_ids: List of tenant IDs for group-based filtering
+
+        Returns:
+            ExecutionHistoryItem or None if not found
+        """
+        try:
+            # Use the repository to get the data
+            run = await self.history_repo.get_execution_by_id(
+                execution_id, group_ids=tenant_ids
+            )
+
+            if not run:
+                return None
+
+            # Build the dictionary from the run object
+            import json
+
+            run_dict = run.__dict__.copy() if hasattr(run, "__dict__") else {}
+
+            # Check if result field is a string but should be a dictionary
+            if hasattr(run, "result") and isinstance(run.result, str):
+                run_dict["result"] = {"content": run.result}
+
+            # Extract agents_yaml and tasks_yaml from inputs if available
+            if hasattr(run, "inputs") and run.inputs:
+                # Mask sensitive data in inputs before returning
+                masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
+                # Convert agents_yaml and tasks_yaml to JSON strings for the schema
+                if "agents_yaml" in masked_inputs:
+                    run_dict["agents_yaml"] = (
+                        json.dumps(masked_inputs["agents_yaml"])
+                        if isinstance(masked_inputs["agents_yaml"], dict)
+                        else masked_inputs.get("agents_yaml", "")
+                    )
+                if "tasks_yaml" in masked_inputs:
+                    run_dict["tasks_yaml"] = (
+                        json.dumps(masked_inputs["tasks_yaml"])
+                        if isinstance(masked_inputs["tasks_yaml"], dict)
+                        else masked_inputs.get("tasks_yaml", "")
+                    )
+
+                # Keep the full masked inputs for the input field
+                run_dict["input"] = masked_inputs
+
+            # Create a model-compatible dictionary for validation
+            return ExecutionHistoryItem.model_validate(run_dict)
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving execution {execution_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error retrieving execution {execution_id}: {str(e)}", exc_info=True
+            )
+            raise
+
+    async def check_execution_exists(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> bool:
+        """
+        Check if an execution exists within the caller's groups.
+
+        Args:
+            execution_id: ID of the execution to check
+            group_ids: List of group IDs for tenant filtering. Scopes the check
+                to the caller's groups so existence of another tenant's execution
+                cannot be probed.
+
+        Returns:
+            True if the execution exists (within the given groups), False otherwise
+        """
+        try:
+            # Use the repository to check existence (group-scoped)
+            exists = await self.history_repo.check_execution_exists(
+                execution_id, group_ids=group_ids
+            )
+
+            return exists
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error checking execution {execution_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error checking execution {execution_id}: {str(e)}")
+            raise
+
+    async def get_execution_outputs(
+        self,
+        execution_id: str,
+        limit: int = 1000,
+        offset: int = 0,
+        tenant_ids: Optional[List[str]] = None,
+    ) -> ExecutionOutputList:
+        """
+        Get outputs for an execution with tenant filtering.
+
+        Args:
+            execution_id: String ID of the execution (job_id in database)
+            limit: Maximum number of items to return
+            offset: Number of items to skip
+            tenant_ids: List of tenant IDs for security filtering
+
+        Returns:
+            ExecutionOutputList with paginated execution outputs
+        """
+        try:
+            # First verify the execution belongs to the user's tenant
+            if tenant_ids:
+                execution = await self.history_repo.get_execution_by_job_id(
+                    execution_id, group_ids=tenant_ids
+                )
+                if not execution:
+                    # Execution doesn't exist or doesn't belong to user's tenants
+                    return ExecutionOutputList(
+                        execution_id=execution_id,
+                        outputs=[],
+                        limit=limit,
+                        offset=offset,
+                        total=0,
+                    )
+
+            # Get logs from our repository
+            logs = await self.logs_repo.get_logs_by_execution_id(
+                execution_id=execution_id, limit=limit, offset=offset, newest_first=True
+            )
+
+            # Get total count
+            total_count = await self.logs_repo.count_by_execution_id(
+                execution_id=execution_id
+            )
+
+            # Convert to schema objects
+            output_items = [
+                ExecutionOutput(
+                    id=log.id,
+                    job_id=log.execution_id,
+                    output=log.content,
+                    timestamp=log.timestamp,
+                )
+                for log in logs
+            ]
+
+            return ExecutionOutputList(
+                execution_id=execution_id,
+                outputs=output_items,
+                limit=limit,
+                offset=offset,
+                total=total_count,
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving outputs for execution {execution_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error retrieving outputs for execution {execution_id}: {str(e)}"
+            )
+            raise
+
+    async def get_debug_outputs(
+        self, execution_id: str, tenant_ids: Optional[List[str]] = None
+    ) -> Optional[ExecutionOutputDebugList]:
+        """
+        Get debug information about outputs for an execution with tenant filtering.
+
+        Args:
+            execution_id: String ID of the execution (job_id in database)
+            tenant_ids: List of tenant IDs for security filtering
+
+        Returns:
+            ExecutionOutputDebugList with debug information
+        """
+        try:
+            # Check if the run exists and belongs to user's tenant
+            run = await self.history_repo.get_execution_by_job_id(
+                execution_id, group_ids=tenant_ids
+            )
+
+            if not run:
+                return None
+
+            # Get logs from our repository
+            logs = await self.logs_repo.get_logs_by_execution_id(
+                execution_id=execution_id
+            )
+
+            # Create debug items
+            debug_items = []
+            for log in logs:
+                debug_items.append(
+                    ExecutionOutputDebug(
+                        id=log.id,
+                        timestamp=log.timestamp,
+                        task_name=None,  # These fields aren't in our new model
+                        agent_name=None,
+                        output_preview=log.content[:200] if log.content else None,
+                    )
+                )
+
+            return ExecutionOutputDebugList(
+                run_id=run.id,
+                execution_id=execution_id,
+                total_outputs=len(debug_items),
+                outputs=debug_items,
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving debug outputs for execution {execution_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error retrieving debug outputs for execution {execution_id}: {str(e)}"
+            )
+            raise
+
+    async def delete_all_executions(
+        self, group_ids: Optional[List[str]] = None
+    ) -> DeleteResponse:
+        """
+        Delete all executions and their associated data for specified groups.
+
+        Args:
+            group_ids: List of group IDs to filter deletions. If provided, only
+                      executions belonging to these groups will be deleted.
+                      This ensures tenant isolation - users can only delete
+                      executions from their own groups.
+
+        Returns:
+            DeleteResponse with information about the deleted data
+        """
+        try:
+            group_filter_msg = (
+                f" for groups {group_ids}" if group_ids else " (all groups)"
+            )
+            logger.info(
+                f"Attempting to delete all executions and their associated data{group_filter_msg}"
+            )
+
+            # Import services here to avoid circular imports
+            from src.services.execution.logs.writer import ExecutionLogsService
+            from src.services.recipes.recipes import WorkflowRecipeService
+            from src.services.trace import ExecutionTraceService
+
+            # Create service instances
+            trace_service = ExecutionTraceService(self.session)
+            logs_service = ExecutionLogsService(self.session)
+            recipe_service = WorkflowRecipeService(self.session)
+
+            # Recipes are distilled FROM these runs: they keep pointing at
+            # source_job_ids that are about to stop existing, and keep feeding
+            # exemplars into crew generation from crews the user believes they
+            # erased. Their trial ledger measures the same runs. Both go with
+            # the history. Done BEFORE the no-executions early return below, so
+            # a library left behind by an earlier delete can still be cleared.
+            recipe_counts = await recipe_service.delete_for_groups(
+                group_ids if group_ids else None
+            )
+
+            # Get job_ids for the group first (needed to delete related data)
+            if group_ids and len(group_ids) > 0:
+                job_ids = await self.history_repo.get_job_ids_for_groups(group_ids)
+
+                if not job_ids:
+                    # The request session commits on the way out, so the recipe
+                    # deletion above still lands.
+                    return DeleteResponse(
+                        success=True,
+                        message=(
+                            "No executions found for the specified groups. "
+                            f"Deleted {recipe_counts['recipe_count']} recipes and "
+                            f"{recipe_counts['trial_count']} recipe trials."
+                        ),
+                    )
+
+                # Delete traces for these job_ids
+                trace_count = 0
+                for job_id in job_ids:
+                    trace_count += await trace_service.repository.delete_by_job_id(
+                        job_id
+                    )
+
+                # Delete logs for these job_ids
+                log_count = 0
+                for job_id in job_ids:
+                    log_count += await logs_service.delete_by_execution_id(job_id)
+            else:
+                # Delete all traces (no group filtering)
+                trace_count = await trace_service.repository.delete_all()
+                # Delete all logs
+                log_count = await logs_service.delete_all_logs()
+
+            # Delete executions and associated data (with group filtering)
+            result = await self.history_repo.delete_all_executions(group_ids=group_ids)
+
+            # Clear in-memory executions from ExecutionService and KasalExecutionService
+            # Note: For group-filtered deletes, we only clear matching job_ids
+            from src.services.execution.kasal_service import (
+                executions as crewai_executions,
+            )
+            from src.services.execution.service import ExecutionService
+
+            if group_ids and len(group_ids) > 0:
+                # Only clear in-memory executions that match the deleted job_ids
+                execution_count_before = 0
+                crewai_execution_count_before = 0
+                for job_id in job_ids:
+                    if job_id in ExecutionService.executions:
+                        del ExecutionService.executions[job_id]
+                        execution_count_before += 1
+                    if job_id in crewai_executions:
+                        del crewai_executions[job_id]
+                        crewai_execution_count_before += 1
+            else:
+                # Clear all in-memory executions
+                execution_count_before = len(ExecutionService.executions)
+                crewai_execution_count_before = len(crewai_executions)
+                ExecutionService.executions.clear()
+                crewai_executions.clear()
+
+            logger.info(
+                f"Cleared {execution_count_before} in-memory executions from ExecutionService"
+            )
+            logger.info(
+                f"Cleared {crewai_execution_count_before} in-memory executions from KasalExecutionService"
+            )
+
+            return DeleteResponse(
+                success=True,
+                message=f"Deleted {result['run_count']} executions, {result['task_status_count']} task statuses, "
+                f"{result['error_trace_count']} error traces, {log_count} logs, {trace_count} traces, "
+                f"{recipe_counts['recipe_count']} recipes, {recipe_counts['trial_count']} recipe trials, "
+                f"and {execution_count_before + crewai_execution_count_before} in-memory executions.",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all executions: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting all executions: {str(e)}")
+            raise
+
+    async def delete_execution(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Optional[DeleteResponse]:
+        """
+        Delete a specific execution and its associated data.
+
+        Args:
+            execution_id: ID of the execution to delete
+            group_ids: List of group IDs for tenant filtering. The execution is
+                only deleted if it belongs to one of these groups; otherwise the
+                lookup returns None and the caller gets a 404 (cross-tenant
+                deletes are denied).
+
+        Returns:
+            DeleteResponse with information about the deleted data
+        """
+        try:
+            logger.info(
+                f"Attempting to delete execution {execution_id} and its associated data"
+            )
+
+            # First get the job_id (group-scoped: returns None if not in the caller's groups)
+            run = await self.history_repo.get_execution_by_id(
+                execution_id, group_ids=group_ids
+            )
+            if not run:
+                return None
+
+            job_id = run.job_id
+
+            # Import services here to avoid circular imports
+            from src.services.execution.logs.writer import ExecutionLogsService
+            from src.services.trace import ExecutionTraceService
+
+            # Create service instances
+            trace_service = ExecutionTraceService(self.session)
+            logs_service = ExecutionLogsService(self.session)
+
+            # Delete associated traces first (to avoid foreign key constraint violations)
+            # For now we need to access the repository directly since ExecutionTraceService
+            # doesn't have a public delete_by_job_id method yet. This should be refactored.
+            trace_count = await trace_service.repository.delete_by_job_id(job_id)
+
+            # Delete execution logs
+            output_count = await logs_service.delete_by_execution_id(job_id)
+
+            # Delete execution using repository (after dependent records are gone)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution(execution_id) or {}
+
+            # Clear in-memory execution from ExecutionService and KasalExecutionService
+            from src.services.execution.kasal_service import (
+                executions as crewai_executions,
+            )
+            from src.services.execution.service import ExecutionService
+
+            # Remove from ExecutionService memory
+            if job_id in ExecutionService.executions:
+                del ExecutionService.executions[job_id]
+                logger.info(f"Removed execution {job_id} from ExecutionService memory")
+
+            # Remove from KasalExecutionService memory
+            if job_id in crewai_executions:
+                del crewai_executions[job_id]
+                logger.info(
+                    f"Removed execution {job_id} from KasalExecutionService memory"
+                )
+
+            return DeleteResponse(
+                success=True,
+                message=f"Deleted execution {execution_id} (job_id: {job_id}), "
+                f"{result['task_status_count']} task statuses, "
+                f"{result['error_trace_count']} error traces, "
+                f"{trace_count} traces, and {output_count} logs.",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting execution {execution_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting execution {execution_id}: {str(e)}")
+            raise
+
+    async def delete_execution_by_job_id(
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[DeleteResponse]:
+        """
+        Delete a specific execution and its associated data by job_id (UUID).
+
+        Args:
+            job_id: The job_id (UUID) of the execution
+            group_ids: List of group IDs for tenant filtering. The execution is
+                only deleted if it belongs to one of these groups; otherwise the
+                lookup returns None and the caller gets a 404 (cross-tenant
+                deletes are denied).
+
+        Returns:
+            DeleteResponse with information about the deleted data
+        """
+        try:
+            logger.info(
+                f"Attempting to delete execution with job_id {job_id} and its associated data"
+            )
+
+            # Check if the execution exists (group-scoped: None if not in the caller's groups)
+            run = await self.history_repo.get_execution_by_job_id(
+                job_id, group_ids=group_ids
+            )
+            if not run:
+                return None
+
+            execution_id = run.id
+
+            # Import services here to avoid circular imports
+            from src.services.execution.logs.writer import ExecutionLogsService
+            from src.services.trace import ExecutionTraceService
+
+            # Create service instances
+            trace_service = ExecutionTraceService(self.session)
+            logs_service = ExecutionLogsService(self.session)
+
+            # Delete associated traces first (to avoid foreign key constraint violations)
+            # For now we need to access the repository directly since ExecutionTraceService
+            # doesn't have a public delete_by_job_id method yet. This should be refactored.
+            trace_count = await trace_service.repository.delete_by_job_id(job_id)
+
+            # Delete execution logs
+            output_count = await logs_service.delete_by_execution_id(job_id)
+
+            # Delete execution using repository (after dependent records are gone)
+            # None: the row went between the lookup and the delete.
+            result = await self.history_repo.delete_execution_by_job_id(job_id) or {}
+
+            # Clear in-memory execution from ExecutionService and KasalExecutionService
+            from src.services.execution.kasal_service import (
+                executions as crewai_executions,
+            )
+            from src.services.execution.service import ExecutionService
+
+            # Remove from ExecutionService memory
+            if job_id in ExecutionService.executions:
+                del ExecutionService.executions[job_id]
+                logger.info(f"Removed execution {job_id} from ExecutionService memory")
+
+            # Remove from KasalExecutionService memory
+            if job_id in crewai_executions:
+                del crewai_executions[job_id]
+                logger.info(
+                    f"Removed execution {job_id} from KasalExecutionService memory"
+                )
+
+            return DeleteResponse(
+                success=True,
+                message=f"Deleted execution {execution_id} (job_id: {job_id}), "
+                f"{result['task_status_count']} task statuses, "
+                f"{result['error_trace_count']} error traces, "
+                f"{trace_count} traces, and {output_count} logs.",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error deleting execution with job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting execution with job_id {job_id}: {str(e)}")
+            raise
+
+    async def get_execution_by_job_id(
+        self, job_id: str
+    ) -> Optional[ExecutionHistoryItem]:
+        """
+        Get execution history by job_id (UUID).
+
+        Args:
+            job_id: String ID of the execution (job_id in database)
+
+        Returns:
+            ExecutionHistoryItem if found, None otherwise
+        """
+        try:
+            # Use the repository to get the data
+            run = await self.history_repo.get_execution_by_job_id(job_id)
+
+            if not run:
+                return None
+
+            # Build the dictionary from the run object
+            import json
+
+            run_dict = run.__dict__.copy() if hasattr(run, "__dict__") else {}
+
+            # Check if result field is a string but should be a dictionary
+            if hasattr(run, "result") and isinstance(run.result, str):
+                run_dict["result"] = {"content": run.result}
+
+            # Extract agents_yaml and tasks_yaml from inputs if available
+            if hasattr(run, "inputs") and run.inputs:
+                # Mask sensitive data in inputs before returning
+                masked_inputs = self._mask_inputs_sensitive_data(run.inputs)
+
+                # Convert agents_yaml and tasks_yaml to JSON strings for the schema
+                if "agents_yaml" in masked_inputs:
+                    run_dict["agents_yaml"] = (
+                        json.dumps(masked_inputs["agents_yaml"])
+                        if isinstance(masked_inputs["agents_yaml"], dict)
+                        else masked_inputs.get("agents_yaml", "")
+                    )
+                if "tasks_yaml" in masked_inputs:
+                    run_dict["tasks_yaml"] = (
+                        json.dumps(masked_inputs["tasks_yaml"])
+                        if isinstance(masked_inputs["tasks_yaml"], dict)
+                        else masked_inputs.get("tasks_yaml", "")
+                    )
+
+                # Keep the full masked inputs for the input field
+                run_dict["input"] = masked_inputs
+
+            # Create a model-compatible dictionary for validation
+            return ExecutionHistoryItem.model_validate(run_dict)
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving execution with job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error retrieving execution with job_id {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            raise
+
+    async def get_checkpoints_for_flow(
+        self,
+        flow_id: Any,
+        group_id: Optional[str] = None,
+        status_filter: Optional[str] = "active",
+    ) -> List:
+        """
+        Get available checkpoints for a specific flow.
+
+        Args:
+            flow_id: UUID of the flow
+            group_id: Group ID for tenant filtering
+            status_filter: Filter by checkpoint status (default: 'active')
+
+        Returns:
+            List of ExecutionHistory records with active checkpoints
+        """
+        try:
+            return await self.history_repo.get_checkpoints_for_flow(
+                flow_id=flow_id, group_id=group_id, status_filter=status_filter
+            )
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error getting checkpoints for flow {flow_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error getting checkpoints for flow {flow_id}: {str(e)}")
+            raise
+
+    async def expire_checkpoint(
+        self, execution_id: int, group_id: Optional[str] = None
+    ) -> bool:
+        """
+        Mark a checkpoint as expired so it won't appear in resume list.
+
+        Args:
+            execution_id: ID of the execution to expire
+            group_id: Group ID for tenant filtering
+
+        Returns:
+            True if successfully expired
+        """
+        try:
+            return await self.history_repo.update_checkpoint_status(
+                execution_id=execution_id, status="expired", group_id=group_id
+            )
+        except SQLAlchemyError as e:
+            logger.error(f"Database error expiring checkpoint {execution_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error expiring checkpoint {execution_id}: {str(e)}")
+            raise
+
+    async def set_checkpoint_active(
+        self, execution_id: int, flow_uuid: str, checkpoint_method: Optional[str] = None
+    ) -> bool:
+        """
+        Set a checkpoint as active for an execution.
+
+        Called when a flow execution with @persist completes or checkpoints.
+
+        Args:
+            execution_id: ID of the execution
+            flow_uuid: CrewAI's state.id
+            checkpoint_method: Name of the last checkpointed method
+
+        Returns:
+            True if successfully updated
+        """
+        try:
+            result = await self.history_repo.set_checkpoint_info(
+                execution_id=execution_id,
+                flow_uuid=flow_uuid,
+                checkpoint_status="active",
+                checkpoint_method=checkpoint_method,
+            )
+            await self.session.commit()
+            return result
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error setting checkpoint for execution {execution_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error setting checkpoint for execution {execution_id}: {str(e)}"
+            )
+            raise
+
+    async def saved_ucmv_edits(
+        self, job_id: str, *, group_ids: Sequence[str]
+    ) -> Optional[dict]:
+        """The UCMV edits saved on run ``job_id``, if that run is in ``group_ids``.
+
+        For the UCMV validator, which applies only its own run's edits, never
+        another run's. No job id or no groups, no result.
+        """
+        if not job_id or not group_ids:
+            return None
+        data = await self.history_repo.get_checkpoint_data(job_id, list(group_ids))
+        edits = data.get("ucmv_yaml_edits") if isinstance(data, dict) else None
+        return edits if isinstance(edits, dict) else None
+
+    async def latest_result_with_keys(
+        self, keys: List[str], *, group_ids: Sequence[str], job_id: Optional[str] = None
+    ) -> Optional[dict]:
+        """Most recent run in ``group_ids`` (or run ``job_id``) whose ``result``
+        dict holds ALL ``keys``."""
+        found: Optional[dict] = await self.history_repo.latest_result_with_keys(
+            keys, group_ids=group_ids, job_id=job_id
+        )
+        return found
+
+    async def find_recent_results_with_key(
+        self, key: str, *, group_ids: Sequence[str], limit: int = 20
+    ) -> list[dict]:
+        """Recent runs in ``group_ids`` whose stored ``result`` contains ``key``.
+
+        Serves the UCMV re-evaluation tool: it scans prior runs for those that
+        recorded non-transpiled measures (``untranslatable_items``). Returns
+        ``[{job_id, run_name, created_at, result}]``. No groups, no rows.
+        """
+        runs = await self.history_repo.find_recent_results_containing(
+            key, group_ids=group_ids, limit=limit
+        )
+        out: list[dict] = []
+        for run in runs:
+            out.append(
+                {
+                    "job_id": getattr(run, "job_id", None),
+                    "run_name": getattr(run, "run_name", None),
+                    "created_at": getattr(run, "created_at", None),
+                    "result": getattr(run, "result", None),
+                }
+            )
+        return out
+
+    async def update_result(
+        self, job_id: str, result_data: dict, group_ids: Optional[list[str]] = None
+    ) -> dict:
+        """
+        Update the result field for an execution.
+
+        Args:
+            job_id: Job ID of the execution
+            result_data: New result data to store
+            group_ids: Optional list of group IDs for tenant filtering
+
+        Returns:
+            Dictionary with success status, job_id, and updated_at
+        """
+        try:
+            from datetime import datetime, timezone
+
+            success = await self.history_repo.update_execution_result(
+                job_id=job_id,
+                result_data=result_data,
+                group_ids=group_ids,
+                gate_stamp=await self._waiting_gate(job_id, group_ids),
+            )
+
+            if not success:
+                return {"success": False, "job_id": job_id, "updated_at": ""}
+
+            return {
+                "success": True,
+                "job_id": job_id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error updating result for job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error updating result for job_id {job_id}: {str(e)}")
+            raise
+
+    async def _waiting_gate(
+        self, job_id: str, group_ids: Optional[list[str]]
+    ) -> Optional[Dict[str, object]]:
+        """The approval the run is waiting at, as ``{approval_id, gate_node_id}``.
+
+        An edit saved now belongs to that gate alone, so only that gate hands it
+        on when the flow resumes. Resolved here, from the run's own approvals,
+        rather than taken from the client. None unless exactly one is pending.
+
+        The run is found in the caller's ``group_ids``, and its approvals are
+        read for the run's own group only: an approval belongs to the group of
+        the run that raised it.
+        """
+        from src.models.hitl_approval import HITLApprovalStatus
+        from src.services.hitl.service import HITLService
+
+        run = await self.history_repo.get_execution_by_job_id(
+            job_id, group_ids=group_ids
+        )
+        run_group_id = getattr(run, "group_id", None)
+        if not run_group_id:
+            return None
+        approvals = await HITLService(self.session).get_approvals_for_execution(
+            job_id, run_group_id
+        )
+        pending = [a for a in approvals if a.status == HITLApprovalStatus.PENDING]
+        if len(pending) != 1:
+            return None
+        return {"approval_id": pending[0].id, "gate_node_id": pending[0].gate_node_id}
+
+    async def get_execution_groups_with_counts(
+        self,
+    ) -> list[tuple[Optional[str], int]]:
+        """
+        Get all unique group_ids from execution_history with their execution counts.
+
+        Returns:
+            List of (group_id, execution_count) tuples
+        """
+        try:
+            return await self.history_repo.count_by_group()
+        except Exception as e:
+            logger.error(f"Error getting execution groups with counts: {str(e)}")
+            raise
+
+
+from src.dependencies.providers import (  # noqa: E402 - import follows module initialization
+    SessionDep,
+)
+
+
+def get_execution_history_service(session: SessionDep) -> ExecutionHistoryService:
+    """
+    Factory function to create an instance of ExecutionHistoryService.
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        ExecutionHistoryService instance initialized with session
+    """
+    return ExecutionHistoryService(session)

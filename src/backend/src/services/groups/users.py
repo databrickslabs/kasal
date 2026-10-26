@@ -1,0 +1,447 @@
+import asyncio
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Set
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import ConflictError
+from src.models.user import User
+from src.repositories.user_repository import UserRepository
+from src.schemas.user import UserPermissionUpdate, UserUpdate
+
+# Removed password hash import - using OAuth proxy authentication
+
+logger = logging.getLogger(__name__)
+
+# One in-flight get-or-create per email, process-wide.
+#
+# The read-then-write in get_or_create_user_by_email is not atomic, and on SQLite
+# it cannot be made safe by retrying. The SQLite engine uses StaticPool — ONE
+# shared connection (see db/session.get_sqlite_poolclass) — so two concurrent
+# callers land in the SAME transaction:
+#
+#   A: SELECT -> none      B: SELECT -> none
+#   A: INSERT (flush)      B: INSERT (flush) -> UNIQUE violation, because it
+#                             sees A's uncommitted row on the shared connection
+#   B: rollback            <- and this discards A's INSERT too
+#   B: SELECT -> none      <- "UNIQUE constraint error but user still not found"
+#
+# Both callers then fail, and the second one's use of the session after the
+# failed flush is what produces "greenlet_spawn has not been called". Retrying
+# harder cannot fix it: the recovery is what destroys the winner's work.
+#
+# Serialising in-process closes the window that actually occurs here — the
+# racers are coroutines in one uvicorn process (startup seeding vs the first
+# authenticated request). Cross-process races are still caught by the UNIQUE
+# constraint and the refetch below, which works when the other transaction has
+# genuinely committed.
+_user_creation_locks: Dict[str, asyncio.Lock] = {}
+_user_creation_locks_guard = asyncio.Lock()
+
+
+async def _lock_for_email(email: str) -> asyncio.Lock:
+    """The lock for one email, created once. Guarded so two coroutines cannot
+    each make their own lock and then not share it."""
+    async with _user_creation_locks_guard:
+        lock = _user_creation_locks.get(email)
+        if lock is None:
+            lock = asyncio.Lock()
+            _user_creation_locks[email] = lock
+        return lock
+
+
+class UserService:
+    """Service for user management operations"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.user_repo = UserRepository(User, session)
+        # UserProfileRepository removed - display_name moved to User model
+        # External identity repository removed - using simplified auth
+
+    async def get_user(self, user_id: str) -> Optional[User]:
+        """Get a user by ID"""
+        return await self.user_repo.get(user_id)
+
+    async def get_system_admin_emails(self) -> Set[str]:
+        """Lower-cased emails of every system administrator (read-only)."""
+        emails = await self.user_repo.find_system_admin_emails()
+        return {email.strip().lower() for email in emails}
+
+    async def get_users(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        filters: Optional[Dict[str, Any]] = None,
+        search: Optional[str] = None,
+    ) -> List[User]:
+        """Get a list of users with filtering and search"""
+        return await self.user_repo.search_users(
+            search or "", limit=limit, skip=skip, filters=filters
+        )
+
+    async def get_user_complete(self, user_id: str) -> Optional[User]:
+        """Get a user with complete information"""
+        return await self.user_repo.get(user_id)
+
+    async def record_login(self, user_id: str) -> None:
+        """Record profile initialization, without writes on frequent refreshes."""
+        user = await self.get_user(user_id)
+        if user is None:
+            return
+        now = datetime.now(timezone.utc)
+        previous = user.last_login
+        if previous is not None and previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        if previous is None or now - previous >= timedelta(minutes=5):
+            await self.user_repo.update_last_login(user_id)
+            # /users/me must not report success before this write is durable.
+            await self.session.commit()
+
+    async def provision_user(self, email: str) -> User:
+        """Prepare an identity for an admin, without recording a login or bootstrapping privileges."""
+        lock = await _lock_for_email(email)
+        async with lock:
+            existing = await self.user_repo.get_by_email(email)
+            if existing is not None:
+                return existing
+            from uuid import uuid4
+
+            user = User(
+                email=email,
+                username=f"user_{uuid4().hex}",
+                personal_group_id=f"user_{uuid4().hex}",
+                is_system_admin=False,
+                is_personal_workspace_manager=False,
+            )
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                await self.user_repo.insert(user)
+                await self.session.commit()
+            except IntegrityError:
+                await self.session.rollback()
+                existing = await self.user_repo.get_by_email(email)
+                if existing is not None:
+                    return existing
+                raise
+            await self.session.refresh(user)
+            return user
+
+    async def update_user(
+        self, user_id: str, user_update: UserUpdate
+    ) -> Optional[User]:
+        """Update a user"""
+        # Check if user exists
+        user = await self.user_repo.get(user_id)
+        if not user:
+            return None
+
+        # Prepare update data
+        update_data = user_update.model_dump(exclude_unset=True, exclude_none=True)
+
+        # Check if username is being updated and is unique
+        if "username" in update_data:
+            existing_user = await self.user_repo.get_by_username(
+                update_data["username"]
+            )
+            if existing_user and existing_user.id != user_id:
+                raise ValueError("Username already taken")
+
+        # Email is never in update_data: it is the identity authentication
+        # resolves a row by, and the schema refuses it (see UserUpdate).
+
+        # Update user
+        await self.user_repo.update(user_id, update_data)
+
+        # Return updated user
+        return await self.user_repo.get(user_id)
+
+    async def _revoke_admin_unless_last(self, user: User, action: str) -> None:
+        """Clear ``user``'s system-admin flag, or raise ConflictError if it is the last.
+
+        Nothing promotes a user when no admin is left, so the installation would
+        have no one who can manage users, teamspaces or global settings. The
+        repository checks and writes in one statement, so two admins removing
+        each other at once cannot both succeed.
+        """
+        if not getattr(user, "is_system_admin", False):
+            return
+        if not await self.user_repo.revoke_system_admin_unless_last(user.id):
+            raise ConflictError(
+                f"Cannot {action} the last system administrator. "
+                "Make another user a system administrator first."
+            )
+        logger.info("System admin removed from user %s", user.id)
+
+    async def update_user_permissions(
+        self, user_id: str, permission_update: UserPermissionUpdate
+    ) -> Optional[User]:
+        """Update user permissions (system admin only)"""
+        # Check if user exists
+        user = await self.user_repo.get(user_id)
+        if not user:
+            return None
+
+        # Prepare update data
+        update_data = permission_update.model_dump(
+            exclude_unset=True, exclude_none=True
+        )
+        if update_data.get("is_system_admin") is False:
+            await self._revoke_admin_unless_last(user, "remove admin rights from")
+            update_data.pop("is_system_admin")
+        elif update_data.get("is_system_admin") is True:
+            logger.info("System admin granted to user %s", user_id)
+
+        # Update user permissions
+        if update_data:
+            await self.user_repo.update(user_id, update_data)
+
+        # Return updated user
+        return await self.user_repo.get(user_id)
+
+    # update_user_profile removed - display_name is now part of User model
+
+    # Password update removed - using OAuth proxy authentication only
+
+    async def ensure_personal_workspace_id(self, user: User) -> str:
+        """Allocate the user's personal-workspace id once (audit F06 / R2-06).
+
+        The startup migration preserves unambiguous existing IDs. New or
+        unresolved accounts get an opaque ID, never a potentially shared legacy
+        scope. An allocation failure must deny access.
+        """
+
+        stored = getattr(user, "personal_group_id", None)
+        if isinstance(stored, str) and stored:
+            from src.utils.user_context import GroupContext
+
+            if stored == GroupContext.generate_individual_group_id(user.email):
+                if await self.user_repo.has_legacy_personal_collision(user.id, stored):
+                    raise ValueError(
+                        "Ambiguous personal workspace requires ownership review"
+                    )
+            return stored
+        import uuid
+
+        from sqlalchemy.exc import IntegrityError
+
+        for attempt in range(3):
+            try:
+                async with self.session.begin_nested():
+                    assigned = await self.user_repo.allocate_personal_group_id(
+                        user.id, f"user_{uuid.uuid4().hex}"
+                    )
+                    if not isinstance(assigned, str) or not assigned:
+                        raise ValueError("Personal workspace allocation failed")
+                user.personal_group_id = assigned
+                return assigned
+            except IntegrityError:
+                if attempt == 2:
+                    raise
+        raise ValueError("Personal workspace allocation failed")
+
+    async def get_or_create_user_by_email(
+        self, email: str, update_login: bool = False
+    ) -> Optional[User]:
+        """Get or create a user by email, one caller at a time.
+
+        The lock is the fix, not a mitigation: see ``_user_creation_locks`` at
+        the top of this module for why retrying after the UNIQUE violation
+        cannot work on a shared SQLite connection.
+        """
+        if not email:
+            return await self._get_or_create_user_by_email_unlocked(email, update_login)
+        lock = await _lock_for_email(email)
+        async with lock:
+            return await self._get_or_create_user_by_email_unlocked(email, update_login)
+
+    async def _get_or_create_user_by_email_unlocked(
+        self, email: str, update_login: bool = False
+    ) -> Optional[User]:
+        """
+        Get or create a user by email address.
+        This is used for proxy-based authentication where users are auto-created.
+
+        Args:
+            email: User's email address
+            update_login: Whether to update the last_login timestamp (default: False to prevent locking)
+
+        Returns:
+            User: The existing or newly created user
+        """
+        logger.debug(f"get_or_create_user_by_email called for email: {email}")
+
+        # Reject partial/invalid emails to prevent junk records from
+        # incremental header processing (e.g. "user@", "user@d", etc.)
+        if not email or not re.match(
+            r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email
+        ):
+            if not email or not email.endswith("@localhost"):
+                logger.warning(f"Rejecting invalid email for user creation: {email!r}")
+                return None
+
+        # Use try-catch to handle race conditions where user might be created between check and create
+        try:
+            # Check if user exists
+            user = await self.user_repo.get_by_email(email)
+
+            if user:
+                # User exists, optionally update last login (disabled by default to prevent SQLite locking)
+                if update_login:
+                    try:
+                        await self.user_repo.update_last_login(user.id)
+                    except Exception as e:
+                        # Log but don't fail on last_login update errors
+                        logger.warning(f"Failed to update last_login for {email}: {e}")
+                logger.debug(f"Existing user found: {email}")
+
+                # An existing user is never promoted, even when no system admin
+                # exists: the bootstrap below is for the first user only.
+                await self.ensure_personal_workspace_id(user)
+                return user
+            # Create new user (OAuth proxy authentication - no password needed)
+
+            # Generate username from email (replace invalid characters)
+            username_base = email.split("@")[0]
+            # Replace dots and other invalid characters with underscores
+            username_base = username_base.replace(".", "_").replace("-", "_")
+            # Remove any other invalid characters (keep only letters, numbers, underscores)
+            username_base = re.sub(r"[^a-zA-Z0-9_]", "_", username_base)
+
+            username = username_base
+            i = 1
+
+            # Ensure unique username
+            while await self.user_repo.get_by_username(username):
+                username = f"{username_base}{i}"
+                i += 1
+
+            # Create user with regular role initially (no password needed for OAuth proxy)
+            from src.schemas.user import UserRole
+
+            user_data = {
+                "username": username,
+                "email": email,
+                "display_name": username,  # Set display_name directly
+                "role": UserRole.REGULAR,
+            }
+
+            try:
+                user = await self.user_repo.create(user_data)
+
+                await self.ensure_personal_workspace_id(user)
+                # No separate profile creation needed - display_name is now part of User
+
+                logger.info(f"Created new user via proxy auth: {email}")
+
+                # Check if this is the first user and needs admin setup
+                await self._handle_first_user_admin_setup(user)
+                return user
+
+            except Exception as create_error:
+                # Handle race condition where user was created between our check and create attempt
+                if (
+                    "UNIQUE constraint failed" in str(create_error)
+                    or "unique constraint" in str(create_error).lower()
+                ):
+                    logger.warning(
+                        f"Race condition detected: User {email} was created by another request. Fetching existing user."
+                    )
+
+                    # CRITICAL: Rollback the failed transaction to clear session state
+                    # SQLite sessions can't see committed data from other connections until rollback
+                    try:
+                        await self.session.rollback()
+                        # Expunge all objects to ensure fresh fetch from database
+                        self.session.expunge_all()
+                        logger.debug(
+                            f"Session rolled back and cleared after UNIQUE constraint error for {email}"
+                        )
+                    except Exception as rollback_error:
+                        logger.warning(f"Error during rollback: {rollback_error}")
+
+                    # Fetch the user that was created by the other request
+                    # The rollback and expunge allow us to see data committed by other sessions
+                    existing_user = await self.user_repo.get_by_email(email)
+                    if existing_user:
+                        logger.info(
+                            f"Successfully retrieved user created by concurrent request: {email}"
+                        )
+                        # Re-check: the request that inserted the row may not
+                        # have reached its bootstrap, and it is safe to repeat
+                        # (it only ever promotes the first user).
+                        await self._handle_first_user_admin_setup(existing_user)
+                        return existing_user
+                    else:
+                        logger.error(
+                            f"UNIQUE constraint error but user {email} still not found after race condition"
+                        )
+                        raise
+
+                # Re-raise other errors
+                logger.error(f"Error creating user {email}: {create_error}")
+                raise
+
+        except Exception as e:
+            logger.error(f"Error in get_or_create_user_by_email for {email}: {e}")
+            raise
+
+    async def _handle_first_user_admin_setup(self, user: User) -> None:
+        """Make the first user of a fresh install its system administrator.
+
+        Called when a user row has just been created (or found created by a
+        concurrent request). It promotes ``user`` only while no system admin
+        exists and ``user`` is the earliest row in the users table, in one
+        conditional UPDATE, so two first sign-ins at once still leave exactly
+        the first one admin. It never promotes anyone else: an installation
+        with users but no admin stays that way (SECURITY.md describes the
+        recovery), and ``_revoke_admin_unless_last`` keeps the API from
+        reaching that state.
+
+        Args:
+            user: The user that was just created
+        """
+        try:
+            if await self.user_repo.grant_first_system_admin(user.id):
+                logger.info(
+                    "First user of this installation: granted system admin to %s",
+                    user.email,
+                )
+        except Exception:
+            # Sign-in continues, but the install may now have no system admin.
+            logger.exception(
+                "First system admin was NOT granted to %s; restore one as "
+                "described under 'The first system admin' in SECURITY.md",
+                user.email,
+            )
+
+    async def delete_user(self, user_id: str) -> bool:
+        """Delete a user"""
+        user = await self.user_repo.get(user_id)
+        if not user:
+            return False
+        # Revoked first, atomically, so two admins deleting each other cannot
+        # both pass; the delete below runs in the same transaction.
+        await self._revoke_admin_unless_last(user, "delete")
+
+        # First, remove user from all groups (to avoid foreign key constraint violations)
+        from src.services.groups.groups import GroupService
+
+        group_service = GroupService(self.session)
+
+        # Get all groups the user belongs to
+        user_groups = await group_service.get_user_groups(user_id)
+
+        # Remove user from each group
+        for group in user_groups:
+            await group_service.remove_user_from_group(group.id, user_id)
+
+        # Now delete the user
+        await self.user_repo.delete(user_id)
+
+        return True
+
+    # External identity methods removed - using simplified auth system

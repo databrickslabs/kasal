@@ -1,0 +1,136 @@
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Query
+
+from src.dependencies.providers import GroupContextDep, SessionDep
+from src.repositories.log_repository import LLMLogRepository
+from src.schemas.log import LLMLogResponse
+from src.services.execution.logs.llm_log_service import LLMLogService
+
+router = APIRouter(
+    prefix="/llm-logs",
+    tags=["logs"],
+    responses={404: {"description": "Not found"}},
+)
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
+def get_log_service(session: SessionDep) -> LLMLogService:
+    """Build the log service for a request.
+
+    Lives here rather than in core/dependencies because it names a concrete
+    service, and core must not import services.
+    """
+    return LLMLogService(LLMLogRepository(session))
+
+
+@router.get("", response_model=List[LLMLogResponse])
+async def get_llm_logs(
+    group_context: GroupContextDep,
+    page: int = Query(0, ge=0, description="Page number, starting from 0"),
+    per_page: int = Query(
+        10, ge=1, le=100, description="Items per page, between 1 and 100"
+    ),
+    endpoint: Optional[str] = Query(
+        None, description="Filter by endpoint, 'all' or None for all endpoints"
+    ),
+    log_service: LLMLogService = Depends(get_log_service),
+) -> List[LLMLogResponse]:
+    """
+    Get LLM logs with pagination and optional endpoint filtering for the current group.
+
+    Args:
+        page: Page number, starting from 0
+        per_page: Items per page, between 1 and 100
+        endpoint: Optional endpoint to filter by
+        log_service: Injected log service
+        group_context: Group context from headers
+
+    Returns:
+        List of LLM logs for the specified page and group
+    """
+    try:
+        logs = await log_service.get_logs_paginated_by_group(
+            page, per_page, endpoint, group_context
+        )
+        return [LLMLogResponse.model_validate(log) for log in logs]
+    except Exception as e:
+        logger.error(f"Error getting LLM logs: {str(e)}")
+        raise
+
+
+@router.get("/count", response_model=int)
+async def count_llm_logs(
+    group_context: GroupContextDep,
+    endpoint: Optional[str] = Query(
+        None, description="Filter by endpoint, 'all' or None for all endpoints"
+    ),
+    log_service: LLMLogService = Depends(get_log_service),
+) -> int:
+    """
+    Count LLM logs with optional endpoint filtering for the current group.
+
+    Args:
+        endpoint: Optional endpoint to filter by
+        log_service: Injected log service
+        group_context: Group context from headers
+
+    Returns:
+        Total count of matching logs for group
+    """
+    try:
+        return await log_service.count_logs_by_group(endpoint, group_context)
+    except Exception as e:
+        logger.error(f"Error counting LLM logs: {str(e)}")
+        raise
+
+
+@router.get("/endpoints", response_model=List[str])
+async def get_unique_endpoints(
+    group_context: GroupContextDep,
+    log_service: LLMLogService = Depends(get_log_service),
+) -> List[str]:
+    """
+    Get list of unique endpoints in the logs for the current group.
+
+    Args:
+        log_service: Injected log service
+        group_context: Group context from headers
+
+    Returns:
+        List of unique endpoint strings for group
+    """
+    try:
+        return await log_service.get_unique_endpoints_by_group(group_context)
+    except Exception as e:
+        logger.error(f"Error getting unique endpoints: {str(e)}")
+        raise
+
+
+@router.get("/stats", response_model=Dict[str, Any])
+async def get_log_stats(
+    group_context: GroupContextDep,
+    days: int = Query(
+        30, ge=1, le=365, description="Number of days to include in stats"
+    ),
+    log_service: LLMLogService = Depends(get_log_service),
+) -> Dict[str, Any]:
+    """
+    Get statistics about LLM usage for the current group.
+
+    Args:
+        days: Number of days to include in stats
+        log_service: Injected log service
+        group_context: Group context from headers
+
+    Returns:
+        Dictionary with usage statistics for group
+    """
+    try:
+        return await log_service.get_log_stats_by_group(days, group_context)
+    except Exception as e:
+        logger.error(f"Error getting log stats: {str(e)}")
+        raise

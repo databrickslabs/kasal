@@ -1,0 +1,509 @@
+[project]
+name = "kasal-backend"
+version = "2.0.0"
+description = "Kasal Backend - AI Agent Workflow Orchestration Platform"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    # Web framework
+    "fastapi>=0.110.0",
+    # Agent Skills: the OFFICIAL reference validator (github.com/anthropics/agentskills).
+    # Used instead of hand-rolling frontmatter checks — a divergent validator is
+    # how a "compatible" implementation quietly stops being compatible, and the
+    # whole reason to adopt the format is that a skill authored here runs
+    # unchanged in Claude Code, Cursor, Codex and Gemini CLI.
+    "skills-ref>=0.1.1",
+    "uvicorn[standard]>=0.27.0",
+    "starlette>=1.0.1,<2.0.0", # every fix for PYSEC-2026-161/248/249/2280/2281 is on the 1.x line — no patched 0.49 exists
+    "limits>=3.6", # API rate-limiting engine. NOTE: we use limits directly in a
+    # pure-ASGI middleware (core/rate_limit.py) rather than slowapi, because
+    # slowapi's SlowAPIMiddleware is BaseHTTPMiddleware and buffers streaming
+    # responses — which would break the app's SSE streaming.
+    # Database
+    "sqlalchemy>=2.0.27",
+    "alembic>=1.13.1",
+    "asyncpg>=0.29.0",
+    "pg8000",
+    "aiosqlite",
+    "greenlet>=3.0.3",
+    # Pydantic
+    "pydantic>=2.6.1",
+    "pydantic-settings>=2.1.0",
+    "pydantic[email]",
+    "email-validator",
+    # HTTP clients
+    "httpx>=0.26.0",
+    "aiohttp>=3.9.0",
+    "urllib3>=1.26.6",
+    # Auth
+    # NOTE: python-jose + passlib removed — they were unused (0 imports) and
+    # python-jose pulled in `ecdsa`, which carries an unfixable CVE. bcrypt (once
+    # pinned ==4.0.1 for passlib) went with them; auth is via the Databricks
+    # OAuth proxy (no homegrown JWT).
+    "cryptography",
+    "python-multipart>=0.0.9",
+    # Document parsing
+    "pdfminer.six", # MIT-licensed pure-Python PDF text extraction (knowledge-file uploads)
+    # Databricks
+    "databricks-sdk>=0.102.0",
+    "databricks-vectorsearch",
+    # No first-party import, but a real runtime dependency: MLflow's built-in
+    # GenAI scorers (RelevanceToQuery, Safety, Correctness, Groundedness, ...
+    # used by services/mlflow/evaluation_runner.py) delegate to
+    # `databricks.agents.evals.judges` when the judge model is the Databricks
+    # default, as do mlflow.genai.datasets and labeling. Do not prune.
+    "databricks-agents>=1.4.0",
+    # Azure
+    "azure-identity>=1.15.0",
+    # AI/ML
+    "litellm[caching]==1.96.2", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.96.2 clears PYSEC-2026-4066 (and everything 1.84.0 cleared); never 1.107.0 (compromised release)
+    "mcp>=1.30.0,<1.31.0", # Kasal's own MCP integration. 1.30.0 clears
+    # CVE-2026-59951; crewai 1.15.28 still declares ~=1.28.1, so this is held by
+    # the override in [tool.uv] until the crewai 1.15.30 bump (which requires
+    # >=1.30,<2 itself). Kasal's own use is narrow — the sse / streamable-http
+    # clients, McpError, and the JSON-RPC server side — so the bump is contained,
+    # but it is a shipped feature and gets exercised rather than assumed.
+    # `mcpadapt` is NOT here: it was only ever present because crewai-tools[mcp]
+    # imported mcpadapt.core, and crewai-tools is deliberately not a dependency
+    # (see below).
+
+    # CrewAI — the SECOND agent runtime. Kasal's own runtime lives in
+    # services/execution/runtime/; which of the two executes a run is an
+    # operator setting (Configuration -> Engines), resolved once per execution
+    # and stamped on the row so a run — and its resume — sticks to one engine.
+    #
+    # `crewai-tools` is deliberately absent. Kasal has 38 first-party tools and
+    # adapts them onto whichever engine is active; crewai-tools would add
+    # pymupdf, pytube and youtube-transcript-api for nothing.
+    #
+    # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84;
+    # litellm is pinned independently above (==1.96.2, for completion_with_usage
+    # only). The CrewAI engine runs on Kasal's own transport instead (a BaseLLM
+    # subclass), so the extra is unnecessary and the two pins never have to move
+    # together — and Databricks auth, retry/fallback, the
+    # context-window clamp and every LLM event stay identical across engines.
+    # 1.15.28: the newest release through the PyPI proxy's 7-day hold. It already
+    # brings chromadb ~=1.5.9 (from ~=1.1), pyjwt >=2.15, oauthlib >=4 and
+    # instructor <1.16. NEXT: 1.15.30 is the first to allow mcp>=1.30 and (via
+    # crewai-cli) uv>=0.13.4; published 2026-10-24, the proxy serves it from about
+    # 2026-10-31. Until then [tool.uv] override-dependencies holds those two; drop
+    # the overrides when this pin moves.
+    "crewai==1.15.28",
+    # Observability
+    # Pinned to the 3.17 line: the built-in judge bridge (services/prompt_optimization/
+    # builtin_judges/bridge.py) wraps mlflow internals (judges.adapters.utils.get_adapter),
+    # pinned by tests/.../builtin_judges/test_bridge_contract.py. Re-run that test before
+    # widening. 3.17.2 is the floor that clears the 3.16 advisories.
+    # (>=3.11 was already required for Unity Catalog trace storage.)
+    "mlflow>=3.17.2,<3.18",
+    "dspy>=3.3,<4", # MemAlign judge alignment (mlflow.genai.judges.optimizers) is built on DSPy; mlflow does not pull it in
+    "opentelemetry-sdk>=1.27.0,<2.0.0",
+    "opentelemetry-api>=1.27.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0,<2.0.0",
+    # Utils
+    "openpyxl>=3.1.0", # PowerBI MQuery conversion report parsing (was transitive via crewai)
+    "croniter",
+    "psutil",
+    "redis>=5.0.0", # no direct import: backs LITELLM_CACHE_TYPE=redis (litellm) and redis:// rate-limit storage (limits)
+    "aiofiles>=23.0.0",
+    "rapidfuzz>=3.0.0", # Power BI metadata fuzzy matching (optional; falls back to difflib)
+    # Protobuf (version pinned for compatibility)
+    "protobuf>=5.29.0,<6.0.0",
+    "grpcio-status>=1.62.0,<1.71.0",
+    # Tools
+    # google-api-python-client, pysendpulse, nixtla, selenium, python-pptx and
+    # wheel were removed: 0 imports (they backed crewai-tools-era tools that no
+    # longer exist; PPTX export is client-side via pptxgenjs).
+    "ollama>=0.6.2",
+    "gepa>=0.1.4",
+    "anthropic>=1.8.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.5",
+    "pytest-xdist>=3.5.0",
+    "pytest-mock>=3.12.0",
+    "pytest-timeout>=2.3.1",
+    "black>=24.1.1",
+    "isort>=5.13.2",
+    "mypy>=1.8.0",
+    "ruff>=0.2.1",
+    "import-linter>=2.0",
+    "types-psutil>=7.2.2.20260906",
+    "types-requests>=2.33.0.20260906",
+    "types-pyyaml>=6.0.12.20260906",
+    "types-croniter>=6.2.4.20260711",
+    "types-aiofiles>=25.1.0.20260518",
+    "types-openpyxl>=3.1.5.20260827",
+    "pandas-stubs>=2.3,<2.4",
+]
+
+[tool.uv]
+# Databricks App: install dependencies ONLY — never build/install this project as
+# a wheel. The app runs from source via PYTHONPATH (see app.yaml), and the deployed
+# bundle root has no matching package layout, so `uv sync` must not try to build it.
+package = false
+# Security overrides, until crewai 1.15.30 is through the PyPI proxy's 7-day hold
+# (published 2026-10-24; that release itself requires mcp>=1.30,<2 and, via
+# crewai-cli, uv>=0.13.4). crewai 1.15.28 still declares mcp~=1.28.1 and
+# crewai-cli uv~=0.11.6, which would keep two advisories in the lock:
+#   - mcp 1.30.0 clears CVE-2026-59951 (stateful Streamable HTTP servers; Kasal
+#     only uses the client side, but the audit gates on it).
+#   - uv 0.13.4 clears PYSEC-2026-4321 (compromised CA root in uv's bundled
+#     store). crewai-cli only shells out to uv for its own CLI, which Kasal
+#     never runs; the app's startup uses the platform's uv, not this one.
+# Drop both lines when the crewai pin moves to 1.15.30.
+override-dependencies = [
+    "mcp>=1.30.0,<1.31.0",
+    "uv>=0.13.4,<0.14.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+# src/services/export/templates/ holds the Databricks agent-app TEMPLATE shipped
+# to exported projects. The WHOLE tree used to be excluded from every linter, for
+# two stated reasons: its *.py files carry {{TOKEN}} placeholders ("invalid
+# Python until rendered"), and they imported packages absent from this env
+# (crewai). That cost ~3,000 lines of shipped code any quality gate ever seeing
+# it, and it accumulated real debt — 14 files needed reformatting and 11 ruff
+# findings were waiting when the exclusion was finally narrowed.
+#
+# Both reasons are now dealt with, and the first was never quite true:
+#
+#   * crewai is gone. The exported app runs Kasal's own vendored runtime, so its
+#     code imports first-party modules and stdlib only.
+#   * The token-bearing files DO parse — `{{X}}` is a valid set-of-set literal,
+#     and a token inside a string is just a string. What actually breaks is
+#     narrower: where a token stands in for CODE, ruff reports the placeholder
+#     name as undefined (F821) and black reformats around it. That is true of
+#     exactly two files, agent.py and llm_factory.py. otel.py's one token sits
+#     inside a string literal, so it is linted like anything else.
+#
+# tests/unit/services/export/test_template_lint_scope.py derives that criterion
+# from the files themselves and asserts this list matches, so a new template file
+# is linted by default, and a file that gains or loses a code-position token is
+# caught here rather than by a confusing CI failure.
+#
+# mypy is the exception and still skips the whole tree: the app's modules import
+# `agent_server.*`, a package that only exists in a RENDERED export, so mypy
+# cannot resolve them from here no matter how the files are formatted.
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = "src/services/export/templates/databricks_app/agent_server/(agent|llm_factory)\\.py"
+
+[tool.isort]
+profile = "black"
+line_length = 88
+extend_skip_glob = [
+    "*/export/templates/databricks_app/agent_server/agent.py",
+    "*/export/templates/databricks_app/agent_server/llm_factory.py",
+]
+
+[tool.mypy]
+python_version = "3.11"
+# Without the plugin mypy does not know a pydantic field with a default is
+# optional, and every model built without it reads as a missing argument.
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+# A suppression must earn its keep: a `type: ignore` that no longer silences
+# anything is an error, and every one must name the error code it silences, so
+# it cannot quietly swallow a different error later. Their count (and `cast(`)
+# is ratcheted by tests/unit/architecture/test_typing_escape_ratchet.py.
+warn_unused_ignores = true
+enable_error_code = ["ignore-without-code"]
+exclude = ["src/services/export/templates/"]
+
+# Installed libraries that ship neither inline types nor a stub package. Each is
+# named explicitly: a blanket ignore_missing_imports would hide a typo'd import.
+[[tool.mypy.overrides]]
+module = [
+    "asyncpg",
+    "asyncpg.*",
+    "dspy",
+    "dspy.*",
+    "skills_ref",
+    "skills_ref.*",
+    # Optional instrumentation; imported inside a try/except ImportError.
+    "openinference.instrumentation.crewai",
+]
+ignore_missing_imports = true
+
+[tool.ruff]
+cache-dir = "tests/.artifacts/ruff"
+line-length = 88
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "alembic",
+    # Only the token-bearing template files — see the note above [tool.black].
+    "src/services/export/templates/databricks_app/agent_server/agent.py",
+    "src/services/export/templates/databricks_app/agent_server/llm_factory.py",
+]
+
+[tool.ruff.lint]
+# Errors and pyflakes only — no opinionated extras. These were top-level keys,
+# which ruff has deprecated and warned about on every invocation.
+#
+# I001 (import sorting) is deliberately NOT selected: isort owns import order
+# here, with profile = "black" so the two agree. Selecting it in both means two
+# tools formatting the same thing, free to disagree the day their settings drift.
+select = ["E", "F"]
+
+# E501 (line-too-long) is BLACK's job, and black has now been applied to the
+# whole backend. What ruff still flags at 88 columns is exclusively what black
+# refuses to split — long string literals, docstrings and f-strings — because
+# splitting them would change their content. Leaving it selected means ~5,100
+# findings no formatter will ever clear, which is how a lint gate becomes
+# something everyone passes with --no-verify.
+ignore = ["E501"]
+
+# RUF100: a `noqa` that suppresses nothing is a lie about the code next to it, and
+# it hides the day the suppressed rule would fire for real. The 110 dead ones that
+# had piled up were removed mechanically (ruff's fix for RUF100 touches noqa
+# comments and nothing else).
+extend-select = ["RUF100"]
+
+# Rules ENFORCED as a per-file COUNT ratchet by
+# tests/unit/architecture/test_ruff_ratchet.py (baseline: ruff_ratchet_baseline.json
+# next to it), not selected here, because thousands of pre-existing hits would turn
+# this gate red. Listing them as `external` keeps RUF100 from deleting the `noqa`
+# comments that suppress them — those comments ARE honoured by the ratchet.
+external = ["BLE001", "S110", "TRY400", "G004", "B904"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy filters are built with `==`, not truthiness: `where(Model.flag == True)`
+# compiles to SQL, while ruff's suggested `where(Model.flag)` evaluates the COLUMN
+# OBJECT in Python and silently changes the query. Same for `== None` vs `.is_(None)`.
+# Every E711/E712 in the repository layer is one of these.
+"src/repositories/*.py" = ["E711", "E712"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+asyncio_mode = "auto"
+# A hung test must fail, not stall an xdist worker (and CI) indefinitely.
+# 300 s is far above the slowest legitimate test. "signal" raises inside the
+# stuck test and keeps the worker alive, so fixture teardown still runs — that
+# teardown is what reaps the real subprocesses some suites spawn. "thread"
+# would os._exit the whole worker, skip teardown and orphan those children.
+# Override per test with @pytest.mark.timeout(n).
+timeout = 300
+timeout_method = "signal"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
+
+# ─── Coverage (pytest-cov) ───────────────────────────────────────────────────
+# Run: uv run python run_tests.py --coverage   (reports land in tests/.artifacts/; CI uploads coverage.xml)
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+# The floor. pytest-cov and `coverage report` both fail below it, and the
+# "backend-coverage" CI job gates on it. Measured 2026-09-27 on the full suite
+# (branch coverage, -n 4): 85% (105,369 statements, 33,306 branches). Only
+# ever raise it. It applies to any --cov run, so a --cov run over a subset of
+# tests fails it by design; use --cov-fail-under=0 for a partial local report.
+fail_under = 80
+
+# ─── Architecture contracts (import-linter) ──────────────────────────────────
+# Run: .venv/bin/lint-imports
+#
+# These encode the layering the code already follows, so the build fails on new
+# violations rather than on a code review noticing one. Everything listed under
+# `ignore_imports` is a KNOWN violation kept passing deliberately — the list is
+# meant to shrink, and nothing should be added to it without a reason in review.
+
+[tool.importlinter]
+root_package = "src"
+
+[[tool.importlinter.contracts]]
+name = "Layers: routers on top, models at the bottom"
+type = "layers"
+layers = [
+    "src.api",
+    "src.services",
+    "src.repositories",
+    "src.models",
+]
+# Every one of these is repositories -> services, direct or through utils. They
+# are listed again here because import-linter evaluates each contract
+# independently; the "Repositories never import services" contract below is
+# where the reasoning lives.
+ignore_imports = [
+    "src.utils.databricks_auth -> src.services.databricks.workspace.service",
+    "src.utils.databricks_auth -> src.services.settings.api_keys",
+    "src.utils.user_context -> src.services.groups.groups",
+    "src.utils.user_context -> src.services.groups.users",
+    "src.utils.prompt_utils -> src.services.catalog.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Repositories never import services"
+type = "forbidden"
+source_modules = ["src.repositories"]
+forbidden_modules = ["src.services"]
+# What is left is all transitive, via utils. The repositories are innocent: they
+# import src.utils.databricks_auth / src.utils.user_context, and those reach for
+# a service. Fixing the three utils modules clears every entry here.
+ignore_imports = [
+    # Transitive, via utils. The repositories are innocent here: they import
+    # src.utils.databricks_auth / src.utils.user_context, which reach for a
+    # service. Fixing the three utils modules below clears all of these at once.
+    "src.utils.databricks_auth -> src.services.databricks.workspace.service",
+    "src.utils.databricks_auth -> src.services.settings.api_keys",
+    "src.utils.user_context -> src.services.groups.groups",
+    "src.utils.user_context -> src.services.groups.users",
+    "src.utils.prompt_utils -> src.services.catalog.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core and utils never import services"
+type = "forbidden"
+source_modules = ["src.core", "src.utils"]
+forbidden_modules = ["src.services"]
+# ACCEPTED EXCEPTIONS — reviewed and kept deliberately, not a backlog.
+#
+# core -> services is now ZERO. These five are all utils -> services, and all
+# five are LAZY (the import sits inside the function that needs it), so none of
+# them forms an import cycle. What they violate is the layering in principle,
+# not the build.
+#
+# The correct fix is dependency inversion: a CredentialProvider protocol in
+# core, implemented in services so ApiKeysService still runs, registered at
+# startup. It was weighed and NOT taken, for one reason worth writing down:
+# this is the auth path for every Databricks call and it runs inside the crew
+# and flow SUBPROCESSES. A global provider registry adds a failure mode that
+# does not exist today — miss the registration in any entry point and PAT
+# lookup silently falls through to environment variables, degrading auth with
+# no error. A lazy import cannot fail that way.
+#
+# Do not "fix" these by pointing them at the repositories instead. ApiKeysService
+# .find_by_name RAISES when group_id is None; that is the multi-tenant isolation
+# guarantee, and reaching past it into ApiKeyRepository would silently drop the
+# check this whole contract exists to protect.
+#
+#   user_context   -> resolves a user's group membership on first access
+#   databricks_auth-> the OBO -> PAT -> SPN chain; needs workspace config + keys
+#   prompt_utils   -> fetches a DB-backed prompt template
+#
+# prompt_utils is the weakest of the three — a "util" doing a database read is
+# misfiled, and moving it into services would cost nothing. Left alone only
+# because it was reviewed together with the other four.
+ignore_imports = [
+    "src.utils.user_context -> src.services.groups.groups",
+    "src.utils.user_context -> src.services.groups.users",
+    "src.utils.databricks_auth -> src.services.databricks.workspace.service",
+    "src.utils.databricks_auth -> src.services.settings.api_keys",
+    "src.utils.prompt_utils -> src.services.catalog.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Routers never import repositories or db"
+type = "forbidden"
+source_modules = ["src.api"]
+forbidden_modules = ["src.repositories", "src.db"]
+# Direct imports only: every router reaches the db transitively through
+# src.dependencies / services, which is how it is supposed to work.
+allow_indirect_imports = true
+# SHRINK-ONLY BASELINE. A router takes a session from src.dependencies and calls
+# a service; it never builds a repository or reaches into src.db itself. Each
+# line below predates this contract and is a known leak. import-linter errors on
+# an ignore that no longer matches, so fixing a router forces deleting its line
+# here. Never ADD to this list: move the work into a service instead.
+ignore_imports = [
+    # --- router -> repository (5 import lines, 4 edges): the service should own these ---
+    "src.api.logs_router -> src.repositories.log_repository",
+    "src.api.mcp_router -> src.repositories.databricks_config_repository",
+    "src.api.mcp_router -> src.repositories.mcp_repository",
+    "src.api.sse_router -> src.repositories.execution_history_repository",
+    # --- router -> db (9 import lines, 6 edges) ---
+    # Background worker owning a fresh routed session (sanctioned helper, but it
+    # belongs in the service that runs the job).
+    "src.api.builder_generation_router -> src.db.session",
+    # _local_session_factory / dispose_engines: belongs in a LakebaseService.
+    "src.api.database_management_router -> src.db.session",
+    # get_lakebase_session + raw f-string SQL: belongs in services/memory/storage.
+    "src.api.memory_backend.record_browsers -> src.db.lakebase_session",
+    # PERMANENT: /health/db reports on THIS process's raw factory and Lakebase
+    # state; routing it through a service would make the check pass by
+    # construction (see the comment in healthcheck_router.db_health).
+    "src.api.healthcheck_router -> src.db.database_router",
+    "src.api.healthcheck_router -> src.db.lakebase_state",
+    "src.api.healthcheck_router -> src.db.session",
+]
+
+[[tool.importlinter.contracts]]
+name = "db never imports services"
+type = "forbidden"
+source_modules = ["src.db"]
+forbidden_modules = ["src.services"]
+# Direct imports are zero. Transitively src.db reaches services only through the
+# five accepted lazy utils -> services edges documented on the "Core and utils
+# never import services" contract above; those are that contract's business.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Execution shared machinery never imports a path package"
+type = "forbidden"
+# The kernel and the machinery the three paths share (see
+# src/services/execution/CLAUDE.md) must not depend on any one path.
+source_modules = [
+    "src.services.execution.kernel",
+    "src.services.execution.config",
+    "src.services.execution.checkpointing",
+]
+forbidden_modules = [
+    "src.services.agent_builder",
+    "src.services.flow_builder",
+    "src.services.chat",
+]
+allow_indirect_imports = true
+# SHRINK-ONLY BASELINE: the four existing edges (audit #16). Each should move the
+# helper it needs down into the kernel. Never add to this list.
+ignore_imports = [
+    "src.services.execution.config.manager_config_builder -> src.services.agent_builder.agent_adapter",
+    "src.services.execution.kernel.output_contract -> src.services.agent_builder.schema_converter",
+    "src.services.execution.kernel.task_builder -> src.services.agent_builder.task_adapter",
+    "src.services.execution.checkpointing.resume_config -> src.services.flow_builder.flow_service",
+]
+
+[[tool.importlinter.contracts]]
+name = "Vendored runtime modules never import backend-only decisions"
+type = "forbidden"
+# These modules ship inside the exported Databricks App (see
+# services/export/runtime_vendor.py); src.services.decisions does not, so an
+# import of it raises ImportError in the exported app.
+source_modules = [
+    "src.services.tools.serper_search",
+    "src.services.tools.web_fetch",
+    "src.services.tools.scrape_website",
+    "src.services.tools.image_generation",
+    "src.services.execution.runtime",
+]
+forbidden_modules = ["src.services.decisions"]
+allow_indirect_imports = true
+# serper_search loads the ranker lazily and falls back to unranked results when
+# the decisions package is absent (fix/tests-green), so no static edge remains.

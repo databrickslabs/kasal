@@ -1,0 +1,1044 @@
+"""``CrewMemoryService`` — from a teamspace's configuration to a run's ``Memory``.
+
+One service, used by all three execution paths, in this order:
+
+1. ``fetch_memory_backend_config`` — the active ``memory_backends`` row (or
+   the local default when the teamspace has none).
+2. ``generate_crew_id`` / ``setup_storage_directory`` — the deterministic crew
+   id (agents, tasks, model, group — never the run name) and the per-teamspace
+   store directory.
+3. ``create_unified_storage`` — a ``StorageBackend`` from the configuration:
+   Lakebase, or ``None`` for the local SQLite default, which
+   ``_create_local_storage`` then builds with the resolved embedder and the
+   Memory Tuning scoring weights.
+4. ``resolve_memory_llm_override`` — the memory LLM the panel chose, fully
+   configured, or ``None`` to use the crew's own model.
+5. ``configure_crew_memory_components`` — builds the ``Memory`` from
+   ``_build_memory_kwargs`` (root scope, embedder, LLM, every engine-side
+   tuning knob, the recall floor chosen for the embedder in use) and attaches
+   it to every agent.
+6. ``attach_memory_trace_context`` / ``attach_tools_trace_context`` — trace
+   attribution so memory and tool rows land under the right task.
+
+Chat calls the same steps in-process (``chat/service.py``); Agent Builder and
+Flow Builder call them inside their subprocess.
+"""
+
+import hashlib
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional, cast
+
+from src.core.logger import LoggerManager
+from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+from src.services.memory.storage.factory import MemoryBackendFactory
+from src.utils.memory_paths import local_memory_store_dir
+
+logger = LoggerManager.get_instance().crew
+
+
+def _embedder_provider(custom_embedder: Any, embedder_config: Any) -> Optional[str]:
+    """Which embedding provider a run resolved — the key the recall floor is chosen by.
+
+    A resolved custom embedder (a callable / ``embed_documents`` object) is the
+    Databricks one; otherwise the crew's provider-dict embedder names itself.
+    """
+    if callable(custom_embedder) or hasattr(custom_embedder, "embed_documents"):
+        return "databricks"
+    if isinstance(embedder_config, dict):
+        provider = embedder_config.get("provider")
+        return str(provider) if provider else None
+    return None
+
+
+class CrewMemoryService:
+    """Handles all crew memory backend configuration and setup"""
+
+    def __init__(self, config: Dict[str, Any], user_token: Optional[str] = None):
+        """
+        Initialize the CrewMemoryService
+
+        Args:
+            config: Crew configuration dictionary
+            user_token: Optional user access token for OBO authentication
+        """
+        self.config = config
+        self.user_token = user_token
+        self._original_storage_dir: Optional[str] = None
+        # Why memory ended up disabled, for the caller to surface. None = fine.
+        self.last_memory_error: Optional[str] = None
+
+    async def fetch_memory_backend_config(self) -> Optional[Dict[str, Any]]:
+        """
+        Fetch memory backend configuration from database
+
+        Returns:
+            Memory backend configuration dict or None
+        """
+        logger.info("=" * 80)
+        logger.info("FETCH_MEMORY_BACKEND_CONFIG CALLED")
+        logger.info("=" * 80)
+        try:
+            from src.db.session import routed_scoped_session
+            from src.services.memory.config.backend_service import MemoryBackendService
+
+            async with routed_scoped_session() as session:
+                service = MemoryBackendService(session)
+                group_id = self.config.get("group_id")
+                logger.info(
+                    f"[fetch_memory_backend_config] Fetching config for group_id: {group_id}"
+                )
+
+                active_config = await service.get_active_config(group_id)
+                if not active_config:
+                    logger.warning(
+                        "No active memory backend configuration found in database"
+                    )
+                    return None
+
+                logger.info(
+                    "Found active memory config: backend_type=%s",
+                    active_config.backend_type,
+                )
+
+                # Convert to dict format for the factory. Memory tuning
+                # flows through ``cognitive_config`` when set.
+                memory_backend_config = {
+                    "backend_type": active_config.backend_type.value,
+                    "databricks_config": active_config.databricks_config,
+                    "lakebase_config": active_config.lakebase_config,
+                }
+                tuning_cfg = getattr(active_config, "cognitive_config", None)
+                if tuning_cfg is not None:
+                    memory_backend_config["cognitive_config"] = (
+                        tuning_cfg.model_dump(exclude_none=True)
+                        if hasattr(tuning_cfg, "model_dump")
+                        else tuning_cfg
+                    )
+                custom_cfg = getattr(active_config, "custom_config", None)
+                if custom_cfg:
+                    memory_backend_config["custom_config"] = custom_cfg
+                logger.info(
+                    "Loaded memory backend config from database: %s",
+                    memory_backend_config["backend_type"],
+                )
+                return memory_backend_config
+
+        except Exception as e:
+            logger.warning(f"Failed to load memory backend config from database: {e}")
+            return None
+
+    def generate_crew_id(self) -> str:
+        """
+        Generate a deterministic crew ID based on crew configuration.
+
+        SECURITY: All crew_ids are prefixed with group_id to ensure complete
+        tenant isolation. Group A cannot access Group B's memory even if they
+        have identical crew configurations.
+
+        Returns:
+            Crew ID string (always prefixed with group_id for isolation)
+        """
+        # SECURITY: Always get group_id first for tenant isolation
+        group_id = self.config.get("group_id") or "default"
+
+        # Use provided crew_id if available (but always prefix with group_id for isolation)
+        if self.config.get("crew_id"):
+            provided_crew_id = cast(str, self.config.get("crew_id"))
+            # SECURITY: Ensure group_id prefix for tenant isolation
+            if not provided_crew_id.startswith(f"{group_id}_"):
+                crew_id = f"{group_id}_{provided_crew_id}"
+                logger.info(
+                    f"Added group_id prefix to provided crew_id for tenant isolation: {crew_id}"
+                )
+            else:
+                crew_id = provided_crew_id
+            return crew_id
+
+        # Check for database crew_id (always prefix with group_id for isolation)
+        db_crew_id = self.config.get("database_crew_id")
+        if db_crew_id:
+            # SECURITY: Include group_id to prevent cross-tenant memory access
+            crew_id = f"{group_id}_crew_db_{db_crew_id}"
+            logger.info(f"Using database crew_id with group isolation: {crew_id}")
+            return crew_id
+
+        # Generate hash-based crew_id from configuration
+        agents = self.config.get("agents", [])
+        tasks = self.config.get("tasks", [])
+
+        # Create sorted lists for stable hashing
+        agent_roles = sorted(
+            [agent.get("role", "") for agent in agents if isinstance(agent, dict)]
+        )
+        task_names = sorted(
+            [
+                task.get("name", task.get("description", "")[:50])
+                for task in tasks
+                if isinstance(task, dict)
+            ]
+        )
+
+        # NOTE: run_name is intentionally NOT used for crew_id generation
+        # run_name was previously included in the hash but this caused a bug where
+        # each execution got a different crew_id (because run_name is auto-generated
+        # uniquely for each execution). This meant Long-Term Memory was stored in different
+        # directories and couldn't be found on subsequent runs.
+        # The crew_id should be deterministic based on the CREW STRUCTURE (agents, tasks,
+        # crew_name, model, group_id), not the execution instance (run_name).
+
+        # Create stable identifier for hashing
+        # SECURITY: group_id is included to ensure tenant isolation
+        crew_identifier = {
+            "agent_roles": agent_roles,
+            "task_names": task_names,
+            "crew_name": self.config.get(
+                "name", self.config.get("crew", {}).get("name", "unnamed_crew")
+            ),
+            "model": self.config.get("model", "default"),
+            "group_id": group_id,  # Already defaults to 'default' at top of function
+        }
+
+        # Create hash and prefix with group_id for guaranteed tenant isolation
+        crew_identifier_json = json.dumps(crew_identifier, sort_keys=True)
+        crew_hash = hashlib.md5(crew_identifier_json.encode()).hexdigest()[:8]
+        crew_id = f"{group_id}_crew_{crew_hash}"
+
+        # Detailed logging
+        logger.info("=" * 80)
+        logger.info("CREW_ID GENERATION - DETAILED DEBUG INFO")
+        logger.info("=" * 80)
+        logger.info("Crew Identifier Components (used for memory persistence):")
+        logger.info(f"  - Agent Roles: {agent_roles}")
+        logger.info(f"  - Task Names: {task_names}")
+        logger.info(f"  - Crew Name: {crew_identifier['crew_name']}")
+        logger.info(f"  - Model: {crew_identifier['model']}")
+        logger.info(f"  - Group ID: {group_id} (SECURITY: ensures tenant isolation)")
+        logger.info(
+            "  NOTE: run_name is NOT included - memory persists across runs with same crew structure"
+        )
+        logger.info(f"JSON for hashing (sorted): {crew_identifier_json}")
+        logger.info(
+            f"MD5 Hash: {hashlib.md5(crew_identifier_json.encode()).hexdigest()}"
+        )
+        logger.info(f"Hash (first 8 chars): {crew_hash}")
+        logger.info(f"Generated crew_id: {crew_id}")
+        logger.info(
+            f"SECURITY: Memory is isolated by group_id - {group_id} cannot access other groups' memory"
+        )
+        logger.info(
+            "This crew_id will persist across ALL runs with the SAME crew configuration"
+        )
+        logger.info("=" * 80)
+
+        return crew_id
+
+    def setup_storage_directory(
+        self, crew_id: str, memory_backend_config: Optional[Dict[str, Any]]
+    ) -> None:
+        """
+        Setup custom storage directory for memory backends
+
+        Args:
+            crew_id: Crew identifier
+            memory_backend_config: Memory backend configuration
+        """
+        if not memory_backend_config:
+            return
+
+        backend_type = memory_backend_config.get("backend_type")
+        if backend_type not in ["databricks", "default", "lakebase"]:
+            return
+
+        # Save original value
+        self._original_storage_dir = os.environ.get("CREWAI_STORAGE_DIR")
+
+        # ONE store per GROUP, at an absolute path — for every backend.
+        #
+        # Two independent defects lived in the old databricks/lakebase names
+        # (``kasal_databricks_{crew_id}``):
+        #
+        #   1. crew_id. e4944393 established that crew_id is NEVER part of a
+        #      memory path — it is hashed from the agents/tasks, so it changes
+        #      with every chat prompt and orphans recall. Scoping is the group
+        #      (tenant boundary), with session scoping carried in the record's
+        #      scope path (root_scope), never the directory.
+        #   2. Relative. db_storage_path() resolves a relative
+        #      CREWAI_STORAGE_DIR against the process CWD — the backend SOURCE
+        #      TREE — so a Databricks run wrote
+        #      src/backend/kasal_databricks_<crew_id>/memory.db into the repo,
+        #      gitignored and silently accumulating.
+        #
+        # The DEFAULT branch was already fixed for both; these two were missed.
+        # For databricks/lakebase the directory is vestigial anyway — records
+        # live in Vector Search / Postgres — but the env var has to point
+        # somewhere, so it points at the same group store as everything else.
+        storage_dirname = self._default_storage_dirname()
+
+        os.environ["CREWAI_STORAGE_DIR"] = storage_dirname
+
+        # Detailed logging
+        logger.info("=" * 80)
+        logger.info("STORAGE PATH CONFIGURATION - DETAILED DEBUG INFO")
+        logger.info("=" * 80)
+        logger.info(f"Backend Type: {backend_type}")
+        logger.info(
+            f"CREWAI_STORAGE_DIR environment variable set to: {storage_dirname}"
+        )
+
+        # Check storage path
+        from src.utils.storage_paths import db_storage_path
+
+        storage_path = Path(db_storage_path())
+        logger.info(f"Full storage path resolved by CrewAI: {storage_path.absolute()}")
+        logger.info(f"Storage path exists: {storage_path.exists()}")
+
+        if storage_path.exists():
+            try:
+                contents = list(storage_path.iterdir())
+                logger.info(f"Storage directory contains {len(contents)} items:")
+                for item in contents[:10]:
+                    logger.info(
+                        f"  - {item.name} ({'dir' if item.is_dir() else 'file'})"
+                    )
+                if len(contents) > 10:
+                    logger.info(f"  ... and {len(contents) - 10} more items")
+            except Exception as e:
+                logger.warning(f"Could not list storage directory contents: {e}")
+            logger.info("Memory will persist from previous runs")
+        else:
+            logger.info(
+                "Creating NEW storage directory - this is the FIRST run with this configuration"
+            )
+        logger.info("=" * 80)
+
+    def _default_storage_dirname(self) -> str:
+        """Absolute storage dir for LOCAL (DEFAULT) memory — ONE store per group.
+
+        Deterministic path under the known memory root (``KASAL_MEMORY_DIR``,
+        default ``~/.kasal/memory``), outside the backend source tree, so the
+        runtime writer and the memory browser always read/write the same place
+        (CrewAI resolves a *relative* ``CREWAI_STORAGE_DIR`` inconsistently).
+
+        Neither ``crew_id`` nor ``session_id`` is part of the directory:
+        ``crew_id`` changes every chat prompt (would orphan recall), and session
+        scoping is encoded in the record scope path (see ``_build_memory_kwargs``)
+        so a session record stays visible workspace-wide — mirroring ChatMode.
+        """
+        group_id = self.config.get("group_id") or "default"
+        return str(local_memory_store_dir(group_id))
+
+    async def create_unified_storage(
+        self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any
+    ) -> Optional[Any]:
+        """Build the unified ``StorageBackend`` for this crew.
+
+        Args:
+            memory_backend_config: Memory backend configuration (dict from DB).
+            crew_id: Deterministic crew identifier (already group-scoped).
+            embedder: Embedder callable or provider config dict.
+
+        Returns:
+            A ``StorageBackend`` instance, or ``None`` when the DEFAULT
+            configuration applies — the caller then builds the local SQLite
+            store (see ``_build_local_storage``).
+        """
+        if "databricks_config" in memory_backend_config and isinstance(
+            memory_backend_config["databricks_config"], dict
+        ):
+            from src.schemas.memory_backend import DatabricksMemoryConfig
+
+            memory_backend_config["databricks_config"] = DatabricksMemoryConfig(
+                **memory_backend_config["databricks_config"]
+            )
+
+        if "lakebase_config" in memory_backend_config and isinstance(
+            memory_backend_config["lakebase_config"], dict
+        ):
+            from src.schemas.memory_backend import LakebaseMemoryConfig
+
+            memory_backend_config["lakebase_config"] = LakebaseMemoryConfig(
+                **memory_backend_config["lakebase_config"]
+            )
+
+        memory_config = MemoryBackendConfig(**memory_backend_config)
+
+        logger.info(
+            "Creating unified memory storage for crew %s (backend=%s)",
+            crew_id,
+            memory_config.backend_type,
+        )
+
+        job_id = self.config.get("execution_id") or self.config.get("job_id")
+        if job_id:
+            logger.info(
+                "Using job_id=%s as session_id for short-term-scoped queries",
+                job_id,
+            )
+
+        group_id = self.config.get("group_id") or ""
+        if not group_id and crew_id and "_crew_" in crew_id:
+            group_id = crew_id.split("_crew_")[0]
+
+        # READ scope, driven by the chat "Workspace memory" switch:
+        #
+        #   ON  (the default, and what every non-chat execution gets)
+        #       → filter on group_id. Recall spans the workspace.
+        #   OFF → filter on group_id + session_id. Recall is confined to the
+        #       current conversation.
+        #
+        # This used to be hardcoded to workspace-wide, so the switch changed the
+        # log line and nothing else. crew_id is NEVER a read-scoping key either
+        # way — it is a hash of crew STRUCTURE that changes with every chat
+        # prompt, so scoping reads by it walls each run off from its own history.
+        workspace_scope = self.config.get("memory_workspace_scope")
+        workspace_wide = True if workspace_scope is None else bool(workspace_scope)
+        # The chat session id is the session partition key, because it is stable
+        # across the turns of one conversation; job_id (per run) is the fallback
+        # for non-chat executions, which run workspace-wide anyway.
+        session_scope_id = self.config.get("session_id")
+        logger.info(
+            "Memory read scope: %s (group=%s, session=%s, crew_id=%s)",
+            "workspace" if workspace_wide else "session",
+            group_id,
+            session_scope_id or job_id,
+            crew_id,
+        )
+
+        return await MemoryBackendFactory.create_unified_storage(
+            config=memory_config,
+            crew_id=crew_id,
+            group_id=group_id,
+            embedder=embedder,
+            user_token=self.user_token,
+            job_id=job_id,
+            workspace_wide=workspace_wide,
+            session_scope_id=session_scope_id,
+        )
+
+    async def create_memory_backends(
+        self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any
+    ) -> Dict[str, Any]:
+        """Legacy shim — prefer :py:meth:`create_unified_storage`.
+
+        Returns ``{"unified": storage}`` when a backend is configured, ``{}``
+        when the CrewAI default should be used.
+        """
+        storage = await self.create_unified_storage(
+            memory_backend_config, crew_id, embedder
+        )
+        return {"unified": storage} if storage is not None else {}
+
+    def configure_crew_memory_components(
+        self,
+        crew_kwargs: Dict[str, Any],
+        memory_config: MemoryBackendConfig,
+        storage: Optional[Any],
+        crew_id: str,
+        custom_embedder: Any = None,
+        memory_llm_override: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Configure the crew's unified ``Memory`` instance.
+
+        Replaces the legacy three-class setup. Instantiates a single engine
+        ``Memory`` bound to a kasal ``StorageBackend`` — Databricks Vector
+        Search, Lakebase, or the local SQLite store for the DEFAULT
+        configuration.
+
+        Args:
+            crew_kwargs: Crew keyword arguments to update.
+            memory_config: Resolved memory backend configuration.
+            storage: ``StorageBackend`` instance returned by the factory, or
+                ``None`` to fall back to the CrewAI default.
+            crew_id: Deterministic crew identifier (used as root scope prefix).
+            custom_embedder: Optional Databricks/other custom embedder that
+                should take precedence over ``crew_kwargs["embedder"]``.
+
+        Returns:
+            Updated ``crew_kwargs``.
+        """
+        # DEFAULT backend with no usable embedder → disable entirely to avoid
+        # the Memory LLM/embedder path hitting the OpenAI placeholder key.
+        if (
+            memory_config.backend_type == MemoryBackendType.DEFAULT
+            and not custom_embedder
+            and not crew_kwargs.get("embedder")
+        ):
+            # No env fallback: a provider key reaches the embedder only through
+            # the workspace's configured embedder (EmbedderConfigBuilder reads
+            # ApiKeysService), never from the shared process environment.
+            reason = (
+                "DEFAULT backend and no embedder at all: no Databricks embedder "
+                "and no configured provider"
+            )
+            logger.warning("Disabling memory — %s", reason)
+            self.last_memory_error = reason
+            crew_kwargs["memory"] = False
+            return crew_kwargs
+
+        try:
+            from src.services.memory.engine import Memory
+        except ImportError as exc:
+            logger.error("CrewAI unified Memory class unavailable: %s", exc)
+            logger.warning("Falling back to memory=False")
+            crew_kwargs["memory"] = False
+            return crew_kwargs
+
+        from src.services.memory.storage.adapter import (
+            EngineStorageAdapter,
+        )
+
+        # DEFAULT backend → local persistent SQLite storage (the crewAI LanceDB
+        # default died with the crewai library; without this, Memory silently
+        # falls back to the engine's in-process dict).
+        if storage is None:
+            storage = self._create_local_storage(
+                crew_kwargs, custom_embedder, memory_config
+            )
+            if storage is None:
+                # last_memory_error was set by _create_local_storage with the
+                # ACTUAL failure; keep it rather than overwrite with a guess.
+                self.last_memory_error = (
+                    self.last_memory_error
+                    or "local SQLite storage could not be created"
+                )
+                logger.warning("Disabling memory — %s", self.last_memory_error)
+                crew_kwargs["memory"] = False
+                return crew_kwargs
+
+        # Wrap whichever backend we have (Databricks / Lakebase / local) in the
+        # engine-protocol adapter: it embeds recall queries, maps kwarg names,
+        # and unwraps (record, score) tuples — Memory itself passes raw strings.
+        adapted_storage = EngineStorageAdapter(
+            storage, embedder=custom_embedder or crew_kwargs.get("embedder")
+        )
+
+        memory_kwargs = self._build_memory_kwargs(
+            crew_kwargs=crew_kwargs,
+            custom_embedder=custom_embedder,
+            crew_id=crew_id,
+            memory_config=memory_config,
+            memory_llm_override=memory_llm_override,
+        )
+        memory_kwargs["storage"] = adapted_storage
+        try:
+            from src.services.memory.storage import graph_factory
+
+            crew_kwargs["memory"] = (
+                graph_factory.build_graph_memory(
+                    storage, memory_kwargs, memory_config, self.config
+                )
+                if graph_factory.graph_enabled(memory_config)
+                else Memory(**memory_kwargs)
+            )
+            logger.info(
+                "Configured unified Memory with %s storage (crew=%s)",
+                memory_config.backend_type.value,
+                crew_id,
+            )
+        except Exception as exc:
+            logger.error("Failed to build unified Memory with custom storage: %s", exc)
+            crew_kwargs["memory"] = False
+        self._attach_crew_memory_to_agents(crew_kwargs)
+        return crew_kwargs
+
+    def _create_local_storage(
+        self,
+        crew_kwargs: Dict[str, Any],
+        custom_embedder: Any,
+        memory_config: Optional["MemoryBackendConfig"] = None,
+    ) -> Optional[Any]:
+        """Build the local SQLite memory backend for the DEFAULT configuration.
+
+        Embedder preference: the resolved custom embedder (callable), else a
+        litellm-backed callable derived from the crew's provider-dict embedder,
+        else OpenAI small embeddings when only OPENAI_API_KEY is present
+        (parity with the old crewAI default). Returns ``None`` when no
+        embedding route exists. Tuning weights (when configured)
+        override the hybrid-scoring defaults.
+        """
+        try:
+            from src.services.memory.storage.adapter import (
+                build_litellm_embedder,
+            )
+            from src.services.memory.storage.local import (
+                LocalStorageBackend,
+            )
+            from src.utils.storage_paths import db_storage_path
+
+            embedder: Any = None
+            if callable(custom_embedder) or hasattr(custom_embedder, "embed_documents"):
+                embedder = custom_embedder
+            if embedder is None:
+                embedder = build_litellm_embedder(crew_kwargs.get("embedder"))
+            if embedder is None:
+                self.last_memory_error = (
+                    "no embedding route: no Databricks embedder, "
+                    f"configured={crew_kwargs.get('embedder')!r}"
+                )
+                return None
+
+            db_path = Path(db_storage_path()) / "memory.db"
+            logger.info("Local memory storage at %s", db_path)
+            from src.services.memory.storage.factory import (
+                MemoryBackendFactory,
+            )
+
+            scoring_kwargs = (
+                MemoryBackendFactory._scoring_kwargs(memory_config)
+                if memory_config is not None
+                else {}
+            )
+            return LocalStorageBackend(db_path, embedder=embedder, **scoring_kwargs)
+        except Exception as exc:  # noqa: BLE001 — memory must never break a run
+            self.last_memory_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("Local memory storage unavailable: %s", exc)
+            return None
+
+    def _attach_crew_memory_to_agents(self, crew_kwargs: Dict[str, Any]) -> None:
+        """Point each agent's ``memory`` at the crew's unified Memory instance.
+
+        CrewAI's per-task auto-save (``Agent._save_kickoff_to_memory``, run when
+        each agent finishes a task) and the recall/save tools both read
+        ``agent.memory`` — NOT the crew memory. We deliberately keep agents free
+        of ``memory=True`` (which would spin up a per-agent OpenAI-default
+        Memory and cause 401s), but that also makes the per-task auto-save a
+        no-op. Assigning the already-built crew Memory *instance* restores
+        per-task writes on the configured Databricks/Lakebase backend without
+        creating a default OpenAI memory.
+        """
+        mem = crew_kwargs.get("memory")
+        if mem in (True, False, None):
+            return
+        for agent in crew_kwargs.get("agents", []) or []:
+            try:
+                agent.memory = mem
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Could not attach crew memory to agent: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Memory kwarg helpers
+    # ------------------------------------------------------------------
+
+    def _build_memory_kwargs(
+        self,
+        crew_kwargs: Dict[str, Any],
+        custom_embedder: Any,
+        crew_id: str,
+        memory_config: MemoryBackendConfig,
+        memory_llm_override: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Assemble keyword arguments for the unified ``Memory`` class.
+
+        Sources the embedder, LLM (to avoid OpenAI fallback), and
+        scoring weights from ``memory_config.custom_config`` when present.
+        """
+        kwargs: Dict[str, Any] = {}
+
+        embedder = custom_embedder or crew_kwargs.get("embedder")
+        if embedder is not None:
+            kwargs["embedder"] = embedder
+
+        # Root scope is ALWAYS the tenant boundary (/<group>) — semantic recall
+        # spans the whole workspace. Per-session conversational recall is owned by
+        # the chat-history preamble, NOT by narrowing memory to a session, so
+        # session_id is intentionally not part of the scope. crew_id is never part
+        # of the scope either (it changes per prompt and would wall each run off).
+        group_id = self.config.get("group_id") or "default"
+        kwargs["root_scope"] = f"/{group_id}"
+        from src.services.decisions.memory import MemoryDecisions
+
+        kwargs["decision_policy"] = MemoryDecisions(group_id)
+
+        tuning = getattr(memory_config, "cognitive_config", None)
+        tuning_dict = (
+            tuning.model_dump(exclude_none=True)
+            if tuning is not None and hasattr(tuning, "model_dump")
+            else (tuning or {})
+        )
+
+        # ``memory_llm_model`` is a bare model key, NOT a Memory ctor param. Drop
+        # it from the tuning kwargs and never pass it to Memory as a string:
+        # CrewAI would build an unconfigured ``LLM(model=<name>)`` with no provider
+        # prefix or credentials, which litellm routes to OpenAI (401 on the
+        # placeholder key). Use the pre-resolved, fully-configured instance from
+        # ``resolve_memory_llm_override``; otherwise fall back to the crew's LLM.
+        tuning_dict.pop("memory_llm_model", None)
+        if memory_llm_override is not None:
+            kwargs["llm"] = memory_llm_override
+        else:
+            memory_llm = self._resolve_memory_llm(crew_kwargs)
+            if memory_llm is not None:
+                kwargs["llm"] = memory_llm
+
+        # Only fields ``Memory`` declares. The scoring weights, half-life and
+        # relevance threshold belong to the STORAGE backend and reach it via
+        # MemoryBackendFactory._scoring_kwargs — handing them to Memory would
+        # be a silent drop (pydantic ignores unknown kwargs), which is exactly
+        # what these knobs used to suffer.
+        for key in (
+            "consolidation_threshold",
+            "consolidation_limit",
+            "default_importance",
+            "confidence_threshold_high",
+            "confidence_threshold_low",
+            "complex_query_threshold",
+            "exploration_budget",
+            "query_analysis_threshold",
+            "recall_max_drop",
+            "write_screening",
+            "forgetting_enabled",
+            "superseded_retention_days",
+            "episodic_ttl_days",
+            "importance_floor",
+            "supersession_enabled",
+            "llm_consolidation_enabled",
+        ):
+            if key in tuning_dict and tuning_dict[key] is not None:
+                kwargs[key] = tuning_dict[key]
+
+        # Recall floor. The teamspace's explicit value wins; otherwise the
+        # default for the embedder this run actually resolved — Ollama's
+        # nomic-embed-text compresses the cosine scale, so the Databricks-
+        # calibrated 0.75 rejected a run's own previous output (measured 0.68).
+        # Decided HERE, where the embedder is known, so chat, agent builder and
+        # flow builder — on either harness — apply the same floor.
+        from src.services.memory.engine.memory import default_recall_min_score
+
+        floor = tuning_dict.get("recall_min_score")
+        if floor is None:
+            floor = default_recall_min_score(
+                _embedder_provider(custom_embedder, crew_kwargs.get("embedder"))
+            )
+        kwargs["recall_min_score"] = float(floor)
+        return kwargs
+
+    def _resolve_memory_llm(self, crew_kwargs: Dict[str, Any]) -> Optional[Any]:
+        """Pick an LLM for memory analysis so we don't implicitly need OpenAI.
+
+        Preference order: explicit crew ``manager_llm`` > first agent's ``llm``
+        > ``None``. The async resolver normally supplies the configured model;
+        this is the fallback when that resolution fails.
+        """
+        manager = crew_kwargs.get("manager_llm")
+        if manager is not None:
+            return manager
+        agents = crew_kwargs.get("agents") or []
+        for agent in agents:
+            llm = getattr(agent, "llm", None)
+            if llm is not None:
+                return llm
+        return None
+
+    async def resolve_memory_llm_override(
+        self, memory_config: "MemoryBackendConfig"
+    ) -> Optional[Any]:
+        """Build a fully-configured CrewAI ``LLM`` for the memory-analysis override.
+
+        ``cognitive_config.memory_llm_model`` is a bare model key (e.g.
+        ``databricks-claude-haiku-4-5``). Handing that string straight to CrewAI's
+        ``Memory`` makes it construct an unconfigured ``LLM(model=<name>)`` with no
+        provider prefix and no credentials, so litellm routes it to OpenAI and 401s
+        on the placeholder key. Resolve it through ``LLMManager`` here so ``Memory``
+        receives a ready-to-call instance (provider prefix + api_key + api_base).
+
+        With no analysis override, use the session's selected model or Kasal's
+        configured default. Session memory and maintenance have no crew agents
+        to borrow an LLM from, and the memory engine does not create one itself.
+        Resolution failures still fall back to the crew's configured instance.
+        """
+        tuning = getattr(memory_config, "cognitive_config", None)
+        model_name = getattr(tuning, "memory_llm_model", None) if tuning else None
+        if not model_name:
+            from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+            model_name = self.config.get("model") or DEFAULT_ENGINE_MODEL
+
+        group_id = self.config.get("group_id") or "default"
+        try:
+            from src.services.llm.manager import LLMManager
+
+            llm = await LLMManager.configure_kasal_llm(model_name, group_id)
+            logger.info(
+                "Resolved memory analysis LLM '%s' to a configured instance (group=%s)",
+                model_name,
+                group_id,
+            )
+            return llm
+        except Exception as exc:  # degrade to the crew LLM, never break the run
+            logger.warning(
+                "Could not build memory analysis LLM '%s' (%s); "
+                "falling back to the crew's LLM instance",
+                model_name,
+                exc,
+            )
+            return None
+
+    def attach_memory_trace_context(
+        self,
+        crew: Any,
+        memory_backend_config: Optional[Dict[str, Any]],
+        crew_kwargs: Dict[str, Any],
+    ) -> None:
+        """
+        Attach execution trace context to memory storages
+
+        Args:
+            crew: Crew instance
+            memory_backend_config: Memory backend configuration
+            crew_kwargs: Crew keyword arguments
+        """
+        try:
+            exec_id = (
+                self.config.get("execution_id")
+                or self.config.get("run_name")
+                or self.config.get("inputs", {}).get("run_name")
+            )
+            grp_id = self.config.get("group_id") or "default"
+
+            trace_ctx = {
+                "job_id": exec_id,
+                "group_context": {"primary_group_id": grp_id},
+                "execution_id": exec_id,
+            }
+
+            def set_trace_ctx(mem_obj: Any) -> None:
+                try:
+                    if not mem_obj:
+                        return
+                    # Unified Memory exposes the backend as either ``_storage``
+                    # (private attr) or ``storage`` (public field). Tag both
+                    # if they're present.
+                    for attr in ("_storage", "storage"):
+                        storage = getattr(mem_obj, attr, None)
+                        if storage is not None and hasattr(storage, "trace_context"):
+                            setattr(storage, "trace_context", trace_ctx)
+                    if hasattr(mem_obj, "trace_context"):
+                        setattr(mem_obj, "trace_context", trace_ctx)
+                except Exception:
+                    pass
+
+            # The unified Memory is stored on ``crew._memory``. There are no
+            # per-type memories to attach to any more: the short-term /
+            # long-term / entity split was removed, not merged, and the engine's
+            # Crew has never carried those attributes.
+            set_trace_ctx(getattr(crew, "_memory", None))
+
+            # NOTE: Direct memory tracing removed - memory events are now captured
+            # by the OTel event bridge with proper agent attribution.
+            # The _patch_default_memory_tracing method was causing duplicate events appearing
+            # under "Memory[...]" as separate agents instead of being grouped with the correct task/agent.
+
+        except Exception as trace_ctx_err:
+            logger.debug(f"Could not attach memory trace context: {trace_ctx_err}")
+
+    def attach_tools_trace_context(
+        self, crew: Any, crew_kwargs: Dict[str, Any]
+    ) -> None:
+        """
+        Attach execution trace context to all tools in the crew.
+
+        This enables tools to emit custom trace events (like llm_call) that appear
+        in the UI technical trace.
+
+        Args:
+            crew: Crew instance with agents
+            crew_kwargs: Crew keyword arguments containing execution context
+        """
+        try:
+            exec_id = (
+                self.config.get("execution_id")
+                or self.config.get("run_name")
+                or self.config.get("inputs", {}).get("run_name")
+            )
+            grp_id = self.config.get("group_id") or "default"
+
+            trace_ctx = {
+                "job_id": exec_id,
+                "group_context": {"primary_group_id": grp_id},
+                "execution_id": exec_id,
+            }
+
+            # Iterate through all agents and their tools
+            tools_attached = 0
+
+            if hasattr(crew, "agents") and crew.agents:
+                for agent in crew.agents:
+                    if hasattr(agent, "tools") and agent.tools:
+                        agent_role = getattr(agent, "role", "Unknown Agent")
+                        for tool in agent.tools:
+                            try:
+                                # Attach trace_context to the tool instance
+                                if hasattr(
+                                    tool, "__dict__"
+                                ):  # Check if tool can have attributes set
+                                    setattr(tool, "trace_context", trace_ctx)
+                                    tools_attached += 1
+                                    logger.debug(
+                                        f"Attached trace context to tool '{getattr(tool, 'name', type(tool).__name__)}' on agent '{agent_role}'"
+                                    )
+                            except Exception as tool_err:
+                                logger.debug(
+                                    f"Could not attach trace context to tool on agent: {tool_err}"
+                                )
+
+            # Also attach trace_context to tools on tasks (CrewAI allows tools on tasks)
+            if hasattr(crew, "tasks") and crew.tasks:
+                for task in crew.tasks:
+                    if hasattr(task, "tools") and task.tools:
+                        task_desc = getattr(task, "description", "Unknown Task")[:50]
+                        for tool in task.tools:
+                            try:
+                                # Attach trace_context to the tool instance
+                                if hasattr(
+                                    tool, "__dict__"
+                                ):  # Check if tool can have attributes set
+                                    setattr(tool, "trace_context", trace_ctx)
+                                    tools_attached += 1
+                                    logger.info(
+                                        f"Attached trace context to tool '{getattr(tool, 'name', type(tool).__name__)}' on task '{task_desc}...'"
+                                    )
+                            except Exception as tool_err:
+                                logger.debug(
+                                    f"Could not attach trace context to tool on task: {tool_err}"
+                                )
+
+            if tools_attached > 0:
+                logger.info(f"Attached trace context to {tools_attached} tool(s) total")
+            else:
+                logger.debug(
+                    "No tools found in crew, skipping tool trace context attachment"
+                )
+
+        except Exception as trace_ctx_err:
+            logger.debug(f"Could not attach tools trace context: {trace_ctx_err}")
+
+    def set_crew_reference_on_memory(self, crew: Any) -> None:
+        """Propagate the crew reference onto the unified memory storage.
+
+        The unified Memory class keeps its storage on ``_storage`` (private
+        attr). Any Kasal storage backend that exposes ``crew`` (for agent/LLM
+        attribution) will receive the crew instance here.
+        """
+        try:
+            memory_obj = getattr(crew, "_memory", None)
+            if not memory_obj:
+                return
+
+            storage = getattr(memory_obj, "_storage", None) or getattr(
+                memory_obj, "storage", None
+            )
+            if storage is None:
+                return
+
+            if hasattr(storage, "crew"):
+                storage.crew = crew
+                logger.info("Set crew reference on unified memory storage")
+
+            if hasattr(storage, "set_agent_context") and getattr(crew, "agents", None):
+                storage.set_agent_context(crew.agents[0])
+                logger.info(
+                    "Set agent context on unified memory storage: %s",
+                    getattr(crew.agents[0], "role", "Unknown"),
+                )
+
+        except Exception as context_error:
+            logger.warning(f"Failed to set context on memory backend: {context_error}")
+
+
+async def build_session_memory(
+    group_id: str,
+    session_id: Optional[str] = None,
+    user_token: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Optional[Any]:
+    """The ``Memory`` a chat SESSION writes to, built from the same parts a run uses.
+
+    A conversation had nowhere durable to live. The light agent remembers its own
+    turns (``chat/service.py``), but a turn routed to a published crew or flow is
+    answered by that capability, so the light agent never runs and the exchange
+    was never remembered — only the crew's task output was. The conversation
+    itself survived solely as ``flow_states.messages``: checkpoint JSON reachable
+    by one derived thread id, never embedded. A new session meant a new thread,
+    and everything said before was unreachable.
+
+    So the write needs a Memory outside a run, which is what this builds. It
+    composes the same public ``CrewMemoryService`` steps ``_attach_memory`` uses —
+    backend config from the database, the embedder that backend needs, the
+    storage directory, the disabled-configuration check — so a session record
+    lands in exactly the store a crew's records land in, with the same tenant
+    scoping. Nothing here is a second memory system.
+
+    Deliberately minimal config: only ``group_id`` (the tenant boundary) and
+    ``session_id`` (recall scope). The agents/tasks a run passes feed the
+    deterministic crew-id hash and the embedder's agent scan, and a session is
+    not a crew — giving it invented ones would fork the storage directory away
+    from the crew's.
+
+    Returns ``None`` when memory is off, misconfigured, or unavailable. Never
+    raises: no conversation should fail to be recorded because memory is down,
+    and nothing here is on the answer's critical path.
+    """
+    try:
+        from src.schemas.memory_backend import MemoryBackendConfig
+        from src.services.execution.config.crew_config_builder import (
+            CrewConfigBuilder,
+        )
+        from src.services.execution.config.embedder_config_builder import (
+            EmbedderConfigBuilder,
+        )
+
+        mem_config: Dict[str, Any] = {
+            "group_id": group_id,
+            "session_id": session_id,
+            # Workspace scope, matching the chat default: a session's memory is
+            # worth recalling from the next session, which is the whole point.
+            "memory_workspace_scope": True,
+            "model": model,
+            "name": "chat",
+        }
+
+        memory_service = CrewMemoryService(mem_config, user_token)
+        config_builder = CrewConfigBuilder(mem_config)
+
+        crew_kwargs: Dict[str, Any] = {"agents": [], "memory": True}
+        embedder_builder = EmbedderConfigBuilder(mem_config, user_token)
+        crew_kwargs, custom_embedder, _ = await embedder_builder.configure_embedder(
+            crew_kwargs
+        )
+
+        backend_config = await memory_service.fetch_memory_backend_config() or {
+            "backend_type": "default"
+        }
+        if config_builder.check_memory_disabled_by_backend_config(backend_config):
+            return None
+
+        crew_id = memory_service.generate_crew_id()
+        memory_service.setup_storage_directory(crew_id, backend_config)
+
+        backend_type = backend_config.get("backend_type")
+        embedder_for_backend = (
+            custom_embedder
+            if backend_type in ("databricks", "lakebase")
+            else crew_kwargs.get("embedder")
+        )
+        unified_storage = await memory_service.create_unified_storage(
+            backend_config, crew_id, embedder_for_backend
+        )
+        memory_config = MemoryBackendConfig(**backend_config)
+        memory_service.configure_crew_memory_components(
+            crew_kwargs,
+            memory_config,
+            unified_storage,
+            crew_id,
+            custom_embedder,
+            memory_llm_override=await memory_service.resolve_memory_llm_override(
+                memory_config
+            ),
+        )
+        built = crew_kwargs.get("memory")
+        return built if built not in (None, True, False) else None
+    except Exception as exc:  # noqa: BLE001 — a conversation is still answered
+        logger.warning("Session memory unavailable (%s); the turn is not recorded", exc)
+        return None

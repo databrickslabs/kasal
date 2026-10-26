@@ -1,0 +1,51 @@
+command: ['python', 'entrypoint.py']
+# To enable OTel auto-instrumentation for custom traces/metrics (requires UI telemetry enabled):
+# command: ['opentelemetry-instrument', 'python', 'entrypoint.py']
+env:
+  - name: PYTHONPATH
+    value: './backend'
+  - name: PYTHONUNBUFFERED
+    value: '1'
+  # Frontend static files will be available via import-dir
+  - name: FRONTEND_STATIC_DIR
+    value: './frontend_static'
+  # Marketplace resource keys are declared in manifest.yaml; the native
+  # lakebase resource is attached separately (see the installation guide).
+  - name: KASAL_SQL_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: KASAL_OUTPUT_VOLUME
+    valueFrom: volume
+  - name: KASAL_DEFAULT_MODEL
+    valueFrom: serving-endpoint
+  # Optional: without a 'lakebase' resource Kasal runs on the container's
+  # SQLite file. Uncomment to refuse to deploy or start without one.
+  - name: KASAL_LAKEBASE_RESOURCE
+    valueFrom: lakebase
+  # - name: KASAL_REQUIRE_LAKEBASE_RESOURCE
+  #   value: 'true'
+
+  # Logging Configuration
+  - name: KASAL_LOG_LEVEL
+    value: 'INFO'
+  - name: KASAL_LOG_APP
+    value: 'INFO'
+  - name: KASAL_LOG_THIRD_PARTY
+    value: 'WARNING'
+  - name: KASAL_LOG_CONSOLE
+    value: 'true'
+  - name: KASAL_LOG_FILE
+    value: 'true'
+
+  # Databricks App Telemetry (Preview)
+  # Structured OTel log export is controlled via the Databricks Configuration UI
+  # (otel_app_telemetry_enabled toggle). It also requires telemetry to be enabled
+  # in the Databricks App settings UI (which injects OTEL_EXPORTER_OTLP_ENDPOINT).
+
+  # Required for custom traces when using opentelemetry-instrument command:
+  # OTEL_TRACES_SAMPLER: 'always_on'
+
+# No apt_packages: the Postgres drivers are asyncpg (manylinux wheels) and
+# pg8000 (pure Python) — neither compiles against libpq, so libpq-dev is not
+# needed and skipping it removes the apt install phase from every deployment.

@@ -1,0 +1,747 @@
+import React, { useState, useEffect } from 'react';
+import {
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  FormControl,
+  FormLabel,
+  FormControlLabel,
+  Typography,
+  Box,
+  Alert,
+  TextField,
+  Divider,
+  Checkbox,
+  Select,
+  MenuItem,
+  InputLabel,
+  Link,
+} from '@mui/material';
+import {
+  Add as AddIcon,
+  PanTool as PanToolIcon,
+  HelpOutline as HelpOutlineIcon,
+} from '@mui/icons-material';
+import { Edge, Node } from 'reactflow';
+import ConditionBuilder from './ConditionBuilder';
+import {
+  ConditionGroup,
+  groupsToPython,
+  pythonToGroups,
+} from '../../../../utils/conditionGroups';
+import { schemaToRoutableFields } from '../../../../utils/schemaFields';
+import SchemaDialog from '../../../configuration/schemas/components/SchemaDialog';
+import { SchemaService } from '../../../../api/workflow/SchemaService';
+import { TaskService } from '../../../../api/workflow/TaskService';
+import { Schema } from '../../../../types/workflow/schema';
+
+import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
+import FlowOutputSchema, { type FlowOutputContract } from './FlowOutputSchema';
+import FlowStateSection from './FlowStateSection';
+export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
+
+// State mapping: extract task output field and save to state variable
+export interface StateMapping {
+  sourceTaskId: string;   // Which task's output to read from
+  outputField: string;    // Field to extract from task output (e.g., "confidence", "result.status")
+  stateVariable: string;  // State variable name to save to (e.g., "confidence", "last_status")
+}
+
+interface Task {
+  id: string;
+  name: string;
+}
+
+interface AggregatedSourceTasks {
+  crewName: string;
+  tasks: Task[];
+}
+
+interface EdgeConfigDialogProps {
+  open: boolean;
+  onClose: () => void;
+  edge: Edge | null;
+  nodes: Node[];  // Pass nodes as prop instead of using useReactFlow
+  onSave: (edgeId: string, config: EdgeConfig) => void;
+  aggregatedSourceTasks?: AggregatedSourceTasks[];  // Tasks from all source crews
+  flowStateVariables?: string[];  // State variables from other edges in the flow
+}
+
+// HITL (Human in the Loop) configuration
+export interface HITLConfig {
+  enabled: boolean;
+  message: string;                          // Message shown to approvers
+  timeout_seconds: number;                  // Timeout before automatic action
+  timeout_action: 'auto_reject' | 'fail';   // Action on timeout
+  require_comment: boolean;                 // Require a comment to approve
+}
+
+export interface EdgeConfig {
+  logicType: FlowLogicType;
+  routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
+  isDefaultRoute?: boolean;       // The "otherwise" branch: taken when no other route matched
+  outputContract?: FlowOutputContract | null;
+  routerSchema?: string;          // Name of the output schema the router routes on (set on source crew's final task)
+  description?: string;
+  listenToTaskIds?: string[];     // Tasks from source crew to wait for
+  targetTaskIds?: string[];       // Tasks from target crew to execute
+  // State management (aligned with CrewAI Flow state)
+  stateMappings?: StateMapping[]; // Extract task outputs → state variables (with sourceTaskId)
+  checkpoint?: boolean;           // Enable @persist - checkpoint after this step for resume capability
+  // Human approval enables any required flow persistence automatically.
+  hitl?: HITLConfig;
+}
+
+const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
+  open,
+  onClose,
+  edge,
+  nodes,
+  onSave,
+  aggregatedSourceTasks = []
+}) => {
+  const [logicType, setLogicType] = useState<FlowLogicType>('NONE');
+  const [routerConditions, setRouterConditions] = useState<ConditionGroup[]>([]);
+  const [isDefaultRoute, setIsDefaultRoute] = useState<boolean>(false);
+  const [description, setDescription] = useState('');
+  const [listenToTaskIds, setListenToTaskIds] = useState<string[]>([]);
+  const [targetTaskIds, setTargetTaskIds] = useState<string[]>([]);
+
+  // Router schema-driven routing
+  const [schemas, setSchemas] = useState<Schema[]>([]);
+  const [routerSchema, setRouterSchema] = useState<string>('');
+  const [outputContract, setOutputContract] = useState<FlowOutputContract | null>(null);
+  const [schemaCreateOpen, setSchemaCreateOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // State management
+
+  // HITL configuration
+  const [hitlEnabled, setHitlEnabled] = useState(false);
+  const [hitlMessage, setHitlMessage] = useState('Please review and approve to continue');
+  const [hitlTimeoutSeconds, setHitlTimeoutSeconds] = useState(86400); // 24 hours default
+  const [hitlTimeoutAction, setHitlTimeoutAction] = useState<'auto_reject' | 'fail'>('auto_reject');
+  const [hitlRequireComment, setHitlRequireComment] = useState(false);
+
+  // Get target node from passed nodes prop
+  const targetNode = edge ? nodes.find(n => n.id === edge.target) : null;
+
+  // Get tasks from target node
+  const targetTasks: Task[] = targetNode?.data?.allTasks || [];
+
+  // Use aggregated source tasks if provided, otherwise fall back to single source
+  const sourceNode = edge ? nodes.find(n => n.id === edge.source) : null;
+  const fallbackSourceTasks: Task[] = sourceNode?.data?.allTasks || [];
+
+  /**
+   * How many upstream connections join at this edge.
+   *
+   * AND/OR describe a JOIN: wait for all of several sources, or fire when any
+   * of them completes. That is a property of the connection, not of the crew
+   * behind it — a crew with two tasks is still ONE source, and it finishes when
+   * it finishes. Counting its tasks instead disabled "None (Default)" for every
+   * ordinary edge out of a multi-task crew and silently forced AND.
+   *
+   * `aggregatedSourceTasks` is already one entry per source crew: several only
+   * for a merge group, which IS the real join.
+   */
+  const sourceCount = aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.length
+    : (fallbackSourceTasks.length > 0 ? 1 : 0);
+  const isJoin = sourceCount > 1;
+
+  // Stable id keys for the auto-include effect (avoids array-identity churn in deps)
+  const sourceTaskIdsKey = (aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.flatMap(g => g.tasks)
+    : fallbackSourceTasks).map(t => t.id).join(',');
+  const targetTaskIdsKey = targetTasks.map(t => t.id).join(',');
+
+  // Load existing configuration when edge changes
+  useEffect(() => {
+    if (edge && edge.data) {
+      setLogicType(edge.data.logicType || 'NONE');
+
+      // Parse router condition from string to conditions array
+      const routerCondStr = edge.data.routerCondition || '';
+      setRouterConditions(routerCondStr ? pythonToGroups(routerCondStr) : []);
+      setIsDefaultRoute(edge.data.isDefaultRoute === true);
+
+      setDescription(edge.data.description || '');
+      setListenToTaskIds(edge.data.listenToTaskIds || []);
+      setTargetTaskIds(edge.data.targetTaskIds || []);
+
+      // Load router schema selection
+      const contract = sourceNode?.data?.outputContract as FlowOutputContract | undefined;
+      setOutputContract(contract || null);
+      setRouterSchema(contract?.name || edge.data.routerSchema || '');
+      setSaveError(null);
+      // Use explicit boolean check to handle false values correctly
+
+      // Load HITL configuration
+      if (edge.data.hitl) {
+        // Use explicit boolean check to handle false values correctly
+        setHitlEnabled(edge.data.hitl.enabled === true);
+        setHitlMessage(edge.data.hitl.message || 'Please review and approve to continue');
+        setHitlTimeoutSeconds(edge.data.hitl.timeout_seconds || 86400);
+        setHitlTimeoutAction(edge.data.hitl.timeout_action || 'auto_reject');
+        setHitlRequireComment(edge.data.hitl.require_comment === true);
+      } else {
+        setHitlEnabled(false);
+        setHitlMessage('Please review and approve to continue');
+        setHitlTimeoutSeconds(86400);
+        setHitlTimeoutAction('auto_reject');
+        setHitlRequireComment(false);
+      }
+    } else {
+      // Reset to defaults
+      setLogicType('NONE');
+      setRouterConditions([]);
+      setIsDefaultRoute(false);
+      setDescription('');
+      setListenToTaskIds([]);
+      setTargetTaskIds([]);
+      setRouterSchema('');
+      setSaveError(null);
+      // Reset HITL
+      setHitlEnabled(false);
+      setHitlMessage('Please review and approve to continue');
+      setHitlTimeoutSeconds(86400);
+      setHitlTimeoutAction('auto_reject');
+      setHitlRequireComment(false);
+    }
+  }, [edge, sourceNode?.data?.outputContract]);
+
+  // Auto-include all source/target tasks — task selection was removed from the UI.
+  // The edge endpoints already define source → target, so we listen to every source
+  // task (wait-for-all of the source crew) and run every target task by default.
+  useEffect(() => {
+    if (!open) return;
+    const srcTasks = aggregatedSourceTasks.length > 0
+      ? aggregatedSourceTasks.flatMap(g => g.tasks)
+      : fallbackSourceTasks;
+    setListenToTaskIds(srcTasks.map(t => t.id));
+    setTargetTaskIds(targetTasks.map(t => t.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, edge?.id, sourceTaskIdsKey, targetTaskIdsKey]);
+
+  // Auto-adjust the logic type when this edge becomes (or stops being) a join.
+  useEffect(() => {
+    if (isJoin && logicType === 'NONE') {
+      // Several sources have to be combined somehow; AND is the safe default.
+      setLogicType('AND');
+    } else if (!isJoin && (logicType === 'AND' || logicType === 'OR')) {
+      // A single source needs no join — sequential is the default again.
+      setLogicType('NONE');
+    }
+  }, [isJoin, logicType]);
+
+  // Get all source tasks as a flat list. The crew's final task is the one whose
+  // output becomes the crew result (what the router routes on), so the schema is
+  // applied there.
+  const allSourceTasks: Task[] = aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.flatMap(g => g.tasks)
+    : fallbackSourceTasks;
+  const finalSourceTask: Task | undefined = allSourceTasks[allSourceTasks.length - 1];
+  const sourceCrewName = aggregatedSourceTasks[0]?.crewName
+    || sourceNode?.data?.crewName
+    || sourceNode?.data?.label
+    || 'the source crew';
+
+  const localSchema = outputContract?.name === routerSchema ? outputContract : null;
+  const selectedSchema = localSchema || schemas.find(s => s.name === routerSchema);
+  // Every value the schema can be routed on, including those nested in an
+  // object or repeated across a list. This used to be the schema's TOP-LEVEL
+  // scalar properties only, which meant a schema shaped like real model output
+  // offered nothing at all and Save stayed disabled.
+  const schemaFields = schemaToRoutableFields(selectedSchema?.schema_definition);
+
+  // Load schemas for the router picker whenever the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void SchemaService.getInstance().getSchemas().then((list) => {
+      if (!cancelled) setSchemas(list);
+    });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  // For an existing ROUTER edge without a stored schema, prefill from the source
+  // crew's final task if it already declares an output schema.
+  useEffect(() => {
+    if (!open || logicType !== 'ROUTER' || routerSchema || !finalSourceTask) return;
+    let cancelled = false;
+    void TaskService.getTask(finalSourceTask.id).then((task) => {
+      const existing = task?.config?.output_pydantic;
+      if (!cancelled && existing) setRouterSchema(existing);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, logicType, routerSchema, finalSourceTask?.id]);
+
+  const handleSave = async () => {
+    if (!edge) return;
+    setSaveError(null);
+
+    if (localSchema && routerConditions.some(group => group.terms.some(term => !schemaFields.some(field => field.path === (group.subject ? `${group.subject}[].${term.field}` : term.field))))) {
+      setSaveError('A routing field was removed. Update the conditions before saving.');
+      return;
+    }
+    const routerConditionStr = groupsToPython(routerConditions);
+
+    const config: EdgeConfig = {
+      logicType,
+      description,
+      listenToTaskIds,
+      targetTaskIds,
+      // Preserve legacy persistence for saved flows. Recovery checkpoints are automatic.
+      checkpoint: edge.data?.checkpoint === true || hitlEnabled,
+      hitl: {
+        enabled: hitlEnabled,
+        message: hitlMessage,
+        timeout_seconds: hitlTimeoutSeconds,
+        timeout_action: hitlTimeoutAction,
+        require_comment: hitlRequireComment,
+      },
+    };
+
+    if (logicType === 'ROUTER') {
+      config.isDefaultRoute = isDefaultRoute;
+      // The fallback runs precisely when nothing else matched, so it carries no
+      // condition of its own.
+      if (routerConditionStr && !isDefaultRoute) config.routerCondition = routerConditionStr;
+      if (routerSchema) config.routerSchema = routerSchema;
+      config.outputContract = localSchema;
+      if (localSchema) config.stateMappings = []; // Flow contracts expose their fields directly.
+
+      // Apply the chosen schema to the source crew's final task so it produces the
+      // structured output the router evaluates. Fetch-then-update preserves the
+      // task's other config fields.
+      if (routerSchema && finalSourceTask && !localSchema) {
+        try {
+          const fullTask = await TaskService.getTask(finalSourceTask.id);
+          if (fullTask && fullTask.config?.output_pydantic !== routerSchema) {
+            await TaskService.updateTask(finalSourceTask.id, {
+              ...fullTask,
+              config: { ...fullTask.config, output_pydantic: routerSchema },
+            });
+          }
+        } catch (e) {
+          setSaveError(e instanceof Error ? e.message : 'Failed to apply the schema to the source task.');
+          return; // keep the dialog open so the user can retry
+        }
+      }
+    }
+
+    onSave(edge.id, config);
+    onClose();
+  };
+
+  const handleCancel = () => {
+    onClose();
+  };
+
+  return (
+    <BuilderNodeEditor open={open} kind="connection" nodeId={edge?.id || 'connection'}
+      label={`${sourceNode?.data?.crewName || 'Source'} → ${targetNode?.data?.crewName || 'Target'}`} onClose={handleCancel}>
+
+      <DialogTitle sx={{ pb: 1 }}>
+        Configure Connection Logic
+      </DialogTitle>
+
+      <DialogContent sx={{ pt: 1 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {/* Task Selection Section - Two Column Layout */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 2 }}>
+            {/* Source Tasks Selection */}
+            <Box>
+              <FormLabel component="legend" sx={{ fontSize: '0.875rem', fontWeight: 600, mb: 0.5 }}>
+                Source Tasks (Listen To)
+              </FormLabel>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontSize: '0.75rem' }}>
+                {aggregatedSourceTasks.length > 1
+                  ? `From ${aggregatedSourceTasks.map(g => g.crewName).join(', ')}`
+                  : `From ${sourceNode?.data?.crewName || aggregatedSourceTasks[0]?.crewName || 'source crew'}`
+                }
+              </Typography>
+            {allSourceTasks.length === 0 ? (
+              <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                No tasks available
+              </Alert>
+            ) : (
+              <Box sx={{
+                maxHeight: '180px',
+                overflowY: 'auto',
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                p: 1.5
+              }}>
+                {aggregatedSourceTasks.length > 1 ? (
+                  // Multiple source crews — group the read-only list by crew name
+                  aggregatedSourceTasks.map((group) => (
+                    <Box key={group.crewName} sx={{ mb: 1.5 }}>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.7rem', display: 'block', mb: 0.5 }}
+                      >
+                        {group.crewName}
+                      </Typography>
+                      {group.tasks.map((task) => (
+                        <Typography key={task.id} variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+                          • {task.name}
+                        </Typography>
+                      ))}
+                    </Box>
+                  ))
+                ) : (
+                  allSourceTasks.map((task) => (
+                    <Typography key={task.id} variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+                      • {task.name}
+                    </Typography>
+                  ))
+                )}
+              </Box>
+            )}
+            </Box>
+
+            {/* Target Tasks Selection */}
+            <Box>
+              <FormLabel component="legend" sx={{ fontSize: '0.875rem', fontWeight: 600, mb: 0.5 }}>
+                Target Tasks (Execute)
+              </FormLabel>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontSize: '0.75rem' }}>
+                From {targetNode?.data?.crewName || 'target crew'}
+              </Typography>
+            {targetTasks.length === 0 ? (
+              <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                No tasks available
+              </Alert>
+            ) : (
+              <Box sx={{
+                maxHeight: '180px',
+                overflowY: 'auto',
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                p: 1.5
+              }}>
+                {targetTasks.map((task) => (
+                  <Typography key={task.id} variant="body2" sx={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+                    • {task.name}
+                  </Typography>
+                ))}
+              </Box>
+            )}
+            </Box>
+          </Box>
+
+          <Divider sx={{ my: 1 }} />
+
+          {/* Logic Type Selection */}
+          <FormControl fullWidth size="small">
+            <FormLabel component="legend" sx={{ fontSize: '0.875rem', fontWeight: 600, mb: 0.5 }}>
+              Flow Logic Type
+            </FormLabel>
+            <Select
+              value={logicType}
+              onChange={(e) => setLogicType(e.target.value as FlowLogicType)}
+              sx={{ fontSize: '0.85rem' }}
+              renderValue={(value) => {
+                const labels: Record<FlowLogicType, string> = {
+                  NONE: 'None (Default) — Sequential',
+                  AND: 'AND Logic — Wait for all',
+                  OR: 'OR Logic — Execute when any completes',
+                  ROUTER: 'Router — Conditional routing',
+                };
+                return (
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    {labels[value as FlowLogicType]}
+                  </Typography>
+                );
+              }}
+            >
+              <MenuItem value="NONE" disabled={isJoin}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    None (Default) <Typography component="span" variant="caption" color="text.secondary">— Sequential</Typography>
+                  </Typography>
+                  {isJoin && (
+                    <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem', display: 'block' }}>
+                      Not available when several connections join here
+                    </Typography>
+                  )}
+                </Box>
+              </MenuItem>
+              <MenuItem value="AND" disabled={!isJoin}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    AND Logic <Typography component="span" variant="caption" color="text.secondary">— Wait for all</Typography>
+                  </Typography>
+                  {!isJoin && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
+                      Requires several connections joining here
+                    </Typography>
+                  )}
+                </Box>
+              </MenuItem>
+              <MenuItem value="OR" disabled={!isJoin}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    OR Logic <Typography component="span" variant="caption" color="text.secondary">— Execute when any completes</Typography>
+                  </Typography>
+                  {!isJoin && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
+                      Requires several connections joining here
+                    </Typography>
+                  )}
+                </Box>
+              </MenuItem>
+              <MenuItem value="ROUTER">
+                <Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                    Router <Typography component="span" variant="caption" color="text.secondary">— Conditional routing</Typography>
+                  </Typography>
+                </Box>
+              </MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* Router Configuration (only shown when ROUTER is selected) */}
+          {logicType === 'ROUTER' && (
+            <FormControlLabel
+              sx={{ ml: 0 }}
+              control={
+                <Checkbox
+                  size="small"
+                  checked={isDefaultRoute}
+                  onChange={(e) => setIsDefaultRoute(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="caption">
+                  Run this branch when no other route matches
+                </Typography>
+              }
+            />
+          )}
+
+          {logicType === 'ROUTER' && !isDefaultRoute && (
+            <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'text.primary' }}>
+                Router Configuration
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                A crew returns <strong>one structured result</strong> for the whole run. Pick or create the
+                output schema for <strong>{sourceCrewName}</strong>, then choose a field to branch on
+                (e.g. <code>status == &quot;failed&quot;</code>).
+              </Typography>
+              <Link
+                href="/docs/flow-routing"
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, fontSize: '0.75rem', mb: 1.5 }}
+              >
+                <HelpOutlineIcon sx={{ fontSize: 14 }} /> Learn how routing works
+              </Link>
+
+              {/* Step 1: Output schema */}
+              <FormControl fullWidth size="small" sx={{ mb: 1.5 }}>
+                <InputLabel>Output schema</InputLabel>
+                <Select
+                  value={routerSchema}
+                  label="Output schema"
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '__create__') {
+                      setSchemaCreateOpen(true);
+                    } else if (value !== routerSchema) {
+                      setRouterSchema(value);
+                      // Existing conditions reference the previous schema's fields — start fresh.
+                      setRouterConditions([]);
+      setIsDefaultRoute(false);
+                    }
+                  }}
+                >
+                  <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
+                    <em>Select a schema…</em>
+                  </MenuItem>
+                  {outputContract && <MenuItem value={outputContract.name}>{outputContract.name} · This flow</MenuItem>}
+                  {schemas.filter(s => s.name !== outputContract?.name).map((s) => (
+                    <MenuItem key={s.id} value={s.name} sx={{ fontSize: '0.85rem' }}>{s.name}</MenuItem>
+                  ))}
+                  <MenuItem value="__create__" sx={{ color: 'text.primary', fontSize: '0.85rem' }}>
+                    <AddIcon fontSize="small" sx={{ mr: 1 }} /> Add new schema…
+                  </MenuItem>
+                </Select>
+              </FormControl>
+
+              {localSchema && <FlowOutputSchema key={`${edge?.id}:${localSchema.task_id}`} contract={localSchema} onChange={setOutputContract} />}
+              {/* Step 2: Condition on a schema variable */}
+              {!routerSchema ? (
+                <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                  Select or create an output schema to route on.
+                </Alert>
+              ) : (schemas.length > 0 && !selectedSchema) ? (
+                <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                  Schema &ldquo;{routerSchema}&rdquo; isn&apos;t available anymore — pick another above.
+                </Alert>
+              ) : schemaFields.length === 0 ? (
+                <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                  This schema has no scalar fields to route on.
+                </Alert>
+              ) : (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                    <strong>You can route on:</strong> {schemaFields.map((f) => f.label).join(', ')}
+                  </Typography>
+                  <ConditionBuilder
+                    groups={routerConditions}
+                    onChange={setRouterConditions}
+                    label=""
+                    fields={schemaFields}
+                    helperText="If TRUE → this route activates. If FALSE → route is skipped."
+                  />
+                </Box>
+              )}
+
+              {saveError && (
+                <Alert severity="error" sx={{ fontSize: '0.75rem', py: 0.5, mt: 1 }}>{saveError}</Alert>
+              )}
+            </Box>
+          )}
+
+          <Box sx={{ mt: 2 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={hitlEnabled}
+                  onChange={(e) => setHitlEnabled(e.target.checked)}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <PanToolIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 600, color: 'text.primary' }}>
+                    Require human approval
+                  </Typography>
+
+                </Box>
+              }
+              sx={{ ml: 0, mb: hitlEnabled ? 2 : 0 }}
+            />
+
+            {hitlEnabled && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pl: 4 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Approval Message"
+                  placeholder="Message shown to approvers..."
+                  value={hitlMessage}
+                  onChange={(e) => setHitlMessage(e.target.value)}
+                  multiline
+                  rows={2}
+                  helperText="This message will be displayed to reviewers when requesting approval"
+                />
+
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    size="small"
+                    type="number"
+                    label="Timeout (seconds)"
+                    value={hitlTimeoutSeconds}
+                    onChange={(e) => setHitlTimeoutSeconds(parseInt(e.target.value) || 86400)}
+                    sx={{ width: 150 }}
+                    helperText={
+                      hitlTimeoutSeconds < 3600
+                        ? `${Math.floor(hitlTimeoutSeconds / 60)} minutes`
+                        : hitlTimeoutSeconds < 86400
+                        ? `${Math.floor(hitlTimeoutSeconds / 3600)} hours`
+                        : `${Math.floor(hitlTimeoutSeconds / 86400)} days`
+                    }
+                  />
+
+                  <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <InputLabel>On Timeout</InputLabel>
+                    <Select
+                      value={hitlTimeoutAction}
+                      label="On Timeout"
+                      onChange={(e) => setHitlTimeoutAction(e.target.value as 'auto_reject' | 'fail')}
+                    >
+                      <MenuItem value="auto_reject">Auto-reject (allow retry)</MenuItem>
+                      <MenuItem value="fail">Fail flow execution</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={hitlRequireComment}
+                      onChange={(e) => setHitlRequireComment(e.target.checked)}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+                      Require a comment to approve
+                    </Typography>
+                  }
+                  sx={{ ml: 0 }}
+                />
+              </Box>
+            )}
+          </Box>
+
+          {/* Flow state is saved independently of this connection. */}
+          <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+            <FlowStateSection />
+          </Box>
+
+          {/* Description */}
+          <TextField
+            fullWidth
+            multiline
+            rows={2}
+            size="small"
+            label="Description (Optional)"
+            placeholder="Describe this connection..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            sx={{ mt: 2 }}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ px: 3, py: 1.5 }}>
+        <Button onClick={handleCancel} size="small">
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          size="small"
+          disabled={logicType === 'ROUTER' && !isDefaultRoute && (!routerSchema || routerConditions.length === 0)}
+        >
+          Save
+        </Button>
+      </DialogActions>
+
+      <SchemaDialog
+        open={schemaCreateOpen}
+        onClose={() => setSchemaCreateOpen(false)}
+        onSaved={(schema) => {
+          setSchemas((prev) => [...prev.filter((s) => s.name !== schema.name), schema]);
+          setRouterSchema(schema.name);
+          setRouterConditions([]);
+          setIsDefaultRoute(false);
+          setSchemaCreateOpen(false);
+        }}
+      />
+    </BuilderNodeEditor>
+  );
+};
+
+export default EdgeConfigDialog;

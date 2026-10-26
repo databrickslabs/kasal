@@ -1,0 +1,79 @@
+import type { IntentType } from './dispatcher';
+
+/** An image attached in the chat: enough for the model to place it in a layout. */
+export interface ImageRef {
+  id: string;
+  name: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+  intent?: IntentType;
+  resultType?: string;
+  resultData?: unknown;
+  isStreaming?: boolean;
+  /**
+   * The UNCAPPED text when `content` is a preview of a longer step output.
+   *
+   * A run posts each crew's output capped, and exactly ONE message per run is
+   * ever expanded — the final answer, swapped in at completion. Every
+   * intermediate crew therefore kept its preview permanently, so a two-crew
+   * flow left the first crew's work unreadable with no way to open it. Carried
+   * here so the reader can.
+   */
+  fullContent?: string;
+  /** Names of knowledge files attached to a user message (shown as chips). */
+  attachments?: string[];
+  /** Images attached to a user message — shown as thumbnails; the run gets their ids. */
+  images?: ImageRef[];
+  /**
+   * The execution (job) id of the run this message anchors. The deliverable
+   * shown in the preview pane is derived on demand from that execution's stored
+   * result (findUiSurface), so the output survives navigating away — no separate
+   * per-session preview copy is needed. Persisted in the __chatmode extras.
+   */
+  executionId?: string;
+  /**
+   * Whether THIS run actually used workspace memory (the "Workspace memory"
+   * mode was on when it ran). Captured per-run at dispatch — NOT the live
+   * toggle — so the "Memory graph" action only shows for runs that wrote
+   * workspace memory. A later toggle to workspace memory must not retroactively
+   * reveal the graph on a run that ran in session-only mode. Persisted in the
+   * __chatmode extras.
+   */
+  usedWorkspaceMemory?: boolean;
+  /**
+   * For an answer produced by a routed "Use existing" run: the published
+   * capability that produced it. Persisted in the __chatmode extras and read
+   * back by the BACKEND router on the following turn — it is how the router
+   * knows a capability is mid-conversation, and therefore that a fragment like
+   * "and Germany?" belongs to it rather than being re-matched against the whole
+   * catalogue.
+   */
+  capability?: string;
+}
+
+export interface ChatSession {
+  mode?: 'chat' | 'crew' | 'flow';
+  id: string;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  /** Workspace (group) this session belongs to — chat sessions are per-workspace. */
+  groupId?: string;
+  /** In-flight crew job for refresh reconnect (set while running). */
+  runningJobId?: string;
+}
+
+export interface AppConfig {
+  apiUrl: string;
+  email: string;
+  groupId: string;
+  accessToken: string;
+}

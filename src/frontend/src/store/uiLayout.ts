@@ -1,0 +1,245 @@
+import { create } from 'zustand';
+import type { UILayoutState } from '../types/ui/layout';
+import { usePermissionStore } from './permissions';
+
+/**
+ * Top-level workspace mode for the whole app, switched via the grid button in
+ * the TabBar. 'crew' is the default landing experience, 'flow' shows the flow
+ * canvas (formerly the "Show Workflow Panel" toggle), and 'chat' shows the
+ * embedded conversational workspace.
+ */
+export type AppMode = 'crew' | 'flow' | 'chat';
+
+interface UILayoutStore extends UILayoutState {
+  // Top-level workspace mode (crew / flow / chat)
+  appMode: AppMode;
+  setAppMode: (mode: AppMode) => void;
+
+  flowPanelTab: 'crews' | 'runs' | 'responses';
+  setFlowPanelTab: (tab: 'crews' | 'runs' | 'responses') => void;
+  assistantPanelVisible: boolean;
+  assistantPanelSide: 'left' | 'right';
+  assistantPanelRatio: number;
+  setAssistantPanelRatio: (ratio: number) => void;
+  assistantResponseFocused: boolean;
+  setAssistantResponseFocused: (focused: boolean) => void;
+  setAssistantPanelVisible: (visible: boolean) => void;
+  setAssistantPanelSide: (side: 'left' | 'right') => void;
+  setAssistantDockHeight: (height: number) => void;
+  // Actions to update the UI state
+  updateScreenDimensions: (width: number, height: number) => void;
+  setChatPanelWidth: (width: number) => void;
+  setChatPanelCollapsed: (collapsed: boolean) => void;
+  setChatPanelVisible: (visible: boolean) => void;
+  setExecutionHistoryHeight: (height: number) => void;
+  setExecutionHistoryVisible: (visible: boolean) => void;
+  setLeftSidebarExpanded: (expanded: boolean) => void;
+  setLeftSidebarVisible: (visible: boolean) => void;
+  setPanelPosition: (position: number) => void;
+  setAreFlowsVisible: (visible: boolean) => void;
+  setChatPanelSide: (side: 'left' | 'right') => void;
+  setLayoutOrientation: (orientation: 'vertical' | 'horizontal') => void;
+
+  // Computed getters
+  getUILayoutState: () => UILayoutState;
+}
+
+// Helper function to load persisted state from localStorage
+const loadPersistedState = () => {
+  try {
+    const stored = localStorage.getItem('ui-layout-storage');
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Failed to load persisted UI state:', error);
+  }
+  return {};
+};
+
+// Helper function to save state to localStorage
+const saveToLocalStorage = (state: Partial<UILayoutState> & { appMode?: AppMode; assistantLayoutVersion?: number }) => {
+  try {
+    const stored = localStorage.getItem('ui-layout-storage') || '{}';
+    const current = JSON.parse(stored);
+    const updated = { ...current, ...state };
+    localStorage.setItem('ui-layout-storage', JSON.stringify(updated));
+  } catch (error) {
+    console.error('Failed to save UI state:', error);
+  }
+};
+
+// Load initial persisted state
+const persistedState = loadPersistedState();
+
+export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
+  // Default UI state with persisted values
+  screenWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
+  screenHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+  tabBarHeight: 0,
+  leftSidebarVisible: true,
+  leftSidebarExpanded: false,
+  leftSidebarBaseWidth: 48,
+  leftSidebarExpandedWidth: 280,
+  rightSidebarVisible: false,
+  rightSidebarWidth: 0,
+  chatPanelVisible: persistedState.chatPanelVisible !== undefined ? persistedState.chatPanelVisible : true,
+  chatPanelCollapsed: persistedState.chatPanelCollapsed !== undefined ? persistedState.chatPanelCollapsed : false,
+  chatPanelWidth: persistedState.chatPanelWidth || 450,
+  chatPanelCollapsedWidth: 60,
+  chatPanelSide: persistedState.chatPanelSide || 'right',
+  executionHistoryVisible: true,
+  executionHistoryHeight: persistedState.executionHistoryHeight || 60,
+  panelPosition: persistedState.panelPosition || 50,
+  areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : false,
+  layoutOrientation: persistedState.layoutOrientation || 'horizontal',
+  // Land on Chat by default — Agent Builder ('crew') and Flow are opt-in via
+  // the mode switcher; an explicit persisted choice always wins.
+  appMode: persistedState.appMode || 'chat',
+
+  flowPanelTab: 'crews',
+  setFlowPanelTab: tab => set({ flowPanelTab: tab, assistantPanelVisible: tab === 'responses', executionHistoryVisible: true, chatPanelVisible: true, assistantResponseFocused: true }),
+  assistantPanelVisible: persistedState.appMode !== 'flow',
+  assistantPanelSide: persistedState.assistantLayoutVersion === 2 && persistedState.assistantPanelSide === 'right' ? 'right' : 'left',
+  assistantPanelRatio: Number.isFinite(persistedState.assistantPanelRatio) ? Math.max(0.3, Math.min(0.75, persistedState.assistantPanelRatio)) : 0.6,
+  assistantResponseFocused: true,
+  setAssistantPanelRatio: ratio => {
+    if (!Number.isFinite(ratio)) return;
+    const assistantPanelRatio = Math.max(0.3, Math.min(0.75, ratio));
+    set({ assistantPanelRatio });
+    saveToLocalStorage({ assistantPanelRatio, assistantLayoutVersion: 2, assistantPanelSide: get().assistantPanelSide });
+  },
+  setAssistantResponseFocused: focused => set({ assistantResponseFocused: focused, assistantPanelVisible: true, executionHistoryVisible: true, chatPanelVisible: true }),
+  setAssistantPanelVisible: visible => set(state => ({ assistantPanelVisible: visible, executionHistoryVisible: visible || (state.executionHistoryVisible && !state.assistantPanelVisible), ...(visible ? { chatPanelVisible: true, assistantResponseFocused: true, ...(state.areFlowsVisible ? { flowPanelTab: 'responses' as const } : {}) } : {}) })),
+  setAssistantPanelSide: side => { set({ assistantPanelSide: side }); saveToLocalStorage({ assistantPanelSide: side, assistantLayoutVersion: 2 }); },
+  assistantDockHeight: 128,
+  setAssistantDockHeight: height => {
+    set({ assistantDockHeight: height });
+    window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'assistant-dock-resize' } }));
+  },
+  // Actions
+  setAppMode: (mode: AppMode) => {
+    // The ONE funnel every mode entrance calls (NewSessionButton, the empty-state
+    // bridge links, OpenOnCanvasButtons, FlowBackLink). Guarding here means a
+    // chat-only user (operator) cannot reach a builder canvas through ANY
+    // entrance, current or future — the visible affordances are additionally
+    // hidden at their sites, but this is the enforcement.
+    if (mode === 'crew' && !usePermissionStore.getState().canUseAgentBuilder()) {
+      return;
+    }
+    if (mode === 'flow' && !usePermissionStore.getState().canUseFlowBuilder()) {
+      return;
+    }
+    // Keep the legacy areFlowsVisible flag in sync: the flow canvas and several
+    // layout effects still key off it. Flow mode shows the flow canvas; crew and
+    // chat modes hide it.
+    const areFlowsVisible = mode === 'flow';
+    set({ appMode: mode, areFlowsVisible, ...(areFlowsVisible && get().appMode !== 'flow' ? { flowPanelTab: 'crews', assistantPanelVisible: false, executionHistoryVisible: true, chatPanelVisible: true } : {}) });
+    saveToLocalStorage({ appMode: mode, areFlowsVisible });
+  },
+
+  updateScreenDimensions: (width: number, height: number) =>
+    set({ screenWidth: width, screenHeight: height }),
+
+  setChatPanelWidth: (width: number) => {
+    set({ chatPanelWidth: width });
+    saveToLocalStorage({ chatPanelWidth: width });
+  },
+
+  setChatPanelCollapsed: (collapsed: boolean) => {
+    set({ chatPanelCollapsed: collapsed });
+    saveToLocalStorage({ chatPanelCollapsed: collapsed });
+  },
+
+  setChatPanelVisible: (visible: boolean) => {
+    set({ chatPanelVisible: visible });
+    saveToLocalStorage({ chatPanelVisible: visible });
+  },
+
+  setExecutionHistoryHeight: (height: number) => {
+    set({ executionHistoryHeight: height });
+    saveToLocalStorage({ executionHistoryHeight: height });
+  },
+
+  setExecutionHistoryVisible: (visible: boolean) => {
+    set({ executionHistoryVisible: visible, assistantPanelVisible: visible, ...(visible && get().areFlowsVisible ? { flowPanelTab: 'responses' as const } : {}) });
+    saveToLocalStorage({ executionHistoryVisible: visible });
+  },
+
+  setLeftSidebarExpanded: (expanded: boolean) =>
+    set({ leftSidebarExpanded: expanded }),
+
+  setLeftSidebarVisible: (visible: boolean) =>
+    set({ leftSidebarVisible: visible }),
+
+  setPanelPosition: (position: number) => {
+    set({ panelPosition: position });
+    saveToLocalStorage({ panelPosition: position });
+  },
+
+  setAreFlowsVisible: (visible: boolean) => {
+    // Keep appMode coherent when legacy code paths flip flow visibility
+    // (e.g. loading a flow from the catalog, restoring a tab's view mode).
+    // Don't disturb 'chat' mode: only switch between crew <-> flow.
+    const currentMode = get().appMode;
+    let appMode = currentMode;
+    if (visible) {
+      appMode = 'flow';
+    } else if (currentMode === 'flow') {
+      appMode = 'crew';
+    }
+    set({ areFlowsVisible: visible, appMode, ...(visible && currentMode !== 'flow' ? { flowPanelTab: 'crews' as const, assistantPanelVisible: false, executionHistoryVisible: true, chatPanelVisible: true } : {}) });
+    saveToLocalStorage({ areFlowsVisible: visible, appMode });
+  },
+
+  setChatPanelSide: (side: 'left' | 'right') => {
+    set({ chatPanelSide: side });
+    saveToLocalStorage({ chatPanelSide: side });
+  },
+  setLayoutOrientation: (orientation: 'vertical' | 'horizontal') => {
+    set({ layoutOrientation: orientation });
+    saveToLocalStorage({ layoutOrientation: orientation });
+  },
+
+
+  // Computed getter that returns the current UI layout state
+  getUILayoutState: (): UILayoutState => {
+    const state = get();
+    return {
+      screenWidth: state.screenWidth,
+      screenHeight: state.screenHeight,
+      tabBarHeight: state.tabBarHeight,
+      leftSidebarVisible: state.leftSidebarVisible,
+      leftSidebarExpanded: state.leftSidebarExpanded,
+      leftSidebarBaseWidth: state.leftSidebarBaseWidth,
+      leftSidebarExpandedWidth: state.leftSidebarExpandedWidth,
+      rightSidebarVisible: state.rightSidebarVisible,
+      rightSidebarWidth: state.rightSidebarWidth,
+      assistantPanelVisible: state.assistantPanelVisible,
+      assistantResponseFocused: state.assistantResponseFocused,
+      assistantPanelSide: state.assistantPanelSide,
+      assistantPanelRatio: state.assistantPanelRatio,
+      assistantDockHeight: state.assistantDockHeight,
+      chatPanelVisible: state.chatPanelVisible,
+      chatPanelCollapsed: state.chatPanelCollapsed,
+      chatPanelWidth: state.chatPanelWidth,
+      chatPanelCollapsedWidth: state.chatPanelCollapsedWidth,
+      chatPanelSide: state.chatPanelSide,
+      executionHistoryVisible: state.executionHistoryVisible,
+      executionHistoryHeight: state.executionHistoryHeight,
+      panelPosition: state.panelPosition,
+      areFlowsVisible: state.areFlowsVisible,
+      layoutOrientation: state.layoutOrientation,
+    };
+  },
+}));
+
+// Helper hook to get just the UI layout state for the canvas layout manager
+export const useUILayoutState = (): UILayoutState => {
+  return useUILayoutStore(state => state.getUILayoutState());
+};
+
+// Expose store on window for debugging
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).useUILayoutStore = useUILayoutStore;
+}

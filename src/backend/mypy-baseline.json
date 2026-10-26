@@ -1,0 +1,5 @@
+{
+  "source_commit": "985ecf22",
+  "description": "Allowed mypy diagnostics; may only shrink, new errors must be fixed.",
+  "diagnostics": []
+}

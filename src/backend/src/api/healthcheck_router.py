@@ -1,0 +1,110 @@
+import logging
+from typing import Any, Dict
+
+from fastapi import APIRouter
+from sqlalchemy import text
+
+from src.core.cache import get_all_cache_stats
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/health",
+    tags=["health"],
+)
+
+
+@router.get("", response_model=None)
+async def health_check() -> Dict[str, Any]:
+    """
+    Health check endpoint to verify API is running.
+
+    Returns:
+        dict: Status information
+    """
+    return {
+        "status": "ok",
+        "message": "Service is healthy",
+    }
+
+
+@router.get("/db", response_model=None)
+async def db_health() -> Dict[str, Any]:
+    """
+    Database health check — reports Lakebase reachability when enabled, and
+    whether the startup schema self-heal applied every step.
+
+    Returns:
+        dict: Lakebase status including enabled, activated, reachable, and error
+        info, plus ``schema_heal`` (status, failed_steps, databases)
+    """
+    from src.db.database_router import is_lakebase_enabled
+    from src.db.lakebase_state import (
+        get_last_successful_connection,
+        is_lakebase_activated,
+    )
+
+    lakebase_enabled = await is_lakebase_enabled()
+    result: Dict[str, Any] = {
+        "status": "ok",
+        "lakebase_enabled": lakebase_enabled,
+        "lakebase_activated": is_lakebase_activated(),
+        "lakebase_reachable": None,
+        "lakebase_error": None,
+    }
+
+    if lakebase_enabled:
+        try:
+            # DELIBERATELY UNROUTED — the one place in the API that should touch
+            # the raw factory. Everywhere else it is a bug (see
+            # services/CLAUDE.md), because it is a per-process snapshot that a
+            # runtime /lakebase/enable never swaps. Here that IS the question:
+            # this endpoint reports whether THIS process's factory got swapped.
+            # Routing it would make the check pass by construction and hide the
+            # split it exists to detect.
+            from src.db.session import async_session_factory
+
+            if async_session_factory.is_lakebase:
+                async with async_session_factory() as session:
+                    await session.execute(text("SELECT 1"))
+                result["lakebase_reachable"] = True
+            else:
+                result["lakebase_reachable"] = False
+                result["lakebase_error"] = "Lakebase factory not initialised"
+        except Exception as e:
+            result["lakebase_reachable"] = False
+            result["lakebase_error"] = str(e)
+            result["status"] = "degraded"
+
+    last_conn = get_last_successful_connection()
+    if last_conn:
+        result["last_successful_connection"] = last_conn.isoformat()
+
+    # Schema gaps the startup self-heal could not close (step names only; the
+    # causes are in the startup log). Reported, never fatal: see
+    # src/db/self_heal/report.py.
+    from src.services.databricks.lakebase.schema_health import schema_heal_status
+
+    result["schema_heal"] = schema_heal_status()
+    if result["schema_heal"]["status"] != "ok":  # incomplete, or not run at all
+        result["status"] = "degraded"
+
+    return result
+
+
+@router.get("/cache", response_model=None)
+async def cache_stats() -> Dict[str, Any]:
+    """
+    Get cache statistics for monitoring performance.
+
+    Returns cache hit/miss rates and sizes for:
+    - model_config: Model configuration cache (5 min TTL)
+    - db_config: Database configuration cache (5 min TTL)
+
+    Returns:
+        dict: Cache statistics including hit rates and sizes
+    """
+    return {
+        "status": "ok",
+        "caches": get_all_cache_stats(),
+    }

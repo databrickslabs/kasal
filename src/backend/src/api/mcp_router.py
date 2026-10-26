@@ -1,0 +1,1139 @@
+"""
+API router for MCP server operations.
+
+This module provides endpoints for managing MCP (Model Context Protocol) servers.
+"""
+
+import logging
+from typing import Annotated, Any, Dict, List, Optional, Union
+
+from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
+from src.core.permissions import check_role_in_context, is_system_admin
+from src.dependencies.providers import GroupContextDep, SessionDep
+from src.schemas.mcp import (
+    MCPServerCreate,
+    MCPServerListResponse,
+    MCPServerResponse,
+    MCPServerUpdate,
+    MCPSettingsResponse,
+    MCPSettingsUpdate,
+    MCPTestConnectionRequest,
+    MCPTestConnectionResponse,
+    MCPToggleResponse,
+)
+from src.services.mcp.mcp_client.databricks_presets import GENIE_ONE_PATH
+from src.services.mcp.mcp_client.legacy_urls import MCPLegacyUrlService
+from src.services.mcp.mcp_client.service import MCPService
+from src.utils.user_context import GroupContext
+
+# Create router instance
+router = APIRouter(
+    prefix="/mcp",
+    tags=["mcp"],
+    responses={404: {"description": "Not found"}},
+)
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
+
+async def get_mcp_service(session: SessionDep) -> MCPService:
+    """
+    Dependency provider for MCPService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        MCPService instance with injected session
+    """
+    return MCPService(session=session)
+
+
+# Type alias for cleaner function signatures
+MCPServiceDep = Annotated[MCPService, Depends(get_mcp_service)]
+
+
+def _is_global_admin(group_context: Optional[GroupContext]) -> bool:
+    """
+    Whether the caller may manage GLOBAL (base) MCP servers: system admins only.
+
+    A base row is every workspace's server, so changing one is a
+    system-administration action. This gate used to accept an effective
+    workspace-admin role as well, which let a workspace admin change and
+    delete servers shared by every other workspace (audit F03).
+    """
+    return is_system_admin(group_context) if group_context is not None else False
+
+
+def _require_enabled_flag(payload: Dict[str, Any]) -> bool:
+    """Validate and extract a boolean ``enabled`` from a PATCH body."""
+    if "enabled" not in payload or not isinstance(payload["enabled"], bool):
+        raise BadRequestError("'enabled' boolean is required")
+    return bool(payload["enabled"])
+
+
+@router.get("/servers", response_model=MCPServerListResponse)
+async def get_mcp_servers(
+    service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPServerListResponse:
+    """
+    Get MCP servers effective for the current workspace (group).
+    Deduplicated by name, preferring workspace overrides over base.
+
+    Only workspace admins see the full list (including disabled servers, which
+    they manage in Configuration → MCP). Everyone else sees only the servers an
+    admin has ENABLED — the curated allow-list — so regular users can't pick
+    servers the workspace hasn't sanctioned.
+    """
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    is_admin = check_role_in_context(group_context, ["admin"])
+    return await service.get_all_servers_effective(group_id, enabled_only=not is_admin)
+
+
+async def _list_external_mcp_options(
+    workspace_url: str,
+    user_token: Optional[str],
+    service_parents: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    External MCP servers registered IN DATABRICKS that the caller can use.
+
+    These are Unity Catalog HTTP connections flagged as MCP connections
+    (workspace UI: AI Gateway → MCPs), proxied by the workspace at
+    ``/api/2.0/mcp/external/{connection_name}``. Listing uses the CALLER's
+    credentials (OBO when available), so the result honors their UC
+    permissions — users only see the servers they have access to.
+    """
+    import aiohttp
+
+    from src.utils.databricks_auth import get_auth_context
+    from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+    auth = await get_auth_context(user_token=user_token)
+    if not auth:
+        return []
+    headers = auth.get_headers()
+    headers.update(get_user_agent_header(KasalProduct.MCP))
+
+    url = f"{workspace_url}/api/2.1/unity-catalog/connections"
+    payload: Dict[str, Any] = {}
+    async with aiohttp.ClientSession() as http:
+        async with http.get(url, headers=headers) as resp:
+            if resp.status != 200:
+                logger.warning(
+                    f"Could not list UC connections for external MCPs: HTTP {resp.status}"
+                )
+            else:
+                payload = await resp.json()
+
+    options: List[Dict[str, Any]] = []
+    for conn in payload.get("connections") or []:
+        if str(conn.get("connection_type", "")).upper() != "HTTP":
+            continue
+        name = str(conn.get("name", ""))
+        if not name:
+            continue
+        # The MCP flag is an option on the HTTP connection ("Is MCP connection"
+        # in the UI). Match any mcp-ish option key so naming variants
+        # (is_mcp / is_mcp_connection) all register.
+        # Databricks' system-managed AI-agent connections (system_ai_agent_*)
+        # are deliberately NOT special-cased: the REST-backed ones (gmail,
+        # calendar, drive, sharepoint) answer an MCP handshake with the
+        # vendor's 404 ("Session terminated"), and even the MCP-backed ones
+        # (slack/atlassian) are AgentBricks-internal — they stay out of the
+        # picker. Per-user services like Gmail are exposed as dedicated Kasal
+        # tools instead (see gmail_tool.py).
+        conn_options = conn.get("options") or {}
+        is_mcp = any(
+            "mcp" in str(key).lower()
+            and str(value).strip().lower() in ("true", "1", "yes")
+            for key, value in conn_options.items()
+        )
+        if not is_mcp:
+            continue
+        options.append(
+            {
+                "id": f"external:{name}",
+                "kind": "external",
+                "name": name,
+                "description": conn.get("comment"),
+                "server_url": f"{workspace_url}/api/2.0/mcp/external/{name}",
+            }
+        )
+
+    # Unity Catalog MCP Services are schema-scoped securables. The list API
+    # requires ``parent=schemas/{catalog}.{schema}``; a parameterless request is
+    # rejected, which previously made this feature silently return no options.
+    # Call every known parent and follow each parent's pagination token.
+    try:
+        seen_urls = {o["server_url"] for o in options}
+        svc_root = f"{workspace_url}/api/2.1/unity-catalog/mcp-services"
+        services: List[Dict[str, Any]] = []
+        async with aiohttp.ClientSession() as http:
+            for parent in dict.fromkeys(service_parents or []):
+                page_token: Optional[str] = None
+                while True:
+                    params: Dict[str, Union[str, int]] = {
+                        "parent": parent,
+                        "max_results": 100,
+                    }
+                    if page_token:
+                        params["page_token"] = page_token
+                    async with http.get(
+                        svc_root, headers=headers, params=params
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.warning(
+                                "Could not list UC MCP Services for %s: HTTP %s",
+                                parent,
+                                resp.status,
+                            )
+                            break
+                        page = await resp.json()
+                    services.extend(page.get("mcp_services") or [])
+                    page_token = page.get("next_page_token")
+                    if not page_token:
+                        break
+
+        for svc in services:
+            # Responses have used both the full name and the resource-name form
+            # ``mcp-services/{catalog}.{schema}.{name}``.
+            full_name = str(svc.get("name", "")).split("/", 1)[-1]
+            if not full_name or full_name.startswith("system."):
+                continue
+            server_url = f"{workspace_url}/ai-gateway/mcp-services/{full_name}"
+            if server_url in seen_urls:
+                continue
+            seen_urls.add(server_url)
+            options.append(
+                {
+                    "id": f"external:{full_name}",
+                    "kind": "external",
+                    "name": full_name,
+                    "description": svc.get("comment"),
+                    "server_url": server_url,
+                }
+            )
+    except Exception as e:  # never let MCP-service discovery break the catalog
+        logger.warning(f"Could not list UC MCP Services for external MCPs: {e}")
+
+    return options
+
+
+def _mcp_service_parent(name: str) -> Optional[str]:
+    """Return the schema parent for a three-part UC securable name."""
+    parts = [part.strip() for part in str(name).split(".")]
+    if len(parts) != 3 or not all(parts):
+        return None
+    return f"schemas/{parts[0]}.{parts[1]}"
+
+
+def _require_catalog_admin(group_context: GroupContext) -> None:
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+
+async def _resolve_catalog_workspace(
+    request: Request, group_context: Optional[GroupContext]
+) -> tuple[str, Optional[str]]:
+    """``(workspace_url, user_token)`` for the Databricks MCP catalog, or 503."""
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    workspace_url = ""
+    try:
+        auth = await get_auth_context(user_token=user_token)
+        workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    except Exception as e:
+        logger.warning(f"Could not resolve workspace URL for Databricks MCPs: {e}")
+
+    if not workspace_url:
+        logger.warning("MCP-DISCOVERY-v1: workspace authentication unavailable")
+        raise KasalError(
+            "Databricks discovery is unavailable because the workspace connection "
+            "could not be authenticated. Check the Databricks connection in "
+            "Configuration, then retry. Diagnostic: MCP-DISCOVERY-v1",
+            status_code=503,
+        )
+    return workspace_url, user_token
+
+
+async def _discover_external_options(
+    session: AsyncSession,
+    workspace_url: str,
+    user_token: Optional[str],
+    group_id: Optional[str],
+) -> List[Dict[str, Any]]:
+    """The workspace's external MCP options (read-only)."""
+    service_parents: List[str] = []
+
+    # The list API is schema-scoped. Seed it from the configured schema and
+    # from existing three-part registrations so a service can be re-homed
+    # even when it lives outside the app's default catalog/schema.
+    try:
+        from src.repositories.databricks_config_repository import (
+            DatabricksConfigRepository,
+        )
+
+        config = await DatabricksConfigRepository(session).get_active_config(
+            group_id=group_id
+        )
+        catalog = getattr(config, "catalog", None) if config else None
+        schema = getattr(config, "schema", None) if config else None
+        if isinstance(catalog, str) and isinstance(schema, str):
+            service_parents.append(f"schemas/{catalog}.{schema}")
+    except Exception as e:
+        logger.warning(f"Could not resolve configured MCP Service schema: {e}")
+
+    try:
+        from src.repositories.mcp_repository import MCPServerRepository
+
+        registered = await MCPServerRepository(session).list_for_group_scope(group_id)
+        for server in registered:
+            parent = _mcp_service_parent(server.name)
+            if parent:
+                service_parents.append(parent)
+    except Exception as e:
+        logger.warning(f"Could not resolve registered MCP Service schemas: {e}")
+
+    try:
+        return await _list_external_mcp_options(
+            workspace_url, user_token, list(dict.fromkeys(service_parents))
+        )
+    except Exception as e:
+        logger.warning(f"Could not enumerate external Databricks MCP servers: {e}")
+        return []
+
+
+@router.get("/databricks/available")
+async def get_databricks_mcp_options(
+    request: Request, session: SessionDep, group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    The Databricks MCP catalog for this workspace, grouped for the chat's
+    two-step picker:
+
+    - ``external``: MCP servers registered IN DATABRICKS as UC HTTP
+      connections (proxied at ``/api/2.0/mcp/external/{name}``), listed with
+      the caller's credentials so only the ones they have permission on appear.
+    - ``managed``: the workspace's managed MCP server TYPES. Leaf types carry
+      a ``server_url`` and are selectable directly:
+        * Databricks SQL  → ``/api/2.0/mcp/sql``
+        * Unity Catalog Functions → ``/api/2.0/mcp/functions/{catalog}/{schema}``
+          using the catalog/schema from the workspace's Databricks
+          configuration (only offered when configured).
+      Expandable types (``expandable: true``) have a second step — Genie
+      spaces can number in the thousands, so they are NOT enumerated here:
+        * Genie     → drill into /mcp/databricks/genie-spaces (search+paging)
+        * AI Search → drill into /mcp/databricks/ai-search-indexes
+
+    Selecting any leaf registers it as a Kasal MCP server with
+    ``auth_type=databricks_obo`` and ``server_type=streamable``.
+
+    Browsing/registering Databricks MCP servers is a workspace-admin action, so
+    this catalog is admin-only (enforced here, not just hidden in the UI).
+    """
+    _require_catalog_admin(group_context)
+    workspace_url, user_token = await _resolve_catalog_workspace(request, group_context)
+
+    external: List[Dict[str, Any]] = []
+    managed: List[Dict[str, Any]] = []
+    legacy_external_count = 0
+    if workspace_url:
+        group_id = (
+            getattr(group_context, "primary_group_id", None) if group_context else None
+        )
+        external = await _discover_external_options(
+            session, workspace_url, user_token, group_id
+        )
+        # Read-only: a GET never rewrites registrations. The UI calls
+        # POST /databricks/migrate-external-urls when this is non-zero.
+        try:
+            legacy_external_count = await MCPLegacyUrlService(session).count_pending(
+                external, group_id, include_base=_is_global_admin(group_context)
+            )
+        except Exception as e:
+            logger.warning(f"Could not count legacy external MCP registrations: {e}")
+
+        managed.append(
+            {
+                "id": "sql",
+                "kind": "sql",
+                "name": "Databricks SQL",
+                "description": "Execute SQL against the workspace (managed MCP)",
+                "server_url": f"{workspace_url}/api/2.0/mcp/sql",
+                "expandable": False,
+            }
+        )
+
+        # Unity Catalog Functions — a two-step type like Genie/AI Search: the
+        # managed server is schema-scoped (.../mcp/functions/{catalog}/{schema},
+        # one server per schema, exposing all its functions), so drilling in
+        # lists selectable catalog.schema pairs. system.ai and the workspace's
+        # configured schema are pinned first on drill-in (see
+        # list_function_mcp_schemas).
+        managed.append(
+            {
+                "id": "functions",
+                "kind": "functions",
+                "name": "Unity Catalog Functions",
+                "description": "Pick a catalog.schema",
+                "expandable": True,
+            }
+        )
+
+        # Genie One — the workspace-wide Genie MCP (no space id): one endpoint
+        # that reaches every Genie space the caller can see, so it is directly
+        # selectable, unlike the per-space servers listed on drill-in below.
+        # Registered at the GA Unity Gateway service system.ai.genie_one_mcp;
+        # the Beta /api/2.0/mcp/genie is retired on 2026-10-31 and rows still
+        # pointing there are re-pointed by the startup self-heal. id, kind and
+        # name are unchanged, so the registered row keeps its name.
+        managed.append(
+            {
+                "id": "genie-one",
+                "kind": "genie",
+                "name": "Genie One",
+                "description": "Ask across all your Genie spaces (workspace-wide)",
+                "server_url": f"{workspace_url}{GENIE_ONE_PATH}",
+                "expandable": False,
+                # No tool-convention config here: the catalog names Databricks
+                # PRODUCTS only. The start+poll follow convention is supplied
+                # at tool-creation time from the managed-URL presets
+                # (services/mcp/mcp_client/databricks_presets via
+                # mcp_integration._follow_config_for); a server's own
+                # additional_config, when declared, overrides it.
+            }
+        )
+
+        # Two-step types — instances are listed on drill-in.
+        managed.append(
+            {
+                "id": "genie",
+                "kind": "genie",
+                "name": "Genie",
+                "description": "Pick a Genie space",
+                "expandable": True,
+            }
+        )
+        managed.append(
+            {
+                "id": "ai-search",
+                "kind": "ai-search",
+                "name": "AI Search",
+                "description": "Pick an AI Search index",
+                "expandable": True,
+            }
+        )
+
+    return {
+        "workspace_url": workspace_url,
+        "external": external,
+        "managed": managed,
+        "legacy_external_count": legacy_external_count,
+    }
+
+
+@router.post("/databricks/migrate-external-urls")
+async def migrate_external_mcp_urls(
+    request: Request, session: SessionDep, group_context: GroupContextDep
+) -> Dict[str, int]:
+    """Re-point this workspace's MCP registrations from the legacy
+    ``/api/2.0/mcp/external/`` proxy to their UC MCP Service (AI Gateway) URL.
+
+    Only rows in the caller's workspace change; a system admin's call also
+    migrates the base rows. This is the explicit write that
+    ``GET /databricks/available`` used to perform as a side effect.
+    """
+    _require_catalog_admin(group_context)
+    workspace_url, user_token = await _resolve_catalog_workspace(request, group_context)
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    external = await _discover_external_options(
+        session, workspace_url, user_token, group_id
+    )
+    migrated = await MCPLegacyUrlService(session).migrate(
+        external, group_id, include_base=_is_global_admin(group_context)
+    )
+    return {"migrated": migrated}
+
+
+@router.get("/databricks/genie-spaces")
+async def list_genie_mcp_spaces(
+    request: Request,
+    group_context: GroupContextDep,
+    search: Optional[str] = None,
+    page_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Second step of the Genie managed-MCP picker: the caller's Genie spaces as
+    selectable MCP servers (``/api/2.0/mcp/genie/{space_id}``), searchable and
+    paginated — workspaces can have thousands of spaces, so the first step
+    never enumerates them.
+
+    Admin-only: registering a Genie space as an MCP server is a workspace-admin
+    action (enforced here, not just hidden in the UI).
+    """
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+    from src.schemas.genie import GenieAuthConfig, GenieSpacesRequest
+    from src.services.databricks.genie.service import GenieService
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"options": [], "next_page_token": None}
+
+    genie = GenieService(GenieAuthConfig(use_obo=True, user_token=user_token))
+    spaces = await genie.get_spaces(
+        GenieSpacesRequest(search_query=search, page_token=page_token, page_size=50)
+    )
+    return {
+        "options": [
+            {
+                "id": f"genie:{space.id}",
+                "kind": "genie",
+                "name": space.name,
+                "description": space.description,
+                "server_url": f"{workspace_url}/api/2.0/mcp/genie/{space.id}",
+                # Follow convention comes from the managed-URL presets at
+                # tool-creation time, not from the catalog.
+            }
+            for space in spaces.spaces
+        ],
+        "next_page_token": spaces.next_page_token,
+    }
+
+
+def _functions_mcp_option(
+    workspace_url: str, catalog: str, schema: str
+) -> Dict[str, Any]:
+    """One selectable UC Functions managed-MCP server for a catalog.schema.
+
+    The managed server is schema-scoped — it exposes every function in the
+    schema; there is no per-function URL. The id mirrors the value the first
+    step used for these leaves so an already-registered server still matches.
+    """
+    return {
+        "id": f"functions:{catalog}.{schema}",
+        "kind": "functions",
+        "name": f"Unity Catalog Functions ({catalog}.{schema})",
+        "description": None,
+        "server_url": f"{workspace_url}/api/2.0/mcp/functions/{catalog}/{schema}",
+    }
+
+
+@router.get("/databricks/function-schemas")
+async def list_function_mcp_schemas(
+    request: Request,
+    session: SessionDep,
+    group_context: GroupContextDep,
+    catalog: Optional[str] = None,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Second step of the Unity Catalog Functions managed-MCP picker: the
+    workspace's ``catalog.schema`` pairs as selectable MCP servers
+    (``/api/2.0/mcp/functions/{catalog}/{schema}``). Each server exposes every
+    UC function in that schema — the managed MCP is schema-scoped, so there is
+    no per-function URL.
+
+    ``system.ai`` and the workspace's configured ``catalog.schema`` are pinned
+    first as quick picks. ``catalog`` chooses which catalog's schemas to browse
+    (defaults to the configured catalog); the returned ``catalogs`` list lets
+    the caller switch. ``search`` filters the ``catalog.schema`` label.
+
+    Admin-only: registering a managed MCP server is a workspace-admin action.
+    """
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+    from src.repositories.databricks_config_repository import (
+        DatabricksConfigRepository,
+    )
+    from src.services.databricks.workspace.service import DatabricksService
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"options": [], "catalogs": [], "selected_catalog": None}
+
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    config = await DatabricksConfigRepository(session).get_active_config(
+        group_id=group_id
+    )
+    cfg_catalog = getattr(config, "catalog", None) if config else None
+    cfg_schema = getattr(config, "schema", None) if config else None
+
+    service = DatabricksService(session, group_id=group_id, user_token=user_token)
+
+    # Catalogs for the switcher — best-effort so the picker still works when the
+    # caller cannot list the metastore.
+    try:
+        catalogs = await service.list_catalogs()
+    except Exception as e:
+        logger.warning(f"Could not list catalogs for Functions MCP picker: {e}")
+        catalogs = []
+
+    # Browse the requested catalog, else the configured one. Best-effort.
+    browse_catalog = catalog or cfg_catalog
+    schema_pairs: List[tuple] = []
+    if browse_catalog:
+        try:
+            schemas = await service.list_schemas(browse_catalog)
+            schema_pairs = [(browse_catalog, s) for s in schemas]
+        except Exception as e:
+            logger.warning(
+                f"Could not list schemas for '{browse_catalog}' Functions MCP: {e}"
+            )
+
+    # Pin quick picks first: system.ai, then the configured schema.
+    pinned: List[tuple] = [("system", "ai")]
+    if cfg_catalog and cfg_schema:
+        pinned.append((cfg_catalog, cfg_schema))
+
+    seen: set = set()
+    ordered: List[tuple] = []
+    for pair in pinned + schema_pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        ordered.append(pair)
+
+    query = (search or "").strip().lower()
+    options = [
+        _functions_mcp_option(workspace_url, c, s)
+        for (c, s) in ordered
+        if not query or query in f"{c}.{s}".lower()
+    ]
+    return {
+        "options": options,
+        "catalogs": catalogs,
+        "selected_catalog": browse_catalog,
+    }
+
+
+@router.get("/databricks/functions")
+async def list_schema_functions(
+    request: Request,
+    session: SessionDep,
+    catalog: str,
+    schema: str,
+    group_context: GroupContextDep,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    The individual Unity Catalog functions in a ``catalog.schema`` — a preview
+    of what the schema-scoped Functions MCP server
+    (``/api/2.0/mcp/functions/{catalog}/{schema}``) exposes.
+
+    This is for VISIBILITY only: the managed MCP server is schema-scoped, so
+    enabling it exposes every function in the schema. Returns
+    ``[{"name", "comment"}]`` filtered by ``search``. Admin-only.
+    """
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+    from src.services.databricks.workspace.service import DatabricksService
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"functions": []}
+
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    service = DatabricksService(session, group_id=group_id, user_token=user_token)
+    try:
+        functions = await service.list_functions(catalog, schema)
+    except Exception as e:
+        logger.warning(
+            f"Could not list functions for '{catalog}.{schema}' MCP preview: {e}"
+        )
+        return {"functions": []}
+
+    query = (search or "").strip().lower()
+    if query:
+        functions = [
+            f
+            for f in functions
+            if query in str(f.get("name", "")).lower()
+            or query in str(f.get("comment") or "").lower()
+        ]
+    return {"functions": functions}
+
+
+@router.get("/databricks/ai-search-indexes")
+async def list_ai_search_mcp_indexes(
+    request: Request, group_context: GroupContextDep
+) -> Dict[str, Any]:
+    """
+    Second step of the AI Search managed-MCP picker: the workspace's vector
+    search indexes as selectable MCP servers
+    (``/api/2.0/mcp/ai-search/{catalog}/{schema}/{index}``), listed with the
+    caller's credentials.
+
+    Admin-only: registering an AI Search index as an MCP server is a
+    workspace-admin action (enforced here, not just hidden in the UI).
+    """
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+    import aiohttp
+
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.telemetry import KasalProduct, get_user_agent_header
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if auth is None or not workspace_url:
+        return {"options": []}
+
+    headers = auth.get_headers()
+    headers.update(get_user_agent_header(KasalProduct.MCP))
+
+    options: List[Dict[str, Any]] = []
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.get(
+                f"{workspace_url}/api/2.0/vector-search/endpoints", headers=headers
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(
+                        f"Could not list vector search endpoints: HTTP {resp.status}"
+                    )
+                    return {"options": []}
+                endpoints = (await resp.json()).get("endpoints") or []
+
+            for endpoint in endpoints:
+                endpoint_name = endpoint.get("name")
+                if not endpoint_name:
+                    continue
+                async with http.get(
+                    f"{workspace_url}/api/2.0/vector-search/indexes",
+                    headers=headers,
+                    params={"endpoint_name": endpoint_name},
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    indexes = (await resp.json()).get("vector_indexes") or []
+                for index in indexes:
+                    full_name = str(index.get("name", ""))
+                    parts = full_name.split(".")
+                    if len(parts) != 3:
+                        continue
+                    catalog, schema, index_name = parts
+                    options.append(
+                        {
+                            "id": f"ai-search:{full_name}",
+                            "kind": "ai-search",
+                            "name": full_name,
+                            "description": f"Endpoint: {endpoint_name}",
+                            "server_url": (
+                                f"{workspace_url}/api/2.0/mcp/ai-search/"
+                                f"{catalog}/{schema}/{index_name}"
+                            ),
+                        }
+                    )
+    except Exception as e:
+        logger.warning(f"Could not enumerate AI Search indexes: {e}")
+
+    return {"options": options}
+
+
+@router.get("/servers/enabled", response_model=MCPServerListResponse)
+async def get_enabled_mcp_servers(
+    service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPServerListResponse:
+    """
+    Get the enabled MCP servers of the caller's groups, plus the base servers.
+    """
+    logger.info("Getting enabled MCP servers")
+    servers_response = await service.get_enabled_servers(
+        getattr(group_context, "group_ids", None) or []
+    )
+    logger.info(f"Found {servers_response.count} enabled MCP servers")
+    return servers_response
+
+
+@router.get("/servers/global", response_model=MCPServerListResponse)
+async def get_global_mcp_servers(
+    service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPServerListResponse:
+    """
+    Get the globally enabled MCP servers of the caller's groups, plus the base
+    servers.
+    """
+    logger.info("Getting globally enabled MCP servers")
+    servers_response = await service.get_global_servers(
+        getattr(group_context, "group_ids", None) or []
+    )
+    logger.info(f"Found {servers_response.count} globally enabled MCP servers")
+    return servers_response
+
+
+@router.get("/servers/base", response_model=MCPServerListResponse)
+async def get_base_mcp_servers(
+    service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPServerListResponse:
+    """
+    Get the base/global MCP servers (group_id IS NULL) — the system-admin
+    catalog. A base server is "available to all workspaces" when enabled.
+    Only system admins manage this list.
+    """
+    if not _is_global_admin(group_context):
+        raise ForbiddenError("Only system admins can view global MCP servers")
+    return await service.get_base_servers()
+
+
+@router.post(
+    "/servers/global",
+    response_model=MCPServerResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_global_mcp_server(
+    server_data: MCPServerCreate,
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPServerResponse:
+    """
+    Create a base/global MCP server (group_id IS NULL), available to all
+    workspaces. Only system admins can create global MCP servers.
+    """
+    if not _is_global_admin(group_context):
+        raise ForbiddenError("Only system admins can create global MCP servers")
+    logger.info(f"Creating global MCP server with name '{server_data.name}'")
+    server = await service.create_global_server(server_data)
+    logger.info(f"Created global MCP server with ID {server.id}")
+    return server
+
+
+@router.get("/servers/{server_id}", response_model=MCPServerResponse)
+async def get_mcp_server(
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPServerResponse:
+    """
+    Get an MCP server by ID.
+    """
+    logger.info(f"Getting MCP server with ID {server_id}")
+    server = await service.get_server_by_id(server_id, group_context)
+    logger.info(f"Found MCP server with ID {server_id}")
+    return server
+
+
+@router.post(
+    "/servers", response_model=MCPServerResponse, status_code=status.HTTP_201_CREATED
+)
+async def create_mcp_server(
+    server_data: MCPServerCreate,
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPServerResponse:
+    """
+    Create a new MCP server.
+    Only Admins can create MCP servers.
+
+    Behavior:
+    - If a workspace context (group_id) is present, the server is created scoped to that workspace
+      to prevent cross-workspace visibility.
+    - Otherwise, it is created as a base (global) server.
+    """
+    # Check permissions - only admins can create MCP servers
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can create MCP servers")
+
+    # Determine workspace scoping
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+
+    logger.info(
+        f"Creating MCP server with name '{server_data.name}' scoped to group_id={group_id}"
+    )
+    server = await service.create_server(server_data, group_id=group_id)
+    logger.info(f"Created MCP server with ID {server.id}")
+    return server
+
+
+@router.put("/servers/{server_id}", response_model=MCPServerResponse)
+async def update_mcp_server(
+    server_id: int,
+    server_data: MCPServerUpdate,
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPServerResponse:
+    """
+    Update an existing MCP server.
+    Only Admins can update MCP servers.
+    """
+    # Check permissions - workspace admins (own rows) or system admins (base rows)
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can update MCP servers")
+
+    logger.info(f"Updating MCP server with ID {server_id}")
+    server = await service.update_server(server_id, server_data, group_context)
+    logger.info(f"Updated MCP server with ID {server_id}")
+    return server
+
+
+@router.delete("/servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_mcp_server(
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
+) -> None:
+    """
+    Delete an MCP server.
+    Only Admins can delete MCP servers.
+    """
+    # Check permissions - workspace admins (own rows) or system admins (base rows)
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can delete MCP servers")
+
+    logger.info(f"Deleting MCP server with ID {server_id}")
+    await service.delete_server(server_id, group_context)
+    logger.info(f"Deleted MCP server with ID {server_id}")
+
+
+@router.patch("/servers/{server_id}/toggle-enabled", response_model=MCPToggleResponse)
+async def toggle_mcp_server_enabled(
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPToggleResponse:
+    """
+    Toggle the enabled status of an MCP server.
+    Only Admins can toggle MCP server status.
+    """
+    # Check permissions - only admins can toggle MCP servers
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can toggle MCP server status")
+
+    logger.info(f"Toggling enabled status for MCP server with ID {server_id}")
+    response = await service.toggle_server_enabled(server_id, group_context)
+    status_text = "enabled" if response.enabled else "disabled"
+    logger.info(f"MCP server with ID {server_id} {status_text}")
+    return response
+
+
+@router.patch(
+    "/servers/{server_id}/toggle-global-enabled", response_model=MCPToggleResponse
+)
+async def toggle_mcp_server_global_enabled(
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPToggleResponse:
+    """
+    Toggle the global enabled status of an MCP server.
+    Only Admins can toggle global MCP server status.
+    """
+    # Check permissions - only admins can toggle global MCP server status
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can toggle global MCP server status")
+
+    logger.info(f"Toggling global enabled status for MCP server with ID {server_id}")
+    response = await service.toggle_server_global_enabled(server_id, group_context)
+    status_text = "globally enabled" if response.enabled else "globally disabled"
+    logger.info(f"MCP server with ID {server_id} {status_text}")
+    return response
+
+
+@router.post(
+    "/servers/{server_id}/enable-for-workspace", response_model=MCPServerResponse
+)
+async def enable_mcp_server_for_workspace(
+    server_id: int, service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPServerResponse:
+    """
+    Create or update a workspace-scoped override for this server and enable it.
+    Only Admins can perform this action.
+    """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can enable MCP server for a workspace")
+    group_id = getattr(group_context, "primary_group_id", None)
+    if not group_id:
+        raise BadRequestError("No workspace/group selected")
+    return await service.enable_server_for_group(server_id, group_id)
+
+
+@router.patch(
+    "/servers/{server_id}/global-availability", response_model=MCPServerResponse
+)
+async def set_mcp_server_global_availability(
+    server_id: int,
+    payload: Dict[str, Any],
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPServerResponse:
+    """
+    System admin: set whether a base/global MCP server is available to all
+    workspaces (its ``enabled`` flag). Mirrors Tools' global-availability toggle.
+    """
+    if not _is_global_admin(group_context):
+        raise ForbiddenError("Only system admins can change global MCP availability")
+    enabled = _require_enabled_flag(payload)
+    logger.info(f"Setting global availability for MCP server {server_id} to {enabled}")
+    return await service.set_global_availability(server_id, enabled, group_context)
+
+
+@router.patch(
+    "/servers/{server_id}/workspace-enabled", response_model=MCPServerResponse
+)
+async def set_mcp_server_workspace_enabled(
+    server_id: int,
+    payload: Dict[str, Any],
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPServerResponse:
+    """
+    Workspace admin: enable/disable a server FOR THIS WORKSPACE only.
+
+    Disabling a globally-available (base) server creates a workspace-scoped
+    override (enabled=false) that hides it from this workspace's users without
+    affecting other workspaces. Toggling the workspace's own row flips it in place.
+    """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can change MCP server state for a workspace")
+    group_id = getattr(group_context, "primary_group_id", None)
+    if not group_id:
+        raise BadRequestError("No workspace/group selected")
+    enabled = _require_enabled_flag(payload)
+    logger.info(
+        f"Setting workspace-enabled for MCP server {server_id} to {enabled} "
+        f"(group={group_id})"
+    )
+    return await service.set_server_enabled_for_group(server_id, group_id, enabled)
+
+
+@router.post("/test-connection", response_model=MCPTestConnectionResponse)
+async def test_mcp_connection(
+    test_data: MCPTestConnectionRequest,
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPTestConnectionResponse:
+    """
+    Test connection to an MCP server.
+    Only Admins can test MCP server connections.
+    """
+    # Check permissions - only admins can test MCP connections
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can test MCP server connections")
+
+    logger.info(f"Testing connection to MCP server at {test_data.server_url}")
+    try:
+        response = await service.test_connection(test_data)
+        success_text = "successful" if response.success else "failed"
+        logger.info(f"Connection test {success_text}: {response.message}")
+        return response
+    except Exception as e:
+        logger.error(f"Error testing MCP server connection: {str(e)}")
+        return MCPTestConnectionResponse(
+            success=False, message=f"Error testing connection: {str(e)}"
+        )
+
+
+@router.get("/settings", response_model=MCPSettingsResponse)
+async def get_mcp_settings(
+    service: MCPServiceDep, group_context: GroupContextDep
+) -> MCPSettingsResponse:
+    """
+    Get global MCP settings.
+    """
+    logger.info("Getting global MCP settings")
+    settings = await service.get_settings()
+    logger.info(f"Retrieved global MCP settings (enabled: {settings.global_enabled})")
+    return settings
+
+
+@router.put("/settings", response_model=MCPSettingsResponse)
+async def update_mcp_settings(
+    settings_data: MCPSettingsUpdate,
+    service: MCPServiceDep,
+    group_context: GroupContextDep,
+) -> MCPSettingsResponse:
+    """
+    Update global MCP settings.
+    Only Admins can update global MCP settings.
+    """
+    # Check permissions - only admins can update global MCP settings
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can update global MCP settings")
+
+    logger.info(
+        f"Updating global MCP settings (enabled: {settings_data.global_enabled})"
+    )
+    settings = await service.update_settings(settings_data)
+    logger.info(f"Updated global MCP settings (enabled: {settings.global_enabled})")
+    return settings

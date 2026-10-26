@@ -1,0 +1,348 @@
+import React, { useState, useEffect, useMemo, useId } from 'react';
+import { CircleUserRound } from 'lucide-react';
+import {
+  Box,
+  IconButton,
+  Chip,
+  Typography,
+  CircularProgress,
+  Tooltip,
+  Menu,
+  MenuItem,
+  Avatar,
+  ListItemIcon,
+  ListItemText,
+  Divider
+} from '@mui/material';
+import {
+  WorkspacesOutlined as WorkspacesIcon,
+  AccountCircleOutlined as ProfileIcon,
+  GroupsOutlined as GroupsIcon
+} from '@mui/icons-material';
+import { GroupWithRole } from '../../../api/groups/GroupService';
+import toast from 'react-hot-toast';
+import { useRunStatusStore } from '../../../store/runStatus';
+import { isPersonalWorkspaceId, useUserStore } from '../../../store/user';
+import { useGroupStore } from '../../../store/groups';
+import { useUILayoutStore } from '../../../store/uiLayout';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
+
+// Kasal's brand accent (chat.css --accent), used ONLY while chat mode is
+// active — the builder canvases are MUI-themed and keep their original
+// primary colors. CSS vars can't reach here (outside #kasal-chat-root).
+const KASAL_ACCENT = '#FF3621';
+const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
+const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
+
+const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false }) => {
+  const id = useId();
+  const appMode = useUILayoutStore((st) => st.appMode);
+  const isChatMode = appMode === 'chat';
+  const accent = isChatMode ? KASAL_ACCENT : 'primary.main';
+  const accentSoft = isChatMode ? KASAL_ACCENT_SOFT : 'action.selected';
+  const accentSoftHover = isChatMode ? KASAL_ACCENT_SOFT_HOVER : 'action.selected';
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  // Use Zustand store instead of local state
+  const groups = useGroupStore(s => s.groups);
+  const loading = useGroupStore(s => s.isLoading);
+  const currentGroup = useGroupStore(s => s.getCurrentGroup());
+  const fetchMyGroups = useGroupStore(s => s.fetchMyGroups);
+  const setCurrentGroupId = useGroupStore(s => s.setCurrentGroup);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const clearRunHistory = useRunStatusStore(state => state.clearRunHistory);
+
+  // Get current user from Zustand store
+  const { currentUser, isLoadingUser, fetchCurrentUser } = useUserStore(state => ({
+    currentUser: state.currentUser,
+    isLoadingUser: state.isLoading,
+    fetchCurrentUser: state.fetchCurrentUser
+  }));
+
+  const open = Boolean(anchorEl);
+
+
+
+  // Fetch user once when component mounts
+  useEffect(() => {
+    if (!currentUser) {
+      fetchCurrentUser();
+    }
+  }, [currentUser, fetchCurrentUser]); // Include dependencies
+
+  // Fetch groups when user changes
+  useEffect(() => {
+    if (currentUser?.email) {
+      fetchMyGroups();
+    }
+  }, [currentUser?.email, fetchMyGroups]);
+
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  const switchToGroup = async (group: GroupWithRole) => {
+    try {
+      // Don't switch if this tab is already on this group. After the server
+      // refused the tab's group the menu still shows it, and picking it again
+      // must re-pin the tab.
+      if (currentGroup?.id === group.id && getTabGroupId() === group.id) {
+        handleClose();
+        return;
+      }
+
+      // Set switching state to prevent flickering
+      setIsSwitching(true);
+
+      console.log('Switching to group:', group.id, group.name);
+
+      // Clear the run history store before switching groups
+      clearRunHistory();
+
+      // Update selected group in the global store (persists to localStorage + fires event)
+      setCurrentGroupId(group.id);
+      handleClose();
+
+      // Show success message with the actual group ID being used
+      const displayName = isPersonalWorkspaceId(group.id, currentUser?.personal_group_id)
+        ? 'Personal Space'
+        : `${group.name} teamspace`;
+      toast.success(`Switched to ${displayName}`);
+
+      // Small delay then reload to apply new context
+      setTimeout(() => {
+        window.location.reload();
+      }, 300);  // Reduced delay for faster transition
+    } catch (error) {
+      console.error('Failed to switch group:', error);
+      toast.error('Failed to switch group');
+    }
+  };
+
+
+  const getRoleColor = (role?: string): "error" | "primary" | "success" | "default" => {
+    switch (role) {
+      case 'ADMIN':
+        return 'error';
+      case 'EDITOR':
+        return 'success';
+      case 'OPERATOR':
+      default:
+        return 'default';
+    }
+  };
+
+  const avatarElement = useMemo(() => <CircleUserRound size={20} strokeWidth={1.8} aria-hidden="true" />, []);
+
+  if (loading || isSwitching || isLoadingUser) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', p: 0.5 }}>
+        <CircularProgress size={24} />
+      </Box>
+    );
+  }
+
+  if (!currentGroup) {
+    // Show a placeholder while waiting for groups to load
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', p: 0.5 }}>
+        <Avatar
+          sx={{
+            width: 24,
+            height: 24,
+            fontSize: '0.75rem',
+            bgcolor: 'grey.400',
+          }}
+        >
+          ?
+        </Avatar>
+      </Box>
+    );
+  }
+
+  return (
+    <>
+      <Tooltip title="Switch teamspace" placement="right"><IconButton
+          id={`${id}-button`}
+          aria-controls={open ? `${id}-menu` : undefined}
+          aria-haspopup="true"
+          aria-expanded={open ? 'true' : undefined}
+          onClick={handleClick}
+          size="small"
+          aria-label={
+            isPersonalWorkspaceId(currentGroup.id, currentUser?.personal_group_id)
+              ? `Switch teamspace: Personal Space (${currentUser?.email})`
+              : `Switch teamspace: ${currentGroup.name} - Shared Teamspace`
+          }
+          sx={{
+            width: showLabel ? '100%' : 40, height: 40, p: 0.5, color: 'text.secondary',
+            minWidth: 0,
+            justifyContent: showLabel ? 'flex-start' : 'center',
+            borderRadius: 2,
+            transition: 'background-color 0.2s',
+            '&:hover': {
+              backgroundColor: 'action.hover',
+            }
+          }}
+        >
+          {showLabel ? (
+            <>
+              <Box component="span" sx={{ width: 36, flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                {avatarElement}
+              </Box>
+              <Typography component="span" noWrap sx={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: 'text.secondary' }}>
+                {isPersonalWorkspaceId(currentGroup.id, currentUser?.personal_group_id) ? 'Personal Space' : currentGroup.name}
+              </Typography>
+            </>
+          ) : avatarElement}
+        </IconButton></Tooltip>
+      <Menu
+        id={`${id}-menu`}
+        anchorEl={anchorEl}
+        open={open}
+        onClose={handleClose}
+        disableScrollLock={true}  // Prevents body scroll lock and ResizeObserver issues
+        keepMounted={false}        // Unmount when closed to save resources and prevent issues
+        TransitionProps={{         // Proper transition configuration
+          timeout: 350,
+        }}
+        anchorOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        slotProps={{
+          paper: {
+            elevation: 2,
+            sx: {
+              minWidth: 280,
+              maxHeight: 400,
+              mt: -1,
+              borderRadius: 3,
+              border: 0,
+              borderColor: 'divider',
+              boxShadow: '0 12px 32px rgba(16,24,40,0.10), 0 2px 8px rgba(16,24,40,0.06)',
+              overflow: 'auto',  // Changed from 'visible' to 'auto' for better scrolling
+            },
+          }
+        }}
+        MenuListProps={{
+          'aria-labelledby': `${id}-button`,
+          sx: { py: 0.75 }
+        }}
+      >
+        <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
+          <Typography
+            sx={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            color="text.secondary"
+          >
+            Switch Teamspace
+          </Typography>
+        </Box>
+        {groups.map((group) => {
+          const isPersonalWorkspace = isPersonalWorkspaceId(group.id, currentUser?.personal_group_id);
+          const isSelected = currentGroup?.id === group.id;
+
+          return (
+            <MenuItem
+              key={group.id}
+              onClick={() => switchToGroup(group)}
+              selected={isSelected}
+              sx={{
+                minHeight: 48,
+                mx: 0.75,
+                px: 1.5,
+                py: 1,
+                borderRadius: 2,
+                '&.Mui-selected': {
+                  backgroundColor: accentSoft,
+                  '&:hover': {
+                    backgroundColor: accentSoftHover,
+                  }
+                }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36 }}>
+                {isPersonalWorkspace ? (
+                  <ProfileIcon
+                    fontSize="small"
+                    sx={{
+                      color: isSelected ? accent : 'text.secondary'
+                    }}
+                  />
+                ) : (
+                  <GroupsIcon
+                    fontSize="small"
+                    sx={{
+                      color: isSelected ? accent : 'text.secondary'
+                    }}
+                  />
+                )}
+              </ListItemIcon>
+              <ListItemText
+                primary={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography
+                      variant="body2"
+                      sx={{ fontWeight: isSelected ? 600 : 400 }}
+                    >
+                      {isPersonalWorkspace ? 'Personal Space' : group.name}
+                    </Typography>
+                    {isSelected && (
+                      <Chip
+                        label="Active"
+                        size="small"
+                        color={isChatMode ? undefined : 'primary'}
+                        sx={
+                          isChatMode
+                            ? {
+                                height: 20,
+                                fontWeight: 600,
+                                color: KASAL_ACCENT,
+                                backgroundColor: KASAL_ACCENT_SOFT,
+                              }
+                            : { height: 20 }
+                        }
+                      />
+                    )}
+                  </Box>
+                }
+                secondary={
+                  <Typography variant="caption" color="text.secondary">
+                    {isPersonalWorkspace
+                      ? `Personal - ${currentUser?.email}`
+                      : `Shared teamspace`}
+                  </Typography>
+                }
+                sx={{ my: 0 }}
+              />
+              {group.user_role && !isPersonalWorkspace && (
+                <Chip
+                  label={group.user_role}
+                  size="small"
+                  color={getRoleColor(group.user_role)}
+                  sx={{ ml: 1 }}
+                />
+              )}
+            </MenuItem>
+          );
+        })}
+        {groups.length === 0 && (
+          <MenuItem disabled>
+            <Typography variant="body2" color="text.secondary">
+              No groups available
+            </Typography>
+          </MenuItem>
+        )}
+      </Menu>
+    </>
+  );
+};
+
+export default GroupSelector;

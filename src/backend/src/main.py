@@ -1,0 +1,955 @@
+import os
+from typing import AsyncIterator, Dict, Optional
+
+# CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
+# This must be done before importing any modules that might create database connections
+os.environ["USE_NULLPOOL"] = "true"
+
+# Configure logging BEFORE any other imports to ensure all loggers respect configuration
+from src.config.logging import CentralizedLoggingConfig, configure_early_logging
+
+configure_early_logging()
+
+
+# Now import everything else
+import logging  # noqa: E402 - import follows module initialization
+from contextlib import (  # noqa: E402 - import follows module initialization
+    asynccontextmanager,
+)
+
+from fastapi import (  # noqa: E402 - import follows module initialization
+    FastAPI,
+    Request,
+)
+from fastapi.middleware.cors import (  # noqa: E402 - import follows module initialization
+    CORSMiddleware,
+)
+from fastapi.responses import (  # noqa: E402 - import follows module initialization
+    JSONResponse,
+)
+from sqlalchemy import text  # noqa: E402 - import follows module initialization
+from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
+    AsyncSession,
+    async_sessionmaker,
+)
+from starlette.types import ASGIApp, Receive, Scope, Send  # noqa: E402
+
+from src.api import api_router  # noqa: E402 - import follows module initialization
+from src.config.settings import (  # noqa: E402 - import follows module initialization
+    settings,
+)
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.core.paths import BACKEND_ROOT  # noqa: E402
+from src.db.session import (  # noqa: E402 - import follows module initialization
+    async_session_factory,
+)
+from src.services.execution.cleanup import (  # noqa: E402 - import follows module initialization
+    ExecutionCleanupService,
+)
+from src.services.scheduling.scheduler import (  # noqa: E402 - import follows module initialization
+    SchedulerService,
+)
+from src.utils.memory_paths import warn_if_local_memory_is_ephemeral  # noqa: E402
+
+# Get logger after configuration
+logger = logging.getLogger(__name__)
+
+# Print logging configuration if in debug mode
+if (
+    os.environ.get("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]
+    or os.environ.get("KASAL_LOG_LEVEL", "").upper() == "DEBUG"
+):
+    print(CentralizedLoggingConfig.get_configuration_summary())
+
+# Set debug flag for seeders
+os.environ["SEED_DEBUG"] = "True"
+
+# Disable CrewAI telemetry (do NOT set OTEL_SDK_DISABLED as it disables all OTel including App Telemetry logs)
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+
+# Prevent MLflow from creating local mlruns directories
+# This MUST be set before MLflow is imported anywhere to ensure Databricks backend is used.
+# A local MLflow server is configured per workspace in Configuration → MLflow,
+# not with MLFLOW_TRACKING_URI at launch.
+os.environ["MLFLOW_TRACKING_URI"] = "databricks"
+
+# Set log directory environment variable
+log_path = os.path.join(
+    os.path.abspath(os.path.dirname(os.path.dirname(__file__))), "logs"
+)
+# setdefault, not overwrite: a LOG_DIR the launcher (or the test suite, which
+# points it at tests/.artifacts/logs) already chose must win. Overwriting it made
+# every test after the first in-process ``import src.main`` write log files into
+# src/backend/logs/, which the test-artifact guard then failed on a clean checkout.
+_log_dir = os.environ.setdefault("LOG_DIR", log_path)
+# Create logs directory if it doesn't exist
+os.makedirs(_log_dir, exist_ok=True)
+
+
+def _trigger_interval() -> int:
+    """Seconds between trigger-queue ticks (Event triggers → Advanced)."""
+    from src.services.settings.engine_settings import setting
+
+    return int(setting("event_triggers_interval"))
+
+
+def _trigger_batch() -> int:
+    from src.services.settings.engine_settings import setting
+
+    return int(setting("event_triggers_batch"))
+
+
+async def _on_database_ready(system_logger: logging.Logger) -> None:
+    """Startup steps that need the database. Neither may stop the app starting."""
+    # Configuration → Engines settings for synchronous readers (Jev URL, run
+    # budgets, agent time limit). Never raises: defaults apply on failure.
+    from src.services.settings import engine_settings_loader
+
+    await engine_settings_loader.load()
+
+    system_logger.info("Cleaning up stale jobs from previous run...")
+    try:
+        cleaned_jobs = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
+        if cleaned_jobs > 0:
+            system_logger.info(f"Successfully cleaned up {cleaned_jobs} stale jobs")
+    except Exception as e:
+        system_logger.error(f"Error cleaning up stale jobs: {e}")
+
+
+async def _heal_activated_lakebase(
+    session_factory: async_sessionmaker[AsyncSession], system_logger: logging.Logger
+) -> None:
+    """Self-heal the ACTIVE Lakebase schema. Best-effort.
+
+    init_db() already ran the same pass, but against the local/default engine
+    BEFORE the hot-swap — so it never touched the Lakebase. Re-running it here
+    (create-missing-tables + add-missing-columns, all idempotent and
+    NON-DESTRUCTIVE) is the only path that heals a customer's PRE-EXISTING
+    Lakebase, e.g. adding powerbi_extraction without the destructive DROP SCHEMA
+    the migrate UI would do. "complete" is logged only when every step applied.
+    """
+    try:
+        from src.db.session import run_schema_self_heal
+
+        async with session_factory() as heal_session:
+            gaps = await run_schema_self_heal(await heal_session.connection())
+            await heal_session.commit()
+    except Exception as heal_err:
+        system_logger.warning(f"Lakebase schema self-heal skipped: {heal_err}")
+        return
+    if gaps:
+        system_logger.warning(
+            "Lakebase schema self-heal incomplete: %d step(s) did not apply "
+            "(see the ERROR above; /health/db lists them)",
+            len(gaps),
+        )
+    else:
+        system_logger.info("Lakebase schema self-heal complete")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """
+    Lifespan manager for the FastAPI application.
+
+    Handles startup and shutdown events for the application.
+    """
+    # Initialize the centralized logging system
+    log_dir = os.environ.get("LOG_DIR")
+    logger_manager = LoggerManager.get_instance(log_dir)
+    logger_manager.initialize()
+
+    system_logger = logger_manager.system
+    system_logger.info(f"Starting application... Logs will be stored in: {log_dir}")
+
+    # Reduce noisy module logs to keep stdout manageable
+    try:
+        import logging as _logging
+
+        _logging.getLogger("src.utils.user_context").setLevel(_logging.WARNING)
+        _logging.getLogger("src.dependencies.providers").setLevel(_logging.WARNING)
+        _logging.getLogger("src.services.groups.users").setLevel(_logging.WARNING)
+    except Exception as _e:
+        system_logger.warning(f"Failed to adjust module log levels: {_e}")
+
+    # Inside Apps, local (DEFAULT) memory is lost on redeploy: say so once.
+    warn_if_local_memory_is_ephemeral()
+
+    # Import needed for DB init
+    # pylint: disable=unused-import,import-outside-toplevel
+    import src.db.all_models  # noqa
+    from src.db.session import init_db, set_main_event_loop
+
+    # Capture the main event loop for smart engine selection
+    set_main_event_loop()
+
+    # Initialize database first - this creates both the file and tables
+    system_logger.info("Initializing database during lifespan...")
+    from src.core.databricks_app import LakebaseAppResource, is_databricks_app
+
+    installed_database = LakebaseAppResource.from_env() is not None
+    try:
+        await init_db()
+        if installed_database:
+            from src.services.memory.config.lakebase_service import (
+                LakebaseMemoryService,
+            )
+
+            memory_setup = await LakebaseMemoryService().initialize_tables()
+            if not memory_setup.get("success"):
+                raise RuntimeError(
+                    memory_setup.get("message")
+                    or "Lakebase memory initialization failed"
+                )
+        system_logger.info("Database initialization complete")
+    except Exception as e:
+        system_logger.error(f"Database initialization failed: {str(e)}")
+        if installed_database or (
+            is_databricks_app()
+            and os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true"
+        ):
+            raise
+
+    # Start embedding queue service for SQLite to batch operations (non-blocking)
+    embedding_queue_started = False
+    if str(settings.DATABASE_URI).startswith("sqlite") and not installed_database:
+        try:
+            # Start the queue service in the background without blocking
+            import asyncio
+
+            from src.services.knowledge.embedding_queue import embedding_queue
+
+            asyncio.create_task(embedding_queue.start())
+            embedding_queue_started = True
+            system_logger.info(
+                "Embedding queue service started in background for SQLite batch processing"
+            )
+        except Exception as e:
+            system_logger.error(f"Failed to start embedding queue service: {e}")
+
+    # Now check if database exists and tables are initialized
+    scheduler = None
+    db_initialized = False
+
+    try:
+        # Simple check for tables - just check if the database file exists with content
+        if str(settings.DATABASE_URI).startswith("sqlite") and not installed_database:
+            db_path = settings.SQLITE_DB_PATH or str(BACKEND_ROOT / "app.db")
+
+            if not os.path.isabs(db_path):
+                db_path = os.path.abspath(db_path)
+
+            system_logger.info(f"Checking database at: {db_path}")
+
+            if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
+                try:
+                    # Direct SQLite check - more reliable than trying to use SQLAlchemy
+                    import sqlite3
+
+                    conn = sqlite3.connect(db_path)
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' LIMIT 1;"
+                    )
+                    if cursor.fetchone():
+                        system_logger.info("Database tables verified")
+                        db_initialized = True
+                    else:
+                        system_logger.warning(
+                            "Database file exists but contains no tables"
+                        )
+                    conn.close()
+                except Exception as e:
+                    system_logger.warning(f"Error checking database tables: {e}")
+            else:
+                system_logger.warning(
+                    f"Database file doesn't exist or is empty at: {db_path}"
+                )
+        else:
+            # For other database types, try a simple connection
+            try:
+                async with async_session_factory() as session:
+                    await session.execute(text("SELECT 1"))
+                    await session.commit()
+                    db_initialized = True
+                    system_logger.info("Database connection successful")
+            except Exception as e:
+                system_logger.warning(f"Database connection failed: {e}")
+    except Exception as e:
+        system_logger.error(f"Error checking database: {e}")
+
+    if db_initialized:
+        await _on_database_ready(system_logger)
+
+    # Bound here, unconditionally, because the background tasks below are NOT
+    # all conditional. This import used to sit inside the `if db_initialized`
+    # block while the knowledge and memory sweeps called `_asyncio.create_task`
+    # outside it — so on any startup without an initialized database, lifespan
+    # raised UnboundLocalError and neither sweep ever started. `import asyncio`
+    # earlier in this function makes the plain name local too, so a module-level
+    # import is no escape.
+    import asyncio as _asyncio
+
+    # Periodic zombie-job recovery: every 5 min, fix RUNNING jobs whose
+    # status update silently failed after subprocess completion.
+    if db_initialized:
+
+        async def _zombie_cleanup_loop() -> None:
+            import asyncio as _asyncio
+
+            while True:
+                await _asyncio.sleep(120)
+                try:
+                    n = await ExecutionCleanupService.cleanup_zombie_jobs()
+                    if n:
+                        system_logger.info(f"[ZombieCleanup] Recovered {n} job(s)")
+                except Exception as _ze:
+                    system_logger.error(f"[ZombieCleanup] Error: {_ze}")
+
+        _asyncio.create_task(_zombie_cleanup_loop())
+        system_logger.info(
+            "[ZombieCleanup] Periodic zombie cleanup task started (every 2 min)"
+        )
+
+    # Knowledge retention. Expiry was already applied at search time and before
+    # each upload, which makes expired uploads unreachable but not gone — a
+    # workspace where nobody uploads again keeps them indefinitely. This sweep
+    # is what makes "we keep uploads for the knowledge TTL" true of the
+    # database rather than only of what search will show.
+    async def _knowledge_ttl_loop() -> None:
+        import asyncio as _a
+
+        from src.services.knowledge.retention import sweep_expired_knowledge
+
+        # One pass shortly after startup catches whatever expired while the app
+        # was down, then daily. Not on the critical path: the delay keeps it out
+        # of the way of the first requests.
+        await _a.sleep(300)
+        while True:
+            try:
+                await sweep_expired_knowledge()
+            except Exception as _ke:  # noqa: BLE001
+                system_logger.error(f"[KnowledgeTTL] Sweep error: {_ke}")
+            await _a.sleep(24 * 60 * 60)
+
+    _asyncio.create_task(_knowledge_ttl_loop())
+    system_logger.info("[KnowledgeTTL] Daily knowledge retention sweep started")
+
+    # Memory maintenance. Consolidation runs at the end of every run, which
+    # makes its coverage a function of how often somebody runs something rather
+    # than of how big the store is — exactly backwards. This sweep visits the
+    # scopes that have gone longest without maintenance, so every workspace is
+    # eventually reached, and gives the expensive passes (the LLM merge,
+    # supersession, forgetting) somewhere to run that is not a user's teardown
+    # path. Kill switch: Configuration → Engines → Advanced.
+    async def _memory_sweep_loop() -> None:
+        import asyncio as _a
+
+        from src.services.memory.maintenance.sweep import (
+            sweep_enabled,
+            sweep_memory_maintenance,
+        )
+
+        # Same shape as the knowledge sweep: stay off the critical path while
+        # the app takes its first requests, then tick steadily.
+        await _a.sleep(600)
+        while True:
+            if not sweep_enabled():
+                await _a.sleep(3600)
+                continue
+            try:
+                await sweep_memory_maintenance()
+            except Exception as _me:  # noqa: BLE001
+                system_logger.error(f"[MemorySweep] Sweep error: {_me}")
+            await _a.sleep(30 * 60)
+
+    _asyncio.create_task(_memory_sweep_loop())
+    system_logger.info("[MemorySweep] Periodic memory maintenance sweep started")
+
+    # Workflow recipes: distil completed crew runs into reusable recipes.
+    #
+    # Mining is EVENT-DRIVEN — process_crew_executor triggers it the moment a
+    # crew subprocess is joined (see services/workflow_recipe_mining.py). It used
+    # to be a 5-minute polling loop, which meant every run waited minutes before
+    # it could be curated.
+    #
+    # This one startup pass is the part polling did that an event cannot: it
+    # back-fills history that finished while the server was down, or that
+    # predates the feature.
+    if db_initialized:
+
+        async def _workflow_recipe_backfill() -> None:
+            from src.services.recipes.mining import mine_now
+
+            try:
+                n = await mine_now()
+                if n:
+                    system_logger.info(f"[WorkflowRecipes] Back-filled {n} recipe(s)")
+            except Exception as _re:
+                system_logger.error(f"[WorkflowRecipes] Back-fill error: {_re}")
+
+        import asyncio as _asyncio
+
+        _asyncio.create_task(_workflow_recipe_backfill())
+        system_logger.info(
+            "[WorkflowRecipes] Mining on run completion; back-filling history once"
+        )
+
+    # Run database seeders after DB initialization.
+    #
+    # Whether a seeding failure blocks startup is decided per path:
+    # - a fresh Lakebase installation awaits seeding and REFUSES to start when
+    #   an essential seeder (models, tools, prompts) failed — it has nothing to
+    #   fall back on (seeds/installation.py);
+    # - everywhere else seeding runs in the background and a failure is logged
+    #   as an ERROR naming the failed seeders while the server keeps serving:
+    #   seeding upserts shipped defaults, and a failed demo-crew seed must not
+    #   take the dev server or an existing install down (seeds/startup.py).
+    if db_initialized:
+        should_seed = settings.AUTO_SEED_DATABASE
+        system_logger.info(f"AUTO_SEED_DATABASE setting: {settings.AUTO_SEED_DATABASE}")
+
+        if should_seed and installed_database:
+            from src.seeds.installation import seed_installed_database
+
+            await seed_installed_database()
+        elif should_seed:
+            import asyncio
+
+            from src.seeds.startup import run_seeders_in_background
+
+            # KEEP A REFERENCE: the loop holds tasks weakly, and an
+            # unreferenced one can be garbage-collected before it finishes
+            # (issue #9).
+            app.state.seeder_task = asyncio.create_task(run_seeders_in_background())
+            system_logger.info(
+                "Seeders started in background, application startup continues..."
+            )
+        else:
+            system_logger.info("Database seeding skipped (AUTO_SEED_DATABASE is False)")
+    else:
+        system_logger.warning("Skipping seeding as database is not initialized.")
+
+    # ── Activate OTel App Telemetry if enabled in EngineConfig (system-level) ──
+    if db_initialized:
+        try:
+            async with async_session_factory() as session:
+                from src.repositories.engine_config_repository import (
+                    EngineConfigRepository,
+                )
+
+                repo = EngineConfigRepository(session)
+                if await repo.get_otel_app_telemetry_enabled():
+                    log_level = await repo.get_otel_app_telemetry_log_level()
+                    logger_manager.enable_otel_app_telemetry(
+                        enabled=True, log_level=log_level
+                    )
+        except Exception as e:
+            system_logger.warning(f"OTel App Telemetry activation skipped: {e}")
+
+    # ── Activate Lakebase session factory if Lakebase is the configured DB ──
+    # This swaps the global async_session_factory so that ALL existing callers
+    # (background tasks, services, tools) automatically use Lakebase.
+    if db_initialized and not installed_database:
+        try:
+            from src.db.database_router import (
+                get_lakebase_config_from_db,
+                is_lakebase_enabled,
+            )
+
+            if await is_lakebase_enabled():
+                config = await get_lakebase_config_from_db()
+                from src.core.databricks_app import lakebase_instance_from_config
+
+                instance_name = lakebase_instance_from_config(config)
+                from src.db.lakebase_session import LakebaseSessionFactory
+
+                lb_factory = LakebaseSessionFactory(instance_name)
+                await lb_factory.create_engine()
+                lb_session_factory = lb_factory._session_factory
+                assert lb_session_factory is not None  # create_engine() set it
+                async_session_factory.activate_lakebase(lb_session_factory)
+                from src.db.lakebase_state import mark_lakebase_activated
+
+                mark_lakebase_activated()
+                system_logger.info(
+                    f"Activated Lakebase session factory (instance: {instance_name})"
+                )
+
+                await _heal_activated_lakebase(lb_session_factory, system_logger)
+        except Exception as e:
+            system_logger.warning(f"Lakebase activation skipped: {e}")
+
+    # Initialize scheduler on startup only if database is initialized
+    if db_initialized:
+        system_logger.info("Initializing scheduler...")
+        try:
+            # The scheduler loop opens a routed session per tick; nothing it
+            # runs queries the session it is constructed with.
+            async with async_session_factory() as db:
+                scheduler = SchedulerService(db)
+                await scheduler.start_scheduler()
+            system_logger.info("Scheduler started successfully.")
+        except Exception as e:
+            system_logger.error(f"Failed to start scheduler: {e}")
+            # Don't raise here, let the application start without scheduler
+    else:
+        system_logger.warning("Skipping scheduler initialization. Database not ready.")
+
+    # Event-trigger queue consumer. Consumes rows from the `triggerqueue` table
+    # and dispatches each as a crew/flow run. The LOOP always starts, but each
+    # tick self-gates on the `event_triggers_enabled` engine setting (default
+    # OFF, toggled in Configuration) — so an admin can enable/disable the whole
+    # feature at runtime without a restart, and nothing drains until they do.
+    # Claims use FOR UPDATE SKIP LOCKED, so multiple app replicas are safe.
+    if db_initialized:
+        try:
+            from src.services.triggers import TriggerQueueConsumerService
+
+            _trigger_consumer = TriggerQueueConsumerService()
+
+            async def _event_triggers_enabled() -> bool:
+                """Read the admin toggle; default OFF, never raise."""
+                try:
+                    from src.db.session import routed_scoped_session
+                    from src.services.settings.engine import EngineConfigService
+
+                    async with routed_scoped_session() as session:
+                        return await EngineConfigService(
+                            session
+                        ).get_event_triggers_enabled()
+                except Exception:  # noqa: BLE001
+                    return False
+
+            async def _trigger_queue_loop() -> None:
+                await asyncio.sleep(_trigger_interval())  # let the app finish booting
+                ticks = 0
+                while True:
+                    try:
+                        if await _event_triggers_enabled():
+                            await _trigger_consumer.claim_and_dispatch(_trigger_batch())
+                            ticks += 1
+                            if ticks >= 12:  # housekeeping: crashed rows + retention
+                                await _trigger_consumer.reclaim()
+                                await _trigger_consumer.purge()
+                                ticks = 0
+                    except Exception as _tq_err:  # noqa: BLE001
+                        system_logger.error(f"[TriggerQueue] loop error: {_tq_err}")
+                    await asyncio.sleep(_trigger_interval())
+
+            # Keep a strong reference on app.state: the event loop holds only
+            # weak refs to tasks, so a bare create_task here can be garbage-
+            # collected and the queue silently stops draining. (The consumer
+            # guards its own dispatch tasks the same way.) Cancelled at
+            # shutdown below.
+            app.state.trigger_queue_task = asyncio.create_task(_trigger_queue_loop())
+            system_logger.info(
+                "Event-trigger consumer loop started (gated on Configuration "
+                "setting; interval=%ss, batch=%s)",
+                _trigger_interval(),
+                _trigger_batch(),
+            )
+        except Exception as e:
+            system_logger.error(f"Failed to start event-trigger consumer: {e}")
+
+    # Start HITL timeout service for processing expired approvals
+    hitl_timeout_started = False
+    if db_initialized:
+        try:
+            from src.services.hitl.timeout import start_hitl_timeout_service
+
+            await start_hitl_timeout_service()
+            hitl_timeout_started = True
+            system_logger.info("HITL timeout service started successfully")
+        except Exception as e:
+            system_logger.error(f"Failed to start HITL timeout service: {e}")
+            # Don't raise - allow app to start without HITL timeout service
+
+    # Start trace broadcast service for real-time SSE updates
+    # This polls the database for new traces and broadcasts them to SSE clients
+    # Required because subprocess executions can't broadcast SSE directly
+    trace_broadcast_started = False
+    try:
+        from src.services.trace import trace_broadcast_service
+
+        trace_broadcast_service.start()
+        trace_broadcast_started = True
+        system_logger.info("Trace broadcast service started successfully")
+    except Exception as e:
+        system_logger.error(f"Failed to start trace broadcast service: {e}")
+        # Don't raise - allow app to start without trace broadcast service
+
+    # Start execution broadcast service for real-time execution status updates
+    # This polls the database for status changes and broadcasts them to SSE clients
+    # Required because subprocess executions can't broadcast SSE directly
+    execution_broadcast_started = False
+    try:
+        from src.services.execution.broadcast import execution_broadcast_service
+
+        execution_broadcast_service.start()
+        execution_broadcast_started = True
+        system_logger.info("Execution broadcast service started successfully")
+    except Exception as e:
+        system_logger.error(f"Failed to start execution broadcast service: {e}")
+        # Don't raise - allow app to start without execution broadcast service
+
+    system_logger.info("Application startup complete")
+
+    try:
+        yield
+
+        # Stop the event-trigger consumer loop first: it must not claim new
+        # rows while the executors below are shutting down.
+        _tq_task = getattr(app.state, "trigger_queue_task", None)
+        if _tq_task is not None:
+            _tq_task.cancel()
+            try:
+                await _tq_task
+            except BaseException:  # noqa: BLE001 — CancelledError is the point
+                pass
+    finally:
+        # Clean up running jobs during shutdown
+        if db_initialized:
+            system_logger.info("Application shutting down, cleaning up running jobs...")
+            try:
+                cleaned_jobs = (
+                    await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
+                )
+                if cleaned_jobs > 0:
+                    system_logger.info(
+                        f"Cleaned up {cleaned_jobs} running jobs during shutdown"
+                    )
+            except Exception as e:
+                system_logger.error(f"Error cleaning up jobs during shutdown: {e}")
+
+        # Stop trace broadcast service if it was started
+        if "trace_broadcast_started" in locals() and trace_broadcast_started:
+            system_logger.info("Stopping trace broadcast service...")
+            try:
+                from src.services.trace import trace_broadcast_service
+
+                trace_broadcast_service.stop()
+                system_logger.info("Trace broadcast service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping trace broadcast service: {e}")
+
+        # Stop execution broadcast service if it was started
+        if "execution_broadcast_started" in locals() and execution_broadcast_started:
+            system_logger.info("Stopping execution broadcast service...")
+            try:
+                from src.services.execution.broadcast import (
+                    execution_broadcast_service,
+                )
+
+                execution_broadcast_service.stop()
+                system_logger.info("Execution broadcast service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping execution broadcast service: {e}")
+
+        # Stop HITL timeout service if it was started
+        if "hitl_timeout_started" in locals() and hitl_timeout_started:
+            system_logger.info("Stopping HITL timeout service...")
+            try:
+                from src.services.hitl.timeout import stop_hitl_timeout_service
+
+                await stop_hitl_timeout_service()
+                system_logger.info("HITL timeout service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping HITL timeout service: {e}")
+
+        # Stop embedding queue service if it was started
+        if "embedding_queue_started" in locals() and embedding_queue_started:
+            system_logger.info("Stopping embedding queue service...")
+            try:
+                from src.services.knowledge.embedding_queue import embedding_queue
+
+                # Flush any remaining items before stopping
+                await embedding_queue._flush_queue()
+                await embedding_queue.stop()
+                system_logger.info("Embedding queue service stopped successfully.")
+            except Exception as e:
+                system_logger.error(f"Error stopping embedding queue service: {e}")
+
+        # Shutdown scheduler if it was started
+        if scheduler:
+            system_logger.info("Shutting down scheduler...")
+            try:
+                await scheduler.shutdown()
+                system_logger.info("Scheduler shut down successfully.")
+            except Exception as e:
+                system_logger.error(f"Error during scheduler shutdown: {e}")
+
+        # Shut down the per-execution process executors. This terminates any
+        # lingering crew/flow subprocesses and releases their multiprocessing
+        # queue semaphores so the resource_tracker does not report leaked
+        # semaphore objects at interpreter shutdown.
+        try:
+            from src.services.agent_builder.process_executor import (
+                process_crew_executor,
+            )
+            from src.services.flow_builder.process_executor import process_flow_executor
+
+            process_crew_executor.shutdown(wait=True)
+            process_flow_executor.shutdown(wait=True)
+            system_logger.info("Process executors shut down successfully.")
+        except Exception as e:
+            system_logger.warning(f"Error during process executor shutdown: {e}")
+
+        # Shutdown OTel App Telemetry provider (flush pending logs)
+        try:
+            logger_manager.shutdown_otel_app_telemetry()
+        except Exception as e:
+            system_logger.warning(f"Error during OTel App Telemetry shutdown: {e}")
+
+        # Dispose database engines before event loop shuts down to prevent asyncpg loop mismatch
+        try:
+            from src.db.session import dispose_engines
+
+            await dispose_engines()
+            system_logger.info("Database engines disposed successfully.")
+        except Exception as e:
+            system_logger.warning(f"Error disposing database engines: {e}")
+
+        system_logger.info("Application shutdown complete.")
+
+
+# Initialize FastAPI app
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    description=settings.PROJECT_DESCRIPTION,
+    version=settings.VERSION,
+    lifespan=lifespan,
+    # Move API docs to /api-docs
+    docs_url="/api-docs" if settings.DOCS_ENABLED else None,
+    redoc_url="/api-redoc" if settings.DOCS_ENABLED else None,
+    openapi_url="/api-openapi.json" if settings.DOCS_ENABLED else None,
+    openapi_version="3.1.0",  # Explicitly set OpenAPI version
+)
+
+# Add CORS middleware using origins from settings
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------------------------
+# Pure ASGI middleware (NOT BaseHTTPMiddleware) to avoid buffering
+# StreamingResponse bodies, which breaks SSE streams through HTTP/2 proxies.
+# See: https://github.com/encode/starlette/issues/1012
+# ---------------------------------------------------------------------------
+
+
+def _local_dev_auth_enabled() -> bool:
+    """Whether requests that carry no identity header run as the development user.
+
+    This used to be unconditional: any request that reached the backend without
+    the proxy's identity headers became ``dev@localhost`` — in production too,
+    if the backend was reachable past the proxy (audit F07). Now:
+
+    - inside Databricks Apps (``DATABRICKS_APP_NAME`` is set by the platform)
+      or with ``ENVIRONMENT=production`` it is OFF and cannot be turned on;
+      identity comes from the proxy only;
+    - elsewhere it is an explicit opt-in: ``LOCAL_DEV_AUTH=true``, which
+      ``run.sh`` sets for a local run. Absent, a request without an identity
+      header is unauthenticated (R2-07).
+    """
+    explicit = os.getenv("LOCAL_DEV_AUTH", "").strip().lower()
+    wanted = explicit in ("1", "true", "yes", "on")
+    from src.core.databricks_app import is_production
+
+    production = is_production()
+    if production:
+        if wanted:
+            logger.error(
+                "[LOCAL_DEV_AUTH] LOCAL_DEV_AUTH is set in a production environment "
+                "and is ignored: identity comes from the platform proxy only"
+            )
+        return False
+    return wanted
+
+
+class LocalDevAuthMiddleware:
+    """Pure ASGI middleware to inject auth headers for local development.
+
+    When running locally (not in Databricks Apps), this adds default headers
+    so developers can use the app without OAuth/OBO authentication. Whether it
+    does anything at all is ``_local_dev_auth_enabled()``: an explicit opt-in
+    outside production, refused inside it.
+    """
+
+    def __init__(self, app: ASGIApp, enabled: Optional[bool] = None) -> None:
+        self.app = app
+        self.enabled = _local_dev_auth_enabled() if enabled is None else enabled
+        if self.enabled:
+            logger.warning(
+                "[LOCAL_DEV_AUTH] Development identity fallback is ACTIVE: a "
+                "request without an identity header runs as %s. Unset "
+                "LOCAL_DEV_AUTH to disable it.",
+                settings.LOCAL_DEV_USER_EMAIL,
+            )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.enabled and scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            if (
+                b"x-forwarded-email" not in headers
+                and b"x-auth-request-email" not in headers
+            ):
+                scope["headers"] = list(scope.get("headers", [])) + [
+                    (
+                        b"x-forwarded-email",
+                        settings.LOCAL_DEV_USER_EMAIL.encode(),
+                    )
+                ]
+                logger.debug(
+                    f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL}"
+                )
+        await self.app(scope, receive, send)
+
+
+# Middleware run order is OUTERMOST-first, and add_middleware registers the
+# LAST-added as the OUTERMOST (it runs first). UserContextMiddleware reads the
+# X-Forwarded-Email / X-Forwarded-Access-Token headers to set the request's
+# group + user context; LocalDevAuthMiddleware injects those headers for local
+# dev. So UserContextMiddleware must be registered BEFORE LocalDevAuthMiddleware
+# — that makes LocalDevAuth the OUTER middleware (runs first, injects the header)
+# and UserContext the inner one (runs next, reads it). Registering them the other
+# way around left the group context unset on local-dev requests, so group-scoped
+# auth (the API-Keys PAT lookup) silently found nothing and Lakebase / LLM calls
+# couldn't authenticate.
+from src.utils.user_context import UserContextMiddleware  # noqa: E402
+
+app.add_middleware(UserContextMiddleware)
+
+
+# Add LAST of these two so it is OUTERMOST and runs BEFORE UserContextMiddleware.
+# Always registered; whether it injects anything is decided once, at
+# construction, by _local_dev_auth_enabled().
+app.add_middleware(LocalDevAuthMiddleware)
+
+# API rate limiting (pure-ASGI, SSE-safe). No-op if the `limits` package is
+# unavailable or RATE_LIMIT_ENABLED is false, so this never breaks a running
+# server that hasn't synced the dependency yet.
+from src.core.rate_limit import RateLimitMiddleware  # noqa: E402
+
+app.add_middleware(RateLimitMiddleware)
+
+
+# Security headers (CSP, nosniff, X-Frame-Options, Referrer-Policy), recommended
+# by the Databricks AI Security team (Security advice for LLM usage in Databricks
+# Apps, Feb 2026). The policy and why each directive is there live in
+# src/core/security_headers.py; entrypoint.py sends the same set on the SPA page.
+from src.core.security_headers import SecurityHeadersMiddleware  # noqa: E402
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Added LAST so it is OUTERMOST: inside Databricks Apps it drops the
+# client-supplied X-Auth-Request-* headers before the rate limiter, the context
+# middleware or any dependency can read them (audit C1).
+from src.utils.request_identity import UntrustedIdentityHeadersMiddleware  # noqa: E402
+
+app.add_middleware(UntrustedIdentityHeadersMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Global exception handlers
+# ---------------------------------------------------------------------------
+from src.core.exceptions import KasalError  # noqa: E402
+
+
+@app.exception_handler(KasalError)
+async def kasal_error_handler(request: Request, exc: KasalError) -> JSONResponse:
+    logger.error("KasalError [%s]: %s", exc.status_code, exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+    logger.warning("ValueError: %s", exc)
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+try:
+    from pydantic import ValidationError as PydanticValidationError
+
+    @app.exception_handler(PydanticValidationError)
+    async def pydantic_validation_handler(
+        request: Request, exc: PydanticValidationError
+    ) -> JSONResponse:
+        logger.warning("ValidationError: %s", exc)
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+except ImportError:
+    pass
+
+
+try:
+    from sqlalchemy.exc import IntegrityError as SAIntegrityError
+
+    @app.exception_handler(SAIntegrityError)
+    async def integrity_error_handler(
+        request: Request, exc: SAIntegrityError
+    ) -> JSONResponse:
+        logger.warning("IntegrityError: %s", exc)
+        return JSONResponse(
+            status_code=409, content={"detail": "Database integrity conflict"}
+        )
+
+except ImportError:
+    pass
+
+
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+# Include the main API router
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# The A2A Agent Card is a WELL-KNOWN URI: discovery by convention at the domain
+# root. Mounted without the API prefix for that reason — under /api/v1 no A2A
+# client would ever look for it. The task operations themselves stay on the
+# prefixed api_router.
+from src.api.a2a_router import (  # noqa: E402 - import follows module initialization
+    well_known_router as _a2a_well_known_router,
+)
+
+app.include_router(_a2a_well_known_router)
+
+# The MCP Streamable HTTP transport, at the domain root. A client configured
+# with https://host/mcp POSTs JSON-RPC there; under the API prefix it would 404
+# on initialize and never attempt anything else.
+from src.api.mcp_jsonrpc_router import (  # noqa: E402 - import follows module initialization
+    router as _mcp_jsonrpc_router,
+)
+
+app.include_router(_mcp_jsonrpc_router)
+
+
+@app.get("/health", response_model=None)
+async def health() -> Dict[str, str]:
+    """Health check endpoint."""
+    return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "src.main:app",
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
+        reload=settings.DEBUG_MODE,
+    )

@@ -1,0 +1,412 @@
+import logging
+from typing import Any, Dict, List, Optional, Type
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.base_service import BaseService
+from src.models.agent import Agent
+from src.repositories.agent_repository import AgentRepository
+from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
+from src.utils.user_context import GroupContext
+
+logger = logging.getLogger(__name__)
+
+
+#: Per-agent LLM overrides whose NULL means "inherit the model row". Clearing
+#: one has to reach the database, and exclude_none drops an explicit null along
+#: with the unset fields — see _keep_explicit_clears.
+_CLEARABLE_OVERRIDES = (
+    "execution_effort",
+    "max_tokens",
+    "temperature",
+    "thinking_budget_tokens",
+    "reasoning_effort",
+)
+
+
+def _keep_explicit_clears(obj_in: Any, update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Put back the override fields the caller SENT as null.
+
+    A partial update dumps with exclude_none so an untouched field stays
+    untouched. For the overrides that is the wrong reading of null: the form
+    sends ``max_tokens: null`` to mean "stop overriding, use the model's
+    value", and dropping it left the old override in place with nothing
+    saying why. Only fields present in the request are affected.
+    """
+    sent = obj_in.model_dump(exclude_unset=True)
+    for field in _CLEARABLE_OVERRIDES:
+        if field in sent and sent[field] is None:
+            update_data[field] = None
+    return update_data
+
+
+class AgentService(BaseService[Agent, AgentCreate]):
+    """
+    Service for Agent model with business logic.
+
+    Security: ``agents.tool_configs`` is a ``SensitiveJSON`` column, so the
+    credentials in it are encrypted on every write and decrypted on load. This
+    service works with plaintext and must never encrypt or decrypt them itself.
+    """
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        repository_class: Type[AgentRepository] = AgentRepository,
+        model_class: Type[Agent] = Agent,
+    ):
+        """
+        Initialize the service with session and optional repository and model classes.
+
+        Args:
+            session: Database session for operations
+            repository_class: Repository class to use for data access (optional)
+            model_class: Model class associated with this service (optional)
+        """
+        super().__init__(session)
+        self.repository_class = repository_class
+        self.model_class = model_class
+        self.repository = repository_class(session)
+
+    async def get(self, id: str) -> Optional[Agent]:
+        """
+        Get an agent by ID.
+
+        Args:
+            id: ID of the agent to get
+
+        Returns:
+            Agent if found, else None
+        """
+        return await self.repository.get(id)
+
+    async def get_with_group_check(
+        self, id: str, group_context: Optional[GroupContext]
+    ) -> Optional[Agent]:
+        """
+        Get an agent by ID with group verification.
+
+        Args:
+            id: ID of the agent to get
+            group_context: Group context for verification
+
+        Returns:
+            Agent if found and belongs to user's group, else None
+        """
+        agent = await self.repository.get(id)
+        if agent and group_context and group_context.group_ids:
+            # Check if agent belongs to one of the user's groups
+            if agent.group_id not in group_context.group_ids:
+                return None  # Return None to trigger 404, not 403 (avoid information leakage)
+        return agent
+
+    async def create(self, obj_in: AgentCreate) -> Agent:
+        """
+        Create a new agent.
+
+        Args:
+            obj_in: Agent data for creation
+
+        Returns:
+            Created agent
+        """
+        return await self.repository.create(obj_in.model_dump())
+
+    async def find_by_name(self, name: str) -> Optional[Agent]:
+        """
+        Find an agent by name.
+
+        Args:
+            name: Name to search for
+
+        Returns:
+            Agent if found, else None
+        """
+        return await self.repository.find_by_name(name)
+
+    async def find_all(self) -> List[Agent]:
+        """
+        Find all agents.
+
+        Returns:
+            List of all agents
+        """
+        return await self.repository.find_all()
+
+    async def update_with_partial_data(
+        self, id: str, obj_in: AgentUpdate
+    ) -> Optional[Agent]:
+        """
+        Update an agent with partial data, only updating fields that are set.
+
+        Args:
+            id: ID of the agent to update
+            obj_in: Schema with fields to update
+
+        Returns:
+            Updated agent if found, else None
+        """
+        # Exclude unset fields (None) from update
+        update_data = _keep_explicit_clears(
+            obj_in, obj_in.model_dump(exclude_none=True)
+        )
+        if not update_data:
+            # No fields to update
+            return await self.get(id)
+
+        return await self.repository.update(id, update_data)
+
+    async def update_with_group_check(
+        self, id: str, obj_in: AgentUpdate, group_context: GroupContext
+    ) -> Optional[Agent]:
+        """
+        Update an agent with group verification.
+
+        Args:
+            id: ID of the agent to update
+            obj_in: Schema with fields to update
+            group_context: Group context for verification
+
+        Returns:
+            Updated agent if found and belongs to user's group, else None
+        """
+        # First verify the agent belongs to the user's group
+        agent = await self.get_with_group_check(id, group_context)
+        if not agent:
+            return None
+
+        # Exclude unset fields (None) from update
+        update_data = _keep_explicit_clears(
+            obj_in, obj_in.model_dump(exclude_none=True)
+        )
+        if not update_data:
+            # No fields to update
+            return agent
+
+        return await self.repository.update(id, update_data)
+
+    #: The only fields a prompt optimiser may rewrite. An allowlist rather than an
+    #: arbitrary dict: this path exists for GEPA, and a typo'd or hostile key must
+    #: not be able to reach `enabled`, `tool_configs` or `group_id`.
+    PROMPT_TEXT_FIELDS = ("role", "goal", "backstory")
+
+    async def update_prompt_text_with_group_check(
+        self,
+        id: str,
+        fields: Dict[str, str],
+        group_context: Optional[GroupContext],
+    ) -> bool:
+        """Rewrite an agent's prompt TEXT, verifying it belongs to the caller's group.
+
+        Added for the prompt optimiser, which used to call
+        ``AgentRepository.update()`` directly — getting the row without this check.
+        The optimiser derives its field keys from a JSON blob on the run, so the
+        group verification here is the thing standing between a foreign id in that
+        blob and a cross-tenant write.
+
+        Args:
+            id: agent id to update.
+            fields: subset of :attr:`PROMPT_TEXT_FIELDS`; anything else is ignored.
+            group_context: caller's groups.
+
+        Returns:
+            True when a row was updated, False when the agent is absent, not
+            visible to this group, or nothing valid was supplied.
+        """
+        agent = await self.get_with_group_check(id, group_context)
+        if agent is None:
+            logger.warning(
+                f"Refusing prompt update for agent {id}: not found in caller's group"
+            )
+            return False
+
+        allowed = {
+            key: value
+            for key, value in (fields or {}).items()
+            if key in self.PROMPT_TEXT_FIELDS
+        }
+        if not allowed:
+            return False
+        return bool(await self.repository.update(id, allowed))
+
+    async def update_limited_with_group_check(
+        self, id: str, obj_in: AgentLimitedUpdate, group_context: GroupContext
+    ) -> Optional[Agent]:
+        """
+        Update limited fields of an agent with group verification.
+
+        Args:
+            id: ID of the agent to update
+            obj_in: Schema with limited fields to update
+            group_context: Group context for verification
+
+        Returns:
+            Updated agent if found and belongs to user's group, else None
+        """
+        # First verify the agent belongs to the user's group
+        agent = await self.get_with_group_check(id, group_context)
+        if not agent:
+            return None
+
+        # Exclude unset fields (None) from update
+        update_data = obj_in.model_dump(exclude_none=True)
+        if not update_data:
+            # No fields to update
+            return agent
+
+        return await self.repository.update(id, update_data)
+
+    @staticmethod
+    async def _delete_agents_and_tasks(
+        session: AsyncSession, agent_ids: List[str]
+    ) -> None:
+        """
+        Delete the given agents and the tasks assigned to them, on ``session``.
+
+        Tasks reference agents via a foreign key (tasks.agent_id -> agents.id),
+        so the tasks must be deleted before the agents or the agent delete trips
+        a FOREIGN KEY constraint error. Deleting an agent therefore also deletes
+        the tasks assigned to it; no table references tasks, so this is safe.
+
+        Args:
+            session: The database session to run the deletes on
+            agent_ids: IDs of the agents to delete
+        """
+        if not agent_ids:
+            return
+
+        from src.repositories.agent_repository import AgentRepository
+
+        await AgentRepository(session).delete_with_tasks(agent_ids)
+
+    async def delete(self, id: str) -> bool:
+        """
+        Delete an agent by ID (and the tasks assigned to it).
+
+        Args:
+            id: ID of the agent to delete
+
+        Returns:
+            True if agent was deleted, False if not found
+        """
+        # Run the delete + commit on a private connection. On SQLite the request
+        # session rides the shared StaticPool connection, so a concurrent
+        # request's commit/rollback (the frontend fires many DELETEs at once) can
+        # silently discard this committed delete — the agents "come back". A
+        # private connection (get_isolated_db_session) commits durably and is
+        # immune to that interference.
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as session:
+            # Repository, on THIS private session — the isolation is about the
+            # connection, not a reason to hand-roll the lookup.
+            existing = await self.repository_class(session).get(id)
+            if not existing:
+                return False
+            await self._delete_agents_and_tasks(session, [id])
+            await session.commit()
+            return True
+
+    async def delete_with_group_check(
+        self, id: str, group_context: GroupContext
+    ) -> bool:
+        """
+        Delete an agent by ID with group verification.
+
+        Args:
+            id: ID of the agent to delete
+            group_context: Group context for verification
+
+        Returns:
+            True if agent was deleted, False if not found or not authorized
+        """
+        # First verify the agent belongs to the user's group
+        agent = await self.get_with_group_check(id, group_context)
+        if not agent:
+            return False
+
+        # Delete + commit on a private connection (see delete() for why).
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as session:
+            await self._delete_agents_and_tasks(session, [id])
+            await session.commit()
+            return True
+
+    async def delete_all(self) -> None:
+        """
+        Delete all agents (and the tasks assigned to them).
+
+        Returns:
+            None
+        """
+        from src.db.session import get_isolated_db_session
+
+        # Delete + commit on a private connection (see delete() for why).
+        async with get_isolated_db_session() as session:
+            # Tasks first, so the agent deletes don't trip the FK constraint.
+            from src.repositories.agent_repository import AgentRepository
+
+            await AgentRepository(session).delete_all_with_tasks()
+            await session.commit()
+
+    async def delete_all_for_group(self, group_context: GroupContext) -> None:
+        """
+        Delete all agents for a specific group (and the tasks assigned to them).
+
+        Args:
+            group_context: Group context for filtering
+
+        Returns:
+            None
+        """
+        if not group_context or not group_context.group_ids:
+            return
+
+        # Get all agents for the group
+        agents = await self.find_by_group(group_context)
+        agent_ids = [agent.id for agent in agents]
+
+        # Delete + commit on a private connection (see delete() for why).
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as session:
+            await self._delete_agents_and_tasks(session, agent_ids)
+            await session.commit()
+
+    async def create_with_group(
+        self, obj_in: AgentCreate, group_context: GroupContext
+    ) -> Agent:
+        """
+        Create a new agent with group isolation.
+
+        Args:
+            obj_in: Agent data for creation
+            group_context: Group context from headers
+
+        Returns:
+            Created agent with group information
+        """
+        # Convert schema to dict and add group fields
+        agent_data = obj_in.model_dump()
+        agent_data["group_id"] = group_context.primary_group_id
+        agent_data["created_by_email"] = group_context.group_email
+
+        # Create agent using repository (pass dict, not object)
+        return await self.repository.create(agent_data)
+
+    async def find_by_group(self, group_context: GroupContext) -> List[Agent]:
+        """
+        Find all agents for a specific group.
+
+        Args:
+            group_context: Group context from headers
+
+        Returns:
+            List of agents for the specified group
+        """
+        if not group_context.group_ids:
+            # If no group context, return empty list for security
+            return []
+
+        return await self.repository.find_by_group_ids(group_context.group_ids)

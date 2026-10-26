@@ -1,0 +1,700 @@
+"""
+Helper functions for working with tasks.
+
+This module provides utility functions for working with CrewAI tasks.
+"""
+
+import traceback
+from typing import Any, Callable, Dict, List, Optional, Type
+
+from pydantic import BaseModel
+
+from src.core.exceptions import NotFoundError
+from src.core.logger import LoggerManager
+from src.services.agent_builder.schema_converter import build_model_from_schema
+from src.services.execution.harnesses import active_harness
+from src.services.execution.kernel.task_builder import build_task_args
+from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
+
+# Get loggers from the centralized logging system
+logger = LoggerManager.get_instance().crew
+guardrail_logger = LoggerManager.get_instance().guardrails
+
+
+def _loggable_keys(config: object) -> List[str]:
+    """The key names of a tool or callback config, for the logs (never values)."""
+    return sorted(config) if isinstance(config, dict) else []
+
+
+def _loggable_tool_names(tools: List[object]) -> List[str]:
+    """Tool names for the logs: a tool's repr can include its credentials."""
+    return [
+        t if isinstance(t, str) else str(getattr(t, "name", type(t).__name__))
+        for t in tools
+    ]
+
+
+def is_data_missing(output: Any) -> bool:
+    """
+    Check if data is missing from task output
+
+    Args:
+        output: TaskOutput to check
+
+    Returns:
+        True if data is missing, False otherwise
+    """
+    logger.info("=== is_data_missing function called ===")
+    logger.info(f"TaskOutput type: {type(output)}")
+
+    if not hasattr(output, "pydantic"):
+        logger.info("No pydantic model found in output, returning True")
+        return True
+
+    logger.info(f"Pydantic model: {output.pydantic}")
+    logger.info(f"Checking events length in: {output.pydantic.events}")
+    events_count = len(output.pydantic.events)
+    result = events_count < 10
+
+    logger.info(f"Found {events_count} events. Need at least 10.")
+    logger.info(f"Is data missing? {result}")
+    return result
+
+
+async def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseModel]]:
+    """
+    Get a Pydantic model class by its name from the schema database.
+
+    The JSON-Schema→Pydantic conversion itself lives in ``schema_converter`` and
+    is shared with inline (non-DB) schemas — a deep-research task mints its
+    envelope per run and has no row to look up.
+
+    Args:
+        schema_name: Name of the schema to retrieve
+
+    Returns:
+        Pydantic model class if found, else None
+    """
+    logger.info(f"Looking up schema '{schema_name}' in the database")
+
+    try:
+        # Schemas are the catalog domain's data, so go through its SERVICE rather
+        # than building SchemaRepository here — agent_builder does not own that
+        # repository (see tests/unit/architecture/test_service_repository_ownership.py).
+        from src.db.session import routed_scoped_session
+        from src.services.catalog.schemas import SchemaService
+
+        try:
+            async with routed_scoped_session() as session:
+                schema = await SchemaService(session).get_schema_by_name(schema_name)
+        except NotFoundError:
+            logger.warning(f"Schema '{schema_name}' not found in database")
+            return None
+
+        schema_def = schema.schema_definition
+        if not schema_def or not isinstance(schema_def, dict):
+            logger.error(f"Invalid schema definition for '{schema_name}': {schema_def}")
+            return None
+
+        return build_model_from_schema(schema_name, schema_def)
+
+    except Exception as e:
+        logger.error(
+            f"Error getting Pydantic model class for '{schema_name}': {str(e)}"
+        )
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        return None
+    finally:
+        pass
+
+
+# Removed duplicate functions - now using centralized MCPIntegration module
+# The MCPIntegration.create_mcp_tools_for_task function handles both
+# explicit MCP servers from task config and global MCP servers
+
+
+def create_callback_from_string(
+    callback_name: str,
+    task_key: str,
+    callback_config: Optional[dict] = None,
+    execution_name: Optional[str] = None,
+    *,
+    group_id: Optional[str] = None,
+) -> Optional[Callable[[Any], Any]]:
+    """
+    Create a callable callback from a string name.
+
+    Args:
+        callback_name: Name of the callback
+        task_key: Task identifier
+        callback_config: Optional configuration for the callback
+        execution_name: Optional execution name for organizing outputs
+
+    Returns:
+        A callable function or None if callback is not supported
+    """
+    logger.info(
+        f"Creating callback from string: {callback_name} for task {task_key} with execution_name: {execution_name}"
+    )
+
+    if callback_name == "DatabricksVolumeCallback":
+        try:
+            from src.core.databricks_app import DatabricksAppInstallation
+            from src.services.databricks.volumes.volume_callback import (
+                DatabricksVolumeCallback,
+            )
+
+            installation = DatabricksAppInstallation.from_env()
+            installed_path = (
+                installation.output_path(group_id or "")
+                if installation.output_volume
+                else None
+            )
+            # Resource storage stays scoped even when loading a legacy catalog task.
+            databricks_callback = DatabricksVolumeCallback(
+                task_key=task_key,
+                group_id=group_id,
+                volume_path=installed_path
+                or (
+                    callback_config.get(
+                        "volume_path", "/Volumes/main/default/task_outputs"
+                    )
+                    if callback_config
+                    else "/Volumes/main/default/task_outputs"
+                ),
+                file_format=(
+                    callback_config.get("file_format", "json")
+                    if callback_config
+                    else "json"
+                ),
+                create_date_dirs=(
+                    callback_config.get("create_date_dirs", True)
+                    if callback_config
+                    else True
+                ),
+                workspace_url=(
+                    callback_config.get("workspace_url") if callback_config else None
+                ),
+                token=callback_config.get("token") if callback_config else None,
+                execution_name=execution_name,  # Pass the execution name for folder organization
+            )
+
+            # Create a synchronous wrapper for the async callback
+            def databricks_callback_wrapper(output: Any) -> Any:
+                """Synchronous wrapper for DatabricksVolumeCallback"""
+                import asyncio
+                from concurrent.futures import ThreadPoolExecutor
+
+                def run_async_callback() -> Any:
+                    """Run the async callback in a separate thread with its own event loop"""
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(
+                            databricks_callback.execute(output)
+                        )
+                        logger.info(
+                            f"DatabricksVolumeCallback executed successfully for task {task_key}"
+                        )
+                        return result
+                    except Exception as e:
+                        logger.error(
+                            f"DatabricksVolumeCallback execution failed: {str(e)}"
+                        )
+                        raise
+                    finally:
+                        loop.close()
+
+                try:
+                    # Run the async callback in a separate thread to avoid event loop conflicts
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(run_async_callback)
+                        future.result(timeout=30)  # 30 second timeout
+
+                    return output  # Return the original output to continue the chain
+                except Exception as e:
+                    logger.error(f"DatabricksVolumeCallback wrapper failed: {str(e)}")
+                    # Don't fail the task if callback fails, just log the error
+                    return output
+
+            return databricks_callback_wrapper
+
+        except Exception as e:
+            logger.error(f"Failed to create DatabricksVolumeCallback: {str(e)}")
+            return None
+
+    # Add other callback types here as they are implemented
+    # For now, log a warning for unknown callbacks
+    logger.warning(f"Unknown callback type: {callback_name}. Callback will be skipped.")
+    return None
+
+
+async def create_task(
+    task_key: str,
+    task_config: dict,
+    # `Any`, not `Agent`/`Task`: which runtime these are is the active engine's
+    # answer, so naming one engine's class would be a type that is wrong half
+    # the time.
+    agent: Any,
+    tools: Optional[List[Any]] = None,
+    config: Optional[dict] = None,
+    tool_service: Any = None,
+    tool_factory: Any = None,
+    execution_name: Optional[str] = None,
+) -> Any:
+    """
+    Creates a Task instance from the provided configuration.
+
+    Args:
+        task_key: The unique identifier for the task
+        task_config: Dictionary containing task configuration
+        agent: The agent that will perform this task
+        tools: Optional list of tools to make available for this task specifically
+        config: Global configuration dictionary containing API keys
+        tool_service: Optional tool service for resolving tool IDs to names
+        tool_factory: Optional tool factory for creating tool instances
+
+    Returns:
+        Task: A configured CrewAI Task instance
+    """
+    logger.info(f"Creating task: {task_key}")
+    logger.info(
+        f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}"
+    )
+    logger.info(
+        f"Task tool_configs: {sorted(task_config.get('tool_configs') or {}) if isinstance(task_config, dict) else 'N/A'}"
+    )
+
+    # Log agent information
+    agent_name = getattr(agent, "_agent_key", getattr(agent, "name", "unknown"))
+    agent_role = getattr(agent, "role", "unknown")
+    logger.info(
+        f"Task {task_key} will be performed by agent {agent_name} with role '{agent_role}'"
+    )
+
+    # Handle tool resolution if tool_service is provided and task has tool_ids
+    task_tools = tools if tools else []
+
+    # Use centralized MCP integration module for task MCP tools
+    try:
+        from src.services.tools.mcp_integration import MCPIntegration
+
+        # Cheap dict check FIRST: with no explicit servers the integration
+        # returns [] without ever touching the service, so opening a DB
+        # session + MCPService per task was pure waste (the 100% case when
+        # MCP is unused).
+        if MCPIntegration._extract_mcp_servers_from_config(
+            task_config.get("tool_configs", {})
+        ):
+            from src.db.session import routed_scoped_session
+            from src.services.mcp.mcp_client.service import MCPService
+
+            async with routed_scoped_session() as session:
+                mcp_service = MCPService(session)
+                mcp_tools = await MCPIntegration.create_mcp_tools_for_task(
+                    task_config, task_key, mcp_service, config
+                )
+                task_tools.extend(mcp_tools)
+                logger.info(f"Added {len(mcp_tools)} MCP tools to task {task_key}")
+    except Exception as e:
+        logger.error(f"Error processing MCP servers for task {task_key}: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+    # Continue with normal tool resolution
+    # Check for tools in task_config or in a backup field (for when MCP clears the tools array)
+    tools_to_resolve = task_config.get("tools", []) or task_config.get(
+        "_original_tools", []
+    )
+
+    # Auto-resolve tools from tool_configs keys when tools array is empty.
+    # The frontend may set tool_configs (e.g. {'GenieTool': {'spaceId': '...'}})
+    # without adding the tool name to the tools array. In that case, use the
+    # tool_configs keys as the tools to resolve so they actually get instantiated.
+    task_tool_configs_map = task_config.get("tool_configs", {})
+    # Exclude MCP_SERVERS — it's handled by the MCP integration above, not the tool factory
+    auto_tool_names = [
+        k for k in task_tool_configs_map.keys() if k and k != "MCP_SERVERS"
+    ]
+    if not tools_to_resolve and auto_tool_names and tool_factory:
+        logger.info(
+            f"Task {task_key}: tools array is empty but tool_configs has keys "
+            f"{auto_tool_names} - auto-resolving tools from tool_configs"
+        )
+        for tool_name in auto_tool_names:
+            if not tool_name or tool_name == "MCP_SERVERS":
+                continue
+            try:
+                tool_config: Dict[str, Any] = {}
+                if tool_service and hasattr(tool_service, "get_tool_config_by_name"):
+                    tool_config = (
+                        await tool_service.get_tool_config_by_name(tool_name) or {}
+                    )
+
+                tool_override = task_tool_configs_map.get(tool_name, {})
+                # Key names only: the override carries the tool's credentials.
+                logger.info(
+                    "Task %s - Auto-creating %s with override keys: %s",
+                    task_key,
+                    tool_name,
+                    _loggable_keys(tool_override),
+                )
+
+                tool_instance = tool_factory.create_tool(
+                    tool_name,
+                    result_as_answer=tool_config.get("result_as_answer", False),
+                    tool_config_override=tool_override,
+                )
+                if tool_instance:
+                    if (
+                        isinstance(tool_instance, tuple)
+                        and len(tool_instance) == 2
+                        and tool_instance[0] is True
+                    ):
+                        mcp_tools = tool_instance[1]
+                        if isinstance(mcp_tools, list):
+                            task_tools.extend(mcp_tools)
+                            logger.info(
+                                f"Auto-added {len(mcp_tools)} MCP tools from {tool_name} to task {task_key}"
+                            )
+                    else:
+                        task_tools.append(tool_instance)
+                        tool_info = {
+                            "name": getattr(tool_instance, "name", "unknown"),
+                            "type": type(tool_instance).__name__,
+                            "has_run": hasattr(tool_instance, "_run"),
+                            "result_as_answer": tool_config.get(
+                                "result_as_answer", False
+                            ),
+                        }
+                        logger.info(
+                            f"Auto-created tool {tool_name} for task {task_key}: {tool_info}"
+                        )
+                else:
+                    logger.error(
+                        f"Tool factory returned None for auto-resolved tool {tool_name}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error auto-creating tool {tool_name} for task {task_key}: {e}"
+                )
+
+    if tool_service and tools_to_resolve:
+        logger.info(f"Resolving tool IDs for task {task_key}: {tools_to_resolve}")
+        try:
+            # Resolve tool IDs to names
+            tool_names = await resolve_tool_ids_to_names(tools_to_resolve, tool_service)
+            logger.info(f"Resolved tool names for task {task_key}: {tool_names}")
+
+            # Create actual tool instances using the tool factory if available
+            if tool_factory:
+                for tool_name in tool_names:
+                    if not tool_name:
+                        continue
+
+                    try:
+                        # Get the tool configuration if available
+                        tool_config = {}
+                        if hasattr(tool_service, "get_tool_config_by_name"):
+                            tool_config = (
+                                await tool_service.get_tool_config_by_name(tool_name)
+                                or {}
+                            )
+
+                        # Get task-specific tool config overrides
+                        task_tool_configs = task_config.get("tool_configs", {})
+                        tool_override = task_tool_configs.get(tool_name, {})
+
+                        # Debug logging for tool configs
+                        debug_tools = [
+                            "GenieTool",
+                            "SerperDevTool",
+                            "DatabricksKnowledgeSearchTool",
+                            "PowerBIAnalysisTool",
+                            "Power BI Field Parameters & Calculation Groups Tool",
+                            "Power BI Hierarchies Tool",
+                            "Power BI Report References Tool",
+                            "M-Query Conversion Pipeline",
+                            "Measure Conversion Pipeline",
+                        ]
+                        if tool_name in debug_tools:
+                            # Key names only: the override carries credentials.
+                            logger.info(
+                                "Task %s - %s task_tool_configs keys: %s; "
+                                "override keys: %s",
+                                task_key,
+                                tool_name,
+                                list(task_tool_configs.keys()),
+                                _loggable_keys(tool_override),
+                            )
+
+                        # Create the tool instance with overrides
+                        tool_instance = tool_factory.create_tool(
+                            tool_name,
+                            result_as_answer=tool_config.get("result_as_answer", False),
+                            tool_config_override=tool_override,
+                        )
+                        if tool_instance:
+                            # Check if this is a special MCP tool that returns a tuple with (is_mcp, tools_list)
+                            if (
+                                isinstance(tool_instance, tuple)
+                                and len(tool_instance) == 2
+                                and tool_instance[0] is True
+                            ):
+                                # This is an MCP tool - Add all the individual tools from the list
+                                mcp_tools = tool_instance[1]
+
+                                # Special case for mcp_service_adapter - async fetch from service
+                                if mcp_tools == "mcp_service_adapter":
+                                    # Skip this case since we've removed the service adapter
+                                    logger.info(
+                                        "MCP service adapter requested but not supported anymore"
+                                    )
+                                    continue
+                                elif isinstance(mcp_tools, list):
+                                    # Regular MCP tools list
+                                    for mcp_tool in mcp_tools:
+                                        task_tools.append(mcp_tool)
+                                    logger.info(
+                                        f"Added {len(mcp_tools)} MCP tools from {tool_name} to task {task_key}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"Unexpected MCP tools format: {mcp_tools}"
+                                    )
+                            else:
+                                # Regular tool
+                                task_tools.append(tool_instance)
+                                # Add more debugging information about the tool
+                                tool_info = {
+                                    "name": getattr(tool_instance, "name", "unknown"),
+                                    "type": type(tool_instance).__name__,
+                                    "has_func": hasattr(tool_instance, "__call__"),
+                                    "result_as_answer": tool_config.get(
+                                        "result_as_answer", False
+                                    ),
+                                }
+                                logger.info(
+                                    f"Added tool instance {tool_name} to task {task_key} with details: {tool_info}"
+                                )
+                        else:
+                            logger.error(
+                                "Could not create tool instance for %s: the tool "
+                                "factory returned None (see its logs). Tool config "
+                                "keys: %s",
+                                tool_name,
+                                _loggable_keys(tool_config),
+                            )
+                    except Exception as e:
+                        logger.error(f"Error creating tool {tool_name}: {str(e)}")
+            else:
+                # Without tool_factory, just append the tool names (this won't work for CrewAI)
+                task_tools.extend([name for name in tool_names if name])
+                logger.warning(
+                    "No tool_factory provided, using tool names which may not work with CrewAI"
+                )
+        except Exception as e:
+            logger.error(f"Error resolving tool IDs for task {task_key}: {str(e)}")
+
+    logger.info("This is the tools: %s", _loggable_tool_names(task_tools))
+    # Log tool information if provided
+    if task_tools:
+        logger.info(f"Task {task_key} has {len(task_tools)} specific tools assigned:")
+        for tool in task_tools:
+            tool_name = (
+                getattr(tool, "name", str(tool)) if not isinstance(tool, str) else tool
+            )
+            tool_desc = (
+                getattr(tool, "description", "No description")
+                if not isinstance(tool, str)
+                else "String tool name"
+            )
+            desc_str = str(tool_desc)[:50] if tool_desc else "No description"
+            logger.info(f"  - Task tool: {tool_name} - {desc_str}...")
+    else:
+        logger.info(f"Task {task_key} will use agent's default tools")
+
+    # Store any existing callback from the task_config for later use
+    existing_callback = task_config.get("callback", None)
+    callback_config = task_config.get("callback_config", None)
+
+    # Check for global Databricks volume configuration if no callback is set
+    if not existing_callback:
+        try:
+            from src.db.session import routed_scoped_session
+            from src.services.databricks.workspace.config_provider import (
+                DatabricksConfigProvider,
+            )
+            from src.services.memory.config.backend_service import MemoryBackendService
+
+            group_id = config.get("group_id") if isinstance(config, dict) else None
+            databricks_config = await DatabricksConfigProvider.get(group_id=group_id)
+
+            # The guard comes FIRST: volume uploads are off in the common case, and
+            # opening a session before checking meant paying for one every task.
+            if (
+                databricks_config
+                and databricks_config.volume_enabled
+                and databricks_config.volume_path
+            ):
+                # Only consider auto-adding the DatabricksVolumeCallback when the
+                # active memory backend for this workspace is also Databricks.
+                async with routed_scoped_session() as session:
+                    group_id = None
+                    try:
+                        group_id = (
+                            config.get("group_id") if isinstance(config, dict) else None
+                        )
+                    except Exception:
+                        group_id = None
+
+                    active_is_databricks = False
+                    try:
+                        memory_service = MemoryBackendService(session)
+                        active_config = (
+                            await memory_service.get_active_config(group_id)
+                            if group_id
+                            else None
+                        )
+                        if active_config:
+                            # Active memory config exists → respect its backend type.
+                            # (CrewAI 1.10+ has a single unified memory; a row
+                            # with is_active=False means memory is disabled.)
+                            backend_type = getattr(active_config, "backend_type", None)
+                            backend_str = getattr(
+                                backend_type, "value", str(backend_type)
+                            )
+                            if backend_str.lower() in ("databricks", "lakebase"):
+                                active_is_databricks = True
+                    except Exception as me:
+                        logger.debug(
+                            f"Could not determine active memory backend for group {group_id}: {me}"
+                        )
+                        active_is_databricks = False
+
+                    if active_is_databricks:
+                        logger.info(
+                            f"Global volume configuration found and active memory backend is Databricks for task {task_key}: path={databricks_config.volume_path}"
+                        )
+                        # Set DatabricksVolumeCallback as the default callback
+                        existing_callback = "DatabricksVolumeCallback"
+
+                        # Use task-specific config if available, otherwise use global config
+                        if not callback_config:
+                            callback_config = {
+                                "volume_path": databricks_config.volume_path,
+                                "file_format": databricks_config.volume_file_format
+                                or "json",
+                                "create_date_dirs": (
+                                    databricks_config.volume_create_date_dirs
+                                    if databricks_config.volume_create_date_dirs
+                                    is not None
+                                    else True
+                                ),
+                            }
+                            logger.info(
+                                f"Using global volume configuration for task {task_key}: {callback_config}"
+                            )
+                        else:
+                            # Task has its own callback_config, merge with global defaults
+                            if "volume_path" not in callback_config:
+                                callback_config["volume_path"] = (
+                                    databricks_config.volume_path
+                                )
+                            if "file_format" not in callback_config:
+                                callback_config["file_format"] = (
+                                    databricks_config.volume_file_format or "json"
+                                )
+                            if "create_date_dirs" not in callback_config:
+                                callback_config["create_date_dirs"] = (
+                                    databricks_config.volume_create_date_dirs
+                                    if databricks_config.volume_create_date_dirs
+                                    is not None
+                                    else True
+                                )
+                            # Key names only: a task's callback_config can hold a PAT.
+                            logger.info(
+                                "Merged task-specific config with global defaults "
+                                "for task %s: keys %s",
+                                task_key,
+                                _loggable_keys(callback_config),
+                            )
+                    else:
+                        logger.info(
+                            f"Skipping auto DatabricksVolumeCallback for task {task_key}: active memory backend is not Databricks (group_id={group_id})"
+                        )
+        except Exception as e:
+            logger.debug(
+                f"Could not check global volume configuration or memory backend: {e}"
+            )
+            # Continue without global config
+
+    # Assemble the Task args via the shared builder (base fields + markdown +
+    # Genie formatting + code/LLM guardrails + output_pydantic) — shared with flow.
+    task_args = await build_task_args(task_config, agent, task_tools, config=config)
+
+    # Attach the callback only when no guardrail took over (a guardrail uses
+    # CrewAI's native retry mechanism instead of a callback).
+    if "guardrail" not in task_args and existing_callback:
+        if isinstance(existing_callback, str):
+            callback_func = create_callback_from_string(
+                existing_callback,
+                task_key,
+                callback_config,
+                execution_name,
+                group_id=config.get("group_id") if isinstance(config, dict) else None,
+            )
+            if callback_func:
+                task_args["callback"] = callback_func
+                logger.info(f"Created callback {existing_callback} for task {task_key}")
+            else:
+                logger.warning(
+                    f"Could not create callback {existing_callback} for task {task_key}, skipping callback"
+                )
+        else:
+            task_args["callback"] = existing_callback
+
+    # Create the task instance
+    try:
+        # Create the task with properly separated parameters
+        task = active_harness().build_task(**task_args)
+
+        # Store the task ID from config if available
+        # This ID matches the database task ID and is used for status tracking
+        if "id" in task_config:
+            # DEBUG: Log the raw task ID from config
+            logger.info(f"[DEBUG] Raw task_config['id']: {task_config['id']}")
+
+            # Extract just the UUID part if the ID has a prefix like "task-"
+            task_id = task_config["id"]
+            if isinstance(task_id, str) and task_id.startswith("task-"):
+                logger.info(f"[DEBUG] Stripping 'task-' prefix from: {task_id}")
+                # Remove the "task-" prefix to get just the UUID
+                task_id = task_id[5:]  # len('task-') = 5
+
+            # DEBUG: Log what we're actually storing
+            logger.info(f"[DEBUG] Storing _kasal_task_id as: {task_id}")
+            task._kasal_task_id = task_id
+            logger.info(
+                f"Attached Kasal task ID to task: {task_id} (from {task_config['id']})"
+            )
+
+        logger.info(f"Successfully created task: {task_key}")
+
+        # Debug the task to see if tools are properly attached
+        task_debug_info = {
+            "name": getattr(task, "name", "unknown"),
+            "has_tools": hasattr(task, "tools"),
+            "tools_length": len(getattr(task, "tools", [])),
+            "tools_types": [type(t).__name__ for t in getattr(task, "tools", [])],
+            "agent": getattr(task, "agent", None)
+            and getattr(task.agent, "name", "unknown"),
+        }
+        logger.info(f"Task debug info: {task_debug_info}")
+
+        return task
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        # Key names only: the values include tool instances and their credentials.
+        logger.error("Task args keys: %s", sorted(task_args))
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        raise

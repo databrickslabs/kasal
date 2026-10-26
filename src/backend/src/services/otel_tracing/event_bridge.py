@@ -1,0 +1,1445 @@
+"""OTel Event Bridge — subscribes to the engine event bus and emits OTel spans.
+
+Bridges the run event bus (``src.core.events``) to the OTel pipeline so each
+event becomes a span that flows through SimpleSpanProcessor ->
+KasalDBSpanExporter -> DB. That is where the trace timeline's 35+ event types
+come from.
+
+Spans are named ``kasal.<subject>.<verb>``. They were once named ``CrewAI.*``,
+from the vendored library the engine grew out of; the names were renamed with
+the rows that carried them (see the migration that rewrites
+``execution_trace.span_name``), so nothing in this codebase speaks CrewAI now.
+"""
+
+import logging
+import threading
+from collections import OrderedDict, deque
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+
+from opentelemetry.context import Context
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    Span,
+    StatusCode,
+    Tracer,
+    set_span_in_context,
+)
+
+from src.services.otel_tracing.auto_decision import LLM_EVENT_TYPES, AutoDecision
+from src.services.otel_tracing.event_subscriptions import _EVENT_CLASSES
+
+logger = logging.getLogger(__name__)
+
+# Max event_id -> SpanContext entries retained for DAG parenting (see
+# KasalEventBridge._event_span_ctx). Generous enough that a parent is still
+# resolvable long after it opened, small enough to bound memory on a long run.
+_MAX_TRACKED_SPAN_CTX = 4096
+
+# RUN-level lifecycle events: they describe the run/crew as a whole, never a
+# single agent or task. They must carry NO agent/task attribution.
+#
+# The bridge publishes agent/task provenance into the engine's ambient event
+# context (so background memory saves get attributed), and the bus stamps that
+# context onto every later event — including these. That made
+# ``crew_completed`` arrive carrying the last agent's role and task_id, so the
+# DB exporter recorded event_source=<agent role> and the timeline rendered
+# "Crew Completed" as a row INSIDE that agent's task instead of as the crew's
+# own boundary. Clearing the inherited values keeps these events run-level.
+_RUN_LEVEL_EVENTS = frozenset(
+    {"crew_started", "crew_completed", "flow_started", "flow_completed"}
+)
+
+
+# Event type -> (span_name, event_type_string)
+# span_name maps to SPAN_NAME_MAP in db_exporter.py
+#: The span for what recall SELECTED (see _EVENT_SPAN_MAP's query_completed).
+_SELECTED_RECALL_SPAN = ("kasal.memory.recall_selected", "memory_retrieval")
+
+_EVENT_SPAN_MAP = {
+    "DecisionEvaluatedEvent": ("kasal.decision.evaluate", "decision_evaluated"),
+    # Crew lifecycle
+    "CrewKickoffStartedEvent": ("kasal.crew.kickoff", "crew_started"),
+    "CrewKickoffCompletedEvent": ("kasal.crew.complete", "crew_completed"),
+    # A crew restored from a checkpoint rather than executed. Its own
+    # event_type so the timeline can show it as restored instead of passing it
+    # off as a run that happened.
+    # A flow's state being WRITTEN. The restore side was already on the trace;
+    # without this the write it depends on was invisible.
+    "FlowCheckpointSavedEvent": (
+        "kasal.flow.checkpoint_saved",
+        "flow_checkpoint_saved",
+    ),
+    # The agent's INNER plan for the task it is executing — how this task gets
+    # done, as opposed to the task graph, which is fixed before the run. On the
+    # trace so progress is legible while a long task is still running.
+    "PlanUpdatedEvent": ("kasal.task.plan_updated", "plan_updated"),
+    # One completed UNIT written to the run's checkpoint — a task for a crew, a
+    # crew for a flow. Emitted from the shared recorder, so a crew run finally
+    # shows its checkpoint writes; previously only the flow path showed any.
+    "CheckpointUnitSavedEvent": (
+        "kasal.checkpoint.unit_saved",
+        "checkpoint_unit_saved",
+    ),
+    "CrewCheckpointRestoredEvent": (
+        "kasal.crew.checkpoint_restored",
+        "crew_checkpoint_restored",
+    ),
+    # Task lifecycle
+    "TaskStartedEvent": ("kasal.task.execute", "task_started"),
+    "TaskCompletedEvent": ("kasal.task.complete", "task_completed"),
+    # A task restored from a checkpoint rather than executed.
+    "TaskCheckpointRestoredEvent": (
+        "kasal.task.checkpoint_restored",
+        "task_checkpoint_restored",
+    ),
+    "TaskFailedEvent": ("kasal.task.fail", "task_failed"),
+    # Agent execution
+    "AgentExecutionStartedEvent": ("kasal.agent.execute", "agent_execution"),
+    "AgentExecutionCompletedEvent": ("kasal.agent.complete", "llm_response"),
+    # Tool usage
+    "ToolUsageStartedEvent": ("kasal.tool.execute", "tool_usage"),
+    "ToolUsageFinishedEvent": ("kasal.tool.complete", "tool_usage"),
+    "ToolUsageErrorEvent": ("kasal.tool.error", "tool_error"),
+    # Memory events — map to frontend-expected event_type names
+    "MemorySaveStartedEvent": ("kasal.memory.save_started", "memory_write_started"),
+    "MemorySaveCompletedEvent": ("kasal.memory.save_completed", "memory_write"),
+    "MemorySaveFailedEvent": ("kasal.memory.save_failed", "memory_write_failed"),
+    "MemoryQueryStartedEvent": (
+        "kasal.memory.query_started",
+        "memory_retrieval_started",
+    ),
+    # The search pool. A stage="selected" event of the same class — what the
+    # run's selection kept for the prompt — is routed to memory_retrieval by
+    # _register_handler; that is the row "what this run recalled" is read from.
+    "MemoryQueryCompletedEvent": ("kasal.memory.query_completed", "memory_search"),
+    "MemoryQueryFailedEvent": ("kasal.memory.query_failed", "memory_retrieval_failed"),
+    "MemoryRetrievalCompletedEvent": (
+        "kasal.memory.retrieval_completed",
+        "memory_retrieval_completed",
+    ),
+    "MemoryRetrievalFailedEvent": (
+        "kasal.memory.retrieval_failed",
+        "memory_retrieval_failed",
+    ),
+    # Knowledge events — map completed to frontend's knowledge_operation
+    "KnowledgeRetrievalStartedEvent": (
+        "kasal.knowledge.retrieval_started",
+        "knowledge_retrieval_started",
+    ),
+    "KnowledgeRetrievalCompletedEvent": (
+        "kasal.knowledge.retrieval_completed",
+        "knowledge_operation",
+    ),
+    # Reasoning events — map to frontend's agent_reasoning/agent_reasoning_error
+    "AgentReasoningStartedEvent": ("kasal.reasoning.started", "reasoning_started"),
+    "AgentReasoningCompletedEvent": ("kasal.reasoning.completed", "agent_reasoning"),
+    "AgentReasoningFailedEvent": ("kasal.reasoning.failed", "agent_reasoning_error"),
+    # Guardrail events — map completed/failed to frontend's llm_guardrail
+    "LLMGuardrailStartedEvent": ("kasal.guardrail.started", "guardrail_started"),
+    "LLMGuardrailCompletedEvent": ("kasal.guardrail.completed", "llm_guardrail"),
+    "LLMGuardrailFailedEvent": ("kasal.guardrail.failed", "llm_guardrail"),
+    # Flow events — map finished to frontend's flow_completed
+    "FlowStartedEvent": ("kasal.flow.started", "flow_started"),
+    "FlowFinishedEvent": ("kasal.flow.finished", "flow_completed"),
+    "FlowCreatedEvent": ("kasal.flow.created", "flow_created"),
+    # MCP events
+    "MCPConnectionStartedEvent": (
+        "kasal.mcp.connection_started",
+        "mcp_connection_started",
+    ),
+    "MCPConnectionCompletedEvent": (
+        "kasal.mcp.connection_completed",
+        "mcp_connection_completed",
+    ),
+    "MCPToolExecutionStartedEvent": ("kasal.mcp.tool_started", "mcp_tool_started"),
+    "MCPToolExecutionCompletedEvent": (
+        "kasal.mcp.tool_completed",
+        "mcp_tool_completed",
+    ),
+    # HITL events
+    "HumanFeedbackRequestedEvent": (
+        "kasal.hitl.feedback_requested",
+        "hitl_feedback_requested",
+    ),
+    "HumanFeedbackReceivedEvent": (
+        "kasal.hitl.feedback_received",
+        "hitl_feedback_received",
+    ),
+    # LLM call events
+    "LLMCallStartedEvent": ("kasal.llm.call_started", "llm_call"),
+    "LLMCallCompletedEvent": ("kasal.llm.call_completed", "llm_response"),
+    "LLMCallFailedEvent": ("kasal.llm.call_failed", "llm_call_failed"),
+    # Context compaction — lossy, so it must be visible: a silently amputated
+    # conversation makes an agent re-query what it already knew and loop.
+    "ContextCompactionEvent": ("kasal.llm.context_compaction", "context_compaction"),
+    # A2UI surface composition — recorded for EVERY outcome (composed, or the
+    # gate that declined), because a skipped surface is the case people ask
+    # about and it used to leave no trace at all.
+    "A2UISurfaceEvent": ("kasal.a2ui.compose", "a2ui_surface"),
+}
+
+# Events to skip. LLMStreamChunkEvent: too noisy (one per token).
+# LLMReasoningChunkEvent: same reason — it arrives per delta on the streaming
+# path. It is still SUBSCRIBED (see _EVENT_CLASSES) because the event pipe
+# forwards it to the live UI; it just gets no span of its own.
+# AgentExecutionCompletedEvent: pure duplicate — under the kasal engine it
+# fires alongside LLMCallCompletedEvent with the same answer text and no
+# usage data, and mapping both to "llm_response" rendered every response
+# twice in the trace timeline.
+_SKIP_EVENTS = {
+    "LLMStreamChunkEvent",
+    "LLMReasoningChunkEvent",
+    "AgentExecutionCompletedEvent",
+}
+
+# Tool-call span names (by _EVENT_SPAN_MAP span_name) that we ALSO mirror into
+# the active MLflow trace so tool/MCP calls show up in the UC trace
+# (kasal_otel_spans). Native mlflow.crewai.autolog captures crew/task/agent/LLM
+# spans but NOT tool calls. We bridge the generic CrewAI ToolUsage events, which
+# fire for every tool — built-in, custom, and MCP (Genie) — so coverage is
+# uniform. The MCP-specific events stay in the Kasal UI trace only (bridging
+# them too would double-count, since MCP tools also fire ToolUsage events).
+_MLFLOW_TOOL_START_SPANS = {"kasal.tool.execute"}
+_MLFLOW_TOOL_END_SPANS = {"kasal.tool.complete", "kasal.tool.error"}
+
+# Tools whose spans are redundant with the richer ``Memory*`` events emitted
+# by CrewAI's unified Memory class. We absorb them to show one span per
+# logical memory operation, not three.
+_MEMORY_WRAPPER_TOOLS = {"search_memory", "save_to_memory"}
+
+# The plan tool, absorbed for the same reason. Every write it makes emits
+# ``PlanUpdatedEvent``, which carries the plan as structured JSON plus its
+# counts — so one plan change was reaching the trace as THREE rows: the tool
+# start, the plan, and the tool finish. Both tool rows are labelled "todo" and
+# neither says anything the plan row does not (the tool's arguments ARE the
+# plan, as a Python repr; its return value is an acknowledgement string).
+#
+# Absorbed for ``tool_usage`` only. A FAILING todo call still gets its
+# ``tool_error`` row, because that is the one case ``PlanUpdatedEvent`` never
+# fires for — absorbing it would make the failure invisible.
+_PLAN_TOOL = "todo"
+
+# The two halves of a tool call, by event type. The frontend reads this to
+# label a row "(input)" / "(output)"; see the operation block in
+# _set_extra_attributes for what its absence looked like.
+_TOOL_OPERATIONS: Dict[Optional[str], str] = {
+    "tool_usage_started": "tool_started",
+    "tool_usage_finished": "tool_finished",
+}
+
+
+#: Ceiling for the one untruncated task description recorded per task span.
+#: Generous enough for real task prompts, bounded so a runaway description
+#: cannot bloat the trace row.
+_FULL_TASK_DESCRIPTION_MAX = 20000
+
+
+def _safe_str(val: Any, max_len: int = 500) -> str:
+    """Safely convert a value to a truncated string."""
+    if val is None:
+        return ""
+    s = str(val)
+    return s[:max_len] if len(s) > max_len else s
+
+
+def _elide_middle(val: Any, max_len: int) -> str:
+    """Truncate from the MIDDLE, keeping both ends.
+
+    Head truncation is the wrong shape for a system prompt: everything appended
+    to one lands at the END — the date-awareness block, and any later addition —
+    so ``s[:max_len]`` would drop exactly the part someone opens the trace to
+    check. The first question asked of this field was "is the date in there?",
+    which a head-truncated copy cannot answer.
+    """
+    if val is None:
+        return ""
+    s = str(val)
+    if len(s) <= max_len:
+        return s
+    keep = (max_len - 5) // 2
+    return f"{s[:keep]}\n…\n{s[-keep:]}"
+
+
+def _get_agent_name(event: Any) -> str:
+    """Extract agent name from an event object.
+
+    Checks BaseEvent.agent_role, then event.agent.role, then
+    event.from_agent.role (MemoryBaseEvent / ToolUsageEvent), then
+    event.task.agent.role as final fallback.
+    """
+    agent_role = getattr(event, "agent_role", None)
+    if agent_role:
+        return str(agent_role)
+
+    for attr in ("agent", "from_agent"):
+        obj = getattr(event, attr, None)
+        if obj and hasattr(obj, "role") and obj.role:
+            return str(obj.role)
+
+    task = getattr(event, "task", None)
+    if task:
+        task_agent = getattr(task, "agent", None)
+        if task_agent and hasattr(task_agent, "role") and task_agent.role:
+            return str(task_agent.role)
+
+    return ""
+
+
+def _get_task_name(event: Any) -> str:
+    """Extract task description from an event object.
+
+    Checks BaseEvent.task_name first, then event.task.description/name.
+    """
+    # BaseEvent sets task_name directly via _set_task_params
+    task_name = getattr(event, "task_name", None)
+    if task_name:
+        return _safe_str(task_name)
+
+    task = getattr(event, "task", None)
+    if task:
+        desc = getattr(task, "description", None)
+        if desc:
+            return _safe_str(desc)
+        name = getattr(task, "name", None)
+        if name:
+            return _safe_str(name)
+    return ""
+
+
+def _get_full_task_description(event: Any) -> str:
+    """The task's description with no display cap applied.
+
+    ``_get_task_name`` truncates to 500 chars and it is stamped on EVERY event
+    of the task, so the cap keeps the trace table small. That copy is also the
+    only text the timeline has, which left long descriptions unreadable in the
+    UI. This returns the whole thing so it can be recorded ONCE, on the task's
+    own span — one row per task rather than one per event.
+    """
+    task = getattr(event, "task", None)
+    desc = getattr(task, "description", None) if task else None
+    if not desc:
+        desc = getattr(event, "task_name", None)
+    return _safe_str(desc, _FULL_TASK_DESCRIPTION_MAX)
+
+
+def _get_tool_name(event: Any) -> str:
+    """Extract tool name from an event object."""
+    tool_name = getattr(event, "tool_name", None) or getattr(event, "tool", None)
+    if tool_name:
+        return _safe_str(tool_name, 200)
+    return ""
+
+
+#: Where a structured output object keeps the text a human is meant to read.
+#: A TaskOutput/CrewOutput is a pydantic model, so ``str()`` on it yields its
+#: REPR — ``description='...' name='...' raw='...' agent='...'`` — and that repr
+#: was what landed in the trace, in the chat's task summary, and in anything else
+#: that treats a trace as text. The answer was inside it the whole time, quoted
+#: and escaped, one field along.
+_OUTPUT_TEXT_ATTRS = ("raw", "output", "result")
+
+
+def _output_text(val: Any) -> str:
+    """The readable text of an output value.
+
+    Unwraps a structured output to its ``raw`` before falling back to ``str()``,
+    so a trace carries the answer rather than a description of the object that
+    held it.
+    """
+    if isinstance(val, str):
+        return val
+    for attr in _OUTPUT_TEXT_ATTRS:
+        inner = getattr(val, attr, None)
+        if isinstance(inner, str) and inner:
+            return inner
+    return str(val)
+
+
+def _get_output(event: Any) -> str:
+    """Extract output/result content from an event object."""
+    for attr in (
+        "output",
+        "result",
+        "results",
+        "response",
+        "content",
+        "message",
+        "reason",
+        "value",
+        "memory_content",
+    ):
+        val = getattr(event, attr, None)
+        if val is not None:
+            return _output_text(val)
+    return ""
+
+
+class OTelEventBridge:
+    """Subscribes to CrewAI event bus and creates OTel spans per event.
+
+    Each span flows through the existing OTel pipeline:
+    SimpleSpanProcessor -> KasalDBSpanExporter -> execution_trace DB.
+
+    Args:
+        tracer: An OTel Tracer from the execution's TracerProvider.
+        job_id: The execution/job ID for logging.
+        group_context: Optional group context for tenant isolation.
+    """
+
+    def __init__(
+        self,
+        tracer: Tracer,
+        job_id: str,
+        group_context: Optional[Any] = None,
+        run_config: Optional[Mapping[str, object]] = None,
+        *,
+        scoped: bool = False,
+    ):
+        self._tracer = tracer
+        # The run's Auto decision, from its payload: the run's trace starts
+        # there (see otel_tracing/auto_decision.py).
+        self._auto = AutoDecision.from_payload(run_config)
+        self._job_id = job_id
+        self._group_context = group_context
+        self._registered_count = 0
+        self._scoped = scoped
+        self._subscriptions: List[Tuple[Any, Any, Callable[..., None]]] = []
+        # Captured from CrewKickoffStartedEvent and stamped on all subsequent
+        # spans so that task-level traces carry the crew name for flow monitoring.
+        self._current_crew_name: Optional[str] = None
+        # Most-recent agent/task seen on an agent/task event. Used to attribute
+        # memory events that don't carry their own agent/task — CrewAI's recall
+        # runs in a RecallFlow whose worker thread doesn't inherit the
+        # agent/task ContextVar, so those memory spans would otherwise land
+        # under "System / Unassigned" instead of the running task.
+        self._current_agent_name: Optional[str] = None
+        self._current_task_name: Optional[str] = None
+        # Most-recent task_id seen on any task/agent event. Memory events
+        # (recall/save) frequently arrive WITHOUT a task_id — CrewAI's recall
+        # runs in a RecallFlow worker thread, and some tasks emit no
+        # TaskStartedEvent at all — so they would land under the frontend's
+        # "Unassigned" task bucket. We stamp them with this id so the frontend's
+        # ``getTaskId`` resolves them to the running task.
+        self._current_task_id: Optional[str] = None
+        # Memory saves run on a background thread and complete tens of seconds
+        # later — often after the *next* task has started. Attributing the
+        # completion to the "current" task would misfile it (and hide the
+        # originating task's write). We FIFO-correlate each ``save_completed``
+        # back to the task that was active at its ``save_started``.
+        self._pending_save_task_ids: deque = deque()
+        # When the agent invokes the ``save_to_memory`` wrapper tool, we
+        # capture the args in-flight and hand them to the next
+        # ``MemorySaveCompletedEvent`` so the trace shows *what* was written
+        # instead of just "N memories saved". This is request-local
+        # correlation between two events on the same thread, not a
+        # time-based fallback cache.
+        self._pending_save_content: Optional[str] = None
+        # Threads currently inside a memory save. ``Memory._analyze_for_save``
+        # asks the LLM to label the record being written, on the same
+        # background thread and between that save's started/completed events —
+        # so an LLM call from one of these threads is memory bookkeeping, not
+        # the agent's own reasoning. Keyed by thread so a save running
+        # concurrently with the agent's next LLM call cannot mislabel it.
+        self._memory_save_threads: set = set()
+        # An LLM guardrail validates a task's output by making its OWN LLM
+        # call(s) through CrewAI's internal "Guardrail Agent", which carries no
+        # task. Those child spans would otherwise land in a separate
+        # "Guardrail Agent / Unassigned" lane instead of under the task being
+        # validated. We track the guardrail window (between its started and
+        # completed/failed events) and the task that owns it, then re-attribute
+        # the guardrail's task-less child spans to that task. The guardrail
+        # LIFECYCLE events already carry the task; only its inner LLM calls don't.
+        self._guardrail_active: bool = False
+        self._guardrail_owner_agent: Optional[str] = None
+        self._guardrail_owner_task: Optional[str] = None
+        self._guardrail_owner_task_id: Optional[str] = None
+        # Open MLflow tool spans (LIFO), bridged into the active autolog trace so
+        # tool/MCP calls land in the UC trace. CrewAI tool usage is synchronous
+        # and properly bracketed (Started -> tool runs -> Finished/Error), so a
+        # stack correctly pairs each finish with its start.
+        self._mlflow_tool_spans: list = []
+        # ── Execution DAG ──────────────────────────────────────────────────
+        # The engine's event bus stamps a true causality DAG onto every event
+        # (parent_event_id, from its scope stack). Each bridge span is opened and
+        # closed immediately, so the ambient OTel context alone would make every
+        # span a sibling leaf — the DAG would be computed and then thrown away.
+        # We map engine event_id -> that event's SpanContext and use
+        # parent_event_id to parent the span explicitly, which lands the DAG in
+        # the already-persisted execution_trace.parent_span_id column (no schema
+        # change, and the frontend already reads span_id/parent_span_id).
+        #
+        # Bounded: a long run emits tens of thousands of events, and only
+        # scope-opening events are ever looked up as parents. We cap the map and
+        # drop oldest-first rather than grow without limit.
+        self._event_span_ctx: "OrderedDict[str, Any]" = OrderedDict()
+
+    def register(self, event_bus: Any) -> int:
+        """Subscribe to Kasal event classes; each mapped event emits one span."""
+        registered = 0
+
+        import importlib
+
+        missing: list = []
+        for module_path, class_name in _EVENT_CLASSES:
+            try:
+                module = importlib.import_module(module_path)
+                event_cls = getattr(module, class_name)
+                self._register_handler(event_bus, event_cls)
+                registered += 1
+            except (ImportError, AttributeError):
+                # WARNING, not debug: an entry here that no longer resolves means
+                # a whole event type is silently missing from every trace. That
+                # was invisible for the flow events until someone asked why the
+                # timeline had no flow row.
+                missing.append(class_name)
+
+        self._registered_count = registered
+        if self._auto is not None:
+            self._auto.emit(self._tracer)
+        logger.info(
+            f"[OTel-Bridge][{self._job_id}] Registered {registered} event types on event bus"
+        )
+        if missing:
+            logger.warning(
+                "[OTel-Bridge][%s] %d event class(es) in _EVENT_CLASSES do not "
+                "resolve and will be ABSENT from every trace: %s",
+                self._job_id,
+                len(missing),
+                ", ".join(missing),
+            )
+        return registered
+
+    def _register_handler(self, event_bus: Any, event_cls: type) -> None:
+        """Register a single event handler on the bus."""
+        event_name = event_cls.__name__
+
+        if event_name in _SKIP_EVENTS:
+            return
+
+        mapping = _EVENT_SPAN_MAP.get(event_name)
+        if not mapping:
+            logger.debug(
+                f"[OTel-Bridge][{self._job_id}] No mapping for {event_name}, skipping"
+            )
+            return
+
+        span_name, event_type = mapping
+        bridge = self  # capture for closure
+
+        @event_bus.on(event_cls)
+        def _handler(source: Any, event: Any) -> None:
+            if (
+                bridge._scoped
+                and event.execution_context.get("generation_job_id") != bridge._job_id
+            ):
+                return
+            if (
+                event_name == "MemoryQueryCompletedEvent"
+                and getattr(event, "stage", "search") == "selected"
+            ):
+                bridge._emit_span(*_SELECTED_RECALL_SPAN, event)
+                return
+            bridge._emit_span(span_name, event_type, event)
+
+        self._subscriptions.append((event_bus, event_cls, _handler))
+
+    def unregister(self) -> None:
+        """Remove only this bridge's handlers; concurrent runs keep theirs."""
+        for bus, event_cls, handler in self._subscriptions:
+            bus.off(event_cls, handler)
+        self._subscriptions.clear()
+
+    def _emit_span(self, span_name: str, event_type: str, event: Any) -> None:
+        """Create and immediately end an OTel span for a point-in-time event."""
+        logger.info(
+            "[OTel-Bridge][%s] _emit_span called: %s / %s",
+            self._job_id,
+            span_name,
+            event_type,
+        )
+        try:
+            agent_name: Optional[str] = _get_agent_name(event)
+            task_name: Optional[str] = _get_task_name(event)
+            tool_name = _get_tool_name(event)
+            output = _get_output(event)
+            event_task_id = getattr(event, "task_id", None)
+
+            # ── Guardrail window ──────────────────────────────────────────
+            # Keep the guardrail's own LLM calls under the task they validate.
+            # On guardrail_started, remember the task that owns the guardrail
+            # (the currently-running task). While the guardrail is active, its
+            # internal LLM-call spans arrive with agent="Guardrail Agent" and no
+            # task — re-attribute those to the owner task so they nest under it
+            # instead of a separate "Guardrail Agent / Unassigned" lane. Done
+            # BEFORE the _current_* updates below so "Guardrail Agent" never
+            # pollutes the running-agent tracker.
+            if event_type == "guardrail_started":
+                self._guardrail_active = True
+                self._guardrail_owner_agent = self._current_agent_name
+                self._guardrail_owner_task = self._current_task_name
+                self._guardrail_owner_task_id = self._current_task_id
+            elif event_type == "llm_guardrail":  # guardrail completed / failed
+                self._guardrail_active = False
+            guardrail_child = (
+                self._guardrail_active
+                and event_type not in ("guardrail_started", "llm_guardrail")
+                and not event_task_id
+            )
+            if guardrail_child:
+                if self._guardrail_owner_agent:
+                    agent_name = self._guardrail_owner_agent
+                if self._guardrail_owner_task:
+                    task_name = self._guardrail_owner_task
+                if self._guardrail_owner_task_id:
+                    event_task_id = self._guardrail_owner_task_id
+
+            # Track the most-recent agent / task / task_id from events that carry
+            # them, then use them to attribute memory events that don't. CrewAI's
+            # recall runs in a RecallFlow worker thread (no agent/task ContextVar)
+            # and some tasks emit no TaskStartedEvent, so memory spans otherwise
+            # land under "System" / "Unassigned". ``task_id`` is the frontend's
+            # primary grouping key (getTaskId), so stamping it is what actually
+            # keeps memory read/write spans under the running task.
+            if agent_name:
+                self._current_agent_name = agent_name
+            if task_name:
+                self._current_task_name = task_name
+            if event_task_id:
+                self._current_task_id = str(event_task_id)
+            if event_type.startswith("memory_"):
+                if not agent_name:
+                    agent_name = self._current_agent_name
+                if not task_name:
+                    task_name = self._current_task_name
+                if not event_task_id:
+                    event_task_id = self._current_task_id
+                # Correlate a save's completion back to the task that started it,
+                # since the background save can finish during a later task.
+                if event_type == "memory_write_started":
+                    self._pending_save_task_ids.append(self._current_task_id)
+                    self._memory_save_threads.add(threading.get_ident())
+                elif event_type in ("memory_write", "memory_write_failed"):
+                    self._memory_save_threads.discard(threading.get_ident())
+                    if self._pending_save_task_ids:
+                        started_task_id = self._pending_save_task_ids.popleft()
+                        if started_task_id:
+                            event_task_id = started_task_id
+
+            # An LLM call raised from inside a save is the record-labelling call
+            # (see _memory_save_threads) — mark it so the timeline does not read
+            # it as the agent thinking after its task already finished.
+            is_memory_labelling = (
+                event_type in ("llm_call", "llm_response", "llm_call_failed")
+                and threading.get_ident() in self._memory_save_threads
+            )
+
+            # A run-level event inherited whatever agent/task was last active
+            # (see _RUN_LEVEL_EVENTS). Drop it: these are crew/flow boundaries,
+            # not work done by an agent. Done AFTER the _current_* bookkeeping
+            # above so memory attribution still has its fallbacks.
+            is_run_level = event_type in _RUN_LEVEL_EVENTS
+            if is_run_level:
+                agent_name = ""
+                task_name = ""
+                event_task_id = None
+
+            # Publish agent/task provenance to the engine's ambient event
+            # context so that upcoming ``Memory.remember_many()`` saves
+            # (which snapshot the caller's contextvars when submitting to
+            # their bg thread pool) emit ``MemorySaveCompletedEvent`` with
+            # proper attribution. Explicit event values always win.
+            #
+            # Skipped for run-level events: they carry no attribution to
+            # publish, and writing None here would ERASE the provenance a
+            # pending background memory save still needs.
+            if not is_run_level:
+                try:
+                    from src.core.events import set_event_context
+
+                    set_event_context(
+                        agent_role=agent_name or None,
+                        agent_id=getattr(event, "agent_id", None)
+                        or getattr(getattr(event, "agent", None), "id", None)
+                        or getattr(getattr(event, "from_agent", None), "id", None),
+                        task_id=getattr(event, "task_id", None)
+                        or (
+                            str(getattr(getattr(event, "task", None), "id", "")) or None
+                        ),
+                        task_name=task_name or None,
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+            # Deduplicate memory-wrapper tool spans. ``search_memory`` and
+            # ``save_to_memory`` are thin agent-facing wrappers around the
+            # unified Memory API; CrewAI already emits ``MemoryQuery*`` /
+            # ``MemorySave*`` events for the underlying operation, so the
+            # tool spans are pure noise. Before skipping ``save_to_memory``
+            # we cache the tool args so the upcoming ``MemorySaveCompleted``
+            # span can surface *what was written* — CrewAI's batch event
+            # only carries "N memories saved", the tool_args carry the
+            # actual payload the agent asked to persist. The two events
+            # fire back-to-back on the same thread so this correlation is
+            # deterministic, not a stale-cache fallback.
+            if tool_name in _MEMORY_WRAPPER_TOOLS and event_type.startswith("tool"):
+                if tool_name == "save_to_memory":
+                    tool_args = getattr(event, "tool_args", None)
+                    if tool_args:
+                        self._pending_save_content = _safe_str(tool_args, 4000)
+                return
+
+            # Same absorption for the plan tool — ``PlanUpdatedEvent`` is the
+            # row (see _PLAN_TOOL). Errors keep theirs.
+            if tool_name == _PLAN_TOOL and event_type == "tool_usage":
+                return
+
+            # Capture crew_name from crew lifecycle events so it can be
+            # propagated to task/agent spans that don't carry it themselves.
+            event_crew_name = getattr(event, "crew_name", None)
+            if event_crew_name:
+                self._current_crew_name = str(event_crew_name)
+
+            # Memory events need special content handling: write events
+            # replace "13 memories saved" with the agent-supplied payload,
+            # retrieval events surface the recall block (or an explicit
+            # "no matches" message instead of a blank span body).
+            saved_content: Optional[str] = None
+            if event_type == "memory_write":
+                if self._pending_save_content:
+                    # Primary path: agent used the ``save_to_memory`` tool
+                    # and we captured the tool args earlier.
+                    saved_content = self._pending_save_content
+                    self._pending_save_content = None
+                else:
+                    # Fallback path: auto-save at task end pulls the records
+                    # out of ``event.metadata['_kasal_saved_contents']``
+                    # (injected by the ``Memory.remember_many`` patch).
+                    metadata = getattr(event, "metadata", None)
+                    if isinstance(metadata, dict):
+                        saved = metadata.get("_kasal_saved_contents")
+                        if saved:
+                            try:
+                                import json as _json
+
+                                saved_content = _safe_str(
+                                    _json.dumps(saved, default=str, indent=2),
+                                    4000,
+                                )
+                            except Exception:
+                                saved_content = _safe_str(str(saved), 4000)
+                if saved_content:
+                    output = saved_content
+            elif event_type == "memory_retrieval_completed":
+                memory_content = getattr(event, "memory_content", None)
+                if memory_content and str(memory_content).strip():
+                    output = _safe_str(memory_content, 8000)
+                else:
+                    output = "(no memories matched the query)"
+
+            # Mirror tool calls into the active MLflow trace (UC tables). Done
+            # outside the OTel span block so MLflow nests under autolog's span,
+            # not our OTel span. Never breaks the existing OTel path on failure.
+            self._bridge_tool_to_mlflow(span_name, tool_name, output, event)
+
+            # Parent this span to the span of the event that caused it, so the
+            # bus's causality DAG survives into parent_span_id (see
+            # _parent_context for a span with no known parent).
+            parent_context = self._parent_context(event)
+
+            with self._tracer.start_as_current_span(
+                span_name, context=parent_context
+            ) as span:
+                self._track_span_for_dag(event, span)
+                if not span.is_recording():
+                    logger.warning(
+                        "[OTel-Bridge][%s] Span not recording for %s (NoOp tracer or not sampled)",
+                        self._job_id,
+                        span_name,
+                    )
+                # Core attributes picked up by db_exporter extractors
+                span.set_attribute("kasal.event_type", event_type)
+                if agent_name:
+                    span.set_attribute("kasal.agent_name", agent_name)
+                if task_name:
+                    span.set_attribute("kasal.task_name", task_name[:500])
+                # Record the description in full ONCE, on the task's own span:
+                # every other copy is capped for size, and the timeline's task
+                # dialog has nothing else to show.
+                if event_type == "task_started":
+                    full_description = _get_full_task_description(event)
+                    if len(full_description) > len(task_name or ""):
+                        span.set_attribute(
+                            "kasal.extra.task_description_full", full_description
+                        )
+                # Stamp the resolved task_id so the frontend groups this span
+                # under the running task instead of "Unassigned" (getTaskId reads
+                # task_id from the span's metadata before falling back to parent).
+                if (
+                    event_type.startswith("memory_") or guardrail_child
+                ) and event_task_id:
+                    span.set_attribute("kasal.extra.task_id", str(event_task_id))
+                # Mark a re-attributed guardrail LLM call so it's still
+                # identifiable as guardrail validation within the task.
+                if guardrail_child:
+                    span.set_attribute("kasal.extra.guardrail_validation", True)
+                if is_memory_labelling:
+                    span.set_attribute("kasal.extra.llm_purpose", "memory_labelling")
+                if tool_name:
+                    span.set_attribute("kasal.tool_name", tool_name)
+                if output:
+                    span.set_attribute("kasal.output_content", output)
+                if saved_content:
+                    # Mirror into extra_data so consumers that don't render
+                    # kasal.output_content (e.g. raw JSON viewers) still see
+                    # exactly what the agent asked to persist.
+                    span.set_attribute("kasal.extra.saved_content", saved_content)
+
+                # Extra metadata
+                self._set_extra_attributes(span, event, skip_attribution=is_run_level)
+                self._set_auto_attributes(span, event_type, event)
+
+                # Mark failed events with error status
+                if "failed" in event_type or "error" in event_type:
+                    error_msg = getattr(event, "error", None) or getattr(
+                        event, "message", None
+                    )
+                    span.set_status(StatusCode.ERROR, _safe_str(error_msg, 500))
+
+        except Exception as e:
+            logger.error(
+                f"[OTel-Bridge][{self._job_id}] Error emitting span "
+                f"{span_name}/{event_type}: {e}",
+                exc_info=True,
+            )
+
+    def _bridge_tool_to_mlflow(
+        self, span_name: str, tool_name: str, output: str, event: Any
+    ) -> None:
+        """Mirror a CrewAI tool call into the active MLflow trace.
+
+        Native ``mlflow.crewai.autolog`` records crew/task/agent/LLM spans but
+        not tool calls, so MCP/Genie tool usage was missing from the UC trace.
+        We open an MLflow span on tool start and close it on finish/error,
+        nesting under the currently-active autolog span. We only ever start a
+        span when there IS an active span — otherwise the tool call would become
+        a separate root trace instead of nesting. All failures are swallowed so
+        tracing never affects crew execution.
+        """
+        is_start = span_name in _MLFLOW_TOOL_START_SPANS
+        is_end = span_name in _MLFLOW_TOOL_END_SPANS
+        if not (is_start or is_end):
+            return
+        try:
+            import mlflow
+            from mlflow.tracking import MlflowClient
+        except Exception:
+            return
+        try:
+            if is_start:
+                # Only nest under an active autolog span; never orphan a root.
+                parent = mlflow.get_current_active_span()
+                if parent is None:
+                    return
+                # IMPERATIVE API (start_span/end_span with explicit parent_id) —
+                # NOT the fluent context manager. The start and finish events run
+                # in DIFFERENT OTel contexts, so the fluent manager's
+                # attach/detach(token) raises "Token was created in a different
+                # Context" on exit (which both errors the span AND corrupts the
+                # context stack for sibling autolog spans). The imperative API
+                # never touches contextvars.
+                tool_args = getattr(event, "tool_args", None)
+                inputs = (
+                    {"tool": tool_name, "args": _safe_str(tool_args, 4000)}
+                    if tool_args is not None
+                    else {"tool": tool_name}
+                )
+                span = MlflowClient().start_span(
+                    name=tool_name or "tool",
+                    trace_id=parent.trace_id,
+                    parent_id=parent.span_id,
+                    span_type="TOOL",
+                    inputs=inputs,
+                )
+                self._mlflow_tool_spans.append(span)
+            else:  # finish / error
+                if not self._mlflow_tool_spans:
+                    return
+                span = self._mlflow_tool_spans.pop()
+                end_kwargs = {
+                    "trace_id": span.trace_id,
+                    "span_id": span.span_id,
+                    "status": "ERROR" if span_name == "kasal.tool.error" else "OK",
+                }
+                if output:
+                    end_kwargs["outputs"] = {"result": _safe_str(output, 8000)}
+                MlflowClient().end_span(**end_kwargs)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "[OTel-Bridge][%s] MLflow tool-span bridge failed for %s: %s",
+                self._job_id,
+                span_name,
+                e,
+            )
+
+    def _dag_parent_context(self, event: Any) -> Optional[Any]:
+        """OTel context naming this event's causal parent, or None for ambient.
+
+        ``None`` means "use the ambient context", which is the pre-DAG behavior
+        and the correct fallback for a root event. The parent span has already
+        ENDED by the time we get here — that's fine, OTel parenting needs only
+        the parent's SpanContext (trace_id + span_id), not a live span, which is
+        why a NonRecordingSpan wrapper is enough.
+        """
+        try:
+            parent_event_id = getattr(event, "parent_event_id", None)
+            if not parent_event_id:
+                # The OUTERMOST closing event (e.g. flow_finished) has no parent:
+                # the bus only sets one when the matched scope is nested
+                # (``match > 0``). Falling through to ambient context would make
+                # it a second ROOT with its own trace_id, splitting one flow run
+                # across two traces. Anchor it to the scope it closes instead, so
+                # the whole run stays a single trace rooted at flow_started.
+                parent_event_id = getattr(event, "started_event_id", None)
+            if not parent_event_id:
+                return None
+            parent_ctx = self._event_span_ctx.get(parent_event_id)
+            if parent_ctx is None:
+                return None
+            return set_span_in_context(NonRecordingSpan(parent_ctx))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "[OTel-Bridge][%s] DAG parent resolution failed: %s", self._job_id, e
+            )
+            return None
+
+    def _parent_context(self, event: object) -> Optional[Context]:
+        """The causal parent's context; else the run's Auto decision, else ambient.
+
+        Ambient (None) is the previous behavior for a span with no known parent:
+        the root event, or a parent emitted before this bridge registered. A run
+        that used Auto continues the decision's trace there instead.
+        """
+        parent_context: Optional[Context] = self._dag_parent_context(event)
+        if parent_context is None and self._auto is not None:
+            return self._auto.parent_context()
+        return parent_context
+
+    def _set_auto_attributes(self, span: Span, event_type: str, event: object) -> None:
+        """Link a call to the model Auto chose back to the decision span."""
+        if self._auto is not None and event_type in LLM_EVENT_TYPES:
+            span.set_attributes(
+                self._auto.llm_attributes(getattr(event, "model", None))
+            )
+
+    def _track_span_for_dag(self, event: Any, span: Any) -> None:
+        """Remember this event's SpanContext so its children can parent to it."""
+        try:
+            event_id = getattr(event, "event_id", None)
+            if not event_id:
+                return
+            span_ctx = span.get_span_context()
+            if span_ctx is None or not span_ctx.is_valid:
+                return
+            self._event_span_ctx[event_id] = span_ctx
+            while len(self._event_span_ctx) > _MAX_TRACKED_SPAN_CTX:
+                self._event_span_ctx.popitem(last=False)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "[OTel-Bridge][%s] DAG span tracking failed: %s", self._job_id, e
+            )
+
+    def _set_extra_attributes(
+        self, span: Any, event: Any, skip_attribution: bool = False
+    ) -> None:
+        """Set extra kasal.extra.* attributes from CrewAI event fields.
+
+        CrewAI BaseEvent provides: task_id, task_name, agent_role, agent_id,
+        source_type. Memory events add: query, value, query_time_ms,
+        save_time_ms, results, limit, score_threshold, memory_content.
+
+        ``skip_attribution`` omits the agent/task identity attributes. Set for
+        run-level crew/flow events, whose agent_role/task_id were inherited from
+        the ambient event context rather than being their own — writing them
+        would file the crew's boundary under an agent's task in the timeline.
+        """
+        # ── Task + agent identification ──
+        # Skipped wholesale for run-level events; everything BELOW this block
+        # (crew_name, inputs, total_tokens, ...) still applies to them and is
+        # what the timeline and MLflow read off a crew boundary.
+        if not skip_attribution:
+            # CrewAI events set task_id/task_name via _set_task_params from from_task
+            task_id = getattr(event, "task_id", None)
+            if task_id:
+                span.set_attribute("kasal.extra.task_id", str(task_id))
+            task_name = getattr(event, "task_name", None)
+            if task_name:
+                span.set_attribute("kasal.extra.task_name", _safe_str(task_name, 200))
+
+            # Also check task object directly (some events carry task reference)
+            task = getattr(event, "task", None)
+            if task:
+                if not task_id:
+                    tid = getattr(task, "id", None)
+                    if tid:
+                        span.set_attribute("kasal.extra.task_id", str(tid))
+                if not task_name:
+                    resolved = getattr(task, "description", None) or getattr(
+                        task, "name", None
+                    )
+                    if resolved:
+                        span.set_attribute(
+                            "kasal.extra.task_name", _safe_str(resolved, 200)
+                        )
+                kasal_task_id = getattr(task, "_kasal_task_id", None)
+                if kasal_task_id:
+                    span.set_attribute(
+                        "kasal.extra.frontend_task_id", str(kasal_task_id)
+                    )
+
+            # ── The agent's plan for this task ──
+            # Written explicitly because this method carries a FIXED set of
+            # fields rather than copying the event: without this the
+            # plan_updated span reached the trace with only the generic
+            # agent/task identity and none of the plan, which reads to a user
+            # as "the plan feature does nothing".
+            if getattr(event, "type", None) == "plan_updated":
+                span.set_attribute(
+                    "kasal.extra.plan_rendered",
+                    _safe_str(getattr(event, "rendered", ""), 4000),
+                )
+                for field in (
+                    "total",
+                    "pending",
+                    "in_progress",
+                    "completed",
+                    "cancelled",
+                ):
+                    span.set_attribute(
+                        f"kasal.extra.plan_{field}", int(getattr(event, field, 0) or 0)
+                    )
+                try:
+                    import json as _json
+
+                    span.set_attribute(
+                        "kasal.extra.plan_items",
+                        _safe_str(_json.dumps(getattr(event, "items", []) or []), 8000),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # ── Agent identification (BaseEvent fields) ──
+            agent_role = getattr(event, "agent_role", None)
+            if agent_role:
+                span.set_attribute("kasal.extra.agent_role", str(agent_role))
+            agent_id = getattr(event, "agent_id", None)
+            if agent_id:
+                span.set_attribute("kasal.extra.agent_id", str(agent_id))
+
+            # ``MemoryBaseEvent`` and ``ToolUsageEvent`` carry ``from_agent`` /
+            # ``agent`` object references — pull role/id off those when the
+            # flat ``agent_role`` field wasn't set by the emitter.
+            if not agent_role:
+                for agent_attr in ("agent", "from_agent"):
+                    agent_obj = getattr(event, agent_attr, None)
+                    if not agent_obj:
+                        continue
+                    role = getattr(agent_obj, "role", None)
+                    aid = getattr(agent_obj, "id", None)
+                    if role:
+                        span.set_attribute("kasal.extra.agent_role", str(role))
+                        agent_role = role
+                    if aid and not agent_id:
+                        span.set_attribute("kasal.extra.agent_id", str(aid))
+                        agent_id = aid
+                    if role:
+                        break
+
+        # ── Memory type from source_type (BaseEvent field) ──
+        # There is no memory_type to derive any more. This used to map a
+        # source_type onto short_term / long_term / entity for the trace UI;
+        # that split was removed and every memory event now reports
+        # ``unified_memory``, so no branch could fire.
+        source_type = getattr(event, "source_type", None)
+        if source_type:
+            span.set_attribute("kasal.extra.source_type", str(source_type))
+
+        # ── Memory query/save fields ──
+        query = getattr(event, "query", None)
+        if query:
+            span.set_attribute("kasal.extra.query", _safe_str(query, 500))
+        distilled = getattr(event, "distilled_query", None)
+        if distilled:
+            span.set_attribute("kasal.extra.distilled_query", _safe_str(distilled, 500))
+        rounds = getattr(event, "exploration_rounds", None)
+        if rounds:
+            span.set_attribute("kasal.extra.exploration_rounds", int(rounds))
+        value = getattr(event, "value", None)
+        if value:
+            span.set_attribute("kasal.extra.value", _safe_str(value, 4000))
+        query_time = getattr(event, "query_time_ms", None)
+        if query_time is not None:
+            span.set_attribute("kasal.extra.query_time_ms", float(query_time))
+        save_time = getattr(event, "save_time_ms", None)
+        if save_time is not None:
+            span.set_attribute("kasal.extra.save_time_ms", float(save_time))
+        retrieval_time = getattr(event, "retrieval_time_ms", None)
+        if retrieval_time is not None:
+            span.set_attribute("kasal.extra.retrieval_time_ms", float(retrieval_time))
+        memory_content = getattr(event, "memory_content", None)
+        if memory_content and str(memory_content).strip():
+            span.set_attribute(
+                "kasal.extra.memory_content", _safe_str(memory_content, 8000)
+            )
+        else:
+            # MemoryRetrievalCompletedEvent always fires, even when recall
+            # matched nothing. Surface that explicitly so the trace UI doesn't
+            # just render a blank body.
+            if any(hasattr(event, f) for f in ("retrieval_time_ms", "memory_content")):
+                span.set_attribute(
+                    "kasal.extra.memory_content",
+                    "(no memories matched the query)",
+                )
+
+        # ── Context compaction fields ──
+        # The numbers are the point of this event: how close to the budget the
+        # conversation got, how much was dropped to get under it, and against
+        # which window — a threshold far below the model's real window is what
+        # turns compaction into a re-query loop.
+        for compaction_field in (
+            "tokens_before",
+            "tokens_after",
+            "window",
+            "messages_compacted",
+        ):
+            compaction_value = getattr(event, compaction_field, None)
+            if compaction_value is not None:
+                span.set_attribute(
+                    f"kasal.extra.{compaction_field}", int(compaction_value)
+                )
+        strategy = getattr(event, "strategy", None)
+        if strategy:
+            span.set_attribute("kasal.extra.strategy", str(strategy))
+
+        # ── A2UI surface fields ──
+        # ``outcome`` is stamped by the HITL block above (both events use the
+        # name); these are what say WHICH surface, how big, and how long it took.
+        surface_kind = getattr(event, "surface_kind", None)
+        if surface_kind:
+            span.set_attribute("kasal.extra.surface_kind", str(surface_kind))
+        component_count = getattr(event, "component_count", None)
+        if component_count is not None:
+            span.set_attribute("kasal.extra.component_count", int(component_count))
+        a2ui_duration = getattr(event, "duration_ms", None)
+        if a2ui_duration is not None:
+            span.set_attribute("kasal.extra.duration_ms", float(a2ui_duration))
+        a2ui_query = getattr(event, "query", None)
+        if a2ui_query and not getattr(event, "memory_content", None):
+            span.set_attribute("kasal.extra.query", _safe_str(a2ui_query, 200))
+        purpose = getattr(event, "purpose", None)
+        if purpose:
+            span.set_attribute("kasal.extra.purpose", _safe_str(purpose, 200))
+
+        limit = getattr(event, "limit", None)
+        if limit is not None:
+            span.set_attribute("kasal.extra.limit", int(limit))
+        score_threshold = getattr(event, "score_threshold", None)
+        if score_threshold is not None:
+            span.set_attribute("kasal.extra.score_threshold", float(score_threshold))
+
+        # ── Memory results (query completed) ──
+        results = getattr(event, "results", None)
+        if results is not None:
+            if isinstance(results, (list, tuple)):
+                span.set_attribute("kasal.extra.results_count", len(results))
+                # The ids of the records recall returned, structured. The
+                # rendered content is capped, which can cut the tail results'
+                # ids off it — so "what did this run READ" must not be parsed
+                # back out of prose. Same key the chat path stamps itself.
+                record_ids = [
+                    str(rid) for rid in (getattr(r, "id", None) for r in results) if rid
+                ]
+                if record_ids:
+                    span.set_attribute("kasal.extra.record_ids", record_ids)
+
+        # ── Memory record identity (save completed) ──
+        # Storage assigns the id before the event fires and the engine carries
+        # it on MemorySaveCompletedEvent. Stamping it here is what lets a
+        # run's memory view resolve EXACTLY which records the run wrote — on
+        # the crew and flow paths, whose only trace writer is this bridge —
+        # instead of guessing by time window. The chat path writes the same
+        # key from its save hook (chat/service.py), so all three paths agree.
+        record_id = getattr(event, "record_id", None)
+        if record_id:
+            span.set_attribute("kasal.extra.record_id", str(record_id))
+
+        # ── Memory metadata (save completed) ──
+        # CrewAI 1.14+ unified Memory emits ``MemorySaveCompletedEvent`` with
+        # ``value="N memories saved"`` and a ``metadata`` dict carrying crew
+        # / task / scope info. Surface the metadata so the trace isn't just a
+        # count.
+        metadata = getattr(event, "metadata", None)
+        if isinstance(metadata, dict) and metadata:
+            try:
+                import json as _json
+
+                span.set_attribute(
+                    "kasal.extra.memory_metadata",
+                    _safe_str(_json.dumps(metadata, default=str), 2000),
+                )
+            except Exception:
+                span.set_attribute(
+                    "kasal.extra.memory_metadata",
+                    _safe_str(str(metadata), 2000),
+                )
+
+        # ── Tool fields ──
+        tool_name = getattr(event, "tool_name", None) or getattr(event, "tool", None)
+        if tool_name:
+            span.set_attribute("kasal.extra.tool_name", str(tool_name))
+        tool_args = getattr(event, "tool_args", None)
+        if tool_args:
+            span.set_attribute("kasal.extra.tool_args", str(tool_args))
+        tool_class = getattr(event, "tool_class", None)
+        if tool_class:
+            cls_name = getattr(tool_class, "__name__", str(tool_class))
+            span.set_attribute("kasal.extra.tool_class", cls_name)
+        from_cache = getattr(event, "from_cache", None)
+        if from_cache is not None:
+            span.set_attribute("kasal.extra.from_cache", bool(from_cache))
+        run_attempts = getattr(event, "run_attempts", None)
+        if run_attempts is not None:
+            span.set_attribute("kasal.extra.run_attempts", int(run_attempts))
+        delegations = getattr(event, "delegations", None)
+        if delegations is not None:
+            span.set_attribute("kasal.extra.delegations", int(delegations))
+
+        # ── Crew fields ──
+        # Use event.crew_name if present, otherwise fall back to the name
+        # captured from the last CrewKickoffStartedEvent in this bridge instance.
+        crew_name = getattr(event, "crew_name", None) or self._current_crew_name
+        if crew_name:
+            span.set_attribute("kasal.extra.crew_name", str(crew_name))
+        inputs = getattr(event, "inputs", None)
+        if inputs:
+            span.set_attribute("kasal.extra.inputs", str(inputs))
+        total_tokens = getattr(event, "total_tokens", None)
+        if total_tokens is not None:
+            span.set_attribute("kasal.extra.total_tokens", int(total_tokens))
+
+        # ── Per-call token usage ──
+        # LLMCallCompletedEvent carries a usage dict (prompt/completion/total
+        # tokens). Persisting it on llm_response spans is what makes token
+        # spend attributable per call/model/agent/task — without this, only
+        # the crew-level aggregate above survives to the database.
+        usage = getattr(event, "usage", None)
+        if isinstance(usage, dict):
+            for key in (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+                "cached_prompt_tokens",
+                "cache_creation_tokens",
+            ):
+                value = usage.get(key)
+                if value is not None:
+                    try:
+                        span.set_attribute(f"kasal.extra.{key}", int(value))
+                    except (TypeError, ValueError):
+                        pass
+
+        # ── Why the model stopped ──
+        # The transport reports `finish_reason` on LLMCallCompletedEvent and
+        # deliberately judges nothing (see
+        # `tests/unit/core/llm/transport/test_finish_reason.py`: no repetition
+        # detector, no truncation exception — neither is what any other
+        # framework does). Reporting it is THIS layer's job, and until now
+        # nobody did it: the field reached the event and stopped there, so
+        # "length" — the endpoint stating the output allowance ran out
+        # mid-generation — was visible nowhere. Execution 74be1413 stored an
+        # answer cut off mid-URL and was marked COMPLETED.
+        #
+        # Persisted as a span attribute (the exporter captures every
+        # kasal.extra.* key) so the trace can show a truncated answer as
+        # truncated, and logged at WARNING because a fragment silently becoming
+        # the answer is the failure mode worth a line in the run's own log.
+        # Still not raised: a truncated answer is sometimes exactly what the
+        # caller wanted, and that decision is not this layer's to make.
+        finish_reason = getattr(event, "finish_reason", None)
+        if finish_reason:
+            span.set_attribute("kasal.extra.finish_reason", str(finish_reason))
+            if str(finish_reason) == "length":
+                completion_tokens = (
+                    usage.get("completion_tokens") if isinstance(usage, dict) else None
+                )
+                logger.warning(
+                    "[llm] answer TRUNCATED — the model hit its output limit "
+                    "(finish_reason=length, completion_tokens=%s, model=%s). "
+                    "What was stored is a fragment, not a finished answer. "
+                    "Raise max_output_tokens for this model, or damp the output "
+                    "with frequency_penalty if it is repeating.",
+                    completion_tokens,
+                    getattr(event, "model", None),
+                )
+
+        # ── The model's reasoning/thinking ──
+        # Recorded once per CALL (LLMCallCompletedEvent.reasoning), not per
+        # streamed delta — LLMReasoningChunkEvent is on _SKIP_EVENTS because a
+        # span per delta is unreadable. Kept as its own attribute rather than
+        # folded into the response so the UI can show it collapsed and separate:
+        # it is the model's private deliberation, not the answer.
+        for key in ("reasoning", "served_model"):  # served_model: a router's pick
+            if value := getattr(event, key, None):
+                span.set_attribute(f"kasal.extra.{key}", str(value))
+
+        # ── Agent execution fields ──
+        task_prompt = getattr(event, "task_prompt", None)
+        if task_prompt:
+            span.set_attribute("kasal.extra.task_prompt", str(task_prompt))
+        tools = getattr(event, "tools", None)
+        if tools and isinstance(tools, (list, tuple)):
+            tool_names = [getattr(t, "name", str(t)) for t in tools[:20]]
+            span.set_attribute("kasal.extra.tools", _safe_str(tool_names, 500))
+
+        # ── Task context ──
+        context = getattr(event, "context", None)
+        if context and isinstance(context, str):
+            span.set_attribute("kasal.extra.context", str(context))
+
+        # ── Knowledge fields ──
+        retrieved_knowledge = getattr(event, "retrieved_knowledge", None)
+        if retrieved_knowledge:
+            span.set_attribute(
+                "kasal.extra.retrieved_knowledge", str(retrieved_knowledge)
+            )
+
+        # ── Reasoning fields ──
+        plan = getattr(event, "plan", None)
+        if plan:
+            span.set_attribute("kasal.extra.plan", str(plan))
+        ready = getattr(event, "ready", None)
+        if ready is not None:
+            span.set_attribute("kasal.extra.ready", bool(ready))
+        attempt = getattr(event, "attempt", None)
+        if attempt is not None:
+            span.set_attribute("kasal.extra.attempt", int(attempt))
+
+        # ── Guardrail fields ──
+        guardrail = getattr(event, "guardrail", None)
+        if guardrail:
+            span.set_attribute("kasal.extra.guardrail", _safe_str(guardrail, 500))
+        success = getattr(event, "success", None)
+        if success is not None:
+            span.set_attribute("kasal.extra.success", bool(success))
+        result = getattr(event, "result", None)
+        if result is not None:
+            span.set_attribute("kasal.extra.result", str(result))
+        retry_count = getattr(event, "retry_count", None)
+        if retry_count is not None:
+            span.set_attribute("kasal.extra.retry_count", int(retry_count))
+
+        # ── Flow fields ──
+        flow_name = getattr(event, "flow_name", None)
+        if flow_name:
+            span.set_attribute("kasal.extra.flow_name", str(flow_name))
+        method_name = getattr(event, "method_name", None)
+        if method_name:
+            span.set_attribute("kasal.extra.method_name", str(method_name))
+
+        # ── MCP fields ──
+        server_name = getattr(event, "server_name", None)
+        if server_name:
+            span.set_attribute("kasal.extra.server_name", str(server_name))
+        server_url = getattr(event, "server_url", None)
+        if server_url:
+            span.set_attribute("kasal.extra.server_url", str(server_url))
+        transport_type = getattr(event, "transport_type", None)
+        if transport_type:
+            span.set_attribute("kasal.extra.transport_type", str(transport_type))
+        conn_duration = getattr(event, "connection_duration_ms", None)
+        if conn_duration is not None:
+            span.set_attribute(
+                "kasal.extra.connection_duration_ms", float(conn_duration)
+            )
+        exec_duration = getattr(event, "execution_duration_ms", None)
+        if exec_duration is not None:
+            span.set_attribute(
+                "kasal.extra.execution_duration_ms", float(exec_duration)
+            )
+
+        # ── HITL fields ──
+        message = getattr(event, "message", None)
+        if message and isinstance(message, str):
+            span.set_attribute("kasal.extra.message", str(message))
+        feedback = getattr(event, "feedback", None)
+        if feedback:
+            span.set_attribute("kasal.extra.feedback", str(feedback))
+        outcome = getattr(event, "outcome", None)
+        if outcome:
+            span.set_attribute("kasal.extra.outcome", str(outcome))
+
+        # ── LLM call fields ──
+        model = getattr(event, "model", None)
+        if model:
+            span.set_attribute("kasal.extra.model", str(model))
+        messages = getattr(event, "messages", None)
+        if messages:
+            # messages can be str or list[dict] — serialize for storage
+            if isinstance(messages, list):
+                # Extract last user message as prompt summary
+                user_msgs = [
+                    m
+                    for m in messages
+                    if isinstance(m, dict) and m.get("role") == "user"
+                ]
+                if user_msgs:
+                    last_user = user_msgs[-1].get("content", "")
+                    span.set_attribute("kasal.extra.prompt", str(last_user))
+                # The SYSTEM message, which was dropped entirely. It carries the
+                # role, the security preamble and the date-awareness block, so a
+                # trace without it cannot answer "what was this agent actually
+                # told?" — and `message_count: 2` alongside a single captured
+                # message read as though only one had been sent, which is how
+                # this looked like a missing-system-prompt bug rather than a
+                # missing-system-prompt LOG.
+                system_msgs = [
+                    m
+                    for m in messages
+                    if isinstance(m, dict) and m.get("role") == "system"
+                ]
+                if system_msgs:
+                    span.set_attribute(
+                        "kasal.extra.system_prompt",
+                        _elide_middle(system_msgs[0].get("content", ""), 4000),
+                    )
+                span.set_attribute("kasal.extra.message_count", len(messages))
+            else:
+                span.set_attribute("kasal.extra.prompt", str(messages))
+        call_type = getattr(event, "call_type", None)
+        if call_type is not None:
+            span.set_attribute("kasal.extra.call_type", str(call_type))
+        # tools available to the LLM (tool definitions, not tool usage)
+        available_functions = getattr(event, "available_functions", None)
+        if available_functions and isinstance(available_functions, dict):
+            span.set_attribute(
+                "kasal.extra.available_tools",
+                _safe_str(list(available_functions.keys()), 500),
+            )
+
+        # ── Error field (all failed events) ──
+        error = getattr(event, "error", None)
+        if error:
+            span.set_attribute("kasal.extra.error", str(error))
+
+        # ── Generic operation type ──
+        operation = getattr(event, "operation", None)
+        if not operation:
+            # Which HALF of a tool call this row is. Both halves map to the
+            # event_type "tool_usage", and the timeline labels them "(input)"
+            # and "(output)" from this attribute — which nothing had ever set,
+            # so every tool call rendered as two identical rows with the same
+            # name and no way to tell the call from its result. It also decided
+            # where "[cached]" could appear: the badge rides on `from_cache`,
+            # which only the finished event carries.
+            operation = _TOOL_OPERATIONS.get(getattr(event, "type", None))
+        if operation:
+            span.set_attribute("kasal.extra.operation", str(operation))

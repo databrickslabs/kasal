@@ -1,0 +1,1002 @@
+"""
+Service for crew execution operations.
+
+This module provides business logic for executing crew operations including
+running execution jobs, managing execution lifecycle, and handling results.
+"""
+
+import asyncio
+import uuid
+from datetime import datetime
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.logger import LoggerManager
+from src.db.session import routed_scoped_session
+from src.models.execution_status import ExecutionStatus
+from src.schemas.execution import CrewConfig
+from src.services.catalog.agents import AgentService
+from src.services.catalog.run_lookup import (
+    agent_for_run,
+    require_run_workspace,
+    task_for_run,
+)
+from src.services.catalog.tasks import TaskService
+
+# Sync flow repository removed - use async FlowRepository instead
+from src.services.execution.engine_factory import EngineFactory
+from src.services.execution.status import ExecutionStatusService
+from src.services.flow_builder.kasal_flow_service import KasalFlowService
+from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.utils.user_context import GroupContext
+
+if TYPE_CHECKING:
+    from src.services.execution.engine_service import KasalEngineService
+
+#: Per-agent LLM overrides stored on the agent row. NULL = inherit the model.
+_AGENT_LLM_OVERRIDE_FIELDS = (
+    "execution_effort",
+    "temperature",
+    "thinking_budget_tokens",
+    "reasoning_effort",
+    "max_tokens",
+)
+
+# Initialize logger
+crew_logger = LoggerManager.get_instance().crew
+
+# Set to store active tasks to prevent garbage collection
+_active_tasks = set()
+
+# Global in-memory storage of executions
+executions: Dict[str, Dict[str, Any]] = {}
+
+
+class JobStatus(Enum):
+    """Status of a job."""
+
+    PENDING = "PENDING"
+    PREPARING = "PREPARING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class KasalExecutionService:
+    """Service for managing CrewAI executions."""
+
+    def __init__(self) -> None:
+        """
+        Initialize the service.
+        """
+        pass
+
+    async def prepare_and_run_crew(
+        self,
+        execution_id: str,
+        config: CrewConfig,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
+        """
+        Prepare and run a crew execution.
+
+        Args:
+            execution_id: ID of the execution
+            config: Configuration for the crew
+            group_context: Group context for logging isolation
+
+        Returns:
+            Dictionary with execution results
+        """
+        try:
+            # No workspace is not a legitimate run: FAIL it (except below) rather
+            # than run it with the catalog's settings and approval gates left out.
+            require_run_workspace(group_context)
+            crew_logger.info("Starting crew execution %s", execution_id)
+
+            # Log the configuration inputs
+            if config.inputs:
+                crew_logger.info(f"Config inputs keys: {list(config.inputs.keys())}")
+                # Memory backend config is now fetched from database, not passed from frontend
+
+            # Prepare the engine
+            engine = await self._prepare_engine(config)
+
+            # Wait for engine initialization to complete if it's still running
+            if hasattr(engine, "_init_task") and not engine._init_task.done():
+                await engine._init_task
+
+            # No need to update status to RUNNING since it's already set during creation
+            crew_logger.info(
+                f"Engine prepared for execution {execution_id}, starting actual execution"
+            )
+
+            # Convert CrewConfig to the dictionary format expected by the engine
+            # Log what we have in the config
+            crew_logger.info(f"Config has agents: {config.agents is not None}")
+            crew_logger.info(
+                f"Config has agents_yaml: {config.agents_yaml is not None}"
+            )
+            crew_logger.info(f"Config has tasks: {config.tasks is not None}")
+            crew_logger.info(f"Config has tasks_yaml: {config.tasks_yaml is not None}")
+
+            # Convert agents from dict to list format and enhance with database data
+            agents_list = []
+            # First check for agents_yaml (YAML-based config)
+            if config.agents_yaml and isinstance(config.agents_yaml, dict):
+                # Get agent service to fetch tool_configs
+                try:
+                    async with routed_scoped_session() as session:
+                        agent_service = AgentService(session)
+
+                        for agent_id, agent_config in config.agents_yaml.items():
+                            # Log what we're working with
+                            crew_logger.info(
+                                f"Processing agent from YAML - key: {agent_id}"
+                            )
+                            crew_logger.info(
+                                f"Agent config keys: {list(agent_config.keys()) if isinstance(agent_config, dict) else 'not a dict'}"
+                            )
+
+                            # Add the ID to the config if not present
+                            if "id" not in agent_config:
+                                agent_config["id"] = agent_id
+
+                            # Log if knowledge_sources are present
+                            if "knowledge_sources" in agent_config:
+                                crew_logger.info(
+                                    f"Agent {agent_id} has {len(agent_config.get('knowledge_sources', []))} knowledge_sources from YAML"
+                                )
+                                for idx, source in enumerate(
+                                    agent_config.get("knowledge_sources", [])
+                                ):
+                                    crew_logger.info(
+                                        f"  Knowledge source {idx}: {source}"
+                                    )
+
+                            # Fill in from the stored agent (tool_configs, LLM
+                            # overrides). The YAML key embeds the DB id
+                            # (agent_<uuid>). The id is the caller's, so the read
+                            # is group-checked; a miss (absent, or another
+                            # workspace's) skips the fill-in and the run goes on
+                            # with the payload. There is no name fallback: a
+                            # name is not unique across workspaces.
+                            db_agent = None
+                            db_agent_id = agent_config.get(
+                                "id", agent_config.get("db_id", agent_id)
+                            )
+                            db_agent_id = db_agent_id.removeprefix(
+                                "agent_"
+                            ).removeprefix("agent-")
+                            try:
+                                db_agent = await agent_for_run(
+                                    agent_service,
+                                    db_agent_id,
+                                    group_context,
+                                    crew_logger,
+                                )
+                            except Exception as e:
+                                crew_logger.debug(
+                                    f"Could not fetch agent by ID {db_agent_id}: {e}"
+                                )
+
+                            try:
+                                if db_agent:
+                                    # Log what we found
+                                    crew_logger.info(
+                                        f"Found agent {agent_id} in database"
+                                    )
+                                    # The per-agent LLM overrides (form fields, stored
+                                    # on the row) reach a run only through the payload,
+                                    # and the canvas payload never carried them: the
+                                    # temperature and thinking overrides were saved,
+                                    # shown, and ignored at run time. Same rule as
+                                    # tool_configs below — the payload wins when it
+                                    # carries the key; the row fills in what it left out.
+                                    for field in _AGENT_LLM_OVERRIDE_FIELDS:
+                                        if (
+                                            not agent_config.get(
+                                                "agent_settings_snapshot"
+                                            )
+                                            and agent_config.get(field) is None
+                                        ):
+                                            value = getattr(db_agent, field, None)
+                                            if value is not None:
+                                                agent_config[field] = value
+                                    crew_logger.info(
+                                        f"Agent has tool_configs attribute: {hasattr(db_agent, 'tool_configs')}"
+                                    )
+                                    if hasattr(db_agent, "tool_configs"):
+                                        crew_logger.info(
+                                            f"Agent tool_configs value from DB: {mask_sensitive_fields(db_agent.tool_configs)}"
+                                        )
+                                        # The payload wins when it CARRIES tool_configs, {} included: the canvas
+                                        # sends {} for a node whose MCP servers were removed, and reading the
+                                        # row instead resurrected its stale MCP_SERVERS. No key -> the row.
+                                        if agent_config.get("tool_configs") is None:
+                                            agent_config["tool_configs"] = (
+                                                db_agent.tool_configs or {}
+                                            )
+                                            crew_logger.info(
+                                                f"Using tool_configs from database for agent {agent_id}: {sorted(agent_config['tool_configs'] or {})}"
+                                            )
+                                        else:
+                                            crew_logger.info(
+                                                f"Keeping tool_configs from YAML for agent {agent_id}: {sorted(agent_config['tool_configs'] or {})}"
+                                            )
+                                    else:
+                                        crew_logger.warning(
+                                            f"Agent {agent_id} does not have tool_configs attribute"
+                                        )
+                                        if "tool_configs" not in agent_config:
+                                            agent_config["tool_configs"] = {}
+                            except Exception as e:
+                                crew_logger.debug(
+                                    f"Could not fetch agent {agent_id} from database: {e}"
+                                )
+
+                            agents_list.append(agent_config)
+                except Exception as e:
+                    crew_logger.error(f"Error fetching agent data from database: {e}")
+                    # Continue with just YAML data if database fetch fails
+                    for agent_id, agent_config in config.agents_yaml.items():
+                        if "id" not in agent_config:
+                            agent_config["id"] = agent_id
+                        agents_list.append(agent_config)
+            # If not YAML, check for agents array (node-based config)
+            elif config.agents and isinstance(config.agents, list):
+                crew_logger.info(f"Using agents array with {len(config.agents)} agents")
+                agents_list = config.agents
+            else:
+                crew_logger.warning("No agents found in config")
+
+            # Convert tasks from dict to list format and enhance with database data
+            tasks_list = []
+            if config.tasks_yaml and isinstance(config.tasks_yaml, dict):
+                # Get task service to fetch tool_configs
+                try:
+                    async with routed_scoped_session() as session:
+                        task_service = TaskService(session)
+
+                        for task_id, task_config in config.tasks_yaml.items():
+                            # Log what we're working with
+                            crew_logger.info(
+                                f"Processing task from YAML - key: {task_id}"
+                            )
+                            crew_logger.info(
+                                f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}"
+                            )
+
+                            # Add the ID to the config if not present
+                            if "id" not in task_config:
+                                task_config["id"] = task_id
+
+                            # Same rule as agents: the stored task (by the id in
+                            # its task_<uuid> key) fills in tool_configs only
+                            # from the run's workspace, with no name fallback;
+                            # a miss leaves the payload as it is.
+                            db_task = None
+                            db_task_id = task_config.get(
+                                "id", task_config.get("db_id", task_id)
+                            )
+                            db_task_id = db_task_id.removeprefix("task_").removeprefix(
+                                "task-"
+                            )
+                            try:
+                                db_task = await task_for_run(
+                                    task_service, db_task_id, group_context, crew_logger
+                                )
+                            except Exception as e:
+                                crew_logger.debug(
+                                    f"Could not fetch task by ID {db_task_id}: {e}"
+                                )
+
+                            try:
+                                if db_task:
+                                    # Log what we found
+                                    crew_logger.info(
+                                        f"Found task {task_id} in database"
+                                    )
+                                    crew_logger.info(
+                                        f"Task has tool_configs attribute: {hasattr(db_task, 'tool_configs')}"
+                                    )
+                                    if hasattr(db_task, "tool_configs"):
+                                        crew_logger.info(
+                                            f"Task tool_configs value from DB: {mask_sensitive_fields(db_task.tool_configs)}"
+                                        )
+                                        # Same rule as agents: an explicit {} is a decision, not an omission.
+                                        if task_config.get("tool_configs") is None:
+                                            task_config["tool_configs"] = (
+                                                db_task.tool_configs or {}
+                                            )
+                                            crew_logger.info(
+                                                f"Using tool_configs from database for task {task_id}: {sorted(task_config['tool_configs'] or {})}"
+                                            )
+                                        else:
+                                            crew_logger.info(
+                                                f"Keeping tool_configs from YAML for task {task_id}: {sorted(task_config['tool_configs'] or {})}"
+                                            )
+                                    else:
+                                        crew_logger.warning(
+                                            f"Task {task_id} does not have tool_configs attribute"
+                                        )
+                                        if "tool_configs" not in task_config:
+                                            task_config["tool_configs"] = {}
+
+                                    # llm_guardrail is NOT injected from the database here.
+                                    # The frontend controls whether llm_guardrail is active via
+                                    # the user's toggle. If enabled, it's sent in tasks_yaml.
+                                    # The DB stores it as a suggestion for the UI only.
+                            except Exception as e:
+                                crew_logger.debug(
+                                    f"Could not fetch task {task_id} from database: {e}"
+                                )
+
+                            tasks_list.append(task_config)
+                except Exception as e:
+                    crew_logger.error(f"Error fetching task data from database: {e}")
+                    # Continue with just YAML data if database fetch fails
+                    for task_id, task_config in config.tasks_yaml.items():
+                        if "id" not in task_config:
+                            task_config["id"] = task_id
+                        tasks_list.append(task_config)
+            # If not YAML, check for tasks array (node-based config)
+            elif config.tasks and isinstance(config.tasks, list):
+                crew_logger.info(f"Using tasks array with {len(config.tasks)} tasks")
+                tasks_list = config.tasks
+            else:
+                crew_logger.warning("No tasks found in config")
+
+            # Get run_name from the execution record if available
+            run_name = None
+            if execution_id in executions:
+                run_name = executions[execution_id].get("run_name")
+                crew_logger.info(
+                    f"Found execution {execution_id} in memory with run_name: {run_name}"
+                )
+            else:
+                crew_logger.warning(
+                    f"Execution {execution_id} not found in memory, executions keys: {list(executions.keys())}"
+                )
+
+            # Include run_name in inputs so it's accessible throughout the execution
+            inputs_with_run_name = config.inputs or {}
+            if run_name:
+                inputs_with_run_name["run_name"] = run_name
+
+            # Extract process type and manager_llm from inputs for crew configuration
+            process_type = inputs_with_run_name.get("process", "sequential")
+            manager_llm = inputs_with_run_name.get("manager_llm")
+
+            # Log the process type being used
+            crew_logger.info(
+                f"Execution {execution_id} using process type: {process_type}"
+            )
+
+            # Build crew configuration with process type
+            # IMPORTANT: Use static "Default Crew" when run_name is None to ensure consistent crew_id
+            # The crew_id hash includes agent_roles, task_names, model, group_id - so uniqueness is preserved
+            crew_config_dict = {
+                "name": run_name or "Default Crew",
+                "model": config.model,
+                "process": process_type,  # Add process type to crew config
+                # NOTE: `planning` / `planning_llm` are deliberately NOT forwarded. The
+                # CrewAI-style prose planner was removed; the engine has no planner, so
+                # those request/DB fields are legacy compatibility only and are ignored.
+                "reasoning": (
+                    config.reasoning if hasattr(config, "reasoning") else False
+                ),
+            }
+
+            # Add manager_llm if hierarchical process
+            if process_type == "hierarchical" and manager_llm:
+                crew_config_dict["manager_llm"] = manager_llm
+                crew_logger.info(
+                    f"Configuring hierarchical process with manager_llm: {manager_llm}"
+                )
+
+            # Add reasoning_llm if specified
+            if inputs_with_run_name.get("reasoning_llm"):
+                crew_config_dict["reasoning_llm"] = inputs_with_run_name[
+                    "reasoning_llm"
+                ]
+
+            # Reasoning budget from the sidebar Reasoning section
+            # ({"reasoning_effort": "low"|"medium"|"high"}). Carried to each agent in
+            # CrewPreparation and applied to the agent's own LLM as the model's native
+            # reasoning budget by the shared agent builder.
+            if inputs_with_run_name.get("reasoning_config"):
+                crew_config_dict["reasoning_config"] = inputs_with_run_name[
+                    "reasoning_config"
+                ]
+
+            execution_config = {
+                "agents": agents_list,
+                "tasks": tasks_list,
+                "inputs": inputs_with_run_name,
+                "reasoning": (
+                    config.reasoning if hasattr(config, "reasoning") else False
+                ),
+                "model": config.model,
+                "run_name": run_name,
+                "execution_id": execution_id,
+                "crew": crew_config_dict,
+            }
+
+            # Memory scoping (chat): carry the chat session id + the recall-scope
+            # toggle through to the engine so CrewMemoryService can scope memory
+            # recall. This dict is built fresh here (not via adapt_config), so
+            # without these two lines the fields are dropped and recall always
+            # defaults to workspace-wide — even when the user picked "Session only".
+            session_id = getattr(config, "session_id", None)
+            if session_id:
+                execution_config["session_id"] = session_id
+            workspace_scope = getattr(config, "memory_workspace_scope", None)
+            if workspace_scope is not None:
+                execution_config["memory_workspace_scope"] = workspace_scope
+
+            # Crash-resume: thread the completed-task checkpoint through to the
+            # subprocess (crew_config → Crew.kickoff(from_checkpoint=...)).
+            resume_checkpoint = getattr(config, "resume_checkpoint", None)
+            if resume_checkpoint:
+                execution_config["resume_checkpoint"] = resume_checkpoint
+                crew_logger.info(
+                    f"Execution {execution_id} resuming from checkpoint with "
+                    f"{len(resume_checkpoint.get('completed') or [])} completed task(s)"
+                )
+
+            # Add group_id to config if group_context is provided
+            if (
+                group_context
+                and group_context.group_ids
+                and len(group_context.group_ids) > 0
+            ):
+                execution_config["group_id"] = group_context.group_ids[0]
+
+            # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
+            # The engine will update the status to COMPLETED or FAILED when done
+            await engine.run_execution(
+                execution_id, execution_config, group_context, session
+            )
+
+            # Return the execution ID - do NOT update status to COMPLETED here
+            # as the execution is running asynchronously and will be updated by the engine
+            return {
+                "execution_id": execution_id,
+                "status": ExecutionStatus.RUNNING.value,
+            }
+
+        except Exception as e:
+            # Update status to FAILED
+            await ExecutionStatusService.update_status(
+                job_id=execution_id,
+                status=ExecutionStatus.FAILED.value,
+                message=f"Crew execution failed: {str(e)}",
+            )
+            raise
+
+    async def run_light_agent_execution(
+        self,
+        execution_id: str,
+        config: CrewConfig,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
+        """Thin service-layer delegate for the "chat" (light) single-agent path.
+
+        Mirrors how :meth:`prepare_and_run_crew` delegates the crew path to
+        ``engine.run_execution``: this resolves the CrewAI engine and hands off
+        to ``engine.run_light_agent_execution``. All CrewAI-specific work — agent
+        build, ``Agent.kickoff_async``, and tool-activity trace emission — lives
+        in the light-agent path (``paths/light_agent/light_agent_service`` —
+        ``LightAgentService`` / ``run_light_agent``), keeping the service free of
+        engine internals. The engine runner runs the
+        agent IN-PROCESS (no subprocess spin-up) and writes its own terminal
+        status, so a sub-second answer is fetchable via the REST poller even if
+        the SSE listener attaches late.
+        """
+        # Bootstrap the DB backend for this in-process run, exactly as the crew
+        # SUBPROCESS does in process_crew_executor.prepare_and_run(): activate
+        # Lakebase on async_session_factory up front so every downstream
+        # service → repository → db call (chat history, model configs, MCP
+        # servers) transparently uses Lakebase. The startup swap in main.py only
+        # runs if Lakebase was already enabled at boot; a detached background task
+        # otherwise keeps the local SQLite factory, which is why the light agent's
+        # MCP lookup silently resolved to 0. Idempotent — skips when already
+        # Lakebase; keeps the engine/services/repositories free of DB-infra concerns.
+        try:
+            from src.db.session import async_session_factory
+
+            if not async_session_factory.is_lakebase:
+                from src.db.database_router import activate_lakebase_in_subprocess
+
+                activated = await activate_lakebase_in_subprocess()
+                crew_logger.info(
+                    f"[light_agent] Lakebase activation ensured before run: {activated}"
+                )
+        except Exception as lb_err:  # noqa: BLE001
+            crew_logger.warning(
+                f"[light_agent] Lakebase activation check failed (non-fatal): {lb_err}"
+            )
+
+        engine = await self._prepare_engine(config)
+        return await engine.run_light_agent_execution(
+            execution_id=execution_id,
+            config=config,
+            group_context=group_context,
+            session=session,
+        )
+
+    async def _prepare_engine(self, config: CrewConfig) -> "KasalEngineService":
+        """
+        Prepare the engine for execution.
+
+        Args:
+            config: Configuration for the engine
+
+        Returns:
+            Initialized engine
+        """
+        # Get engine from factory
+        engine = await EngineFactory.get_engine(
+            engine_type="kasal", initialize=True, model=config.model
+        )
+
+        if not engine:
+            raise ValueError("Failed to initialize CrewAI engine")
+
+        return engine
+
+    async def run_crew_execution(
+        self,
+        execution_id: str,
+        config: CrewConfig,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a crew execution with the provided configuration.
+
+        Args:
+            execution_id: Unique ID for the execution
+            config: Configuration for the execution
+            group_context: Group context for logging isolation
+
+        Returns:
+            Dictionary with execution results
+        """
+        crew_logger.info(f"Running crew execution {execution_id}")
+
+        # Create an asyncio task for executing the crew
+        task = asyncio.create_task(
+            self.prepare_and_run_crew(
+                execution_id=execution_id,
+                config=config,
+                group_context=group_context,
+                session=session,
+            )
+        )
+
+        # Store task reference to prevent garbage collection
+        _active_tasks.add(task)
+        # Remove from active tasks when done
+        task.add_done_callback(lambda t: _active_tasks.remove(t))
+
+        # Store the task in memory for potential cancellation
+        executions[execution_id] = {
+            "task": task,
+            "status": ExecutionStatus.PENDING.value,
+            "created_at": datetime.utcnow(),
+        }
+
+        # Return immediate response
+        return {
+            "execution_id": execution_id,
+            "status": ExecutionStatus.RUNNING.value,
+            "message": "CrewAI execution started successfully",
+        }
+
+    @staticmethod
+    def get_execution(execution_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get execution from in-memory storage.
+
+        Args:
+            execution_id: ID of the execution
+
+        Returns:
+            Execution dictionary or None if not found
+        """
+        return executions.get(execution_id)
+
+    @staticmethod
+    def add_execution_to_memory(
+        execution_id: str,
+        status: str,
+        run_name: str,
+        created_at: Optional[datetime] = None,
+    ) -> None:
+        """
+        Add execution to in-memory storage.
+
+        Args:
+            execution_id: ID of the execution
+            status: Status of the execution
+            run_name: Name of the execution
+            created_at: Timestamp when execution was created
+        """
+        executions[execution_id] = {
+            "execution_id": execution_id,
+            "status": status,
+            "run_name": run_name,
+            "created_at": created_at or datetime.utcnow(),
+        }
+
+    async def update_execution_status(
+        self,
+        execution_id: str,
+        status: ExecutionStatus,
+        message: str,
+        result: Any = None,
+    ) -> None:
+        """
+        Update execution status in memory and database.
+
+        Args:
+            execution_id: ID of the execution
+            status: New execution status
+            message: Status message
+            result: Execution result
+        """
+        # Update in-memory execution status
+        if execution_id in executions:
+            executions[execution_id]["status"] = status.value
+            executions[execution_id]["message"] = message
+            if result:
+                executions[execution_id]["result"] = result
+
+        # Update database through ExecutionStatusService
+        await ExecutionStatusService.update_status(
+            job_id=execution_id, status=status.value, message=message, result=result
+        )
+
+        # Clean up in-memory entry once terminal status is persisted to DB
+        # This also releases the asyncio.Task reference, allowing GC of the coroutine
+        terminal_statuses = {
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.STOPPED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.REJECTED,
+        }
+        if status in terminal_statuses:
+            executions.pop(execution_id, None)
+            crew_logger.debug(
+                f"Cleaned up in-memory execution entry for {execution_id}"
+            )
+
+    async def cancel_execution(self, execution_id: str) -> bool:
+        """
+        Cancel a running execution.
+
+        Args:
+            execution_id: ID of the execution to cancel
+
+        Returns:
+            Boolean indicating success
+        """
+        crew_logger.info(f"Cancelling execution {execution_id}")
+
+        # Check if execution exists in memory
+        if execution_id not in executions:
+            crew_logger.warning(f"Execution {execution_id} not found in memory")
+            return False
+
+        # Get engine from factory
+        engine = await EngineFactory.get_engine(engine_type="kasal", initialize=False)
+
+        if not engine:
+            crew_logger.error(
+                f"Failed to get engine for cancelling execution {execution_id}"
+            )
+            return False
+
+        # Cancel execution through engine
+        return await engine.cancel_execution(execution_id)
+
+    async def get_execution_status(self, execution_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the status of an execution.
+
+        Args:
+            execution_id: ID of the execution
+
+        Returns:
+            Dictionary with execution status details
+        """
+        crew_logger.info(f"Getting status for execution {execution_id}")
+
+        # Check memory first
+        if execution_id in executions:
+            memory_status = executions[execution_id]["status"]
+
+            # If terminal status, just return from memory
+            if memory_status in [
+                ExecutionStatus.COMPLETED.value,
+                ExecutionStatus.FAILED.value,
+                ExecutionStatus.CANCELLED.value,
+            ]:
+                return executions[execution_id]
+
+        # Get engine from factory
+        engine = await EngineFactory.get_engine(engine_type="kasal", initialize=False)
+
+        if not engine:
+            crew_logger.error(
+                f"Failed to get engine for execution status {execution_id}"
+            )
+            return None
+
+        # Get status from engine
+        return await engine.get_execution_status(execution_id)
+
+    async def run_flow_execution(
+        self,
+        flow_id: Optional[str] = None,
+        nodes: Optional[List[Dict[str, Any]]] = None,
+        edges: Optional[List[Dict[str, Any]]] = None,
+        job_id: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        group_context: Optional[GroupContext] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a flow execution with the provided configuration.
+        This method handles all flow data loading and execution preparation.
+
+        Args:
+            flow_id: Optional ID of flow to execute
+            nodes: Optional list of nodes for a dynamic flow
+            edges: Optional list of edges for a dynamic flow
+            job_id: Optional job ID for tracking the execution
+            config: Optional configuration parameters
+            group_context: Group context for multi-tenant isolation
+
+        Returns:
+            Dictionary with execution result
+        """
+        # Use flow logger from LoggerManager for flow execution
+        flow_logger = LoggerManager.get_instance().flow
+
+        flow_logger.info(
+            f"Running flow execution with flow_id={flow_id}, job_id={job_id}"
+        )
+
+        # If no job_id is provided, generate a random UUID
+        if not job_id:
+            job_id = str(uuid.uuid4())
+            flow_logger.info(f"Generated random job_id: {job_id}")
+
+        try:
+            # Initialize configuration
+            execution_config = config or {}
+
+            # If flow_id is provided but no nodes/edges, load flow data from repository
+            if flow_id and (not nodes or not isinstance(nodes, list)):
+                flow_logger.info(
+                    f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository"
+                )
+                try:
+                    # Get repository instance through async factory function with session
+                    from src.db.session import routed_scoped_session
+                    from src.services.flow_builder.flow_service import FlowService
+
+                    async with routed_scoped_session() as db:
+                        flow = await FlowService(db).get_flow_for_execution(
+                            flow_id, group_context
+                        )
+                        if not flow:
+                            crew_logger.error(
+                                f"Flow with ID {flow_id} not found in repository"
+                            )
+                            return {
+                                "success": False,
+                                "error": f"Flow with ID {flow_id} not found",
+                                "job_id": job_id,
+                            }
+
+                        # Add flow data to execution config
+                        if flow.nodes:
+                            execution_config["nodes"] = flow.nodes
+                            crew_logger.info(
+                                f"Loaded {len(flow.nodes)} nodes from repository for flow {flow_id}"
+                            )
+                        if flow.edges:
+                            execution_config["edges"] = flow.edges
+                            crew_logger.info(
+                                f"Loaded {len(flow.edges)} edges from repository for flow {flow_id}"
+                            )
+                        if flow.flow_config:
+                            execution_config["flow_config"] = flow.flow_config
+                            crew_logger.info(
+                                f"Loaded flow_config from repository for flow {flow_id}"
+                            )
+                except Exception as e:
+                    crew_logger.error(
+                        f"Error loading flow data from repository: {str(e)}",
+                        exc_info=True,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"Error loading flow data: {str(e)}",
+                        "job_id": job_id,
+                    }
+
+            # If nodes are provided directly, add them to the config
+            if nodes:
+                flow_logger.info(f"Adding {len(nodes)} nodes to execution config")
+                execution_config["nodes"] = nodes
+                execution_config["edges"] = edges or []
+            elif not flow_id:
+                # Neither flow_id nor nodes provided - can't proceed
+                flow_logger.error("No flow_id or nodes provided, cannot execute flow")
+                return {
+                    "success": False,
+                    "error": "Either flow_id or nodes must be provided for flow execution",
+                    "job_id": job_id,
+                }
+
+            # Make sure flow_id is in the config
+            if flow_id:
+                execution_config["flow_id"] = flow_id
+
+            # Add group context to config if provided
+            if group_context:
+                execution_config["group_context"] = group_context
+                execution_config["group_id"] = (
+                    group_context.primary_group_id
+                )  # For background task API key loading
+
+            # A SEPARATE session from the flow-config read above, deliberately:
+            # run_flow() makes an LLM call (execution-name generation) and then
+            # spawns the flow engine, so one session spanning both would pin a
+            # connection — the shared one, on SQLite — for the whole run.
+            from src.db.session import routed_scoped_session
+
+            async with routed_scoped_session() as session:
+                # Create a flow service instance with session
+                flow_service = KasalFlowService(session)
+
+                # Set group context in UserContext for API key loading
+                if group_context:
+                    from src.utils.user_context import UserContext
+
+                    UserContext.set_group_context(group_context)
+                    flow_logger.info(
+                        f"Set group context for flow execution: group_id={group_context.primary_group_id}"
+                    )
+
+                # Run the flow
+                try:
+                    # Extract user token from group context for OBO authentication
+                    user_token = group_context.access_token if group_context else None
+
+                    # Use flow logger for flow execution
+                    flow_logger = LoggerManager.get_instance().flow
+
+                    # Call the flow service to run the flow with process isolation
+                    # Extract checkpoint resume parameters from config
+                    resume_from_flow_uuid = execution_config.get(
+                        "resume_from_flow_uuid"
+                    )
+                    resume_from_execution_id = execution_config.get(
+                        "resume_from_execution_id"
+                    )
+                    resume_from_crew_sequence = execution_config.get(
+                        "resume_from_crew_sequence"
+                    )
+                    if resume_from_flow_uuid:
+                        flow_logger.info(
+                            f"Starting flow execution for job_id: {job_id} (RESUMING from checkpoint {resume_from_flow_uuid})"
+                        )
+                        if resume_from_crew_sequence is not None:
+                            flow_logger.info(
+                                f"Resume from crew sequence: {resume_from_crew_sequence} (will skip crews up to this sequence)"
+                            )
+                    else:
+                        flow_logger.info(
+                            f"Starting flow execution for job_id: {job_id}"
+                        )
+                    result = await flow_service.run_flow(
+                        flow_id=flow_id,
+                        job_id=job_id,
+                        config=execution_config,
+                        group_context=group_context,
+                        user_token=user_token,
+                        resume_from_flow_uuid=resume_from_flow_uuid,
+                        resume_from_execution_id=resume_from_execution_id,
+                        resume_from_crew_sequence=resume_from_crew_sequence,
+                    )
+
+                    flow_logger.info(
+                        f"Flow execution started successfully (process isolated): {result}"
+                    )
+                    return result
+                except Exception as e:
+                    flow_logger.error(
+                        f"Error running flow execution: {e}", exc_info=True
+                    )
+                    # Update status to FAILED - reuse the existing session
+                    await ExecutionStatusService.update_status(
+                        job_id=job_id,
+                        status=ExecutionStatus.FAILED.value,
+                        message=f"Flow execution failed: {str(e)}",
+                        session=session,
+                    )
+                    return {"success": False, "error": str(e), "job_id": job_id}
+        except Exception as e:
+            flow_logger = LoggerManager.get_instance().flow
+            flow_logger.error(
+                f"Unexpected error in run_flow_execution: {e}", exc_info=True
+            )
+            await ExecutionStatusService.update_status(
+                job_id=job_id,
+                status=ExecutionStatus.FAILED.value,
+                message=f"Unexpected error in flow execution: {str(e)}",
+            )
+            return {"success": False, "error": str(e), "job_id": job_id}
+
+    async def get_flow_execution(self, execution_id: int) -> Dict[str, Any]:
+        """
+        Get details of a specific flow execution.
+
+        Args:
+            execution_id: ID of the flow execution to retrieve
+
+        Returns:
+            Dictionary with execution details
+        """
+        crew_logger.info(f"Getting flow execution {execution_id}")
+
+        # Create a database session for flow execution retrieval
+        from src.db.session import routed_scoped_session
+
+        async with routed_scoped_session() as session:
+            # Create a flow service instance with session
+            flow_service = KasalFlowService(session)
+
+            # Get the execution details
+            try:
+                return await flow_service.get_flow_execution(execution_id)
+            except Exception as e:
+                crew_logger.error(f"Error getting flow execution: {e}", exc_info=True)
+                raise
+
+    async def get_flow_executions_by_flow(self, flow_id: str) -> Dict[str, Any]:
+        """
+        Get all executions for a specific flow.
+
+        Args:
+            flow_id: ID of the flow to get executions for
+
+        Returns:
+            Dictionary with list of executions
+        """
+        crew_logger.info(f"Getting executions for flow {flow_id}")
+
+        # Create a database session for flow executions retrieval
+        from src.db.session import routed_scoped_session
+
+        async with routed_scoped_session() as session:
+            # Create a flow service instance with session
+            flow_service = KasalFlowService(session)
+
+            # Get the executions
+            try:
+                return await flow_service.get_flow_executions_by_flow(flow_id)
+            except Exception as e:
+                crew_logger.error(f"Error getting flow executions: {e}", exc_info=True)
+                raise

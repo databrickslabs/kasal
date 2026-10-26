@@ -1,0 +1,193 @@
+from datetime import datetime
+from typing import Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class EngineConfigBase(BaseModel):
+    """Base schema with common engine configuration attributes."""
+
+    engine_name: str = Field(..., description="Name of the engine (e.g., 'kasal')")
+    engine_type: str = Field(
+        ..., description="Type of engine (e.g., 'workflow', 'ai', 'processing')"
+    )
+    config_key: str = Field(..., description="Configuration key (e.g., 'flow_enabled')")
+    config_value: str = Field(
+        ..., description="Configuration value (JSON string or simple value)"
+    )
+    enabled: Optional[bool] = Field(
+        True, description="Whether the configuration is enabled"
+    )
+    description: Optional[str] = Field(
+        None, description="Description of the configuration"
+    )
+
+
+class EngineConfigCreate(EngineConfigBase):
+    """Schema for creating a new engine configuration."""
+
+    pass
+
+
+class EngineConfigUpdate(BaseModel):
+    """Schema for updating an existing engine configuration."""
+
+    engine_type: Optional[str] = Field(None, description="Type of engine")
+    config_key: Optional[str] = Field(None, description="Configuration key")
+    config_value: Optional[str] = Field(None, description="Configuration value")
+    enabled: Optional[bool] = Field(
+        None, description="Whether the configuration is enabled"
+    )
+    description: Optional[str] = Field(
+        None, description="Description of the configuration"
+    )
+
+
+class EngineConfigResponse(EngineConfigBase):
+    """Schema for engine configuration responses."""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EngineConfigToggleUpdate(BaseModel):
+    """Schema for toggling engine configuration enabled status."""
+
+    enabled: bool = Field(..., description="New enabled status")
+
+
+class EngineConfigValueUpdate(BaseModel):
+    """Schema for updating engine configuration value."""
+
+    config_value: str = Field(..., description="New configuration value")
+
+
+class EngineConfigListResponse(BaseModel):
+    """Schema for list of engine configurations."""
+
+    configs: List[EngineConfigResponse]
+    count: int
+
+
+class KasalFlowConfigUpdate(BaseModel):
+    """Schema for updating CrewAI flow configuration."""
+
+    flow_enabled: bool = Field(..., description="Whether flow feature is enabled")
+
+
+class EventTriggersConfigUpdate(BaseModel):
+    """Schema for updating the event-trigger feature toggle."""
+
+    enabled: bool = Field(
+        ..., description="Whether the event-trigger feature is enabled"
+    )
+
+
+class OtelAppTelemetryConfigUpdate(BaseModel):
+    """Schema for updating OTel App Telemetry configuration."""
+
+    enabled: Optional[bool] = Field(
+        None, description="Whether OTel App Telemetry is enabled"
+    )
+    log_level: Optional[str] = Field(
+        None,
+        description="OTel log export level (DEBUG, INFO, WARNING, ERROR)",
+        pattern="^(DEBUG|INFO|WARNING|ERROR)$",
+    )
+
+
+class HarnessDescription(BaseModel):
+    """One harness, and whether it can actually run here."""
+
+    name: str = Field(..., description="Harness identifier ('kasal' or 'crewai')")
+    label: Optional[str] = Field(None, description="Display name")
+    version: Optional[str] = Field(None, description="The runtime's own version")
+    available: bool = Field(..., description="Whether this harness can run here")
+    unavailable_reason: Optional[str] = Field(
+        None,
+        description=(
+            "Why it cannot, in terms an operator can act on. The UI shows this "
+            "beside a disabled option — a greyed-out engine with no reason is "
+            "the thing people open a ticket about."
+        ),
+    )
+    capabilities: List[str] = Field(
+        default_factory=list,
+        description=(
+            "What this engine supports (checkpoint_resume, tool_approval, "
+            "flow, …). The UI disables what the selected engine cannot do "
+            "instead of offering a button that fails."
+        ),
+    )
+
+
+class HarnessResponse(BaseModel):
+    """The default harness, alongside every harness's availability."""
+
+    harness: str = Field(
+        ...,
+        description=(
+            "The harness new runs DEFAULT to. A run may name its own; this is "
+            "what applies when it does not — scheduled runs and API-triggered "
+            "runs have no picker."
+        ),
+    )
+    harnesses: List[HarnessDescription] = Field(default_factory=list)
+
+
+class HarnessUpdate(BaseModel):
+    """Change the harness runs default to."""
+
+    harness: str = Field(..., description="'kasal' or 'crewai'")
+
+
+class EngineSettings(BaseModel):
+    """Configuration → Engines system settings, with defaults filled in."""
+
+    #: The Jev decisions API URL; None when not set (Jev then stays off).
+    jev_api_base: Optional[str] = None
+    #: How the decision model is reached: "jev" (the API above), "openrouter"
+    #: or "databricks" (the workspace's AI Gateway).
+    decision_connection: str = "jev"
+    #: OpenRouter's API URL (its public API when not set).
+    openrouter_api_base: Optional[str] = None
+    #: The model the Databricks connection asks (the effective value).
+    databricks_decision_model: Optional[str] = None
+    #: Wall-clock seconds for one agent call when the agent sets none (0 = off).
+    agent_max_execution_time: int
+    agent_max_execution_time_default: int
+    #: Effective run budgets per answer mode, and the built-in defaults.
+    budgets: Dict[str, Dict[str, int]]
+    budget_defaults: Dict[str, Dict[str, int]]
+    #: Server-wide scalar settings (memory sweep, knowledge limits): the
+    #: effective value per key, and each key's default and bounds.
+    advanced: Dict[str, Union[bool, int, float, str]] = Field(default_factory=dict)
+    advanced_specs: Dict[str, "EngineSettingSpec"] = Field(default_factory=dict)
+
+
+class EngineSettingSpec(BaseModel):
+    """Default and bounds of one scalar engine setting (drives the form)."""
+
+    default: Union[bool, int, float, str]
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+
+
+class EngineSettingsUpdate(BaseModel):
+    """Partial update. An omitted field is left alone; null (or "") resets it."""
+
+    jev_api_base: Optional[str] = None
+    decision_connection: Optional[str] = None
+    openrouter_api_base: Optional[str] = None
+    databricks_decision_model: Optional[str] = None
+    agent_max_execution_time: Optional[int] = Field(default=None, ge=0, le=86400)
+    #: {mode: {field: value}}; a null value resets that field to its default.
+    budgets: Optional[Dict[str, Dict[str, Optional[int]]]] = None
+    #: {key: value}; a null value resets that setting to its default.
+    advanced: Optional[Dict[str, Optional[Union[bool, int, float, str]]]] = None
+
+
+EngineSettings.model_rebuild()

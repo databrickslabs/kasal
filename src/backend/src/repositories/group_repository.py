@@ -1,0 +1,190 @@
+"""
+Repository for Group and GroupUser models.
+
+Handles database operations for group management and user membership.
+"""
+
+from typing import Any, Dict, List, Optional, cast
+
+from sqlalchemy import and_, delete, func, select
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from src.core.base_repository import BaseRepository
+from src.models.group import Group, GroupUser, GroupUserStatus
+
+
+class GroupRepository(BaseRepository[Group]):
+    """Repository for Group model operations"""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(Group, session)
+
+    async def get_name(self, group_id: str) -> Optional[str]:
+        """The group's display name, or None when no such group exists.
+
+        Just the name: callers that only need it for a label should not pull the
+        whole row, and the query belongs here rather than in a service (see
+        tests/unit/architecture/test_service_query_construction).
+        """
+        result = await self.session.execute(
+            select(Group.name).where(Group.id == group_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_with_user_counts(
+        self, skip: int = 0, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Get groups with user counts"""
+        query = (
+            select(self.model, func.count(GroupUser.id).label("user_count"))
+            .outerjoin(GroupUser)
+            .group_by(self.model.id)
+            .offset(skip)
+            .limit(limit)
+        )
+
+        result = await self.session.execute(query)
+        groups_with_counts = []
+
+        for group, user_count in result:
+            group_dict = {
+                "id": group.id,
+                "name": group.name,
+                "status": group.status,
+                "description": group.description,
+                "auto_created": group.auto_created,
+                "created_by_email": group.created_by_email,
+                "created_at": group.created_at,
+                "updated_at": group.updated_at,
+                "user_count": user_count,
+            }
+            groups_with_counts.append(group_dict)
+
+        return groups_with_counts
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get group statistics"""
+        # Total groups
+        total_query = select(func.count(self.model.id))
+        total_result = await self.session.execute(total_query)
+        total_groups = total_result.scalar()
+
+        # Active groups
+        active_query = select(func.count(self.model.id)).where(
+            self.model.status == "ACTIVE"
+        )
+        active_result = await self.session.execute(active_query)
+        active_groups = active_result.scalar()
+
+        # Total users across all groups
+        users_query = select(func.count(GroupUser.id))
+        users_result = await self.session.execute(users_query)
+        total_users = users_result.scalar()
+
+        # Groups by status
+        status_query = select(self.model.status, func.count(self.model.id)).group_by(
+            self.model.status
+        )
+        status_result = await self.session.execute(status_query)
+        groups_by_status = {status: count for status, count in status_result}
+
+        return {
+            "total_groups": total_groups,
+            "active_groups": active_groups,
+            "total_users": total_users,
+            "groups_by_status": groups_by_status,
+        }
+
+
+class GroupUserRepository(BaseRepository[GroupUser]):
+    """Repository for GroupUser model operations"""
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(GroupUser, session)
+
+    async def get_by_group_and_user(
+        self, group_id: str, user_id: str
+    ) -> Optional[GroupUser]:
+        """Get a group user membership by group and user IDs"""
+        query = select(self.model).where(
+            and_(self.model.group_id == group_id, self.model.user_id == user_id)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def count_active_users(self, group_id: str) -> int:
+        """How many ACTIVE members a group has."""
+        result = await self.session.execute(
+            select(func.count(GroupUser.id)).where(
+                GroupUser.group_id == group_id,
+                GroupUser.status == GroupUserStatus.ACTIVE,
+            )
+        )
+        return result.scalar() or 0
+
+    async def get_users_by_group(
+        self, group_id: str, skip: int = 0, limit: int = 100
+    ) -> List[GroupUser]:
+        """Get all users in a group with user details"""
+        query = (
+            select(self.model)
+            .options(selectinload(self.model.user))
+            .where(self.model.group_id == group_id)
+            .offset(skip)
+            .limit(limit)
+        )
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_groups_by_user(self, user_id: str) -> List[GroupUser]:
+        """Get all groups a user belongs to"""
+        query = (
+            select(self.model)
+            .options(selectinload(self.model.group))
+            .where(self.model.user_id == user_id)
+        )
+
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def remove_user_from_group(self, group_id: str, user_id: str) -> bool:
+        """Remove a user from a group"""
+        query = delete(self.model).where(
+            and_(self.model.group_id == group_id, self.model.user_id == user_id)
+        )
+        result = await self.session.execute(query)
+        # Don't commit here - let the session dependency handle it
+        await self.session.flush()
+        return cast("CursorResult[Any]", result).rowcount > 0
+
+    async def get_user_groups_with_roles(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get user's group memberships with roles"""
+        query = (
+            select(self.model, Group)
+            .join(Group, self.model.group_id == Group.id)
+            .where(self.model.user_id == user_id)
+        )
+
+        result = await self.session.execute(query)
+        memberships = []
+
+        for group_user, group in result:
+            membership = {
+                "group_id": group.id,
+                "group_name": group.name,
+                "role": group_user.role,
+                "status": group_user.status,
+                "joined_at": group_user.joined_at,
+                "auto_created": group_user.auto_created,
+            }
+            memberships.append(membership)
+
+        return memberships
+
+
+# Legacy compatibility - maintain old names for backward compatibility during migration
+TenantRepository = GroupRepository
+TenantUserRepository = GroupUserRepository

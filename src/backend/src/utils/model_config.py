@@ -1,0 +1,239 @@
+"""
+Model configuration utilities.
+
+This module provides utility functions for getting model configurations,
+validating models, and retrieving default settings.
+"""
+
+import logging
+import re
+from typing import Any, Dict, Optional
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from src.core.databricks_app import DatabricksAppInstallation
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+# The model used when a spec reaches the engine without one of its own.
+#
+# Single source of truth for every default: the three execution paths had
+# drifted apart — light-agent and flow defaulted to databricks-llama-4-maverick
+# while the crew path used a hardcoded "gpt-4o", so in a Databricks-first
+# deployment an agent missing an llm silently needed an OPENAI_API_KEY that may
+# not exist. The model/schema layers (models/agent.py, schemas/agent.py,
+# schemas/crew.py) point here too, so a default can no longer diverge per path.
+#
+# Gemini 3.8 Flash is the current quality/speed default: it combines strong
+# reasoning and tool use with much higher throughput than frontier-only models.
+# It is a global endpoint, so deployments using this default must enable
+# cross-geography routing in the Databricks workspace.
+# Inside Databricks Apps: the installed model (the endpoint the app is granted).
+# The old DEFAULT_LLM_MODEL env override is gone.
+DEFAULT_ENGINE_MODEL: str = (
+    DatabricksAppInstallation.from_env().default_model or "databricks-gemini-3-8-flash"
+)
+
+
+# Models whose request surface accepts a native reasoning budget:
+#   - Chat Completions: `reasoning_effort: "low"|"medium"|"high"`
+#   - Responses API:    `reasoning: {"effort": ...}`
+# (see kasal_engine/llm/completion.py — the param is only emitted when set).
+# This is a deliberately CONSERVATIVE allow-list of substrings matched against the
+# resolved provider model name: sending the param to an endpoint that does not know
+# it is a 400 on strict gateways, so anything not proven here is dropped silently.
+# Excluded on purpose:
+#   - Anthropic Claude: uses a thinking BUDGET, not `reasoning_effort`
+#     ("reasoning_effort: Extra inputs are not permitted"). It is handled
+#     separately and DOES work — see `_SUPPORTS_THINKING_BUDGET_RE` and
+#     `_thinking_for` in core/llm/transport/completion.py, driven by the
+#     `ModelConfig.extended_thinking` toggle:
+#       * Claude 4.x → `thinking: {"type": "enabled", "budget_tokens": N}` in
+#         extra_body, subject to `max_tokens > budget_tokens`. Returns REAL
+#         thinking text (haiku-4-5 1,630 chars, sonnet-4-5 1,600 — measured
+#         through this transport).
+#       * Claude 5 / Fable → reject "enabled", demand `{"type": "adaptive"}`,
+#         which takes no sub-keys and still returns an EMPTY summary (Bedrock
+#         sends only the opaque `signature`). Nothing to enable, nothing to show.
+#     An earlier version of this comment claimed Claude's thinking was
+#     unavailable by ANY request. That was wrong, and wrong in a costly way: the
+#     first probe set `max_tokens` (3,000) BELOW `budget_tokens` (10,240), and the
+#     resulting 400 ("`max_tokens` must be greater than `thinking.budget_tokens`")
+#     was misread as "unsupported" and generalised across the whole family.
+#   - Kimi / self-hosted vLLM: no `reasoning_effort` param (Kimi K2.7 cannot
+#     even disable thinking). Note kimi-k2-7-code DOES return thinking text —
+#     unprompted, in a sibling `reasoning_content` field.
+#   - DeepSeek direct API: top-level reasoning_effort supports none/low/high/max
+#     (September 2026). Registered in the central model capability table.
+#   - o1 / o1-preview / o1-mini: predate `reasoning_effort`.
+#   - *deep-research*: fixed internal budget, rejects an explicit effort.
+#
+# Gemini 3.x WAS excluded here on the belief that it has no `reasoning_effort`
+# param. That is wrong for the Databricks-served endpoints, and it was costing us
+# most of the visible chain-of-thought available anywhere in the catalogue.
+# WITHOUT the param the response carries a text-only block and no thinking; WITH
+# it a populated `reasoning` block comes back ("**My Thought Process for
+# Calculating 17 x 23**..."). The native Gemini `thinking` shape is rejected
+# (400 Invalid JSON payload), so `reasoning_effort` is the only lever.
+#
+# Note that ACCEPTING the param and RETURNING the trace are different things.
+# Full sweep of all 37 seeded Databricks models, 2026-08-05 — reasoning TEXT via
+# `reasoning_effort` (this list) comes back from five:
+#     gemini-3-1-flash-lite  2,226    inkling         309
+#     gemini-3-5-flash       2,104    kimi-k2-7-code  137
+#     gemini-3-1-pro         1,648
+# Every gpt-5* ACCEPTS `reasoning_effort` and still returns NOTHING. It genuinely
+# reasons — `usage.completion_tokens_details.reasoning_tokens` scales with the
+# effort (1,344 at high, 896 at medium, 0 at minimal) — but the message carries
+# only ['annotations','content','refusal','role']: no reasoning block, no
+# `reasoning_content`. OpenAI's `reasoning: {"summary": ...}` lever is rejected
+# here ("Unknown parameter"), so the trace is unobtainable, not merely unrequested.
+# Llama, Qwen, Gemma and gemini-2-5-flash expose none. gemini-3-5-flash-lite and
+# 3-6-flash accept the param (HTTP 200) but return no text, which is harmless.
+#
+# Claude is NOT covered by this list and is not "none": the 4.x line returns real
+# thinking through the extended-thinking BUDGET instead (see the Anthropic bullet
+# above), while Claude 5 / Fable return a redacted block. So this allow-list
+# governs one of two mechanisms, and neither one promises visible reasoning.
+_REASONING_EFFORT_SUBSTRINGS = ("gpt-oss",)
+# o3 / o4 families (o3, o3-mini, o4-mini, ...) do accept `reasoning_effort`.
+_REASONING_EFFORT_PREFIX_RE = re.compile(r"^o[34](\b|[-_.]|$)")
+
+VALID_REASONING_EFFORTS = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+
+
+def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
+    """Return True when the model accepts a native reasoning-budget parameter.
+
+    ``model_name`` may carry a provider prefix (``databricks/gpt-5-2``,
+    ``openai/gpt-5.2``) — the prefix is stripped before matching.
+
+    Support comes from the model-capabilities registry; whether a model USES
+    it is its ``reasoning_effort`` setting in Configuration → Models. (The old
+    KASAL_REASONING_EFFORT_DISABLED / _MODELS env overrides are gone.)
+    """
+    # Defensive isinstance check: callers pass whatever the built LLM reports as
+    # its model, which is not guaranteed to be a str.
+    if not model_name or not isinstance(model_name, str):
+        return False
+    m = model_name.lower()
+    # Strip a provider prefix ("databricks/", "openai/", ...) if present.
+    if "/" in m:
+        m = m.rpartition("/")[2]
+
+    if "deep-research" in m:
+        return False
+    # The per-model registry is the source of truth for current Databricks and
+    # OpenAI endpoints. This keeps the API capability flag aligned with the
+    # exact effort values exposed to the UI and accepted by the transport.
+    from src.core.llm.model_capabilities import ReasoningStyle, reasoning_style
+
+    if reasoning_style(m) is ReasoningStyle.REASONING_EFFORT:
+        return True
+    # Legacy GPT-OSS and o3/o4 compatibility for models that are not seeded in
+    # the current Databricks catalogue.
+    if any(s in m for s in _REASONING_EFFORT_SUBSTRINGS):
+        return True
+    if _REASONING_EFFORT_PREFIX_RE.match(m):
+        return True
+    return False
+
+
+def model_rejects_temperature(model_name: Optional[str]) -> bool:
+    """
+    Return True for models whose serving endpoint rejects the `temperature`
+    parameter (a 400 BAD_REQUEST otherwise).
+
+    Delegates to the capability registry rather than keeping its own list — see
+    the note in the body. To mark a new model, add it there.
+    """
+    if not model_name:
+        return False
+
+    # Ask the per-model capability registry (core/llm/model_capabilities.py),
+    # which already records `refuses=("temperature", ...)` for every model
+    # measured against the live endpoints. It is the single source of truth the
+    # UI uses to decide whether to render the temperature control.
+    #
+    # Duplicating that knowledge here is what caused the bug this replaces: the
+    # registry had claude-sonnet-5 down as refusing temperature, this function's
+    # hand-maintained list did not, so the UI correctly hid the field while the
+    # runtime sent it anyway. Every request in a 12-task flow 400'd with "Model
+    # global.anthropic.claude-sonnet-5 does not support the temperature
+    # parameter" and silently fell back to another model — the run "succeeded"
+    # with answers from a model the user never chose.
+    #
+    # The list had already missed claude-opus-5 the same way. One registry, one
+    # place to add a model.
+    from src.core.llm.model_capabilities import model_capability
+
+    capability = model_capability(model_name)
+    if capability is not None:
+        return not capability.accepts("temperature")
+
+    # Unknown to the registry: GPT-5 is the one family whose naming is reliable
+    # enough to pattern-match, and new gpt-5-* endpoints appear faster than the
+    # registry is updated. Everything else defaults to "sends temperature",
+    # matching the previous behaviour for unrecognised models.
+    m = model_name.lower()
+    return "gpt-5" in m or "gpt5" in m
+
+
+def get_model_config(
+    model_key: str, db: Optional[Session] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Get model configuration based on model key.
+
+    Only returns configurations from the database.
+    Returns None if model not found in database.
+
+    Args:
+        model_key: The model key (e.g., 'gpt-4', 'claude-3-opus')
+        db: Optional database session
+
+    Returns:
+        Dictionary with model configuration or None if not found
+    """
+    # Only retrieve from database, no fallbacks
+    if db:
+        try:
+            from src.models.model_config import ModelConfig
+
+            # Query the database for the model configuration
+            result = db.execute(
+                select(ModelConfig).filter(ModelConfig.key == model_key)
+            )
+            model_config = result.scalars().first()
+
+            if model_config:
+                logger.info(f"Found model config for {model_key} in database")
+                return {
+                    "key": model_config.key,
+                    "name": model_config.name,
+                    "provider": model_config.provider,
+                    "temperature": model_config.temperature,
+                    "context_window": model_config.context_window,
+                    "max_output_tokens": model_config.max_output_tokens,
+                    "extended_thinking": model_config.extended_thinking,
+                    "enabled": model_config.enabled,
+                }
+            logger.warning(f"Model {model_key} not found in database")
+            return None
+        except Exception as e:
+            logger.warning(f"Error retrieving model config from database: {str(e)}")
+            return None
+
+    logger.warning(f"No database session provided to get_model_config for {model_key}")
+    return None

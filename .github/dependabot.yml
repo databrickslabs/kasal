@@ -1,0 +1,50 @@
+# Dependency update PRs. Weekly, grouped, so a week's minor/patch bumps arrive
+# as one PR per ecosystem instead of dozens. Majors stay individual PRs: they
+# are the ones that need reading.
+#
+# CVE detection itself runs in .github/workflows/dependency-audit.yml; this
+# file is about getting the fixes proposed.
+#
+# cooldown: a release must be 7 days old before it is proposed, matching the
+# internal registry proxies' hold (litellm 1.82.7/1.82.8 and 1.107.0 were
+# malicious and pulled within hours). Version updates only — security updates
+# are not delayed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Python: src/backend/pyproject.toml + uv.lock (the only Python manifest).
+  - package-ecosystem: uv
+    directory: /src/backend
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /src/frontend
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]

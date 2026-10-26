@@ -1,0 +1,143 @@
+import { useShallow } from 'zustand/react/shallow';
+import { useCallback } from 'react';
+import { Models, ModelConfig } from '../../types/config/models';
+import { useModelConfigStore } from '../../store/modelConfig';
+
+export const useModelConfig = () => {
+  const {
+    models,
+    currentEditModel,
+    editDialogOpen,
+    isNewModel,
+    loading,
+    saving,
+    modelsChanged,
+    searchTerm,
+    databricksEnabled,
+    error,
+    refreshKey,
+    activeTab,
+    setModels,
+    setCurrentEditModel,
+    setEditDialogOpen,
+    setIsNewModel,
+    setLoading,
+    setSaving,
+    setModelsChanged,
+    setSearchTerm,
+    setDatabricksEnabled,
+    setError,
+    incrementRefreshKey,
+    setActiveCanvas,
+    resetModelConfig,
+  } = useModelConfigStore(useShallow(state => ({
+    models: state.models,
+    currentEditModel: state.currentEditModel,
+    editDialogOpen: state.editDialogOpen,
+    isNewModel: state.isNewModel,
+    loading: state.loading,
+    saving: state.saving,
+    modelsChanged: state.modelsChanged,
+    searchTerm: state.searchTerm,
+    databricksEnabled: state.databricksEnabled,
+    error: state.error,
+    refreshKey: state.refreshKey,
+    activeTab: state.activeTab,
+    setModels: state.setModels,
+    setCurrentEditModel: state.setCurrentEditModel,
+    setEditDialogOpen: state.setEditDialogOpen,
+    setIsNewModel: state.setIsNewModel,
+    setLoading: state.setLoading,
+    setSaving: state.setSaving,
+    setModelsChanged: state.setModelsChanged,
+    setSearchTerm: state.setSearchTerm,
+    setDatabricksEnabled: state.setDatabricksEnabled,
+    setError: state.setError,
+    incrementRefreshKey: state.incrementRefreshKey,
+    setActiveCanvas: state.setActiveCanvas,
+    resetModelConfig: state.resetModelConfig,
+  })));
+
+  const handleSetModels = useCallback((models: Models) => {
+    setModels(models);
+  }, [setModels]);
+
+  const handleSetCurrentEditModel = useCallback((model: (ModelConfig & { key: string }) | null) => {
+    setCurrentEditModel(model);
+  }, [setCurrentEditModel]);
+
+  const handleSetEditDialogOpen = useCallback((open: boolean) => {
+    setEditDialogOpen(open);
+  }, [setEditDialogOpen]);
+
+  const handleSetIsNewModel = useCallback((isNew: boolean) => {
+    setIsNewModel(isNew);
+  }, [setIsNewModel]);
+
+  const handleSetLoading = useCallback((loading: boolean) => {
+    setLoading(loading);
+  }, [setLoading]);
+
+  const handleSetSaving = useCallback((saving: boolean) => {
+    setSaving(saving);
+  }, [setSaving]);
+
+  const handleSetModelsChanged = useCallback((changed: boolean) => {
+    setModelsChanged(changed);
+  }, [setModelsChanged]);
+
+  const handleSetSearchTerm = useCallback((term: string) => {
+    setSearchTerm(term);
+  }, [setSearchTerm]);
+
+  const handleSetDatabricksEnabled = useCallback((enabled: boolean) => {
+    setDatabricksEnabled(enabled);
+  }, [setDatabricksEnabled]);
+
+  const handleSetError = useCallback((error: string | null) => {
+    setError(error);
+  }, [setError]);
+
+  const handleIncrementRefreshKey = useCallback(() => {
+    incrementRefreshKey();
+  }, [incrementRefreshKey]);
+
+  const handleSetActiveTab = useCallback((tab: number) => {
+    setActiveCanvas(tab);
+  }, [setActiveCanvas]);
+
+  const handleResetModelConfig = useCallback(() => {
+    resetModelConfig();
+  }, [resetModelConfig]);
+
+  return {
+    // State
+    models,
+    currentEditModel,
+    editDialogOpen,
+    isNewModel,
+    loading,
+    saving,
+    modelsChanged,
+    searchTerm,
+    databricksEnabled,
+    error,
+    refreshKey,
+    activeTab,
+
+    // Actions
+    setModels: handleSetModels,
+    setCurrentEditModel: handleSetCurrentEditModel,
+    setEditDialogOpen: handleSetEditDialogOpen,
+    setIsNewModel: handleSetIsNewModel,
+    setLoading: handleSetLoading,
+    setSaving: handleSetSaving,
+    setModelsChanged: handleSetModelsChanged,
+    setSearchTerm: handleSetSearchTerm,
+    setDatabricksEnabled: handleSetDatabricksEnabled,
+    setError: handleSetError,
+    incrementRefreshKey: handleIncrementRefreshKey,
+    setActiveCanvas: handleSetActiveTab,
+    resetModelConfig: handleResetModelConfig,
+  };
+}; 

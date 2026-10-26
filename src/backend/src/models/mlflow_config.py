@@ -1,0 +1,97 @@
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from src.db.base import Base
+
+
+class MLflowConfig(Base):
+    """MLflow tracing settings for a workspace, independent of Databricks.
+
+    These three flags used to live on ``DatabricksConfig``, which was coherent
+    while MLflow *was* Databricks. It stopped being coherent once tracing could
+    also go to a local OSS server — and it was not merely untidy: ``is_enabled``
+    read the flag off the Databricks row, so a workspace with no Databricks
+    configuration could never switch MLflow on **by construction rather than by
+    choice**. The UI showed the same seam from the other side ("Please save
+    Databricks settings first to persist MLflow"), which in a dev environment
+    with nothing to save is a dead end.
+
+    Memory is the precedent this follows: it can use Databricks Vector Search or
+    a local store, and it has its own configuration rather than living inside
+    the Databricks one.
+
+    The old columns on ``databricksconfig`` are deliberately LEFT IN PLACE by the
+    accompanying migration, which copies rather than moves. That makes the change
+    a two-way door: a rollback loses nothing, and the columns can be dropped in a
+    later release once this table has proven itself.
+    """
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    #: Whether crew executions are traced to MLflow at all. Which BACKEND they
+    #: are traced to is derived (Databricks when configured, else a local
+    #: server) and deliberately not stored — a stored backend choice can only
+    #: ever disagree with what is actually available.
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    #: Experiment to trace into, or NULL to let the backend name it.
+    #:
+    #: No column default on purpose. A stored default is indistinguishable from
+    #: a name the user typed, so it silently outranks the derived
+    #: ``kasal-<teamspace>-traces`` and the per-teamspace naming never applies —
+    #: which is exactly what happened with an earlier
+    #: ``default="kasal-crew-execution-traces"`` here. NULL means "not chosen",
+    #: which is the only value the resolver can safely override.
+    #:
+    #: Stored without a workspace-path prefix; the Databricks backend adds
+    #: ``/Shared/`` and the local one does not (see
+    #: services/mlflow/local.local_experiment_name).
+    experiment_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    #: LLM-judge evaluation of finished runs — a separate, more expensive opt-in
+    #: than tracing, hence its own flag rather than a mode of ``enabled``.
+    evaluation_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+
+    #: Judge endpoint route, e.g. "databricks:/<endpoint>". Also the default
+    #: judge for prompt optimization (the Optimize dialog can override it).
+    evaluation_judge_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    #: Advanced: most traces an evaluation run scores. NULL = the default (200).
+    evaluation_max_rows: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    #: Advanced: how many times prompt optimization samples the correctness
+    #: judge per distinct candidate (median of N). NULL = the default.
+    optimization_judge_samples: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+
+    #: A local (OSS) MLflow server to trace to, e.g. http://127.0.0.1:5555.
+    #: NULL = none. Ignored inside Databricks Apps. It replaced launching the
+    #: backend with MCP_SERVER_ENABLED + MLFLOW_TRACKING_URI.
+    local_tracking_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Multi-tenant fields — one row per group, same isolation rule as every
+    # other configuration table.
+    group_id: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    created_by_email: Mapped[Optional[str]] = mapped_column(
+        String(255), index=True, nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )

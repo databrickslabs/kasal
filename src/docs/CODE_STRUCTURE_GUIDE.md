@@ -1,0 +1,215 @@
+# Code structure
+
+Use this map to find the owner of a change. Backend domain packages and the
+frontend feature packages identify the owner of each view and its supporting code.
+
+## Repository and build ownership
+
+| Path | Responsibility |
+| --- | --- |
+| `src/backend/` | Backend environment, dependency manifest, tests and migrations |
+| `src/backend/src/` | FastAPI application; Python imports use the `src` package |
+| `src/backend/scripts/maintenance/`, `scripts/diagnostics/` | Operator-run maintenance and diagnostic scripts; outside the shipped application |
+| `src/frontend/` | React and TypeScript application built with Vite |
+| `src/docs/` | Canonical in-app documentation, images and downloadable examples |
+| `src/scripts/build-tasks.cjs` | Stage public assets/docs and publish Vite output |
+| `src/package.json` | Build lifecycle shared by deployment and wheel preparation |
+| `src/build.py` | Python entry point for that npm lifecycle |
+| `src/deploy.py` | Build and stage a Databricks App deployment |
+| `src/package_pip.py` | Prepare frontend assets and build the pip distribution |
+| `pyproject.toml`, `hatch_build.py`, `packaging/kasal/` | Wheel packaging and CLI; dependencies come from the backend manifest |
+
+Vite combines `frontend/public/` with `src/docs/` in the ignored
+`frontend/.generated/public/` directory. It copies nested Markdown, images,
+JSON examples and CSS, preserving `/docs/...` URLs. Edit `src/docs/`, then
+restart Vite to refresh the staged documentation during development.
+
+The root npm lifecycle publishes `frontend/dist/` as `src/frontend_static/`.
+Deployment uploads that snapshot; the wheel includes it under
+`kasal/_app/frontend_static`. Generated assets are not source files.
+
+## Backend ownership
+
+Paths in this section are relative to `src/backend/src/`.
+
+| Path | Responsibility |
+| --- | --- |
+| `main.py`, `api/__init__.py` | Application lifecycle, middleware and router composition |
+| `api/` | HTTP routing, request validation and response translation |
+| `dependencies/providers.py`, `dependencies/admin_auth.py` | Request/session injection and authentication checks; `core/dependencies.py` retains compatibility imports |
+| `services/` | Domain operations and orchestration, grouped by domain |
+| `repositories/` | Database and external storage access |
+| `models/`, `schemas/` | SQLAlchemy entities and Pydantic contracts |
+| `db/session.py`, `db/all_models.py` | Sessions and model registration |
+| `db/self_heal/` | Deployed startup schema compatibility repairs |
+| `db/lakebase_ddl.py` | Lakebase role/extension setup with savepoint isolation |
+| `config/` | Runtime settings and logging configuration |
+| `core/` | Shared infrastructure, LLM transport, events and runtime paths |
+| `utils/` | Cross-domain helpers and documented lazy authentication lookups |
+| `seeds/`, `seeds/skills_data/` | Shipped seed and skill content |
+
+Endpoint request/response models belong to the corresponding `schemas/` domain.
+Routers import them; the public field names and defaults stay with the schema.
+
+Use the existing domain package for a service. Tool adapters under
+`services/tools/` are intentionally flat; substantial reusable logic belongs
+with its domain rather than being copied into each adapter.
+
+Selected execution and integration entry points:
+
+- `services/execution/service.py`: execution lifecycle facade.
+- `services/execution/engine_service.py`: `KasalEngineService`, the hub that resolves the Chat, Agent Builder or Flow Builder path and delegates.
+- `services/execution/finalization.py`: terminal outcomes and persistence retries.
+- `services/execution/serialization.py`, `flow_name_inputs.py`: payload serialization and flow naming inputs behind the execution facade.
+- `services/execution/logs/file_ingestion.py`: shared crew/flow file-log persistence; each executor retains its own failure policy.
+- `services/groups/forwarded_identity.py`: fallback identity provisioning through the user repository, with transaction scope owned by the service.
+- `services/execution/runtime/`: Kasal agent runtime (agent, task, crew and the tool-call loop).
+- `services/execution/harnesses/`: runtime bindings (`binding.py`, `selection.py`), with `kasal/` and `crewai/` implementations.
+- `services/execution/kernel/`: shared agent/task construction and tooling, used by both subprocess paths.
+- `services/execution/checkpointing/`: crash-resume shared by the crew and flow paths.
+- `services/execution/process_tree.py`: terminates only the process trees this server spawned.
+- `services/execution/blocking_pools.py`: bounded thread pools for the subprocess paths' blocking waits and event relay.
+- `core/llm/transport/`: the OpenAI-compatible LLM transport and tool-round loop; `core/events/`: the run event bus.
+- `services/chat/`: the in-process Chat path.
+- `services/agent_builder/`: crew preparation, execution and subprocess entry point.
+- `services/flow_builder/`: flow assembly, execution, checkpoints and subprocess entry point.
+- `services/execution/history.py`, `services/execution/logs/`: history and execution logs.
+- `services/trace/`: trace ingestion, persistence and broadcasting.
+- `services/llm/manager.py`: provider/model selection and streaming.
+- `core/llm/robust_json.py`: tolerant JSON recovery for generated responses.
+- `services/catalog/templates.py`: database-backed prompt-template lookup.
+- `services/powerbi/pipeline_config.py`: shared Power BI extraction and configuration derivation.
+  `services/tools/generate_config.py` retains the standalone CLI and compatibility imports.
+- `services/scheduling/scheduler.py`: scheduled execution.
+- `services/knowledge/documentation_embedding.py`: documentation embeddings.
+- `services/databricks/`, `services/mlflow/`: integration services.
+
+## Boundaries and transactions
+
+Follow routers → services → repositories → models. Keep request assembly at
+the API boundary, orchestration in services and I/O in repositories. Services
+raise the application errors in `core/exceptions.py`; the global handler in
+`main.py` translates their status, detail and headers into HTTP responses.
+Catch `KasalError` before broad exception recovery when access failures must
+propagate, especially during checkpoint resume. Exported app templates have
+their own HTTP boundary and do not depend on the main application's services.
+
+Services own transaction scope and use the injected session inside a request.
+Background work uses `routed_scoped_session()`. Repositories neither acquire
+sessions nor commit them. Operations spanning multiple writes, such as memory
+configuration replacement, must retain one transaction.
+
+`src/backend/pyproject.toml` contains the import-linter contracts and documented
+lazy authentication exceptions. Preserve the service-level tenant checks in
+those paths. A folder move must not bypass authorization.
+
+Terminal execution state belongs to the existing finalization module. Keep
+its failure/cancel/reject outcomes and retry behavior when splitting executors;
+do not introduce another pending-outcome registry.
+
+## Schema changes and shipped resources
+
+Alembic configuration and revision history live in `src/backend/alembic.ini`
+and `src/backend/migrations/`. They serve offline migration workflows.
+Databricks deployment excludes that directory; startup repairs under
+`db/self_heal/` have a separate role. Preserve applied revision identifiers.
+
+Runtime/tool changes can affect export allowlists and generated imports under
+`services/export/`. Update those consumers alongside source moves. The A2UI
+frontend copy in the exported app template is intentional: deployed apps do
+not contain the main frontend source. Its synchronization tests protect that
+copy.
+
+Keep backend package roots stable. The wheel embeds the application under
+`kasal/_app/src`, and its CLI sets up the import path before loading `src.main`.
+
+## Frontend ownership
+
+Paths in this section are relative to `src/frontend/src/`.
+
+| Path | Responsibility |
+| --- | --- |
+| `app/App.tsx` | Routes, lazy screen imports, providers and application startup |
+| `app/workspace/` | Cross-feature workspace layout, tabs, panels and dialogs |
+| `app/connections/`, `app/approvals/`, `app/notifications/` | Application-wide streaming, approval listening and error notification policy |
+| `features/chat/` | Chat workspace, state, hooks and views |
+| `features/chat/persistence/` | Server session storage, queued writes, message mapping and legacy IndexedDB migration |
+| `features/chat/api/`, `features/chat/types/` | Shared chat HTTP client and chat/dispatcher contracts |
+| `features/executions/trace/lib/` | UI-independent trace processing, indexing and batching |
+| `features/executions/trace/hooks/` | Trace fetching and React view state |
+| `features/executions/trace/components/` | Trace event icons |
+| `features/workflow/canvas/lib/` | Canvas layout calculations and graph indexing |
+| `features/workflow/canvas/components/` | Crew/flow canvases, node/edge registry and controls |
+| `features/workflow/{agents,tasks,crews,flows,scheduling,export}/` | Workflow editing, selection and export views |
+| `features/workflow/assistant/` | Workflow conversation views, contracts, hooks and message state |
+| `features/executions/`, `features/approvals/`, `features/triggers/` | Run history/results, approvals and event triggers |
+| `features/configuration/`, `features/tools/`, `features/memory/`, `features/groups/` | Domain settings, tool configuration selectors, memory and workspace selection |
+| `features/conversion/`, `features/help/` | Conversion tools, documentation, tutorials and best practices |
+| `shared/api/` | Single Axios transport, workspace-header recovery and error publication |
+| `shared/errors/` | `ErrorBoundary` and lazy-chunk failure detection (`chunkErrors.ts`) |
+| `shared/ui/` | Domain-independent presentation shared across features |
+| `shared/lib/collections.ts` | Generic first-occurrence indexing and deduplication |
+| `types/ui/layout.ts` | Application-wide workspace panel/layout state contract |
+| `api/` | API clients grouped by domain |
+| `types/` | Component-independent contracts grouped by domain |
+| `store/`, `hooks/` | Existing shared state and hooks |
+| `shared/` | Shared libraries and A2UI rendering |
+| `utils/`, `theme/` | Existing utilities and app theme |
+
+Preview parsing belongs to `features/chat/utils/preview.ts`, with its
+contracts in `features/chat/types/preview.ts`. Skill selection lookup is
+independent of state; reconciliation actions live under the chat store folder.
+API clients, contracts and pure processing libraries must not import UI views.
+The flat ESLint configuration enforces the boundaries already established.
+
+`shared/api/client.ts` reads `VITE_API_URL`, defaulting to
+`http://localhost:<port>/api/v1` in development (the port comes from
+`shared/api/backendOrigin.ts`, which follows `KASAL_PORT`) and `/api/v1` in production.
+App startup registers the
+deduplicated database-outage toast; the transport does not import UI libraries.
+
+Every `Suspense` that wraps `lazy()` components sits inside a
+`ErrorBoundary` (`shared/errors/ErrorBoundary.tsx`), so one failed render does not blank the whole
+app. A lazy chunk that fails to load, usually because a redeploy changed the
+chunk names while the tab was open, shows a prompt to reload the page instead
+of a generic error. The boundary has `page`, `section` and `dialog` variants and
+clears itself when one of its `resetKeys` (a route or a tab) changes.
+
+Crew representations are separate: `types/workflow/crew.ts` holds API contracts,
+`crewPayload.ts` serialized inputs and
+`canvas.ts` canvas data. UI props live with the canvas and crew features.
+
+Chat view models retain `Date` values and camelCase fields; persistence wire
+contracts keep backend timestamp strings and snake_case fields. `messageCodec.ts`
+owns their conversion. `legacySessionDb.ts` exists only for migration; server
+sessions, previews and running-job markers remain in `sessionApi.ts`.
+
+State storage keys, event names, endpoint URLs and CSS scopes are stable
+contracts even when their source files move.
+
+## Tests and checks
+
+Frontend unit/component tests live beside their source. Run Vitest from
+`src/frontend/`; `vitest.config.ts` owns coverage thresholds, including exact
+paths that must move with covered files. `eslint.config.js` is the ESLint
+configuration. `npm run build` checks TypeScript and produces the Vite bundle.
+
+Backend tests live under `src/backend/tests/`, with unit suites following
+source ownership. `src/backend/pyproject.toml` owns pytest discovery, asyncio
+mode and markers. Run `.venv/bin/python -m pytest` from `src/backend/`, adding
+the relevant paths and explicit coverage options when needed. There is no
+second configuration under `tests/`. Fixtures and artifact isolation live in
+`tests/conftest.py`; architecture tests guard layering and test placement.
+
+When moving code, update imports, mocks, coverage paths, export mappings and
+resource locators together. Preserve lazy entry points and subprocess imports.
+Test the affected behavior, and check built artifacts when their inputs move.
+
+## Related guides
+
+- [Architecture guide](./ARCHITECTURE_GUIDE.md)
+- [Developer guide](./DEVELOPER_GUIDE.md)
+- [API endpoints](./api_endpoints.md)
+- [Execution harnesses](./harnesses.md)
+- [Pip packaging](./PIP_PACKAGE.md)
+- [Documentation hub](./README.md)

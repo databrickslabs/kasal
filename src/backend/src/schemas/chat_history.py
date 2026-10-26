@@ -1,0 +1,242 @@
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _require_content_or_payload(content: Optional[str], generation_result: Any) -> None:
+    """A chat message must carry SOMETHING — text, or a structured payload.
+
+    Replaces the old ``content`` ``min_length=1``. assistant/result/trace/execution
+    messages routinely deliver a deck/quiz/crew in ``generation_result`` with no
+    prose; rejecting empty text dropped those messages AND logged the 422 as a
+    spurious "Error in Lakebase session: 1 validation error". Empty text with no
+    payload (e.g. a blank user message) is still rejected — cleanly, as a 422."""
+    if not (content or "").strip() and generation_result is None:
+        raise ValueError("a message must have content or a generation_result")
+
+
+# Shared properties
+class ChatHistoryBase(BaseModel):
+    """Base Pydantic model for ChatHistory with shared attributes."""
+
+    session_id: str = Field(..., description="Chat session identifier")
+    user_id: str = Field(..., description="User identifier")
+    message_type: str = Field(
+        ...,
+        pattern="^(user|assistant|system|execution|trace|result)$",
+        description="Message type: user, assistant, system, execution, trace, or result",
+    )
+    content: str = Field(
+        ...,
+        description=(
+            "Message content. May be empty: assistant/result/trace/execution "
+            "messages often carry their payload in generation_result with no text, "
+            "and rejecting those dropped the message and logged a spurious "
+            "'Error in Lakebase session' 422."
+        ),
+    )
+    intent: Optional[str] = Field(
+        None, description="Detected intent (generate_agent, generate_task, etc.)"
+    )
+    confidence: Optional[str] = Field(None, description="Confidence score as string")
+    generation_result: Optional[Dict[str, Any]] = Field(
+        None, description="Generated agent/task/crew data"
+    )
+
+
+# Properties to receive on chat message creation
+class ChatHistoryCreate(ChatHistoryBase):
+    """Schema for creating a new chat message.
+
+    The content-or-payload rule lives on the INPUT schemas (this create schema
+    and SaveMessageRequest), NOT on ChatHistoryBase. ChatHistoryResponse is a
+    read/echo DTO built from an already-persisted row; enforcing the rule there
+    made ChatHistoryService.save_message write the row and THEN raise while
+    building the response — an empty internal save became a partial-success 500,
+    and a legitimately-empty stored row could not be read back. The API boundary
+    still rejects an empty, payload-less message as a clean 422 via
+    SaveMessageRequest.
+    """
+
+    # Timestamp will be auto-generated in the service.
+    @model_validator(mode="after")
+    def _check_content_or_payload(self) -> "ChatHistoryCreate":
+        _require_content_or_payload(self.content, self.generation_result)
+        return self
+
+
+# Properties shared by models stored in DB
+class ChatHistoryInDBBase(ChatHistoryBase):
+    """Base schema for ChatHistory models in database."""
+
+    id: str = Field(..., description="Unique message identifier")
+    timestamp: datetime = Field(..., description="Message timestamp")
+
+    # Multi-group fields
+    group_id: Optional[str] = Field(None, description="Group identifier for isolation")
+    group_email: Optional[str] = Field(None, description="Group email for audit")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Properties to return to client
+class ChatHistoryResponse(ChatHistoryInDBBase):
+    """Schema for ChatHistory API responses."""
+
+    pass
+
+
+# Session-related schemas
+class ChatSessionInfo(BaseModel):
+    """Schema for chat session information."""
+
+    session_id: str = Field(..., description="Chat session identifier")
+    user_id: str = Field(..., description="User identifier")
+    latest_timestamp: datetime = Field(..., description="Latest message timestamp")
+    message_count: Optional[int] = Field(None, description="Total messages in session")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ChatSessionListResponse(BaseModel):
+    """Schema for listing chat sessions."""
+
+    sessions: List[ChatSessionInfo] = Field(..., description="List of chat sessions")
+    total_sessions: int = Field(..., description="Total number of sessions")
+    page: int = Field(..., description="Current page number")
+    per_page: int = Field(..., description="Messages per page")
+
+
+class ChatHistoryListResponse(BaseModel):
+    """Schema for listing chat messages."""
+
+    messages: List[ChatHistoryResponse] = Field(
+        ..., description="List of chat messages"
+    )
+    total_messages: int = Field(..., description="Total number of messages")
+    page: int = Field(..., description="Current page number")
+    per_page: int = Field(..., description="Messages per page")
+    session_id: str = Field(..., description="Chat session identifier")
+
+
+# Request schemas
+class SaveMessageRequest(BaseModel):
+    """Schema for saving a chat message via API."""
+
+    session_id: str = Field(..., description="Chat session identifier")
+    id: Optional[str] = Field(
+        None,
+        description="Client-generated message id (optional; server generates when absent)",
+    )
+    message_type: str = Field(
+        ...,
+        pattern="^(user|assistant|system|execution|trace|result)$",
+        description="Message type",
+    )
+    content: str = Field(
+        ...,
+        description=(
+            "Message content. May be empty: assistant/result/trace/execution "
+            "messages often carry their payload in generation_result with no text, "
+            "and rejecting those dropped the message and logged a spurious "
+            "'Error in Lakebase session' 422."
+        ),
+    )
+    intent: Optional[str] = Field(None, description="Detected intent")
+    confidence: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Confidence score"
+    )
+    generation_result: Optional[Dict[str, Any]] = Field(
+        None, description="Generation result"
+    )
+
+    @model_validator(mode="after")
+    def _check_content_or_payload(self) -> "SaveMessageRequest":
+        _require_content_or_payload(self.content, self.generation_result)
+        return self
+
+
+class UpdateMessageRequest(BaseModel):
+    """Schema for updating a chat message (streaming append / result attach)."""
+
+    content: Optional[str] = Field(
+        None, description="Updated message content (may be empty)"
+    )
+    intent: Optional[str] = Field(None, description="Updated intent")
+    generation_result: Optional[Dict[str, Any]] = Field(
+        None, description="Updated generation result"
+    )
+
+
+# Named chat sessions (chat-mode workspace) — server-side replacement for
+# the browser IndexedDB session store.
+class ChatSessionCreateRequest(BaseModel):
+    """Schema for creating a named chat session."""
+
+    id: Optional[str] = Field(
+        None, description="Client-generated session id (optional)"
+    )
+    title: str = Field("New Chat", max_length=255, description="Session title")
+
+
+class ChatSessionRenameRequest(BaseModel):
+    """Schema for renaming a named chat session."""
+
+    title: str = Field(
+        ..., min_length=1, max_length=255, description="New session title"
+    )
+
+
+class NamedChatSessionResponse(BaseModel):
+    """Schema for a named chat session."""
+
+    id: str = Field(..., description="Session identifier")
+    title: str = Field(..., description="Session title")
+    mode: str = "chat"
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def default_session_mode(cls, value: Any) -> Any:
+        return value or "chat"
+
+    user_id: str = Field(..., description="Owner user id")
+    group_id: Optional[str] = Field(None, description="Workspace (group) id")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last activity timestamp")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Per-session preview (rendered A2UI deliverable) — server-side replacement for
+# the browser IndexedDB 'previews' store.
+class SavePreviewRequest(BaseModel):
+    """Schema for saving a session's rendered preview."""
+
+    type: str = Field(
+        ..., max_length=50, description="Preview content type (e.g. 'ui')"
+    )
+    data: str = Field(..., description="Serialized preview document (A2UI JSON)")
+    title: Optional[str] = Field(None, max_length=512, description="Preview title")
+
+
+class SessionPreviewResponse(BaseModel):
+    """A session's preview, or all-null when it has none."""
+
+    type: Optional[str] = Field(None, description="Preview content type")
+    data: Optional[str] = Field(None, description="Serialized preview document")
+    title: Optional[str] = Field(None, description="Preview title")
+
+
+# Per-session in-flight crew job marker (refresh reconnect) — server-side
+# replacement for the browser IndexedDB running-job marker.
+class SetRunningJobRequest(BaseModel):
+    """Schema for recording the in-flight crew job for a session."""
+
+    job_id: str = Field(..., min_length=1, description="In-flight execution job id")
+
+
+class RunningJobResponse(BaseModel):
+    """The session's in-flight job id, or null when no run is active."""
+
+    job_id: Optional[str] = Field(None, description="In-flight execution job id")

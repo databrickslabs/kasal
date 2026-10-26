@@ -1,0 +1,553 @@
+"""
+Embedder configuration builder for different providers.
+
+Handles embedder setup for:
+- Databricks (with custom authentication)
+- OpenAI
+- Google (Gemini)
+- Ollama
+- Other providers
+"""
+
+import functools
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.core.databricks_app import DatabricksAppInstallation
+from src.core.logger import LoggerManager
+from src.utils.databricks_url_utils import DatabricksURLUtils
+
+logger = LoggerManager.get_instance().crew
+
+
+def _loggable_embedder(embedder: object) -> str:
+    """An embedder config for the logs: provider and key NAMES, never values.
+
+    These dicts carry the provider API key (``config.api_key``), and these log
+    lines reach crew.log and the run's execution logs.
+    """
+    if not isinstance(embedder, dict):
+        return "none"
+    config = embedder.get("config")
+    keys = sorted(config) if isinstance(config, dict) else []
+    return f"provider={embedder.get('provider')} config_keys={keys}"
+
+
+def _queue_embedding_usage(
+    usage: Dict[str, int],
+    model: str,
+    workspace_url: Optional[str],
+    token: Optional[str],
+) -> None:
+    """Hand one embedding batch's token usage to the usage-telemetry worker.
+
+    The logfood request is a separate GET to the workspace with a 5 s timeout;
+    the embedding returns its vectors without waiting for it.
+    """
+    from src.core.llm.usage_telemetry import submit_telemetry
+    from src.utils.telemetry import KasalProduct, send_logfood_telemetry_sync
+
+    submit_telemetry(
+        functools.partial(
+            send_logfood_telemetry_sync,
+            usage=usage,
+            model=model,
+            product_context=KasalProduct.EMBEDDING,
+            workspace_url=workspace_url,
+            token=token,
+        )
+    )
+
+
+class EmbedderConfigBuilder:
+    """Handles embedder configuration for different providers"""
+
+    def __init__(self, config: Dict[str, Any], user_token: Optional[str] = None):
+        """
+        Initialize the EmbedderConfigBuilder
+
+        Args:
+            config: Crew configuration dictionary (must include group_id for multi-tenant isolation)
+            user_token: Optional user access token for OBO authentication
+        """
+        self.config = config
+        self.user_token = user_token
+        self.custom_embedder = None
+        self.embedder_config = None
+        # SECURITY: Extract group_id from config for multi-tenant isolation
+        self.group_id = config.get("group_id")
+
+    def get_embedder_config_from_agents(self) -> Optional[Dict[str, Any]]:
+        """
+        Extract embedder configuration from agent configs
+
+        Returns:
+            Embedder configuration dict or None
+        """
+        embedder_config = None
+        for agent_config in self.config.get("agents", []):
+            if "embedder_config" in agent_config and agent_config["embedder_config"]:
+                ec = agent_config["embedder_config"]
+                if isinstance(ec, dict) and "provider" in ec:
+                    embedder_config = ec
+                    logger.info(
+                        "Found valid embedder configuration: %s",
+                        _loggable_embedder(embedder_config),
+                    )
+                    break
+                else:
+                    logger.warning(
+                        "Found invalid embedder config (missing provider): keys=%s",
+                        sorted(ec) if isinstance(ec, dict) else type(ec).__name__,
+                    )
+
+        # Default to Databricks if no valid config found
+        if not embedder_config:
+            embedder_config = {
+                "provider": "databricks",
+                "config": {"model": "databricks-gte-large-en"},
+            }
+            logger.info(
+                "No valid embedder config found, using default Databricks configuration"
+            )
+
+        return embedder_config
+
+    async def configure_embedder(
+        self, crew_kwargs: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Any, Any]:
+        """
+        Configure embedder based on provider
+
+        Args:
+            crew_kwargs: Crew keyword arguments to update
+
+        Returns:
+            Tuple of (updated crew_kwargs, custom_embedder, embedder_config)
+        """
+        embedder_config = self.get_embedder_config_from_agents()
+        if not embedder_config:
+            return crew_kwargs, None, None
+
+        provider = embedder_config.get("provider", "openai")
+        config = embedder_config.get("config", {})
+
+        if provider == "databricks":
+            crew_kwargs, custom_embedder, emb_config = (
+                await self._configure_databricks_embedder(crew_kwargs, config)
+            )
+            self.custom_embedder = custom_embedder
+            self.embedder_config = emb_config
+            # Databricks auth unavailable — fall back to a local Ollama embedder.
+            # (The previous FastEmbed fallback is unusable: this CrewAI build does not
+            # register a "fastembed" provider, so memory init crashed with
+            # "Unknown provider: fastembed".) The Ollama host
+            # and model come from services/llm/endpoints (localhost only outside
+            # Databricks Apps); no env var, no URL hardcoded here.
+            if custom_embedder is None and not crew_kwargs.get("embedder"):
+                from src.services.llm.endpoints import (
+                    DEFAULT_OLLAMA_EMBED_MODEL,
+                    ollama_base_url,
+                )
+
+                crew_kwargs["embedder"] = {
+                    "provider": "ollama",
+                    "config": {
+                        "model": DEFAULT_OLLAMA_EMBED_MODEL,
+                        "url": ollama_base_url(),
+                    },
+                }
+                logger.info(
+                    "Databricks embedder unavailable, falling back to Ollama: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
+                )
+                self.embedder_config = crew_kwargs["embedder"]
+        elif provider == "openai":
+            crew_kwargs = await self._configure_openai_embedder(crew_kwargs, config)
+            self.embedder_config = crew_kwargs.get("embedder")
+        elif provider == "ollama":
+            crew_kwargs = self._configure_ollama_embedder(crew_kwargs, config)
+            self.embedder_config = crew_kwargs.get("embedder")
+        elif provider == "google":
+            crew_kwargs = await self._configure_google_embedder(crew_kwargs, config)
+            self.embedder_config = crew_kwargs.get("embedder")
+        elif provider != "databricks":
+            # Other providers - pass through config as-is
+            crew_kwargs["embedder"] = embedder_config
+            logger.info(
+                "Configured CrewAI embedder for %s: %s",
+                provider,
+                _loggable_embedder(crew_kwargs["embedder"]),
+            )
+            self.embedder_config = crew_kwargs.get("embedder")
+
+        logger.info(
+            "Final embedder configuration: %s",
+            _loggable_embedder(crew_kwargs.get("embedder")),
+        )
+
+        return crew_kwargs, self.custom_embedder, self.embedder_config
+
+    async def _configure_databricks_embedder(
+        self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Any, Any]:
+        """Configure Databricks embedder with custom authentication"""
+        try:
+            from typing import cast
+
+            from src.services.settings.api_keys import ApiKeysService
+            from src.utils.databricks_auth import get_databricks_auth_headers
+
+            # The embedder interface, defined locally rather than imported from
+            # chromadb. chromadb supplied `EmbeddingFunction` (an ABC whose only
+            # abstract method is __call__) plus two type aliases, and dragged in
+            # 31 direct requirements — kubernetes, grpcio, fastapi, hnswlib — for
+            # exactly that. Nothing consumes this object as a chromadb type:
+            # every backend duck-types it (`callable(...)` or
+            # `hasattr(..., "embed_documents")`), so the shape is the contract.
+            Documents = List[str]
+            Embeddings = List[List[float]]
+
+            class EmbeddingFunction:
+                """Callable that turns documents into embeddings."""
+
+                def __call__(self, input: Documents) -> Embeddings:
+                    raise NotImplementedError
+
+            databricks_key = None
+            auth_headers = None
+
+            logger.info("Using unified Databricks auth for embeddings")
+            logger.info(
+                f"User token available: {bool(self.user_token)}, token length: {len(self.user_token) if self.user_token else 0}"
+            )
+
+            from src.utils.databricks_app_auth import (
+                get_model_auth_context,
+                is_installed_model,
+            )
+
+            model_name = config.get("model", "databricks-gte-large-en")
+            installed_model = is_installed_model(model_name)
+            if installed_model:
+                auth = await get_model_auth_context(model_name, group_id=self.group_id)
+                if auth is None:
+                    auth_headers, error = None, "App authentication is unavailable"
+                else:
+                    auth_headers, error = auth.get_headers(), None
+            else:
+                auth_headers, error = await get_databricks_auth_headers(
+                    user_token=self.user_token
+                )
+            if error:
+                logger.warning(f"Unified auth failed, falling back to API key: {error}")
+                # SECURITY: Pass group_id for multi-tenant isolation
+                databricks_key = await ApiKeysService.get_provider_api_key(
+                    "DATABRICKS", group_id=self.group_id
+                )
+
+            if not databricks_key and not auth_headers:
+                logger.warning(
+                    "No Databricks API key found, falling back to default embedder"
+                )
+                return crew_kwargs, None, None
+
+            # Get Databricks endpoint
+            databricks_endpoint = (
+                DatabricksAppInstallation.from_env().host
+                if installed_model
+                else await self._get_databricks_endpoint()
+            )
+            if not databricks_endpoint:
+                logger.error(
+                    "No Databricks endpoint found for embeddings - cannot create embedder"
+                )
+                raise Exception("No Databricks workspace URL available for embeddings")
+
+            model_name = config.get("model", "databricks-gte-large-en")
+
+            # Create custom embedding function
+            class DatabricksEmbeddingFunction(EmbeddingFunction):
+                def __init__(
+                    self,
+                    api_key: Optional[str] = None,
+                    api_base: Optional[str] = None,
+                    model: Optional[str] = None,
+                    auth_headers: Optional[dict] = None,
+                    user_token: Optional[str] = None,
+                ):
+                    self.api_key = api_key
+                    self.api_base = cast(str, api_base)  # always passed below
+                    self.model = cast(str, model)  # always passed below
+                    self.auth_headers = auth_headers
+                    self.user_token = user_token
+
+                def __call__(self, input: Documents) -> Embeddings:
+                    try:
+                        import requests
+
+                        workspace_url = (
+                            DatabricksURLUtils.extract_workspace_from_endpoint(
+                                self.api_base
+                            )
+                        )
+                        # AI Gateway on  -> /ai-gateway/mlflow/v1/embeddings (model in body)
+                        # AI Gateway off -> /serving-endpoints/<model>/invocations (model in path)
+                        endpoint_url, body_model = (
+                            DatabricksURLUtils.construct_embeddings_url(
+                                workspace_url, self.model
+                            )
+                        )
+
+                        if not endpoint_url:
+                            raise Exception("Failed to construct valid endpoint URL")
+
+                        logger.debug(
+                            f"Databricks embedding endpoint URL: {endpoint_url}"
+                        )
+                        payload: dict = {
+                            "input": input if isinstance(input, list) else [input]
+                        }
+                        if body_model:
+                            payload["model"] = body_model
+
+                        # Prepare headers - prioritize user token for OBO auth
+                        if is_installed_model(self.model):
+                            from src.utils.databricks_app_auth import get_app_headers
+
+                            headers = get_app_headers()
+                        elif self.user_token:
+                            headers = {
+                                "Authorization": f"Bearer {self.user_token}",
+                                "Content-Type": "application/json",
+                            }
+                            logger.debug("Using OBO token for embeddings")
+                        elif self.auth_headers:
+                            headers = self.auth_headers.copy()
+                        elif self.api_key:
+                            headers = {
+                                "Authorization": f"Bearer {self.api_key}",
+                                "Content-Type": "application/json",
+                            }
+                        else:
+                            logger.error(
+                                "No authentication method available for Databricks embeddings"
+                            )
+                            raise Exception("No authentication method available")
+
+                        # Add User-Agent header for Databricks API attribution
+                        from src.utils.telemetry import (
+                            KasalProduct,
+                            get_user_agent_header,
+                        )
+
+                        headers.update(get_user_agent_header(KasalProduct.EMBEDDING))
+
+                        response = requests.post(
+                            endpoint_url, headers=headers, json=payload, timeout=30
+                        )
+                        if response.status_code == 200:
+                            result = response.json()
+                            if "data" in result and len(result["data"]) > 0:
+                                embeddings = [
+                                    item.get("embedding", item)
+                                    for item in result["data"]
+                                ]
+
+                                if result.get("usage"):
+                                    _queue_embedding_usage(
+                                        result["usage"],
+                                        self.model,
+                                        workspace_url,
+                                        self.user_token or self.api_key,
+                                    )
+
+                                return cast(Embeddings, embeddings)
+                            else:
+                                raise Exception(f"Unexpected response format: {result}")
+                        else:
+                            raise Exception(
+                                f"Embedding API error {response.status_code}: {response.text}"
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error in Databricks embedding function: {e}")
+                        raise e
+
+            # Construct URLs (encodes the workspace; the embedding function re-derives
+            # the workspace and picks serving-endpoints vs AI Gateway per the toggle)
+            api_base_url = DatabricksURLUtils.construct_llm_base_url(
+                databricks_endpoint
+            )
+            if not api_base_url:
+                logger.error(
+                    f"Failed to construct LLM base URL from workspace: {databricks_endpoint}"
+                )
+                raise Exception("Failed to construct LLM base URL")
+
+            logger.info(
+                f"Databricks embedding api_base: {api_base_url}, model: {model_name}"
+            )
+
+            databricks_embedder = DatabricksEmbeddingFunction(
+                api_key=databricks_key,
+                api_base=api_base_url,
+                model=model_name,
+                auth_headers=auth_headers,
+                user_token=self.user_token,
+            )
+
+            embedder_config = {
+                "provider": "custom",
+                "config": {"embedder": databricks_embedder},
+            }
+
+            logger.info(
+                "Databricks custom embedder stored for DEFAULT backend manual memory configuration"
+            )
+
+            return crew_kwargs, databricks_embedder, embedder_config
+
+        except Exception as e:
+            logger.error(f"Error configuring Databricks embedder: {e}")
+            return crew_kwargs, None, None
+
+    async def _get_databricks_endpoint(self) -> Optional[str]:
+        """Get Databricks endpoint from unified auth, database, or environment"""
+        import os
+
+        databricks_endpoint: Optional[str] = ""
+
+        # Try unified auth first (pass user_token for OBO auth)
+        try:
+            from src.utils.databricks_auth import get_auth_context
+
+            auth = await get_auth_context(user_token=self.user_token)
+            if auth and auth.workspace_url:
+                databricks_endpoint = auth.workspace_url
+                logger.info(
+                    f"Using workspace URL from unified {auth.auth_method} auth for embeddings: {databricks_endpoint}"
+                )
+            else:
+                logger.warning(f"get_auth_context() returned: {auth}")
+        except Exception as e:
+            logger.error(
+                f"Failed to get unified auth for embeddings: {e}", exc_info=True
+            )
+
+        # If no endpoint, get from database
+        if not databricks_endpoint:
+            try:
+                from src.services.databricks.workspace.config_provider import (
+                    DatabricksConfigProvider,
+                )
+
+                db_config = await DatabricksConfigProvider.get()
+                if db_config and db_config.workspace_url:
+                    databricks_endpoint = DatabricksURLUtils.normalize_workspace_url(
+                        db_config.workspace_url
+                    )
+                    if databricks_endpoint:
+                        logger.info(
+                            f"Using Databricks workspace URL from database: {databricks_endpoint}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"Could not get Databricks workspace URL from database: {e}"
+                )
+
+        # Fallback: check DATABRICKS_HOST environment variable directly
+        # This is set by Databricks Apps runtime and may not have https:// prefix
+        if not databricks_endpoint:
+            host = os.environ.get("DATABRICKS_HOST")
+            if host:
+                host = host.rstrip("/")
+                if not host.startswith("https://"):
+                    host = f"https://{host}"
+                databricks_endpoint = host
+                logger.info(
+                    f"Using workspace URL from DATABRICKS_HOST env var for embeddings: {databricks_endpoint}"
+                )
+
+        return databricks_endpoint
+
+    async def _configure_openai_embedder(
+        self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Configure OpenAI embedder"""
+        try:
+            from src.services.settings.api_keys import ApiKeysService
+
+            # SECURITY: Pass group_id for multi-tenant isolation
+            openai_key = await ApiKeysService.get_provider_api_key(
+                "OPENAI", group_id=self.group_id
+            )
+            if openai_key:
+                crew_kwargs["embedder"] = {
+                    "provider": "openai",
+                    "config": {
+                        "api_key": openai_key,
+                        "model": config.get("model", "text-embedding-3-large"),
+                    },
+                }
+                logger.info(
+                    "Configured CrewAI embedder for OpenAI: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
+                )
+        except Exception as e:
+            logger.error(f"Error configuring OpenAI embedder: {e}")
+
+        return crew_kwargs
+
+    def _configure_ollama_embedder(
+        self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Configure Ollama embedder"""
+        from src.services.llm.endpoints import (
+            DEFAULT_OLLAMA_EMBED_MODEL,
+            ollama_base_url,
+        )
+
+        crew_kwargs["embedder"] = {
+            "provider": "ollama",
+            "config": {
+                "model": config.get("model", DEFAULT_OLLAMA_EMBED_MODEL),
+                # The embedder's own url, else the Ollama host from
+                # services/llm/endpoints. chromadb's OllamaEmbeddingFunction
+                # normalizes a trailing /api/embeddings, so either form works.
+                "url": config.get("url") or ollama_base_url(),
+            },
+        }
+        logger.info(
+            "Configured CrewAI embedder for Ollama: %s",
+            _loggable_embedder(crew_kwargs["embedder"]),
+        )
+        return crew_kwargs
+
+    async def _configure_google_embedder(
+        self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Configure Google (Gemini) embedder"""
+        try:
+            from src.schemas.model_provider import ModelProvider
+            from src.services.settings.api_keys import ApiKeysService
+
+            # SECURITY: Pass group_id for multi-tenant isolation
+            google_key = await ApiKeysService.get_provider_api_key(
+                ModelProvider.GEMINI, group_id=self.group_id
+            )
+            if google_key:
+                crew_kwargs["embedder"] = {
+                    "provider": "google",
+                    "config": {
+                        "api_key": google_key,
+                        "model": config.get("model", "text-embedding-004"),
+                    },
+                }
+                logger.info(
+                    "Configured CrewAI embedder for Google: %s",
+                    _loggable_embedder(crew_kwargs["embedder"]),
+                )
+        except Exception as e:
+            logger.error(f"Error configuring Google embedder: {e}")
+
+        return crew_kwargs

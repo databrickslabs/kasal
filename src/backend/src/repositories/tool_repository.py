@@ -1,0 +1,249 @@
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.base_repository import BaseRepository
+from src.models.tool import Tool
+
+#: Ids below this are reserved for the tools ``seeds/tools.py`` ships, which it
+#: writes with explicit ids. Every other row (a workspace's copy, credentials
+#: or custom tool) gets an id at or above it, so a tool a later release adds
+#: never finds its id taken.
+TOOL_ID_FLOOR = 10_000
+
+
+class ToolRepository(BaseRepository[Tool]):
+    """
+    Repository for Tool model with custom query methods.
+    Inherits base CRUD operations from BaseRepository.
+    """
+
+    def __init__(self, session: AsyncSession):
+        """
+        Initialize the repository with session.
+
+        Args:
+            session: SQLAlchemy async session
+        """
+        super().__init__(Tool, session)
+
+    async def create(self, obj_in: Dict[str, object]) -> Tool:
+        """Insert a tool row, with an id at or above :data:`TOOL_ID_FLOOR`.
+
+        The id is explicit, the same on SQLite and PostgreSQL, so no row
+        created here depends on where a database sequence happens to be.
+        """
+        if obj_in.get("id") is None:
+            top = (await self.session.execute(select(func.max(self.model.id)))).scalar()
+            obj_in = {**obj_in, "id": max(TOOL_ID_FLOOR, (top or 0) + 1)}
+        return await super().create(obj_in)
+
+    async def find_by_ids(self, tool_ids: List[int]) -> List[Tool]:
+        """Resolve an execution's already-selected catalogue IDs in batches."""
+        ids = list(dict.fromkeys(tool_ids))
+        tools: List[Tool] = []
+        for start in range(0, len(ids), 500):
+            result = await self.session.execute(
+                select(self.model).where(self.model.id.in_(ids[start : start + 500]))
+            )
+            tools.extend(result.scalars().all())
+        return tools
+
+    async def find_by_title(
+        self, title: str, group_id: Optional[str] = None
+    ) -> Optional[Tool]:
+        """The tool ``title`` resolves to for one teamspace.
+
+        That teamspace's own row when ``group_id`` is given and one exists, else
+        the global row. Nothing else is returned. Without ``group_id`` it
+        is the global row only.
+        """
+        scope: ColumnElement[bool] = self.model.group_id.is_(None)
+        if group_id:
+            scope = scope | (self.model.group_id == group_id)
+        query = (
+            select(self.model)
+            .where((self.model.title == title) & scope)
+            .order_by(self.model.group_id.is_(None), self.model.id)
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def find_by_title_and_group(
+        self, title: str, group_id: str
+    ) -> Optional[Tool]:
+        """
+        Find a tool by title and group_id.
+
+        Args:
+            title: Tool title to search for
+            group_id: Group ID to filter by
+
+        Returns:
+            Tool if found, else None
+        """
+        query = (
+            select(self.model)
+            .where((self.model.title == title) & (self.model.group_id == group_id))
+            .order_by(self.model.id)
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def find_enabled(self) -> List[Tool]:
+        """
+        Find all enabled tools.
+
+        Returns:
+            List of enabled tools
+        """
+        query = select(self.model).where(self.model.enabled == True)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def find_base_by_title(self, title: str) -> Optional[Tool]:
+        """
+        Find the base (global) tool by title (group_id is NULL).
+        """
+        return await self.find_by_title(title)
+
+    async def toggle_enabled(self, tool_id: int) -> Optional[Tool]:
+        """
+        Toggle the enabled status of a tool.
+
+        Args:
+            tool_id: ID of the tool to toggle
+
+        Returns:
+            Updated tool if found, else None
+        """
+        try:
+            tool = await self.get(tool_id)
+            if not tool:
+                return None
+
+            # Toggle the enabled status
+            tool.enabled = not tool.enabled
+            await self.session.flush()
+            await self.session.refresh(tool)
+            return tool
+        except Exception as e:
+            # Log the error and rollback
+            import logging
+
+            logging.error(f"Error in toggle_enabled for tool ID {tool_id}: {str(e)}")
+            await self.session.rollback()
+            raise
+
+    async def update_configuration_by_title(
+        self, title: str, config: Dict[str, Any]
+    ) -> Optional[Tool]:
+        """
+        Update configuration for a tool identified by its title.
+
+        Args:
+            title: Title of the tool to update
+            config: New configuration dictionary
+
+        Returns:
+            Updated Tool object if found and updated, else None
+        """
+        try:
+            tool = await self.find_by_title(title)
+            if not tool:
+                return None
+
+            tool.config = config
+            await self.session.flush()
+            await self.session.refresh(tool)
+            return tool
+        except Exception as e:
+            # Log the error and rollback
+            import logging
+
+            logging.error(
+                f"Error in update_configuration_by_title for {title}: {str(e)}"
+            )
+            await self.session.rollback()
+            raise
+
+    async def update_configuration_for_title_and_group(
+        self, title: str, group_id: str, config: Dict[str, Any]
+    ) -> Optional[Tool]:
+        """
+        Update configuration for a tool by title scoped to a specific group.
+        If a tool with (title, group_id) exists, update it; otherwise return None.
+        """
+        try:
+            tool = await self.find_by_title_and_group(title, group_id)
+            if not tool:
+                return None
+            tool.config = config
+            await self.session.flush()
+            await self.session.refresh(tool)
+            return tool
+        except Exception as e:
+            import logging
+
+            logging.error(
+                f"Error in update_configuration_for_title_and_group for {title}/{group_id}: {str(e)}"
+            )
+            await self.session.rollback()
+            raise
+
+    async def enable_all(self) -> List[Tool]:
+        """
+        Enable all tools in the database.
+
+        Returns:
+            List of all tools after enabling them.
+        """
+        try:
+            # Update all tools where enabled is False to True
+            stmt = (
+                update(self.model)
+                .where(self.model.enabled == False)
+                .values(enabled=True)
+            )
+            await self.session.execute(stmt)
+            await self.session.flush()
+
+            # Return all tools (now enabled)
+            return await self.list()
+        except Exception as e:
+            # Log the error and rollback
+            import logging
+
+            logging.error(f"Error in enable_all: {str(e)}")
+            await self.session.rollback()
+            raise
+
+    async def disable_all(self) -> List[Tool]:
+        """
+        Disable all tools in the database.
+
+        Returns:
+            List of all tools after disabling them.
+        """
+        try:
+            # Update all tools where enabled is True to False
+            stmt = (
+                update(self.model)
+                .where(self.model.enabled == True)
+                .values(enabled=False)
+            )
+            await self.session.execute(stmt)
+            await self.session.flush()
+
+            # Return all tools (now disabled)
+            return await self.list()
+        except Exception as e:
+            # Log the error and rollback
+            import logging
+
+            logging.error(f"Error in disable_all: {str(e)}")
+            await self.session.rollback()
+            raise

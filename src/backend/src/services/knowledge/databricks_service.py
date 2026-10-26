@@ -1,0 +1,757 @@
+"""
+Databricks Knowledge Source Service
+"""
+
+import asyncio
+import hashlib
+import io
+import logging
+import os
+import tempfile
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import KasalError, UnprocessableEntityError
+from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
+
+logger = logging.getLogger(__name__)
+
+# SECURITY: cap knowledge-file uploads so a single request cannot buffer an
+# unbounded amount of data into memory (DoS). Enforced via Content-Length up
+# front when available, with a post-read backstop.
+MAX_KNOWLEDGE_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+class DatabricksKnowledgeService:
+    """Service for managing knowledge files in Databricks Volumes."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        group_id: str,
+        created_by_email: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ):
+        """
+        Initialize the Databricks Knowledge Service.
+
+        Args:
+            session: Database session
+            group_id: Group ID for tenant isolation
+            created_by_email: Email of the user
+            user_token: Optional user token for OBO authentication
+        """
+        self.session = session
+        # Databricks config belongs to the databricks domain, so it comes from
+        # DatabricksService rather than a repository built here. Nothing in this class
+        # currently reads it — the old DatabricksConfigRepository attribute was
+        # constructed and never used — but the seam is kept so a future config read
+        # goes through the owning service instead of reintroducing the repository.
+        from src.services.databricks.workspace.service import DatabricksService
+
+        self.databricks_service = DatabricksService(session, group_id=group_id)
+        self.volume_repository = DatabricksVolumeRepository(
+            user_token=user_token, group_id=group_id
+        )
+        self.group_id = group_id
+        self.created_by_email = created_by_email
+        self.user_token = user_token
+
+        # Initialize specialized services (proper separation of concerns)
+        from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
+        from src.services.knowledge.search_service import KnowledgeSearchService
+
+        self.embedding_service = KnowledgeEmbeddingService(session, group_id)
+        self.search_service = KnowledgeSearchService(session, group_id)
+
+    async def upload_knowledge_file(
+        self,
+        file: UploadFile,
+        execution_id: str,
+        group_id: str,
+        volume_config: Optional[Dict[str, Any]] = None,
+        agent_ids: Optional[List[str]] = None,
+        user_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Ingest an uploaded knowledge file: stage it in a local temp file,
+        embed its content into the local knowledge store (knowledge_embeddings
+        — SQLite locally, Lakebase pgvector when deployed) stamped with the
+        uploading user, then delete the temp file. No Databricks Volume is
+        involved and no raw upload is retained.
+
+        Args:
+            file: The uploaded file
+            execution_id: Execution ID for scoping
+            group_id: Group ID for tenant isolation
+            volume_config: Legacy volume configuration (only selected_agents
+                is still read; the volume itself is no longer used for uploads)
+            agent_ids: Optional list of agent IDs that can access this knowledge source
+            user_token: Optional user token for OBO authentication
+
+        Returns:
+            Upload response with the logical file path and embedding metadata
+        """
+        logger.info("=" * 60)
+        logger.info("STARTING KNOWLEDGE FILE UPLOAD")
+
+        # CRITICAL DEBUG: Log what agent_ids we receive in the service
+        logger.info(
+            f"[SERVICE] 🔍 AGENT_IDS RECEIVED: {agent_ids} (type: {type(agent_ids)}, length: {len(agent_ids) if agent_ids else 0})"
+        )
+
+        if agent_ids:
+            logger.info(f"[SERVICE] ✅ Agent IDs detected: {agent_ids}")
+        else:
+            logger.warning(
+                "[SERVICE] ⚠️ No agent_ids provided - this will result in null agent_ids in vector index!"
+            )
+
+        logger.info(f"File: {file.filename}")
+        logger.info(f"Execution ID: {execution_id}")
+        logger.info(f"Group ID: {group_id}")
+        logger.info(f"Volume Config: {volume_config}")
+        logger.info("=" * 60)
+
+        try:
+            # SECURITY: reject oversized uploads up front (via Content-Length when
+            # available) so we never buffer an unbounded body into memory.
+            _max = MAX_KNOWLEDGE_UPLOAD_BYTES
+            declared_size = getattr(file, "size", None)
+            if isinstance(declared_size, int) and declared_size > _max:
+                raise UnprocessableEntityError(
+                    detail=f"File exceeds the {_max // (1024 * 1024)} MB upload limit"
+                )
+
+            # Read file content
+            content = await file.read()
+            file_size = len(content)
+            # Backstop in case Content-Length was absent or understated.
+            if file_size > _max:
+                raise UnprocessableEntityError(
+                    detail=f"File exceeds the {_max // (1024 * 1024)} MB upload limit"
+                )
+            logger.info(f"File size: {file_size} bytes ({file_size/1024:.2f} KB)")
+
+            # TTL sweep: purge expired knowledge BEFORE adding more, so the
+            # embedding store never bloats (knowledge_ttl_days(); non-fatal).
+            await self.embedding_service.purge_expired(user_token=user_token)
+
+            # Stage the raw upload in a LOCAL TEMP FILE — its content is
+            # embedded into the local knowledge store (knowledge_embeddings:
+            # SQLite locally, Lakebase pgvector when deployed), stamped with
+            # the uploading user for per-user isolation, and the temp file is
+            # deleted as soon as the embedding attempt finishes. No Databricks
+            # Volume is required and no raw upload is retained anywhere.
+            safe_name = os.path.basename(file.filename or "upload.txt") or "upload.txt"
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                prefix="kasal-knowledge-", suffix=f"-{safe_name}"
+            )
+            logger.info(f"[UPLOAD] Staged upload in temp file: {tmp_path}")
+            try:
+                # Off the event loop: PDF and workbook parsing is CPU-bound.
+                extraction = await asyncio.to_thread(
+                    self._stage_and_extract, tmp_fd, tmp_path, safe_name, content
+                )
+                if extraction.get("status") != "success":
+                    raise UnprocessableEntityError(
+                        detail=extraction.get(
+                            "message", f"Could not extract text from '{safe_name}'"
+                        )
+                    )
+
+                # Logical path — the stable identity of the embedded chunks.
+                # The crew's tool_configs carry it and the search tool
+                # soft-filters by its basename; no physical file lives here.
+                file_path = f"uploads/{group_id}/{execution_id}/{safe_name}"
+
+                # Re-uploading the SAME bytes is a no-op. Without this, three
+                # uploads of one PDF stored three copies of all 110 chunks, and
+                # a 15-result search came back with 4 distinct passages — the
+                # rest were the same text again. Nothing malfunctioned; the
+                # embed simply appended, and nothing deduplicated afterwards.
+                #
+                # Hashing the EXTRACTED TEXT rather than the raw bytes: a PDF
+                # re-exported by the same tool differs byte-for-byte while
+                # saying the same thing, and re-embedding it would cost the
+                # same duplication for no new content.
+                content_hash = hashlib.sha256(
+                    (extraction.get("content") or "").encode("utf-8")
+                ).hexdigest()
+
+                unchanged = await self.embedding_service.file_already_embedded(
+                    file_path=file_path,
+                    content_hash=content_hash,
+                    created_by=self.created_by_email,
+                    user_token=user_token,
+                )
+                # `is True`, not truthiness: skipping the embed is the
+                # destructive reading of an ambiguous answer — the upload
+                # silently becomes a no-op and the user's file is never stored.
+                # Only an unambiguous True earns that.
+                if unchanged is True:
+                    logger.info(
+                        f"[UPLOAD] {safe_name} is already embedded with identical "
+                        "content — skipping re-embedding."
+                    )
+                    return {
+                        "status": "success",
+                        "unchanged": True,
+                        "path": file_path,
+                        "filename": safe_name,
+                        "size": file_size,
+                        "execution_id": execution_id,
+                        "uploaded_at": datetime.utcnow().isoformat(),
+                        "message": f"'{safe_name}' was already uploaded; reusing it.",
+                    }
+
+                # Changed content under the same name REPLACES the old chunks.
+                # Keeping both would leave the model retrieving passages from a
+                # version of the document the user has replaced — worse than a
+                # duplicate, because it is silently wrong.
+                replaced = await self.embedding_service.forget_file(
+                    file_path=file_path,
+                    created_by=self.created_by_email,
+                    user_token=user_token,
+                )
+                if replaced:
+                    logger.info(
+                        f"[UPLOAD] {safe_name} changed — removed {replaced} stale "
+                        "chunk(s) before re-embedding."
+                    )
+
+                logger.info(f"[UPLOAD] Starting embedding for file: {file_path}")
+                embedding_result = await self.embedding_service.embed_file(
+                    file_path=file_path,
+                    file_content=extraction.get("content", ""),
+                    execution_id=execution_id,
+                    agent_ids=agent_ids,
+                    user_token=user_token,
+                    created_by=self.created_by_email,
+                    content_hash=content_hash,
+                )
+            finally:
+                # The raw upload never outlives the embedding attempt.
+                try:
+                    os.unlink(tmp_path)
+                    logger.info(f"[UPLOAD] Deleted temp file: {tmp_path}")
+                except OSError:
+                    pass
+
+            if embedding_result.get("status") != "success":
+                # Embedding IS the upload now — nothing was persisted, so the
+                # caller (and the UI) must see a real failure.
+                raise UnprocessableEntityError(
+                    detail=(
+                        f"Failed to embed '{safe_name}': "
+                        f"{embedding_result.get('message') or embedding_result.get('reason') or 'unknown error'}"
+                    )
+                )
+
+            logger.info(
+                f"[UPLOAD] Embedding completed with result: {embedding_result.get('status')}"
+            )
+
+            # Ensure DatabricksKnowledgeSearchTool (id 36) is in this workspace's
+            # tool catalog (group_tools), so it shows in the task tool picker AND
+            # the crew can resolve it. The frontend only toggles the GLOBAL tool
+            # flag; without a group_tools mapping, get_enabled_tools_for_group
+            # excludes it and the agent gets "Tool not found in available tools".
+            await self._ensure_knowledge_tool_in_group(group_id)
+
+            response = {
+                "status": "success",
+                "path": file_path,
+                "filename": safe_name,
+                "size": file_size,
+                "execution_id": execution_id,
+                "group_id": group_id,
+                "created_by": self.created_by_email,
+                "uploaded_at": datetime.now().isoformat(),
+                "selected_agents": (volume_config or {}).get("selected_agents", []),
+                "embedding_result": embedding_result,
+                "upload_method": "temp_embed",
+                "message": (
+                    f"File {safe_name} embedded successfully "
+                    f"({embedding_result.get('chunks_embedded', 0)} chunks); "
+                    "the temporary upload was deleted"
+                ),
+            }
+
+            logger.info(f"Returning unified response: {response}")
+            return response
+
+        except KasalError:
+            # Already carries an HTTP status + actionable detail — let the global
+            # handler map it so the client (and the UI) see the real error.
+            raise
+        except Exception as e:
+            logger.error("=" * 60)
+            logger.error(f"ERROR in upload_knowledge_file: {str(e)}")
+            logger.error("=" * 60, exc_info=True)
+            raise KasalError(detail=f"Knowledge upload failed: {e}") from e
+
+    # Tool id of DatabricksKnowledgeSearchTool (see src/seeds/tools.py).
+    _KNOWLEDGE_SEARCH_TOOL_ID = 36
+
+    async def _ensure_knowledge_tool_in_group(self, group_id: str) -> None:
+        """Register DatabricksKnowledgeSearchTool in the workspace's tool catalog.
+
+        Crews resolve tools via get_enabled_tools_for_group, which requires a
+        group_tools mapping — not just the global tools.enabled flag. Without
+        this, an uploaded knowledge file's task references a tool the crew can't
+        instantiate ("Tool not found in available tools"). Idempotent (upsert);
+        non-fatal so a catalog hiccup never fails the upload.
+        """
+        if not group_id:
+            return
+        try:
+            from src.services.groups.group_tools import GroupToolService
+            from src.utils.user_context import GroupContext
+
+            group_context = GroupContext(group_ids=[group_id])
+            service = GroupToolService(self.session)
+            await service.add_tool_to_group(
+                self._KNOWLEDGE_SEARCH_TOOL_ID,
+                group_context,
+                defaults={"enabled": True},
+            )
+            # Guarantee the mapping is enabled even if it pre-existed disabled.
+            await service.set_group_tool_enabled(
+                self._KNOWLEDGE_SEARCH_TOOL_ID, True, group_context
+            )
+            try:
+                await self.session.commit()
+            except Exception:
+                pass
+            logger.info(
+                f"Ensured DatabricksKnowledgeSearchTool in tool catalog for group {group_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Could not register knowledge search tool for group {group_id}: {e}"
+            )
+
+    def _stage_and_extract(
+        self, tmp_fd: int, tmp_path: str, filename: str, content: bytes
+    ) -> Dict[str, str]:
+        """Write the upload to its temp file, read it back, extract its text.
+
+        Blocking file I/O plus pdfminer/openpyxl parsing, which is pure-Python
+        and CPU-bound: seconds for a 300-page PDF or a large workbook. The
+        caller runs this in a worker thread so the one event loop keeps serving
+        every other request while it does.
+        """
+        with os.fdopen(tmp_fd, "wb") as staged:
+            staged.write(content)
+        with open(tmp_path, "rb") as staged:
+            raw_bytes = staged.read()
+        return self._extract_text_content(filename, raw_bytes)
+
+    def _extract_text_content(self, filename: str, content: Any) -> Dict[str, Any]:
+        """Extract embeddable text from raw file content (bytes or str).
+
+        PDFs go through pdfminer.six text extraction; everything else is
+        decoded as UTF-8 (lossy fallback). Shared by the temp-file upload
+        path and the legacy volume read path so both extract identically.
+
+        Returns:
+            {"status": "success", "content": str} or {"status": "error", "message": str}
+        """
+        lower_name = (filename or "").lower()
+        if lower_name.endswith(".pdf"):
+            logger.info("Detected PDF file, extracting text content")
+            try:
+                # pdfminer.six (MIT-licensed) — pure-Python PDF text extraction.
+                from pdfminer.high_level import extract_text
+
+                raw = (
+                    content
+                    if isinstance(content, bytes)
+                    else str(content).encode("utf-8")
+                )
+                text_content = extract_text(io.BytesIO(raw)) or ""
+            except ImportError:
+                # Fail loudly instead of embedding a placeholder as "success":
+                # otherwise the table gets one junk chunk and the real content
+                # is silently dropped.
+                logger.error("pdfminer.six not installed — cannot extract PDF text")
+                return {
+                    "status": "error",
+                    "message": (
+                        "PDF text extraction requires the 'pdfminer.six' package "
+                        "(MIT). Install it (pip install pdfminer.six) and re-upload."
+                    ),
+                }
+            except Exception as pdf_error:
+                logger.error(f"Error extracting PDF text: {pdf_error}", exc_info=True)
+                return {
+                    "status": "error",
+                    "message": f"Could not extract text from PDF '{filename}': {pdf_error}",
+                }
+
+            if not text_content.strip():
+                logger.warning(f"No extractable text found in PDF: {filename}")
+                return {
+                    "status": "error",
+                    "message": (
+                        f"No extractable text found in '{filename}'. It may be a "
+                        "scanned / image-only PDF that needs OCR."
+                    ),
+                }
+
+            logger.info(f"Extracted {len(text_content)} chars from PDF")
+            return {"status": "success", "content": text_content}
+
+        if lower_name.endswith((".xlsx", ".xls")):
+            return self._extract_spreadsheet_text(filename, content)
+
+        # For non-PDF files, decode as text
+        if isinstance(content, bytes):
+            try:
+                content = content.decode("utf-8")
+            except UnicodeDecodeError:
+                logger.warning(f"Failed to decode {filename} as UTF-8")
+                content = content.decode("utf-8", errors="ignore")
+        return {"status": "success", "content": content}
+
+    def _extract_spreadsheet_text(self, filename: str, content: Any) -> Dict[str, Any]:
+        """Extract embeddable text from an Excel workbook (.xlsx / .xls).
+
+        Each sheet is rendered as CSV-like rows (``Sheet: <name>`` header, then
+        one comma-joined line per row) so the existing text chunker treats it
+        exactly like an uploaded CSV. Binary workbooks would otherwise reach the
+        UTF-8 branch and embed as garbage. openpyxl (already a dependency) reads
+        .xlsx; legacy .xls needs xlrd, which we report clearly if absent.
+        """
+        raw = content if isinstance(content, bytes) else str(content).encode("utf-8")
+        lower_name = (filename or "").lower()
+
+        if lower_name.endswith(".xls"):
+            # Legacy binary .xls — openpyxl cannot read it.
+            try:
+                import xlrd  # type: ignore[import-untyped]
+            except ImportError:
+                logger.error("xlrd not installed — cannot extract legacy .xls text")
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Reading legacy '.xls' files ('{filename}') requires the "
+                        "'xlrd' package. Install it (pip install xlrd) or re-save "
+                        "the file as .xlsx and re-upload."
+                    ),
+                }
+            try:
+                book = xlrd.open_workbook(file_contents=raw)
+            except Exception as xls_err:  # noqa: BLE001
+                logger.error(f"Error reading .xls '{filename}': {xls_err}")
+                return {
+                    "status": "error",
+                    "message": f"Could not read Excel file '{filename}': {xls_err}",
+                }
+            sections: List[str] = []
+            for sheet in book.sheets():
+                lines = [f"Sheet: {sheet.name}"]
+                for row_idx in range(sheet.nrows):
+                    values = [
+                        "" if cell.value is None else str(cell.value)
+                        for cell in sheet.row(row_idx)
+                    ]
+                    if any(v.strip() for v in values):
+                        lines.append(",".join(values))
+                if len(lines) > 1:
+                    sections.append("\n".join(lines))
+            text_content = "\n\n".join(sections)
+        else:
+            # .xlsx via openpyxl (read_only + values_only keeps large sheets cheap)
+            try:
+                import io as _io
+
+                from openpyxl import load_workbook
+
+                workbook = load_workbook(
+                    _io.BytesIO(raw), read_only=True, data_only=True
+                )
+            except Exception as xlsx_err:  # noqa: BLE001
+                logger.error(f"Error reading .xlsx '{filename}': {xlsx_err}")
+                return {
+                    "status": "error",
+                    "message": f"Could not read Excel file '{filename}': {xlsx_err}",
+                }
+            sections = []
+            for worksheet in workbook.worksheets:
+                lines = [f"Sheet: {worksheet.title}"]
+                for row in worksheet.iter_rows(values_only=True):
+                    values = ["" if v is None else str(v) for v in row]
+                    if any(v.strip() for v in values):
+                        lines.append(",".join(values))
+                if len(lines) > 1:
+                    sections.append("\n".join(lines))
+            workbook.close()
+            text_content = "\n\n".join(sections)
+
+        if not text_content.strip():
+            logger.warning(f"No extractable rows found in spreadsheet: {filename}")
+            return {
+                "status": "error",
+                "message": f"No data rows found in '{filename}'.",
+            }
+
+        logger.info(f"Extracted {len(text_content)} chars from spreadsheet: {filename}")
+        return {"status": "success", "content": text_content}
+
+    async def browse_volume_files(
+        self,
+        volume_path: str,
+        group_id: str,
+        execution_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Browse files in a Databricks volume directory using repository pattern.
+
+        Args:
+            volume_path: Volume path in format "catalog.schema.volume" or full path "/Volumes/catalog/schema/volume/path"
+            group_id: Group ID for tenant isolation
+            execution_id: Optional execution ID for scoping
+            user_token: Optional user token for OBO authentication
+
+        Returns:
+            List of files and directories with metadata
+        """
+        logger.info("=" * 60)
+        logger.info("BROWSING VOLUME FILES VIA REPOSITORY")
+        logger.info(f"Volume path: {volume_path}")
+        logger.info(f"Group ID: {group_id}")
+        logger.info(f"Execution ID: {execution_id}")
+        logger.info("=" * 60)
+
+        try:
+            # Parse volume path
+            if volume_path.startswith("/Volumes/"):
+                # Full path format: /Volumes/catalog/schema/volume/optional/path
+                path_parts = volume_path.split("/")
+                if len(path_parts) < 5:
+                    return {
+                        "success": False,
+                        "error": f"Invalid volume path structure: {volume_path}",
+                    }
+                catalog = path_parts[2]
+                schema = path_parts[3]
+                volume = path_parts[4]
+                # Optional subdirectory path
+                subpath = "/".join(path_parts[5:]) if len(path_parts) > 5 else ""
+            else:
+                # Dot notation format: catalog.schema.volume
+                parts = volume_path.split(".")
+                if len(parts) != 3:
+                    return {
+                        "success": False,
+                        "error": f"Invalid volume path format: {volume_path}. Expected 'catalog.schema.volume'",
+                    }
+                catalog, schema, volume = parts
+                # Add group_id and execution_id to path if provided
+                subpath_parts = [group_id]
+                if execution_id:
+                    subpath_parts.append(execution_id)
+                subpath = "/".join(subpath_parts)
+
+            logger.info(
+                f"Parsed - Catalog: {catalog}, Schema: {schema}, Volume: {volume}"
+            )
+            logger.info(f"Subpath: {subpath}")
+
+            # Use repository to list volume contents
+            list_result = await self.volume_repository.list_volume_contents(
+                catalog=catalog, schema=schema, volume_name=volume, path=subpath
+            )
+
+            if not list_result.get("success"):
+                error_msg = list_result.get("error", "Unknown error")
+                logger.error(f"Failed to list volume contents: {error_msg}")
+                return {"success": False, "error": error_msg}
+
+            # Process the files list
+            files = list_result.get("files", [])
+
+            # Get workspace URL for generating Databricks URLs
+            try:
+                from src.utils.databricks_auth import get_auth_context
+
+                auth = await get_auth_context()
+                workspace_url = auth.workspace_url if auth else None
+            except Exception:
+                workspace_url = None
+
+            # Format the response
+            formatted_files = []
+            for file_info in files:
+                file_entry = {
+                    "name": file_info.get("name"),
+                    "path": file_info.get("path"),
+                    "type": file_info.get("type", "file"),  # file or directory
+                    "size": file_info.get("size", 0),
+                    "modified_at": file_info.get("modified_at"),
+                }
+
+                # Add Databricks URL if we have workspace URL
+                if workspace_url and file_entry["path"]:
+                    file_entry["databricks_url"] = (
+                        f"{workspace_url}/explore/data{file_entry['path']}"
+                    )
+
+                formatted_files.append(file_entry)
+
+            logger.info(f"Successfully listed {len(formatted_files)} files/directories")
+
+            return {
+                "success": True,
+                "files": formatted_files,
+                "volume_path": f"{catalog}.{schema}.{volume}",
+                "full_path": f"/Volumes/{catalog}/{schema}/{volume}/{subpath}".rstrip(
+                    "/"
+                ),
+                "count": len(formatted_files),
+            }
+
+        except Exception as e:
+            logger.error(f"Error browsing volume files: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def list_knowledge_files(
+        self, execution_id: str, group_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        List all knowledge files for a specific execution.
+
+        Args:
+            execution_id: Execution ID to list files for
+            group_id: Group ID for tenant isolation
+
+        Returns:
+            List of files with metadata
+        """
+        try:
+            # For now, return an empty list since we're simulating uploads
+            logger.info(
+                f"Listing knowledge files for execution {execution_id}, group {group_id}"
+            )
+
+            # In a real implementation, this would list files from Databricks Volume
+            # For now, return empty list to avoid hanging
+            return []
+
+        except Exception as e:
+            logger.error(f"Error listing knowledge files: {e}")
+            return []
+
+    async def delete_knowledge_file(
+        self,
+        execution_id: str,
+        group_id: str,
+        filename: str,
+        user_token: Optional[str] = None,
+    ) -> bool:
+        """
+        Delete a knowledge file from Databricks Volume using repository pattern.
+
+        Args:
+            execution_id: Execution ID of the file
+            group_id: Group ID for tenant isolation
+            filename: Name of the file to delete
+            user_token: Optional user token for OBO authentication
+
+        Returns:
+            True if deletion was successful
+        """
+        try:
+            # Uploads are no longer persisted anywhere (temp file deleted after
+            # embedding), so "deleting a knowledge file" means deleting its
+            # EMBEDDINGS from the knowledge store (Lakebase pgvector when
+            # active, else the app DB) so the search tool no longer retrieves
+            # its chunks.
+            from src.models.documentation_embedding import KnowledgeEmbedding
+            from src.repositories.documentation_embedding_repository import (
+                DocumentationEmbeddingRepository,
+            )
+            from src.services.knowledge.embedding_session import (
+                ensure_lakebase_doc_table,
+                knowledge_embedding_session,
+            )
+
+            async with knowledge_embedding_session(
+                self.session, group_id, user_token
+            ) as (store_session, is_lakebase):
+                doc_repo = DocumentationEmbeddingRepository(
+                    store_session, model=KnowledgeEmbedding
+                )
+                if is_lakebase:
+                    await ensure_lakebase_doc_table(store_session)
+                deleted_rows = await doc_repo.delete_by_file(
+                    group_id,
+                    execution_id,
+                    filename,
+                    # A user only deletes their OWN uploads (legacy rows with
+                    # no uploader stay group-deletable).
+                    created_by=self.created_by_email,
+                )
+                if not is_lakebase:
+                    await store_session.commit()
+            logger.info(
+                f"Removed {deleted_rows} embedding rows for {filename} (execution {execution_id})"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error deleting knowledge file: {e}", exc_info=True)
+            return False
+
+    async def search_knowledge(
+        self,
+        query: str,
+        group_id: str,
+        execution_id: Optional[str] = None,
+        file_paths: Optional[List[str]] = None,
+        agent_id: Optional[str] = None,
+        limit: int = 5,
+        user_token: Optional[str] = None,
+        created_by: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for knowledge in the Databricks Vector Index.
+
+        This method delegates to KnowledgeSearchService following clean architecture pattern.
+
+        Args:
+            query: The search query
+            group_id: Group ID for tenant isolation
+            execution_id: Optional execution ID for scoping
+            file_paths: Optional list of file paths to filter search
+            agent_id: Optional agent ID for access control filtering
+            limit: Maximum number of results to return
+            user_token: Optional user token for OBO authentication
+
+        Returns:
+            List of search results with content and metadata
+        """
+        # No path resolution needed: uploads use logical paths
+        # (uploads/{group}/{execution}/{name}) and the search service
+        # soft-filters by basename, so bare filenames and full paths both work.
+
+        # Delegate to search service (proper separation of concerns)
+        result = await self.search_service.search(
+            query=query,
+            execution_id=execution_id,
+            file_paths=file_paths,
+            agent_id=agent_id,
+            limit=limit,
+            user_token=user_token,
+            # Per-user isolation: prefer the explicit caller identity, falling
+            # back to the service's own (API-context) user.
+            created_by=created_by or self.created_by_email,
+        )
+
+        return result

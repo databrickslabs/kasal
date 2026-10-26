@@ -1,0 +1,799 @@
+"""
+Seed the tools table with default tool data.
+"""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict
+
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
+
+from src.db.session import async_session_factory
+from src.models.group_tool import GroupTool
+from src.models.tool import Tool
+from src.repositories.tool_repository import TOOL_ID_FLOOR
+from src.seeds.errors import SeederIncomplete
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Tool data as a list of tuples (id, title, description, icon)
+# Only keeping the safe and approved tools
+tools_data = [
+    (
+        6,
+        "Image Generation Tool",
+        "Generates images from text descriptions through an OpenAI-compatible images endpoint. The model is configurable (default gpt-image-1) and so is the endpoint, so a self-hosted or gateway-fronted image model works without code changes. Returns the image as a base64 payload or a URL depending on the model, along with any revised prompt the model produced. Use for illustrations, concept art, diagrams and visual mockups.",
+        "ai",
+    ),
+    (
+        16,
+        "SerperDevTool",
+        "A sophisticated search tool that integrates with the Serper.dev API to perform high-quality web searches and return structured results. It offers customizable search parameters including result count, geographic targeting (country and locale), and location specificity. This tool excels at retrieving current information from the web, making it essential for real-time research, market analysis, and gathering the latest data on any topic.",
+        "development",
+    ),
+    (
+        26,
+        "ScrapeWebsiteTool",
+        "A comprehensive web scraping tool for extracting entire website content and converting it into structured, usable data. It handles various website complexities including JavaScript rendering, authentication, and cookie management to ensure complete content extraction. Ideal for content aggregation, data collection for analysis, competitive research, and building searchable archives of web content.",
+        "web",
+    ),
+    (
+        31,
+        "PerplexityTool",
+        "A powerful search and question-answering tool that leverages the Perplexity AI platform to provide detailed, accurate answers to complex queries. It combines web search capabilities with advanced language processing to generate comprehensive responses with references and citations. Ideal for research tasks, fact-checking, gathering detailed information on specialized topics, and obtaining nuanced explanations of complex subjects.",
+        "search",
+    ),
+    (
+        35,
+        "GenieTool",
+        "A sophisticated database querying tool that enables natural language access to database tables and content. It translates plain language questions into optimized database queries, allowing non-technical users to retrieve complex information from databases without SQL knowledge. Perfect for data analysis, business intelligence applications, and providing database access within conversational interfaces.",
+        "database",
+    ),
+    (
+        71,
+        "AgentBricksTool",
+        "A powerful tool for querying Databricks AgentBricks (Mosaic AI Agent Bricks) endpoints. AgentBricks is Databricks' no-code AI agent builder platform that enables users to create sophisticated AI agents without writing code. This tool provides seamless integration with AgentBricks serving endpoints, allowing Kasal agents to leverage pre-built Databricks AI agents for specialized tasks. It supports full authentication (OBO, PAT, Service Principal), customizable inputs, and execution tracing. Ideal for integrating Databricks-native AI agents into multi-agent workflows, accessing domain-specific agents, and building hybrid AI systems that combine Kasal orchestration with Databricks AgentBricks capabilities.",
+        "databricks",
+    ),
+    (
+        36,
+        "DatabricksKnowledgeSearchTool",
+        "A powerful knowledge search tool that enables semantic search across documents uploaded to Databricks Vector Search. It provides RAG (Retrieval-Augmented Generation) capabilities by searching through indexed documents based on vector similarity. This tool allows agents to access and retrieve relevant information from uploaded knowledge files including PDFs, Word documents, text files, and other document formats. Essential for building context-aware AI applications with access to custom knowledge bases.",
+        "search",
+    ),
+    (
+        96,
+        "Gmail",
+        "Read the user's Gmail inbox through the Databricks-managed Google connection. Supports listing the most recent emails (sender, subject, date, snippet) with optional day-range filtering, and reading a single email's full content by message id. Access is read-only, uses the per-user Google authorization stored on the workspace connection, and requires the running user to have completed the one-time Google login on that connection. Perfect for email summaries, daily briefings, and extracting action items from recent correspondence.",
+        "communication",
+    ),
+    (
+        69,
+        "MCPTool",
+        "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.",
+        "integration",
+    ),
+    (
+        70,
+        "DatabricksJobsTool",
+        "A comprehensive Databricks Jobs management tool using REST API 2.2 for optimal performance. IMPORTANT WORKFLOW: Always use 'get_notebook' action FIRST to analyze job notebooks and understand required parameters before running any job with custom parameters. Available actions: (1) 'list' - List all jobs with optional name/ID filtering and pagination, (2) 'list_my_jobs' - List only jobs created by current user, (3) 'get' - Get detailed job configuration and recent run history, (4) 'get_notebook' - Analyze notebook content to understand parameters and widgets, (5) 'run' - Trigger job execution with custom parameters (dict for notebook/SQL, list for Python), (6) 'monitor' - Track real-time execution status, (7) 'create' - Create new jobs, (8) 'get_output' - Get output/results of a completed run, (9) 'submit' - Submit a one-time run without creating a persistent job. Supports PAT token authentication (note: Jobs API does NOT support OBO scopes). All operations use direct REST API 2.2 calls for fast execution. Destructive actions (delete, cancel, update) are excluded for agent safety.",
+        "database",
+    ),
+    (
+        72,
+        "Power BI Comprehensive Analysis Tool",
+        "Answer ad-hoc business questions by converting natural language queries into DAX queries with intelligent self-correction (up to 5 retries). This tool extracts Power BI model context (measures, tables, relationships), uses LLM to generate DAX from user questions, executes queries via Power BI Execute Queries API, and identifies which reports use the queried measures. Features measure hallucination detection to prevent incorrect data and enhanced logging for debugging. Perfect for data exploration, self-service BI, validating measure logic, and learning DAX through LLM-generated examples. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token. Supports both LLM-powered intelligent DAX generation and keyword-based fallback for simple queries.",
+        "database",
+    ),
+    (
+        73,
+        "Measure Conversion Pipeline",
+        "Universal measure conversion pipeline for converting business metrics between different BI platforms and formats. Supports multiple inbound connectors (Power BI, YAML) and outbound formats (DAX, SQL, UC Metrics, YAML). Perfect for migrating Power BI measures to Databricks SQL, generating UC Metrics from YAML definitions, or converting between different BI platforms. Configure the source format (FROM) and target format (TO) along with authentication credentials in the task configuration. Supports both static configuration (values entered in UI) and dynamic mode (values provided at runtime via execution inputs).",
+        "transform",
+    ),
+    (
+        74,
+        "M-Query Conversion Pipeline",
+        "Extracts M-Query (Power Query) expressions from Power BI semantic models using the Admin API and converts them to Databricks SQL. This tool scans Power BI workspaces to extract table definitions including Value.NativeQuery (embedded SQL), DatabricksMultiCloud.Catalogs connections, Sql.Database connections, and various Table.* transformations. It generates CREATE VIEW statements for Unity Catalog. Supports both rule-based conversion for simple expressions and LLM-powered conversion for complex M-Query transformations. Perfect for migrating Power BI data models to Databricks, extracting SQL logic for documentation, or analyzing M-Query patterns for migration planning. Requires Service Principal with Power BI Admin API permissions.",
+        "transform",
+    ),
+    (
+        75,
+        "Power BI Relationships Tool",
+        "Extracts relationships from Power BI semantic models using the Execute Queries API with INFO.VIEW.RELATIONSHIPS() DAX function. Generates Unity Catalog Foreign Key constraint statements (NOT ENFORCED). IMPORTANT: Requires a Service Principal that is a WORKSPACE MEMBER with dataset read permissions - this is different from the Admin API which requires admin-level permissions. Perfect for migrating Power BI relationships to Unity Catalog as informational FKs, documenting data model relationships, or generating DDL for Databricks tables.",
+        "transform",
+    ),
+    (
+        76,
+        "Power BI Hierarchies Tool",
+        "Extracts hierarchies from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Parses TMDL to extract hierarchy definitions and generates Unity Catalog dimension views with hierarchy_path columns plus metadata table DDL. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for migrating Power BI hierarchies to Databricks as dimension views, documenting drill-down structures, or generating DDL for dimension tables.",
+        "transform",
+    ),
+    (
+        77,
+        "Power BI Field Parameters & Calculation Groups Tool",
+        "Extracts Field Parameters and Calculation Groups from Microsoft Fabric semantic models using the Fabric API getDefinition endpoint (TMDL format). Field Parameters allow users to dynamically switch between measures in reports using NAMEOF() DAX functions. Calculation Groups provide reusable time intelligence calculations (YTD, PY, YoY%, MTD) using SELECTEDMEASURE() patterns. Generates Unity Catalog metadata tables with parameter/calculation item details and SQL patterns for implementing equivalent logic. IMPORTANT: Requires a Service Principal with SemanticModel.ReadWrite.All permissions and works with Fabric workspaces only (not legacy Power BI Service). Perfect for documenting Power BI dynamic measure switching, migrating time intelligence patterns to Databricks, or generating SQL equivalents for calculation group logic.",
+        "transform",
+    ),
+    (
+        78,
+        "Power BI Report References Tool",
+        "Extracts visual-to-measure and visual-to-table references from Microsoft Fabric reports using the Fabric Report Definition API (PBIR format). Shows which measures, tables, and fields are used in each report page and visual. Output formats include markdown (grouped by page, measure, or table), JSON, and matrix view. IMPORTANT: Requires a Service Principal with Report.ReadWrite.All permissions and works only with Fabric reports in PBIR format. Perfect for understanding report dependencies, impact analysis for measure/table changes, identifying unused measures, and documenting report-to-semantic-model relationships.",
+        "transform",
+    ),
+    (
+        79,
+        "Power BI Semantic Model Fetcher",
+        "Extracts and caches semantic model metadata (measures, tables, relationships, columns, sample data, default filters) from Power BI. Uses 3-tier fallback: Fabric TMDL API, Admin Scanner API, or DAX-based extraction. Output is JSON that can be fed directly into the 'Power BI Semantic Model DAX Generator' tool for multi-step workflows. Caches metadata for same-day reuse. Requires Service Principal with SemanticModel.ReadWrite.All permission or user OAuth token.",
+        "database",
+    ),
+    (
+        80,
+        "Power BI Semantic Model DAX Generator",
+        "Generates and executes DAX queries from natural language questions using LLM with self-correction retry loop (up to N retries). Accepts model context JSON from the 'Power BI Semantic Model Fetcher' tool output, or reads from cache as fallback. Features business term mappings, field synonyms, active filter auto-application, and optional visual reference lookup. Requires Service Principal or user OAuth token for DAX execution, plus Databricks LLM endpoint for DAX generation.",
+        "database",
+    ),
+    (
+        81,
+        "Power BI Metadata Reducer",
+        "Intelligently reduces semantic model metadata to only what's relevant for a specific question. Uses fuzzy matching, LLM-powered table/measure selection, and measure dependency resolution to filter the full model context from the Fetcher tool. Produces a focused, reduced JSON that dramatically improves DAX generation accuracy. Place between Fetcher and DAX Generator tools in multi-step workflows. Pass the Fetcher output as 'model_context_json' and the user's business question as 'user_question'.",
+        "database",
+    ),
+    (
+        82,
+        "Power BI DAX Executor",
+        "Executes a pre-configured DAX query directly against a Power BI semantic model via the Execute Queries API. Accepts workspace ID, dataset ID, authentication credentials, and a DAX EVALUATE statement. Returns results as a formatted markdown table or JSON. No LLM required — use when you already have a working DAX query and want to run it against Power BI.",
+        "database",
+    ),
+    (
+        85,
+        "DAX to SQL Translator",
+        "Translate Power BI DAX measure expressions to Databricks Spark SQL using pattern-based rules. Supports 14+ DAX patterns including SUM, SUMX+FILTER, CALCULATE, DIVIDE, COUNTX, AVERAGEX, SAMEPERIODLASTYEAR, and SELECTEDVALUE+SWITCH detection. Input: JSON array of measures with dax_expression fields. Output: JSON array with sql_expr, confidence, and skip_reason per measure. Can be used standalone or as part of the UC Metric View Generator pipeline.",
+        "transform",
+    ),
+    (
+        86,
+        "UC Metric View Generator",
+        "Full pipeline: generates UC Metric View YAML + deploy SQL per fact table. TWO MODES: (1) API mode — provide workspace_id + dataset_id + PBI credentials, and the tool extracts measures, MQuery, and relationships from the PBI API automatically. (2) JSON mode — provide pre-extracted measures_json (from tool 73) + mquery_json (from tool 74). Combines MQuery parsing, DAX translation (14+ patterns + LLM fallback), Kahn's dependency graph, join detection (dim + fact-to-fact), scan data enrichment, and YAML/SQL emission. Optionally accepts PBI relationships JSON (tool 75) for auto-detected enrichment joins and scan data for inline SQL source generation. Output: JSON with YAML + SQL per fact table, plus generation statistics.",
+        "transform",
+    ),
+    (
+        87,
+        "PBI Measure Allocator",
+        "Groups Power BI measures into fact tables with confidence scores based on DAX table column references (Table[Column] patterns). Analyzes DAX expressions to determine which table each measure belongs to. Input: raw measures JSON (from Power BI Connector/Fetcher) + mquery_transpilation JSON (from tool 74). Output: JSON mapping of measure → fact table allocation with confidence (high/medium/low/none). Use before the UC Metric View Generator when measures don't have proposed_allocation fields.",
+        "transform",
+    ),
+    (
+        88,
+        "Metric View Deployer",
+        "Deploy UC Metric View definitions to a Databricks workspace. Accepts YAML specs and deploy SQL from the UC Metric View Generator tool (86). Supports dry_run mode (default) for validation without actual deployment. When dry_run=False, executes CREATE METRIC VIEW SQL via the Databricks SQL Statement API. Input: yaml_specs_json + sql_specs_json from tool 86. Output: deployment status per metric view.",
+        "transform",
+    ),
+    (
+        89,
+        "Config Generator",
+        "Auto-propose pipeline_config.json from PBI extraction output. Takes measures_json, mquery_json, relationships_json, scan_data_json and returns a proposed config with join_key_map, enrichment_joins, switch_decompositions, etc.",
+        "transform",
+    ),
+    (
+        90,
+        "Pipeline Config Generator",
+        "Generate pipeline_config.json by calling 4 PBI APIs directly — no LLM intermediation. Produces all 26 config keys with auto-fill + TODO markers. Requires two Service Principals: non-admin (Execute Queries API, workspace member) and admin (Admin Scanner API, Tenant.Read.All). Output is ready for the UC Metric View Generator (Tool 86).",
+        "transform",
+    ),
+    (
+        91,
+        "Metric View Validator",
+        "Validate generated UC Metric View YAML definitions against original DAX expressions. Compares each translated measure's SQL with the source DAX to detect semantic mismatches, missing filters, or incorrect aggregations. Returns VALID/EQUIVALENT/REVIEW/INVALID per measure. Input: UCMV Generator output (yaml_content) + measures_json.",
+        "transform",
+    ),
+    (
+        92,
+        "Genie Space Generator",
+        "Creates or updates a Databricks Genie Space from deployed UC Metric Views. Configures instructions, join specs, sample questions, and SQL snippets. Idempotent — patches existing space or creates new one. Designed as the final step in the UCMV pipeline: Config Generator → UCMV Generator → UCMV Validator → Genie Space Generator.",
+        "database",
+    ),
+    (
+        93,
+        "UCMV Genie Space Config Generator",
+        "Auto-generates Genie Space configuration from deployed UC Metric Views. Reads ucmv_output (auto-injected from flow) and uses an LLM to produce: text_instructions (business description), sample_questions (natural language questions), example_sqls_json (MEASURE() SQL queries), and join_specs_json (from UCMV join definitions). If genie_config_override is provided (manually uploaded JSON), the LLM step is skipped. Output fields match the Genie Space Generator schema for direct flow injection. Use as the step between Metric View Deployer and Genie Space Generator.",
+        "transform",
+    ),
+    (
+        94,
+        "PBI Visual-UCMV Mapper",
+        "Maps Power BI report visuals to deployed UC Metric View metric views. Takes Power BI Report References (tool 78) output and ucmv_output (from flow injection) and uses an LLM to match each visual's PBI measures to UCMV SQL measures, identify the correct metric view, determine grouping dimensions, and generate executable Databricks SQL with MEASURE() syntax. Output feeds directly into the Dashboard Creator (tool 95). Part of the CI/CD dashboard pipeline: Report References → UCMV Mapper → Dashboard Creator.",
+        "transform",
+    ),
+    (
+        95,
+        "Databricks Dashboard Creator",
+        "Creates Databricks AI/BI (Lakeview) dashboards from visual-to-UCMV mappings. Takes the structured visual mappings from the PBI Visual-UCMV Mapper (tool 94), generates a Lakeview dashboard JSON with correct widget types (bar, line, table, counter), datasets with MEASURE() SQL queries, and page layouts. Calls the Databricks Lakeview REST API to create or update the dashboard and optionally publishes it. Returns the dashboard URL. Final step in the CI/CD dashboard pipeline.",
+        "database",
+    ),
+    (
+        # id 1: the Gmail tool (below) already owns 96; reusing it made a fresh
+        # Lakebase seed fail with a tools_pkey duplicate (both rows INSERT), so
+        # Remote Agent gets its own free id. The factory maps by tool NAME, not
+        # id, so this renumber is safe and no other code references the id.
+        1,
+        "Remote Agent",
+        "Delegate a task to a remote agent over the A2A protocol and wait for its answer. Remote agents are attached per workspace (Configuration > Remote Agents); this tool exposes every enabled one, or a named subset, with each remote's advertised skills listed in its description. Use it to hand work to a specialist agent that lives outside Kasal — a partner team's agent, another Kasal workspace, or any A2A-compliant service. If the remote asks a clarifying question, it comes back with a task_id you can answer by calling the tool again.",
+        "ai",
+    ),
+    (
+        97,
+        "UCMV Re-evaluation",
+        "Finds previously-untranslatable DAX measures that TODAY's improved transpiler can now recover. Replays stored conversion history (no PowerBI API call): for each dataset it compares the capability fingerprint of the original run against the current one, and re-tries ONLY the measures that failed back then. Reports which are now recoverable with their new SQL, the reason they failed before, and how many other measures depend on them. Read-only — proposes re-transpilation candidates, never modifies metric views. Deterministic by default (no LLM tokens); set use_llm=true to also try the LLM-first path. Skips permanent-limitation categories (display artifacts, slicer scalars, prior-year) and measures a reviewer already dismissed. Schedule it or trigger manually after shipping transpiler improvements.",
+        "database",
+    ),
+]
+
+
+def get_tool_configs() -> Dict[str, Dict[str, Any]]:
+    """Return the default configurations for each tool."""
+    return {
+        "6": {
+            "model": "gpt-image-1",
+            "size": "1024x1024",
+            "quality": "auto",
+            "n": 1,
+            "result_as_answer": False,
+        },  # ImageGenerationTool
+        "16": {
+            "n_results": 10,
+            "search_url": "https://google.serper.dev/search",
+            "country": "us",
+            "locale": "en",
+            "location": "",
+            "result_as_answer": False,
+        },  # SerperDevTool
+        "26": {"result_as_answer": False},  # ScrapeWebsiteTool
+        "1": {"result_as_answer": False},  # Remote Agent (A2A)
+        "31": {
+            "model": "sonar",  # Options: sonar, sonar-pro, sonar-deep-research, sonar-reasoning, sonar-reasoning-pro, r1-1776
+            "max_tokens": 2000,  # Max output tokens (default: 2000, documented limit: 4000)
+            "temperature": 0.1,  # Controls randomness (0.0-1.0)
+            "top_p": 0.9,  # Nucleus sampling parameter
+            "top_k": 0,  # Top-k sampling parameter
+            "presence_penalty": 0.0,  # Penalizes new topics (-2.0 to 2.0)
+            "frequency_penalty": 1.0,  # Penalizes repetition (-2.0 to 2.0)
+            "search_recency_filter": "month",  # Options: day, week, month, year
+            "search_domain_filter": [
+                "<any>"
+            ],  # List of domains to search or ["<any>"] for all
+            "return_images": False,  # Include images in response
+            "return_related_questions": False,  # Include related questions
+            "web_search_options": {
+                "search_context_size": "high"  # Options: low, medium, high
+            },
+            "result_as_answer": False,
+        },  # PerplexityTool
+        "35": {
+            "result_as_answer": False,
+            "max_calls": 5,
+            "max_result_rows": 200,
+        },  # GenieTool
+        "71": {
+            "result_as_answer": True,
+            "timeout": 120,  # Timeout in seconds for AgentBricks endpoint queries
+        },  # AgentBricksTool
+        "36": {"result_as_answer": False},  # DatabricksKnowledgeSearchTool
+        "96": {
+            "result_as_answer": False,
+            "connection_name": "system_ai_agent_gmail",  # UC connection serving the per-user Google credential
+            "timeout": 60,
+        },  # Gmail (OBO-only: per-user mailbox, never shared credentials)
+        "69": {
+            "result_as_answer": False,
+            "server_type": "sse",  # Type of MCP server: "sse" or "stdio"
+            "server_url": "http://localhost:8001/sse",  # For SSE server type
+            "command": "uvx",  # For STDIO server type - command to run the MCP server
+            "args": [
+                "--quiet",
+                "pubmedmcp@0.1.3",
+            ],  # For STDIO server type - arguments for the command
+            "env": {},  # For STDIO server type - additional environment variables
+        },  # MCPTool
+        "70": {
+            "result_as_answer": False,
+            "DATABRICKS_HOST": "",  # Databricks workspace URL (e.g., "your-workspace.cloud.databricks.com")
+        },  # DatabricksJobsTool
+        "72": {
+            "result_as_answer": False,
+            "databricks_job_id": None,  # Required: Databricks job ID for Power BI analysis
+            "tenant_id": "",  # Azure AD Tenant ID (required)
+            "client_id": "",  # Azure AD Application/Client ID (required)
+            "workspace_id": "",  # Default Power BI Workspace ID (optional, can be overridden per task)
+            "semantic_model_id": "",  # Default Power BI Semantic Model ID (optional, can be overridden per task)
+            "auth_method": None,  # Authentication method: "service_principal" or "service_account" (None = use UI selection)
+            "username": "",  # Service Account username/UPN (for service_account auth)
+            "password": "",  # Service Account password (for service_account auth)
+        },  # PowerBIAnalysisTool
+        "73": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs)
+            "inbound_connector": "powerbi",  # Source: "powerbi" or "yaml"
+            "outbound_format": "uc_metrics",  # Target: "dax", "sql", "uc_metrics", "yaml"
+            # Power BI inbound configuration
+            "powerbi_semantic_model_id": "",
+            "powerbi_group_id": "",
+            # Service Principal Authentication
+            "powerbi_tenant_id": "",
+            "powerbi_client_id": "",
+            "powerbi_client_secret": "",
+            # Service Account Authentication
+            "powerbi_username": "",
+            "powerbi_password": "",
+            "powerbi_auth_method": None,  # "service_principal", "service_account", or None for auto-detect
+            # User OAuth Authentication
+            "powerbi_access_token": "",
+            # Other Power BI settings
+            "powerbi_info_table_name": "Info Measures",
+            "powerbi_include_hidden": False,
+            "powerbi_filter_pattern": "",
+            # SQL outbound configuration
+            "sql_dialect": "databricks",
+            "sql_include_comments": True,
+            "sql_process_structures": True,
+            # UC Metrics outbound configuration
+            "uc_catalog": "main",
+            "uc_schema": "default",
+            "uc_process_structures": True,
+            # DAX outbound configuration
+            "dax_process_structures": True,
+        },  # Measure Conversion Pipeline
+        "74": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs)
+            # Power BI Admin API configuration
+            "workspace_id": "",
+            "dataset_id": "",
+            # Service Principal Authentication
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
+            # LLM Configuration (optional)
+            "llm_workspace_url": "",
+            "llm_token": "",
+            "llm_model": "databricks-claude-sonnet-4-5",
+            "use_llm": True,
+            # Scan Options
+            "include_lineage": True,
+            "include_datasource_details": True,
+            "include_dataset_schema": True,
+            "include_dataset_expressions": True,
+            "include_hidden_tables": False,
+            "skip_static_tables": True,
+            # Output Options
+            "include_summary": True,
+            # DBSQL Validation (optional — enables classify-first + DAX vs SQL comparison)
+            "databricks_sql_endpoint": "",  # e.g. https://workspace.cloud.databricks.com/api/2.0/mcp/sql
+            "databricks_pat": "",
+            "max_iterations": 10,
+        },  # M-Query Conversion Pipeline
+        "75": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
+            # Power BI Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",
+            # Service Principal Authentication
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
+            # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
+            "target_catalog": "main",
+            "target_schema": "default",
+            # Output Options
+            "include_inactive": False,
+            "skip_system_tables": True,
+        },  # Power BI Relationships Tool
+        "76": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
+            # Power BI / Fabric Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",
+            # Service Principal Authentication
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
+            # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
+            "target_catalog": "main",
+            "target_schema": "default",
+            # Output Options
+            "skip_system_tables": True,
+            "include_hidden": False,
+        },  # Power BI Hierarchies Tool
+        "77": {
+            "result_as_answer": True,
+            "mode": "static",  # Configuration mode: "static" (UI-configured) or "dynamic" (runtime inputs with {placeholders})
+            # Power BI / Fabric Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",
+            # Service Principal Authentication
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Service Account Authentication
+            "username": "",
+            "password": "",
+            "auth_method": None,  # None for auto-detect, or explicit "service_principal"/"service_account"/"user_oauth"
+            # User OAuth Authentication
+            "access_token": "",
+            # Unity Catalog Target (supports {placeholder} syntax in dynamic mode)
+            "target_catalog": "main",
+            "target_schema": "default",
+            # Output Options
+            "output_format": "markdown",  # Output format: "markdown", "json", or "sql"
+            "skip_system_tables": True,
+            "include_hidden": False,
+        },  # Power BI Field Parameters & Calculation Groups Tool
+        "78": {
+            # Mode: "static" = use values below, "dynamic" = resolve from execution_inputs
+            "mode": "static",
+            # Power BI Configuration (supports {placeholder} syntax in dynamic mode)
+            "workspace_id": "",
+            "dataset_id": "",  # Recommended: discovers ALL reports using this dataset
+            "report_id": "",  # Alternative: single specific report (ignored if dataset_id provided)
+            # Service Principal authentication (requires Report.ReadWrite.All)
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            # Output Options
+            "output_format": "markdown",  # Output format: "markdown", "json", or "matrix"
+            "include_visual_details": True,
+            "group_by": "page",  # Group results by: "page", "measure", or "table"
+        },  # Power BI Report References Tool
+        "79": {
+            "result_as_answer": False,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "workspace_id": "",
+            "semantic_model_id": "",  # Alias for dataset_id
+            "auth_method": None,
+            "username": "",
+            "password": "",
+            "output_format": "json",
+            "cache_ttl_days": 1,  # Days to cache model metadata (1=daily, 7=weekly)
+        },  # Power BI Semantic Model Fetcher
+        "80": {
+            "result_as_answer": False,
+            "workspace_id": "",
+            "semantic_model_id": "",  # Alias for dataset_id
+            "auth_method": None,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "llm_model": "databricks-claude-sonnet-4-5",
+            "max_dax_retries": 5,
+            "user_question": "",
+            "context_knowledge": "",
+            "reference_dax": "",
+            # Context enrichment fields (dynamic context passed via crew inputs or UI config)
+            "active_filters": {},
+            "business_mappings": {},
+            "field_synonyms": {},
+            "visible_tables": [],
+            "conversation_history": [],
+        },  # Power BI Semantic Model DAX Generator
+        "81": {
+            "result_as_answer": True,
+            "strategy": "combined",
+            "synonym_threshold": 70,
+            "synonym_boost_min": 60.0,
+            "max_tables": 15,
+            "max_measures": 30,
+            "enable_value_normalization": True,
+            "dataset_id": "",
+            "workspace_id": "",
+            "llm_model": "databricks-claude-sonnet-4-5",
+        },  # Power BI Metadata Reducer
+        "82": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "dax_query": "",
+            "auth_method": None,
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "access_token": "",
+            "output_format": "markdown",
+            "max_rows": 1000,
+        },  # Power BI DAX Executor
+        "85": {
+            "result_as_answer": True,
+            "config_json": "{}",
+        },  # DAX to SQL Translator
+        "86": {
+            "result_as_answer": True,
+            "catalog": "main",
+            "schema_name": "default",
+            "config_json": "{}",
+            "inner_dim_joins": False,
+            "unflatten_tables": False,
+            "use_llm_fallback": False,
+            "llm_model": "databricks-claude-sonnet-4-5",
+            "llm_workspace_url": "",
+            "llm_token": "",
+            # PBI API extraction (alternative to providing pre-extracted JSON)
+            "workspace_id": "",
+            "dataset_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "username": "",
+            "password": "",
+            "auth_method": None,
+            "access_token": "",
+            "pbi_api_base_url": "",
+        },  # UC Metric View Generator
+        "87": {
+            "result_as_answer": True,
+            "config_json": "{}",
+        },  # PBI Measure Allocator
+        "88": {
+            "result_as_answer": True,
+            "ucmv_output": None,
+            "dry_run": False,
+            "catalog": "main",
+            "schema_name": "default",
+            "databricks_host": "",
+            "warehouse_id": "",
+            "catalog_remap": None,
+        },  # Metric View Deployer
+        "89": {
+            "result_as_answer": True,
+            "workspace_id": None,
+            "dataset_id": None,
+            "measures_json": None,
+            "mquery_json": None,
+            "relationships_json": None,
+            "scan_data_json": None,
+            "catalog": None,
+            "schema_name": None,
+        },  # Config Generator
+        "90": {
+            "result_as_answer": True,
+            "workspace_id": "",
+            "dataset_id": "",
+            "report_id": "",
+            "tenant_id": "",
+            "client_id": "",
+            "client_secret": "",
+            "admin_client_id": "",
+            "admin_client_secret": "",
+            "catalog": "main",
+            "schema_name": "default",
+        },  # Pipeline Config Generator
+        "91": {
+            "result_as_answer": True,
+            "yaml_content": None,
+            "measures_json": None,
+        },  # Metric View Validator
+        "92": {
+            "result_as_answer": True,
+            "space_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",  # optional — overrides workspace URL from Kasal Settings
+            "additional_tables": "",
+            "text_instructions": "",
+            "join_specs_json": "",
+            "sample_questions": "",
+            "sql_expressions_json": "",
+            "sql_measures_json": "",
+            "sql_filters_json": "",
+            "example_sqls_json": "",
+        },  # Genie Space Generator
+        "93": {
+            "result_as_answer": True,
+            "ucmv_output": None,
+            "genie_config_override": None,
+            "space_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",
+            "llm_model": "databricks-claude-sonnet-4-5",
+        },  # UCMV Genie Space Config Generator
+        "94": {
+            "result_as_answer": True,
+            "report_references_json": None,
+            "ucmv_output": None,
+            "measures_json": None,
+            "catalog": "",
+            "schema_name": "",
+            "dashboard_title": "",
+            "databricks_host": "",
+            "llm_model": "databricks-claude-sonnet-4-5",
+        },  # PBI Visual-UCMV Mapper
+        "95": {
+            "result_as_answer": True,
+            "visual_mappings_json": None,
+            "dashboard_title": "",
+            "catalog": "",
+            "schema_name": "",
+            "warehouse_id": "",
+            "databricks_host": "",
+            "parent_path": "/Workspace/Shared",
+            "publish_dashboard": True,
+        },  # Databricks Dashboard Creator
+    }
+
+
+def _refresh_global_tool(
+    tool: Tool, title: str, description: str, icon: str, tool_id: int
+) -> None:
+    """Refresh what defines a shipped tool; leave what an admin set alone.
+
+    ``enabled`` is the system admin's "Published" choice: forcing it True
+    re-published every unpublished tool on each restart. Saved config values
+    win; only keys a release adds come from the seed.
+    """
+    tool.title = title
+    tool.description = description
+    tool.icon = icon
+    # Saved values win over the seed, so a corrected default for a key a row
+    # already holds does not ship; change such a key here explicitly.
+    tool.config = {**get_tool_configs().get(str(tool_id), {}), **(tool.config or {})}
+    tool.updated_at = datetime.now().replace(tzinfo=None)
+
+
+async def seed_async() -> None:
+    """Seed the global tools (``group_id IS NULL``); workspace rows are never touched."""
+    logger.info("Seeding tools table (async)...")
+
+    # Get existing tool IDs to avoid duplicates
+    async with async_session_factory() as session:
+        id_result = await session.execute(select(Tool.id))
+        existing_ids = set(id_result.scalars().all())
+
+    tools_added = 0
+    tools_updated = 0
+    tools_skipped = 0
+    tools_error = 0
+
+    for tool_id, title, description, icon in tools_data:
+        try:
+            async with async_session_factory() as session:
+                if tool_id not in existing_ids:
+                    # Add new tool - all tools in the list are enabled by default
+                    tool = Tool(
+                        id=tool_id,
+                        title=title,
+                        description=description,
+                        icon=icon,
+                        config=get_tool_configs().get(str(tool_id), {}),
+                        enabled=True,  # All tools in this curated list are enabled
+                        group_id=None,  # Global tools available to all groups
+                        created_at=datetime.now().replace(tzinfo=None),
+                        updated_at=datetime.now().replace(tzinfo=None),
+                    )
+                    session.add(tool)
+                    tools_added += 1
+                else:
+                    result = await session.execute(
+                        select(Tool).filter(Tool.id == tool_id)
+                    )
+                    existing_tool = result.scalars().first()
+                    if existing_tool and existing_tool.group_id is not None:
+                        # A workspace row created before non-seeded ids started
+                        # at ToolRepository's TOOL_ID_FLOOR holds this id. It is
+                        # theirs: never rewrite it or make it global, and never
+                        # fail startup over it.
+                        logger.warning(
+                            "Tool id %s (%r) is a workspace row; the global tool "
+                            "was not seeded",
+                            tool_id,
+                            title,
+                        )
+                        tools_skipped += 1
+                        continue
+                    if existing_tool:
+                        _refresh_global_tool(
+                            existing_tool, title, description, icon, tool_id
+                        )
+                        tools_updated += 1
+
+                try:
+                    await session.commit()
+                except Exception as e:
+                    await session.rollback()
+                    logger.error(f"Failed to commit tool {tool_id}: {str(e)}")
+                    tools_error += 1
+        except Exception as e:
+            logger.error(f"Error processing tool {tool_id}: {str(e)}")
+            tools_error += 1
+
+    # Remove GLOBAL rows this file no longer defines. Without this the seeder
+    # only ever ADDED, so every tool a previous version seeded stayed in the
+    # table forever — including the CrewAI tools this engine replaced, still
+    # listed and still assignable in the UI while the factory had no
+    # implementation to build. group_tools.tool_id is ON DELETE CASCADE, so
+    # per-group config for a tool that cannot be built goes with it.
+    # Workspace rows are not this seeder's: their ids are never in the seed
+    # list, so without the group filter every one was deleted on each startup.
+    # Nor are ids at or above TOOL_ID_FLOOR: those rows were made at runtime.
+    seeded_ids = {row[0] for row in tools_data}
+    async with async_session_factory() as session:
+        not_seeded = (Tool.id.notin_(seeded_ids), Tool.id < TOOL_ID_FLOOR)
+        result = await session.execute(
+            select(Tool).filter(*not_seeded, Tool.group_id.is_(None))
+        )
+        stale = result.scalars().all()
+        stale_ids = [tool.id for tool in stale]
+        for tool in stale:
+            logger.warning(
+                f"Removing tool {tool.id} ({tool.title!r}): no longer defined in seeds/tools.py"
+            )
+        if stale_ids:
+            # Delete the dependent rows explicitly rather than leaning on the
+            # FK's ON DELETE CASCADE. Two reasons it does not fire on its own:
+            # SQLite ignores foreign keys unless PRAGMA foreign_keys=ON, and the
+            # ORM gets there first — session.delete() on a Tool tries to NULL
+            # group_tools.tool_id, which is NOT NULL, so the commit dies with an
+            # IntegrityError. A bulk delete skips the ORM's cascade entirely.
+            await session.execute(
+                sa_delete(GroupTool).where(GroupTool.tool_id.in_(stale_ids))
+            )
+            await session.execute(sa_delete(Tool).where(Tool.id.in_(stale_ids)))
+            await session.commit()
+    tools_removed = len(stale_ids)
+
+    logger.info(
+        f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, "
+        f"Removed {tools_removed}, Skipped {tools_skipped}, Errors {tools_error}"
+    )
+    if tools_error:
+        raise SeederIncomplete("tools", tools_error, len(tools_data))
+
+
+async def seed() -> None:
+    """Main entry point for seeding tools."""
+    logger.info("Tools seed function called")
+    try:
+        logger.info("Attempting to call seed_async in tools.py")
+        await seed_async()
+        logger.info("Tools seed_async completed successfully")
+    except Exception as e:
+        logger.error(f"Error in tools seed function: {str(e)}")
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
+
+
+# For direct external calls - call seed() instead
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(seed())

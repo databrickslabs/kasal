@@ -1,0 +1,1075 @@
+import asyncio
+import logging
+import os
+import re
+from contextlib import asynccontextmanager
+from contextvars import ContextVar, Token
+from typing import Any, AsyncGenerator, AsyncIterator, Callable, Dict, Optional, Tuple
+
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from src.config.settings import settings
+from src.core.logger import LoggerManager
+from src.db.self_heal import (  # re-exported: main.py + Lakebase import it from here
+    run_schema_self_heal,
+)
+
+# SQL identifier validation to prevent injection in dynamic SQL
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate a SQL identifier against a safe pattern to prevent injection."""
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
+
+
+# Configure logging using LoggerManager
+logger_manager = LoggerManager.get_instance()
+if not logger_manager._initialized or not logger_manager._log_dir:
+    # Initialize with environment variable if available
+    log_dir = os.environ.get("LOG_DIR")
+    if log_dir:
+        logger_manager.initialize(log_dir)
+    else:
+        logger_manager.initialize()
+
+# Get module logger
+logger = logging.getLogger(__name__)
+
+# Check if SQL debugging is enabled via environment variable or debug all
+SQL_DEBUG = (
+    os.environ.get("SQL_DEBUG", "false").lower() == "true"
+    or os.environ.get("KASAL_DEBUG_ALL", "false").lower() == "true"
+    or os.environ.get("KASAL_LOG_DATABASE", "").upper() == "DEBUG"
+)
+if SQL_DEBUG:
+    logger.warning("=" * 80)
+    logger.warning("SQL_DEBUG is ENABLED - All SQL queries will be logged!")
+    logger.warning("This WILL impact performance. Disable when done debugging.")
+    logger.warning("To disable: unset SQL_DEBUG or export SQL_DEBUG=false")
+    logger.warning("=" * 80)
+
+
+# Database retry decorator for handling SQLite locks
+
+
+# Create a SQLAlchemy logger using the LoggerManager
+class SQLAlchemyLogger:
+    def __init__(self) -> None:
+        self.formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        self.log_dir = logger_manager.log_dir
+        self.setup_logger()
+
+    def setup_logger(self) -> None:
+        # Create sqlalchemy.log file handler
+        sqlalchemy_log_file = self.log_dir / "sqlalchemy.log"
+
+        # Get the sqlalchemy engine logger
+        engine_logger = logging.getLogger("sqlalchemy.engine")
+
+        # When SQL_DEBUG is enabled, we want both console and file output
+        if SQL_DEBUG:
+            engine_logger.setLevel(logging.INFO)
+            # Clear existing handlers to avoid duplicates
+            engine_logger.handlers = []
+            engine_logger.propagate = False
+
+            # Add console handler for immediate visibility
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(logging.Formatter("[SQL] %(message)s"))
+            engine_logger.addHandler(console_handler)
+
+            # Also add file handler for persistent logging
+            file_handler = logging.handlers.RotatingFileHandler(
+                sqlalchemy_log_file,
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=5,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(self.formatter)
+            engine_logger.addHandler(file_handler)
+        else:
+            # In non-debug mode, respect centralized configuration
+            # but ensure file handler exists
+            engine_logger.propagate = False
+
+        # Ensure handlers are set up properly
+        if not engine_logger.handlers:
+            # Create file handler if not already configured elsewhere
+            file_handler = logging.handlers.RotatingFileHandler(
+                sqlalchemy_log_file,
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=5,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(self.formatter)
+            engine_logger.addHandler(file_handler)
+
+        # Log that the database logger has been configured
+        logger.info(f"SQLAlchemy logs will be written to {sqlalchemy_log_file}")
+        if SQL_DEBUG:
+            logger.info("SQL_DEBUG enabled: SQL queries will also be shown in console")
+
+
+# Initialize SQLAlchemy logging
+sql_logger = SQLAlchemyLogger()
+
+# Import pool classes
+from sqlalchemy.pool import (  # noqa: E402 - import follows module initialization
+    AsyncAdaptedQueuePool,
+    NullPool,
+    StaticPool,
+)
+
+# Determine if we should use NullPool for event loop isolation
+# This is necessary when running in environments with multiple event loops
+# such as with CrewAI memory backends or during testing
+use_nullpool = os.environ.get("USE_NULLPOOL", "false").lower() == "true"
+
+# Track the main event loop for intelligent engine selection
+main_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def set_main_event_loop() -> None:
+    """
+    Capture the main event loop when the FastAPI app starts.
+    This should be called from the lifespan/startup event.
+    """
+    global main_event_loop
+    try:
+        main_event_loop = asyncio.get_running_loop()
+        logger.info(f"Main event loop captured: {id(main_event_loop)}")
+    except RuntimeError:
+        logger.warning("Failed to capture main event loop")
+
+
+# Try to detect early if we're in an async context
+try:
+    main_event_loop = asyncio.get_running_loop()
+    logger.info(f"Main event loop detected during import: {id(main_event_loop)}")
+except RuntimeError:
+    # No event loop running yet - will be set later by set_main_event_loop()
+    logger.info("No event loop during module import - will capture during app startup")
+
+
+# Determine isolation level based on database type
+def get_isolation_level(database_uri: str) -> Optional[str]:
+    """Get appropriate isolation level based on database type."""
+    if database_uri.startswith("sqlite"):
+        # SQLite with SQLAlchemy: Use None for autocommit behavior with async
+        # This allows SQLite to handle transactions automatically
+        return None
+    else:
+        # PostgreSQL supports: READ COMMITTED, READ UNCOMMITTED, REPEATABLE READ, SERIALIZABLE
+        return "READ COMMITTED"
+
+
+def get_sqlite_connect_args(database_uri: str) -> Dict[str, Any]:
+    """Get SQLite-specific connection arguments for better concurrent access."""
+    if database_uri.startswith("sqlite"):
+        return {
+            "check_same_thread": False,  # Allow SQLite to be used across threads
+            "timeout": 60,  # Increase to 60 seconds for heavy operations
+            # Note: isolation_level is set at engine level, not in connect_args for SQLite
+        }
+    return {}
+
+
+def get_sqlite_poolclass() -> type[StaticPool]:
+    """Pool class for the SQLite engine: StaticPool.
+
+    NullPool opens a FRESH aiosqlite connection per checkout, so every
+    concurrent writer (API loop, trace/logs writer, OTel exporter thread,
+    flow/crew subprocess) gets its own connection. On SQLite — a single-writer
+    database — those connections contend for the one write lock and, once write
+    load grows (memory/chat-session writes, multi-crew HITL flow resumes),
+    callers exceed busy_timeout and fail with "database is locked".
+
+    StaticPool shares ONE connection so writes serialize through it, which
+    eliminates that contention. WAL mode + busy_timeout (configure_sqlite) plus
+    check_same_thread=False keep the shared connection safe across threads. This
+    reverts the StaticPool->NullPool switch from 205b5f57; that switch was made
+    to avoid MissingGreenlet / "Cannot operate on a closed database" at
+    cross-loop teardown, so watch for those if connection lifetimes change.
+    """
+    return StaticPool
+
+
+isolation_level = get_isolation_level(str(settings.DATABASE_URI))
+connect_args = get_sqlite_connect_args(str(settings.DATABASE_URI))
+
+# Create intelligent dual-engine setup for optimal performance
+# Strategy: Use pooled connections for main app, NullPool for background tasks
+
+if str(settings.DATABASE_URI).startswith("sqlite"):
+    # SQLite: StaticPool — ONE shared aiosqlite connection so concurrent writers
+    # serialize through it instead of each opening its own connection and
+    # contending for SQLite's single write lock ("database is locked"). WAL mode
+    # + busy_timeout (configure_sqlite, applied via the "connect" event) and
+    # check_same_thread=False keep the shared connection safe across threads.
+    # See get_sqlite_poolclass() for the NullPool trade-off (205b5f57).
+    logger.info(
+        "SQLite detected - using StaticPool (single shared connection) to "
+        "serialize writes and avoid 'database is locked'"
+    )
+    engine = create_async_engine(
+        str(settings.DATABASE_URI),
+        echo=SQL_DEBUG,
+        future=True,
+        poolclass=get_sqlite_poolclass(),
+        connect_args={
+            **connect_args,
+            "check_same_thread": False,
+        },
+    )
+    # For SQLite, both engines are the same
+    pooled_engine = engine
+    nullpool_engine = engine
+
+else:
+    # PostgreSQL: Create TWO engines for different contexts
+    logger.info("=" * 80)
+    logger.info(
+        "PostgreSQL detected - creating dual-engine setup for optimal performance"
+    )
+    logger.info(
+        "Main app will use pooled connections, background tasks will use NullPool"
+    )
+    logger.info("=" * 80)
+
+    # 1. Create POOLED engine for main FastAPI application (best performance)
+    pooled_engine_opts = {
+        "echo": SQL_DEBUG,
+        "future": True,
+        "poolclass": AsyncAdaptedQueuePool,
+        "pool_size": 20,  # Keep 20 connections ready for web requests
+        "max_overflow": 10,  # Allow 10 more during peak
+        "pool_pre_ping": True,  # Check connection health
+        "pool_recycle": 3600,  # Recycle after 1 hour
+        "echo_pool": SQL_DEBUG,
+        "connect_args": connect_args,
+        "isolation_level": isolation_level,
+    }
+    pooled_engine = create_async_engine(
+        str(settings.DATABASE_URI), **pooled_engine_opts
+    )
+    logger.info("Created pooled engine for main FastAPI app (20x better performance)")
+
+    # 2. Create NULLPOOL engine for background tasks/CrewAI (event loop isolation)
+    nullpool_engine_opts = {
+        "echo": SQL_DEBUG,
+        "future": True,
+        "poolclass": NullPool,  # No pooling - new connection per query
+        "connect_args": connect_args,
+        "isolation_level": isolation_level,
+    }
+    nullpool_engine = create_async_engine(
+        str(settings.DATABASE_URI), **nullpool_engine_opts
+    )
+    logger.info("Created NullPool engine for background tasks (CrewAI compatibility)")
+
+    # Default engine selection
+    # When USE_NULLPOOL=true, default to NullPool to avoid cross-loop issues under reload
+    if use_nullpool:
+        logger.info(
+            "USE_NULLPOOL=true - Event loop isolation mode enabled (defaulting to NullPool engine)"
+        )
+        engine = nullpool_engine
+    else:
+        logger.info(
+            "USE_NULLPOOL=false - Full pooling mode enabled for maximum performance"
+        )
+        engine = pooled_engine
+
+# Configure SQLite for better concurrent access.
+# With NullPool this hook fires for EVERY new connection (i.e. constantly), so
+# the success line logs at INFO only once and DEBUG afterwards.
+_sqlite_configured_logged = False
+
+
+def configure_sqlite(dbapi_connection: Any, connection_record: Any) -> None:
+    """Configure SQLite connection for better performance and concurrency."""
+    global _sqlite_configured_logged
+    if str(settings.DATABASE_URI).startswith("sqlite"):
+        try:
+            # Set busy timeout - CRITICAL for handling locks (20 seconds based on best practices)
+            dbapi_connection.execute("PRAGMA busy_timeout=20000")
+            # Enable foreign keys
+            dbapi_connection.execute("PRAGMA foreign_keys=ON")
+            # Use WAL mode for better concurrency - MOST IMPORTANT optimization
+            dbapi_connection.execute("PRAGMA journal_mode=WAL")
+            # Optimize for faster writes with NORMAL synchronous (safe with WAL)
+            dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+            # Increase cache for better performance
+            dbapi_connection.execute("PRAGMA cache_size=-64000")  # 64MB cache
+            # Store temp tables in memory to reduce disk I/O
+            dbapi_connection.execute("PRAGMA temp_store=MEMORY")
+            # Enable memory-mapped I/O for better performance
+            dbapi_connection.execute("PRAGMA mmap_size=268435456")  # 256MB mmap
+            # Auto checkpoint at 1000 pages to balance performance and WAL size
+            dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
+            # Optimize page size for better performance
+            dbapi_connection.execute("PRAGMA page_size=4096")
+            if not _sqlite_configured_logged:
+                logger.info(
+                    "SQLite configured with WAL mode and optimizations (per-connection; further lines at DEBUG)"
+                )
+                _sqlite_configured_logged = True
+            else:
+                logger.debug("SQLite connection configured (WAL + optimizations)")
+        except Exception as e:
+            logger.error(f"Failed to configure SQLite connection: {e}")
+
+
+# Apply SQLite configuration to all engines
+if str(settings.DATABASE_URI).startswith("sqlite"):
+    # For async engine, we need to listen to the sync_engine property
+    event.listen(engine.sync_engine, "connect", configure_sqlite)
+    logger.info("Applied SQLite configuration event listener to main engine")
+
+    # Also apply to pooled and nullpool engines if they exist (PostgreSQL only)
+    if "pooled_engine" in locals():
+        event.listen(pooled_engine.sync_engine, "connect", configure_sqlite)
+        logger.info("Applied SQLite configuration to pooled engine")
+    if "nullpool_engine" in locals():
+        event.listen(nullpool_engine.sync_engine, "connect", configure_sqlite)
+        logger.info("Applied SQLite configuration to nullpool engine")
+
+# Sync engine removed - everything is async now
+# All database operations must use async sessions
+
+# Create session factories for both engines (avoid recreating on each request)
+# Main session factory (uses default engine based on USE_NULLPOOL setting)
+_local_session_factory = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+    autoflush=False,  # Disable autoflush to prevent SQLite locking issues
+    autocommit=False,  # Explicit transaction control
+)
+
+
+# Anything that, called with no arguments, returns a new AsyncSession.
+_SessionFactory = Callable[[], AsyncSession]
+
+
+class _SwappableSessionFactory:
+    """Wrapper around async_sessionmaker that can be hot-swapped to Lakebase.
+
+    Every module that does ``from src.db.session import async_session_factory``
+    receives a reference to the **same** mutable instance.  Calling
+    ``async_session_factory.activate_lakebase(lakebase_sessionmaker)`` replaces
+    the underlying factory so that *all* existing callers automatically start
+    producing Lakebase sessions — zero call-site changes required.
+    """
+
+    def __init__(self, default_factory: _SessionFactory) -> None:
+        self._factory = default_factory
+        self._is_lakebase = False
+        self._on_swap_callbacks: list[Callable[[], object]] = []
+
+    # --- async_sessionmaker-compatible interface ---
+
+    def __call__(self) -> AsyncSession:
+        """Return a new AsyncSession (same as async_sessionmaker.__call__)."""
+        return self._factory()
+
+    # --- swap-invalidation hooks ---
+
+    def register_on_swap(self, callback: Callable[[], object]) -> None:
+        """Register a zero-arg callback fired whenever the active DB is swapped
+        (Lakebase activate/deactivate). Use it to flush in-memory caches keyed to
+        the OLD database — e.g. ExecutionService's execution registry — so a
+        status lookup after a swap doesn't serve/poll rows that only existed in
+        the previous DB (the 'Execution not found' 404 storm)."""
+        self._on_swap_callbacks.append(callback)
+
+    def _fire_swap_callbacks(self) -> None:
+        for cb in self._on_swap_callbacks:
+            try:
+                cb()
+            except Exception as e:
+                logger.warning(f"[SESSION FACTORY] on-swap cache hook failed: {e}")
+
+    # --- hot-swap API ---
+
+    def activate_lakebase(self, lakebase_factory: _SessionFactory) -> None:
+        """Replace the underlying factory with a Lakebase-backed one."""
+        changed = not self._is_lakebase
+        self._factory = lakebase_factory
+        self._is_lakebase = True
+        logger.info("[SESSION FACTORY] Swapped to Lakebase engine")
+        # Only on an actual transition — activate_lakebase can be called more
+        # than once (startup + per-request router); firing every time would
+        # wipe live caches needlessly.
+        if changed:
+            self._fire_swap_callbacks()
+
+    def deactivate_lakebase(self) -> None:
+        """Revert to the local (SQLite / PG) factory."""
+        changed = self._is_lakebase
+        self._factory = _local_session_factory
+        self._is_lakebase = False
+        logger.info("[SESSION FACTORY] Reverted to local engine")
+        if changed:
+            self._fire_swap_callbacks()
+
+    @property
+    def is_lakebase(self) -> bool:
+        return self._is_lakebase
+
+
+async_session_factory = _SwappableSessionFactory(_local_session_factory)
+
+# ContextVar holding the current request-scoped session (set by DI providers)
+_request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
+    "_request_session", default=None
+)
+
+# The asyncio Task that OWNS the request-scoped session above — recorded when the
+# session is published so reuse can be scoped to the owning task.
+#
+# `asyncio.create_task` copies the current context (both vars) into the child, so
+# a task spawned mid-request would otherwise see `_request_session` and reuse the
+# request's connection — which the request is still using or has since closed, so
+# on Lakebase/asyncpg it raises "another operation is in progress" and on SQLite
+# "Cannot operate on a closed database". A child task has a DIFFERENT
+# `current_task()`, so comparing against this owner lets `routed_scoped_session`
+# reuse the session only for code running in the request's OWN task and route a
+# fresh connection for everything spawned off it. Callers can no longer forget to
+# detach — the primitive is safe by default.
+_request_session_owner: ContextVar[Optional["asyncio.Task[Any]"]] = ContextVar(
+    "_request_session_owner", default=None
+)
+
+
+_RequestSessionTokens = Tuple[
+    Token[Optional[AsyncSession]], Optional[Token[Optional["asyncio.Task[Any]"]]]
+]
+
+
+def _enter_request_session(session: AsyncSession) -> _RequestSessionTokens:
+    """Publish ``session`` as the request-scoped session, owned by the CURRENT task.
+
+    Returns opaque tokens to hand back to :func:`_exit_request_session`. Every
+    site that sets ``_request_session`` goes through here so the session and its
+    owner can never drift apart. Recording the owner is what makes reuse
+    task-scoped (see ``_request_session_owner``)."""
+    session_token = _request_session.set(session)
+    owner_token: Optional[Token[Optional["asyncio.Task[Any]"]]] = None
+    try:
+        owner_token = _request_session_owner.set(asyncio.current_task())
+    except Exception:  # no running loop is not fatal; reuse just won't match
+        pass
+    return session_token, owner_token
+
+
+def _exit_request_session(tokens: _RequestSessionTokens) -> None:
+    """Undo :func:`_enter_request_session`. Tolerates a token created in a
+    different async context (generator GC'd or cancelled across tasks)."""
+    session_token, owner_token = tokens
+    try:
+        _request_session.reset(session_token)
+    except ValueError:
+        pass
+    if owner_token is not None:
+        try:
+            _request_session_owner.reset(owner_token)
+        except ValueError:
+            pass
+
+
+def _usable_for_more_sql(session: AsyncSession) -> bool:
+    """Whether ``session`` can still take a query, i.e. is not mid-commit.
+
+    Reusing the request session is the whole point of branch 1, but a session
+    COMMITTING is briefly in ``PREPARED`` state, and SQLAlchemy refuses further SQL
+    on it: "This session is in 'prepared' state; no further SQL can be emitted
+    within this transaction."
+
+    That is reachable because ``commit()`` -> ``_prepare_impl()`` -> ``flush()``, and
+    a flush can run application code that reads the database again — the light-agent
+    path did exactly this, committing a terminal run status and then building its
+    embedder config, whose API-key lookup landed back on the same session. The read
+    failed, the Databricks key read as absent, embeddings fell back to a local Ollama
+    that was not running, and memory silently saved with no vector.
+
+    Falling through to a NEW session is correct here: a nested read that cannot join
+    the in-flight transaction is better served by its own, and it sees the committed
+    state either way.
+    """
+    from sqlalchemy.orm.session import SessionTransactionState
+
+    try:
+        transaction = session.sync_session._transaction
+    except Exception:  # noqa: BLE001 - a test double, or no sync_session
+        return True
+    if transaction is None:
+        return True
+    state = getattr(transaction, "_state", None)
+    # Only REFUSE on a state we positively recognise as unusable. A MagicMock's
+    # attribute access yields another Mock, so an `is ACTIVE` test would reject every
+    # test double and every future SQLAlchemy state name.
+    return state not in (
+        SessionTransactionState.PREPARED,
+        SessionTransactionState.COMMITTED,
+        SessionTransactionState.CLOSED,
+        SessionTransactionState.DEACTIVE,
+    )
+
+
+@asynccontextmanager
+async def routed_scoped_session() -> AsyncIterator[AsyncSession]:
+    """The one way to get a session outside an HTTP request.
+
+    Three branches, in order:
+
+    1. **Inside a request** — yield THAT session, so the caller joins the single
+       request transaction rather than opening a competing one.
+    2. **Already resolving auth** — use the raw factory. This is the recursion
+       break; see below.
+    3. **Otherwise** — go through the database ROUTER, which re-reads
+       ``is_lakebase_enabled()`` on every call.
+
+    Branch 3 is the point. ``async_session_factory`` is a per-process SNAPSHOT that
+    only a SUBPROCESS ever swaps to Lakebase (``activate_lakebase_in_subprocess``);
+    the main process never does. So anything running IN-PROCESS outside a request —
+    a FastAPI ``BackgroundTask``, which is where the whole Chat path runs — read
+    local SQLite while the crew and flow subprocesses read Lakebase. Same config,
+    opposite answers, no error: an MCP server enabled for the workspace produced
+    "Added 1 explicit MCP servers" in Agent Builder and "Added 0" in Chat.
+
+    Branch 2 is why this helper cannot simply always route. The router needs a
+    credential to reach Lakebase and resolves one via ``get_auth_context`` →
+    ``ApiKeysService`` — itself a caller of this function. Routing that read closes
+    the loop, which the deployed app logged 1,287 times as "maximum recursion depth
+    exceeded", killing every crew and flow subprocess. ``_RESOLVING_AUTH`` is set
+    for the duration of an auth resolution (by ``get_auth_context`` on its
+    outermost entry, and by the router before it calls auth), and it is a
+    ContextVar rather than a bool so one task's lookup cannot disable routing for
+    another's. The bootstrap read wants the local database anyway: the Lakebase
+    config row lives there by design.
+
+    This replaced ``request_scoped_session``, which had branch 1 and then went
+    straight to the snapshot — unconditionally, whether or not auth was involved.
+    That looked safe (the name says "request-scoped") and was the same silent split
+    as the raw factory in 33 of its 37 call sites.
+
+    Branches 2 and 3 OWN their session: a clean exit commits, an exception rolls
+    back, and both happen in the caller's task before the block returns. Branch 1
+    does neither, because the transaction belongs to the request.
+    """
+    existing = _request_session.get(None)
+    # Reuse the request session ONLY for code running in the task that owns it.
+    # A task spawned mid-request (asyncio.create_task) inherits a COPY of these
+    # vars but has a different current_task(), so it falls through to the router
+    # and gets a fresh connection instead of colliding on the request's — which
+    # is closed/concurrently-busy by the time the child runs. This is what makes
+    # the primitive safe without every spawn site remembering to detach.
+    if (
+        existing is not None
+        and _request_session_owner.get(None) is asyncio.current_task()
+        and _usable_for_more_sql(existing)
+    ):
+        yield existing
+        return
+
+    # Imported here, not at module scope: both modules import THIS one.
+    from src.utils.databricks_auth import _RESOLVING_AUTH
+
+    if _RESOLVING_AUTH.get():
+        async with async_session_factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            await session.commit()
+        return
+
+    from src.db.database_router import get_smart_db_session
+
+    # Drive the router as a context manager, NOT `async for ...: yield; break`.
+    # The break left the router suspended at its yield, so its commit never ran
+    # and its rollback, close and _request_session reset happened later, in a
+    # finaliser task. The reset then failed (wrong Context), and the next block
+    # in this task reused the finished session through branch 1.
+    async with asynccontextmanager(get_smart_db_session)() as session:
+        yield session
+
+
+# NOTE: detach_request_session() / background_task_context() were removed once
+# routed_scoped_session became ownership-aware. They existed only to clear
+# `_request_session` in a spawned task so it wouldn't reuse the request's
+# session; the ownership check (reuse only when current_task() owns the session)
+# now does that automatically for every create_task child. There is one way to
+# get a session outside a request — routed_scoped_session — and nothing to
+# remember at the spawn site. A task that genuinely needs its own private
+# connection uses get_isolated_db_session().
+
+
+# (was: ``safe_async_session`` — a third session helper, now DELETED.)
+# It wrapped the raw ``async_session_factory`` and swallowed errors from
+# ``session.close()``, for crew/flow subprocess work where a SQLite connection
+# went stale after the greenlet context was lost. It had no caller left in
+# ``src/`` — only its own tests, plus eleven ``patch("src.db.session.
+# safe_async_session", ...)`` in the flow-executor tests that were patching a
+# name the code under test no longer touched, i.e. asserting nothing. That is
+# the same failure mode ``request_scoped_session`` had: a helper that reads as
+# the careful option, keeps a per-process SNAPSHOT of the factory underneath,
+# and stays alive because its tests still pass. Two helpers remain by design —
+# ``routed_scoped_session`` (the default) and ``get_isolated_db_session``
+# (connection isolation on SQLite). Do not add a third.
+
+
+# ── Isolated DB session on a PRIVATE connection ───────────────────────────
+# SQLite runs on a SINGLE shared connection (StaticPool — see
+# get_sqlite_poolclass). SQLite transactions are per-connection, but every
+# AsyncSession in the process checks out that one connection, so concurrent
+# sessions corrupt each other's transaction boundaries: a concurrent
+# rollback/close can silently discard another session's just-committed (or
+# pending) writes. That bit progressive crew generation — across the
+# seconds-long per-task LLM calls, a concurrent request's session on the shared
+# connection clobbered a committed agent row, so the next task INSERT failed the
+# agent_id foreign key ("FOREIGN KEY constraint failed"). A session on its OWN
+# connection (its own aiosqlite queue) is immune to that interference.
+# PostgreSQL/Lakebase already give each pooled checkout a private connection, so
+# this only needs special handling for SQLite.
+_isolated_sqlite_engine: Optional[AsyncEngine] = None
+_isolated_sqlite_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+
+
+def _get_isolated_sqlite_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Lazily build a NullPool engine + sessionmaker on a private connection.
+
+    NullPool hands out a FRESH aiosqlite connection per checkout (closed on
+    return), so the caller's whole unit of work runs on a connection no other
+    session touches. Only one such connection is added per crew-generation run
+    (not the per-query NullPool storm that the 205b5f57 StaticPool switch was
+    reverting), and it sits idle/lock-free between the per-entity commits, so
+    WAL + busy_timeout absorb the brief write-lock overlap with the shared
+    connection.
+    """
+    global _isolated_sqlite_engine, _isolated_sqlite_session_factory
+    if _isolated_sqlite_session_factory is None:
+        _isolated_sqlite_engine = create_async_engine(
+            str(settings.DATABASE_URI),
+            echo=SQL_DEBUG,
+            future=True,
+            poolclass=NullPool,
+            connect_args={**connect_args, "check_same_thread": False},
+        )
+        # Apply the same PRAGMAs (foreign_keys=ON, WAL, busy_timeout) as the main engine.
+        event.listen(_isolated_sqlite_engine.sync_engine, "connect", configure_sqlite)
+        _isolated_sqlite_session_factory = async_sessionmaker(
+            _isolated_sqlite_engine,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
+    return _isolated_sqlite_session_factory
+
+
+@asynccontextmanager
+async def get_isolated_db_session() -> AsyncIterator[AsyncSession]:
+    """Yield a session whose connection is NOT shared with any other session.
+
+    Use for a multi-step unit of work that interleaves DB writes with long
+    awaits (e.g. progressive crew generation: commit an agent, then make a
+    seconds-long LLM call, then insert a task referencing it). On the shared
+    SQLite connection a concurrent session's commit/rollback in that window can
+    silently discard the committed agent and break the task's foreign key; a
+    private connection removes that hazard. For SQLite this uses a dedicated
+    NullPool engine (private connection); for PostgreSQL/Lakebase, where each
+    pooled checkout is already private, it falls through to the normal (possibly
+    Lakebase-swapped) factory.
+    """
+    if (
+        str(settings.DATABASE_URI).startswith("sqlite")
+        and not async_session_factory.is_lakebase
+    ):
+        # The global Lakebase swap (main.py lifespan / activate_lakebase_in_subprocess)
+        # is PER-PROCESS and can fail or lag, leaving THIS process's
+        # async_session_factory on local SQLite even though Lakebase is enabled in
+        # the DB config. Reads route to Lakebase off is_lakebase_enabled() via
+        # get_smart_db_session — INDEPENDENT of the swap state. So if we wrote to the
+        # private SQLite engine here while Lakebase is enabled, the row would land in
+        # local SQLite while every read looks in Lakebase, i.e. "Execution not found"
+        # 404 storms (e751d923 moved create_execution's parent-row write onto this
+        # helper and regressed exactly that). Follow the SAME signal as reads: when
+        # Lakebase is enabled, write through the same Lakebase factory the reads use.
+        from src.db.database_router import (
+            get_lakebase_config_from_db,
+            is_lakebase_enabled,
+        )
+
+        if await is_lakebase_enabled():
+            from src.db.lakebase_session import get_lakebase_session
+
+            config = await get_lakebase_config_from_db()
+            instance_name = (config or {}).get("instance_name")
+            async with get_lakebase_session(instance_name) as session:
+                yield session
+            return
+        factory = _get_isolated_sqlite_session_factory()
+        async with factory() as session:
+            yield session
+    else:
+        # PostgreSQL or a Lakebase-swapped factory: pooled connections are
+        # already per-checkout, so there is no shared-connection hazard.
+        async with async_session_factory() as session:
+            yield session
+
+
+# Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
+# Uses the sync_engine underlying the async engine.
+from sqlalchemy.orm import (  # noqa: E402 - import follows module initialization
+    sessionmaker as sync_sessionmaker,
+)
+
+sync_session_factory = sync_sessionmaker(
+    engine.sync_engine,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
+
+
+# Database initialization
+async def init_db() -> None:
+    """Initialize database tables if they don't exist."""
+    from src.core.databricks_app import LakebaseAppResource, is_databricks_app
+
+    if LakebaseAppResource.from_env() is not None:
+        from src.db.app_resource import initialize_resource_database
+
+        await initialize_resource_database()
+        return
+    if is_databricks_app():
+        from src.db.app_resource import check_sqlite_fallback
+
+        check_sqlite_fallback(os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true")
+    try:
+        # Import all models to ensure they're registered
+        import importlib
+
+        import src.db.all_models
+
+        importlib.reload(src.db.all_models)  # Ensure models are freshly loaded
+        from src.db.all_models import Base
+
+        sqlite_db_path: str = settings.SQLITE_DB_PATH or ""  # has a default
+        # For PostgreSQL, check if database exists and create if not
+        if str(settings.DATABASE_URI).startswith("postgresql"):
+            import asyncpg
+
+            # Extract connection parameters
+            db_name = settings.POSTGRES_DB
+            host = settings.POSTGRES_SERVER
+            port = settings.POSTGRES_PORT
+            user = settings.POSTGRES_USER
+            password = settings.POSTGRES_PASSWORD
+
+            # Defense-in-depth: validate db_name even though it comes from
+            # environment settings, to prevent SQL injection via CREATE DATABASE.
+            _validate_identifier(db_name, "database name")
+
+            try:
+                # First, try to connect to the specified database
+                test_conn = await asyncpg.connect(
+                    host=host, port=port, user=user, password=password, database=db_name
+                )
+                await test_conn.close()
+                logger.info(f"Database '{db_name}' exists and is accessible")
+            except asyncpg.InvalidCatalogNameError:
+                # Database doesn't exist, create it
+                logger.info(f"Database '{db_name}' does not exist. Creating it...")
+
+                # Connect to postgres database to create the new database
+                admin_conn = await asyncpg.connect(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database="postgres",  # Connect to default postgres database
+                )
+
+                try:
+                    # Create the database
+                    await admin_conn.execute(f'CREATE DATABASE "{db_name}"')
+                    logger.info(f"Database '{db_name}' created successfully")
+                except asyncpg.DuplicateDatabaseError:
+                    logger.info(f"Database '{db_name}' already exists")
+                except Exception as e:
+                    logger.error(f"Error creating database: {e}")
+                    raise
+                finally:
+                    await admin_conn.close()
+
+        # For SQLite, ensure database file exists
+        if str(settings.DATABASE_URI).startswith("sqlite"):
+            db_path = sqlite_db_path
+
+            # Get absolute path if relative
+            if not os.path.isabs(db_path):
+                # If it's a relative path, make it absolute from current directory
+                db_path = os.path.abspath(db_path)
+
+            logger.info(f"Database path: {db_path}")
+
+            # Create directory if it doesn't exist
+            db_dir = os.path.dirname(db_path)
+            if db_dir and not os.path.exists(db_dir):
+                logger.info(f"Creating database directory: {db_dir}")
+                os.makedirs(db_dir, exist_ok=True)
+
+            # Create empty database file if it doesn't exist
+            if not os.path.exists(db_path):
+                logger.info(f"Creating new SQLite database file: {db_path}")
+                # Create the file and initialize it
+                with open(db_path, "w"):
+                    pass  # Create empty file
+
+                # Initialize it as a sqlite database
+                import sqlite3
+
+                sqlite_conn = sqlite3.connect(db_path)
+                sqlite_conn.close()
+                logger.info(f"Empty database file created at {db_path}")
+
+        # Create all tables in a completely separate, isolated transaction
+        logger.info("Creating database tables...")
+
+        # For SQLite, we can verify if tables already exist first
+        tables_exist = False
+        if str(settings.DATABASE_URI).startswith("sqlite"):
+            try:
+                import sqlite3
+
+                sqlite_conn = sqlite3.connect(os.path.abspath(sqlite_db_path))
+                cursor = sqlite_conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = cursor.fetchall()
+                sqlite_conn.close()
+
+                if len(tables) > 1:  # SQLite has a sqlite_master table by default
+                    logger.info(
+                        f"Tables already exist: {', '.join([t[0] for t in tables])}"
+                    )
+                    tables_exist = True
+            except Exception as e:
+                logger.error(f"Error checking existing tables: {e}")
+
+        # Only create tables if they don't already exist
+        if not tables_exist:
+            # Use a fresh engine for initialization with settings optimized for table creation
+            init_engine_opts: Dict[str, Any] = {
+                "echo": SQL_DEBUG,  # Control SQL logging via SQL_DEBUG env var
+                "future": True,
+            }
+
+            # For SQLite, don't set isolation_level to avoid errors
+            if not str(settings.DATABASE_URI).startswith("sqlite"):
+                init_engine_opts["isolation_level"] = (
+                    "AUTOCOMMIT"  # Use AUTOCOMMIT for table creation
+                )
+                init_engine_opts["poolclass"] = (
+                    NullPool  # Avoid pooling during init to isolate loop
+                )
+
+            # Create a dedicated engine just for initialization
+            engine_for_init = create_async_engine(
+                str(settings.DATABASE_URI), **init_engine_opts
+            )
+
+            async with engine_for_init.connect() as conn:
+                logger.info("Database connection established")
+
+            # Ensure pgvector extension (PostgreSQL) before table creation
+            if not str(settings.DATABASE_URI).startswith("sqlite"):
+                try:
+                    logger.info("Checking pgvector extension...")
+                    async with engine_for_init.connect() as conn:
+                        result = await conn.execute(
+                            text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+                        )
+                        extension_exists = result.fetchone() is not None
+                        if not extension_exists:
+                            logger.info("Installing pgvector extension...")
+                            await conn.execute(
+                                text("CREATE EXTENSION IF NOT EXISTS vector")
+                            )
+                            await conn.commit()
+                            logger.info("pgvector extension installed successfully")
+                        else:
+                            logger.info("pgvector extension already installed")
+                except Exception as e:
+                    logger.warning(f"Could not install pgvector extension: {e}")
+                    logger.warning(
+                        "The database will work but documentation embeddings table will not be created"
+                    )
+
+            # Then create tables
+            try:
+                async with engine_for_init.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+                    logger.info("Tables created successfully")
+            except Exception as table_error:
+                logger.error(f"Error creating tables: {table_error}")
+                import traceback
+
+                logger.error(traceback.format_exc())
+                raise
+
+            await engine_for_init.dispose()
+
+            logger.info("Database tables initialized successfully")
+
+        # Self-heal: create missing tables and add missing columns even when the
+        # tables already existed (create_all is skipped then). DBs created before
+        # these tables/columns were added would otherwise be missing them.
+        try:
+            ensure_engine = create_async_engine(
+                str(settings.DATABASE_URI), future=True, echo=SQL_DEBUG
+            )
+            try:
+                async with ensure_engine.begin() as conn:
+                    await run_schema_self_heal(conn)
+            finally:
+                await ensure_engine.dispose()
+        except Exception as ensure_err:
+            logger.warning(f"column ensure skipped: {ensure_err}")
+
+        # Verify tables were created for SQLite
+        if str(settings.DATABASE_URI).startswith("sqlite"):
+
+            import sqlite3
+
+            try:
+                db_path_to_check = os.path.abspath(sqlite_db_path)
+                logger.info(f"Verifying tables in: {db_path_to_check}")
+
+                if (
+                    os.path.exists(db_path_to_check)
+                    and os.path.getsize(db_path_to_check) > 0
+                ):
+                    sqlite_conn = sqlite3.connect(db_path_to_check)
+                    cursor = sqlite_conn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                    tables = cursor.fetchall()
+                    sqlite_conn.close()
+
+                    table_count = len(tables)
+                    logger.info(
+                        f"Verified {table_count} tables in database: {', '.join([t[0] for t in tables])}"
+                    )
+                    if table_count == 0:
+                        logger.error("No tables were created in the database!")
+                else:
+                    logger.error(
+                        f"Database file not found or empty after initialization: {db_path_to_check}"
+                    )
+            except Exception as e:
+                logger.error(f"Error verifying tables: {e}")
+                import traceback
+
+                logger.error(traceback.format_exc())
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        # Print full traceback for debugging
+        import traceback
+
+        logger.error(traceback.format_exc())
+        raise
+
+
+async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield a session connected to the LOCAL database (SQLite/PG),
+    bypassing the Lakebase swap.  Used for bootstrap config tables
+    like database_configs that are never migrated to Lakebase.
+
+    Routes take it through ``LocalSessionDep``, which commits before the
+    response is sent; this request-scoped teardown runs after it."""
+    async with _local_session_factory() as session:
+        tokens = _enter_request_session(session)
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            _exit_request_session(tokens)
+            await session.close()
+
+
+# get_db (the old request dependency) and get_sync_db are gone: inside a
+# request use SessionDep, outside one routed_scoped_session().
+
+
+# Graceful engine disposal to avoid event-loop mismatch on shutdown
+async def dispose_engines() -> None:
+    """
+    Dispose all async engines/pools while the FastAPI event loop is still alive.
+    This prevents asyncpg from attempting to close connections on a different
+    loop during interpreter shutdown ("Future attached to a different loop").
+
+    Also disposes the global Lakebase session factory to ensure a clean
+    switch between database backends (SQLite/PG <-> Lakebase).
+    """
+    try:
+        engines = []
+        try:
+            engines.append(engine)
+        except Exception:
+            pass
+        try:
+            if "pooled_engine" in globals():
+                engines.append(pooled_engine)
+        except Exception:
+            pass
+        try:
+            if "nullpool_engine" in globals():
+                engines.append(nullpool_engine)
+        except Exception:
+            pass
+        try:
+            if _isolated_sqlite_engine is not None:
+                engines.append(_isolated_sqlite_engine)
+        except Exception:
+            pass
+
+        # De-duplicate in case some references are the same (e.g., SQLite)
+        seen = set()
+        unique_engines = []
+        for eng in engines:
+            if eng is not None and id(eng) not in seen:
+                seen.add(id(eng))
+                unique_engines.append(eng)
+
+        for eng in unique_engines:
+            try:
+                logger.info(f"Disposing SQLAlchemy engine {eng}...")
+                await eng.dispose()
+            except Exception as e:
+                logger.warning(f"Error disposing engine {eng}: {e}")
+
+        # Also dispose the Lakebase factory to force fresh connections
+        # on the next request after a backend switch
+        try:
+            from src.db.lakebase_session import dispose_lakebase_factory
+
+            await dispose_lakebase_factory()
+        except Exception as e:
+            logger.warning(f"Error disposing Lakebase factory: {e}")
+    except Exception as outer_e:
+        logger.warning(f"dispose_engines encountered an error: {outer_e}")

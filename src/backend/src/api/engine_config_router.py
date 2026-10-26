@@ -1,0 +1,647 @@
+import logging
+from typing import Annotated, Any, Dict
+
+from fastapi import APIRouter, Depends, status
+
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
+from src.core.permissions import is_system_admin
+from src.dependencies.providers import GroupContextDep, SessionDep
+from src.models.engine_config import EngineConfig
+from src.schemas.engine_config import (
+    EngineConfigCreate,
+    EngineConfigListResponse,
+    EngineConfigResponse,
+    EngineConfigToggleUpdate,
+    EngineConfigUpdate,
+    EngineConfigValueUpdate,
+    EngineSettings,
+    EngineSettingsUpdate,
+    EventTriggersConfigUpdate,
+    HarnessResponse,
+    HarnessUpdate,
+    KasalFlowConfigUpdate,
+    OtelAppTelemetryConfigUpdate,
+)
+from src.services.settings import engine_settings_view
+from src.services.settings.engine import EngineConfigService
+
+router = APIRouter(
+    prefix="/engine-config",
+    tags=["engine-config"],
+    responses={404: {"description": "Not found"}},
+)
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
+# Dependency to get EngineConfigService
+def get_engine_config_service(session: SessionDep) -> EngineConfigService:
+    """
+    Dependency provider for EngineConfigService.
+
+    Creates service with session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI (from core.dependencies)
+
+    Returns:
+        EngineConfigService instance with session
+    """
+    return EngineConfigService(session)
+
+
+# Type alias for cleaner function signatures
+EngineConfigServiceDep = Annotated[
+    EngineConfigService, Depends(get_engine_config_service)
+]
+
+
+@router.get("", response_model=EngineConfigListResponse)
+async def get_engine_configs(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfigListResponse:
+    """
+    Get all engine configurations.
+
+    Args:
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        List of engine configurations
+    """
+    logger.info("API call: GET /engine-config")
+
+    configs = await service.find_all()
+    logger.info(f"Found {len(configs)} engine configurations in database")
+
+    return EngineConfigListResponse(configs=configs, count=len(configs))
+
+
+@router.get("/enabled", response_model=EngineConfigListResponse)
+async def get_enabled_engine_configs(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfigListResponse:
+    """
+    Get only enabled engine configurations.
+
+    Args:
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        List of enabled engine configurations
+    """
+    logger.info("API call: GET /engine-config/enabled")
+
+    configs = await service.find_enabled_configs()
+    logger.info(f"Found {len(configs)} enabled engine configurations in database")
+
+    return EngineConfigListResponse(configs=configs, count=len(configs))
+
+
+@router.get("/engine/{engine_name}", response_model=EngineConfigResponse)
+async def get_engine_config(
+    engine_name: str,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfig:
+    """
+    Get a specific engine configuration by engine name.
+
+    Args:
+        engine_name: Name of the engine configuration to get
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Engine configuration if found
+
+    Raises:
+        HTTPException: If engine configuration not found
+    """
+    logger.info(f"API call: GET /engine-config/engine/{engine_name}")
+
+    config = await service.find_by_engine_name(engine_name)
+    if not config:
+        logger.warning(f"Engine configuration with name {engine_name} not found")
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    return config
+
+
+@router.get(
+    "/engine/{engine_name}/config/{config_key}", response_model=EngineConfigResponse
+)
+async def get_engine_config_by_key(
+    engine_name: str,
+    config_key: str,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfig:
+    """
+    Get a specific engine configuration by engine name and config key.
+
+    Args:
+        engine_name: Name of the engine
+        config_key: Configuration key
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Engine configuration if found
+
+    Raises:
+        HTTPException: If engine configuration not found
+    """
+    logger.info(
+        f"API call: GET /engine-config/engine/{engine_name}/config/{config_key}"
+    )
+
+    config = await service.find_by_engine_and_key(engine_name, config_key)
+    if not config:
+        logger.warning(f"Engine configuration {engine_name}.{config_key} not found")
+        raise NotFoundError(
+            f"Engine configuration {engine_name}.{config_key} not found"
+        )
+
+    return config
+
+
+@router.get("/type/{engine_type}", response_model=EngineConfigListResponse)
+async def get_engine_configs_by_type(
+    engine_type: str,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfigListResponse:
+    """
+    Get all engine configurations by engine type.
+
+    Args:
+        engine_type: Type of the engine
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        List of engine configurations
+    """
+    logger.info(f"API call: GET /engine-config/type/{engine_type}")
+
+    configs = await service.find_by_engine_type(engine_type)
+    logger.info(f"Found {len(configs)} engine configurations for type {engine_type}")
+
+    return EngineConfigListResponse(configs=configs, count=len(configs))
+
+
+@router.post(
+    "", response_model=EngineConfigResponse, status_code=status.HTTP_201_CREATED
+)
+async def create_engine_config(
+    config: EngineConfigCreate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfig:
+    """
+    Create a new engine configuration.
+    Only Admins can create engine configurations.
+
+    Args:
+        config: Engine configuration data
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Created engine configuration
+
+    Raises:
+        HTTPException: If engine configuration with the same name already exists
+    """
+    # Check permissions - only admins can create engine configurations
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can create engine configurations")
+
+    logger.info(
+        f"API call: POST /engine-config - Creating engine config {config.engine_name}"
+    )
+
+    created_config = await service.create_engine_config(config)
+    logger.info(f"Engine config {config.engine_name} created successfully")
+
+    return created_config
+
+
+@router.put("/engine/{engine_name}", response_model=EngineConfigResponse)
+async def update_engine_config(
+    engine_name: str,
+    config: EngineConfigUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfig:
+    """
+    Update an existing engine configuration.
+    Only Admins can update engine configurations.
+
+    Args:
+        engine_name: Name of the engine configuration to update
+        config: Updated engine configuration data
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Updated engine configuration
+
+    Raises:
+        HTTPException: If engine configuration not found
+    """
+    # Check permissions - only admins can update engine configurations
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can update engine configurations")
+
+    logger.info(f"API call: PUT /engine-config/engine/{engine_name}")
+
+    updated_config = await service.update_engine_config(engine_name, config)
+    if not updated_config:
+        logger.warning(
+            f"Engine configuration with name {engine_name} not found for update"
+        )
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    logger.info(f"Engine config {engine_name} updated successfully")
+    return updated_config
+
+
+@router.patch("/engine/{engine_name}/toggle", response_model=EngineConfigResponse)
+async def toggle_engine_config(
+    engine_name: str,
+    toggle_data: EngineConfigToggleUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfig:
+    """
+    Toggle the enabled status of an engine configuration.
+    Only Admins can toggle engine configurations.
+
+    Args:
+        engine_name: Name of the engine configuration to toggle
+        toggle_data: Toggle data containing new enabled status
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Updated engine configuration
+
+    Raises:
+        HTTPException: If engine configuration not found
+    """
+    # Check permissions - only admins can toggle engine configurations
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can toggle engine configurations")
+
+    logger.info(
+        f"API call: PATCH /engine-config/engine/{engine_name}/toggle - enabled={toggle_data.enabled}"
+    )
+
+    updated_config = await service.toggle_engine_enabled(
+        engine_name, toggle_data.enabled
+    )
+    if not updated_config:
+        logger.warning(
+            f"Engine configuration with name {engine_name} not found for toggle"
+        )
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    logger.info(f"Engine config {engine_name} toggled to enabled={toggle_data.enabled}")
+    return updated_config
+
+
+@router.patch(
+    "/engine/{engine_name}/config/{config_key}/value",
+    response_model=EngineConfigResponse,
+)
+async def update_config_value(
+    engine_name: str,
+    config_key: str,
+    value_data: EngineConfigValueUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineConfig:
+    """
+    Update the configuration value for a specific engine and key.
+    Only Admins can update engine configuration values.
+
+    Args:
+        engine_name: Name of the engine
+        config_key: Configuration key
+        value_data: New configuration value
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Updated engine configuration
+
+    Raises:
+        HTTPException: If engine configuration not found
+    """
+    # Check permissions - only admins can update engine configuration values
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system admins can update engine configuration values"
+        )
+
+    logger.info(
+        f"API call: PATCH /engine-config/engine/{engine_name}/config/{config_key}/value"
+    )
+
+    updated_config = await service.update_config_value(
+        engine_name, config_key, value_data.config_value
+    )
+    if not updated_config:
+        logger.warning(
+            f"Engine configuration {engine_name}.{config_key} not found for value update"
+        )
+        raise NotFoundError(
+            f"Engine configuration {engine_name}.{config_key} not found"
+        )
+
+    logger.info(f"Engine config {engine_name}.{config_key} value updated successfully")
+    return updated_config
+
+
+@router.get("/kasal/flow-enabled", response_model=None)
+async def get_kasal_flow_enabled(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """
+    Get the CrewAI flow enabled status.
+    Only system administrators can access engine configuration.
+
+    Args:
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Flow enabled status
+    """
+    # Check permissions - only system admins can access engine configuration
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can access engine configuration"
+        )
+
+    logger.info("API call: GET /engine-config/kasal/flow-enabled")
+
+    enabled = await service.get_kasal_flow_enabled()
+    logger.info(f"CrewAI flow enabled status: {enabled}")
+
+    return {"flow_enabled": enabled}
+
+
+@router.patch("/kasal/flow-enabled", response_model=None)
+async def set_kasal_flow_enabled(
+    config_data: KasalFlowConfigUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """
+    Set the CrewAI flow enabled status.
+    Only system administrators can manage engine configuration.
+
+    Args:
+        config_data: Flow configuration data
+        service: EngineConfig service injected by dependency
+
+    Returns:
+        Success status
+    """
+    # Check permissions - only system admins can manage engine configuration
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can manage engine configuration"
+        )
+
+    logger.info(
+        f"API call: PATCH /engine-config/kasal/flow-enabled - enabled={config_data.flow_enabled}"
+    )
+
+    success = await service.set_kasal_flow_enabled(config_data.flow_enabled)
+    if not success:
+        raise KasalError("Failed to update CrewAI flow configuration")
+
+    logger.info(f"CrewAI flow enabled status updated to: {config_data.flow_enabled}")
+    return {"success": True, "flow_enabled": config_data.flow_enabled}
+
+
+@router.get("/kasal/event-triggers", response_model=None)
+async def get_event_triggers_enabled(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Get the event-trigger feature enabled status (system-level).
+
+    Only system administrators can access engine configuration.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can access engine configuration"
+        )
+
+    enabled = await service.get_event_triggers_enabled()
+    return {"event_triggers_enabled": enabled}
+
+
+@router.patch("/kasal/event-triggers", response_model=None)
+async def set_event_triggers_enabled(
+    config_data: EventTriggersConfigUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Enable/disable the event-trigger feature (system-level, Preview).
+
+    Only system administrators can manage this. When enabled, the background
+    consumer drains the trigger queue and completed runs emit their events;
+    when disabled, both stop (queued rows simply wait).
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can manage engine configuration"
+        )
+
+    success = await service.set_event_triggers_enabled(config_data.enabled)
+    if not success:
+        raise KasalError("Failed to update event-trigger configuration")
+
+    logger.info(f"Event triggers enabled status updated to: {config_data.enabled}")
+    return {"success": True, "event_triggers_enabled": config_data.enabled}
+
+
+@router.get("/kasal/otel-app-telemetry", response_model=None)
+async def get_otel_app_telemetry_enabled(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Get the OTel App Telemetry configuration (system-level, Preview).
+
+    Only system administrators can access this configuration.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can access OTel App Telemetry configuration"
+        )
+
+    enabled = await service.get_otel_app_telemetry_enabled()
+    log_level = await service.get_otel_app_telemetry_log_level()
+    return {
+        "otel_app_telemetry_enabled": enabled,
+        "otel_app_telemetry_log_level": log_level,
+    }
+
+
+@router.patch("/kasal/otel-app-telemetry", response_model=None)
+async def set_otel_app_telemetry_enabled(
+    config_data: OtelAppTelemetryConfigUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Update the OTel App Telemetry configuration (system-level, Preview).
+
+    Only system administrators can manage this configuration.
+    When enabled, structured OpenTelemetry logs are exported to Unity Catalog
+    tables via the Databricks App Telemetry sidecar.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can manage OTel App Telemetry configuration"
+        )
+
+    from src.core.logger import LoggerManager
+
+    logger_manager = LoggerManager.get_instance()
+
+    result: dict = {"success": True}
+
+    if config_data.enabled is not None:
+        success = await service.set_otel_app_telemetry_enabled(config_data.enabled)
+        if not success:
+            raise KasalError("Failed to update OTel App Telemetry configuration")
+        logger_manager.enable_otel_app_telemetry(enabled=config_data.enabled)
+        result["otel_app_telemetry_enabled"] = config_data.enabled
+
+    if config_data.log_level is not None:
+        success = await service.set_otel_app_telemetry_log_level(config_data.log_level)
+        if not success:
+            raise KasalError("Failed to update OTel App Telemetry log level")
+        logger_manager.set_otel_log_level(config_data.log_level)
+        result["otel_app_telemetry_log_level"] = config_data.log_level
+
+    return result
+
+
+@router.delete("/engine/{engine_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_engine_config(
+    engine_name: str,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> None:
+    """
+    Delete an engine configuration.
+    Only system admins can delete engine configurations.
+
+    Args:
+        engine_name: Name of the engine configuration to delete
+        service: EngineConfig service injected by dependency
+
+    Raises:
+        HTTPException: If engine configuration not found
+    """
+    # Engine configuration is GLOBAL (R2-03, audit V4-3): deleting a row resets
+    # a server-wide setting for every tenant, so a workspace admin must not.
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can delete engine configurations")
+
+    logger.info(f"API call: DELETE /engine-config/engine/{engine_name}")
+
+    deleted = await service.delete_engine_config(engine_name)
+    if not deleted:
+        logger.warning(
+            f"Engine configuration with name {engine_name} not found for deletion"
+        )
+        raise NotFoundError(f"Engine configuration with name {engine_name} not found")
+
+    logger.info(f"Engine config {engine_name} deleted successfully")
+
+
+@router.get("/harness", response_model=HarnessResponse)
+async def get_harness(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Which agent runtime new executions start on, and what each can do.
+
+    Readable by anyone who can see the configuration page — the answer changes
+    what the rest of the UI is allowed to offer (resume, flows, export), so
+    gating the READ behind system-admin would leave every other user looking at
+    controls that do not match the running engine.
+    """
+    logger.info("API call: GET /engine-config/harness")
+    return await service.get_harnesses()
+
+
+@router.put("/harness", response_model=HarnessResponse)
+async def set_harness(
+    config_data: HarnessUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> Dict[str, Any]:
+    """Switch the engine. Takes effect on the NEXT execution, never a running one.
+
+    A run resolves its engine once, at creation, and carries it in its own row
+    (``execution_history.harness``) — so flipping this mid-flight cannot
+    split a run across two runtimes, and a resume continues on the engine that
+    started it.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can manage engine configuration"
+        )
+
+    logger.info(f"API call: PUT /engine-config/harness - harness={config_data.harness}")
+    await service.set_harness(config_data.harness)
+    return await service.get_harnesses()
+
+
+@router.get("/settings", response_model=EngineSettings)
+async def get_engine_settings(
+    service: EngineConfigServiceDep, group_context: GroupContextDep
+) -> EngineSettings:
+    """Configuration → Engines system settings (system administrators only)."""
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can access engine configuration"
+        )
+    return EngineSettings(**await engine_settings_view.get_view(service))
+
+
+@router.patch("/settings", response_model=EngineSettings)
+async def update_engine_settings(
+    payload: EngineSettingsUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+) -> EngineSettings:
+    """Partial update; null (or "") resets a field to its default."""
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can change engine configuration"
+        )
+    sent = payload.model_dump(exclude_unset=True)
+    return EngineSettings(**await engine_settings_view.update_view(service, sent))

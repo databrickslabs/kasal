@@ -1,0 +1,565 @@
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+from uuid import UUID as PyUUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.core.llm.effort import EffortSettings
+from src.schemas.chat_asset import ImageAssetRef
+
+# Node data models
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+
+class Position(BaseModel):
+    """Position of a node in the flow diagram."""
+
+    x: float
+    y: float
+
+
+class Style(BaseModel):
+    """Visual styling for a node."""
+
+    background: Optional[str] = None
+    border: Optional[str] = None
+    borderRadius: Optional[str] = None
+    padding: Optional[str] = None
+    boxShadow: Optional[str] = None
+
+
+class LLMGuardrailConfig(BaseModel):
+    """Configuration for LLM-based output validation guardrail."""
+
+    description: str = Field(..., description="Validation criteria for the task output")
+    llm_model: Optional[str] = Field(
+        None,
+        description="Deprecated/ignored — guardrail uses the run's model (the chat-input selection)",
+    )
+
+
+class TaskConfig(BaseModel):
+    """Configuration specific to tasks."""
+
+    cache_response: Optional[bool] = False
+    cache_ttl: Optional[int] = 3600
+    retry_on_fail: Optional[bool] = False
+    max_retries: Optional[int] = 3
+    timeout: Optional[Any] = None
+    priority: Optional[int] = 1
+    error_handling: Optional[str] = "default"
+    output_file: Optional[str] = None
+    output_json: Optional[str] = None
+    output_pydantic: Optional[str] = None
+    validation_function: Optional[str] = None
+    callback_function: Optional[str] = None
+    human_input: Optional[bool] = False
+    markdown: Optional[bool] = False
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(
+        None, description="LLM-based output validation configuration"
+    )
+
+
+class NodeData(BaseModel):
+    """Data associated with a node in the flow diagram."""
+
+    label: str
+    role: Optional[str] = None
+    goal: Optional[str] = None
+    backstory: Optional[str] = None
+    tools: List[Any] = Field(default_factory=list)
+    tool_configs: Optional[Dict[str, Any]] = (
+        None  # Tool-specific configuration overrides (e.g., MCP_SERVERS, GenieTool)
+    )
+    agentId: Optional[str] = None
+    taskId: Optional[str] = None
+    llm: Optional[str] = None
+    function_calling_llm: Optional[str] = None
+    max_iter: Optional[int] = None
+    max_rpm: Optional[int] = None
+    max_execution_time: Optional[int] = None
+    verbose: Optional[bool] = None
+    allow_delegation: Optional[bool] = None
+    cache: Optional[bool] = None
+    # Memory settings
+    memory: Optional[bool] = True
+    embedder_config: Optional[Dict[str, Any]] = None
+    system_template: Optional[str] = None
+    prompt_template: Optional[str] = None
+    response_template: Optional[str] = None
+    allow_code_execution: Optional[bool] = None
+    code_execution_mode: Optional[str] = None
+    max_retry_limit: Optional[int] = None
+    use_system_prompt: Optional[bool] = None
+    respect_context_window: Optional[bool] = None
+    type: Optional[str] = None
+    description: Optional[str] = None
+    expected_output: Optional[str] = None
+    icon: Optional[str] = None
+    advanced_config: Optional[Dict[str, Any]] = None
+    config: Optional[TaskConfig] = None
+    context: List[str] = Field(default_factory=list)
+    async_execution: Optional[bool] = False
+    knowledge_sources: Optional[List[Dict[str, Any]]] = None
+    markdown: Optional[bool] = Field(
+        False, description="Whether to use markdown formatting"
+    )
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(
+        None, description="LLM-based output validation at node level"
+    )
+
+
+class Node(BaseModel):
+    """A node in the flow diagram representing an agent or task."""
+
+    id: str
+    type: str
+    position: Position
+    data: NodeData
+    width: Optional[float] = None
+    height: Optional[float] = None
+    selected: Optional[bool] = None
+    positionAbsolute: Optional[Position] = None
+    dragging: Optional[bool] = None
+    style: Optional[Style] = None
+
+
+class Edge(BaseModel):
+    """An edge in the flow diagram representing a connection between nodes."""
+
+    source: str
+    target: str
+    id: str
+    sourceHandle: Optional[str] = None
+    targetHandle: Optional[str] = None
+
+
+# Shared properties
+class CrewBase(BaseModel):
+    """Base Pydantic model for Crews with shared attributes."""
+
+    name: str
+    agent_ids: List[str] = Field(default_factory=list)
+    task_ids: List[str] = Field(default_factory=list)
+    nodes: List[Node] = Field(default_factory=list)
+    edges: List[Edge] = Field(default_factory=list)
+
+    # Crew execution configuration
+    process: Optional[str] = Field(
+        "sequential",
+        description="Execution process type: sequential, hierarchical, or parallel (independent tasks run concurrently)",
+    )
+    reasoning: Optional[bool] = Field(
+        False,
+        description="Enable the model's native reasoning budget for this crew's agents",
+    )
+    reasoning_llm: Optional[str] = Field(
+        None, description="LLM model for reasoning operations"
+    )
+    reasoning_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Reasoning budget, e.g. {'reasoning_effort': 'low'|'medium'|'high'}",
+    )
+    manager_llm: Optional[str] = Field(
+        None, description="LLM model for hierarchical process manager"
+    )
+    tool_configs: Optional[Dict[str, Any]] = Field(
+        None, description="Crew-level tool configurations (MCP servers, etc.)"
+    )
+    memory: Optional[bool] = Field(True, description="Enable crew memory")
+    verbose: Optional[bool] = Field(True, description="Enable verbose output")
+    max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
+
+
+# Properties to receive on crew creation
+class CrewCreate(CrewBase):
+    """Pydantic model for creating a crew."""
+
+    pass
+
+
+# Properties to receive on crew update
+class CrewUpdate(BaseModel):
+    """Pydantic model for updating a crew, all fields optional."""
+
+    name: Optional[str] = None
+    agent_ids: Optional[List[str]] = None
+    task_ids: Optional[List[str]] = None
+    nodes: Optional[List[Node]] = None
+    edges: Optional[List[Edge]] = None
+    # Crew execution configuration
+    process: Optional[str] = None
+    reasoning: Optional[bool] = None
+    reasoning_llm: Optional[str] = None
+    reasoning_config: Optional[Dict[str, Any]] = None
+    manager_llm: Optional[str] = None
+    tool_configs: Optional[Dict[str, Any]] = None
+    memory: Optional[bool] = None
+    verbose: Optional[bool] = None
+    max_rpm: Optional[int] = None
+
+
+# Properties shared by models stored in DB
+class CrewInDBBase(CrewBase):
+    """Base Pydantic model for crews in the database, including id and timestamps."""
+
+    id: PyUUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Properties to return to client
+class Crew(CrewInDBBase):
+    """Pydantic model for returning crews to clients."""
+
+    pass
+
+
+# Custom response model with string timestamps
+class CrewResponse(BaseModel):
+    """Pydantic model for Crew response with string timestamps."""
+
+    id: PyUUID
+    name: str
+    agent_ids: List[str]
+    task_ids: List[str]
+    nodes: List[Node]
+    edges: List[Edge]
+    created_at: str
+    updated_at: str
+    # Crew execution configuration
+    process: Optional[str] = "sequential"
+    reasoning: Optional[bool] = False
+    reasoning_llm: Optional[str] = None
+    reasoning_config: Optional[Dict[str, Any]] = None
+    manager_llm: Optional[str] = None
+    tool_configs: Optional[Dict[str, Any]] = None
+    memory: Optional[bool] = True
+    verbose: Optional[bool] = True
+    max_rpm: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrewGenerationRequest(BaseModel):
+    """Request schema for generating crew setup with agents and tasks."""
+
+    prompt: str = Field(
+        ..., description="Natural language description of the crew setup"
+    )
+    model: Optional[str] = Field(None, description="LLM model to use for generation")
+    tools: Optional[List[str]] = Field(
+        [], description="List of available tools for the crew"
+    )
+    api_key: Optional[str] = Field(None, description="API key for the LLM provider")
+
+
+class CrewFromConversationRequest(BaseModel):
+    """Request schema for distilling a reusable crew from a chat conversation.
+
+    Used by ChatMode answer mode's "Save to catalog": rather than persisting the
+    generic chat assistant, the backend reads the session's conversation and
+    synthesizes an Agent + Task that capture what the user actually asked for.
+    """
+
+    session_id: str = Field(
+        ...,
+        description="Chat session whose conversation is distilled into a reusable crew",
+    )
+    model: Optional[str] = Field(None, description="LLM model to use for the synthesis")
+
+
+class AgentConfig(BaseModel):
+    """Configuration for an agent in the crew."""
+
+    llm: Optional[str] = Field(
+        DEFAULT_ENGINE_MODEL, description="LLM model for the agent"
+    )
+    function_calling_llm: Optional[str] = Field(
+        None, description="LLM model for function calling"
+    )
+    max_iter: Optional[int] = Field(25, description="Maximum iterations for the agent")
+    max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
+    max_execution_time: Optional[int] = Field(
+        None, description="Maximum execution time in seconds"
+    )
+    verbose: Optional[bool] = Field(False, description="Whether to use verbose output")
+    allow_delegation: Optional[bool] = Field(
+        False, description="Whether to allow delegation"
+    )
+    cache: Optional[bool] = Field(True, description="Whether to use cache")
+    system_template: Optional[str] = Field(None, description="System template")
+    prompt_template: Optional[str] = Field(None, description="Prompt template")
+    response_template: Optional[str] = Field(None, description="Response template")
+    allow_code_execution: Optional[bool] = Field(
+        False, description="Whether to allow code execution"
+    )
+    code_execution_mode: Optional[str] = Field(
+        "safe", description="Code execution mode"
+    )
+    max_retry_limit: Optional[int] = Field(2, description="Maximum retry limit")
+    use_system_prompt: Optional[bool] = Field(
+        True, description="Whether to use system prompt"
+    )
+    respect_context_window: Optional[bool] = Field(
+        True, description="Whether to respect context window"
+    )
+
+
+class Agent(BaseModel):
+    """Agent in the crew."""
+
+    id: Optional[str] = Field(None, description="Unique identifier for the agent")
+    name: str = Field(..., description="Name of the agent")
+    role: str = Field(..., description="Role of the agent")
+    goal: str = Field(..., description="Goal of the agent")
+    backstory: str = Field(..., description="Backstory of the agent")
+    tools: Optional[List[str]] = Field([], description="Tools available to the agent")
+    llm: Optional[str] = Field(
+        DEFAULT_ENGINE_MODEL, description="LLM model for the agent"
+    )
+    function_calling_llm: Optional[str] = Field(
+        None, description="LLM model for function calling"
+    )
+    max_iter: Optional[int] = Field(25, description="Maximum iterations")
+    max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
+    max_execution_time: Optional[int] = Field(
+        None, description="Maximum execution time in seconds"
+    )
+    verbose: Optional[bool] = Field(False, description="Whether to use verbose output")
+    allow_delegation: Optional[bool] = Field(
+        False, description="Whether to allow delegation"
+    )
+    cache: Optional[bool] = Field(True, description="Whether to use cache")
+    system_template: Optional[str] = Field(None, description="System template")
+    prompt_template: Optional[str] = Field(None, description="Prompt template")
+    response_template: Optional[str] = Field(None, description="Response template")
+    allow_code_execution: Optional[bool] = Field(
+        False, description="Whether to allow code execution"
+    )
+    code_execution_mode: Optional[str] = Field(
+        "safe", description="Code execution mode"
+    )
+    max_retry_limit: Optional[int] = Field(2, description="Maximum retry limit")
+    use_system_prompt: Optional[bool] = Field(
+        True, description="Whether to use system prompt"
+    )
+    respect_context_window: Optional[bool] = Field(
+        True, description="Whether to respect context window"
+    )
+
+
+class Task(BaseModel):
+    """Task in the crew."""
+
+    id: Optional[str] = Field(None, description="Unique identifier for the task")
+    name: str = Field(..., description="Name of the task")
+    description: str = Field(..., description="Description of the task")
+    expected_output: Optional[str] = Field(
+        None, description="Expected output of the task"
+    )
+    tools: Optional[List[str]] = Field([], description="Tools required for the task")
+    assigned_agent: Optional[str] = Field(
+        None, description="Agent assigned to the task"
+    )
+    async_execution: Optional[bool] = Field(
+        False, description="Whether to execute the task asynchronously"
+    )
+    context: Optional[List[str]] = Field(
+        [], description="Task IDs that provide context"
+    )
+    config: Optional[Dict[str, Any]] = Field({}, description="Additional configuration")
+    output_json: Optional[bool] = Field(None, description="Whether to output as JSON")
+    output_pydantic: Optional[str] = Field(
+        None, description="Pydantic model for output"
+    )
+    output_file: Optional[str] = Field(None, description="File to output to")
+    output: Optional[str] = Field(None, description="Output variable name")
+    callback: Optional[str] = Field(None, description="Callback function")
+    human_input: Optional[bool] = Field(
+        False, description="Whether to request human input"
+    )
+    converter_cls: Optional[str] = Field(None, description="Converter class")
+    markdown: Optional[bool] = Field(
+        False, description="Whether to use markdown formatting"
+    )
+
+
+class CrewCreationResponse(BaseModel):
+    """Response schema for crew creation with database entities."""
+
+    agents: List[Any] = Field(
+        ..., description="List of created agent entities with database IDs"
+    )
+    tasks: List[Any] = Field(
+        ..., description="List of created task entities with database IDs"
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrewStreamingRequest(BaseModel):
+    """Request schema for progressive/streaming crew generation."""
+
+    execution_effort: Optional[EffortSettings] = None
+
+    prompt: str = Field(
+        ..., description="Natural language description of the crew setup"
+    )
+    original_prompt: Optional[str] = Field(
+        None,
+        description="Original user message before LLM rewrite, used for cap computation",
+    )
+    model: Optional[str] = Field(None, description="LLM model to use for generation")
+    tools: Optional[List[str]] = Field(
+        default_factory=list, description="List of available tools for the crew"
+    )
+    # --- ChatMode auto-execute. AgentBuilder/crew canvas leaves these at the
+    # defaults, so it stays generate-only (renders the plan as nodes, no run). ---
+    auto_execute: bool = Field(
+        default=False,
+        description="When true, run the generated crew on the backend immediately after generation (ChatMode). AgentBuilder keeps this false and only renders the plan.",
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Chat session id — memory partition + run ownership for the auto-executed run",
+    )
+    user_message_id: Optional[str] = Field(
+        default=None, description="Saved user message that starts this chat turn"
+    )
+    memory_workspace_scope: Optional[bool] = Field(
+        default=True,
+        description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only",
+    )
+    disable_memory: bool = Field(
+        False,
+        description="'No memory' mode — build agents without memory for the auto-executed run",
+    )
+    answer_from_conversation: bool = Field(
+        default=False,
+        description=(
+            "Set by the dispatcher, not the client: this turn restates or reshapes "
+            "the answer already on screen. The run is grounded on the transcript "
+            "instead of sent to research the question again."
+        ),
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        default_factory=list,
+        description="MCP server names to equip the auto-executed crew with",
+    )
+    agentbricks_endpoints: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the auto-executed crew",
+    )
+    knowledge_file_paths: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document",
+    )
+    image_assets: Optional[List[ImageAssetRef]] = Field(
+        default_factory=list,
+        description=(
+            "Images attached in this chat turn (id, name, pixel size). The run tells "
+            'the model how to place one in HTML it writes — <img src="asset:<id>"> — '
+            "and the frontend resolves that reference when rendering."
+        ),
+    )
+    skills: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Skill names picked in the chat '+' menu; attached to every agent of the auto-executed run (the kernel builder injects each skill's <available_skills> block + load_skill/read_skill_file tools)",
+    )
+    chat_mode_type: Optional[str] = Field(
+        "chat",
+        description="ChatMode answer mode (chat|research|deep): drives the reasoning budget and execution_type in build_crew_config_from_generated. 'chat' = single light agent (no extra thinking), 'research' = crew with a medium reasoning budget, 'deep' = crew with a high reasoning budget",
+    )
+
+
+class CrewStreamingResponse(BaseModel):
+    """Response schema for streaming crew generation initiation."""
+
+    generation_id: str = Field(
+        ..., description="Unique ID for tracking the progressive generation via SSE"
+    )
+
+
+# ── The plan the crew generator must return ─────────────────────────────────
+# Sent to the planning LLM as a json_schema response_format, not merely
+# described in the prompt. The prompt asked for `scope`, `produces` and
+# `needs_tools`; databricks-gpt-5-3-codex read a 4.3k-char instruction carrying
+# all three and returned the old three-field shape with none of them, plus six
+# tasks for a two-task request. A field the model can decline to emit is a
+# field the pipeline cannot rely on, so every one of them is REQUIRED here and
+# the ceiling on task count is enforced rather than truncated after the fact.
+
+
+class CrewPlanAgent(BaseModel):
+    """One agent in the plan outline — identity only; prose comes later."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Short, descriptive agent name")
+    role: str = Field(..., description="One specialised sentence fragment")
+
+
+class CrewPlanTask(BaseModel):
+    """One task in the plan outline, and the contract its write-up must honour.
+
+    ``scope``/``produces`` exist because each task's description is generated by
+    its OWN later call, which cannot see the other tasks. Given only the task
+    name and the whole user request, every one of those calls tried to satisfy
+    the whole request — three tasks all describing the same gathering, all three
+    holding the same tool. These fields are the plan telling each task where its
+    responsibility starts and stops.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Short, descriptive task name")
+    assigned_agent: str = Field(
+        ..., description="Must be the name of one of the agents"
+    )
+    context: List[str] = Field(
+        ...,
+        description=(
+            "Names of earlier tasks whose output this task needs. Empty list "
+            "when it needs none — the field is still required, so the planner "
+            "has to decide rather than omit."
+        ),
+    )
+    scope: str = Field(
+        ...,
+        description=(
+            "One sentence naming what THIS task alone is responsible for, "
+            "narrower than the user's overall request. Two tasks that would "
+            "share a scope are one task."
+        ),
+    )
+    produces: str = Field(
+        ...,
+        description=(
+            "The single artifact this task hands on. The last task's artifact "
+            "is the one the user asked for."
+        ),
+    )
+
+
+class CrewPlan(BaseModel):
+    """The whole plan outline. Names and structure only — no prose, no tools.
+
+    Deliberately carries NO array length bounds. `strict: true` is what makes the
+    required fields binding, and strict mode rejects several validation keywords
+    — `minItems`/`maxItems` among them on some providers. A schema the endpoint
+    refuses fails the whole planning call, which is far worse than an over-long
+    plan: the generator already clamps agent and task counts after parsing, and
+    the prompt already carries the per-request cap. So the schema buys what only
+    a schema can buy (fields the model cannot omit) and leaves counting to the
+    code that already does it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    complexity: Literal["light", "standard", "complex"] = Field(...)
+    process_type: Literal["sequential", "parallel"] = Field(...)
+    agents: List[CrewPlanAgent] = Field(...)
+    tasks: List[CrewPlanTask] = Field(...)

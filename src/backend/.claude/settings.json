@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if [[ \"${tool_params_file_path}\" == *.py ]]; then echo \"\\n🔍 Running flake8 on ${tool_params_file_path}...\"; flake8 \"${tool_params_file_path}\" --max-line-length=120 --extend-ignore=W293,W291,W292 || echo \"⚠️  Flake8 found issues in ${tool_params_file_path}\"; elif [[ \"${tool_params_file_path}\" == *.ts || \"${tool_params_file_path}\" == *.tsx ]]; then echo \"\\n🔍 Running ESLint on ${tool_params_file_path}...\"; cd ../../src/frontend && npx eslint --no-error-on-unmatched-pattern \"${tool_params_file_path}\" || echo \"⚠️  ESLint found issues in ${tool_params_file_path}\"; fi'",
+            "description": "Run linters on files after editing (flake8 for Python, ESLint for TypeScript)"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": ".*flake8.*|.*lint.*|.*test.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"💡 Linting tips:\\n\\nPython (Backend):\\n  • flake8 src/ --count --statistics\\n  • flake8 <file> --max-line-length=120\\n  • Auto-fix: autopep8 or black\\n\\nTypeScript (Frontend):\\n  • npm run lint (from frontend dir)\\n  • npx eslint src/ --fix (auto-fix)\\n  • npm run tsc (type checking)\"",
+            "description": "Show linting tips for both Python and TypeScript"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,144 @@
+"""Execution caps, resolved from the ChatMode answer mode.
+
+Before this module the caps lived in three unrelated places — the engine's own
+``Agent`` field defaults, a ``DEFAULT_AGENT_MAX_EXECUTION_TIME`` env var applied
+in the kernel, and a hardcoded round cap in the LLM transport — and generated
+crews set none of them, so chat, research and deep all ran on identical bare
+defaults. A mode that is meant to think harder and longer than another has to
+say so somewhere.
+
+One cap is new rather than merely relocated. ``run_wall_clock`` bounds the WHOLE
+run: ``max_execution_time`` is per agent call and a fresh deadline is computed
+on every call, so a six-task crew's real ceiling was 6 × the per-call cap — and
+the guardrail retry loop multiplied it again, since each retry re-enters
+``agent.execute_task``. With retries switched on for deep mode that compounds to
+hours, which is why the budget work ships WITH the guardrail work, not after it.
+
+A run-level TOKEN budget belongs here too and is deliberately absent: nothing
+enforces one yet, and this codebase already carries ``max_rpm`` — declared on
+Agent and Crew, plumbed through the config builder, enforced nowhere. A knob
+that looks like a cap and is not one is worse than no knob. It lands with its
+enforcement or not at all. (When it does: a token ceiling, not a dollar one —
+tokens are counted exactly and for free by the LLM layer, dollars need
+per-model pricing that exists nowhere in this codebase.)
+
+The numbers are a calibrated starting point, not a measurement. A system admin
+can override any field in Configuration → Engines → Advanced (stored as the
+``budget_<mode>_<field>`` engine setting; it replaced the
+KASAL_BUDGET_<MODE>_<FIELD> env vars), so ops can retune without a deploy.
+"""
+
+import logging
+from dataclasses import dataclass, fields
+from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BudgetProfile:
+    """Resolved caps for one execution."""
+
+    #: Tool-calling rounds allowed within a single agent call.
+    max_iter: int
+    #: Wall-clock seconds for a single agent call.
+    max_execution_time: int
+    #: Wall-clock seconds for the entire run, retries included.
+    run_wall_clock: int
+    #: Guardrail rejections a task may be retried through.
+    guardrail_max_retries: int
+
+
+#: The engine's own fallback when nothing sets ``max_execution_time``
+#: (``engine_settings.DEFAULT_AGENT_MAX_EXECUTION_TIME``, 900s, overridable in
+#: Configuration → Engines). Duplicated as a NUMBER rather than imported because this module sits
+#: under ``config/`` and ``agent_builder`` pulls in the whole kernel; the test
+#: ``test_deep_is_not_starved_relative_to_an_unprofiled_mode`` fails if the two
+#: drift apart.
+#:
+#: It matters here because a mode with NO profile gets this value, so any
+#: profile below it makes the mode that is supposed to think longer think for
+#: LESS time. That is not hypothetical: deep shipped at 600 against research's
+#: effective 900, while ALSO swapping Perplexity to a search model that answers
+#: in minutes instead of seconds. Deep was starved by a third and handed a tool
+#: an order of magnitude slower, which is why deep runs blew their budget and
+#: research runs never did. The tool swap has since been removed; this floor
+#: is what stops the other half of it coming back.
+_ENGINE_DEFAULT_MAX_EXECUTION_TIME = 900
+
+#: Only ``deep`` is APPLIED today (see generation/crew/answer_mode.GATED_MODES).
+#: The chat and research rows are the floor this function falls back to and the
+#: shape a future widening would take — they are not currently stamped onto any
+#: run, so chat and research keep the bare engine defaults they have always had.
+_PROFILES = {
+    "chat": BudgetProfile(
+        max_iter=8,
+        max_execution_time=120,
+        run_wall_clock=180,
+        guardrail_max_retries=0,
+    ),
+    "research": BudgetProfile(
+        max_iter=15,
+        max_execution_time=300,
+        run_wall_clock=900,
+        guardrail_max_retries=1,
+    ),
+    # Above the engine default, because deep genuinely does more per turn than
+    # an unprofiled mode: a high reasoning budget makes each call slower, and
+    # the envelope contract ("every claim needs a source") makes the agent
+    # gather more before it will answer. NOT more than that — deep no longer
+    # swaps in a minutes-per-call search model (see
+    # generation/crew/answer_mode), so the tool it runs is the same fast one
+    # research uses, and a ceiling sized for the slow model would only let a
+    # stuck run burn an hour before anyone noticed.
+    #
+    # Both numbers are ceilings. A run ends when its tasks finish.
+    "deep": BudgetProfile(
+        max_iter=30,
+        max_execution_time=1200,
+        run_wall_clock=3600,
+        guardrail_max_retries=3,
+    ),
+}
+
+DEFAULT_MODE = "chat"
+
+
+def _override(mode: str, field_name: str, current: int) -> int:
+    """The Configuration → Engines override for this field, else ``current``."""
+    from src.services.settings import engine_settings
+
+    return engine_settings.get_int(
+        engine_settings.budget_key(mode, field_name), current, minimum=1
+    )
+
+
+def default_profiles() -> Dict[str, Dict[str, int]]:
+    """The built-in budgets per mode (what an unset override falls back to)."""
+    return {
+        mode: {f.name: getattr(profile, f.name) for f in fields(BudgetProfile)}
+        for mode, profile in _PROFILES.items()
+    }
+
+
+def budget_field_names() -> List[str]:
+    return [f.name for f in fields(BudgetProfile)]
+
+
+def resolve_budget_profile(mode: Optional[str]) -> BudgetProfile:
+    """Caps for a ChatMode answer mode (``chat`` / ``research`` / ``deep``).
+
+    An unknown mode resolves to ``chat`` — the tightest profile — so a typo or a
+    future mode name cannot accidentally buy an hour of runtime.
+    """
+    key = (mode or DEFAULT_MODE).strip().lower()
+    base = _PROFILES.get(key)
+    if base is None:
+        logger.info("unknown answer mode %r; using the %s budget", mode, DEFAULT_MODE)
+        key, base = DEFAULT_MODE, _PROFILES[DEFAULT_MODE]
+
+    overridden = {
+        f.name: _override(key, f.name, getattr(base, f.name))
+        for f in fields(BudgetProfile)
+    }
+    return BudgetProfile(**overridden)

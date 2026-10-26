@@ -1,0 +1,930 @@
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlparse
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
+from src.core.permissions import is_system_admin
+from src.models.mcp_server import MCPServer
+from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
+from src.schemas.mcp import (
+    MCPServerCreate,
+    MCPServerListResponse,
+    MCPServerResponse,
+    MCPServerUpdate,
+    MCPSettingsResponse,
+    MCPSettingsUpdate,
+    MCPTestConnectionRequest,
+    MCPTestConnectionResponse,
+    MCPToggleResponse,
+)
+from src.utils.encryption_utils import EncryptionUtils
+
+logger = logging.getLogger(__name__)
+
+
+def _refuse_foreign_mcp_host(
+    server_url: str, auth_context: Any
+) -> Optional[MCPTestConnectionResponse]:
+    """A failed test result if the workspace credential must not go to ``server_url``.
+
+    Same rule as a run (``mcp_integration``): only the credential's own
+    workspace host or a Databricks App of that workspace (audit V3-2).
+    """
+    if not auth_context or not getattr(auth_context, "token", None):
+        return None
+    from src.core.exceptions import ForbiddenError
+    from src.services.databricks.workspace.host_guard import (
+        assert_mcp_credential_host,
+    )
+
+    try:
+        assert_mcp_credential_host(server_url, auth_context.workspace_url)
+    except ForbiddenError:
+        return MCPTestConnectionResponse(
+            success=False,
+            message=(
+                "Databricks authentication is only sent to this workspace's own "
+                "host or its Databricks Apps; use an API key for this server"
+            ),
+        )
+    return None
+
+
+class MCPService:
+    """
+    Service for MCP business logic and error handling.
+    Acts as an intermediary between the API routers and the repository.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        """
+        Initialize service with database session.
+
+        Args:
+            session: SQLAlchemy async session from dependency injection
+        """
+        self.server_repository = MCPServerRepository(session)
+        self.settings_repository = MCPSettingsRepository(session)
+
+    async def get_all_servers_effective(
+        self, group_id: Optional[str], enabled_only: bool = False
+    ) -> MCPServerListResponse:
+        """
+        Get MCP servers effective for a workspace (group): prefer group-specific
+        entries over base entries for the same name. Return both enabled and
+        disabled so admins can manage state.
+
+        ``enabled_only`` restricts the result to enabled servers — used for
+        non-admin callers, who must only see the servers a workspace admin has
+        enabled (the curated allow-list), never the disabled ones.
+
+        OPT-IN model: a globally-available base server (``group_id IS NULL``)
+        that THIS workspace has not yet opted into (no override row) is reported
+        with ``enabled=False`` so the workspace toggle starts off and the server
+        is not usable (picker/execution) until a workspace admin enables it,
+        which creates an enabled override. The base ``enabled`` flag only means
+        "published / available to workspaces", not "active for this workspace".
+        """
+        servers = await self.server_repository.list_for_group_scope(group_id)
+        # Deduplicate by name, preferring group-specific
+        dedup: Dict[str, Any] = {}
+        for s in servers:
+            key = s.name
+            if key not in dedup:
+                dedup[key] = s
+            else:
+                # Prefer group-specific over base
+                if getattr(s, "group_id", None) and not getattr(
+                    dedup[key], "group_id", None
+                ):
+                    dedup[key] = s
+        server_responses: List[MCPServerResponse] = []
+        for server in dedup.values():
+            # Inherited base row with no workspace override → not opted in yet.
+            is_inherited_base = (
+                bool(group_id) and getattr(server, "group_id", None) is None
+            )
+            effective_enabled = (
+                False if is_inherited_base else bool(getattr(server, "enabled", False))
+            )
+            if enabled_only and not effective_enabled:
+                continue
+            resp = MCPServerResponse.model_validate(server)
+            resp.enabled = effective_enabled
+            resp.api_key = ""  # do not include in list
+            server_responses.append(resp)
+        return MCPServerListResponse(
+            servers=server_responses, count=len(server_responses)
+        )
+
+    async def get_enabled_servers(
+        self, group_ids: Sequence[str]
+    ) -> MCPServerListResponse:
+        """
+        Get the enabled MCP servers visible to ``group_ids``: base servers plus
+        those groups' own. Another group's servers are never listed.
+
+        Returns:
+            MCPServerListResponse with list of enabled servers and count
+        """
+        servers = await self.server_repository.find_enabled(group_ids)
+        server_responses = []
+
+        for server in servers:
+            server_response = MCPServerResponse.model_validate(server)
+            # Don't include API key in list response
+            server_response.api_key = ""
+            server_responses.append(server_response)
+
+        return MCPServerListResponse(servers=server_responses, count=len(servers))
+
+    async def get_global_servers(
+        self, group_ids: Sequence[str]
+    ) -> MCPServerListResponse:
+        """
+        Get the globally enabled MCP servers visible to ``group_ids``: base
+        servers plus those groups' own. Another group's servers are never listed.
+
+        Returns:
+            MCPServerListResponse with list of globally enabled servers and count
+        """
+        servers = await self.server_repository.find_global_enabled(group_ids)
+        server_responses = []
+
+        for server in servers:
+            server_response = MCPServerResponse.model_validate(server)
+            # Don't include API key in list response
+            server_response.api_key = ""
+            server_responses.append(server_response)
+
+        return MCPServerListResponse(servers=server_responses, count=len(servers))
+
+    async def get_servers_by_names(self, names: List[str]) -> List[MCPServerResponse]:
+        """
+        Get MCP servers by a list of names.
+
+        Args:
+            names: List of server names to retrieve
+
+        Returns:
+            List of MCPServerResponse objects
+        """
+        if not names:
+            return []
+        servers = await self.server_repository.find_by_names(names)
+        server_responses: List[MCPServerResponse] = []
+        for server in servers:
+            server_response = MCPServerResponse.model_validate(server)
+            decrypted = self._decrypt_server_api_key(server)
+            if decrypted is not None:
+                server_response.api_key = decrypted
+            server_responses.append(server_response)
+        return server_responses
+
+    async def get_servers_by_names_group_aware(
+        self, names: List[str], group_id: Optional[str]
+    ) -> List[MCPServerResponse]:
+        """
+        Get MCP servers by names with group scoping (prefer group-specific over base).
+        """
+        if not names:
+            return []
+        servers = await self.server_repository.find_by_names_group_scope(
+            names, group_id
+        )
+        # Deduplicate by name preferring group-specific
+        best_by_name: Dict[str, Any] = {}
+        for s in servers:
+            key = s.name
+            if key not in best_by_name:
+                best_by_name[key] = s
+            else:
+                if getattr(s, "group_id", None) and not getattr(
+                    best_by_name[key], "group_id", None
+                ):
+                    best_by_name[key] = s
+        responses: List[MCPServerResponse] = []
+        for server in best_by_name.values():
+            resp = MCPServerResponse.model_validate(server)
+            decrypted = self._decrypt_server_api_key(server)
+            if decrypted is not None:
+                resp.api_key = decrypted
+            responses.append(resp)
+        return responses
+
+    @staticmethod
+    def _decrypt_server_api_key(server: MCPServer) -> Optional[str]:
+        """Decrypt a server's stored API key — only when its auth mode uses one.
+
+        OBO/SPN servers authenticate with tokens, not the stored key. A row can
+        still carry a leftover ``encrypted_api_key`` blob (saved before the auth
+        type changed, possibly under an older encryption key); decrypting it on
+        every run produced anonymous "Error decrypting value with SSH key:
+        Decryption failed" errors for servers that never use the value. Skip
+        those outright, and when an api_key-mode server's stored key genuinely
+        cannot be decrypted, say WHICH server and how to fix it.
+
+        Returns the decrypted key, "" when decryption failed, or None when the
+        server has no usable stored key (no blob, or a token-auth server).
+        """
+        auth_type = getattr(server, "auth_type", None) or "api_key"
+        if auth_type != "api_key" or not server.encrypted_api_key:
+            return None
+        try:
+            decrypted = EncryptionUtils.decrypt_value(server.encrypted_api_key)
+        except Exception as e:  # decrypt_value normally returns "" — belt and braces
+            logger.warning(
+                f"MCP server '{server.name}': error decrypting stored API key: {e}"
+            )
+            return ""
+        if not decrypted:
+            logger.warning(
+                f"MCP server '{server.name}': stored API key cannot be decrypted "
+                "(it was encrypted under a previous encryption key) — re-save the "
+                "server's API key to clear this warning."
+            )
+        return decrypted
+
+    @staticmethod
+    def _masked_response(server: Optional[MCPServer]) -> MCPServerResponse:
+        """A response that says a key is stored without saying what it is.
+        Keys are write-only at the API; the run that connects decrypts its own
+        (``get_servers_by_names*``). ``None`` — a row that vanished between a
+        read and its update — is a 404, not a validation crash."""
+        if server is None:
+            raise NotFoundError(detail="MCP server not found")
+        resp = MCPServerResponse.model_validate(server)
+        resp.api_key = ""
+        resp.has_api_key = bool(getattr(server, "encrypted_api_key", None))
+        return resp
+
+    def _group_override_payload(
+        self, base: MCPServer, group_id: str, enabled: bool
+    ) -> Dict[str, Any]:
+        """Clone a base server's config into a workspace-scoped override row."""
+        return {
+            "name": base.name,
+            "server_url": base.server_url,
+            "server_type": base.server_type,
+            "auth_type": base.auth_type,
+            "enabled": enabled,
+            "global_enabled": False,
+            "timeout_seconds": base.timeout_seconds,
+            "max_retries": base.max_retries,
+            "model_mapping_enabled": base.model_mapping_enabled,
+            "rate_limit": base.rate_limit,
+            "additional_config": base.additional_config or {},
+            "encrypted_api_key": base.encrypted_api_key,
+            "group_id": group_id,
+        }
+
+    async def set_server_enabled_for_group(
+        self, server_id: int, group_id: str, enabled: bool
+    ) -> MCPServerResponse:
+        """
+        Set the enabled state of a server FOR A SPECIFIC WORKSPACE (group),
+        mirroring how Models are toggled per workspace.
+
+        - If the target is this group's own row → just flip its ``enabled``.
+        - If the target is a base/global row → create or update a workspace-scoped
+          override clone with the requested ``enabled`` (this is how a workspace
+          admin disables a globally-available MCP for their workspace). The base
+          row is NEVER mutated, so other workspaces are unaffected.
+        - If the target is another group's row → not found for this caller.
+        """
+        if not group_id:
+            raise BadRequestError(detail="No workspace/group selected")
+        target = await self.server_repository.get(server_id)
+        if not target:
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+
+        target_group = getattr(target, "group_id", None)
+        # This group's own row → flip directly.
+        if target_group == group_id:
+            updated = await self.server_repository.update(
+                server_id, {"enabled": enabled}
+            )
+            return self._masked_response(updated)
+        # Another group's row → not visible to this caller.
+        if target_group is not None:
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        # Base/global row → create/update this group's override (never touch base).
+        existing = await self.server_repository.find_by_name_and_group(
+            target.name, group_id
+        )
+        payload = self._group_override_payload(target, group_id, enabled)
+        if existing:
+            updated = await self.server_repository.update(existing.id, payload)
+            return self._masked_response(updated)
+        created = await self.server_repository.create(payload)
+        return self._masked_response(created)
+
+    async def enable_server_for_group(
+        self, server_id: int, group_id: str
+    ) -> MCPServerResponse:
+        """
+        Enable a server for a workspace (opt-in / re-enable an override).
+        Thin wrapper over set_server_enabled_for_group; never disables the base.
+        """
+        return await self.set_server_enabled_for_group(server_id, group_id, True)
+
+    async def get_base_servers(self) -> MCPServerListResponse:
+        """
+        List base/global MCP servers (group_id IS NULL) — the system-admin
+        catalog. A base server is "available to all workspaces" when enabled.
+        """
+        servers = await self.server_repository.find_all_base()
+        server_responses: List[MCPServerResponse] = []
+        for server in servers:
+            resp = MCPServerResponse.model_validate(server)
+            resp.api_key = ""  # never include in list responses
+            server_responses.append(resp)
+        return MCPServerListResponse(
+            servers=server_responses, count=len(server_responses)
+        )
+
+    async def create_global_server(
+        self, server_data: MCPServerCreate
+    ) -> MCPServerResponse:
+        """
+        Create a base/global MCP server (group_id IS NULL) — available to all
+        workspaces. System-admin only (enforced at the router).
+        """
+        return await self.create_server(server_data, group_id=None)
+
+    async def set_global_availability(
+        self, server_id: int, enabled: bool, group_context: Any
+    ) -> MCPServerResponse:
+        """
+        System admin: set whether a base/global server is available to all
+        workspaces (its ``enabled`` flag). Validates the target IS a base row.
+        """
+        if not is_system_admin(group_context):
+            raise ForbiddenError(
+                detail="Only system admins can change global MCP availability"
+            )
+        server = await self.server_repository.get(server_id)
+        if not server:
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        if getattr(server, "group_id", None) is not None:
+            raise BadRequestError(detail="Not a global MCP server")
+        updated = await self.server_repository.update(server_id, {"enabled": enabled})
+        return self._masked_response(updated)
+
+    # ── Ownership ──────────────────────────────────────────────────────────
+    # Rows are workspace-owned (``group_id`` set) or base/global (``None``,
+    # available to every workspace). Every API read and change goes through
+    # these two: a route dependency checks the caller's ROLE, and only here is
+    # the TARGET checked — which row, whose it is, what the caller may do to
+    # it. A numeric id is not an authorization (audit F02/F03).
+
+    @staticmethod
+    def _caller_group(group_context: Any) -> Optional[str]:
+        return (
+            getattr(group_context, "primary_group_id", None) if group_context else None
+        )
+
+    async def _visible_row(self, server_id: int, group_context: Any) -> MCPServer:
+        """The row when the caller may SEE it: a base row, or the caller's own
+        workspace's row. Another workspace's row reads as not found — that it
+        exists is the other workspace's business."""
+        server = await self.server_repository.get(server_id)
+        owner = getattr(server, "group_id", None) if server else None
+        if server is None or (
+            owner is not None and owner != self._caller_group(group_context)
+        ):
+            logger.warning(f"MCP server with ID {server_id} not found for caller")
+            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        return server
+
+    async def _mutable_row(self, server_id: int, group_context: Any) -> MCPServer:
+        """The row when the caller may CHANGE it. A base row changes for a
+        system admin only — it is every workspace's server. A workspace row
+        changes for its own workspace (the route has already required the
+        admin role there)."""
+        server = await self._visible_row(server_id, group_context)
+        if getattr(server, "group_id", None) is None and not is_system_admin(
+            group_context
+        ):
+            raise ForbiddenError(
+                detail="Only system admins can change global MCP servers"
+            )
+        return server
+
+    async def get_server_by_id(
+        self, server_id: int, group_context: Any
+    ) -> MCPServerResponse:
+        """One server the caller may see, key masked (see ``_masked_response``)."""
+        server = await self._visible_row(server_id, group_context)
+        return self._masked_response(server)
+
+    async def create_server(
+        self, server_data: MCPServerCreate, group_id: Optional[str] = None
+    ) -> MCPServerResponse:
+        """
+        Create a new MCP server.
+
+        Args:
+            server_data: Server data for creation
+            group_id: Optional workspace group ID to scope this server to. When provided,
+                      the server will be created as workspace-specific (not global).
+
+        Returns:
+            MCPServerResponse of the created server
+
+        Raises:
+            HTTPException: If server creation fails
+        """
+        try:
+            # Check if a server with the same name already exists
+            existing_server = await self.server_repository.find_by_name(
+                server_data.name
+            )
+            if existing_server:
+                logger.warning(
+                    f"MCP server with name '{server_data.name}' already exists"
+                )
+                raise ConflictError(
+                    detail=f"MCP server with name '{server_data.name}' already exists"
+                )
+
+            # Encrypt the API key
+            encrypted_api_key = EncryptionUtils.encrypt_value(server_data.api_key)
+
+            # Convert server_data to dictionary excluding api_key
+            server_dict = server_data.model_dump(exclude={"api_key"})
+
+            # Add encrypted API key
+            server_dict["encrypted_api_key"] = encrypted_api_key
+
+            # Scope to workspace if group_id provided
+            if group_id:
+                server_dict["group_id"] = group_id
+                # Default new workspace-scoped servers to not global
+                server_dict["global_enabled"] = False
+
+            # Create server
+            server = await self.server_repository.create(server_dict)
+
+            # Prepare response
+            server_response = MCPServerResponse.model_validate(server)
+            server_response.api_key = (
+                server_data.api_key
+            )  # Include the original API key in the response
+
+            return server_response
+        except KasalError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to create MCP server: {str(e)}")
+            raise KasalError(detail=f"Failed to create MCP server: {str(e)}")
+
+    async def update_server(
+        self, server_id: int, server_data: MCPServerUpdate, group_context: Any
+    ) -> MCPServerResponse:
+        """
+        Update an MCP server the caller owns (see ``_mutable_row``).
+
+        Args:
+            server_id: ID of server to update
+            server_data: Server data for update
+            group_context: The caller — decides which rows are theirs to change
+
+        Returns:
+            MCPServerResponse of the updated server, key masked
+
+        Raises:
+            HTTPException: If server not found, not the caller's, or update fails
+        """
+        await self._mutable_row(server_id, group_context)
+
+        try:
+            # Prepare update data
+            update_data = server_data.model_dump(
+                exclude_unset=True, exclude={"api_key"}
+            )
+
+            # If API key is provided and not empty, encrypt it
+            # Only update encrypted_api_key if a new API key is actually provided
+            if server_data.api_key and server_data.api_key.strip():
+                update_data["encrypted_api_key"] = EncryptionUtils.encrypt_value(
+                    server_data.api_key
+                )
+
+            # Update server
+            updated_server = await self.server_repository.update(server_id, update_data)
+            return self._masked_response(updated_server)
+        except Exception as e:
+            logger.error(f"Failed to update MCP server: {str(e)}")
+            raise KasalError(detail=f"Failed to update MCP server: {str(e)}")
+
+    async def delete_server(self, server_id: int, group_context: Any) -> bool:
+        """
+        Delete an MCP server the caller owns (see ``_mutable_row``).
+
+        Args:
+            server_id: ID of server to delete
+            group_context: The caller — decides which rows are theirs to delete
+
+        Returns:
+            True if deleted successfully
+
+        Raises:
+            HTTPException: If server not found, not the caller's, or deletion fails
+        """
+        server = await self._mutable_row(server_id, group_context)
+
+        # A GLOBAL (base) server has no group_id. Deleting it must cascade to every
+        # workspace that opted in — otherwise their override rows are orphaned and
+        # those workspaces keep the server. Workspace-only rows (group_id set) delete
+        # just themselves.
+        is_base = getattr(server, "group_id", None) is None
+        server_name = server.name
+
+        try:
+            # Delete server
+            await self.server_repository.delete(server_id)
+            if is_base:
+                removed = await self.server_repository.delete_overrides_by_name(
+                    server_name
+                )
+                if removed:
+                    logger.info(
+                        f"Cascade-deleted {removed} workspace override(s) for global MCP server '{server_name}'"
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete MCP server: {str(e)}")
+            raise KasalError(detail=f"Failed to delete MCP server: {str(e)}")
+
+    async def toggle_server_enabled(
+        self, server_id: int, group_context: Any
+    ) -> MCPToggleResponse:
+        """
+        Toggle the enabled status of a MCP server.
+
+        Args:
+            server_id: ID of server to toggle
+
+        Returns:
+            MCPToggleResponse with message and current enabled state
+
+        Raises:
+            HTTPException: If server not found or toggle fails
+        """
+        await self._mutable_row(server_id, group_context)
+        try:
+            # Toggle server enabled status using repository
+            server = await self.server_repository.toggle_enabled(server_id)
+            if not server:
+                logger.warning(f"MCP server with ID {server_id} not found for toggle")
+                raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+
+            status_text = "enabled" if server.enabled else "disabled"
+            return MCPToggleResponse(
+                message=f"MCP server {status_text} successfully", enabled=server.enabled
+            )
+        except KasalError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to toggle MCP server: {str(e)}")
+            raise KasalError(detail=f"Failed to toggle MCP server: {str(e)}")
+
+    async def toggle_server_global_enabled(
+        self, server_id: int, group_context: Any
+    ) -> MCPToggleResponse:
+        """
+        Toggle the global enabled status of a MCP server.
+
+        Args:
+            server_id: ID of server to toggle global enablement
+
+        Returns:
+            MCPToggleResponse with message and current global enabled state
+
+        Raises:
+            HTTPException: If server not found or toggle fails
+        """
+        await self._mutable_row(server_id, group_context)
+        try:
+            # Toggle server global enabled status using repository
+            server = await self.server_repository.toggle_global_enabled(server_id)
+            if not server:
+                logger.warning(
+                    f"MCP server with ID {server_id} not found for global toggle"
+                )
+                raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+
+            status_text = (
+                "globally enabled" if server.global_enabled else "globally disabled"
+            )
+            return MCPToggleResponse(
+                message=f"MCP server {status_text} successfully",
+                enabled=server.global_enabled,
+            )
+        except KasalError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to toggle MCP server global status: {str(e)}")
+            raise KasalError(
+                detail=f"Failed to toggle MCP server global status: {str(e)}"
+            )
+
+    async def test_connection(
+        self, test_data: MCPTestConnectionRequest
+    ) -> MCPTestConnectionResponse:
+        """
+        Test connection to an MCP server.
+
+        Args:
+            test_data: Connection test data
+
+        Returns:
+            MCPTestConnectionResponse with success status and message
+        """
+        logger.info(
+            f"Testing MCP connection - Type: {test_data.server_type}, URL: {test_data.server_url}"
+        )
+        logger.debug(
+            f"Connection test parameters - Timeout: {test_data.timeout_seconds}s, Has API key: {bool(test_data.api_key)}"
+        )
+
+        if test_data.server_type.lower() == "sse":
+            return await self._test_sse_connection(test_data)
+        elif test_data.server_type.lower() == "streamable":
+            return await self._test_streamable_connection(test_data)
+        else:
+            logger.warning(
+                f"Unsupported MCP server type requested: {test_data.server_type}"
+            )
+            return MCPTestConnectionResponse(
+                success=False,
+                message=f"Unsupported server type: {test_data.server_type}",
+            )
+
+    async def _test_sse_connection(
+        self, test_data: MCPTestConnectionRequest
+    ) -> MCPTestConnectionResponse:
+        """
+        Test connection to an SSE MCP server using the official MCP SSE client.
+
+        Args:
+            test_data: Connection test data
+
+        Returns:
+            MCPTestConnectionResponse with success status and message
+        """
+        logger.info(f"Starting SSE connection test to: {test_data.server_url}")
+
+        if (
+            not test_data.api_key
+            and test_data.auth_type in ("databricks_obo", "databricks_spn")
+            and urlparse(test_data.server_url).scheme.lower() != "https"
+        ):
+            return MCPTestConnectionResponse(
+                success=False,
+                message="Automatic Databricks authentication requires HTTPS",
+            )
+
+        headers = {}
+        if test_data.api_key:
+            headers["Authorization"] = f"Bearer {test_data.api_key}"
+            logger.debug("Added API key authentication to headers")
+        elif test_data.auth_type in ("databricks_obo", "databricks_spn"):
+            try:
+                from src.utils.databricks_auth import get_auth_context
+
+                # For SPN, skip OBO (user_token=None); for OBO, would pass user_token
+                auth_context = await get_auth_context(user_token=None)
+                refusal = _refuse_foreign_mcp_host(test_data.server_url, auth_context)
+                if refusal:
+                    return refusal
+                if auth_context and auth_context.token:
+                    headers = {
+                        "Authorization": f"Bearer {auth_context.token}",
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                    }
+                    logger.debug(
+                        f"Using {auth_context.auth_method} authentication for MCP test"
+                    )
+                else:
+                    logger.warning("No Databricks auth context available for MCP test")
+            except Exception as e:
+                logger.warning(f"Failed to get Databricks auth headers: {e}")
+
+        try:
+            from mcp import ClientSession
+            from mcp.client.sse import sse_client
+
+            timeout = test_data.timeout_seconds
+
+            async with sse_client(
+                test_data.server_url,
+                headers=headers if headers else None,
+                timeout=timeout,
+            ) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools_result = await session.list_tools()
+
+                    tool_count = 0
+                    if hasattr(tools_result, "tools") and tools_result.tools:
+                        tool_count = len(tools_result.tools)
+
+                    logger.info(
+                        f"SSE connection test successful - found {tool_count} tools"
+                    )
+                    return MCPTestConnectionResponse(
+                        success=True,
+                        message=f"Successfully connected to MCP SSE server ({tool_count} tools available)",
+                    )
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(
+                f"SSE connection test failed: {type(e).__name__}: {error_msg}",
+                exc_info=True,
+            )
+
+            if (
+                "401" in error_msg
+                or "403" in error_msg
+                or "Unauthorized" in error_msg.lower()
+            ):
+                return MCPTestConnectionResponse(
+                    success=False,
+                    message="Authentication failed - please check your API key",
+                )
+            elif "timeout" in error_msg.lower() or isinstance(e, asyncio.TimeoutError):
+                return MCPTestConnectionResponse(
+                    success=False,
+                    message=f"Connection timed out after {test_data.timeout_seconds} seconds",
+                )
+            elif "connect" in error_msg.lower() or "refused" in error_msg.lower():
+                return MCPTestConnectionResponse(
+                    success=False, message=f"Failed to connect: {error_msg}"
+                )
+            else:
+                return MCPTestConnectionResponse(
+                    success=False, message=f"Error testing connection: {error_msg}"
+                )
+
+    async def _test_streamable_connection(
+        self, test_data: MCPTestConnectionRequest
+    ) -> MCPTestConnectionResponse:
+        """
+        Test connection to a Streamable HTTP MCP server using the official MCP client.
+
+        Args:
+            test_data: Connection test data
+
+        Returns:
+            MCPTestConnectionResponse with success status and message
+        """
+        logger.info(
+            f"Starting Streamable HTTP connection test to: {test_data.server_url}"
+        )
+
+        if (
+            not test_data.api_key
+            and test_data.auth_type in ("databricks_obo", "databricks_spn")
+            and urlparse(test_data.server_url).scheme.lower() != "https"
+        ):
+            return MCPTestConnectionResponse(
+                success=False,
+                message="Automatic Databricks authentication requires HTTPS",
+            )
+
+        headers = {}
+        if test_data.api_key:
+            headers["Authorization"] = f"Bearer {test_data.api_key}"
+            logger.debug("Added API key authentication to headers")
+        elif test_data.auth_type in ("databricks_obo", "databricks_spn"):
+            try:
+                from src.utils.databricks_auth import get_auth_context
+
+                auth_context = await get_auth_context(user_token=None)
+                refusal = _refuse_foreign_mcp_host(test_data.server_url, auth_context)
+                if refusal:
+                    return refusal
+                if auth_context and auth_context.token:
+                    headers = {"Authorization": f"Bearer {auth_context.token}"}
+                    logger.debug(
+                        f"Using {auth_context.auth_method} authentication for MCP streamable test"
+                    )
+                else:
+                    logger.warning(
+                        "No Databricks auth context available for MCP streamable test"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to get Databricks auth headers: {e}")
+
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client
+
+            timeout = test_data.timeout_seconds
+
+            async with streamablehttp_client(
+                test_data.server_url,
+                headers=headers if headers else None,
+                timeout=timeout,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools_result = await session.list_tools()
+
+                    tool_count = 0
+                    if hasattr(tools_result, "tools") and tools_result.tools:
+                        tool_count = len(tools_result.tools)
+
+                    logger.info(
+                        f"Streamable HTTP connection test successful - found {tool_count} tools"
+                    )
+                    return MCPTestConnectionResponse(
+                        success=True,
+                        message=f"Successfully connected to MCP Streamable HTTP server ({tool_count} tools available)",
+                    )
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(
+                f"Streamable HTTP connection test failed: {type(e).__name__}: {error_msg}",
+                exc_info=True,
+            )
+
+            if (
+                "401" in error_msg
+                or "403" in error_msg
+                or "Unauthorized" in error_msg.lower()
+            ):
+                return MCPTestConnectionResponse(
+                    success=False,
+                    message="Authentication failed - please check your API key",
+                )
+            elif "timeout" in error_msg.lower() or isinstance(e, asyncio.TimeoutError):
+                return MCPTestConnectionResponse(
+                    success=False,
+                    message=f"Connection timed out after {test_data.timeout_seconds} seconds",
+                )
+            elif "connect" in error_msg.lower() or "refused" in error_msg.lower():
+                return MCPTestConnectionResponse(
+                    success=False, message=f"Failed to connect: {error_msg}"
+                )
+            else:
+                return MCPTestConnectionResponse(
+                    success=False, message=f"Error testing connection: {error_msg}"
+                )
+
+    async def get_settings(self) -> MCPSettingsResponse:
+        """
+        Get global MCP settings.
+
+        Returns:
+            MCPSettingsResponse with global settings
+        """
+        try:
+            settings = await self.settings_repository.get_settings()
+            return MCPSettingsResponse.model_validate(settings)
+        except Exception as e:
+            logger.error(f"Error getting MCP settings: {str(e)}")
+            raise KasalError(detail=f"Error getting MCP settings: {str(e)}")
+
+    async def update_settings(
+        self, settings_data: MCPSettingsUpdate
+    ) -> MCPSettingsResponse:
+        """
+        Update global MCP settings.
+
+        Args:
+            settings_data: Settings data for update
+
+        Returns:
+            MCPSettingsResponse with updated settings
+        """
+        try:
+            # Get current settings
+            settings = await self.settings_repository.get_settings()
+
+            # Update settings
+            update_data = settings_data.model_dump()
+            updated_settings = await self.settings_repository.update(
+                settings.id, update_data
+            )
+
+            return MCPSettingsResponse.model_validate(updated_settings)
+        except Exception as e:
+            logger.error(f"Error updating MCP settings: {str(e)}")
+            raise KasalError(detail=f"Error updating MCP settings: {str(e)}")

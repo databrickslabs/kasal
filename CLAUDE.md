@@ -1,0 +1,240 @@
+# CLAUDE.md
+
+Project-wide instructions for Claude Code (claude.ai/code) when working with the Kasal codebase.
+
+## Context Layering
+
+Claude reads context from multiple CLAUDE.md files. The closest one to the file
+you are editing wins on specifics:
+- **This file**: Project-wide patterns and rules
+- **src/backend/CLAUDE.md**: Backend-specific instructions
+- **src/frontend/CLAUDE.md**: Frontend-specific instructions
+- **Per-layer files** (added for precision). This list is exhaustive — if a layer
+  is not named here it has no CLAUDE.md, so do not go looking for one:
+  - `src/backend/src/api/CLAUDE.md` — FastAPI routers
+  - `src/backend/src/services/CLAUDE.md` — business logic
+  - `src/backend/src/repositories/CLAUDE.md` — data access
+  - `src/backend/src/services/execution/CLAUDE.md` — the three execution paths
+    (Chat / Agent Builder / Flow Builder) and the machinery they share
+  - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system
+    (renderer + composer + catalog + UIConfigurator + exported-app vendoring).
+    **Read before adding/editing an A2UI component** — the touchpoints span
+    frontend, backend and the export template.
+
+  The capability packages under `src/backend/src/services/` (`tools/`, `memory/`,
+  `guardrails/`, `security/`, `knowledge/`, `export/`, `trace/`) have NO CLAUDE.md
+  of their own; `services/CLAUDE.md` ("Two shapes live here") covers them, and
+  `src/backend/CLAUDE.md` has the memory package map. To check this list:
+  `git ls-files | grep 'CLAUDE.md$'`.
+
+## Important Project Rules
+
+### Dependencies
+- **Python dependencies are managed with `uv`** — declared in `src/backend/pyproject.toml` and pinned in `src/backend/uv.lock` (both committed). There is no `requirements.txt`.
+- Install dependencies: `cd src/backend && uv sync`
+- To change a dependency: edit `pyproject.toml`, run `uv lock` (regenerates `uv.lock`), then `uv sync`. Never hand-edit `uv.lock`.
+- The Databricks App deploy (`src/deploy.py`) ships `pyproject.toml` + `uv.lock` at the bundle root so the build runs `uv sync` (a `requirements.txt` at the root would take precedence and bypass uv).
+- Key dependencies include: psutil (for process management), litellm, databricks-sdk. The agent engine is first-party code under `src/backend/src/` — it is no longer a separate `kasal_engine` package.
+
+### Documentation Location
+- **ALWAYS create documentation in `src/docs/` directory**
+- Do not create docs in the root `docs/` folder
+- The frontend build copies `src/docs/` to `src/frontend/.generated/public/docs/` for display, leaving out internal pages (`archive/`, `reviews/`, the files listed in `src/scripts/build-tasks.cjs`, and any page whose opening carries a `**Status: internal` banner)
+- Follow existing documentation patterns and naming conventions
+
+### Test Files Location
+- **ALWAYS create test scripts and temporary files in `/tmp` folder**
+- Do not create test files in the project directory
+- Use paths like `/tmp/test_script.py` for testing
+- This keeps the project directory clean
+
+### Service Management
+- **DO NOT restart backend or frontend services** - They are managed externally
+- Backend uses `--reload` flag and auto-detects code changes
+- Frontend uses hot module replacement (HMR) and auto-updates in browser
+- Check service status: `ps aux | grep uvicorn` (backend) or `ps aux | grep "npm start"` (frontend)
+
+### Code Quality Standards
+- **CRITICAL: All operations must be async and non-blocking**
+- **CRITICAL: Never include real URLs, endpoints, or addresses in code**
+- Always use placeholder values like "https://example.com" or environment variables
+- Follow clean architecture principles
+- **Keep files small** — see File Size Limits below (≤800 lines target, 1500 hard ceiling)
+- Never commit without running linting tools
+
+### File Size Limits (keep files small)
+
+**Target ≤ 800 lines per file. 1500 is the hard ceiling.** Same pair for source
+and tests.
+
+Set from the tree as it is: about 94% of files are under 800, and under 2% are
+over 1500 — exceptional, which is what a ceiling should mean. The previous pair
+(400 / 800) put the target at the 75th percentile and left 131 files above the
+"hard" ceiling, so it taught people to skip the rule rather than split the file.
+
+The point is reviewability, not tidiness: a 2,000-line module cannot be read in
+one sitting, cannot be reviewed properly, and blows out the context of every
+future change to it. Applies to `.py`, `.ts`, and `.tsx` under `src/backend/` and
+`src/frontend/src/`.
+
+**The ratchet — this is the operative rule:**
+- **Never create a new file over the target.** If what you are writing will land
+  above 800 lines, it is at least two modules; design it that way from the start.
+- **A file already over the ceiling must not grow.** When adding to one, extract
+  the new code (and the cohesive block it belongs to) into a sibling module
+  instead of appending. "It was already 2,000 lines" is not a licence to make it
+  2,100.
+- **Touch it, shrink it.** Any non-trivial edit to a file over the ceiling should
+  leave it smaller than you found it — pull out one coherent seam, not a token
+  gesture.
+- **Functions: 200 lines at most.** A Python function or method in
+  `src/backend/src` may not pass 200 lines; one already over may only shrink.
+  Split it into named steps.
+- **CI enforces this** for `src/backend/src` and `src/frontend/src` (not yet for
+  `src/backend/tests`) with `src/backend/tests/unit/architecture/test_size_ratchet.py`
+  (see "Enforcement ratchets" below). When you shrink a baselined file or
+  function, that test fails until you lower the baseline with its `--update`.
+- **Do not mass-refactor files you were not asked to touch.** Splitting modules
+  the crew/flow **subprocess** imports is high-risk (see
+  `src/backend/src/services/execution/CLAUDE.md`); a drive-by split that passes
+  in-process tests can still break the spawned interpreter. Shrink what the task
+  puts you in, and flag the rest.
+
+**Split along real seams, never at an arbitrary line number.** A good split is
+one another engineer can name:
+- **Services** — split by strategy/concern into a package
+  (`foo_service/` with one module per strategy), not `foo_service_part2.py`.
+- **Custom tools** — the heavy PowerBI/metric-view tools already show the
+  pattern: a thin tool class plus a `*_utils/` package of pure helpers
+  (parsing, emitting, validating). Follow it.
+- **React components** — extract sub-components, `hooks/`, and pure helpers;
+  a component file should be JSX plus wiring, not business logic.
+- **Keep the public import path stable.** Re-export from the package
+  `__init__.py` / `index.ts` so call sites do not churn.
+
+**Known offenders.** Roughly 30 source files are over the 1500 ceiling (28 on
+2026-09-26; the number drifts every week), so there is no
+hand-maintained table here — a list that long goes stale the week it is written
+(the previous one named 8 files, three of them under paths that no longer existed).
+Ask the tree instead:
+
+```bash
+# worst offenders, source only
+find src/backend/src src/frontend/src \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
+  ! -path '*/node_modules/*' ! -name '*.test.*' -exec wc -l {} + \
+  | sort -rn | awk '$1 > 1500 && $2 != "total"' | head -40
+```
+
+The `$2 != "total"` matters: `wc -l` emits a `total` row per batch, and without
+it the count reads one too high — which is exactly how the number above was
+previously wrong.
+
+The heaviest are the PowerBI semantic-model tools,
+`services/agent_builder/process_executor.py`, `services/tools/tool_factory.py`
+and `services/execution/service.py` (roughly 2,100-3,000 lines). Do not add
+to any file already over the ceiling; shrink it when you are in it.
+
+Counts drift with every commit: treat the files above as "which files", not as
+current sizes, and run the command when the number matters.
+
+Check before you commit: `wc -l <files you touched>`.
+
+### Enforcement ratchets
+
+Several checks freeze existing debt so it can only shrink. They fail when a count
+grows, and most also fail when a count drops until you record the gain. Lower a
+baseline from `src/backend` with the owning test's `--update`, and commit the JSON
+with the change that earned it:
+
+```bash
+uv run python tests/unit/architecture/test_size_ratchet.py --update                 # file + function size
+uv run python tests/unit/architecture/test_ruff_ratchet.py --update                 # BLE001/S110/TRY400/G004/B904
+uv run python tests/unit/architecture/test_env_reads_stay_in_config.py --update     # env reads
+uv run python tests/unit/architecture/test_no_exception_text_in_http_errors.py --update
+```
+
+`--update` only ever lowers a baseline; it cannot absorb a regression, so when a
+count grows, fix the code. Never hand-edit a baseline upwards. The same rule
+applies to the import-linter `ignore_imports` lists in `src/backend/pyproject.toml`
+(delete a line when you fix the import; never add one), the mypy baseline
+(`check_types.py`) and the ESLint `--max-warnings` cap in
+`.github/workflows/quality.yml`. Details: `src/docs/continuous-integration.md`
+("Ratchets"). Run them all with `uv run pytest -q tests/unit/architecture`.
+
+### Build and Deploy
+- **Build frontend static assets**: `python src/build.py`
+- **Deploy application**: `python src/deploy.py`
+
+## Architecture Overview
+
+Kasal is an AI agent workflow orchestration platform with a **clean architecture pattern**:
+
+**Frontend (React + TypeScript)** → **API (FastAPI)** → **Services** → **Repositories** → **Database**
+
+### Technology Stack
+- **Backend**: FastAPI + SQLAlchemy 2.0 (async) + Alembic (Python 3.11, pinned `>=3.11,<3.12`)
+- **Frontend**: React 18 + TypeScript + Material-UI + ReactFlow, built with **Vite**
+- **AI Engine**: Kasal's own agent runtime, in `services/execution/runtime/` (agents, tasks, crews, the tool-call loop) over `services/execution/events/`
+- **Database**: SQLite (dev) / PostgreSQL / Databricks Lakebase (prod)
+- **Authentication**: Databricks OAuth (OBO / SPN); JWT for app sessions
+
+### Project Structure
+```
+src/
+├── backend/                  # FastAPI backend (see backend/CLAUDE.md)
+│   ├── src/                 # Core application code
+│   ├── tests/               # Unit and integration tests
+│   └── migrations/          # Database migrations
+├── frontend/                # React frontend (see frontend/CLAUDE.md)
+│   └── src/                 # React application
+└── frontend_static/         # Built frontend assets
+```
+
+## Development Workflow
+
+### Quick Start
+1. **Backend**: `cd src/backend && ./run.sh` (auto-reloads on changes)
+2. **Frontend**: `cd src/frontend && npm start` (hot module replacement)
+3. **Tests**: See respective CLAUDE.md files for testing commands
+
+### Key Principles
+- **Clean Architecture**: Separation of concerns across layers
+- **Async-First**: All I/O operations must be async
+- **Type Safety**: Strong typing in both backend (mypy) and frontend (TypeScript)
+- **Test Coverage**: Minimum 80% for backend, comprehensive frontend testing
+
+## Special Considerations
+
+### Memory and Persistence
+- Crews generate deterministic IDs for memory persistence
+- Group isolation ensures tenant data separation
+- Databricks Vector Search integration for advanced memory backends
+
+### Model Integration
+- Support for multiple LLM providers (Databricks, OpenAI, Anthropic, etc.)
+- Model configurations in `src/backend/src/seeds/model_configs.py`
+- Automatic handling of provider-specific requirements
+
+### Databricks Apps Integration
+- **When searching for Databricks Apps information, always check first**: https://apps-cookbook.dev/docs/streamlit/authentication/users_obo
+- This reference covers authentication patterns and user on-behalf-of (OBO) flows
+
+For detailed backend instructions, see: **src/backend/CLAUDE.md**
+For detailed frontend instructions, see: **src/frontend/CLAUDE.md**
+- always make sure whenever you develop anything you stick to the service and
+  repository architecture patterns. **Not** the unit-of-work pattern —
+  `src.core.unit_of_work` has been deleted, and a second way to acquire a session
+  is the bug class the architecture tests exist to prevent. The three rules CI
+  enforces are in `src/backend/src/services/CLAUDE.md`: a service never builds
+  queries or persists rows, never opens a session, and reaches another domain's
+  data through that domain's *service* rather than its repository.
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- After modifying code files in this session, run `graphify --update .` to keep the graph current (AST-only, no API cost; it reuses cached extractions for unchanged files). `graphify-out/` is gitignored and local to each checkout, so a fresh worktree has no graph until you build one with `graphify .`

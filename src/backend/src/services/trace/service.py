@@ -1,0 +1,827 @@
+"""
+Service for accessing and managing execution traces.
+
+This module provides functions for retrieving and managing execution traces
+from the database. Sensitive data (credentials, secrets, tokens) is automatically
+masked when returning traces to prevent credential leakage.
+"""
+
+from typing import Any, Dict, List, Optional, Sequence
+
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.logger import LoggerManager
+from src.core.process_role import in_run_subprocess
+from src.core.sse_manager import SSEEvent, sse_manager
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
+from src.schemas.execution_trace import (
+    DeleteTraceResponse,
+    ExecutionTraceItem,
+    ExecutionTraceList,
+    ExecutionTraceResponseByJobId,
+    ExecutionTraceResponseByRunId,
+)
+from src.services.trace.row_view import mask_sensitive_data, preview_trace
+from src.utils.user_context import GroupContext
+
+# Get logger from the centralized logging system
+logger = LoggerManager.get_instance().system
+
+
+class ExecutionTraceService:
+    """Service for accessing and managing execution traces."""
+
+    def __init__(
+        self, session: AsyncSession, auth_session: Optional[AsyncSession] = None
+    ) -> None:
+        """
+        Initialize the service with session(s).
+
+        Args:
+            session: Database session for trace and execution_history operations.
+                When Lakebase is active the OTel exporter writes traces
+                directly to Lakebase, so a single smart session is sufficient
+                for both trace CRUD and execution_history auth checks.
+            auth_session: Optional separate session for execution_history
+                authorization queries.  Kept for backward compatibility;
+                defaults to *session* when not provided.
+        """
+        self.session = session
+        self.repository = ExecutionTraceRepository(session)
+        # Runs are ExecutionService's domain — traces only READ them to authorize
+        # access and to resolve a run id.
+        from src.services.execution.service import ExecutionService
+
+        self.execution_service = ExecutionService(
+            auth_session if auth_session is not None else session
+        )
+
+    async def outputs_containing(self, job_id: str, needle: str) -> List[Any]:
+        """This run's trace outputs whose serialised form contains ``needle``.
+
+        Serves the flow runner's CI/CD artifact scrape.
+        """
+        return await self.repository.outputs_containing(job_id, needle)
+
+    async def latest_output_for_span_prefix(
+        self, prefix: str, *, group_ids: Sequence[str], job_id: Optional[str] = None
+    ) -> Optional[str]:
+        """The most recent trace ``output`` in ``group_ids`` whose ``span_name``
+        starts with ``prefix``; with ``job_id``, from that run only.
+
+        Serves the PowerBI/UCMV tools, which hand a later step the output of an
+        earlier one. Scoped to the caller's groups; no groups, no result.
+        """
+        return await self.repository.latest_output_for_span_prefix(
+            prefix, group_ids=group_ids, job_id=job_id
+        )
+
+    async def get_event_shape_by_job_id(self, job_id: str) -> List[Any]:
+        """Per-event (source, context, type) rows for a run — the trace SHAPE.
+
+        Used by recipe mining to fingerprint what a run actually did without
+        pulling every output payload. Traces are this service's domain, so the
+        accessor lives here rather than callers building ExecutionTraceRepository.
+        """
+        return await self.repository.get_event_shape_by_job_id(job_id)
+
+    async def get_traces_by_run_id(
+        self,
+        group_context: Optional[GroupContext] = None,
+        run_id: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Optional[ExecutionTraceResponseByRunId]:
+        """
+        Get traces for an execution by run_id with pagination and authorization.
+
+        Args:
+            group_context: Group context for authorization (contains group_ids and email)
+            run_id: Database ID of the execution
+            limit: Maximum number of traces to return
+            offset: Number of traces to skip
+
+        Returns:
+            ExecutionTraceResponseByRunId with traces for the execution if authorized
+        """
+        if run_id is None:  # no run to authorize against: same result as "not found"
+            return None
+        try:
+            # First check if the execution exists and belongs to the user's group
+
+            # Get group IDs from context for filtering
+            group_ids = group_context.group_ids if group_context else None
+
+            # Check if the execution exists and the user has access to it
+            execution = await self.execution_service.get_run_by_id(
+                run_id, group_ids=group_ids
+            )
+
+            if not execution:
+                # Either doesn't exist or user doesn't have access
+                return None
+
+            # Get job_id from the execution
+            job_id = execution.job_id
+
+            # Get traces using repository
+            traces = await self.repository.get_by_run_id(run_id, limit, offset)
+
+            # Get job_id for these traces if needed
+            if traces and not all(trace.job_id for trace in traces):
+                # Update any missing job_id values
+                for trace in traces:
+                    if not trace.job_id:
+                        trace.job_id = job_id
+
+            # Convert to schema objects and mask sensitive data
+            trace_items = [
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+
+            return ExecutionTraceResponseByRunId(run_id=run_id, traces=trace_items)
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving traces for execution {run_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving traces for execution {run_id}: {str(e)}")
+            raise
+
+    async def get_traces_by_job_id(
+        self,
+        group_context: Optional[GroupContext] = None,
+        job_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        since_id: int = 0,
+        preview_chars: int = 0,
+        event_type_prefix: Optional[str] = None,
+    ) -> Optional[ExecutionTraceResponseByJobId]:
+        """
+        Get traces for an execution by job_id with pagination and authorization.
+
+        Args:
+            group_context: Group context for authorization (contains group_ids and email)
+            job_id: String ID of the execution (job_id in database)
+            limit: Maximum number of traces to return
+            offset: Number of traces to skip
+            since_id: Incremental cursor — only traces with id greater than this.
+                Pollers pass their last seen id so each poll returns only NEW
+                rows instead of re-reading (and re-masking) the whole trace set.
+            preview_chars: Trim each row's long text to this many characters
+                (see row_view.preview_trace). 0 returns them whole. The timeline
+                asks for previews because it renders one-line labels; a row's
+                full text is fetched only when someone opens it.
+            event_type_prefix: Only rows whose event_type starts with this. The
+                memory views ask for ``memory_`` so a run's reads and writes
+                come back whole, without paging through its LLM payloads.
+
+        Returns:
+            ExecutionTraceResponseByJobId with traces for the execution if authorized
+        """
+        if job_id is None:  # no run to authorize against: same result as "not found"
+            return None
+        try:
+            # First check if the execution exists and belongs to the user's group
+
+            # Get group IDs from context for filtering
+            group_ids = group_context.group_ids if group_context else None
+            # DEBUG: this runs per poll tick during live runs — INFO was log spam.
+            logger.debug(
+                f"[get_traces_by_job_id] job_id={job_id}, group_context.group_ids={group_ids}"
+            )
+
+            # Authorize with the SLIM summary lookup — the full-row variant
+            # dragged the result/inputs JSON blobs through the driver on every
+            # 2s poll just to check group access and resolve run_id.
+            execution = await self.execution_service.get_run_summary_by_job_id(
+                job_id, group_ids=group_ids
+            )
+
+            if not execution:
+                # Either doesn't exist or user doesn't have access
+                # Try to get execution without group filter to diagnose
+                execution_no_filter = (
+                    await self.execution_service.get_run_summary_by_job_id(
+                        job_id, group_ids=None
+                    )
+                )
+                if execution_no_filter:
+                    logger.warning(
+                        f"[get_traces_by_job_id] Access denied: execution {job_id} has group_id={execution_no_filter.group_id}, but user group_ids={group_ids}"
+                    )
+                else:
+                    logger.warning(
+                        f"[get_traces_by_job_id] Execution {job_id} not found in database"
+                    )
+                return None
+
+            # Get the run_id from the execution
+            run_id = execution.id
+
+            # Get traces using repository - direct lookup by job_id
+            traces = await self.repository.get_by_job_id(
+                job_id, limit, offset, since_id, event_type_prefix
+            )
+
+            # If no traces found using the direct job_id field, try via the run_id
+            # (for backward compatibility). Full reads only: with a cursor,
+            # "no new traces" is the NORMAL result of most polls — falling back
+            # would add a pointless second query per empty tick. Filtered reads
+            # skip it too: "no memory rows" is a true answer, and the fallback
+            # cannot apply the filter.
+            if not traces and not since_id and not event_type_prefix:
+                logger.debug(
+                    f"No traces found directly with job_id {job_id}, trying via run_id lookup"
+                )
+                traces = await self.repository.get_by_run_id(run_id, limit, offset)
+
+                # Update job_id for these traces if it's missing
+                for trace in traces:
+                    if not trace.job_id:
+                        trace.job_id = job_id
+
+            # Convert to schema objects, mask sensitive data, and trim the
+            # long text when the caller only needs labels.
+            trace_items = [
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+            if preview_chars:
+                trace_items = [
+                    preview_trace(item, preview_chars) for item in trace_items
+                ]
+
+            return ExecutionTraceResponseByJobId(job_id=job_id, traces=trace_items)
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving traces for execution with job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error retrieving traces for execution with job_id {job_id}: {str(e)}"
+            )
+            raise
+
+    async def get_state_events_by_job_id(
+        self,
+        group_context: Optional[GroupContext] = None,
+        job_id: Optional[str] = None,
+        event_types: Optional[List[str]] = None,
+    ) -> Optional[List[ExecutionTraceItem]]:
+        """Authorized fetch of ONLY the state-transition events for a job.
+
+        Backs the crew-node-states / task-states endpoints: they reduce a few
+        lifecycle events (task_started/completed/failed, crew_completed) into a
+        small state dict, and previously fetched + validated + masked the run's
+        ENTIRE trace set (up to 15k rows with payload blobs) per poll to do it.
+
+        Returns None when the execution doesn't exist or the caller lacks
+        access; an empty list when authorized but no matching events yet.
+        """
+        if job_id is None:  # no run to authorize against: same result as "not found"
+            return None
+        try:
+            group_ids = group_context.group_ids if group_context else None
+
+            execution = await self.execution_service.get_run_summary_by_job_id(
+                job_id, group_ids=group_ids
+            )
+            if not execution:
+                logger.warning(
+                    f"[get_state_events_by_job_id] Execution {job_id} not found or access denied"
+                )
+                return None
+
+            traces = await self.repository.get_state_events_by_job_id(
+                job_id, event_types or []
+            )
+            return [
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error retrieving state events for job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving state events for job_id {job_id}: {str(e)}")
+            raise
+
+    async def get_all_traces(
+        self, limit: int = 100, offset: int = 0
+    ) -> ExecutionTraceList:
+        """
+        Get all traces with pagination.
+
+        Args:
+            limit: Maximum number of traces to return
+            offset: Number of traces to skip
+
+        Returns:
+            ExecutionTraceList with paginated traces
+        """
+        try:
+            # Get all traces using repository
+            traces, total_count = await self.repository.get_all_traces(limit, offset)
+
+            # Convert to schema objects and mask sensitive data
+            trace_items = [
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+
+            return ExecutionTraceList(
+                traces=trace_items, total=total_count, limit=limit, offset=offset
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving all traces: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving all traces: {str(e)}")
+            raise
+
+    async def get_all_traces_for_group(
+        self, group_context: GroupContext, limit: int = 100, offset: int = 0
+    ) -> ExecutionTraceList:
+        """
+        Get all traces for a specific group with pagination.
+
+        Args:
+            group_context: Group context for authorization
+            limit: Maximum number of traces to return
+            offset: Number of traces to skip
+
+        Returns:
+            ExecutionTraceList with paginated traces for the group
+        """
+        try:
+            if not group_context or not group_context.group_ids:
+                return ExecutionTraceList(
+                    traces=[], total=0, limit=limit, offset=offset
+                )
+
+            # Single group-scoped page (group_id is denormalized + indexed on
+            # execution_trace). The previous implementation walked EVERY
+            # execution in the group with one query per job (N+1), materialized
+            # up to 100×N rows to slice one page in Python, and reported a
+            # wrong total (capped at 100 per job).
+            traces, total_count = await self.repository.get_by_group_ids(
+                group_context.group_ids, limit=limit, offset=offset
+            )
+
+            # Convert to schema objects and mask sensitive data
+            trace_items = [
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+
+            return ExecutionTraceList(
+                traces=trace_items, total=total_count, limit=limit, offset=offset
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving group traces: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving group traces: {str(e)}")
+            raise
+
+    async def get_trace_by_id(self, trace_id: int) -> Optional[ExecutionTraceItem]:
+        """
+        Get a specific trace by ID with sensitive data masked.
+
+        Args:
+            trace_id: ID of the trace to retrieve
+
+        Returns:
+            ExecutionTraceItem if found, None otherwise (with sensitive data masked)
+        """
+        try:
+            trace = await self.repository.get_by_id(trace_id)
+
+            if not trace:
+                return None
+
+            trace_item = ExecutionTraceItem.model_validate(trace)
+            return mask_sensitive_data(trace_item)
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving trace {trace_id}: {str(e)}")
+            raise
+
+    async def get_trace_by_id_with_group_check(
+        self, trace_id: int, group_context: GroupContext
+    ) -> Optional[ExecutionTraceItem]:
+        """
+        Get a specific trace by ID with group authorization and sensitive data masked.
+
+        Args:
+            trace_id: ID of the trace to retrieve
+            group_context: Group context for authorization
+
+        Returns:
+            ExecutionTraceItem if found and authorized, None otherwise (with sensitive data masked)
+        """
+        try:
+            trace = await self.repository.get_by_id(trace_id)
+
+            if not trace:
+                return None
+
+            # Check if trace belongs to user's group via job_id
+            if trace.job_id and group_context and group_context.group_ids:
+                execution = await self.execution_service.get_run_by_job_id(
+                    trace.job_id, group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return None  # Not authorized
+
+            trace_item = ExecutionTraceItem.model_validate(trace)
+            return mask_sensitive_data(trace_item)
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving trace {trace_id}: {str(e)}")
+            raise
+
+    async def create_trace(
+        self,
+        trace_data: Dict[str, Any],
+        verify_execution_exists: bool = True,
+    ) -> ExecutionTraceItem:
+        """
+        Create a new trace.
+
+        Args:
+            trace_data: Dictionary with trace data
+            verify_execution_exists: Whether to check the parent ExecutionHistory
+                row exists before inserting. Batch writers (e.g. the light-agent
+                per-run persister) verify once for the first event of a run and
+                skip the extra SELECT for the rest.
+
+        Returns:
+            Created ExecutionTraceItem
+
+        Raises:
+            ValueError: If job_id doesn't exist in ExecutionHistory
+        """
+        try:
+            job_id = trace_data.get("job_id")
+            event_type = trace_data.get("event_type", "unknown")
+            # DEBUG: this runs per tool/LLM event during runs — INFO was log spam.
+            logger.debug(
+                f"[ExecutionTraceService] Creating trace for job_id={job_id}, event_type={event_type}"
+            )
+
+            trace = await self.repository.create(
+                trace_data, verify_execution_exists=verify_execution_exists
+            )
+
+            trace_item = ExecutionTraceItem.model_validate(trace)
+            logger.debug(
+                f"[ExecutionTraceService] Trace created successfully: id={trace.id}, job_id={job_id}"
+            )
+
+            # Broadcast SSE event for real-time trace updates
+            # CRITICAL: Skip SSE broadcast in subprocess mode because:
+            # 1. Subprocess has its own SSE manager instance with no connected clients
+            # 2. Clients connect to the main process's SSE manager
+            # 3. Broadcasting in subprocess is wasteful and produces misleading logs
+            is_subprocess = in_run_subprocess()
+
+            if is_subprocess:
+                logger.debug(
+                    f"[ExecutionTraceService] Skipping SSE broadcast in subprocess mode for job_id={job_id}"
+                )
+            elif job_id:
+                try:
+                    event = SSEEvent(
+                        data=trace_item.model_dump(),
+                        event="trace",
+                        id=f"{job_id}_trace_{trace.id}",
+                    )
+                    sent_count = await sse_manager.broadcast_to_job(
+                        job_id, event, group_id=getattr(trace, "group_id", None)
+                    )
+                    logger.debug(
+                        f"[ExecutionTraceService] Broadcasted SSE trace event for job_id={job_id}, sent to {sent_count} clients"
+                    )
+                except Exception as sse_error:
+                    # Don't fail trace creation if SSE fails
+                    logger.warning(
+                        f"[ExecutionTraceService] Failed to broadcast SSE trace event: {sse_error}"
+                    )
+
+            return trace_item
+
+        except ValueError as e:
+            # Log the error but don't re-raise for missing jobs
+            logger.warning(f"Trace creation skipped: {str(e)}")
+            raise
+        except SQLAlchemyError as e:
+            logger.error(f"Database error creating trace: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error creating trace: {str(e)}")
+            raise
+
+    async def delete_trace(self, trace_id: int) -> Optional[DeleteTraceResponse]:
+        """
+        Delete a specific trace by ID.
+
+        Args:
+            trace_id: ID of the trace to delete
+
+        Returns:
+            DeleteTraceResponse with information about the deleted trace
+        """
+        try:
+            # Check if the trace exists first
+            trace = await self.repository.get_by_id(trace_id)
+
+            if not trace:
+                return None
+
+            # Delete the trace
+            deleted_count = await self.repository.delete_by_id(trace_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted trace {trace_id}",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting trace {trace_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting trace {trace_id}: {str(e)}")
+            raise
+
+    async def delete_trace_with_group_check(
+        self, trace_id: int, group_context: GroupContext
+    ) -> Optional[DeleteTraceResponse]:
+        """
+        Delete a specific trace by ID with group authorization.
+
+        Args:
+            trace_id: ID of the trace to delete
+            group_context: Group context for authorization
+
+        Returns:
+            DeleteTraceResponse with information about the deleted trace
+        """
+        try:
+            # Check if the trace exists and belongs to group
+            trace = await self.repository.get_by_id(trace_id)
+
+            if not trace:
+                return None
+
+            # Check authorization via job_id
+            if trace.job_id and group_context and group_context.group_ids:
+                execution = await self.execution_service.get_run_by_job_id(
+                    trace.job_id, group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return None  # Not authorized
+
+            # Delete the trace
+            deleted_count = await self.repository.delete_by_id(trace_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted trace {trace_id}",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting trace {trace_id}: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting trace {trace_id}: {str(e)}")
+            raise
+
+    async def delete_traces_by_run_id(self, run_id: int) -> DeleteTraceResponse:
+        """
+        Delete all traces for a specific execution.
+
+        Args:
+            run_id: Database ID of the execution
+
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Delete the traces
+            deleted_count = await self.repository.delete_by_run_id(run_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted {deleted_count} traces for execution {run_id}",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error deleting traces for execution {run_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting traces for execution {run_id}: {str(e)}")
+            raise
+
+    async def delete_traces_by_run_id_with_group_check(
+        self, run_id: int, group_context: GroupContext
+    ) -> DeleteTraceResponse:
+        """
+        Delete all traces for a specific execution with group authorization.
+
+        Args:
+            run_id: Database ID of the execution
+            group_context: Group context for authorization
+
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Check if execution belongs to group
+            if group_context and group_context.group_ids:
+                execution = await self.execution_service.get_run_by_id(
+                    run_id, group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return DeleteTraceResponse(
+                        deleted_traces=0,
+                        message="Execution not found or not authorized",
+                    )
+
+            # Delete the traces
+            deleted_count = await self.repository.delete_by_run_id(run_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted {deleted_count} traces for execution {run_id}",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error deleting traces for execution {run_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting traces for execution {run_id}: {str(e)}")
+            raise
+
+    async def delete_traces_by_job_id(self, job_id: str) -> DeleteTraceResponse:
+        """
+        Delete all traces for a specific job.
+
+        Args:
+            job_id: String ID of the execution (job_id)
+
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Delete the traces
+            deleted_count = await self.repository.delete_by_job_id(job_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted {deleted_count} traces for job {job_id}",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error deleting traces for job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting traces for job_id {job_id}: {str(e)}")
+            raise
+
+    async def delete_traces_by_job_id_with_group_check(
+        self, job_id: str, group_context: GroupContext
+    ) -> DeleteTraceResponse:
+        """
+        Delete all traces for a specific job with group authorization.
+
+        Args:
+            job_id: String ID of the execution (job_id)
+            group_context: Group context for authorization
+
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Check if job belongs to group
+            if group_context and group_context.group_ids:
+                execution = await self.execution_service.get_run_by_job_id(
+                    job_id, group_ids=group_context.group_ids
+                )
+                if not execution:
+                    return DeleteTraceResponse(
+                        deleted_traces=0, message="Job not found or not authorized"
+                    )
+
+            # Delete the traces
+            deleted_count = await self.repository.delete_by_job_id(job_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted {deleted_count} traces for job {job_id}",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error deleting traces for job_id {job_id}: {str(e)}"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting traces for job_id {job_id}: {str(e)}")
+            raise
+
+    async def delete_all_traces(self) -> DeleteTraceResponse:
+        """
+        Delete all execution traces.
+
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            # Delete all traces
+            deleted_count = await self.repository.delete_all()
+
+            return DeleteTraceResponse(
+                deleted_traces=deleted_count,
+                message=f"Successfully deleted all traces ({deleted_count} total)",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting all traces: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting all traces: {str(e)}")
+            raise
+
+    async def delete_all_traces_for_group(
+        self, group_context: GroupContext
+    ) -> DeleteTraceResponse:
+        """
+        Delete all execution traces for a specific group.
+
+        Args:
+            group_context: Group context for authorization
+
+        Returns:
+            DeleteTraceResponse with information about deleted traces
+        """
+        try:
+            if not group_context or not group_context.group_ids:
+                return DeleteTraceResponse(
+                    deleted_traces=0, message="No group context provided"
+                )
+
+            # Runs are ExecutionService's domain. This called a method that did NOT
+            # exist on the repository (get_all_executions_for_groups), so every
+            # attempt raised AttributeError and deleted nothing — the router test
+            # mocked this whole method, so nothing caught it.
+            job_ids = await self.execution_service.get_job_ids_for_groups(
+                group_context.group_ids
+            )
+
+            if not job_ids:
+                return DeleteTraceResponse(
+                    deleted_traces=0, message="No executions found for group"
+                )
+
+            # Delete traces for each execution
+            total_deleted = 0
+            for job_id in job_ids:
+                if job_id:
+                    total_deleted += await self.repository.delete_by_job_id(job_id)
+
+            return DeleteTraceResponse(
+                deleted_traces=total_deleted,
+                message=f"Successfully deleted {total_deleted} traces for group",
+            )
+
+        except SQLAlchemyError as e:
+            logger.error(f"Database error deleting group traces: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting group traces: {str(e)}")
+            raise

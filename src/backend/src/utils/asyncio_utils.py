@@ -1,0 +1,250 @@
+"""
+Utilities for event loop management and handling asyncio operations across threads.
+"""
+
+import asyncio
+from typing import Any, Callable, Coroutine, TypeVar
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from src.core.logger import LoggerManager
+
+# Get logger from the centralized logging system
+logger = LoggerManager.get_instance().system
+
+# Type variable for the return value of the database operation
+T = TypeVar("T")
+
+
+async def execute_db_operation_with_fresh_engine(
+    operation: Callable[[AsyncSession], Coroutine[Any, Any, T]],
+) -> T:
+    """Run a DB operation on the LOCAL engine. **Call `execute_db_operation_smart`
+    instead** — this is that function's local-DB branch, not a general-purpose
+    helper.
+
+    It resolves its engine by importing ``nullpool_engine`` from ``db.session``
+    directly: no ``is_lakebase_enabled()`` check, no router, no way to reach
+    Lakebase however the app is configured. On a Lakebase deployment anything
+    calling this reads and writes a database the app is no longer using — a miss
+    that surfaces as "row not found" rather than an error, so it is invisible
+    until someone asks why a value that was definitely saved cannot be read.
+    That cost real debugging time: tool API keys resolved as "not configured"
+    while the row sat in Lakebase, and the execution safety-net silently found no
+    stuck rows to fix.
+
+    Kept (rather than inlined into ``execute_db_operation_smart``) because the
+    engine choice below is load-bearing for SQLite, per the note it carries:
+
+    IMPORTANT: Reuses the global engine instead of creating fresh engines.
+    This prevents:
+    - WAL checkpoint interruption during engine disposal
+    - Connection lifecycle conflicts with StaticPool
+    - Silent data loss from incomplete checkpoints
+    - "file is not a database" corruption errors
+
+    Based on 2025 SQLite best practices research which showed that:
+    - Creating and disposing StaticPool engines repeatedly violates its design
+    - Engine disposal can interrupt WAL checkpoint operations
+    - Multiple competing engines cause checkpoint conflicts
+    - Proper pattern: Reuse long-lived global engine
+
+    For SQLite: Uses the global StaticPool engine (single connection)
+    For PostgreSQL: Uses dedicated NullPool engine for background tasks
+
+    Args:
+        operation: A callable that takes an AsyncSession and returns a coroutine
+
+    Returns:
+        The result of the operation
+    """
+    # Import the global nullpool_engine from session.py
+    # For SQLite: nullpool_engine = engine (same StaticPool)
+    # For PostgreSQL: nullpool_engine = separate NullPool for background tasks
+    from src.db.session import nullpool_engine
+
+    # Create session factory using the EXISTING global engine
+    # No engine creation, no disposal - engine lifecycle managed by session.py
+    session_factory = async_sessionmaker(
+        nullpool_engine,  # Reuse existing engine
+        expire_on_commit=False,
+        autoflush=False,
+    )
+
+    try:
+        # Create a session and execute the operation
+        async with session_factory() as session:
+            result = await operation(session)
+            return result
+    except Exception as e:
+        logger.error(f"Error executing DB operation: {str(e)}", exc_info=True)
+        raise
+    # No engine disposal - engine lifecycle managed by session.py
+
+
+async def execute_db_operation_smart(
+    operation: Callable[[AsyncSession], Coroutine[Any, Any, T]],
+) -> T:
+    """
+    Execute a database operation using the smart session (Lakebase-aware).
+
+    Unlike ``execute_db_operation_with_fresh_engine`` (which always uses the
+    local DB engine), this function honours the database router:
+    - When Lakebase is active → uses a Lakebase session.
+    - Otherwise             → falls back to the local NullPool engine.
+
+    Use this for operations on tables that may live in Lakebase
+    (e.g. execution_history).
+    """
+    from src.db.database_router import is_lakebase_enabled
+
+    if await is_lakebase_enabled():
+        from src.db.database_router import get_lakebase_config_from_db
+        from src.db.lakebase_session import get_lakebase_session
+        from src.db.lakebase_state import (
+            is_fallback_allowed,
+            record_successful_connection,
+        )
+        from src.utils.databricks_auth import get_auth_context
+
+        config = await get_lakebase_config_from_db()
+        from src.core.databricks_app import lakebase_instance_from_config
+
+        instance_name = lakebase_instance_from_config(config)
+
+        user_token = None
+        user_email = None
+        try:
+            auth = await get_auth_context()
+            if auth:
+                user_token = auth.token
+                user_email = auth.user_identity
+        except Exception:
+            pass  # Will rely on other auth methods inside lakebase session
+
+        max_retries = 3
+        backoff_delays = [0.5, 1.0, 2.0]
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                async with get_lakebase_session(
+                    instance_name, user_token, user_email
+                ) as session:
+                    record_successful_connection()
+                    result = await operation(session)
+                    return result
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = backoff_delays[attempt]
+                    logger.warning(
+                        f"Lakebase operation attempt {attempt + 1}/{max_retries} failed: {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+
+        # All retries exhausted
+        if is_fallback_allowed():
+            logger.warning(
+                f"Lakebase unavailable during startup after {max_retries} attempts, "
+                f"falling back to local DB: {last_error}"
+            )
+        else:
+            raise RuntimeError(
+                f"Lakebase database unreachable after {max_retries} retries: {last_error}"
+            )
+
+    # Local DB fallback (or Lakebase not enabled)
+    return await execute_db_operation_with_fresh_engine(operation)
+
+
+def _dispose_thread_local_lakebase(loop: Any) -> None:
+    """Dispose any thread-local Lakebase engine bound to THIS throwaway loop
+    before it closes.
+
+    ``get_lakebase_session`` (reached via routed/isolated sessions, or the OTel DB
+    span exporter's writes, or any tool that reads config/credentials) binds a
+    thread-local asyncpg engine + token-refresh task to whatever loop is running.
+    Closing the loop WITHOUT disposing that engine orphans the pooled asyncpg
+    connection on a dead loop; its later graceful close then raises
+    ``RuntimeError: Event loop is closed`` and SQLAlchemy GC-terminates it as a
+    "non-checked-in connection". Disposing here, on the same loop, returns the
+    connection cleanly. Safe no-op when the coroutine never touched Lakebase (no
+    thread-local factory), and never raises — teardown must not fail the caller.
+    """
+    try:
+        from src.db.lakebase_session import dispose_thread_local_lakebase_factory
+
+        loop.run_until_complete(dispose_thread_local_lakebase_factory())
+    except Exception as e:  # noqa: BLE001 — teardown must never raise
+        logger.debug(f"thread-local Lakebase dispose skipped: {e}")
+
+
+def create_and_run_loop(coroutine: Any) -> Any:
+    """Create a new event loop, run the coroutine, and clean up properly."""
+    new_loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(new_loop)
+        result = new_loop.run_until_complete(coroutine)
+        return result
+    finally:
+        # Properly clean up the event loop
+        try:
+            # Close all running event loop tasks
+            pending = (
+                asyncio.all_tasks(new_loop) if hasattr(asyncio, "all_tasks") else []
+            )
+            for task in pending:
+                task.cancel()
+            # Run the event loop until all tasks are canceled
+            if pending:
+                new_loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            # Return a thread-local Lakebase connection to its pool BEFORE closing
+            # the loop it lives on (else it is orphaned → "Event loop is closed" →
+            # GC-terminated "non-checked-in connection").
+            _dispose_thread_local_lakebase(new_loop)
+            # Remove the loop from the current context and close it
+            asyncio.set_event_loop(None)
+            new_loop.close()
+        except Exception as e:
+            logger.error(f"Error cleaning up event loop: {str(e)}")
+
+
+def run_in_thread_with_loop(func: Callable, *args: Any, **kwargs: Any) -> Any:
+    """Run a function in a thread with a properly managed event loop."""
+    # Track whether we created a new event loop
+    created_loop = False
+    loop = None
+
+    try:
+        # Set up event loop for this thread
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # If there's no event loop in this thread, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            created_loop = True
+            logger.info("Created new event loop for thread execution")
+
+        # Execute the function
+        return func(*args, **kwargs)
+
+    finally:
+        # Clean up the event loop only if we created it
+        if created_loop and loop is not None:
+            try:
+                # Return a thread-local Lakebase connection before closing its loop.
+                _dispose_thread_local_lakebase(loop)
+                # Only close the loop if we created it
+                asyncio.set_event_loop(None)
+                loop.close()
+                logger.info(
+                    "Successfully closed the event loop created for this thread"
+                )
+            except Exception as e:
+                logger.error(f"Error cleaning up event loop: {str(e)}")

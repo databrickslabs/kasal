@@ -1,0 +1,767 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+"""CrewAI Engine Service for AI agent orchestration.
+
+This module provides the core engine service for CrewAI-based agent execution,
+handling both individual crew executions and complex flow orchestrations.
+
+The service integrates with the CrewAI framework to manage multi-agent systems,
+coordinate task execution, and provide comprehensive tracing and monitoring
+capabilities for AI workflows.
+
+Key Features:
+    - Crew preparation and configuration management
+    - Flow orchestration for complex multi-crew workflows
+    - Process-based execution isolation for reliability
+    - Real-time trace capture and event monitoring
+    - Tool factory integration for dynamic tool loading
+    - Multi-tenant support with group context isolation
+
+Architecture:
+    The service extends BaseEngineService and acts as the primary interface
+    between the application layer and the CrewAI framework. It manages the
+    lifecycle of crew executions, from configuration through completion.
+
+Example:
+    >>> service = KasalEngineService()
+    >>> await service.initialize(llm_provider="openai", model="gpt-4")
+    >>> result = await service.run_execution(
+    ...     execution_id="exec_123",
+    ...     execution_config=crew_config,
+    ...     group_context=group_ctx
+    ... )
+"""
+
+import asyncio  # noqa: E402 - import follows module initialization
+import os  # noqa: E402 - import follows module initialization
+from datetime import datetime  # noqa: E402 - import follows module initialization
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    Optional,
+)
+
+from sqlalchemy.ext.asyncio import (  # noqa: E402 - import follows module initialization
+    AsyncSession,
+)
+
+# Import logger manager
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.models.execution_status import (  # noqa: E402 - import follows module initialization
+    ExecutionStatus,
+)
+from src.services.agent_builder.execution_runner import (  # noqa: E402 - import follows module initialization
+    run_crew_in_process,
+    update_execution_status_with_retry,
+)
+from src.services.execution.base import (  # noqa: E402 - import follows module initialization
+    BaseEngineService,
+)
+from src.services.execution.config.auto_model import (  # noqa: E402 - import follows module initialization
+    stamp_decision,
+)
+from src.services.execution.config_adapter import (  # noqa: E402 - import follows module initialization
+    normalize_config,
+    normalize_flow_config,
+)
+from src.services.execution.harness_choice import (  # noqa: E402 - import follows module initialization
+    HarnessName,
+    dispatch_session,
+    harness_for_execution,
+    stamp_on_config,
+    subprocess_env,
+)
+from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
+    active_harness,
+    bind,
+)
+
+# Import helper modules
+from src.services.execution.logs.writer_task import (  # noqa: E402 - import follows module initialization
+    LogWriterTask,
+)
+from src.services.flow_builder.flow_execution_runner import (  # noqa: E402 - import follows module initialization
+    run_flow_in_process,
+)
+from src.utils.user_context import (  # noqa: E402 - import follows module initialization
+    GroupContext,
+)
+
+logger = LoggerManager.get_instance().crew
+
+
+def _stamp_payload(
+    config: Dict[str, object], execution_id: str, engine: HarnessName
+) -> None:
+    """What the spawned interpreter must know before it parses the config.
+
+    The engine this run was created with (payload and environment), and the
+    run's Auto decision, which its trace continues (``auto_model``).
+    """
+    stamp_on_config(config, engine)
+    stamp_decision(config, execution_id)
+    os.environ.update(subprocess_env(engine))
+
+
+class KasalEngineService(BaseEngineService):
+    """Core engine service for CrewAI agent orchestration and execution.
+
+    This service provides comprehensive management of CrewAI-based agent systems,
+    handling everything from crew configuration to execution monitoring. It supports
+    both simple crew executions and complex flow orchestrations with multiple crews.
+
+    The service integrates with various subsystems including:
+    - Trace management for execution monitoring
+    - Tool factory for dynamic tool provisioning
+    - Process isolation for reliable execution
+    - Event callbacks for real-time updates
+
+    Attributes:
+        _running_jobs: Dictionary mapping execution IDs to job information
+        _get_execution_repository: Factory function for execution repository access
+        _status_service: Reference to ExecutionStatusService for status updates
+
+    Inheritance:
+        Extends BaseEngineService to provide CrewAI-specific implementation
+
+    Note:
+        The service uses process-based execution for isolation and reliability,
+        ensuring that crew failures don't affect the main application process.
+    """
+
+    _init_task: "asyncio.Task[bool]"  # set by EngineFactory.get_engine
+
+    def __init__(self, db: Any = None) -> None:
+        """Initialize the CrewAI engine service with database connection.
+
+        Sets up the service with repository access patterns and initializes
+        tracking structures for running jobs.
+
+        Args:
+            db: Optional database connection for repository access.
+                If not provided, repositories will use their default connections.
+
+        Note:
+            The service doesn't store the db directly but uses repository
+            factory functions to maintain proper separation of concerns.
+        """
+        # Don't store db directly - repositories should handle db access
+        self._running_jobs: Dict[str, Any] = {}  # Map of execution_id -> job info
+
+        # Import repository factory functions
+        from src.repositories.execution_repository import get_execution_repository
+        from src.services.execution.status import ExecutionStatusService
+
+        self._get_execution_repository = lambda session: get_execution_repository(
+            session
+        )
+        self._status_service = ExecutionStatusService  # Store reference to service
+
+    async def initialize(self, **kwargs: Any) -> bool:
+        """Initialize the CrewAI engine service and its dependencies.
+
+        Performs startup initialization including trace writer setup,
+        logger configuration, and LLM provider initialization.
+
+        Args:
+            **kwargs: Initialization parameters including:
+                - llm_provider: LLM provider name (default: "openai")
+                - model: Model identifier (default: DEFAULT_ENGINE_MODEL)
+                - Additional provider-specific configuration
+
+        Returns:
+            bool: True if initialization successful, False otherwise
+
+        Note:
+            This method ensures the trace writer is started for execution
+            monitoring and configures the CrewAI library logging.
+
+        Example:
+            >>> success = await service.initialize(
+            ...     llm_provider="anthropic",
+            ...     model="claude-3-opus"
+            ... )
+        """
+        # Ensure trace writer is started when engine initializes
+        await LogWriterTask.ensure_writer_started()
+        try:
+            # Set up CrewAI library logging via our centralized logger
+
+            # Choose logger based on execution type if provided
+            execution_type = kwargs.get("execution_type", "crew")
+            if execution_type and execution_type.lower() == "flow":
+                init_logger = LoggerManager.get_instance().flow
+            else:
+                init_logger = logger
+
+            # Additional initialization if needed
+            llm_provider = kwargs.get("llm_provider", "openai")
+            model = kwargs.get("model", DEFAULT_ENGINE_MODEL)
+            init_logger.info(
+                f"Initializing CrewAI engine with {llm_provider} using model {model}"
+            )
+
+            return True
+
+        except Exception as e:
+            # Use appropriate logger for error too
+            execution_type = kwargs.get("execution_type", "crew")
+            if execution_type and execution_type.lower() == "flow":
+                error_logger = LoggerManager.get_instance().flow
+            else:
+                error_logger = logger
+            error_logger.error(f"Failed to initialize CrewAI engine: {str(e)}")
+            return False
+
+    async def run_execution(
+        self,
+        execution_id: str,
+        execution_config: Dict[str, Any],
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> str:
+        """Execute a CrewAI crew with process isolation and comprehensive monitoring.
+
+        Orchestrates the complete execution lifecycle including crew preparation,
+        process-based execution, trace capture, and status updates. Supports
+        multi-tenant isolation through group context.
+
+        Args:
+            execution_id: Unique identifier for tracking this execution.
+                Used for trace correlation and status updates.
+            execution_config: Complete crew configuration including:
+                - crew: Crew-level settings (name, process, memory, etc.)
+                - agents: List of agent configurations
+                - tasks: List of task configurations
+                - tools: Tool configurations and API keys
+                - output_settings: Output format and destination
+            group_context: Optional multi-tenant context containing:
+                - primary_group_id: Group identifier for isolation
+                - access_token: User token for authenticated operations
+                - group_email: Group email for notifications
+
+        Returns:
+            str: The execution ID for tracking the execution
+
+        Raises:
+            Exception: Propagates exceptions from crew preparation or execution
+
+        Note:
+            The method assumes the execution record is already created with
+            RUNNING status by the caller. It focuses on actual execution
+            and status updates.
+
+        Example:
+            >>> exec_id = await service.run_execution(
+            ...     execution_id="exec_123",
+            ...     execution_config={
+            ...         "crew": {"name": "Research Crew"},
+            ...         "agents": [...],
+            ...         "tasks": [...]
+            ...     },
+            ...     group_context=user_group_context
+            ... )
+        """
+        try:
+            # Normalize config to ensure consistent format
+            execution_config = normalize_config(execution_config)
+
+            # The engine this run was CREATED with, carried into the spawned
+            # interpreter. Read from the execution row rather than the setting:
+            # flipping the configuration while this run is queued must not send
+            # it to a different runtime than the one recorded against it.
+            async with dispatch_session(session) as db:
+                engine = await harness_for_execution(db, execution_id)
+            _stamp_payload(execution_config, execution_id, engine)
+            logger.info(
+                f"[KasalEngineService] Execution {execution_id} engine: {engine}"
+            )
+
+            # Add group_id to config if we have group_context
+            if group_context and group_context.primary_group_id:
+                execution_config["group_id"] = group_context.primary_group_id
+                logger.info(
+                    f"[KasalEngineService] Added group_id to config: {group_context.primary_group_id}"
+                )
+
+            # Propagate the executing user's email so tools can isolate
+            # per-user data (e.g. knowledge search returns only the chunks
+            # this user uploaded).
+            if group_context and group_context.group_email:
+                execution_config["user_email"] = group_context.group_email
+
+            # Extract crew definition sections from config
+            execution_config.get("crew", {})
+            agent_configs = execution_config.get("agents", [])
+            execution_config.get("tasks", [])
+
+            # Log agent configurations to debug knowledge_sources
+            logger.info(
+                f"[KasalEngineService] Processing {len(agent_configs)} agents for execution {execution_id}"
+            )
+            for idx, agent_config in enumerate(agent_configs):
+                agent_id = agent_config.get("id", f"agent_{idx}")
+                logger.info(
+                    f"[KasalEngineService] Agent {agent_id} config keys: {list(agent_config.keys())}"
+                )
+                if "knowledge_sources" in agent_config:
+                    ks = agent_config["knowledge_sources"]
+                    logger.info(
+                        f"[KasalEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}"
+                    )
+                else:
+                    logger.debug(
+                        f"[KasalEngineService] Agent {agent_id} has NO knowledge_sources"
+                    )
+
+            # We assume the execution record is already created by the caller
+            # We will only update the status
+
+            # Ensure writer is started before running execution
+            await LogWriterTask.ensure_writer_started()
+
+            logger.info(
+                f"[KasalEngineService] Starting run_execution for ID: {execution_id} (already has RUNNING status)"
+            )
+
+            try:
+                # NOTE: no ToolFactory/ToolService is built here. The subprocess
+                # builds its own fully-initialized ToolFactory (see
+                # process_crew_executor.run_crew_in_process); the parent-side
+                # factory was dead work (~1s + 5 DB round-trips per execution).
+
+                # IMPORTANT: Do NOT prepare crew in main process when using subprocess execution
+                # The subprocess will prepare its own crew with the full config including knowledge_sources
+                # Preparing here would modify the config and remove knowledge_sources before subprocess gets them
+
+                # Debug log to check if knowledge_sources are still present
+                logger.info(
+                    f"[KasalEngineService] DEBUG: Config before subprocess for {execution_id}:"
+                )
+                for idx, agent_config in enumerate(execution_config.get("agents", [])):
+                    agent_id = agent_config.get("id", f"agent_{idx}")
+                    ks = agent_config.get("knowledge_sources", [])
+                    logger.info(
+                        f"[KasalEngineService] Agent {agent_id} has {len(ks)} knowledge_sources: {ks}"
+                    )
+
+                # Skip crew preparation in main process - let subprocess handle it
+                # This preserves the original config with knowledge_sources intact
+
+            except Exception as e:
+                logger.error(
+                    f"[KasalEngineService] Error running CrewAI execution {execution_id}: {str(e)}",
+                    exc_info=True,
+                )
+                try:
+                    await self._update_execution_status(
+                        execution_id,
+                        ExecutionStatus.FAILED.value,
+                        f"Failed during crew preparation/launch: {str(e)}",
+                    )
+                except Exception as update_err:
+                    logger.critical(
+                        f"[KasalEngineService] CRITICAL: Failed to update status to FAILED for {execution_id} after run_execution error: {update_err}",
+                        exc_info=True,
+                    )
+                raise
+
+            # Event listeners are now initialized in the subprocess
+            # This ensures they're in the same process as the crew execution
+            logger.debug(
+                f"[KasalEngineService] Event listeners will be initialized in subprocess for {execution_id}"
+            )
+
+            # Status is already RUNNING from creation, no need to update
+            logger.info(
+                f"[KasalEngineService] Execution {execution_id} ready to start (status already RUNNING)"
+            )
+
+            # User token was already extracted and passed to tool factory above
+            user_token = group_context.access_token if group_context else None
+
+            # Use process-based execution for true termination capability
+            logger.info(
+                f"[KasalEngineService] Starting process-based execution for {execution_id}"
+            )
+
+            # The runner reports the workload outcome separately from persistence.
+            # A normal return can mean FAILED; it must never imply COMPLETED.
+            async def run_with_exception_handler() -> None:
+                from src.services.execution.finalization import (
+                    ExecutionOutcome,
+                    persist_execution_outcome,
+                )
+
+                try:
+                    outcome = await run_crew_in_process(
+                        execution_id=execution_id,
+                        config=execution_config,
+                        running_jobs=self._running_jobs,
+                        group_context=group_context,
+                        user_token=user_token,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Crew runner failed for %s", execution_id)
+                    outcome = ExecutionOutcome("FAILED", "Crew execution failed")
+                if isinstance(outcome, ExecutionOutcome) and not outcome.persisted:
+                    # One immediate recovery attempt; the periodic sweep retains
+                    # and retries the same outcome if the database remains down.
+                    await persist_execution_outcome(
+                        execution_id, outcome, max_attempts=1
+                    )
+
+            execution_task = asyncio.create_task(run_with_exception_handler())
+
+            logger.info(
+                f"[KasalEngineService] Created execution task for {execution_id}"
+            )
+
+            # Store job info (no crew object since it runs in a separate process)
+            self._running_jobs[execution_id] = {
+                "task": execution_task,
+                "crew": None,  # Crew runs in separate process
+                "start_time": datetime.now(),
+                "config": execution_config,
+                "execution_mode": "process",  # Mark this as process-based
+            }
+
+            return execution_id
+
+        except Exception as e:
+            logger.error(
+                f"Error running execution {execution_id}: {str(e)}", exc_info=True
+            )
+            raise
+
+    async def _update_execution_status(
+        self, execution_id: str, status: str, message: str, result: Any = None
+    ) -> None:
+        """
+        Update execution status via service layer.
+
+        Args:
+            execution_id: Execution ID
+            status: New status
+            message: Status message
+            result: Optional execution result
+        """
+        # Delegate to the update_execution_status_with_retry function
+        await update_execution_status_with_retry(
+            execution_id=execution_id, status=status, message=message, result=result
+        )
+
+    async def get_execution_status(self, execution_id: str) -> Dict[str, Any]:
+        """
+        Get the status of an execution
+
+        Args:
+            execution_id: Execution ID
+
+        Returns:
+            Dict with execution status information
+        """
+        # Check in-memory jobs first
+        if execution_id in self._running_jobs:
+            job_info = self._running_jobs[execution_id]
+            return {
+                "status": ExecutionStatus.RUNNING.value,
+                "start_time": job_info["start_time"].isoformat(),
+                "message": "Execution is currently running",
+            }
+
+        # Get status from database via service
+        try:
+            # Use execution status service - service should handle DB access through repositories
+            from src.services.execution.status import ExecutionStatusService
+
+            # Service should handle DB sessions internally
+            status = await ExecutionStatusService.get_status(execution_id)
+
+            if status:
+                return {
+                    "status": status.status,
+                    "message": status.message,
+                    "result": status.result,
+                    "updated_at": (
+                        status.updated_at.isoformat() if status.updated_at else None
+                    ),
+                    "created_at": (
+                        status.created_at.isoformat() if status.created_at else None
+                    ),
+                }
+            else:
+                return {"status": "UNKNOWN", "message": "Execution status not found"}
+        except Exception as e:
+            logger.error(f"Error getting execution status: {str(e)}")
+            return {
+                "status": "ERROR",
+                "message": f"Error retrieving execution status: {str(e)}",
+            }
+
+    async def cancel_execution(self, execution_id: str) -> bool:
+        """
+        Cancel a running execution
+
+        Args:
+            execution_id: Execution ID
+
+        Returns:
+            bool: True if cancelled successfully
+        """
+        if execution_id not in self._running_jobs:
+            logger.warning(
+                f"Cannot cancel execution {execution_id}: not found in running jobs"
+            )
+            return False
+
+        try:
+            # Get the job info
+            job_info = self._running_jobs[execution_id]
+            execution_mode = job_info.get("execution_mode", "thread")
+
+            # If process-based execution, terminate the process
+            if execution_mode == "process":
+                from src.services.agent_builder.process_executor import (
+                    process_crew_executor,
+                )
+
+                terminated = await process_crew_executor.terminate_execution(
+                    execution_id
+                )
+                if terminated:
+                    logger.info(
+                        f"Successfully terminated process for execution {execution_id}"
+                    )
+
+                    # Cancel the asyncio task as well
+                    task = job_info["task"]
+                    if task and not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+
+                    # Update status in database
+                    await self._update_execution_status(
+                        execution_id,
+                        ExecutionStatus.STOPPED.value,
+                        "Execution stopped by user (process terminated)",
+                    )
+
+                    # Clean up
+                    del self._running_jobs[execution_id]
+                    return True
+                else:
+                    logger.warning(
+                        f"Could not terminate process for execution {execution_id}"
+                    )
+
+            # For thread-based execution (fallback or if process termination fails)
+            # Ask the run to stop cooperatively first — a worker thread ignores
+            # task.cancel(); the transport round loop honours this event.
+            from src.core.execution_stop import request_stop as request_cooperative_stop
+
+            request_cooperative_stop(execution_id)
+            task = job_info["task"]
+
+            # Cancel the task
+            task.cancel()
+
+            # Wait for task to be cancelled
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+            # Update status in database - use STOPPED instead of CANCELLED for user-initiated stops
+            await self._update_execution_status(
+                execution_id, ExecutionStatus.STOPPED.value, "Execution stopped by user"
+            )
+
+            # Clean up
+            del self._running_jobs[execution_id]
+
+            return True
+        except Exception as e:
+            logger.error(f"Error cancelling execution {execution_id}: {str(e)}")
+            return False
+
+    async def run_flow(
+        self,
+        execution_id: str,
+        flow_config: Dict[str, Any],
+        group_context: Optional[GroupContext] = None,
+        user_token: Optional[str] = None,
+    ) -> str:
+        """
+        Run a CrewAI flow with the given configuration using process isolation.
+
+        Args:
+            execution_id: Unique ID for this flow execution
+            flow_config: Configuration for the flow
+            group_context: Group context for multi-tenant isolation
+            user_token: User access token for OAuth authentication
+
+        Returns:
+            Execution ID
+        """
+        # Use flow-specific logger for flow execution
+        from src.core.logger import LoggerManager
+
+        flow_logger = LoggerManager.get_instance().flow
+
+        try:
+            # Normalize flow config
+            flow_config = normalize_flow_config(flow_config)
+
+            # Same contract as the crew path — see run_execution. run_flow takes
+            # no session (its callers are background paths), so the boundary
+            # acquires one through the router rather than inventing a parameter
+            # every caller would pass as None.
+            async with dispatch_session() as db:
+                engine = await harness_for_execution(db, execution_id)
+            _stamp_payload(flow_config, execution_id, engine)
+            flow_logger.info(
+                f"[KasalEngineService] Flow {execution_id} engine: {engine}"
+            )
+
+            # Add group_id to config if we have group_context
+            if group_context and group_context.primary_group_id:
+                flow_config["group_id"] = group_context.primary_group_id
+                flow_logger.info(
+                    f"[KasalEngineService] Added group_id to flow config: {group_context.primary_group_id}"
+                )
+
+            # Ensure writer is started before running execution
+            await LogWriterTask.ensure_writer_started()
+
+            flow_logger.info(
+                f"[KasalEngineService] Starting run_flow for ID: {execution_id} (process-based)"
+            )
+            flow_logger.info(
+                f"[KasalEngineService] Flow config has {len(flow_config.get('nodes', []))} nodes and {len(flow_config.get('edges', []))} edges"
+            )
+
+            # Status is already RUNNING from creation, no need to update
+            flow_logger.info(
+                f"[KasalEngineService] Execution {execution_id} ready to start flow (status already RUNNING)"
+            )
+
+            # Use process-based execution for true termination capability
+            flow_logger.info(
+                f"[KasalEngineService] Starting process-based flow execution for {execution_id}"
+            )
+
+            # Create a task for process-based flow execution with exception handler
+            async def run_with_exception_handler() -> None:
+                try:
+                    flow_logger.info(
+                        f"[KasalEngineService] About to call run_flow_in_process for {execution_id}"
+                    )
+                    await run_flow_in_process(
+                        execution_id=execution_id,
+                        config=flow_config,
+                        running_jobs=self._running_jobs,
+                        group_context=group_context,
+                        user_token=user_token,
+                    )
+                    flow_logger.info(
+                        f"[KasalEngineService] run_flow_in_process completed for {execution_id}"
+                    )
+                except Exception as e:
+                    flow_logger.error(
+                        f"[KasalEngineService] CRITICAL: Exception in run_flow_in_process for {execution_id}: {e}",
+                        exc_info=True,
+                    )
+                    # Write to file as backup
+                    import traceback
+
+                    with open(f"/tmp/flow_task_error_{execution_id[:8]}.log", "w") as f:
+                        f.write(f"Exception in flow background task: {e}\n")
+                        f.write(traceback.format_exc())
+
+            execution_task = asyncio.create_task(run_with_exception_handler())
+
+            flow_logger.info(
+                f"[KasalEngineService] Created flow execution task for {execution_id}"
+            )
+
+            # Store job info (no flow object since it runs in a separate process)
+            self._running_jobs[execution_id] = {
+                "task": execution_task,
+                "flow": None,  # Flow runs in separate process
+                "start_time": datetime.now(),
+                "config": flow_config,
+                "execution_mode": "process",  # Mark this as process-based
+            }
+
+            flow_logger.info(
+                f"[KasalEngineService] Stored job info for {execution_id} in running_jobs"
+            )
+
+            return execution_id
+
+        except Exception as e:
+            flow_logger.error(
+                f"[KasalEngineService] Error in run_flow for {execution_id}: {str(e)}",
+                exc_info=True,
+            )
+            await self._update_execution_status(
+                execution_id,
+                ExecutionStatus.FAILED.value,
+                f"Flow execution failed: {str(e)}",
+            )
+            raise
+
+    async def run_light_agent_execution(
+        self,
+        execution_id: str,
+        config: Any,
+        group_context: Optional[GroupContext] = None,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
+        """Run a single agent ("chat"/light) execution at the engine level.
+
+        CrewAI-specific counterpart to :meth:`run_execution` for the light path:
+        the service layer resolves the engine and delegates here so the actual
+        agent build + ``Agent.kickoff_async`` + trace emission live in the
+        engine. Unlike :meth:`run_execution` (which isolates the crew in a
+        subprocess), this runs IN-PROCESS for sub-second latency. Like
+        :meth:`run_flow`, it is a CrewAI-engine-specific extension and not part
+        of the :class:`BaseEngineService` contract.
+
+        Args:
+            execution_id: Execution/job ID (already has a RUNNING row).
+            config: ``CrewConfig`` with exactly one agent + one task.
+            group_context: Optional multi-tenant context (group + OBO token).
+            session: Unused; kept for signature parity with the crew path.
+
+        Returns:
+            ``{"execution_id", "status"[, "error"]}``.
+        """
+        from src.services.chat.service import LightAgentService
+
+        # The Chat path runs IN-PROCESS, in a server that serves many chats, so
+        # the engine is bound for the duration of this turn rather than pinned
+        # process-wide the way a spawned crew interpreter pins it.
+        async with dispatch_session(session) as db:
+            engine = await harness_for_execution(db, execution_id)
+
+        # The event bridge is installed INSIDE the bind, because which bridge to
+        # install is the active engine's answer — under Kasal it is a no-op, and
+        # under CrewAI it republishes that runtime's lifecycle events onto the
+        # Kasal bus so traces, the live chat stream and the log writer keep
+        # working unchanged. Scoped to this turn: the Chat path serves many
+        # turns in one process, and a handler outliving its run attaches traces
+        # to the wrong job.
+        with bind(engine):
+            with active_harness().event_bridge():
+                return await LightAgentService().run_light_agent_execution(
+                    execution_id, config, group_context, session
+                )

@@ -1,0 +1,71 @@
+// Define possible value types for RunResult
+type RunResultValue = string | number | boolean | null | Record<string, unknown>;
+
+export interface RunResult {
+  output?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: RunResultValue | undefined;
+}
+
+export interface Run {
+  id: string;
+  job_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  run_name: string;
+  agents_yaml: string;
+  tasks_yaml: string;
+  group_id?: string;
+  group_email?: string;
+  // Execution type for distinguishing crew vs flow
+  execution_type?: 'crew' | 'flow' | string;
+  /** Which agent runtime ran it — decided once at creation and stamped on the
+   *  row, so a finished run can say what ran it however the setting changes. */
+  harness?: string;
+  // Flow-specific fields
+  flow_id?: string;
+  /** Saved crew definition used by this execution. */
+  crew_id?: string;
+  /** Full inputs. Only on runs from the DETAIL endpoint, like `result`. */
+  inputs?: {
+    agents_yaml?: Record<string, any>;
+    tasks_yaml?: Record<string, any>;
+    inputs?: Record<string, any>;
+    model?: string;
+    execution_type?: string;
+    schema_detection_enabled?: boolean;
+    // Flow-specific input fields
+    flow_id?: string;
+    nodes?: any[];
+    edges?: any[];
+    flow_config?: Record<string, any>;
+    [key: string]: any;
+  };
+  /** Full result. Only on runs from the DETAIL endpoint: list rows omit it
+   *  (see `runService.withPayload`). */
+  result?: RunResult;
+  /** Start of the serialized result, carried by list rows instead of `result`. */
+  result_preview?: string;
+  /** Model the run was started with (a list-row scalar; `inputs.model` on detail). */
+  model?: string;
+  error?: string;
+  // MLflow integration fields
+  mlflow_trace_id?: string;
+  mlflow_experiment_name?: string;
+  mlflow_evaluation_run_id?: string;
+}
+
+export interface ExtendedRun extends Run {
+  currentTaskId?: string | null;
+  completedTaskIds?: string[];
+}
+
+export interface RunsResponse {
+  runs: Run[];
+  total: number;
+  limit: number;
+  offset: number;
+}

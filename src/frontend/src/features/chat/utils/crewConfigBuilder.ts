@@ -1,0 +1,700 @@
+import { buildFlowConfiguration } from '../../../utils/flowConfigBuilder';
+
+/**
+ * Converts plan/flow nodes + edges into the CrewConfig format
+ * expected by the Kasal backend POST /executions endpoint.
+ *
+ * This mirrors the logic in the main Kasal frontend's
+ * JobExecutionService.executeJob().
+ */
+
+interface NodeData {
+  [key: string]: unknown;
+}
+
+interface FlowNode {
+  id: string;
+  type: string;
+  data: NodeData;
+  position?: { x: number; y: number };
+}
+
+interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface CrewExecutionConfig {
+  agents_yaml: Record<string, Record<string, unknown>>;
+  tasks_yaml: Record<string, Record<string, unknown>>;
+  inputs: Record<string, unknown>;
+  reasoning: boolean;
+  model?: string;
+  execution_type: string;
+  schema_detection_enabled: boolean;
+  /**
+   * Stable chat-session id that scopes session-only memory recall. The backend
+   * keeps its own deterministic `crew_id` for tracing/identity; this is purely
+   * the memory partition for the conversation, stable across messages.
+   */
+  session_id?: string;
+  /** Memory READ scope: true = workspace-wide (default), false = this chat session only. */
+  memory_workspace_scope?: boolean;
+  /** Direct Chat execution; the backend applies its execution defaults. */
+  chat_mode_type?: string;
+  /**
+   * The saved crew this run was built from. The backend records it on the run,
+   * which is what completion rules and trigger chains match on. Absent for a
+   * generated (unsaved) crew.
+   */
+  crew_id?: string;
+  /**
+   * Sent with `crew_id`. A resume rebuilds a saved crew's run from the saved
+   * crew, which would drop what the chat applied to this run (memory off,
+   * Agent Bricks endpoints, the request added to the first task); a "chat"
+   * run resumes from its own stored definition instead.
+   */
+  trigger_type?: 'chat';
+}
+
+export interface FlowExecutionConfig {
+  agents_yaml: Record<string, Record<string, unknown>>;
+  tasks_yaml: Record<string, Record<string, unknown>>;
+  inputs: Record<string, unknown>;
+  reasoning: boolean;
+  model?: string;
+  execution_type: string;
+  schema_detection_enabled: boolean;
+  nodes: { id: string; type: string; position: { x: number; y: number }; data: NodeData }[];
+  edges: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
+  flow_id?: string;
+  flow_config?: Record<string, unknown>;
+  /**
+   * The conversation this run belongs to. The backend derives the flow's
+   * checkpoint lineage from it (with the flow id and group), so a second
+   * message in the same session continues the first run's state.
+   */
+  session_id?: string;
+  /** This turn's user line, when the flow holds a conversation. */
+  user_message?: string;
+}
+
+function normalizeTaskName(nodeId: string): string {
+  if (nodeId.startsWith('task-') || nodeId.startsWith('task_')) {
+    return nodeId.replace('task-', 'task_');
+  }
+  return `task_${nodeId}`;
+}
+
+function isAgentNode(node: FlowNode): boolean {
+  return node.type === 'agentNode' || node.type === 'agent';
+}
+
+function isTaskNode(node: FlowNode): boolean {
+  return node.type === 'taskNode' || node.type === 'task';
+}
+
+export function buildCrewConfig(plan: {
+  /** The saved crew's id, when the plan is one (catalog load, routed run). */
+  id?: string;
+  name?: string;
+  nodes: unknown[];
+  edges: unknown[];
+  process?: string;
+}, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true,
+   agentBricksEndpoints: string[] = []): CrewExecutionConfig {
+  const nodes = plan.nodes as FlowNode[];
+  const edges = plan.edges as FlowEdge[];
+
+  const agents_yaml: Record<string, Record<string, unknown>> = {};
+  const tasks_yaml: Record<string, Record<string, unknown>> = {};
+
+  // First pass: create agent and task configurations from nodes
+  nodes.forEach((node) => {
+    if (isAgentNode(node)) {
+      const d = node.data;
+      const agentName = `agent_${node.id}`;
+      const agentConfig: Record<string, unknown> = {
+        role: d.role || '',
+        goal: d.goal || '',
+        backstory: d.backstory || '',
+        tools: Array.isArray(d.tools) ? d.tools : [],
+      };
+
+      // Copy optional agent fields if present
+      const optionalFields = [
+        'llm', 'function_calling_llm', 'max_iter', 'max_rpm',
+        'max_execution_time', 'memory', 'verbose', 'allow_delegation',
+        'cache', 'system_template', 'prompt_template', 'response_template',
+        'allow_code_execution', 'code_execution_mode', 'max_retry_limit',
+        'use_system_prompt', 'respect_context_window', 'reasoning',
+        'max_reasoning_attempts', 'embedder_config', 'knowledge_sources',
+        'tool_configs', 'inject_date', 'date_format',
+        // Agent Skills. This list is a WHITELIST — a field missing from it is
+        // dropped silently, which for skills means an agent that shows them
+        // attached in the form and has none at run time.
+        'skills', 'execution_effort', 'reasoning_effort', 'thinking_effort', 'thinking_budget_tokens', 'max_tokens', 'temperature',
+      ];
+      optionalFields.forEach((field) => {
+        if (d[field] !== undefined && d[field] !== null) {
+          agentConfig[field] = d[field];
+        }
+      });
+
+      // "No memory" mode (chat toggle) overrides the loaded crew's saved memory:
+      // force every agent without memory so the backend disables crew memory.
+      if (!memoryEnabled) {
+        agentConfig.memory = false;
+      }
+
+      agents_yaml[agentName] = agentConfig;
+    } else if (isTaskNode(node)) {
+      const d = node.data;
+      const taskName = normalizeTaskName(node.id);
+      tasks_yaml[taskName] = {
+        id: node.id.startsWith('task-') ? node.id.substring(5) : node.id,
+        description: d.description || '',
+        expected_output: d.expected_output || '',
+        tools: Array.isArray(d.tools) ? d.tools : [],
+        context: [],
+        agent: null,
+        async_execution: Boolean(d.async_execution),
+        output_file: d.config
+          ? (d.config as Record<string, unknown>).output_file || `output/${node.id}.md`
+          : `output/${node.id}.md`,
+      };
+
+      // Copy optional task fields
+      if (d.tool_configs) tasks_yaml[taskName].tool_configs = d.tool_configs;
+      if ((d as Record<string, unknown>).config) {
+        const cfg = (d as Record<string, unknown>).config as Record<string, unknown>;
+        if (cfg.output_json) tasks_yaml[taskName].output_json = String(cfg.output_json);
+        if (cfg.output_pydantic) tasks_yaml[taskName].output_pydantic = String(cfg.output_pydantic);
+        if (cfg.human_input !== undefined) tasks_yaml[taskName].human_input = Boolean(cfg.human_input);
+        if (cfg.guardrail) {
+          try {
+            tasks_yaml[taskName].guardrail = JSON.parse(String(cfg.guardrail));
+          } catch { /* ignore */ }
+        }
+        if (cfg.llm_guardrail) {
+          tasks_yaml[taskName].guardrail = JSON.stringify(cfg.llm_guardrail);
+        }
+      }
+    }
+  });
+
+  // Second pass: edges -> connect agents to tasks and set task dependencies
+  edges.forEach((edge) => {
+    const sourceNode = nodes.find((n) => n.id === edge.source);
+    const targetNode = nodes.find((n) => n.id === edge.target);
+
+    if (sourceNode && isAgentNode(sourceNode) && targetNode && isTaskNode(targetNode)) {
+      const agentName = `agent_${edge.source}`;
+      const taskName = normalizeTaskName(edge.target);
+      // A task-typed target always has an entry created in the first pass.
+      tasks_yaml[taskName].agent = agentName;
+    } else if (sourceNode && isTaskNode(sourceNode) && targetNode && isTaskNode(targetNode)) {
+      const depTaskName = normalizeTaskName(edge.source);
+      const targetTaskName = normalizeTaskName(edge.target);
+      // A task-typed target always has an entry created in the first pass.
+      (tasks_yaml[targetTaskName].context as string[]).push(depTaskName);
+    }
+  });
+
+  // Third pass: handle agent_id on task nodes for missing connections
+  nodes.forEach((node) => {
+    if (isTaskNode(node) && node.data.agent_id) {
+      const taskName = normalizeTaskName(node.id);
+      if (tasks_yaml[taskName] && !tasks_yaml[taskName].agent) {
+        const agentNode = nodes.find(
+          (n) =>
+            isAgentNode(n) &&
+            (n.data.id === node.data.agent_id || n.id === node.data.agent_id)
+        );
+        if (agentNode) {
+          tasks_yaml[taskName].agent = `agent_${agentNode.id}`;
+        }
+      }
+    }
+  });
+
+  // Agent Bricks endpoints picked in the chat "+" menu: equip + CONFIGURE the
+  // AgentBricksTool (catalog id 71) on every agent and task of this loaded/saved
+  // crew. Without this the saved crew may carry the tool but not the endpoint,
+  // so it fails at runtime with "AgentBricks endpoint name is not configured".
+  // When NO endpoint is picked, do the opposite: STRIP any AgentBricksTool the
+  // saved crew/LLM carries, since an unconfigured AgentBricksTool aborts the run.
+  {
+    const ABT = '71'; // AgentBricksTool seed id
+    const isABT = (t: unknown) => String(t) === ABT || String(t) === 'AgentBricksTool';
+    if (agentBricksEndpoints.length > 0) {
+      const config = { endpointName: agentBricksEndpoints };
+      const equip = (entry: Record<string, unknown>) => {
+        const tools = Array.isArray(entry.tools) ? (entry.tools as string[]) : [];
+        if (!tools.includes(ABT)) entry.tools = [...tools, ABT];
+        entry.tool_configs = {
+          ...(entry.tool_configs as Record<string, unknown> | undefined),
+          AgentBricksTool: config,
+        };
+      };
+      Object.values(agents_yaml).forEach(equip);
+      Object.values(tasks_yaml).forEach(equip);
+    } else {
+      const strip = (entry: Record<string, unknown>) => {
+        if (Array.isArray(entry.tools)) {
+          entry.tools = (entry.tools as unknown[]).filter((t) => !isABT(t));
+        }
+      };
+      Object.values(agents_yaml).forEach(strip);
+      Object.values(tasks_yaml).forEach(strip);
+    }
+  }
+
+  attachReferencedAnswer(tasks_yaml, inputs);
+  attachConversation(tasks_yaml, inputs);
+  attachUnreferencedInputs(tasks_yaml, inputs);
+
+  return {
+    agents_yaml,
+    tasks_yaml,
+    inputs: inputs || {},
+    reasoning: false,
+    model: model || undefined,
+    execution_type: 'crew',
+    schema_detection_enabled: true,
+    ...(plan.id ? { crew_id: plan.id, trigger_type: 'chat' as const } : {}),
+  };
+}
+
+/**
+ * Give the crew the earlier answer this run works FROM.
+ *
+ * "Turn this into a deck" names something — the summary already on screen — and
+ * a crew that starts from nothing will go and re-derive it. On a workspace whose
+ * memory pool is dominated by one topic, what it re-derives is that topic, which
+ * is how a request about one subject comes back about another.
+ *
+ * Its own labelled block rather than a line in the inputs list: this is a
+ * document, not a variable, and it reads as source material only if it is
+ * presented as source material.
+ */
+function attachReferencedAnswer(
+  tasks_yaml: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+): void {
+  const referenced = String(inputs?.referenced_answer ?? '').trim();
+  if (!referenced) return;
+  const taskKeys = Object.keys(tasks_yaml);
+  if (taskKeys.length === 0) return;
+
+  // The FIRST task: it is where the run enters, and later tasks receive its
+  // output as context.
+  const first = tasks_yaml[taskKeys[0]];
+  first.description =
+    `${String(first.description ?? '').trim()}\n\n` +
+    `Work from the following, which the user is referring to. It is the ` +
+    `material for this run — do not go and gather it again:\n\n${referenced}`;
+}
+
+/**
+ * A crew that holds a conversation is SHOWN the conversation.
+ *
+ * A flow carries its own state from turn to turn; a crew has none — every turn
+ * is a fresh run. So the router hands a conversational crew the recent
+ * transcript (the same window it just read itself) in `inputs.conversation`,
+ * and this puts it in front of the first task as context: what was asked and
+ * answered before, so "now do the same for Germany" means something. Context,
+ * not the request — the request is the task's own USER REQUEST block.
+ */
+function attachConversation(
+  tasks_yaml: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+): void {
+  const conversation = String(inputs?.conversation ?? '').trim();
+  if (!conversation) return;
+  const taskKeys = Object.keys(tasks_yaml);
+  if (taskKeys.length === 0) return;
+  const first = tasks_yaml[taskKeys[0]];
+  first.description =
+    `${String(first.description ?? '').trim()}\n\n` +
+    `This run continues a conversation. The recent turns, oldest first — the ` +
+    `current request refers to them, so read it in their light and do not ` +
+    `redo work they already contain:\n\n${conversation}`;
+}
+
+/**
+ * Input keys that are run machinery, not values the crew author declared.
+ *
+ * They ride in `inputs` because that is the channel the backend reads, but they
+ * are not things the user typed and must never be echoed back into a task
+ * description as "Inputs for this run" — `user_request` in particular is already
+ * the prompt the run exists to answer.
+ */
+const MACHINERY_INPUTS = new Set([
+  'user_request',
+  'prompt',
+  'run_name',
+  // Handed to the crew by attachReferencedAnswer, as a labelled block rather
+  // than a one-line "input" — it is a document, often thousands of characters.
+  'referenced_answer',
+  // Likewise attachConversation: the recent transcript for a crew that holds a
+  // conversation.
+  'conversation',
+]);
+
+/**
+ * Make an input the crew never mentions reach the run anyway.
+ *
+ * Interpolation only replaces `{placeholders}` that are actually written into an
+ * agent's or task's text. So a capability published with a declared `topic`,
+ * whose tasks say only "collect current news", takes the value the user gave,
+ * substitutes it nowhere, and answers about whatever its memory last saw. The
+ * user supplied a value and it changed nothing — the invisible failure this
+ * whole feature is built to avoid.
+ *
+ * Rather than rewrite the saved crew — which would make `{topic}` leak literally
+ * into every canvas, MCP and scheduled run that does not supply one — the values
+ * are appended to the FIRST task's description for THIS RUN ONLY. The first
+ * task is where the run enters, and later tasks receive it as context.
+ *
+ * Only inputs with no placeholder anywhere are appended: one that IS referenced
+ * is already in the text, and repeating it reads as emphasis the author did not
+ * write.
+ */
+function attachUnreferencedInputs(
+  tasks_yaml: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+): void {
+  const entries = Object.entries(inputs || {}).filter(
+    ([name, value]) =>
+      !MACHINERY_INPUTS.has(name) && String(value ?? '').trim().length > 0,
+  );
+  if (entries.length === 0) return;
+
+  const taskKeys = Object.keys(tasks_yaml);
+  if (taskKeys.length === 0) return;
+
+  const allText = JSON.stringify(tasks_yaml);
+  const unreferenced = entries.filter(([name]) => !allText.includes(`{${name}}`));
+  if (unreferenced.length === 0) return;
+
+  const first = tasks_yaml[taskKeys[0]];
+  const lines = unreferenced.map(([name, value]) => `- ${name}: ${value}`).join('\n');
+  first.description =
+    `${String(first.description ?? '').trim()}\n\n` +
+    `Inputs for this run — use them, and prefer them over anything recalled ` +
+    `from memory:\n${lines}`;
+}
+
+/**
+ * Builds a CrewExecutionConfig directly from generated agent/task arrays
+ * (as returned by the generation_complete SSE event), without needing
+ * ReactFlow nodes/edges.
+ */
+export function buildCrewConfigFromGenerated(
+  agents: Record<string, unknown>[],
+  tasks: Record<string, unknown>[],
+  model?: string,
+  toolConfigs?: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+  toolNameMap: Record<string, string> = {},
+  sessionId?: string | null,
+  workspaceMemory: boolean = true,
+  memoryEnabled: boolean = true,
+  mcpServers: string[] = [],
+  userRequest?: string,
+  agentBricksEndpoints: string[] = [],
+  reasoning: boolean = false,
+  chatModeType?: string,
+): CrewExecutionConfig {
+  const agents_yaml: Record<string, Record<string, unknown>> = {};
+  const tasks_yaml: Record<string, Record<string, unknown>> = {};
+
+  // Agent Bricks endpoints picked in the chat "+" menu equip the regular
+  // AgentBricksTool (catalog tool, seed id 71) configured for those endpoints.
+  // Unlike MCP_SERVERS (a special backend key), AgentBricksTool must appear in
+  // the agent/task `tools` list by ID, so resolve its id from the name map
+  // (falling back to the stable seed id).
+  const hasAgentBricks = agentBricksEndpoints.length > 0;
+  const agentBricksToolId =
+    Object.keys(toolNameMap).find((id) => toolNameMap[id] === 'AgentBricksTool') || '71';
+  const isAgentBricksTool = (t: string): boolean =>
+    String(t) === agentBricksToolId ||
+    String(t) === 'AgentBricksTool' ||
+    toolNameMap[String(t)] === 'AgentBricksTool';
+  // When the user picks an endpoint in the "+" menu, ensure the AgentBricksTool is
+  // equipped (and configured below). When the user did NOT pick one, STRIP any
+  // AgentBricksTool the generator/LLM added on its own: an unconfigured
+  // AgentBricksTool fails the whole run with "AgentBricks endpoint name is not
+  // configured", so it must never reach the crew without a selected endpoint.
+  const withAgentBricksTool = (toolIds: string[]): string[] => {
+    if (hasAgentBricks) {
+      return toolIds.includes(agentBricksToolId) ? toolIds : [...toolIds, agentBricksToolId];
+    }
+    return toolIds.filter((t) => !isAgentBricksTool(t));
+  };
+
+  // toolConfigs are keyed by canonical tool NAME (e.g. "GenieTool"), but a
+  // generated agent/task references tools by ID. Resolve each tool entry through
+  // toolNameMap so the override attaches under the name the backend looks up
+  // (task_tool_configs.get(tool_name)). Without this, a Genie space picked in
+  // the chat never reaches the tool ("Genie space ID is not configured").
+  const applicableToolConfigs = (
+    tools: string[],
+  ): Record<string, Record<string, unknown>> => {
+    const applicable: Record<string, Record<string, unknown>> = {};
+    if (!toolConfigs) return applicable;
+    tools.forEach((t) => {
+      // toolConfigs is keyed by canonical tool name; the agent/task may list the
+      // tool by id, so resolve through toolNameMap before matching.
+      const name = toolNameMap[String(t)] || String(t);
+      if (toolConfigs[name]) applicable[name] = toolConfigs[name];
+    });
+    return applicable;
+  };
+
+  // Build agent configs keyed by agent_<id>
+  const agentIdToKey: Record<string, string> = {};
+  agents.forEach((agent) => {
+    const id = String(agent.id || '');
+    const key = `agent_${id}`;
+    agentIdToKey[id] = key;
+
+    const baseAgentTools: string[] = Array.isArray(agent.tools) ? agent.tools as string[] : [];
+    const agentTools = withAgentBricksTool(baseAgentTools);
+    const agentConfig: Record<string, unknown> = {
+      role: agent.role || '',
+      goal: agent.goal || '',
+      backstory: agent.backstory || '',
+      tools: agentTools,
+    };
+
+    // Inject tool_configs for tools that have overrides (e.g. GenieTool spaceId)
+    const agentApplicable = applicableToolConfigs(agentTools);
+    // MCP servers picked in the chat's "+" menu: every agent gets the
+    // selection via tool_configs.MCP_SERVERS — the backend MCP integration
+    // resolves these names against the registered (enabled) servers and
+    // equips the agent with their tools.
+    if (mcpServers.length > 0) {
+      agentApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
+    // Agent Bricks endpoints: configure the AgentBricksTool with the picked
+    // serving endpoint(s). The tool uses the first when given a list.
+    if (hasAgentBricks) {
+      agentApplicable.AgentBricksTool = { endpointName: agentBricksEndpoints };
+    }
+    if (Object.keys(agentApplicable).length > 0) {
+      agentConfig.tool_configs = agentApplicable;
+    }
+
+    const optionalFields = [
+      'llm', 'function_calling_llm', 'max_iter', 'max_rpm',
+      'max_execution_time', 'memory', 'verbose', 'allow_delegation',
+      'cache', 'system_template', 'prompt_template', 'response_template',
+      'allow_code_execution', 'code_execution_mode', 'max_retry_limit',
+      'use_system_prompt', 'respect_context_window',
+    ];
+    optionalFields.forEach((field) => {
+      if (agent[field] !== undefined && agent[field] !== null) {
+        agentConfig[field] = agent[field];
+      }
+    });
+
+    // "No memory" mode: force every agent to be created without memory. The
+    // backend's determine_crew_memory() disables crew memory entirely when ALL
+    // agents have memory:false, so nothing is recalled or persisted.
+    if (!memoryEnabled) {
+      agentConfig.memory = false;
+    }
+
+    agents_yaml[key] = agentConfig;
+  });
+
+  // Build task configs
+  tasks.forEach((task) => {
+    const id = String(task.id || '');
+    const key = `task_${id}`;
+
+    const agentId = String(task.agent_id || task.agent || '');
+    const agentKey = agentIdToKey[agentId] || null;
+
+    // Resolve context (task dependencies)
+    let context: string[] = [];
+    if (Array.isArray(task.context)) {
+      context = task.context.map((dep: unknown) => {
+        if (typeof dep === 'string') return `task_${dep}`;
+        if (typeof dep === 'object' && dep !== null && 'id' in dep) return `task_${(dep as Record<string, unknown>).id}`;
+        return '';
+      }).filter(Boolean);
+    }
+
+    const taskTools: string[] = withAgentBricksTool(
+      Array.isArray(task.tools) ? task.tools as string[] : [],
+    );
+    // Generated task descriptions are often generic mission statements
+    // ("process diverse user inquiries…"). Ground the run with the chat prompt
+    // that asked for it and the attached MCP data sources — without these,
+    // agents have no concrete question and never query tools (e.g. Genie).
+    const baseDescription = String(task.description || '');
+    const groundingParts: string[] = [];
+    if (userRequest) {
+      groundingParts.push(`USER REQUEST — this run exists to answer it:\n${userRequest}`);
+    }
+    if (mcpServers.length > 0) {
+      groundingParts.push(
+        `MCP data sources attached — query them for data questions: ${mcpServers.join(', ')}`,
+      );
+    }
+    if (hasAgentBricks) {
+      // The user picked a Databricks Agent Bricks agent for this run: instruct the
+      // task's agent to delegate the work to it via the AgentBricksTool (configured
+      // above with the endpoint) and return its answer, rather than solving alone.
+      groundingParts.push(
+        `An Agent Bricks agent is assigned to this task — use the AgentBricksTool to ` +
+        `delegate the request to it and base your answer on its response: ${agentBricksEndpoints.join(', ')}`,
+      );
+    }
+    const description = groundingParts.length > 0
+      ? `${baseDescription}\n\n${groundingParts.join('\n\n')}`
+      : baseDescription;
+    const taskEntry: Record<string, unknown> = {
+      id,
+      description,
+      expected_output: task.expected_output || '',
+      tools: taskTools,
+      context,
+      agent: agentKey,
+      async_execution: Boolean(task.async_execution),
+      output_file: (task.output_file as string) || `output/${id}.md`,
+    };
+
+    // The generator writes an llm_guardrail for EVERY task (the prompt template
+    // requires one, aligned with expected_output) and this builder used to drop
+    // it, so every research/deep run executed ungated against a criterion that
+    // had already been written for it. The backend reads it straight off the
+    // task entry; carrying it is the whole fix.
+    if (task.llm_guardrail) {
+      taskEntry.llm_guardrail = task.llm_guardrail;
+    }
+
+    // Inject tool_configs for tasks that have matching tools
+    const taskApplicable = applicableToolConfigs(taskTools);
+    // TASKS need the MCP selection too: CrewAI replaces the agent's tools with
+    // the task's own tools whenever a task lists any (generated tasks usually
+    // do), which would mask the agent-level MCP tools entirely — the run would
+    // never see them. create_task() merges tool_configs.MCP_SERVERS into the
+    // task's tools, keeping the MCP tools visible alongside the task's own.
+    if (mcpServers.length > 0) {
+      taskApplicable.MCP_SERVERS = { servers: mcpServers };
+    }
+    if (hasAgentBricks) {
+      taskApplicable.AgentBricksTool = { endpointName: agentBricksEndpoints };
+    }
+    if (Object.keys(taskApplicable).length > 0) {
+      taskEntry.tool_configs = taskApplicable;
+    }
+
+    tasks_yaml[key] = taskEntry;
+  });
+
+  return {
+    agents_yaml,
+    tasks_yaml,
+    inputs: inputs || {},
+    reasoning,
+    model: model || undefined,
+    execution_type: 'crew',
+    schema_detection_enabled: true,
+    chat_mode_type: chatModeType,
+    // Memory scoping for chat. The backend generates its own deterministic
+    // crew_id for tracing; we pass the chat session id purely as the memory
+    // partition. The READ scope is controlled by `memory_workspace_scope`:
+    //   - true (default): backend recalls workspace-wide (group_id) — all context;
+    //   - false: backend recalls only this chat session (session_id).
+    session_id: sessionId || undefined,
+    memory_workspace_scope: workspaceMemory,
+  };
+}
+
+export function buildFlowConfig(flow: {
+  id?: string;
+  name?: string;
+  nodes: unknown[];
+  edges: unknown[];
+  flow_config?: Record<string, unknown>;
+}, model?: string, inputs?: Record<string, string>,
+   /** The conversation this run belongs to. The backend derives the flow's
+    *  checkpoint lineage from it, so a second message continues the first. */
+   sessionId?: string | null,
+   /** This turn's user line, for a conversational flow. */
+   userMessage?: string): FlowExecutionConfig {
+  const nodes = flow.nodes as FlowNode[];
+  const edges = flow.edges as FlowEdge[];
+
+  const mappedNodes = nodes.map((node) => ({
+    id: node.id,
+    type: node.type || 'unknown',
+    position: node.position || { x: 0, y: 0 },
+    data: node.data || {},
+  }));
+
+  const mappedEdges = edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    sourceHandle: edge.sourceHandle || undefined,
+    targetHandle: edge.targetHandle || undefined,
+    data: edge.data || {},
+  }));
+
+  return {
+    agents_yaml: {},
+    tasks_yaml: {},
+    // Hardcoded `{}` until now, which is why a flow could not be given a value
+    // by anything: the field existed, travelled the whole way, and was always
+    // empty. It is the first of five drops in series — see the backend's
+    // _kickoff_inputs and _merge_inputs for the rest.
+    inputs: inputs || {},
+    reasoning: false,
+    model: model || undefined,
+    execution_type: 'flow',
+    schema_detection_enabled: true,
+    nodes: mappedNodes,
+    edges: mappedEdges,
+    flow_id: flow.id,
+    session_id: sessionId || undefined,
+    user_message: userMessage || undefined,
+    // REBUILT from the flow's nodes and edges, not passed through as saved.
+    //
+    // The backend wires a flow from flow_config.listeners / routers /
+    // startingPoints. A SAVED config is only as current as the last save, so a
+    // flow whose router condition was added after it was last saved reached the
+    // backend with no routers at all — and only its starting crew ran. The Flow
+    // Builder never had this problem because it rebuilds (JobExecutionService
+    // → buildFlowConfiguration); running the same flow from chat quietly did
+    // something different, which is the kind of divergence nobody debugs.
+    //
+    // Same builder, so the two paths cannot drift again. Anything the saved
+    // config carries that the builder does not produce is preserved underneath.
+    flow_config: {
+      ...(flow.flow_config || {}),
+      ...buildFlowConfiguration(
+        nodes as unknown as Parameters<typeof buildFlowConfiguration>[0],
+        edges as unknown as Parameters<typeof buildFlowConfiguration>[1],
+        flow.name || 'Flow',
+        // The declared half of the state block. Channel NAMES are rederived
+        // from the canvas, but reducers and `conversational` are the author's
+        // and cannot be inferred — without this, rebuilding would drop them and
+        // a conversational flow would forget every turn but its newest.
+        (flow.flow_config as { state?: Parameters<typeof buildFlowConfiguration>[3] })
+          ?.state,
+      ),
+      nodes: mappedNodes,
+      edges: mappedEdges,
+    },
+  };
+}

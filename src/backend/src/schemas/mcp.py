@@ -1,0 +1,213 @@
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _validate_mcp_server_url(value: Optional[str]) -> Optional[str]:
+    """
+    Structural validation for an MCP server URL. Rejects non-http(s) schemes
+    (e.g. file://, gopher://) and URLs with no host. Note: this does NOT decide
+    whether Databricks credentials may be sent there — that is enforced at
+    request time in mcp_integration (see host_guard.assert_mcp_credential_host).
+    """
+    if value is None:
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise ValueError("server_url must be a valid http(s) URL with a host")
+    return value
+
+
+class MCPServerBase(BaseModel):
+    """Base MCP Server schema with common attributes"""
+
+    name: str = Field(..., description="Name of the MCP server")
+    server_url: str = Field(..., description="URL of the MCP server")
+
+    @field_validator("server_url")
+    @classmethod
+    def _check_server_url(cls, v: str) -> str:
+        _validate_mcp_server_url(v)
+        return v
+
+    server_type: str = Field(
+        default="sse", description="Type of MCP server (sse or streamable)"
+    )
+    auth_type: str = Field(
+        default="api_key", description="Authentication type (api_key or databricks_spn)"
+    )
+    enabled: bool = Field(default=False, description="Whether the server is enabled")
+    global_enabled: bool = Field(
+        default=False,
+        description="Whether the server is enabled globally for all agents/tasks",
+    )
+    timeout_seconds: int = Field(
+        default=30, description="Timeout in seconds for server requests"
+    )
+    max_retries: int = Field(default=3, description="Maximum number of retry attempts")
+    model_mapping_enabled: bool = Field(
+        default=False, description="Enable model name mapping"
+    )
+    rate_limit: int = Field(default=60, description="Maximum requests per minute")
+    additional_config: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional configuration parameters"
+    )
+
+
+class MCPServerCreate(MCPServerBase):
+    """Schema for creating a new MCP server"""
+
+    api_key: str = Field(
+        default="",
+        description="API key for authentication (will be encrypted). Not required for databricks_spn auth.",
+    )
+
+
+class MCPServerUpdate(BaseModel):
+    """Schema for updating an existing MCP server"""
+
+    name: Optional[str] = Field(default=None, description="Name of the MCP server")
+    server_url: Optional[str] = Field(default=None, description="URL of the MCP server")
+
+    @field_validator("server_url")
+    @classmethod
+    def _check_server_url(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_mcp_server_url(v)
+
+    api_key: Optional[str] = Field(
+        default=None, description="API key for authentication (will be encrypted)"
+    )
+    server_type: Optional[str] = Field(
+        default=None, description="Type of MCP server (sse or streamable)"
+    )
+    auth_type: Optional[str] = Field(
+        default=None, description="Authentication type (api_key or databricks_spn)"
+    )
+    enabled: Optional[bool] = Field(
+        default=None, description="Whether the server is enabled"
+    )
+    global_enabled: Optional[bool] = Field(
+        default=None,
+        description="Whether the server is enabled globally for all agents/tasks",
+    )
+    timeout_seconds: Optional[int] = Field(
+        default=None, description="Timeout in seconds for server requests"
+    )
+    max_retries: Optional[int] = Field(
+        default=None, description="Maximum number of retry attempts"
+    )
+    model_mapping_enabled: Optional[bool] = Field(
+        default=None, description="Enable model name mapping"
+    )
+    rate_limit: Optional[int] = Field(
+        default=None, description="Maximum requests per minute"
+    )
+    additional_config: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional configuration parameters"
+    )
+
+
+class MCPServerResponse(MCPServerBase):
+    """Schema for MCP server responses"""
+
+    id: int = Field(..., description="Unique identifier for the MCP server")
+    # Keys are WRITE-ONLY at the API: stored encrypted, decrypted only for the
+    # run that connects. The detail endpoint used to return the plaintext, to
+    # any authenticated caller, for any row by numeric id (audit F02).
+    api_key: str = Field("", description="Always empty in API responses")
+    has_api_key: bool = Field(
+        False, description="Whether a key is stored; leave api_key blank to keep it"
+    )
+    group_id: Optional[str] = Field(
+        default=None,
+        description="Workspace/group identifier if this is a workspace override",
+    )
+    created_at: datetime = Field(
+        ..., description="Timestamp when the server was created"
+    )
+    updated_at: datetime = Field(
+        ..., description="Timestamp when the server was last updated"
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MCPServerListResponse(BaseModel):
+    """Schema for list of MCP servers response"""
+
+    servers: List[MCPServerResponse] = Field(..., description="List of MCP servers")
+    count: int = Field(..., description="Total number of MCP servers")
+
+
+class MCPToggleResponse(BaseModel):
+    """Schema for toggle enabled response"""
+
+    message: str = Field(..., description="Success message")
+    enabled: bool = Field(..., description="Current enabled state")
+
+
+class MCPTestConnectionRequest(BaseModel):
+    """Schema for testing MCP server connection"""
+
+    server_url: str = Field(..., description="URL of the MCP server")
+    api_key: str = Field(..., description="API key for authentication")
+    server_type: str = Field(
+        default="sse", description="Type of MCP server (sse or streamable)"
+    )
+    auth_type: str = Field(
+        default="api_key", description="Authentication type (api_key or databricks_spn)"
+    )
+    timeout_seconds: int = Field(default=30, description="Timeout in seconds")
+
+
+class MCPTestConnectionResponse(BaseModel):
+    """Schema for MCP server connection test response"""
+
+    success: bool = Field(..., description="Whether the connection test was successful")
+    message: str = Field(..., description="Details about the connection test")
+
+
+class MCPSettingsBase(BaseModel):
+    """Base MCP Settings schema"""
+
+    global_enabled: bool = Field(
+        default=False, description="Master switch for all MCP functionality"
+    )
+    individual_enabled: bool = Field(
+        default=True, description="Allow agent/task-specific MCP selection"
+    )
+
+
+class MCPSettingsUpdate(MCPSettingsBase):
+    """Schema for updating MCP settings"""
+
+    pass
+
+
+class MCPSettingsResponse(MCPSettingsBase):
+    """Schema for MCP settings response"""
+
+    id: int = Field(..., description="Unique identifier for the settings")
+    created_at: datetime = Field(
+        ..., description="Timestamp when the settings were created"
+    )
+    updated_at: datetime = Field(
+        ..., description="Timestamp when the settings were last updated"
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ToolCallRequest(BaseModel):
+    name: str = Field(..., description="The tool to invoke.")
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    stream: bool = Field(
+        default=False,
+        description=(
+            "Stream progress as NDJSON instead of returning one result. The "
+            "response is a chunked application/x-ndjson body, one JSON object "
+            "per line, ending with the terminal frame."
+        ),
+    )

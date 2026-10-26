@@ -1,0 +1,350 @@
+import apiClient from '../../shared/api/client';
+
+/*
+ * Prompt optimization (GEPA via managed MLflow). A run mines training
+ * examples from the LLM interaction log (or takes them inline), searches
+ * for a better seeded template, and proposes it for explicit
+ * review-and-apply as a group-scoped template override.
+ */
+
+export interface PromptOptimizationStart {
+  run_id: string;
+  status: string;
+  dataset_size: number;
+  /** Selected judges left out of the run, with why ("Correctness skipped: not labelled"). */
+  skipped_judges?: string[];
+}
+
+export interface PromptOptimizationRun {
+  run_id: string;
+  template_name: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  dataset_size: number;
+  model?: string | null;
+  /** Model that graded correctness. Equal to `model` means the run judged
+   *  itself (self-preference) — its score gain is not independently verified. */
+  judge_model?: string | null;
+  reflection_model?: string | null;
+  initial_score?: number | null;
+  final_score?: number | null;
+  baseline_template?: string | null;
+  optimized_template?: string | null;
+  error?: string | null;
+  applied: boolean;
+  applied_at?: string | null;
+  applied_by?: string | null;
+  /** True while the before-image taken at apply time is still on the run, i.e.
+   *  the apply can still be undone. */
+  revertible?: boolean;
+  created_at?: string | null;
+  kind?: 'template' | 'crew' | null;
+  crew_id?: string | null;
+  baseline_fields?: Record<string, string> | null;
+  optimized_fields?: Record<string, string> | null;
+  executions_used?: number | null;
+  execution_cap?: number | null;
+  /** Crew runs: human grades/expectations harvested into this run's judge + reflection. */
+  human_feedback_count?: number | null;
+  /** Crew runs: distinct candidate prompt sets actually executed. */
+  candidates_tried?: number | null;
+}
+
+export interface LLMJudge {
+  /** Display name (crew prefix stripped). */
+  name: string;
+  /** Registry name (crew-scoped judges carry a crew prefix). */
+  full_name?: string;
+  /** Crew id prefix when the judge is assigned to a crew; null = shared library. */
+  crew_id?: string | null;
+  model?: string | null;
+  instructions?: string;
+  /** Where the judge lives in the MLflow UI (prompt page locally, the
+   *  experiment's Prompts tab on Databricks); null when no UI is reachable. */
+  url?: string | null;
+}
+
+/** Where the workspace's judges live (MLflow prompt registry), or why none resolves. */
+export interface JudgeRegistryInfo {
+  kind: 'local' | 'databricks' | null;
+  /** "Unity Catalog <catalog.schema>" on Databricks, the server URL locally. */
+  location: string | null;
+  /** The registry's Prompts page in the MLflow UI. */
+  url?: string | null;
+  /** Set when no registry resolves — shown to the user in place of the judges. */
+  message?: string | null;
+}
+
+/** What aligning a judge to its human grades (MemAlign) distilled. */
+export interface JudgeAlignment {
+  /** Display name (crew prefix stripped). */
+  name: string;
+  /** Registry name of the newly registered judge version. */
+  full_name: string;
+  /** Graded evaluation answers the alignment learned from. */
+  traces_used: number;
+  /** Plain-language guidelines now folded into the judge's instructions. */
+  guidelines: string[];
+}
+
+/** An MLflow built-in judge a crew optimization run can select. */
+export interface BuiltinJudge {
+  /** The mlflow.genai.scorers class name — what the request carries. */
+  id: string;
+  label: string;
+  description: string;
+  /** gate: a "no" zeroes the judge score; graded: the verdict joins the mean. */
+  role: 'gate' | 'graded';
+  weight: number;
+  /** Needs labels: selectable only once one of `label_fields` is present. */
+  needs_labels: boolean;
+  /** Expectation fields it reads (expected_facts, expected_response, guidelines). */
+  label_fields?: string[];
+  /** Whether the server's MLflow provides this judge. */
+  available: boolean;
+}
+
+export interface CrewEval {
+  trace_id: string;
+  timestamp_ms?: number | null;
+  deliverable: string;
+  assessment_count: number;
+}
+
+/** A crew's labels: what its deliverable must contain. */
+export interface CrewLabels {
+  expected_facts: string[];
+  expected_response: string;
+}
+
+/** A crew's confirmed labels, plus review notes offered as suggestions. */
+export interface CrewLabelsInfo {
+  labels: CrewLabels | null;
+  /** Never used as labels until the user accepts or edits one. */
+  suggestions: string[];
+  /** Review notes exist for Expectations guidelines to check against. */
+  has_review_notes: boolean;
+}
+
+export interface CrewOptimizationRequest {
+  crew_id: string;
+  model?: string;
+  judge_model?: string;
+  reflection_model?: string;
+  guidance?: string;
+  max_metric_calls?: number;
+  execution_timeout_seconds?: number;
+  /** MLflow built-in judges (catalog ids) to grade with, on demand. */
+  builtin_judges?: string[];
+  /** The labels the user confirmed (saved for the crew when changed). */
+  labels?: CrewLabels;
+}
+
+export interface StartOptimizationRequest {
+  template_name: string;
+  model?: string;
+  judge_model?: string;
+  reflection_model?: string;
+  examples?: string[];
+  lookback_days?: number;
+  max_examples?: number;
+  max_metric_calls?: number;
+}
+
+export class PromptOptimizationService {
+  static async startOptimization(
+    request: StartOptimizationRequest,
+  ): Promise<PromptOptimizationStart> {
+    const response = await apiClient.post<PromptOptimizationStart>(
+      '/prompt-optimization/optimize',
+      request,
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  /** GEPA over a saved crew — every evaluation EXECUTES the crew for real. */
+  static async startCrewOptimization(
+    request: CrewOptimizationRequest,
+  ): Promise<PromptOptimizationStart> {
+    const response = await apiClient.post<PromptOptimizationStart>(
+      '/prompt-optimization/optimize-crew',
+      request,
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  static async listRuns(): Promise<PromptOptimizationRun[]> {
+    const response = await apiClient.get<{ runs: PromptOptimizationRun[] }>(
+      '/prompt-optimization/runs',
+    );
+    return response.data?.runs || [];
+  }
+
+  static async getRun(runId: string): Promise<PromptOptimizationRun> {
+    const response = await apiClient.get<PromptOptimizationRun>(
+      `/prompt-optimization/runs/${runId}`,
+    );
+    return response.data;
+  }
+
+  /** The crew's confirmed labels and the suggested ones (this workspace only). */
+  static async getCrewLabels(crewId: string): Promise<CrewLabelsInfo> {
+    const response = await apiClient.get<CrewLabelsInfo>(
+      `/prompt-optimization/crew-labels/${crewId}`,
+    );
+    return response.data;
+  }
+
+  /** Optimization-evaluation answers for a crew (local MLflow traces). */
+  static async listCrewEvals(crewId: string): Promise<CrewEval[]> {
+    const response = await apiClient.get<{ evals: CrewEval[] }>(
+      `/prompt-optimization/crew-evals/${crewId}`,
+    );
+    return response.data?.evals || [];
+  }
+
+  /** Grade an evaluation answer (Feedback) and/or state what it SHOULD have
+   *  contained (Expectation) — both stored as MLflow assessments. With
+   *  `judge` (registry name) the grade is also stored in that judge's name,
+   *  which is what lets the judge be aligned to it later. */
+  static async addEvalFeedback(
+    traceId: string,
+    value?: number,
+    comment?: string,
+    expectation?: string,
+    judge?: string,
+  ): Promise<boolean> {
+    const response = await apiClient.post<{ ok: boolean }>(
+      `/prompt-optimization/crew-evals/${traceId}/feedback`,
+      {
+        value: value ?? undefined,
+        comment: comment || undefined,
+        expectation: expectation || undefined,
+        judge: judge || undefined,
+      },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return Boolean(response.data?.ok);
+  }
+
+  /** Where this workspace's judges live, or why no registry resolves. */
+  static async judgeRegistryInfo(): Promise<JudgeRegistryInfo> {
+    const response = await apiClient.get<JudgeRegistryInfo>(
+      '/prompt-optimization/judges/registry',
+    );
+    return response.data;
+  }
+
+  /** MLflow built-in judges (Safety, RelevanceToQuery, ...) runs can select. */
+  static async listBuiltinJudges(): Promise<BuiltinJudge[]> {
+    const response = await apiClient.get<{ judges: BuiltinJudge[] }>(
+      '/prompt-optimization/judges/builtin',
+    );
+    return response.data?.judges || [];
+  }
+
+  /** LLM judges in the MLflow prompt registry. */
+  static async listJudges(): Promise<LLMJudge[]> {
+    const response = await apiClient.get<{ judges: LLMJudge[] }>(
+      '/prompt-optimization/judges',
+    );
+    return response.data?.judges || [];
+  }
+
+  /** Create + register an LLM judge (plain-language criteria). With crewId
+   *  the judge is assigned to that crew; without, it joins the shared library. */
+  static async createJudge(
+    name: string,
+    instructions: string,
+    model?: string,
+    crewId?: string,
+  ): Promise<LLMJudge> {
+    const response = await apiClient.post<LLMJudge>(
+      '/prompt-optimization/judges',
+      { name, instructions, model: model || undefined, crew_id: crewId || undefined },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  /** Assign a shared library judge to a crew (registers a crew-scoped copy). */
+  static async assignJudge(name: string, crewId: string): Promise<LLMJudge> {
+    const response = await apiClient.post<LLMJudge>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}/assign`,
+      { crew_id: crewId },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  /** Align a crew judge to the grades given with it selected (MemAlign):
+   *  distils where the judge disagreed with the grader into guidelines and
+   *  registers them as a new version of the same judge. */
+  static async alignJudge(name: string, crewId: string): Promise<JudgeAlignment> {
+    const response = await apiClient.post<JudgeAlignment>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}/align`,
+      { crew_id: crewId },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  /** Update a judge's instructions and/or model (full registry name).
+   *  Editing a crew-scoped copy changes what that crew's runs use; editing a
+   *  library judge leaves already-assigned copies untouched. */
+  static async updateJudge(
+    name: string,
+    changes: { instructions?: string; model?: string },
+  ): Promise<LLMJudge> {
+    const response = await apiClient.put<LLMJudge>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}`,
+      {
+        instructions: changes.instructions || undefined,
+        model: changes.model || undefined,
+      },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  static async deleteJudge(name: string): Promise<boolean> {
+    const response = await apiClient.delete<{ ok: boolean }>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}`,
+    );
+    return Boolean(response.data?.ok);
+  }
+
+  /** Request a running optimization to stop (honored before the next crew execution). */
+  static async cancelRun(runId: string): Promise<boolean> {
+    const response = await apiClient.post<{ cancelling: boolean }>(
+      `/prompt-optimization/runs/${runId}/cancel`,
+    );
+    return Boolean(response.data?.cancelling);
+  }
+
+  /** Delete a run's record so it stops blocking new runs (cancels an active
+   *  task first). */
+  static async deleteRun(runId: string): Promise<boolean> {
+    const response = await apiClient.delete<{ deleted: boolean }>(
+      `/prompt-optimization/runs/${runId}`,
+    );
+    return Boolean(response.data?.deleted);
+  }
+
+  static async applyRun(runId: string): Promise<boolean> {
+    const response = await apiClient.post<{ applied: boolean }>(
+      `/prompt-optimization/runs/${runId}/apply`,
+    );
+    return Boolean(response.data?.applied);
+  }
+
+  /** Undo an applied run by restoring the before-image taken at apply time.
+   *  The snapshot is consumed, so this works exactly once per apply. */
+  static async revertRun(runId: string): Promise<boolean> {
+    const response = await apiClient.post<{ reverted: boolean }>(
+      `/prompt-optimization/runs/${runId}/revert`,
+    );
+    return Boolean(response.data?.reverted);
+  }
+}

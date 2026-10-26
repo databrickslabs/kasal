@@ -1,0 +1,1765 @@
+import { catalogExecutionSettings } from './catalogExecutionSettings';
+import CatalogSurface from './CatalogSurface';
+import CatalogActionPane from './CatalogActionPane';
+import { CatalogNavigation } from './CatalogNavigation';
+import { cloneCatalogCrew } from './cloneCatalogCrew';
+import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
+import { 
+  DialogContent, 
+  Button, 
+  Box, 
+  Grid,
+  Card,
+  CardContent,
+  Typography,
+  IconButton,
+  Tooltip,
+  CircularProgress,
+  Alert,
+  TextField,
+  InputAdornment,
+  Tabs,
+  Tab,
+  Divider,
+  MenuItem,
+  useTheme
+} from '@mui/material';
+import { CrewService, CrewFeedbackService, CrewFeedbackEntry } from '../../../../../api/workflow/CrewService';
+import { FlowService } from '../../../../../api/workflow/FlowService';
+import { CrewResponse } from '../../../../../types/workflow/crew';
+import { FlowResponse } from '../../../../../types/workflow/flow';
+import { CrewFlowSelectionDialogProps } from '../../../../../types/workflow/crewflowDialog';
+import { Node as _Node, Edge as _Edge } from 'reactflow';
+import DeleteIcon from '@mui/icons-material/Delete';
+import DownloadIcon from '@mui/icons-material/Download';
+import SearchIcon from '@mui/icons-material/Search';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import PersonIcon from '@mui/icons-material/Person';
+import EditIcon from '@mui/icons-material/Edit';
+import UploadIcon from '@mui/icons-material/Upload';
+import CrewCatalogActions from './CrewCatalogActions';
+import CrewOptimizeDialog from '../CrewOptimizeDialog';
+import { useMLflowEnabled } from '../../../../../hooks/global/useMLflowEnabled';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
+import { AgentService } from '../../../../../api/workflow/AgentService';
+import { TaskService } from '../../../../../api/workflow/TaskService';
+import { Agent } from '../../../../../types/workflow/agent';
+import { Task } from '../../../../../types/workflow/task';
+import GroupIcon from '@mui/icons-material/Group';
+import AssignmentIcon from '@mui/icons-material/Assignment';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import { useFlowConfigStore } from '../../../../../store/flowConfig';
+import { useCrewExecutionStore } from '../../../../../store/crewExecution';
+import { useBuilderCanvasStore } from '../../../../../app/sessions/builderCanvasStore';
+import PublishButton from './PublishButton';
+import { usePublicationStore } from '../../../../../store/publication';
+import { usePermissions } from '../../../../../hooks/usePermissions';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`dialog-tabpanel-${index}`}
+      aria-labelledby={`dialog-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Box sx={{ pt: 2 }}>
+          {children}
+        </Box>
+      )}
+    </div>
+  );
+}
+
+// Thumb icons matching the chat-mode actions bar exactly (same Heroicons
+// outline paths) so the feedback shown here reads as the same control the
+// user submitted. `filled` mirrors the "active vote" fill in chat.
+const ThumbUp: React.FC<{ filled?: boolean }> = ({ filled }) => (
+  <svg width="14" height="14" fill={filled ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6.633 10.5c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 012.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 00.322-1.672V3a.75.75 0 01.75-.75A2.25 2.25 0 0116.5 4.5c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 01-2.649 7.521c-.388.482-.987.729-1.605.729H13.48c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 00-1.423-.23H5.904" />
+  </svg>
+);
+const ThumbDown: React.FC<{ filled?: boolean }> = ({ filled }) => (
+  <svg width="14" height="14" fill={filled ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7.498 15.25H4.372c-1.026 0-1.945-.694-2.054-1.715a12.137 12.137 0 01-.068-1.285c0-2.848.992-5.464 2.649-7.521C5.287 4.247 5.886 4 6.504 4h4.016a4.5 4.5 0 011.423.23l3.114 1.04a4.5 4.5 0 001.423.23h1.294M7.498 15.25c.618 0 .991.724.725 1.282A7.471 7.471 0 007.5 19.75 2.25 2.25 0 009.75 22a.75.75 0 00.75-.75v-.633c0-.573.11-1.14.322-1.672.304-.76.93-1.33 1.653-1.715a9.04 9.04 0 002.86-2.4c.498-.634 1.226-1.08 2.032-1.08h.384" />
+  </svg>
+);
+
+const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
+  open,
+  embedded = false,
+  onClose,
+  onCrewSelect,
+  onFlowSelect,
+  onAgentSelect,
+  onTaskSelect,
+  initialTab = 0,
+  showOnlyTab,
+  hideFlowsTab = false,
+}): JSX.Element => {
+  const [tabValue, setTabValue] = useState(initialTab);
+  const catalogTitleId = useId();
+  // Crew whose prompts are being optimized (opens CrewOptimizeDialog).
+  const [optimizeCrew, setOptimizeCrew] = useState<CrewResponse | null>(null);
+  // Optimization writes prompt versions to an MLflow registry, so the action is
+  // withheld when MLflow is off rather than offered and then failing.
+  const mlflowEnabled = useMLflowEnabled();
+  
+  // When showing only one tab, always use that tab's value
+  useEffect(() => {
+    if (showOnlyTab !== undefined) {
+      setTabValue(showOnlyTab);
+    } else {
+      setTabValue(initialTab);
+    }
+  }, [showOnlyTab, initialTab]);
+  const [crews, setCrews] = useState<CrewResponse[]>([]);
+  const [flows, setFlows] = useState<FlowResponse[]>([]);
+  // Publication state lives in a store because the standalone FlowDialog draws
+  // the same marker: two local copies is how a flow published in one view still
+  // looks unpublished in the other.
+  const publishedCrewIds = usePublicationStore((s) => s.publishedCrewIds);
+  const publishedFlowIds = usePublicationStore((s) => s.publishedFlowIds);
+  const setPublished = usePublicationStore((s) => s.setPublished);
+  const refreshPublications = usePublicationStore((s) => s.refresh);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedAgents, setSelectedAgents] = useState<Agent[]>([]);
+  const [selectedTasks, setSelectedTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const theme = useTheme();
+  const [catalogSort, setCatalogSort] = useState('recent');
+  const sortCatalog = (a: { name: string; created_at: string }, b: { name: string; created_at: string }) => catalogSort === 'name'
+    ? a.name.localeCompare(b.name)
+    : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  const catalogCardSx = { height: '100%', cursor: 'pointer', backgroundColor: 'action.hover', backgroundImage: 'none', border: 0, borderRadius: 3, boxShadow: 'none', transition: 'background-color 150ms ease', '&:hover': { bgcolor: 'action.selected' }, '&:focus-visible': { outline: '2px solid', outlineColor: 'text.secondary', outlineOffset: 2 }, '& .MuiCardContent-root': { p: 2.5 }, '& h2': { fontSize: 15, fontWeight: 600, minHeight: 40 }, '& .MuiIconButton-root': { color: 'text.secondary' } };
+
+  
+  // Clear search query when dialog opens or closes
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery('');
+    }
+  }, [open]);
+  const [_focusedCardIndex, _setFocusedCardIndex] = useState<number>(0);
+  const firstCrewCardRef = useRef<HTMLDivElement>(null);
+  const firstFlowCardRef = useRef<HTMLDivElement>(null);
+  const firstAgentCardRef = useRef<HTMLDivElement>(null);
+  const firstTaskCardRef = useRef<HTMLDivElement>(null);
+  
+  // Get flow configuration to check if CrewAI flows are enabled
+  const kasalFlowEnabled = useFlowConfigStore(state => state.kasalFlowEnabled);
+
+  // Operators may run what is in the catalog, not change it. The authoring
+  // actions on a card (optimize, publish, edit, delete) are editor/admin only,
+  // and the backend enforces the same rule — showing them to an operator only
+  // offers a button whose sole possible outcome is a 403.
+  const { canEdit, canDelete } = usePermissions();
+  
+  // Helper function to detect if a crew contains flow nodes
+  const isCrewActuallyFlow = (crew: CrewResponse): boolean => {
+    return crew.nodes?.some(node => node.type === 'flowNode') || false;
+  };
+  
+  // Refs for file inputs
+  const flowFileInputRef = useRef<HTMLInputElement>(null);
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      // Load data based on current tab
+      if (tabValue === 0) {
+        loadCrews();
+        refreshPublications();
+      } else if (tabValue === 1) {
+        loadAgents();
+      } else if (tabValue === 2) {
+        loadTasks();
+      } else if (tabValue === 3 && kasalFlowEnabled) {
+        loadFlows();
+        refreshPublications();
+      }
+    }
+  }, [open, tabValue, kasalFlowEnabled]);
+
+  // Clear selections when closing dialog
+  useEffect(() => {
+    if (!open) {
+      setSelectedAgents([]);
+      setSelectedTasks([]);
+    }
+  }, [open]);
+
+  // Switch to Plans tab if CrewAI flow is disabled and user is on Flows tab
+  useEffect(() => {
+    if (!kasalFlowEnabled && tabValue === 3) {
+      setTabValue(0);
+    }
+  }, [kasalFlowEnabled, tabValue]);
+
+  // Focus management when dialog opens
+  const handleDialogEntered = () => {
+    // Focus only the search box when dialog opens
+    setTimeout(() => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
+    }, 150);
+  };
+
+  // Thumbs feedback left from chat mode: per-crew counts + on-demand comments
+  const [feedbackSummary, setFeedbackSummary] = useState<Record<string, { up: number; down: number }>>({});
+  const [feedbackComments, setFeedbackComments] = useState<Record<string, CrewFeedbackEntry[]>>({});
+  const [feedbackOpenFor, setFeedbackOpenFor] = useState<string | null>(null);
+
+  const toggleFeedback = async (e: React.MouseEvent, crewId: string) => {
+    e.stopPropagation();
+    if (feedbackOpenFor === crewId) {
+      setFeedbackOpenFor(null);
+      return;
+    }
+    setFeedbackOpenFor(crewId);
+    if (!feedbackComments[crewId]) {
+      try {
+        const entries = await CrewFeedbackService.getForCrew(crewId);
+        setFeedbackComments((prev) => ({ ...prev, [crewId]: entries }));
+      } catch {
+        /* leave empty — counts still show */
+      }
+    }
+  };
+
+  const loadCrews = async () => {
+    setLoading(true);
+    try {
+      const fetchedCrews = await CrewService.getCrews();
+      setCrews(fetchedCrews);
+      setError(null);
+      // Best-effort: feedback counts for the catalog cards
+      CrewFeedbackService.getSummary()
+        .then((rows) => {
+          const map: Record<string, { up: number; down: number }> = {};
+          for (const r of rows) map[r.crew_id] = { up: r.up, down: r.down };
+          setFeedbackSummary(map);
+        })
+        .catch(() => undefined);
+    } catch (error) {
+      console.error('Error loading crews:', error);
+      setError('Failed to load crews');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadFlows = async () => {
+    setLoading(true);
+    try {
+      const fetchedFlows = await FlowService.getFlows();
+      setFlows(fetchedFlows);
+      setError(null);
+    } catch (error) {
+      console.error('Error loading flows:', error);
+      setError('Failed to load flows');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAgents = async () => {
+    setLoading(true);
+    try {
+      const fetchedAgents = await AgentService.listAgents();
+      setAgents(fetchedAgents);
+      setError(null);
+    } catch (error) {
+      console.error('Error loading agents:', error);
+      setError('Failed to load agents');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTasks = async () => {
+    setLoading(true);
+    try {
+      const fetchedTasks = await TaskService.listTasks();
+      setTasks(fetchedTasks);
+      setError(null);
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+      setError('Failed to load tasks');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCrewSelect = async (crewId: string, asCopy = false) => {
+    setLoading(true);
+
+    // Set isLoadingCrew flag to prevent useManagerNode from removing manager node
+    const executionStore = useCrewExecutionStore.getState();
+    executionStore.setIsLoadingCrew(true);
+
+    // Dispatch event to signal crew loading is starting
+    window.dispatchEvent(new CustomEvent('crewLoadStarted'));
+    
+    try {
+      const selectedCrew = await CrewService.getCrew(crewId);
+      
+      if (!selectedCrew) {
+        throw new Error('Crew not found');
+      }
+
+      // In place: the canvas edits the crew's own agent and task rows (with
+      // their per-agent overrides), and the tab is bound to the crew, so Save
+      // updates it — the shape catalogLoadCrew / openCrewInAgentBuilder use.
+      // "Open as copy" re-creates the rows and binds NO crew id, so Save
+      // creates a new crew instead of repointing this one at the copies.
+      const { nodes: updatedNodes, edges: updatedEdges } = asCopy
+        ? await cloneCatalogCrew(selectedCrew)
+        : { nodes: selectedCrew.nodes || [], edges: selectedCrew.edges || [] };
+      if (asCopy) onCrewSelect(updatedNodes, updatedEdges, `${selectedCrew.name} (copy)`);
+      else onCrewSelect(updatedNodes, updatedEdges, selectedCrew.name, selectedCrew.id.toString());
+      onClose();
+
+      // Check if there's a manager node in the loaded crew
+      const hasManagerNode = updatedNodes.some(n => n.type === 'managerNode');
+      const managerNode = updatedNodes.find(n => n.type === 'managerNode');
+
+      // Restore execution config after nodes are added
+      setTimeout(() => {
+        const store = useCrewExecutionStore.getState();
+        const tabStore = useBuilderCanvasStore.getState();
+
+        const settings = catalogExecutionSettings(selectedCrew, managerNode?.data?.llm, hasManagerNode);
+        store.setProcessType(settings.processType!);
+        store.setReasoningEnabled(settings.reasoningEnabled!);
+        store.setReasoningLLM(settings.reasoningLLM!);
+        store.setReasoningConfig(settings.reasoningConfig!);
+        store.setManagerLLM(settings.managerLLM!);
+        if (managerNode) store.setManagerNodeId(managerNode.id);
+        if (tabStore.activeCanvasId) tabStore.updateCanvasExecutionConfig(tabStore.activeCanvasId, settings);
+
+        // Clear the loading flag after all config is set
+        store.setIsLoadingCrew(false);
+
+        // Dispatch event to fit view after nodes are rendered
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('fitViewToNodes', { bubbles: true });
+          window.dispatchEvent(event);
+        }
+      }, 100);
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error loading crew:', error);
+      setError(error.message || 'Failed to load crew');
+
+      // Clear loading flag on error too
+      useCrewExecutionStore.getState().setIsLoadingCrew(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFlowSelect = async (flowId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      console.log(`Selecting flow with ID: ${flowId}`);
+      const selectedFlow = await FlowService.getFlow(flowId);
+      
+      // Better error handling for null or missing data
+      if (!selectedFlow) {
+        throw new Error('Failed to load flow data from server');
+      }
+      
+      if (!Array.isArray(selectedFlow.nodes) || !Array.isArray(selectedFlow.edges)) {
+        console.error('Invalid flow structure:', selectedFlow);
+        throw new Error('Invalid flow data structure');
+      }
+
+      // Extract any flow configuration from the response
+      // The FlowService should map flow_config to flowConfig
+      let flowConfig = selectedFlow.flowConfig ?? selectedFlow.flow_config;
+      
+      // If still no explicit flowConfig but we have nodes with listener data, rebuild the config
+      if (!flowConfig && selectedFlow.nodes.some(node => node.data?.listener)) {
+        const listeners = selectedFlow.nodes
+          .filter(node => node.data?.listener)
+          .map(node => ({
+            id: `listener-${node.id}`,
+            name: node.data.label || `Listener ${node.id}`,
+            crewId: String(node.data.crewRef || ''),
+            crewName: node.data.crewName || node.data.label || 'Unknown',
+            tasks: node.data.listener.tasks || [],
+            listenToTaskIds: node.data.listener.listenToTaskIds || [],
+            listenToTaskNames: node.data.listener.listenToTaskNames || [],
+            conditionType: node.data.listener.conditionType || 'NONE',
+            state: node.data.listener.state || {
+              stateType: 'unstructured',
+              stateDefinition: '',
+              stateData: {}
+            }
+          }));
+        
+        flowConfig = {
+          id: `flow-${Date.now()}`,
+          name: selectedFlow.name,
+          listeners,
+          actions: [],
+          startingPoints: []
+        };
+      }
+
+      // Ensure flowConfig is properly structured
+      if (flowConfig) {
+        flowConfig = {
+          ...flowConfig,
+          id: flowConfig.id || `flow-${Date.now()}`,
+          name: flowConfig.name || selectedFlow.name,
+          listeners: flowConfig.listeners || [],
+          actions: flowConfig.actions || [],
+          startingPoints: flowConfig.startingPoints || []
+        };
+      }
+
+      // Record WHICH flow this canvas now holds. Without it the tab has no
+      // savedFlowId, so Save offers to create a new flow instead of updating
+      // the one just opened, and anything keyed on the flow id — the state
+      // declaration among them — has nothing to address.
+      const tabId = useBuilderCanvasStore.getState().activeCanvasId;
+      if (tabId && selectedFlow.id) {
+        useBuilderCanvasStore
+          .getState()
+          .updateCanvasFlowInfo(tabId, String(selectedFlow.id), selectedFlow.name);
+      }
+      onFlowSelect(selectedFlow.nodes, selectedFlow.edges, flowConfig);
+      onClose();
+      
+      // Dispatch event to fit view after nodes are rendered
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('fitViewToNodes', { bubbles: true });
+          window.dispatchEvent(event);
+        }
+      }, 100);
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error loading flow:', error);
+      setError(error.message || 'Failed to load flow');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Deleting removes the row from local state rather than calling load*().
+  //
+  // The reload was the whole problem: load* sets `loading`, and every TabPanel
+  // swaps its list for a centred spinner while it is true — so deleting one crew
+  // blanked the entire panel and rebuilt it, losing scroll position and reading
+  // as a full-screen refresh. The server is already the source of truth for the
+  // delete; re-fetching a list we can update in place buys nothing.
+  const handleDeleteFlow = async (event: React.MouseEvent, flowId: string) => {
+    event.stopPropagation();
+    try {
+      await FlowService.deleteFlow(flowId);
+      setFlows((current) => current.filter((flow) => String(flow.id) !== String(flowId)));
+      setError(null);
+    } catch (error) {
+      console.error('Error deleting flow:', error);
+      setError('Failed to delete flow');
+      // The delete failed, so the row is still there on the server — put the
+      // list back rather than leaving the UI disagreeing with it.
+      loadFlows();
+    }
+  };
+
+  const handleDeleteCrew = async (event: React.MouseEvent, crewId: string) => {
+    event.stopPropagation();
+    try {
+      await CrewService.deleteCrew(crewId);
+      setCrews((current) => current.filter((crew) => String(crew.id) !== String(crewId)));
+      setError(null);
+    } catch (error) {
+      console.error('Error deleting crew:', error);
+      setError('Failed to delete crew');
+      loadCrews();
+    }
+  };
+
+  const handleExportFlow = async (event: React.MouseEvent, flow: FlowResponse) => {
+    event.stopPropagation();
+    try {
+      const exportData = JSON.stringify(flow, null, 2);
+      const blob = new Blob([exportData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `flow_${flow.name.replace(/\s+/g, '_').toLowerCase()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting flow:', error);
+      setError('Failed to export flow');
+    }
+  };
+
+  const handleExportCrew = async (event: React.MouseEvent, crew: CrewResponse) => {
+    event.stopPropagation();
+    try {
+      const exportData = JSON.stringify(crew, null, 2);
+      const blob = new Blob([exportData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `crew_${crew.name.replace(/\s+/g, '_').toLowerCase()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting crew:', error);
+      setError('Failed to export crew');
+    }
+  };
+
+  const handleEditFlow = (event: React.MouseEvent, flowId: string) => {
+    event.stopPropagation();
+    void handleFlowSelect(flowId);
+  };
+
+  const handleDeleteAgent = async (event: React.MouseEvent, agentId: string) => {
+    event.stopPropagation();
+    try {
+      setLoading(true);
+      const success = await AgentService.deleteAgent(agentId);
+      if (success) {
+        await loadAgents();
+        // Remove from selected if it was selected
+        setSelectedAgents(prev => prev.filter(a => a.id !== agentId));
+      }
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+      setError('Failed to delete agent');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTask = async (event: React.MouseEvent, taskId: string) => {
+    event.stopPropagation();
+    try {
+      setLoading(true);
+      await TaskService.deleteTask(taskId);
+      await loadTasks();
+      // Remove from selected if it was selected
+      setSelectedTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      setError('Failed to delete task');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAllAgents = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL agents? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Delete all agents
+      for (const agent of agents) {
+        if (agent.id) {
+          await AgentService.deleteAgent(agent.id);
+        }
+      }
+      
+      // Clear the lists
+      setAgents([]);
+      setSelectedAgents([]);
+      
+      // Reload to ensure consistency
+      await loadAgents();
+    } catch (err) {
+      setError('Failed to delete all agents');
+      console.error('Error deleting all agents:', err);
+      // Refresh to show current state
+      await loadAgents();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAllTasks = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL tasks? This action cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Delete all tasks
+      for (const task of tasks) {
+        if (task.id) {
+          await TaskService.deleteTask(task.id);
+        }
+      }
+      
+      // Clear the lists
+      setTasks([]);
+      setSelectedTasks([]);
+      
+      // Reload to ensure consistency
+      await loadTasks();
+    } catch (err) {
+      setError('Failed to delete all tasks');
+      console.error('Error deleting all tasks:', err);
+      // Refresh to show current state
+      await loadTasks();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAgentToggle = (agent: Agent) => {
+    setSelectedAgents(prev => {
+      const isSelected = prev.some(a => a.id === agent.id);
+      if (isSelected) {
+        return prev.filter(a => a.id !== agent.id);
+      }
+      return [...prev, agent];
+    });
+  };
+
+  const handleTaskToggle = (task: Task) => {
+    setSelectedTasks(prev => {
+      const isSelected = prev.some(t => t.id === task.id);
+      if (isSelected) {
+        return prev.filter(t => t.id !== task.id);
+      }
+      return [...prev, task];
+    });
+  };
+
+  const handlePlaceAgents = () => {
+    if (onAgentSelect) {
+      onAgentSelect(selectedAgents);
+      setSelectedAgents([]);
+      onClose();
+    }
+  };
+
+  const handlePlaceTasks = () => {
+    if (onTaskSelect) {
+      onTaskSelect(selectedTasks);
+      setSelectedTasks([]);
+      onClose();
+    }
+  };
+
+  const handleSelectAllAgents = () => {
+    if (selectedAgents.length === agents.length) {
+      setSelectedAgents([]);
+    } else {
+      setSelectedAgents([...agents]);
+    }
+  };
+
+  const handleSelectAllTasks = () => {
+    if (selectedTasks.length === tasks.length) {
+      setSelectedTasks([]);
+    } else {
+      setSelectedTasks([...tasks]);
+    }
+  };
+
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    // Prevent switching to Flows tab if CrewAI flow is disabled
+    if (newValue === 3 && !kasalFlowEnabled) {
+      return;
+    }
+    // Only allow tab changes when showing all tabs
+    if (showOnlyTab === undefined) {
+      setTabValue(newValue);
+      // Reset search when changing tabs
+      setSearchQuery('');
+    }
+  };
+
+
+
+  const handleImportFlowClick = () => {
+    if (flowFileInputRef.current) {
+      flowFileInputRef.current.click();
+    }
+  };
+
+  const handleBulkImportClick = () => {
+    if (bulkFileInputRef.current) {
+      bulkFileInputRef.current.click();
+    }
+  };
+
+
+
+  const handleImportFlow = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      setImportSuccess(null);
+      
+      const file = event.target.files[0];
+      const fileContents = await file.text();
+      const flowData = JSON.parse(fileContents);
+      
+      // Validate flow data
+      if (!flowData.name) {
+        throw new Error('Invalid flow data: missing name');
+      }
+      
+      // Save flow
+      await FlowService.saveFlow({
+        name: flowData.name,
+        crew_id: flowData.crew_id || 0,
+        nodes: flowData.nodes || [],
+        edges: flowData.edges || [],
+        flowConfig: flowData.flowConfig || flowData.flow_config
+      });
+      
+      await loadFlows();
+      setImportSuccess('Flow imported successfully');
+      
+      // Reset file input
+      event.target.value = '';
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error importing flow:', error);
+      setError(`Failed to import flow: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+
+
+
+
+
+
+
+  const handleBulkImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      setImportSuccess(null);
+
+      const file = event.target.files[0];
+      const fileContents = await file.text();
+      let bulkData = JSON.parse(fileContents);
+
+      // Auto-detect single crew object and wrap it
+      // A single crew has: name, nodes, edges, and optionally agent_ids/task_ids
+      const isSingleCrew = bulkData.name &&
+                          bulkData.nodes &&
+                          Array.isArray(bulkData.nodes) &&
+                          bulkData.edges &&
+                          Array.isArray(bulkData.edges) &&
+                          !bulkData.crews &&
+                          !bulkData.flows;
+
+      if (isSingleCrew) {
+        console.log('Detected single crew object, wrapping in crews array');
+        bulkData = { crews: [bulkData] };
+      }
+
+      // Validate bulk data
+      if (!bulkData.crews && !bulkData.flows && !bulkData.agents && !bulkData.tasks && !bulkData.crew) {
+        throw new Error('Invalid import data: no valid data found');
+      }
+
+      let importedCrews = 0;
+      let importedFlows = 0;
+      let importedAgents = 0;
+      let importedTasks = 0;
+      
+      // Import agents first (they may be referenced by tasks)
+      if (Array.isArray(bulkData.agents)) {
+        for (const agent of bulkData.agents) {
+          if (agent.name && agent.role) {
+            await AgentService.createAgent({
+              name: agent.name,
+              role: agent.role,
+              backstory: agent.backstory || '',
+              goal: agent.goal || '',
+              verbose: agent.verbose || false,
+              allow_delegation: agent.allow_delegation || false,
+              tools: agent.tools || [],
+              max_iter: agent.max_iter || 15,
+              max_rpm: agent.max_rpm || null,
+              llm: agent.llm || '',
+              cache: agent.cache !== undefined ? agent.cache : true,
+              allow_code_execution: agent.allow_code_execution || false,
+              code_execution_mode: agent.code_execution_mode || 'safe'
+            });
+            importedAgents++;
+          }
+        }
+      }
+      
+      // Import tasks
+      if (Array.isArray(bulkData.tasks)) {
+        for (const task of bulkData.tasks) {
+          if (task.description) {
+            await TaskService.createTask({
+              name: task.name || task.description.slice(0, 50),
+              description: task.description,
+              expected_output: task.expected_output || '',
+              tools: task.tools || [],
+              agent_id: task.agent_id || null,
+              async_execution: task.async_execution || false,
+              context: task.context || null,
+              config: task.config || {}
+            });
+            importedTasks++;
+          }
+        }
+      }
+
+      // Import crews — auto-rename on 409 conflict instead of aborting
+      const importSingleCrew = async (normalized: Record<string, unknown>) => {
+        const baseName = (normalized.name as string)
+          || (normalized.title as string)
+          || (normalized.plan_name as string)
+          || (normalized.workflow_name as string)
+          || `Imported Crew ${new Date().toISOString().slice(0,19).replace('T',' ')}`;
+        let name = baseName;
+        let attempt = 0;
+        while (true) {
+          try {
+            await CrewService.saveCrew({
+              name,
+              nodes: (normalized.nodes as _Node[]) || [],
+              edges: (normalized.edges as _Edge[]) || [],
+              agent_ids: (normalized.agent_ids as string[]) || [],
+              task_ids: (normalized.task_ids as string[]) || []
+            });
+            importedCrews++;
+            return;
+          } catch (err: unknown) {
+            const status = (err as { response?: { status?: number } })?.response?.status;
+            if (status === 409) {
+              attempt++;
+              name = `${baseName} (${attempt})`;
+            } else {
+              throw err;
+            }
+          }
+        }
+      };
+
+      if (Array.isArray(bulkData.crews)) {
+        for (const c of bulkData.crews) {
+          await importSingleCrew(c?.crew ?? c);
+        }
+      } else if (bulkData.crew) {
+        await importSingleCrew(bulkData.crew);
+      }
+      
+      // Import flows
+      if (Array.isArray(bulkData.flows)) {
+        for (const flow of bulkData.flows) {
+          if (flow.name) {
+            await FlowService.saveFlow({
+              name: flow.name,
+              crew_id: flow.crew_id || 0,
+              nodes: flow.nodes || [],
+              edges: flow.edges || [],
+              flowConfig: flow.flowConfig || flow.flow_config
+            });
+            importedFlows++;
+          }
+        }
+      }
+      
+      // Reload data based on what was imported
+      if (importedAgents > 0) {
+        await loadAgents();
+      }
+      if (importedTasks > 0) {
+        await loadTasks();
+      }
+      if (importedCrews > 0) {
+        await loadCrews();
+      }
+      if (importedFlows > 0) {
+        await loadFlows();
+      }
+      
+      const parts = [];
+      if (importedAgents > 0) parts.push(`${importedAgents} agents`);
+      if (importedTasks > 0) parts.push(`${importedTasks} tasks`);
+      if (importedCrews > 0) parts.push(`${importedCrews} crews`);
+      if (importedFlows > 0) parts.push(`${importedFlows} flows`);
+      
+      setImportSuccess(`Import successful: ${parts.join(', ')} imported.`);
+      
+      // Reset file input
+      event.target.value = '';
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error bulk importing:', error);
+      setError(`Failed to import: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Export all
+
+
+  const handleExportAllFlows = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get all flows
+      const allFlows = await FlowService.getFlows();
+      
+      // Package in a format for export
+      const exportData = {
+        flows: allFlows,
+        exportDate: new Date().toISOString()
+      };
+      
+      // Export to file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `all_flows_export_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting all flows:', error);
+      setError('Failed to export all flows');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+
+
+
+  const handleExportEverything = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get all data
+      const allCrews = await CrewService.getCrews();
+      const allFlows = await FlowService.getFlows();
+      const allAgents = await AgentService.listAgents();
+      const allTasks = await TaskService.listTasks();
+      
+      // Package in a format for export
+      const exportData = {
+        crews: allCrews,
+        flows: allFlows,
+        agents: allAgents,
+        tasks: allTasks,
+        exportDate: new Date().toISOString()
+      };
+      
+      // Export to file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `complete_export_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting all data:', error);
+      setError('Failed to export all data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, id: string, type: 'crew' | 'flow' | 'agent' | 'task', index: number) => {
+    // Get the right array based on the type
+    let itemsArray: CrewResponse[] | FlowResponse[] | Agent[] | Task[];
+    switch(type) {
+      case 'crew':
+        itemsArray = crews;
+        break;
+      case 'flow':
+        itemsArray = flows;
+        break;
+      case 'agent':
+        itemsArray = agents;
+        break;
+      case 'task':
+        itemsArray = tasks;
+        break;
+      default:
+        itemsArray = [];
+    }
+    
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (type === 'crew') {
+        handleCrewSelect(id);
+      } else {
+        handleFlowSelect(id.toString());
+      }
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      const nextIndex = (index + 1) % itemsArray.length;
+      const nextElement = document.querySelector(`[data-card-index="${type}-${nextIndex}"]`) as HTMLElement;
+      if (nextElement) nextElement.focus();
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const prevIndex = (index - 1 + itemsArray.length) % itemsArray.length;
+      const prevElement = document.querySelector(`[data-card-index="${type}-${prevIndex}"]`) as HTMLElement;
+      if (prevElement) prevElement.focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      // Calculate number of cards per row based on current viewport
+      // Assuming 3 cards per row on desktop, 2 on tablet, 1 on mobile
+      // This is a rough estimate that matches the Grid item sizing
+      const width = window.innerWidth;
+      let cardsPerRow = 1;
+      if (width >= 960) cardsPerRow = 3; // md breakpoint
+      else if (width >= 600) cardsPerRow = 2; // sm breakpoint
+      
+      // Calculate the vertical navigation
+      const currentRow = Math.floor(index / cardsPerRow);
+      const currentCol = index % cardsPerRow;
+      let targetIndex;
+      
+      if (e.key === 'ArrowDown') {
+        const nextRow = (currentRow + 1);
+        targetIndex = nextRow * cardsPerRow + currentCol;
+        // If we would go beyond the last row, wrap to the first
+        if (targetIndex >= itemsArray.length) {
+          // Go to same column in first row
+          targetIndex = currentCol;
+        }
+      } else { // ArrowUp
+        const prevRow = (currentRow - 1);
+        if (prevRow < 0) {
+          // Go to the same column in last row
+          const lastRowIndex = Math.floor((itemsArray.length - 1) / cardsPerRow);
+          targetIndex = lastRowIndex * cardsPerRow + currentCol;
+          // If the last row doesn't have this column, go to the last item
+          if (targetIndex >= itemsArray.length) {
+            targetIndex = itemsArray.length - 1;
+          }
+        } else {
+          targetIndex = prevRow * cardsPerRow + currentCol;
+        }
+      }
+      
+      // Focus the target element if it exists
+      if (targetIndex >= 0 && targetIndex < itemsArray.length) {
+        const targetElement = document.querySelector(`[data-card-index="${type}-${targetIndex}"]`) as HTMLElement;
+        if (targetElement) targetElement.focus();
+      }
+    }
+  };
+
+  // Handle keyboard shortcuts at the dialog level
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Skip shortcuts if an input field is active
+    if (
+      document.activeElement instanceof HTMLInputElement ||
+      document.activeElement instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+    
+    // When user presses '/' (forward slash) focus the search input
+    if (event.key === '/' && searchInputRef.current) {
+      event.preventDefault();
+      searchInputRef.current.focus();
+    }
+    
+    // When user presses 'f', focus the first card
+    if (event.key === 'f') {
+      event.preventDefault();
+      if (tabValue === 0 && firstCrewCardRef.current) {
+        firstCrewCardRef.current.focus();
+      } else if (tabValue === 1 && firstAgentCardRef.current) {
+        firstAgentCardRef.current.focus();
+      } else if (tabValue === 2 && firstTaskCardRef.current) {
+        firstTaskCardRef.current.focus();
+      } else if (tabValue === 3 && firstFlowCardRef.current) {
+        firstFlowCardRef.current.focus();
+      }
+    }
+  };
+
+  return (
+    <CatalogNavigation open={open}>
+      <CatalogSurface open={open} embedded={embedded} onClose={onClose} titleId={catalogTitleId}
+        tab={showOnlyTab ?? (embedded ? initialTab : undefined)} onEntered={handleDialogEntered}>
+        <DialogContent onKeyDown={handleDialogKeyDown} data-tour="catalog-dialog" sx={{ px: 3, pb: 3, '& .MuiButton-outlined': { border: 0, color: 'text.secondary', bgcolor: 'action.hover', borderRadius: 2 }, '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTab-root': { minHeight: 40, borderRadius: 2, mx: 0.25, color: 'text.secondary' }, '& .MuiTab-root.Mui-selected': { color: 'text.primary', bgcolor: 'action.selected' } }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          {importSuccess && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {importSuccess}
+            </Alert>
+          )}
+          
+          <Box sx={{ width: '100%' }}>
+            {showOnlyTab === undefined ? (
+              // Show all tabs when opened from catalog
+              <Box sx={{ borderBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+                <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs" variant="scrollable" scrollButtons="auto" sx={{ minWidth: 0, maxWidth: '100%' }}>
+                  <Tab icon={<PersonIcon />} iconPosition="start" label="Crews" id="crew-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
+                  <Tab icon={<GroupIcon />} iconPosition="start" label="Agents" id="agent-tab-1" aria-controls="tabpanel-1" sx={{ textTransform: 'none' }} />
+                  <Tab icon={<AssignmentIcon />} iconPosition="start" label="Tasks" id="task-tab-2" aria-controls="tabpanel-2" sx={{ textTransform: 'none' }} />
+                  {kasalFlowEnabled && !hideFlowsTab && (
+                    <Tab icon={<AccountTreeIcon />} iconPosition="start" label="Flows" id="flow-tab-3" aria-controls="tabpanel-3" sx={{ textTransform: 'none' }} />
+                  )}
+                </Tabs>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button startIcon={<FileUploadIcon />} variant="outlined" size="small" onClick={handleBulkImportClick}>
+                    Import
+                  </Button>
+                  <Button startIcon={<DownloadIcon />} variant="outlined" size="small" onClick={handleExportEverything} disabled={crews.length === 0 && flows.length === 0 && agents.length === 0 && tasks.length === 0}>
+                    Export
+                  </Button>
+                </Box>
+              </Box>
+            ) : showOnlyTab === 3 ? (
+              // Show import/export buttons when showing only Flows tab
+              <Box sx={{ borderBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, py: 1 }}>
+                <Button startIcon={<FileUploadIcon />} variant="outlined" size="small" onClick={handleImportFlowClick}>
+                  Import Flow
+                </Button>
+                <Button startIcon={<DownloadIcon />} variant="outlined" size="small" onClick={handleExportAllFlows} disabled={flows.length === 0}>
+                  Export All Flows
+                </Button>
+              </Box>
+            ) : null}
+
+            {/* Search and action buttons */}
+            <Box sx={{ py: 2, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              <Box sx={{ flex: 1 }}>
+                <TextField
+                  placeholder={`Search ${['crews', 'agents', 'tasks', 'flows'][tabValue]}…`}
+                  inputProps={{ 'aria-label': 'Search catalog' }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: 'action.hover' }, '& fieldset': { border: 0 } }}
+                  size="small"
+                  fullWidth
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  inputRef={searchInputRef}
+                  autoComplete="off"
+                  onKeyDown={(e) => {
+                    // Only handle Tab and Escape, let all other typing happen normally
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      // When Tab is pressed in the search box, move focus to the first card
+                      e.preventDefault();
+                      // Check which tab is active and focus the appropriate first card
+                      if (tabValue === 0 && firstCrewCardRef.current) {
+                        firstCrewCardRef.current.focus();
+                      } else if (tabValue === 1 && firstAgentCardRef.current) {
+                        firstAgentCardRef.current.focus();
+                      } else if (tabValue === 2 && firstTaskCardRef.current) {
+                        firstTaskCardRef.current.focus();
+                      } else if (tabValue === 3 && firstFlowCardRef.current) {
+                        firstFlowCardRef.current.focus();
+                      }
+                    } else if (e.key === 'Escape') {
+                      setSearchQuery('');
+                    }
+                    // All other keys should work normally for typing
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon fontSize="small" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Box>
+              {(tabValue === 0 || tabValue === 3) && <TextField select size="small" value={catalogSort} onChange={event => setCatalogSort(event.target.value)} SelectProps={{ inputProps: { 'aria-label': 'Sort catalog' } }} sx={{ minWidth: 135, '& fieldset': { border: 0 }, '& .MuiInputBase-root': { borderRadius: 3, bgcolor: 'action.hover' } }}>
+                <MenuItem value="recent">Newest first</MenuItem><MenuItem value="name">Name A–Z</MenuItem>
+              </TextField>}
+              {showOnlyTab === undefined && (
+                <Box sx={{ ml: 2, display: 'flex', gap: 1 }}>
+                  {tabValue === 3 ? (
+                    <>
+                      <Button
+                        startIcon={<UploadIcon />}
+                        variant="outlined"
+                        size="small"
+                        onClick={handleImportFlowClick}
+                      >
+                        Import
+                      </Button>
+                      <Button
+                        startIcon={<DownloadIcon />}
+                        variant="outlined"
+                        size="small"
+                        onClick={handleExportAllFlows}
+                        disabled={flows.length === 0}
+                      >
+                        Export Flows
+                      </Button>
+                    </>
+                  ) : null}
+                </Box>
+              )}
+            </Box>
+            
+            {(showOnlyTab === undefined || showOnlyTab === 0) && (
+              <TabPanel value={tabValue} index={0}>
+                {showOnlyTab === undefined && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose a crew to open it in a new session.</Typography>
+                )}
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : crews.length === 0 ? (
+                <Alert severity="info">
+                  No crews found. Describe a plan in Agent Builder, then save it to the catalog.
+                </Alert>
+              ) : (
+                <Grid container spacing={2}>
+                  {[...crews].sort(sortCatalog)
+                    .filter(crew => {
+                      // Filter out flows if CrewAI flow is disabled
+                      if (!kasalFlowEnabled && isCrewActuallyFlow(crew)) {
+                        return false;
+                      }
+                      
+                      // Apply search filter
+                      if (searchQuery) {
+                        return crew.name.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      
+                      return true;
+                    })
+                    .map((crew, index) => (
+                      <Grid item xs={12} sm={6} md={4} key={crew.id}>
+                        <Card elevation={0}
+                          sx={catalogCardSx}
+                          onClick={() => handleCrewSelect(crew.id)}
+                          onKeyDown={(e) => handleKeyDown(e, crew.id, 'crew', index)}
+                          tabIndex={0}
+                          ref={index === 0 ? firstCrewCardRef : undefined}
+                          data-card-index={`crew-${index}`}
+                        >
+                          <CardContent>
+                            <Typography
+                              variant="h6"
+                              component="h2"
+                              title={crew.name}
+                              sx={{
+                                // Two lines then ellipsis: the name is what
+                                // someone scans for, so it gets the whole card
+                                // width rather than competing with four icons.
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                lineHeight: 1.3,
+                                mb: 0.5,
+                              }}
+                            >
+                              {crew.name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {new Date(crew.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </Typography>
+                            {(() => {
+                              const fb = feedbackSummary[crew.id];
+                              if (!fb || (fb.up === 0 && fb.down === 0)) return null;
+                              const open = feedbackOpenFor === crew.id;
+                              const comments = (feedbackComments[crew.id] || []).filter((c) => c.comment);
+                              return (
+                                // Stop ALL clicks here from bubbling to the card's
+                                // load-crew handler — otherwise expanding/reading the
+                                // feedback loaded the crew and closed the dialog.
+                                <Box sx={{ mt: 0.5 }} onClick={(e) => e.stopPropagation()}>
+                                  <Box
+                                    onClick={(e) => toggleFeedback(e, crew.id)}
+                                    sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, cursor: 'pointer' }}
+                                    title="User feedback from chat — click for details"
+                                    data-testid={`crew-feedback-${crew.id}`}
+                                  >
+                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: 'success.main' }}>
+                                      <ThumbUp filled />
+                                      <Typography variant="caption" sx={{ fontWeight: 600 }}>{fb.up}</Typography>
+                                    </Box>
+                                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: fb.down > 0 ? 'error.main' : 'text.secondary' }}>
+                                      <ThumbDown filled={fb.down > 0} />
+                                      <Typography variant="caption" sx={{ fontWeight: 600 }}>{fb.down}</Typography>
+                                    </Box>
+                                  </Box>
+                                  {open && (
+                                    <Box sx={{ mt: 0.5, pl: 1, borderLeft: '2px solid', borderColor: 'divider' }}>
+                                      {comments.length === 0 ? (
+                                        <Typography variant="caption" color="text.secondary" display="block">
+                                          No written feedback yet.
+                                        </Typography>
+                                      ) : (
+                                        comments.map((c) => (
+                                          <Box key={c.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mb: 0.25, color: c.rating === 'down' ? 'error.main' : 'success.main' }}>
+                                            {c.rating === 'down' ? <ThumbDown /> : <ThumbUp />}
+                                            <Typography variant="caption" color="text.secondary">
+                                              “{c.comment}”{c.group_email ? ` — ${c.group_email}` : ''}
+                                            </Typography>
+                                          </Box>
+                                        ))
+                                      )}
+                                    </Box>
+                                  )}
+                                </Box>
+                              );
+                            })()}
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              Agents: {(() => {
+                                // Count agents from nodes
+                                const nodesCount = crew.nodes?.filter(n => 
+                                  n.type === 'agent' || 
+                                  n.type === 'agentNode' || 
+                                  (n.data && (
+                                    n.data.type === 'agent' || 
+                                    n.data.agentId || 
+                                    n.data.agentRef
+                                  )) ||
+                                  (typeof n.id === 'string' && (
+                                    n.id.startsWith('agent-') || 
+                                    n.id.startsWith('agent:')
+                                  ))
+                                ).length || 0;
+                                
+                                // Add agents directly from crew.agents if it exists
+                                const agentsCount = (crew.agents && Array.isArray(crew.agents)) ? crew.agents.length : 0;
+                                
+                                // Add from agent_ids if it exists
+                                const agentIdsCount = (crew.agent_ids && Array.isArray(crew.agent_ids)) ? crew.agent_ids.length : 0;
+                                
+                                // Return the largest count
+                                return Math.max(nodesCount, agentsCount, agentIdsCount);
+                              })()} / 
+                              Tasks: {(() => {
+                                // Count tasks from nodes
+                                const nodesCount = crew.nodes?.filter(n => 
+                                  n.type === 'task' || 
+                                  n.type === 'taskNode' || 
+                                  (n.data && (
+                                    n.data.type === 'task' || 
+                                    n.data.taskId || 
+                                    n.data.taskRef
+                                  )) ||
+                                  (typeof n.id === 'string' && (
+                                    n.id.includes('task') || 
+                                    n.id.includes('Task')
+                                  ))
+                                ).length || 0;
+                                
+                                // Add tasks directly from crew.tasks if it exists
+                                const tasksCount = (crew.tasks && Array.isArray(crew.tasks)) ? crew.tasks.length : 0;
+                                
+                                // Add from task_ids if it exists
+                                const taskIdsCount = (crew.task_ids && Array.isArray(crew.task_ids)) ? crew.task_ids.length : 0;
+                                
+                                // Return the largest count
+                                return Math.max(nodesCount, tasksCount, taskIdsCount);
+                              })()}
+                            </Typography>
+                            <CrewCatalogActions
+                              crew={crew}
+                              canEdit={canEdit}
+                              canDelete={canDelete}
+                              mlflowEnabled={!!mlflowEnabled}
+                              published={publishedCrewIds.has(String(crew.id))}
+                              onPublished={isPublished => setPublished('crew', String(crew.id), isPublished)}
+                              onOptimize={() => setOptimizeCrew(crew)}
+                              onOpenCopy={() => handleCrewSelect(crew.id, true)}
+                              onExport={event => handleExportCrew(event, crew)}
+                              onDelete={event => handleDeleteCrew(event, crew.id)}
+                            />
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                </Grid>
+              )}
+              </TabPanel>
+            )}
+            
+            {/* Agents Tab Panel */}
+            {(showOnlyTab === undefined || showOnlyTab === 1) && (
+              <TabPanel value={tabValue} index={1}>
+                {showOnlyTab === undefined && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Loading agents will add them to the current tab
+                  </Alert>
+                )}
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  variant="outlined"
+                  onClick={handleSelectAllAgents}
+                >
+                  {selectedAgents.length === agents.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handlePlaceAgents}
+                  disabled={selectedAgents.length === 0}
+                >
+                  Place Agents ({selectedAgents.length})
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={handleDeleteAllAgents}
+                  disabled={agents.length === 0 || loading}
+                  startIcon={<DeleteIcon />}
+                >
+                  Delete All
+                </Button>
+
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : agents.length === 0 ? (
+                <Alert severity="info">
+                  No agents found. Create agents to use in your crews.
+                </Alert>
+              ) : (
+                <List sx={{ maxHeight: '50vh', overflow: 'auto' }}>
+                  {agents
+                    .filter(agent => {
+                      if (searchQuery) {
+                        return agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                               agent.role.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      return true;
+                    })
+                    .map((agent) => (
+                      <ListItemButton
+                        key={agent.id}
+                        onClick={() => handleAgentToggle(agent)}
+                        selected={selectedAgents.some(a => a.id === agent.id)}
+                      >
+                        <ListItemIcon>
+                          <GroupIcon />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={agent.name}
+                          secondary={`${agent.role} - LLM: ${agent.llm}`}
+                        />
+                        <Tooltip title="Delete Agent">
+                          <IconButton
+                            onClick={(e) => handleDeleteAgent(e, agent.id || '')}
+                            disabled={loading}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </ListItemButton>
+                    ))}
+                </List>
+              )}
+              </TabPanel>
+            )}
+            
+            {/* Tasks Tab Panel */}
+            {(showOnlyTab === undefined || showOnlyTab === 2) && (
+              <TabPanel value={tabValue} index={2}>
+                {showOnlyTab === undefined && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    Loading tasks will add them to the current tab
+                  </Alert>
+                )}
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button
+                  variant="outlined"
+                  onClick={handleSelectAllTasks}
+                >
+                  {selectedTasks.length === tasks.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handlePlaceTasks}
+                  disabled={selectedTasks.length === 0}
+                >
+                  Place Tasks ({selectedTasks.length})
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={handleDeleteAllTasks}
+                  disabled={tasks.length === 0 || loading}
+                  startIcon={<DeleteIcon />}
+                >
+                  Delete All
+                </Button>
+
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : tasks.length === 0 ? (
+                <Alert severity="info">
+                  No tasks found. Create tasks to use in your crews.
+                </Alert>
+              ) : (
+                <List sx={{ maxHeight: '50vh', overflow: 'auto' }}>
+                  {tasks
+                    .filter(task => {
+                      if (searchQuery) {
+                        return task.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                               task.description.toLowerCase().includes(searchQuery.toLowerCase());
+                      }
+                      return true;
+                    })
+                    .map((task) => (
+                      <ListItemButton
+                        key={task.id}
+                        onClick={() => handleTaskToggle(task)}
+                        selected={selectedTasks.some(t => t.id === task.id)}
+                      >
+                        <ListItemIcon>
+                          <AssignmentIcon />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={task.name}
+                          secondary={task.description}
+                        />
+                        <Tooltip title="Delete Task">
+                          <IconButton
+                            onClick={(e) => handleDeleteTask(e, task.id)}
+                            disabled={loading}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </ListItemButton>
+                    ))}
+                </List>
+              )}
+              </TabPanel>
+            )}
+            
+            {/* Flows Tab Panel */}
+            {kasalFlowEnabled && (showOnlyTab === undefined || showOnlyTab === 3) && (
+              <TabPanel value={tabValue} index={3}>
+              {loading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : flows.length === 0 ? (
+                <Alert severity="info">
+                  No flows found. Describe a flow in Flow Builder, then save it to the catalog.
+                </Alert>
+              ) : (
+                <Grid container spacing={2}>
+                  {[...flows].sort(sortCatalog)
+                    .filter(flow => 
+                      searchQuery === '' ||
+                      flow.name.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                    .map((flow, index) => (
+                      <Grid item xs={12} sm={6} md={4} key={flow.id}>
+                        <Card elevation={0}
+                          sx={catalogCardSx}
+                          onClick={() => handleFlowSelect(flow.id.toString())}
+                          onKeyDown={(e) => handleKeyDown(e, flow.id, 'flow', index)}
+                          tabIndex={0}
+                          ref={index === 0 ? firstFlowCardRef : undefined}
+                          data-card-index={`flow-${index}`}
+                        >
+                          <CardContent>
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 1,
+                                minWidth: 0,
+                              }}
+                            >
+                              <Typography
+                                variant="h6"
+                                component="h2"
+                                title={flow.name}
+                                sx={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  lineHeight: 1.3,
+                                  mb: 0.5,
+                                  width: '100%',
+                                }}
+                              >
+                                {flow.name}
+                              </Typography>
+                            </Box>
+                            
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, minHeight: 42, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {(flow.nodes || []).filter(node => node.type === 'crewNode' || node.data?.crewName).map(node => node.data?.crewName || node.data?.label || 'Crew').join(' → ') || 'No crews yet'}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                              {new Date(flow.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              Components: {flow.nodes?.length || 0} / 
+                              Connections: {flow.edges?.length || 0}
+                            </Typography>
+                            {/* Actions at the bottom, after the facts — the
+                                flow name gets the full card width. */}
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                alignItems: 'center',
+                                gap: 0.25,
+                                mt: 1.5,
+                                pt: 1,
+                                borderTop: 0,
+                                borderColor: 'divider',
+                              }}
+                            >
+
+                                {canEdit && (
+                                  <Tooltip title="Edit on canvas">
+                                    <IconButton
+                                      size="small"
+                                      aria-label={`Edit ${flow.name} on canvas`}
+                                      onKeyDown={(event) => event.stopPropagation()}
+                                      onClick={(e) => handleEditFlow(e, flow.id.toString())}
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {canEdit && (
+                                  <PublishButton
+                                    entityType="flow"
+                                    entityId={String(flow.id)}
+                                    entityName={flow.name}
+                                    nodes={flow.nodes}
+                                    published={publishedFlowIds.has(String(flow.id))}
+                                    onChanged={(isPublished) =>
+                                      setPublished('flow', String(flow.id), isPublished)
+                                    }
+                                  />
+                                )}
+                                <Tooltip title="Export Flow">
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => handleExportFlow(e, flow)}
+                                  >
+                                    <DownloadIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                {canDelete && (
+                                  <Tooltip title="Delete Flow">
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                </Grid>
+              )}
+            </TabPanel>
+            )}
+          </Box>
+        </DialogContent>
+      </CatalogSurface>
+
+      {/* Hidden file inputs */}
+      <input 
+        type="file" 
+        ref={flowFileInputRef} 
+        style={{ display: 'none' }} 
+        accept=".json"
+        onChange={handleImportFlow}
+      />
+      <input
+        type="file"
+        ref={bulkFileInputRef}
+        style={{ display: 'none' }}
+        accept=".json"
+        onChange={handleBulkImport}
+      />
+
+      {open && optimizeCrew && <CatalogActionPane open label={`Optimize · ${optimizeCrew.name}`}
+        onClose={() => setOptimizeCrew(null)}>
+      <CrewOptimizeDialog embedded
+        open={optimizeCrew !== null}
+        crewId={optimizeCrew?.id ?? null}
+        crewName={optimizeCrew?.name}
+        onClose={() => setOptimizeCrew(null)}
+      />
+      </CatalogActionPane>}
+
+    </CatalogNavigation>
+  );
+};
+
+export default CrewFlowSelectionDialog;

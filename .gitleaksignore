@@ -1,0 +1,18 @@
+# gitleaks false positives, triaged 2026-10-26 (gitleaks 8.30.1, default rules).
+# Fingerprints only (commit:file:rule:line) - no secret values live in this file.
+# All 11 are the heuristic generic-api-key rule matching:
+#  - utils/databricks_app_keys.py: the secret-scope ENTRY NAME, not a value;
+#  - test fixtures: model names, placeholder keys (sk-..., dapiT... - not a real
+#    dapi+32-hex PAT) and stand-in ciphertexts ('orphaned', 'enc').
+# Add a fingerprint here only after confirming the match is not a credential.
+566420e24db05a484123f6ccd56c41bd1d9a0500:src/backend/src/utils/databricks_app_keys.py:generic-api-key:24
+4c6958c20c1cc30c85cfc7834eecafd71a0ee42d:src/backend/tests/unit/schemas/test_api_key.py:generic-api-key:121
+4c6958c20c1cc30c85cfc7834eecafd71a0ee42d:src/backend/tests/unit/schemas/test_api_key.py:generic-api-key:134
+4c6958c20c1cc30c85cfc7834eecafd71a0ee42d:src/backend/tests/unit/schemas/test_api_key.py:generic-api-key:152
+4c6958c20c1cc30c85cfc7834eecafd71a0ee42d:src/backend/tests/unit/schemas/test_databricks_secret.py:generic-api-key:162
+4c6958c20c1cc30c85cfc7834eecafd71a0ee42d:src/backend/tests/unit/schemas/test_databricks_secret.py:generic-api-key:480
+74a855b3a9ca0d5131cba2e1fa59a1224a0ae993:src/backend/tests/unit/schemas/test_model_config_schema.py:generic-api-key:718
+74a855b3a9ca0d5131cba2e1fa59a1224a0ae993:src/backend/tests/unit/services/converters/formats/uc_metrics/test_authentication_token_validation.py:generic-api-key:255
+74a855b3a9ca0d5131cba2e1fa59a1224a0ae993:src/backend/tests/unit/services/mcp/test_mcp_service_connection_testing.py:generic-api-key:822
+ecf2d9c9c54fb04f81846c20cc2e4d909e66d552:src/backend/tests/unit/services/test_mcp_service_unit.py:generic-api-key:678
+ecf2d9c9c54fb04f81846c20cc2e4d909e66d552:src/backend/tests/unit/services/test_mcp_service_unit.py:generic-api-key:692

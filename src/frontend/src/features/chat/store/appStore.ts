@@ -1,0 +1,296 @@
+import { create } from 'zustand';
+import { useThemeStore } from '../../../store/theme';
+import { AppConfig } from '../types/chat';
+import { updateClient } from '../api/client';
+import { fetchEnabledTools, ToolInfo } from '../api/tools';
+import { fetchWorkspaces, Workspace } from '../api/workspaces';
+import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
+import { PublicationService } from '../../../api/workflow/PublicationService';
+import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
+import { subscribeToModels, useModelsStore } from '../../../store/models';
+import { MODEL_EXPLICIT_STORAGE_KEY, resolveChatModel } from '../utils/autoModel';
+import { getTabGroupId } from '../../../shared/api/tabGroup';
+
+const CONFIG_STORAGE_KEY = 'kasal-chat-config';
+const MODEL_STORAGE_KEY = 'kasal-chat-model';
+let catalogRequestVersion = 0;
+export type Theme = 'light' | 'dark';
+
+function applyTheme(theme: Theme): void {
+  document.getElementById('kasal-chat-root')?.setAttribute('data-theme', theme);
+}
+
+function getDefaultApiUrl(): string {
+  return import.meta.env.VITE_KASAL_API_URL || '/api/v1';
+}
+
+function loadConfig(): AppConfig {
+  const defaultUrl = getDefaultApiUrl();
+  try {
+    const stored = localStorage.getItem(CONFIG_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed.apiUrl && parsed.apiUrl.startsWith('http')) {
+        parsed.apiUrl = defaultUrl;
+      }
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return { apiUrl: defaultUrl, email: '', groupId: '', accessToken: '' };
+}
+
+function saveConfig(config: AppConfig): void {
+  try {
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+  } catch {
+    // ignore
+  }
+}
+
+interface AppState {
+  config: AppConfig;
+  theme: Theme;
+  // The enabled models and Auto's availability live in the shared models store
+  // (store/models.ts: `models`, `autoModelAvailable`), so the chat, the
+  // builders and Configuration → Models all read — and refresh — one list.
+  tools: ToolInfo[];
+  /** Map of tool ID (number or string) → tool title for quick lookup */
+  toolNameMap: Record<string, string>;
+  workspaces: Workspace[];
+  /** Saved catalog shown in the rail library (replaces /list crews & /list flows) */
+  savedCrews: CatalogItem[];
+  savedFlows: CatalogItem[];
+  /**
+   * Whether loadCatalog has completed at least once.
+   *
+   * Needed because an empty `savedCrews` means two different things — "still
+   * loading" and "nothing published to chat" — and only the second may disable
+   * the composer's "Use existing" control. Disabling on the first would tell a
+   * user their published work does not exist, for as long as the fetch takes.
+   */
+  catalogLoaded: boolean;
+  catalogError: string | null;
+  /**
+   * The composer's EFFECTIVE model: the user's stored choice (localStorage),
+   * reconciled with the live model list by `syncModelSelection`.
+   */
+  selectedModel: string;
+  sidebarOpen: boolean;
+  settingsOpen: boolean;
+  // The rail's Catalog card expansion — in the store (not component state) so
+  // the collapsed rail's catalog icon can open the sidebar WITH it expanded.
+  catalogOpen: boolean;
+  /** The workspace's schedules, for the rail's Schedules section. */
+  schedules: Schedule[];
+  schedulesOpen: boolean;
+}
+
+interface AppActions {
+  setCatalogOpen: (open: boolean) => void;
+  setSchedulesOpen: (open: boolean) => void;
+  loadSchedules: () => Promise<void>;
+  init: () => void;
+  /** Reload the shared model list, then reconcile `selectedModel`. */
+  loadModels: () => Promise<void>;
+  /** Re-derive `selectedModel` from the stored choice and the live list. */
+  syncModelSelection: () => void;
+  loadTools: () => Promise<void>;
+  loadWorkspaces: () => Promise<void>;
+  loadCatalog: () => Promise<void>;
+  updateConfig: (field: keyof AppConfig, value: string) => void;
+  toggleTheme: () => void;
+  setTheme: (theme: Theme) => void;
+  setSelectedModel: (model: string) => void;
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
+  setSettingsOpen: (open: boolean) => void;
+  toggleSettings: () => void;
+}
+
+type AppStore = AppState & AppActions;
+
+export const useAppStore = create<AppStore>((set, get) => ({
+  // --- State ---
+  config: loadConfig(),
+  theme: useThemeStore.getState().isDarkMode ? 'dark' : 'light',
+  tools: [],
+  toolNameMap: {},
+  workspaces: [],
+  savedCrews: [],
+  savedFlows: [],
+  catalogLoaded: false,
+  catalogError: null,
+  selectedModel: (() => {
+    try {
+      return localStorage.getItem(MODEL_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  })(),
+  sidebarOpen: false,
+  settingsOpen: false,
+  catalogOpen: false,
+  schedules: [],
+  schedulesOpen: false,
+
+  // --- Actions ---
+  init: () => {
+    const state = get();
+    applyTheme(state.theme);
+    updateClient(state.config);
+  },
+
+  loadModels: async () => {
+    await useModelsStore.getState().refresh();
+    get().syncModelSelection();
+  },
+
+  syncModelSelection: () => {
+    const live = useModelsStore.getState();
+    // Nothing to reconcile against until a list has loaded.
+    if (live.loadedForGroup === null) return;
+    let stored = '';
+    let explicit: boolean | null = null;
+    try {
+      stored = localStorage.getItem(MODEL_STORAGE_KEY) || '';
+      const flag = localStorage.getItem(MODEL_EXPLICIT_STORAGE_KEY);
+      explicit = flag === null ? null : flag === '1';
+    } catch { /* */ }
+    const key = resolveChatModel({
+      stored,
+      explicit,
+      models: live.models,
+      autoAvailable: live.autoModelAvailable,
+      serverDefault: live.defaultModel,
+    });
+    if (key !== get().selectedModel) set({ selectedModel: key });
+    // Persist only a default the old selector would also have stored; Auto,
+    // a user's own pick and a fallback for a disabled pick are not stored.
+    if (key && !stored && !live.autoModelAvailable) {
+      try {
+        localStorage.setItem(MODEL_STORAGE_KEY, key);
+      } catch { /* */ }
+    }
+  },
+
+  loadTools: async () => {
+    try {
+      const tools = await fetchEnabledTools();
+      const nameMap: Record<string, string> = {};
+      tools.forEach((t) => {
+        nameMap[String(t.id)] = t.title;
+        nameMap[t.title] = t.title; // identity mapping for tools already by name
+      });
+      set({ tools, toolNameMap: nameMap });
+    } catch {
+      // Tools endpoint may not be available
+    }
+  },
+
+  loadWorkspaces: async () => {
+    try {
+      const state = get();
+      if (!state.config.email) return;
+      const ws = await fetchWorkspaces(state.config.email);
+      set({ workspaces: ws });
+      // Repair old derived personal IDs and workspaces no longer accessible.
+      if (ws.length > 0 && !ws.some(workspace => workspace.id === state.config.groupId)) {
+        const updated = { ...state.config, groupId: ws[0].id };
+        saveConfig(updated);
+        updateClient(updated);
+        set({ config: updated });
+      }
+    } catch {
+      // Workspaces endpoint may not be available
+    }
+  },
+
+  loadCatalog: async () => {
+    const version = ++catalogRequestVersion;
+    const groupId = getTabGroupId() || get().config.groupId;
+    // Clear the previous teamspace's data while checking what Chat can reach.
+    set({ savedCrews: [], savedFlows: [], catalogLoaded: false, catalogError: null });
+    const [crews, flows, chatPublished] = await Promise.all([
+      listSavedCrews().catch(() => [] as CatalogItem[]),
+      listSavedFlows().catch(() => [] as CatalogItem[]),
+      PublicationService.listChatPublished().catch(() => null),
+    ]);
+    if (version !== catalogRequestVersion || groupId !== (getTabGroupId() || get().config.groupId)) return;
+    // Publication is required for Chat visibility. A failed lookup must never
+    // turn the saved builder catalog into the Chat catalog.
+    if (chatPublished === null) {
+      set({ savedCrews: [], savedFlows: [], catalogLoaded: true, catalogError: 'The published catalog could not be loaded.' });
+      return;
+    }
+    const published = new Set(chatPublished);
+    const visible = (items: CatalogItem[]) => items.filter(item => published.has(String(item.id)));
+    set({ savedCrews: visible(crews), savedFlows: visible(flows), catalogLoaded: true, catalogError: null });
+  },
+
+  updateConfig: (field, value) => {
+    set((state) => {
+      const updated = { ...state.config, [field]: value };
+      saveConfig(updated);
+      updateClient(updated);
+      return { config: updated };
+    });
+  },
+
+  toggleTheme: () => { void useThemeStore.getState().toggleTheme(); },
+
+  setTheme: (theme: Theme) => {
+    void useThemeStore.getState().changeTheme(theme);
+  },
+
+  setSelectedModel: (model) => {
+    set({ selectedModel: model });
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, model);
+      // The user chose (a model or Auto): keep it across loads.
+      localStorage.setItem(MODEL_EXPLICIT_STORAGE_KEY, '1');
+    } catch { /* */ }
+  },
+
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setCatalogOpen: (open) => set({ catalogOpen: open }),
+  setSchedulesOpen: (open) => set({ schedulesOpen: open }),
+
+  loadSchedules: async () => {
+    // Best-effort like loadCatalog: a failed read leaves the section as it
+    // was rather than emptying it under the user.
+    try {
+      const schedules = await ScheduleService.listSchedules();
+      set({ schedules });
+    } catch {
+      /* endpoint unavailable — keep whatever is shown */
+    }
+  },
+  toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
+}));
+
+// Chat's CSS tokens mirror the shared appearance, including changes made while
+// Chat is unmounted. Both toggles persist through the same ThemeService.
+useThemeStore.subscribe((state) => {
+  const theme: Theme = state.isDarkMode ? 'dark' : 'light';
+  applyTheme(theme);
+  if (useAppStore.getState().theme !== theme) useAppStore.setState({ theme });
+});
+
+// The composer follows the live model list: when an admin disables the chosen
+// model, turns the decision model on or off, or the workspace changes, the
+// selection is reconciled without a reload (see resolveChatModel).
+const unsubscribeModels = subscribeToModels((live, previous) => {
+  if (
+    live.models !== previous.models
+    || live.autoModelAvailable !== previous.autoModelAvailable
+    || live.defaultModel !== previous.defaultModel
+    || live.loadedForGroup !== previous.loadedForGroup
+  ) {
+    useAppStore.getState().syncModelSelection();
+  }
+});
+if (import.meta.hot) import.meta.hot.dispose(unsubscribeModels);

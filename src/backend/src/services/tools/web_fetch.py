@@ -1,0 +1,373 @@
+"""
+Shared HTTP + HTML helpers for the web tools.
+
+Extracted from what used to be one 514-line ``bundled.py`` in the engine
+library: a JSON POST, a guarded GET, and a stdlib HTML-to-text extractor, used
+by both the search and scrape tools.
+"""
+
+import datetime
+import http.client
+import ipaddress
+import json
+import logging
+import socket
+import ssl
+import urllib.error
+import urllib.parse
+import urllib.request
+from html.parser import HTMLParser
+from typing import IO, Any, TypedDict
+
+logger = logging.getLogger(__name__)
+
+
+# --------------------------- HTTP helpers ---------------------------
+
+
+def _http_json(
+    url: str, payload: dict[str, Any], headers: dict[str, str], timeout: int = 10
+) -> dict[str, Any]:
+    """POST JSON and parse the JSON reply, through the same guarded opener as
+    ``_safe_fetch``: http(s) only, no address that is not globally routable on
+    any hop, and (unless an egress proxy carries it) the connection goes to the
+    address that was checked.
+    """
+    _assert_http_scheme(url)  # the transport checks the address, per hop
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"content-type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with _open(request, timeout) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"request to {url} failed: {e}\n{detail}") from e
+    results = json.loads(body)
+    if not results:
+        raise ValueError(f"Empty response from {url}")
+    return dict(results)
+
+
+#: Redirect hops followed before giving up. urllib's own default is 10.
+_MAX_REDIRECTS = 5
+#: The only request headers kept when a redirect changes the origin: content
+#: negotiation and connection handling, none of which carries a credential.
+#: Every other header (Authorization, Cookie, an API key, any header a tool
+#: config set) is dropped, whatever its name. Lower-case: urllib re-cases
+#: header names, so they are compared case-insensitively.
+_CROSS_ORIGIN_REQUEST_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "connection",
+        "referer",
+        "upgrade-insecure-requests",
+        "user-agent",
+    }
+)
+
+
+def _assert_http_scheme(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
+
+
+def _assert_public_target(url: str) -> str:
+    """Refuse non-HTTP schemes and hosts that resolve to an address that is
+    not globally routable (private, loopback, link-local, shared, reserved)
+    or is multicast, and return the address that passed.
+
+    Applied to the first URL AND to every redirect hop — a public URL that
+    302s to ``http://127.0.0.1/…`` used to be followed without a second look
+    (audit F09). The connection is then made to the returned address, never
+    to a second resolution: a name that answered public here and private a
+    moment later reached the private address (R2-08).
+    """
+    _assert_http_scheme(url)
+    host = urllib.parse.urlparse(url).hostname or ""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise ValueError(f"Cannot resolve host {host!r}: {e}") from e
+    if not infos:
+        raise ValueError(f"Cannot resolve host {host!r}")
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        if (
+            not address.is_global
+            or address.is_multicast
+            or address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+        ):
+            raise ValueError(f"Refusing to fetch private/internal address for {host!r}")
+    return str(infos[0][4][0])
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """Connects to the address that was validated, not to a fresh lookup."""
+
+    def __init__(self, *args: Any, pinned: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._pinned = pinned
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection(
+            (self._pinned, self.port),
+            self.timeout,
+            self.source_address,  # type: ignore[attr-defined]  # set by HTTPConnection.__init__, missing from typeshed
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """As above; TLS still verifies the certificate against the HOST NAME."""
+
+    def __init__(self, *args: Any, pinned: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._pinned = pinned
+
+    def connect(self) -> None:
+        sock = socket.create_connection(
+            (self._pinned, self.port),
+            self.timeout,
+            self.source_address,  # type: ignore[attr-defined]  # set by HTTPConnection.__init__, missing from typeshed
+        )
+        ctx = self._context  # type: ignore[attr-defined]  # private HTTPSConnection attr
+        self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
+
+
+def _through_proxy(req: urllib.request.Request) -> bool:
+    """True once ``ProxyHandler`` has routed ``req`` to an egress proxy: a
+    CONNECT tunnel for https, an absolute-URL request for http."""
+    return bool(getattr(req, "_tunnel_host", None)) or req.has_proxy()
+
+
+class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
+    """The opener's transport: every request — first URL and every redirect
+    hop, which the redirect handler re-issues through here — is validated and
+    then connected to exactly the address that passed.
+
+    Through an egress proxy the proxy makes the connection, so the target is
+    validated but cannot be pinned."""
+
+    def __init__(self) -> None:
+        urllib.request.HTTPHandler.__init__(self)
+        urllib.request.HTTPSHandler.__init__(self, context=ssl.create_default_context())
+
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        pinned = _assert_public_target(req.full_url)
+        if _through_proxy(req):
+            return self.do_open(http.client.HTTPConnection, req)
+        return self.do_open(
+            _PinnedHTTPConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
+            req,
+            pinned=pinned,
+        )
+
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        pinned = _assert_public_target(req.full_url)
+        context = self._context  # type: ignore[attr-defined]  # private HTTPSHandler attr
+        if _through_proxy(req):
+            return self.do_open(http.client.HTTPSConnection, req, context=context)
+        return self.do_open(
+            _PinnedHTTPSConnection,  # type: ignore[arg-type]  # typeshed's protocol lacks 'pinned'
+            req,
+            pinned=pinned,
+            context=context,
+        )
+
+
+def _origin(url: str) -> tuple[str, str]:
+    parts = urllib.parse.urlsplit(url)
+    return (parts.scheme, parts.netloc)
+
+
+class _SafeRedirects(urllib.request.HTTPRedirectHandler):
+    """Every hop is held to the same rule as the first URL, the hop count is
+    capped, and credentials do not travel to a different origin."""
+
+    max_redirections = _MAX_REDIRECTS
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        try:
+            _assert_public_target(target)
+        except ValueError as refused:
+            raise urllib.error.HTTPError(
+                target, code, f"redirect refused: {refused}", headers, fp
+            ) from refused
+        new = super().redirect_request(req, fp, code, msg, headers, target)
+        if new is not None and _origin(target) != _origin(req.full_url):
+            for header in list(new.headers):
+                if header.lower() not in _CROSS_ORIGIN_REQUEST_HEADERS:
+                    new.remove_header(header)
+        return new
+
+
+def _open(request: urllib.request.Request, timeout: int) -> http.client.HTTPResponse:
+    """Open through the pinned, redirect-checking opener. The one seam tests stub.
+
+    Built by hand rather than with ``build_opener``: the default set includes
+    file:, ftp: and data: handlers, and a redirect to ``file:///etc/passwd``
+    must have nowhere to go. An HTTP(S)_PROXY in the environment (NO_PROXY
+    honoured) is used for http(s), as urllib's default opener would."""
+    opener = urllib.request.OpenerDirector()
+    handlers: list[urllib.request.BaseHandler] = [
+        _PinnedHandler(),
+        _SafeRedirects(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ]
+    proxies = {
+        scheme: proxy
+        for scheme, proxy in urllib.request.getproxies_environment().items()
+        if scheme in ("http", "https")
+    }
+    if proxies:
+        handlers.append(urllib.request.ProxyHandler(proxies))
+    for handler in handlers:
+        opener.add_handler(handler)
+    response: http.client.HTTPResponse = opener.open(request, timeout=timeout)
+    return response
+
+
+def _safe_fetch(
+    url: str,
+    headers: dict[str, str],
+    timeout: int = 15,
+    max_bytes: int | None = None,
+) -> str:
+    """Fetch a URL, refusing non-HTTP schemes and non-public hosts.
+
+    ``max_bytes`` bounds how much of the response body is READ. Without it a
+    multi-megabyte page is pulled into memory in full and only trimmed later,
+    which pays the download and decode cost regardless — and on a hostile or
+    misconfigured URL there is no upper bound at all. None keeps the previous
+    unbounded behaviour for callers that have their own limit.
+    """
+    _assert_http_scheme(url)  # the transport checks the address, per hop
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with _open(request, timeout) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            # read(n) caps the transfer itself. One extra byte is requested so the
+            # caller can tell "exactly at the limit" from "truncated".
+            raw = response.read() if max_bytes is None else response.read(max_bytes + 1)
+            return raw.decode(charset, errors="replace")
+    except urllib.error.HTTPError as e:
+        # urllib's message is just "HTTP Error 404: Not Found" — no URL. The
+        # model receives this as the tool result and needs to know WHICH source
+        # is dead to pick another. Redirect loops arrive as HTTPError too.
+        raise RuntimeError(f"HTTP {e.code} fetching {url}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Could not reach {url}: {e.reason}") from e
+
+
+class _TextExtractor(HTMLParser):
+    _SKIP = {"script", "style", "noscript", "template"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag in self._SKIP:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth and data.strip():
+            self._chunks.append(data)
+
+    def text(self) -> str:
+        return " ".join(self._chunks)
+
+
+# --------------------------- SerperDevTool ---------------------------
+
+
+class KnowledgeGraph(TypedDict, total=False):
+    title: str
+    type: str
+    website: str
+    imageUrl: str
+    description: str
+    descriptionSource: str
+    descriptionLink: str
+    attributes: dict[str, Any]
+
+
+class Sitelink(TypedDict):
+    title: str
+    link: str
+
+
+class OrganicResult(TypedDict, total=False):
+    title: str
+    link: str
+    snippet: str
+    position: int | None
+    sitelinks: list[Sitelink]
+
+
+class PeopleAlsoAskResult(TypedDict):
+    question: str
+    snippet: str
+    title: str
+    link: str
+
+
+class RelatedSearchResult(TypedDict):
+    query: str
+
+
+class NewsResult(TypedDict):
+    title: str
+    link: str
+    snippet: str
+    date: str
+    source: str
+    imageUrl: str
+
+
+class SearchParameters(TypedDict, total=False):
+    q: str
+    type: str
+
+
+class FormattedResults(TypedDict, total=False):
+    searchParameters: SearchParameters
+    knowledgeGraph: KnowledgeGraph
+    organic: list[OrganicResult]
+    peopleAlsoAsk: list[PeopleAlsoAskResult]
+    relatedSearches: list[RelatedSearchResult]
+    news: list[NewsResult]
+    credits: int
+
+
+def _save_results_to_file(content: str) -> None:
+    filename = (
+        f"search_results_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+    )
+    with open(filename, "w") as file:
+        file.write(content)
+    logger.info("Results saved to %s", filename)

@@ -1,0 +1,169 @@
+"""
+Simple multi-group models for basic group-based isolation.
+
+This foundation can be incrementally enhanced with Unity Catalog and SCIM integration.
+"""
+
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.db.base import Base
+
+
+def generate_uuid() -> str:
+    return str(uuid4())
+
+
+# Simple enums for group management
+from enum import Enum  # noqa: E402 - import follows module initialization
+
+
+class GroupStatus(str, Enum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    ARCHIVED = "archived"
+
+
+class GroupUserRole(str, Enum):
+    ADMIN = "admin"  # Full control within group
+    EDITOR = "editor"  # Can build and modify workflows
+    OPERATOR = "operator"  # Can execute workflows and monitor
+
+
+class GroupUserStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    SUSPENDED = "suspended"
+
+
+class Group(Base):
+    """
+    Simple group model for basic multi-group isolation.
+
+    Each group represents an organization identified by email domain.
+    Groups are automatically created from user email domains.
+    """
+
+    __tablename__ = "groups"
+    __table_args__ = {"extend_existing": True}
+
+    # Primary identification
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)  # e.g., "acme_corp"
+    name: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # e.g., "Acme Corporation"
+
+    # Status and metadata
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="ACTIVE")
+    description: Mapped[str] = mapped_column(String(500), nullable=True)
+
+    # Auto-creation tracking
+    auto_created: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Was this group auto-created?
+    created_by_email: Mapped[str] = mapped_column(
+        String(255), nullable=True
+    )  # Email of first user
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    group_users = relationship(
+        "GroupUser", back_populates="group", cascade="all, delete-orphan"
+    )
+
+    @classmethod
+    def generate_group_id(cls, group_name: str) -> str:
+        """
+        Generate unique group ID from group name.
+
+        Examples:
+        - "Engineering Team" -> engineering_team_<uuid>
+        - "Sales" -> sales_<uuid>
+        """
+        # Clean group name for ID use
+        name_part = group_name.replace(" ", "_").replace("-", "_").lower()
+        # Remove special characters
+        name_part = "".join(c for c in name_part if c.isalnum() or c == "_")
+
+        # Add short UUID to ensure uniqueness
+        short_uuid = str(uuid4())[:8]
+        return f"{name_part}_{short_uuid}"
+
+
+class GroupUser(Base):
+    """
+    Simple group user membership model.
+
+    Links existing users to groups with role-based access control.
+    """
+
+    __tablename__ = "group_users"
+
+    id: Mapped[str] = mapped_column(
+        String(100), primary_key=True, default=generate_uuid
+    )
+    group_id: Mapped[str] = mapped_column(
+        String(100), ForeignKey("groups.id"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.id"), nullable=False
+    )
+
+    # Role and status within group
+    role: Mapped[str] = mapped_column(String(50), nullable=False, default="USER")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="ACTIVE")
+
+    # Per-surface capability OVERRIDES. NULL means "derived from the role"
+    # (operator -> no builders, editor/admin -> builders); an explicit True or
+    # False set from the Access screen wins over the role. Two named booleans
+    # rather than a JSON blob: the set of gated surfaces is tiny and stable,
+    # and named columns keep the override auditable in plain SQL.
+    allow_agent_builder: Mapped[bool | None] = mapped_column(nullable=True)
+    allow_flow_builder: Mapped[bool | None] = mapped_column(nullable=True)
+
+    # Membership tracking
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    auto_created: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Was this membership auto-created?
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    group = relationship("Group", back_populates="group_users")
+    user = relationship("User", foreign_keys=[user_id])
+
+    # Unique constraint: one user can only have one membership per group
+    __table_args__ = ({"mysql_engine": "InnoDB", "extend_existing": True},)
+
+    def __repr__(self) -> str:
+        return f"<GroupUser(group_id='{self.group_id}', user_id='{self.user_id}', role='{self.role}')>"
+
+
+# Simplified role-based access - permissions handled by decorators in src.core.permissions
+# Role hierarchy: admin > editor > operator
+
+
+# Legacy compatibility aliases removed - migration complete

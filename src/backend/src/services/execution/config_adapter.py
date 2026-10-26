@@ -1,0 +1,309 @@
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
+
+"""
+Configuration Adapter for CrewAI engine.
+
+This module provides functionality for adapting various configuration formats
+to the format expected by the CrewAI engine.
+"""
+import logging  # noqa: E402 - import follows module initialization
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    Optional,
+)
+
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.schemas.execution import (  # noqa: E402 - import follows module initialization
+    CrewConfig,
+)
+from src.services.agent_builder.conversion_helpers import (  # noqa: E402 - import follows module initialization
+    extract_crew_yaml_data,
+)
+
+
+def get_execution_logger(config: Optional[dict] = None) -> logging.Logger:
+    """
+    Get the appropriate logger based on whether this is a flow or crew execution.
+
+    Args:
+        config: Optional execution configuration dict
+
+    Returns:
+        Flow logger if config indicates a flow execution, crew logger otherwise
+    """
+    logger_manager = LoggerManager.get_instance()
+
+    # If no config provided, default to crew logger
+    if not config:
+        return logger_manager.crew
+
+    # Check if this is a flow execution (has nodes, edges, and flow_config)
+    is_flow = "flow_config" in config and "nodes" in config and "edges" in config
+
+    return logger_manager.flow if is_flow else logger_manager.crew
+
+
+# Default logger for backward compatibility (will be crew logger)
+logger = LoggerManager.get_instance().crew
+
+
+def adapt_config(config: CrewConfig) -> Dict[str, Any]:
+    """
+    Adapt a CrewConfig to the engine-specific format.
+
+    Args:
+        config: Configuration in CrewConfig format
+
+    Returns:
+        Dictionary with the engine format
+    """
+    # Answer-mode behaviour (guardrails, execution caps, degrade policy, and in
+    # deep the JSON envelope + its gate). Applied HERE as well as in generation
+    # because a crew RE-RUN from the UI never passes through generation — it
+    # posts a previously generated config straight to the executions API, and
+    # without this it would run ungated while the identical auto-executed run
+    # was gated. The pass is idempotent, so covering both is a no-op the second
+    # time. Canvas crews carry no chat_mode_type and are untouched.
+    chat_mode_type = getattr(config, "chat_mode_type", None)
+    if chat_mode_type:
+        from src.services.generation.crew import apply_answer_mode
+
+        apply_answer_mode(
+            chat_mode_type,
+            config.agents_yaml or {},
+            config.tasks_yaml or {},
+            config.tasks_yaml or {},
+        )
+
+    # Extract agents and tasks from YAML
+    agents_data, tasks_data = extract_crew_yaml_data(
+        config.agents_yaml, config.tasks_yaml
+    )
+
+    # Determine tools to use based on config
+    tools = []
+    if config.inputs and "tools" in config.inputs:
+        tools = config.inputs["tools"]
+
+    # NOTE: config.planning / inputs['planning_llm'] are deliberately NOT forwarded.
+    # The CrewAI-style prose planner was removed — the engine has no planner, so the
+    # fields are legacy request/DB compatibility only and are ignored here. Existing
+    # crews saved with planning=true simply run without it.
+
+    # Log reasoning settings
+    if config.reasoning:
+        logger.info("Reasoning is enabled for execution")
+    else:
+        logger.debug("Reasoning is disabled for execution")
+
+    # Create engine configuration
+    engine_config: Dict[str, Any] = {
+        "agents": agents_data,
+        "tasks": tasks_data,
+        "tools": tools,
+        "crew": {
+            "process": (
+                config.inputs.get("process", "sequential")
+                if config.inputs
+                else "sequential"
+            ),
+            "verbose": True,
+            "memory": True,
+            "reasoning": config.reasoning,
+        },
+        "model": config.model or DEFAULT_ENGINE_MODEL,
+        "max_rpm": config.inputs.get("max_rpm", 10) if config.inputs else 10,
+        # Read by CrewConfigBuilder to resolve the run-level wall clock from the
+        # same budget profile the per-agent caps above came from.
+        "chat_mode_type": chat_mode_type,
+        # Include the original frontend configuration for logging
+        "original_config": {
+            "model": config.model,
+            "llm_provider": config.llm_provider,
+            "agents_yaml": config.agents_yaml,
+            "tasks_yaml": config.tasks_yaml,
+            "inputs": config.inputs,
+            "reasoning": config.reasoning,
+        },
+    }
+
+    # If reasoning_llm is specified in inputs, add it to the crew config
+    if config.inputs and "reasoning_llm" in config.inputs:
+        reasoning_llm = config.inputs["reasoning_llm"]
+        engine_config["crew"]["reasoning_llm"] = reasoning_llm
+        logger.info(f"Using specific reasoning LLM: {reasoning_llm}")
+    elif config.reasoning:
+        # Log that we're using the default model for reasoning
+        logger.info(f"Using default model for reasoning: {engine_config['model']}")
+
+    # If memory_backend_config is specified in inputs, preserve it
+    if config.inputs and "memory_backend_config" in config.inputs:
+        engine_config["memory_backend_config"] = config.inputs["memory_backend_config"]
+        logger.info(
+            f"Preserving memory backend configuration, keys: {sorted(config.inputs['memory_backend_config'] or {})}"
+        )
+
+    # Handle hierarchical process configuration
+    if config.inputs and config.inputs.get("process") == "hierarchical":
+        logger.info("Hierarchical process detected in configuration")
+
+        # Check for manager_llm configuration
+        if "manager_llm" in config.inputs:
+            engine_config["crew"]["manager_llm"] = config.inputs["manager_llm"]
+            logger.info(
+                f"Using specific manager LLM for hierarchical process: {config.inputs['manager_llm']}"
+            )
+
+        # Check for manager_agent configuration
+        if "manager_agent" in config.inputs:
+            engine_config["crew"]["manager_agent"] = config.inputs["manager_agent"]
+            logger.info(
+                "Using custom manager agent configuration for hierarchical process"
+            )
+
+    # Memory scoping (chat). These control which memories a run can recall and
+    # MUST be carried through to the engine config — the unified memory reads
+    # them from CrewMemoryService.config. Without this they are silently
+    # dropped here and the workspace/session toggle becomes a no-op.
+    #   - session_id: stable chat-session id; scopes session-only recall.
+    #   - memory_workspace_scope: True (default) = workspace-wide recall,
+    #     False = recall confined to this chat session.
+    session_id = getattr(config, "session_id", None)
+    if session_id:
+        engine_config["session_id"] = session_id
+    workspace_scope = getattr(config, "memory_workspace_scope", None)
+    if workspace_scope is not None:
+        engine_config["memory_workspace_scope"] = workspace_scope
+
+    effort = config.inputs.get("resolved_effort")
+    if effort:
+        engine_config["run_max_seconds"] = effort["run_max_seconds"]
+        engine_config["execution_effort"] = config.inputs["execution_effort"]
+
+    return engine_config
+
+
+def normalize_config(execution_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize execution configuration to the standard format.
+
+    Args:
+        execution_config: Configuration dictionary or CrewConfig object
+
+    Returns:
+        Normalized configuration dictionary
+    """
+    # Check if this is a CrewConfig object
+    if isinstance(execution_config, CrewConfig):
+        return adapt_config(execution_config)
+
+    # Otherwise, assume it's already a dictionary in the right format
+    return execution_config
+
+
+def normalize_flow_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize a flow configuration to the expected format.
+
+    Handles two types of configurations:
+    1. Traditional: Pre-defined agents, tasks, and flow structure
+    2. Dynamic: nodes/edges/flow_config from visual flow canvas
+
+    Args:
+        config: Raw flow configuration dictionary
+
+    Returns:
+        Normalized flow configuration dictionary (or passthrough for dynamic flows)
+    """
+    # Use dynamic logger based on config type (flow vs crew)
+    logger = get_execution_logger(config)
+
+    # Check if this is a dynamic flow configuration (nodes/edges/flow_config)
+    # Dynamic flows are built from the visual flow canvas and don't have pre-defined agents/tasks
+    is_dynamic_flow = (
+        "flow_config" in config and "nodes" in config and "edges" in config
+    )
+
+    if is_dynamic_flow:
+        logger.info(
+            "[normalize_flow_config] Detected dynamic flow config with nodes/edges/flow_config"
+        )
+        logger.info(
+            f"[normalize_flow_config] Config has {len(config.get('nodes', []))} nodes and {len(config.get('edges', []))} edges"
+        )
+        logger.info(
+            f"[normalize_flow_config] flow_config keys: {list(config.get('flow_config', {}).keys())}"
+        )
+
+        # For dynamic flows, we pass the config through without normalization
+        # The FlowBuilder will handle building the flow from nodes/edges/flow_config directly
+        # We just need to ensure the structure is preserved
+        return config
+
+    # Traditional flow config with pre-defined agents, tasks, and flow
+    logger.info(
+        "[normalize_flow_config] Processing traditional flow config with agents/tasks/flow"
+    )
+    normalized: Dict[str, Any] = {}
+
+    # Validate required sections for traditional flows
+    required_sections = ["agents", "tasks", "flow"]
+    for section in required_sections:
+        if section not in config:
+            raise ValueError(
+                f"Missing required section '{section}' in flow configuration"
+            )
+
+    # Normalize agents section
+    normalized["agents"] = []
+    for agent in config.get("agents", []):
+        normalized_agent = {
+            "name": agent.get("name"),
+            "role": agent.get("role"),
+            "goal": agent.get("goal"),
+            "backstory": agent.get("backstory"),
+            "tools": agent.get("tools", []),
+            "tool_configs": agent.get("tool_configs", {}),  # Include tool_configs
+            "allow_delegation": agent.get("allow_delegation", False),
+            "verbose": agent.get("verbose", True),
+            "memory": agent.get("memory", {}),
+            "llm_config": agent.get("llm_config", {}),
+        }
+        normalized["agents"].append(normalized_agent)
+
+    # Normalize tasks section
+    normalized["tasks"] = []
+    for task in config.get("tasks", []):
+        normalized_task = {
+            "name": task.get("name"),
+            "description": task.get("description"),
+            "agent": task.get("agent"),
+            "expected_output": task.get("expected_output"),
+            "tools": task.get("tools", []),
+            "tool_configs": task.get("tool_configs", {}),  # Include tool_configs
+            "context": task.get("context", {}),
+            "async_execution": task.get("async_execution", False),
+            "markdown": task.get("markdown", False),
+        }
+        normalized["tasks"].append(normalized_task)
+
+    # Normalize flow section
+    normalized["flow"] = {
+        "type": config["flow"].get("type", "sequential"),
+        "tasks": config["flow"].get("tasks", []),
+        "parallel_tasks": config["flow"].get("parallel_tasks", []),
+        "conditional_tasks": config["flow"].get("conditional_tasks", {}),
+        "error_handling": config["flow"].get("error_handling", {}),
+        "max_iterations": config["flow"].get("max_iterations", 10),
+        "timeout": config["flow"].get("timeout", 3600),
+    }
+
+    # Copy any additional configuration
+    for key, value in config.items():
+        if key not in ["agents", "tasks", "flow"]:
+            normalized[key] = value
+
+    return normalized

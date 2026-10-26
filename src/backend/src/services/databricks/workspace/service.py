@@ -1,0 +1,775 @@
+import logging
+import os
+from typing import Any, Dict, Optional, Tuple
+
+import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
+from src.core.exceptions import ForbiddenError, KasalError
+from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.schemas.databricks_config import (
+    DatabricksConfigCreate,
+    DatabricksConfigResponse,
+)
+from src.services.databricks.workspace.host_guard import (
+    assert_host_is_configured_workspace,
+    validate_stored_workspace_url,
+)
+from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+logger = logging.getLogger(__name__)
+
+
+class DatabricksService:
+    """
+    Service for Databricks integration operations.
+    """
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        group_id: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
+        """
+        Initialize the service with session.
+
+        Args:
+            session: Database session from FastAPI DI (from core.dependencies)
+            group_id: Group ID for multi-tenant filtering
+            user_token: Optional user access token for OBO auth. When present, the
+                workspace/warehouse/catalog listing calls authenticate on-behalf-of
+                the user (matching how other OBO endpoints work) instead of falling
+                back to PAT/SPN only. Sourced from GroupContext.access_token
+                (the X-Forwarded / X-Auth-Request forwarded token).
+        """
+        self.session = session
+        self.repository = DatabricksConfigRepository(session)
+        self.group_id = group_id
+        self._user_token = user_token
+
+    @staticmethod
+    def _apply_ai_gateway_env(enabled: bool) -> None:
+        """
+        Mirror the DatabricksConfig.ai_gateway_enabled flag into the process
+        environment so DatabricksURLUtils routes LLM/embedding traffic correctly,
+        and invalidate the cached Databricks auth config so the change takes
+        effect without a restart.
+
+        Args:
+            enabled: Whether the AI Gateway should be used.
+        """
+        from src.utils.databricks_url_utils import DatabricksURLUtils
+
+        os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR] = (
+            "true" if enabled else "false"
+        )
+        logger.info(
+            f"AI Gateway routing {'enabled' if enabled else 'disabled'} "
+            f"(env {DatabricksURLUtils.AI_GATEWAY_ENV_VAR}={os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR]})"
+        )
+        # Invalidate cached auth config so workspace host + gateway flag reload.
+        try:
+            from src.utils.databricks_auth import reset_auth_config_cache
+
+            reset_auth_config_cache()
+        except Exception as e:
+            logger.debug(f"Could not reset Databricks auth config cache: {e}")
+
+    async def set_ai_gateway_enabled(self, enabled: bool) -> bool:
+        """Persist just the AI Gateway routing flag on the active config.
+
+        Immediate toggle (no full config payload needed), mirroring the MLflow
+        status endpoint. Also propagates the flag to the runtime so subsequent
+        LLM / embedding calls route correctly without a restart. Returns False
+        when there is no active Databricks config to attach the flag to.
+        """
+        ok = await self.repository.set_ai_gateway_enabled(
+            enabled, group_id=self.group_id
+        )
+        if ok:
+            self._apply_ai_gateway_env(enabled)
+        return ok
+
+    async def set_databricks_config(
+        self, config_in: DatabricksConfigCreate, created_by_email: Optional[str] = None
+    ) -> Dict:
+        """
+        Set Databricks configuration.
+
+        Args:
+            config_in: Configuration data
+            created_by_email: Email of the user creating the config
+
+        Returns:
+            Configuration response with success message
+        """
+        # The listing calls send the caller's credential to this URL: only the
+        # workspace the credentials belong to may be stored (audit N1). Raised
+        # before the try below so the 403 is not rewrapped as a 500.
+        workspace_url = await validate_stored_workspace_url(config_in.workspace_url)
+        try:
+            # Create configuration data dictionary
+            config_data = {
+                "workspace_url": workspace_url,
+                "warehouse_id": config_in.warehouse_id,
+                "catalog": config_in.catalog,
+                "schema": config_in.db_schema,
+                "is_active": True,
+                "is_enabled": config_in.enabled,
+                "ai_gateway_enabled": getattr(config_in, "ai_gateway_enabled", False),
+                "mlflow_enabled": getattr(config_in, "mlflow_enabled", False),
+                "mlflow_experiment_name": getattr(
+                    config_in, "mlflow_experiment_name", "kasal-crew-execution-traces"
+                ),
+                "evaluation_enabled": getattr(config_in, "evaluation_enabled", False),
+                "evaluation_judge_model": getattr(
+                    config_in, "evaluation_judge_model", None
+                ),
+                "group_id": self.group_id,
+                "created_by_email": created_by_email,
+                # Volume configuration fields
+                "volume_enabled": config_in.volume_enabled,
+                "volume_path": config_in.volume_path,
+                "volume_file_format": config_in.volume_file_format,
+                "volume_create_date_dirs": config_in.volume_create_date_dirs,
+                # Knowledge source volume configuration
+                "knowledge_volume_enabled": config_in.knowledge_volume_enabled,
+                "knowledge_volume_path": config_in.knowledge_volume_path,
+                "knowledge_chunk_size": config_in.knowledge_chunk_size,
+                "knowledge_chunk_overlap": config_in.knowledge_chunk_overlap,
+            }
+
+            # Create the new configuration through repository
+            new_config = await self.repository.create_config(config_data)
+
+            # Propagate the AI Gateway toggle to the runtime so subsequent LLM /
+            # embedding calls route correctly without a restart, and invalidate the
+            # cached Databricks auth config so the new flag/workspace reload.
+            self._apply_ai_gateway_env(
+                bool(config_data.get("ai_gateway_enabled", False))
+            )
+
+            # New catalog/schema/warehouse/experiment must reach parent-process
+            # MLflow tracing on the next dispatch, not after the memo TTL.
+            from src.services.otel_tracing.mlflow_parent_setup import (
+                invalidate_parent_mlflow_cache,
+            )
+
+            invalidate_parent_mlflow_cache()
+
+            if DatabricksAppInstallation.from_env().hosted:
+                return {
+                    "status": "success",
+                    "message": "Databricks preferences saved; installation resources remain managed by Databricks Apps",
+                    "config": await self.get_databricks_config(),
+                }
+
+            # Return the response
+            return {
+                "status": "success",
+                "message": f"Databricks configuration {'enabled' if config_in.enabled else 'disabled'} successfully",
+                "config": DatabricksConfigResponse(
+                    workspace_url=new_config.workspace_url,
+                    warehouse_id=new_config.warehouse_id,
+                    catalog=new_config.catalog,
+                    schema=new_config.schema,
+                    enabled=new_config.is_enabled,
+                    ai_gateway_enabled=(
+                        new_config.ai_gateway_enabled
+                        if hasattr(new_config, "ai_gateway_enabled")
+                        else False
+                    ),
+                    mlflow_enabled=(
+                        new_config.mlflow_enabled
+                        if hasattr(new_config, "mlflow_enabled")
+                        else False
+                    ),
+                    mlflow_experiment_name=(
+                        new_config.mlflow_experiment_name
+                        if hasattr(new_config, "mlflow_experiment_name")
+                        else "kasal-crew-execution-traces"
+                    ),
+                    evaluation_enabled=(
+                        new_config.evaluation_enabled
+                        if hasattr(new_config, "evaluation_enabled")
+                        else False
+                    ),
+                    evaluation_judge_model=(
+                        new_config.evaluation_judge_model
+                        if hasattr(new_config, "evaluation_judge_model")
+                        else None
+                    ),
+                    # Volume configuration fields
+                    volume_enabled=(
+                        new_config.volume_enabled
+                        if hasattr(new_config, "volume_enabled")
+                        else False
+                    ),
+                    volume_path=(
+                        new_config.volume_path
+                        if hasattr(new_config, "volume_path")
+                        else None
+                    ),
+                    volume_file_format=(
+                        new_config.volume_file_format
+                        if hasattr(new_config, "volume_file_format")
+                        else "json"
+                    ),
+                    volume_create_date_dirs=(
+                        new_config.volume_create_date_dirs
+                        if hasattr(new_config, "volume_create_date_dirs")
+                        else True
+                    ),
+                    # Knowledge source volume configuration
+                    knowledge_volume_enabled=(
+                        new_config.knowledge_volume_enabled
+                        if hasattr(new_config, "knowledge_volume_enabled")
+                        else False
+                    ),
+                    knowledge_volume_path=(
+                        new_config.knowledge_volume_path
+                        if hasattr(new_config, "knowledge_volume_path")
+                        else None
+                    ),
+                    knowledge_chunk_size=(
+                        new_config.knowledge_chunk_size
+                        if hasattr(new_config, "knowledge_chunk_size")
+                        else 1000
+                    ),
+                    knowledge_chunk_overlap=(
+                        new_config.knowledge_chunk_overlap
+                        if hasattr(new_config, "knowledge_chunk_overlap")
+                        else 200
+                    ),
+                ),
+            }
+        except Exception as e:
+            logger.error(f"Error setting Databricks configuration: {e}")
+            raise KasalError(detail=f"Error setting Databricks configuration: {str(e)}")
+
+    async def get_databricks_config(self) -> Optional[DatabricksConfigResponse]:
+        """
+        Get the current Databricks configuration for the group.
+
+        Returns:
+            Current Databricks configuration or None if not found
+        """
+        try:
+            config = await self.repository.get_active_config(group_id=self.group_id)
+
+            installation = DatabricksAppInstallation.from_env()
+            if installation.hosted:
+                from .app_resources import trace_namespace
+
+                namespace = await trace_namespace(installation)
+                # Existing installations without the new resource bindings keep
+                # their explicitly configured namespace and warehouse.
+                legacy = config if not installation.output_volume else None
+                catalog = namespace.catalog or (getattr(legacy, "catalog", "") or "")
+                schema = namespace.schema or (getattr(legacy, "schema", "") or "")
+                warehouse = installation.warehouse_id or (
+                    getattr(config, "warehouse_id", "") or ""
+                )
+                namespace_error = namespace.error if not (catalog and schema) else ""
+                # Connection and compute belong to the installation. Never read
+                # another team's config or persist these defaults into each team.
+                result = DatabricksConfigResponse(
+                    workspace_url=installation.host,
+                    warehouse_id=warehouse,
+                    catalog=catalog,
+                    schema=schema,
+                    enabled=True,
+                    installation_managed=True,
+                    lakebase_managed=LakebaseAppResource.from_env() is not None,
+                    default_model=installation.default_model or None,
+                    warehouse_from_resource=bool(installation.warehouse_id),
+                    resource_error=namespace_error
+                    or (
+                        None
+                        if warehouse
+                        else "Attach the sql-warehouse resource in the Databricks App installation."
+                    ),
+                )
+                if config:
+                    # Preserve optional preferences; assigned storage roots below
+                    # override legacy paths without copying them into each team.
+                    for field in (
+                        "ai_gateway_enabled",
+                        "volume_enabled",
+                        "volume_path",
+                        "volume_file_format",
+                        "volume_create_date_dirs",
+                        "knowledge_volume_enabled",
+                        "knowledge_volume_path",
+                        "knowledge_chunk_size",
+                        "knowledge_chunk_overlap",
+                    ):
+                        value = getattr(config, field, None)
+                        if value is not None:
+                            setattr(result, field, value)
+                # Storage roots belong to the installation; object paths below
+                # them remain scoped by the existing teamspace storage services.
+                if installation.output_volume:
+                    group_id = self.group_id if not namespace.error else None
+                    result.volume_enabled = bool(group_id)
+                    result.volume_path = (
+                        installation.output_path(group_id) if group_id else None
+                    )
+                return result
+
+            if not config:
+                return None
+
+            logger.debug(
+                f"Databricks config from DB: schema={config.schema}, catalog={config.catalog}"
+            )
+
+            return DatabricksConfigResponse(
+                workspace_url=config.workspace_url,
+                warehouse_id=config.warehouse_id,
+                catalog=config.catalog,
+                schema=config.schema,
+                enabled=config.is_enabled,
+                # AI Gateway configuration
+                ai_gateway_enabled=(
+                    config.ai_gateway_enabled
+                    if hasattr(config, "ai_gateway_enabled")
+                    else False
+                ),
+                # MLflow configuration
+                mlflow_enabled=(
+                    config.mlflow_enabled
+                    if hasattr(config, "mlflow_enabled")
+                    else False
+                ),
+                mlflow_experiment_name=(
+                    config.mlflow_experiment_name
+                    if hasattr(config, "mlflow_experiment_name")
+                    else "kasal-crew-execution-traces"
+                ),
+                evaluation_enabled=(
+                    config.evaluation_enabled
+                    if hasattr(config, "evaluation_enabled")
+                    else False
+                ),
+                evaluation_judge_model=(
+                    config.evaluation_judge_model
+                    if hasattr(config, "evaluation_judge_model")
+                    else None
+                ),
+                # Volume configuration fields
+                volume_enabled=(
+                    config.volume_enabled
+                    if hasattr(config, "volume_enabled")
+                    else False
+                ),
+                volume_path=(
+                    config.volume_path if hasattr(config, "volume_path") else None
+                ),
+                volume_file_format=(
+                    config.volume_file_format
+                    if hasattr(config, "volume_file_format")
+                    else "json"
+                ),
+                volume_create_date_dirs=(
+                    config.volume_create_date_dirs
+                    if hasattr(config, "volume_create_date_dirs")
+                    else True
+                ),
+                # Knowledge source volume configuration
+                knowledge_volume_enabled=(
+                    config.knowledge_volume_enabled
+                    if hasattr(config, "knowledge_volume_enabled")
+                    else False
+                ),
+                knowledge_volume_path=(
+                    config.knowledge_volume_path
+                    if hasattr(config, "knowledge_volume_path")
+                    else None
+                ),
+                knowledge_chunk_size=(
+                    config.knowledge_chunk_size
+                    if hasattr(config, "knowledge_chunk_size")
+                    else 1000
+                ),
+                knowledge_chunk_overlap=(
+                    config.knowledge_chunk_overlap
+                    if hasattr(config, "knowledge_chunk_overlap")
+                    else 200
+                ),
+            )
+        except KasalError:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting Databricks configuration: {e}")
+            raise KasalError(detail=f"Error getting Databricks configuration: {str(e)}")
+
+    async def check_personal_token_required(self) -> Dict:
+        """
+        Check if personal access token is required for Databricks.
+
+        Returns:
+            Status indicating if personal token is required
+        """
+        if DatabricksAppInstallation.from_env().hosted:
+            return {
+                "personal_token_required": False,
+                "message": "Databricks uses the app installation identity",
+            }
+        try:
+            config = await self.repository.get_active_config(group_id=self.group_id)
+
+            if not config:
+                return {
+                    "personal_token_required": False,
+                    "message": "Databricks is not configured",
+                }
+
+            # If Databricks is not enabled, no token is required
+            if not config.is_enabled:
+                return {
+                    "personal_token_required": False,
+                    "message": "Databricks integration is disabled",
+                }
+
+            # Check if all required fields are set
+            required_fields = ["warehouse_id", "catalog", "schema"]
+            for field in required_fields:
+                value = getattr(config, field)
+                if not value:
+                    return {
+                        "personal_token_required": True,
+                        "message": f"Databricks configuration is missing {field}",
+                    }
+
+            # All required fields are set, using unified authentication (OBO→PAT→SPN)
+            return {
+                "personal_token_required": False,
+                "message": "Databricks is configured with unified authentication (OBO→PAT→SPN)",
+            }
+        except Exception as e:
+            logger.error(f"Error checking personal token requirement: {e}")
+            raise KasalError(
+                detail=f"Error checking personal token requirement: {str(e)}"
+            )
+
+    async def get_workspace_auth(
+        self, host: str | None = None
+    ) -> Tuple[Dict[str, str], str]:
+        """Public entrypoint other domains use to borrow this service's auth.
+
+        Returns ``(auth_headers, workspace_url)`` from the same OBO→PAT→SPN chain
+        and host resolution the listing calls use. The skills↔UC sync
+        (``services/skills/uc_sync``) needs both to call the UC Skills + Files
+        APIs, and reaching them through the databricks service — rather than
+        re-deriving auth in the skills domain — is the ownership rule.
+        """
+        return await self._resolve_workspace_url_and_headers(host)
+
+    async def _resolve_workspace_url_and_headers(
+        self, host: str | None = None
+    ) -> Tuple[Dict[str, str], str]:
+        """Helper: returns (auth_headers, workspace_url) applying optional host override.
+
+        The headers carry the OBO token, the group's PAT or the app's SPN token,
+        each valid only on the auth context's workspace. So whatever host the
+        request would go to — the caller's ``host``, the team's stored
+        ``workspace_url`` or the installation host — must be that workspace, or
+        nothing is sent (audit C2 / N1).
+        """
+        from src.utils.databricks_auth import get_auth_context
+
+        # Pass the user token so OBO is attempted first (get_auth_context skips OBO
+        # when user_token is None). Without this the warehouse/catalog/schema
+        # dropdowns fall straight through to PAT/SPN and fail in an OBO-only
+        # deployment ("No authentication credentials available").
+        auth = await get_auth_context(user_token=self._user_token)
+        if not auth:
+            raise KasalError(detail="No authentication credentials available")
+
+        target = host or await self._stored_workspace_url() or auth.workspace_url
+        if not target:
+            raise KasalError(
+                detail="workspace_url not configured and DATABRICKS_HOST not set"
+            )
+        subject = "Workspace host override" if host else "Configured workspace URL"
+        target_host = assert_host_is_configured_workspace(
+            target, (auth.workspace_url,), subject=subject
+        )
+        return auth.get_headers(), f"https://{target_host}"
+
+    async def _stored_workspace_url(self) -> str:
+        """The team's workspace URL; the installation's inside Databricks Apps."""
+        installation = DatabricksAppInstallation.from_env()
+        if installation.hosted:
+            return str(installation.host)
+        config = await self.repository.get_active_config(group_id=self.group_id)
+        return str(config.workspace_url or "") if config else ""
+
+    async def list_warehouses(self, host: str | None = None) -> list:
+        """List SQL warehouses accessible in the workspace."""
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.0/sql/warehouses"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            logger.warning(
+                "List warehouses failed: %s %s",
+                response.status_code,
+                response.text[:500],
+            )
+            raise KasalError(
+                detail=f"Failed to list warehouses: {response.status_code}"
+            )
+
+        data = response.json()
+        return [
+            {"id": w["id"], "name": w["name"], "state": w.get("state", "")}
+            for w in data.get("warehouses", [])
+        ]
+
+    async def list_catalogs(self, host: str | None = None) -> list:
+        """List Unity Catalog catalogs accessible in the workspace."""
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.1/unity-catalog/catalogs"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+
+        if response.status_code != 200:
+            logger.warning(
+                "List catalogs failed: %s %s", response.status_code, response.text[:500]
+            )
+            raise KasalError(detail=f"Failed to list catalogs: {response.status_code}")
+
+        data = response.json()
+        return [c["name"] for c in data.get("catalogs", [])]
+
+    async def list_schemas(self, catalog: str, host: str | None = None) -> list:
+        """List Unity Catalog schemas for a given catalog."""
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.1/unity-catalog/schemas"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                url, headers=headers, params={"catalog_name": catalog}
+            )
+
+        if response.status_code != 200:
+            logger.warning(
+                "List schemas failed: %s %s", response.status_code, response.text[:500]
+            )
+            raise KasalError(detail=f"Failed to list schemas: {response.status_code}")
+
+        data = response.json()
+        return [s["name"] for s in data.get("schemas", [])]
+
+    async def list_functions(
+        self, catalog: str, schema: str, host: str | None = None
+    ) -> list:
+        """List Unity Catalog functions in a catalog.schema.
+
+        Returns ``[{"name", "comment"}]``. Used to preview which functions a
+        schema-scoped Functions MCP server (``/mcp/functions/{catalog}/{schema}``)
+        will expose — the managed server is schema-scoped, so this is for
+        visibility, not per-function selection.
+        """
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.1/unity-catalog/functions"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                url,
+                headers=headers,
+                params={"catalog_name": catalog, "schema_name": schema},
+            )
+
+        if response.status_code != 200:
+            logger.warning(
+                "List functions failed: %s %s",
+                response.status_code,
+                response.text[:500],
+            )
+            raise KasalError(detail=f"Failed to list functions: {response.status_code}")
+
+        data = response.json()
+        return [
+            {"name": f.get("name", ""), "comment": f.get("comment")}
+            for f in data.get("functions", [])
+            if f.get("name")
+        ]
+
+    async def check_databricks_connection(self) -> Dict[str, Any]:
+        """
+        Check connection to Databricks.
+
+        Returns:
+            Dictionary with connection status
+        """
+        installation = DatabricksAppInstallation.from_env()
+        if installation.hosted:
+            from .app_resources import connection_status
+
+            return await connection_status(installation)
+        config = await self.repository.get_active_config(group_id=self.group_id)
+
+        if not config:
+            return {
+                "status": "error",
+                "message": "Databricks configuration not found",
+                "connected": False,
+            }
+
+        if not config.is_enabled:
+            return {
+                "status": "disabled",
+                "message": "Databricks integration is disabled",
+                "connected": False,
+            }
+
+        # Check required fields for Databricks integration
+        # workspace_url can fall back to DATABRICKS_HOST environment variable
+        required_fields = ["warehouse_id", "catalog", "schema"]
+        missing_fields = []
+
+        for field in required_fields:
+            value = getattr(config, field, None)
+            if not value:
+                missing_fields.append(field)
+
+        if missing_fields:
+            return {
+                "status": "error",
+                "message": f"Missing required fields: {', '.join(missing_fields)}",
+                "connected": False,
+            }
+
+        # All required fields are present, now test actual connection
+        try:
+            # Prepare the workspace URL - fall back to environment variable if not in config
+            workspace_url = str(config.workspace_url or "") or os.getenv(
+                "DATABRICKS_HOST", ""
+            )
+
+            if not workspace_url:
+                return {
+                    "status": "error",
+                    "message": "workspace_url not configured and DATABRICKS_HOST environment variable not set",
+                    "connected": False,
+                }
+            if not workspace_url.startswith("https://"):
+                workspace_url = f"https://{workspace_url}"
+            if workspace_url.endswith("/"):
+                workspace_url = workspace_url[:-1]
+
+            # Try to list warehouses as a connection test
+            test_url = f"{workspace_url}/api/2.0/sql/warehouses"
+
+            # Get authentication using unified auth system
+            try:
+                from src.utils.databricks_auth import get_auth_context
+
+                # Use unified authentication system (supports OBO, OAuth, and PAT).
+                # Pass the user token so OBO is attempted (skipped when None).
+                auth = await get_auth_context(user_token=self._user_token)
+                if not auth:
+                    return {
+                        "status": "error",
+                        "message": "No authentication credentials available",
+                        "connected": False,
+                    }
+
+                headers = auth.get_headers()
+                if not headers:
+                    return {
+                        "status": "error",
+                        "message": "No authentication credentials available (PAT or OAuth)",
+                        "connected": False,
+                    }
+                headers.update(
+                    get_user_agent_header(KasalProduct.CONNECTION_TEST)
+                )  # Kasal User-Agent
+
+            except Exception as e:
+                logger.error(f"Failed to get authentication context: {e}")
+                return {
+                    "status": "error",
+                    "message": f"Authentication error: {str(e)}",
+                    "connected": False,
+                }
+
+            if not headers or not auth:
+                return {
+                    "status": "error",
+                    "message": "No authentication credentials available (PAT or OAuth)",
+                    "connected": False,
+                }
+
+            # The credential is only valid on (and only ever sent to) the auth
+            # context's workspace (audit N1).
+            try:
+                assert_host_is_configured_workspace(
+                    workspace_url,
+                    (auth.workspace_url,),
+                    subject="Configured workspace URL",
+                )
+            except ForbiddenError as e:
+                return {"status": "error", "message": e.detail, "connected": False}
+
+            # Make the actual API call to test connection
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(test_url, headers=headers)
+
+            if response.status_code == 200:
+                return {
+                    "status": "success",
+                    "message": "Successfully connected to Databricks",
+                    "connected": True,
+                    "config": {
+                        "workspace_url": workspace_url,
+                        "warehouse_id": config.warehouse_id,
+                        "catalog": config.catalog,
+                        "schema": config.schema,
+                    },
+                }
+            elif response.status_code == 401:
+                return {
+                    "status": "error",
+                    "message": "Authentication failed - invalid credentials",
+                    "connected": False,
+                }
+            elif response.status_code == 403:
+                return {
+                    "status": "error",
+                    "message": "Access forbidden - check permissions",
+                    "connected": False,
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Connection failed with status {response.status_code}: {response.text}",
+                    "connected": False,
+                }
+
+        except httpx.ConnectError:
+            return {
+                "status": "error",
+                "message": f"Failed to connect to {workspace_url} - check workspace URL",
+                "connected": False,
+            }
+        except httpx.TimeoutException:
+            return {
+                "status": "error",
+                "message": "Connection timeout - check network and workspace URL",
+                "connected": False,
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Connection test failed: {str(e)}",
+                "connected": False,
+            }

@@ -1,0 +1,123 @@
+/**
+ * Types for crew export and deployment functionality
+ */
+
+/**
+ * The only export format. `python_project` and `databricks_notebook` were
+ * removed: both generated projects that ran on `pip install crewai`, a second
+ * engine kept in agreement with Kasal's by hand. The backend enum matches, so
+ * requesting either now fails validation with a 422.
+ */
+export enum ExportFormat {
+  DATABRICKS_APP = 'databricks_app'
+}
+
+export enum DeploymentTarget {
+  DATABRICKS_MODEL_SERVING = 'databricks_model_serving'
+}
+
+export enum DeploymentStatus {
+  PENDING = 'pending',
+  READY = 'ready',
+  UPDATING = 'updating',
+  UPDATE_FAILED = 'update_failed',
+  NOT_READY = 'not_ready'
+}
+
+export interface ExportOptions {
+  include_custom_tools?: boolean;
+  include_comments?: boolean;
+  model_override?: string;
+  // Databricks App options
+  include_static_frontend?: boolean;
+  include_obo_auth?: boolean;
+}
+
+export interface CrewExportRequest {
+  export_format: ExportFormat;
+  options?: ExportOptions;
+}
+
+export interface FileInfo {
+  path: string;
+  content: string;
+}
+
+export interface CrewExportResponse {
+  crew_id: string;
+  crew_name: string;
+  export_format: string;
+  files?: FileInfo[];
+  metadata: {
+    agents_count: number;
+    tasks_count: number;
+    tools_count: number;
+    sanitized_name: string;
+  };
+  generated_at: string;
+  size_bytes: number;
+  download_url?: string;
+}
+
+export interface ModelServingConfig {
+  model_name: string;
+  endpoint_name?: string;
+  workload_size?: 'Small' | 'Medium' | 'Large';
+  scale_to_zero_enabled?: boolean;
+  min_instances?: number;
+  max_instances?: number;
+  unity_catalog_model?: boolean;
+  catalog_name?: string;
+  schema_name?: string;
+  environment_vars?: Record<string, string>;
+  tags?: Record<string, string>;
+}
+
+// ── Databricks Apps deployment (one-click from the UI) ──────────────────
+
+export type AppDeploymentStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+export interface AppDeploymentConfig {
+  app_name?: string;
+  options?: ExportOptions;
+  model?: string;
+  catalog?: string;
+  schema_name?: string;
+  experiment_name?: string;
+  lakebase_instance?: string;
+  create_lakebase?: boolean;
+  warehouse_id?: string;
+}
+
+export interface AppDeploymentRequest {
+  config: AppDeploymentConfig;
+}
+
+export interface AppDeploymentResponse {
+  deployment_id: string;
+  crew_id: string;
+  app_name: string;
+  status: AppDeploymentStatus;
+  message?: string;
+}
+
+export interface AppDeploymentStatusResponse {
+  deployment_id: string;
+  crew_id: string;
+  app_name: string;
+  status: AppDeploymentStatus;
+  step?: string;
+  message?: string;
+  app_url?: string;
+  error?: string;
+}
+
+export interface LakebaseInstance {
+  name: string;
+  state?: string;
+  capacity?: string;
+}
+
+export interface LakebaseInstancesResponse {
+  instances: LakebaseInstance[];
+}

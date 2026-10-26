@@ -1,0 +1,321 @@
+"""
+Schemas for crew export and deployment operations.
+"""
+
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+
+class ExportFormat(str, Enum):
+    """Export formats.
+
+    ``DATABRICKS_APP`` is the only one that produces an export.
+
+    ``PYTHON_PROJECT`` and ``DATABRICKS_NOTEBOOK`` are RETIRED but deliberately
+    still members. Both generated projects that ran on ``pip install crewai``, a
+    second agent engine to keep in agreement with Kasal's by hand, and their
+    exporters are gone.
+
+    Dropping the members outright was the first attempt, and it was the wrong
+    failure: pydantic rejects the request before it reaches any of our code, so
+    a caller that had been exporting notebooks for months gets a bare 422
+    ``Input should be 'databricks_app'`` with no hint that the format was
+    removed, when, or what to do instead. Keeping them lets
+    ``CrewExportService`` answer with a 410 that says all three.
+
+    The cost of keeping them: a genuinely unknown format now gets a 422 reading
+    "Input should be 'databricks_app', 'python_project' or 'databricks_notebook'",
+    which offers two formats that do not work. Accepted knowingly — picking one
+    of them yields the 410 that explains, so the caller is one informative step
+    from the answer either way, and that beats a first step that explains
+    nothing.
+
+    See ``RETIRED_EXPORT_FORMATS`` for the messages.
+    """
+
+    DATABRICKS_APP = "databricks_app"
+
+    # Retired — accepted by validation, refused with 410 Gone. See above.
+    PYTHON_PROJECT = "python_project"
+    DATABRICKS_NOTEBOOK = "databricks_notebook"
+
+
+#: Retired format -> why it went, and what to use instead. A caller hitting one
+#: of these gets this text, so it has to be enough to act on without reading the
+#: changelog.
+RETIRED_EXPORT_FORMATS: Dict[ExportFormat, str] = {
+    ExportFormat.PYTHON_PROJECT: (
+        "The 'python_project' export format has been removed. It generated a "
+        "project from a template kept in agreement with Kasal's runtime by "
+        "hand, which is how an exported crew came to behave differently from "
+        "the one you tested. Export as 'databricks_app' instead — it ships the "
+        "runtime itself. Set runtime='crewai' if you want a CrewAI project."
+    ),
+    ExportFormat.DATABRICKS_NOTEBOOK: (
+        "The 'databricks_notebook' export format has been removed. It generated "
+        "a notebook from a template kept in agreement with Kasal's runtime by "
+        "hand, which is how an exported crew came to behave differently from "
+        "the one you tested. Export as 'databricks_app' instead — it ships the "
+        "runtime itself and deploys straight to Databricks Apps."
+    ),
+}
+
+
+class DeploymentTarget(str, Enum):
+    """Available deployment targets"""
+
+    DATABRICKS_MODEL_SERVING = "databricks_model_serving"
+    DATABRICKS_APPS = "databricks_apps"
+
+
+class ExportOptions(BaseModel):
+    """Options for crew export"""
+
+    include_custom_tools: bool = Field(
+        True, description="Include custom tool implementations"
+    )
+    include_comments: bool = Field(True, description="Add explanatory comments")
+    model_override: Optional[str] = Field(
+        None, description="Override LLM model for all agents"
+    )
+    include_memory_config: bool = Field(
+        True, description="Include memory backend configuration"
+    )
+
+    # Which agent runtime the bundle ships. Chosen at EXPORT time, because a
+    # bundle carries one runtime's dependencies — there is no switch inside a
+    # deployed app. Left unset it follows the workspace's configured harness,
+    # so a crew tuned against CrewAI's executor deploys onto CrewAI's executor.
+    runtime: Optional[str] = Field(
+        None,
+        description="Agent runtime for the exported app: 'kasal' or 'crewai'. "
+        "Defaults to the workspace's configured harness.",
+    )
+
+    # Databricks App options
+    include_static_frontend: bool = Field(
+        True, description="Include static frontend UI (databricks_app only)"
+    )
+    include_obo_auth: bool = Field(
+        True, description="Include OBO authentication support (databricks_app only)"
+    )
+
+    # Deploy-time overrides written into the generated app's app.yaml env
+    # (set by the one-click Databricks Apps deploy).
+    experiment_id: Optional[str] = Field(
+        None, description="MLflow experiment id to set as MLFLOW_EXPERIMENT_ID"
+    )
+    databricks_catalog: Optional[str] = Field(
+        None, description="UC catalog the deployed app uses (tools/memory)"
+    )
+    databricks_schema: Optional[str] = Field(
+        None, description="UC schema the deployed app uses (tools/memory)"
+    )
+    lakebase_instance: Optional[str] = Field(
+        None,
+        description="Lakebase instance name surfaced to the app as "
+        "LAKEBASE_INSTANCE_NAME (set by the one-click deploy)",
+    )
+    databricks_warehouse_id: Optional[str] = Field(
+        None,
+        description="SQL warehouse id surfaced to the app as DATABRICKS_WAREHOUSE_ID; "
+        "used to provision Unity Catalog trace tables",
+    )
+    mlflow_experiment_name: Optional[str] = Field(
+        None,
+        description="MLflow experiment name the deployed app creates (UC-bound) and "
+        "traces to; surfaced as MLFLOW_EXPERIMENT_NAME",
+    )
+
+
+class CrewExportRequest(BaseModel):
+    """Request to export a crew"""
+
+    export_format: ExportFormat = Field(..., description="Target export format")
+    options: ExportOptions = Field(default_factory=ExportOptions)
+
+
+class ExportFile(BaseModel):
+    """Individual file in export"""
+
+    path: str = Field(..., description="Relative path in project")
+    content: str = Field(..., description="File content")
+    type: str = Field(..., description="File type (python, yaml, markdown, text)")
+
+
+class CrewExportResponse(BaseModel):
+    """Response from crew export"""
+
+    crew_id: str
+    crew_name: str
+    export_format: ExportFormat
+
+    # The generated project, zipped by the router for download.
+    files: Optional[List[ExportFile]] = None
+
+    # Common metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    generated_at: str
+    download_url: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+
+class ModelServingConfig(BaseModel):
+    """Configuration for Databricks Model Serving deployment"""
+
+    model_name: str = Field(..., description="Name for the registered model")
+    endpoint_name: Optional[str] = Field(
+        None, description="Model serving endpoint name (defaults to model_name)"
+    )
+
+    # Compute configuration
+    workload_size: str = Field(
+        "Small", description="Workload size: Small, Medium, Large"
+    )
+    scale_to_zero_enabled: bool = Field(True, description="Enable scale to zero")
+    min_instances: int = Field(0, description="Minimum number of instances")
+    max_instances: int = Field(1, description="Maximum number of instances")
+
+    # Model configuration
+    unity_catalog_model: bool = Field(True, description="Register in Unity Catalog")
+    catalog_name: Optional[str] = Field(None, description="Unity Catalog name")
+    schema_name: Optional[str] = Field(None, description="Unity Catalog schema name")
+
+    # Environment
+    environment_vars: Optional[Dict[str, str]] = Field(
+        default_factory=dict, description="Environment variables"
+    )
+
+    # Tags
+    tags: Optional[Dict[str, str]] = Field(
+        default_factory=dict, description="Model tags"
+    )
+
+
+class DeploymentRequest(BaseModel):
+    """Request to deploy a crew"""
+
+    deployment_target: DeploymentTarget = Field(..., description="Deployment target")
+    config: ModelServingConfig = Field(..., description="Deployment configuration")
+
+
+class DeploymentStatus(str, Enum):
+    """Deployment status"""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    READY = "ready"
+    FAILED = "failed"
+    UPDATING = "updating"
+
+
+class AppDeploymentConfig(BaseModel):
+    """Configuration for a one-click Databricks Apps deployment."""
+
+    app_name: Optional[str] = Field(
+        None,
+        description="Databricks App name; defaults to the sanitized crew name.",
+    )
+    options: ExportOptions = Field(
+        default_factory=ExportOptions,
+        description="Export options controlling the generated app project.",
+    )
+    # Deploy-screen selections that flow into the deployed app.
+    model: Optional[str] = Field(
+        None, description="Model override for all agents in the deployed app"
+    )
+    catalog: Optional[str] = Field(
+        None, description="UC catalog the app uses for tools/memory"
+    )
+    schema_name: Optional[str] = Field(
+        None, description="UC schema the app uses for tools/memory"
+    )
+    experiment_name: Optional[str] = Field(
+        None,
+        description="MLflow experiment to create/reuse and link for tracing "
+        "(workspace path, or a name created under the user)",
+    )
+    lakebase_instance: Optional[str] = Field(
+        None, description="Existing Lakebase instance name for persistent memory"
+    )
+    create_lakebase: bool = Field(
+        False, description="Create a new Lakebase instance/database for the app"
+    )
+    warehouse_id: Optional[str] = Field(
+        None,
+        description="SQL warehouse id used to provision Unity Catalog trace tables "
+        "(defaults to the workspace's configured warehouse)",
+    )
+
+
+class AppDeploymentRequest(BaseModel):
+    """Request to deploy a crew as a Databricks App."""
+
+    config: AppDeploymentConfig = Field(default_factory=AppDeploymentConfig)
+
+
+class AppDeploymentResponse(BaseModel):
+    """Initial response when a Databricks Apps deployment is started."""
+
+    deployment_id: str
+    crew_id: str
+    app_name: str
+    status: str
+    message: Optional[str] = None
+
+
+class AppDeploymentStatusResponse(BaseModel):
+    """Status of an in-flight or completed Databricks Apps deployment."""
+
+    deployment_id: str
+    crew_id: str
+    app_name: str
+    status: str  # PENDING | RUNNING | SUCCEEDED | FAILED
+    step: Optional[str] = None
+    message: Optional[str] = None
+    app_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+class LakebaseInstance(BaseModel):
+    """A Lakebase (database) instance available for the deploy screen."""
+
+    name: str
+    state: Optional[str] = None
+    capacity: Optional[str] = None
+
+
+class LakebaseInstancesResponse(BaseModel):
+    """List of the workspace's Lakebase instances."""
+
+    instances: List[LakebaseInstance] = Field(default_factory=list)
+
+
+class DeploymentResponse(BaseModel):
+    """Response from crew deployment"""
+
+    crew_id: str
+    crew_name: str
+    deployment_target: DeploymentTarget
+
+    # Model information
+    model_name: str
+    model_version: Optional[str] = None
+    model_uri: Optional[str] = None
+
+    # Endpoint information
+    endpoint_name: str
+    endpoint_url: Optional[str] = None
+    endpoint_status: DeploymentStatus
+
+    # Deployment details
+    deployment_id: Optional[str] = None
+    deployed_at: Optional[str] = None
+
+    # Metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    # Usage instructions
+    usage_example: Optional[str] = None

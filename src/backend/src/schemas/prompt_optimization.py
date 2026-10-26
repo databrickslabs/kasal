@@ -1,0 +1,272 @@
+"""
+Pydantic schemas for prompt optimization operations.
+
+Data-driven optimization of the seeded meta-prompts (GEPA via
+mlflow.genai.optimize_prompts): a run mines training examples from the
+LLM interaction log (or takes them inline), searches for a better
+template, and proposes it for explicit review-and-apply.
+"""
+
+from datetime import datetime
+from typing import Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+class PromptOptimizationRequest(BaseModel):
+    """Request to start a prompt optimization run for a seeded template."""
+
+    template_name: Literal[
+        "detect_intent",
+        "generate_agent",
+        "generate_task",
+        "generate_crew",
+        "generate_crew_plan",
+        "generate_job_name",
+        "route_capability",
+    ] = Field(
+        ...,
+        description="The prompt template to optimize (must be wired in TEMPLATE_TASKS)",
+    )
+    model: Optional[str] = Field(
+        None,
+        description="Target model the optimized prompt must perform on "
+        "(defaults to the dispatcher's fast model)",
+    )
+    judge_model: Optional[str] = Field(
+        None,
+        description="Model used to judge output correctness. Should NOT be the "
+        "target model — a model judging its own outputs shows self-preference. "
+        "Defaults to GEPA_JUDGE_MODEL, and only then to the target model (with "
+        "a warning).",
+    )
+    reflection_model: Optional[str] = Field(
+        None,
+        description="Model GEPA uses to reflect on failures and mutate the prompt "
+        "(defaults to the target model)",
+    )
+    examples: Optional[List[str]] = Field(
+        None,
+        description="Explicit training inputs (user messages). When omitted, "
+        "examples are mined from the LLM interaction log.",
+    )
+    lookback_days: int = Field(
+        30, ge=1, le=365, description="Log-mining window in days"
+    )
+    max_examples: int = Field(50, ge=5, le=200, description="Maximum training examples")
+    max_metric_calls: int = Field(
+        40,
+        ge=8,
+        le=400,
+        description="GEPA evaluation budget — each call is one LLM invocation of the "
+        "target model (plus judge calls), so this bounds run cost",
+    )
+
+
+class CrewLabelsPayload(BaseModel):
+    """A crew's labels: what its deliverable must contain (one label set per
+    crew, matching the crew run's single row)."""
+
+    expected_facts: List[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Points the deliverable must contain (Correctness)",
+    )
+    expected_response: str = Field(
+        "", max_length=8000, description="Optional expected answer (Correctness)"
+    )
+
+
+class CrewLabelsInfo(BaseModel):
+    """What the Optimize dialog shows for a crew's labels."""
+
+    labels: Optional[CrewLabelsPayload] = Field(
+        None, description="The labels confirmed for this crew, if any"
+    )
+    suggestions: List[str] = Field(
+        default_factory=list,
+        description="Human expectation notes on past answers, offered as "
+        "SUGGESTED labels; never used until the user confirms one",
+    )
+    has_review_notes: bool = Field(
+        False,
+        description="Whether review notes exist to distil into "
+        "ExpectationsGuidelines' guidelines",
+    )
+
+
+class CrewOptimizationRequest(BaseModel):
+    """Request to GEPA-optimize a saved crew's prompt fields.
+
+    EXPENSIVE BY DESIGN: every metric call executes the crew for real (tools
+    included) and judges the final deliverable — the budget is the number of
+    crew executions.
+    """
+
+    crew_id: str = Field(..., description="The saved crew to optimize")
+    model: Optional[str] = Field(
+        None, description="Model the crew executes with during evaluation"
+    )
+    judge_model: Optional[str] = Field(
+        None,
+        description="Judge model for deliverables. Should NOT be the crew's "
+        "execution model — self-preference inflates the score. Defaults to "
+        "GEPA_JUDGE_MODEL, and only then to the execution model (with a warning).",
+    )
+    reflection_model: Optional[str] = Field(None, description="GEPA reflection model")
+    guidance: Optional[str] = Field(
+        None, description="Optional extra judging guidance (what 'good' looks like)"
+    )
+    max_metric_calls: int = Field(
+        10,
+        ge=4,
+        le=40,
+        description="HARD CAP on crew executions (includes 1 validation + 1 "
+        "baseline, so 10 buys ~8 candidate evaluations)",
+    )
+    execution_timeout_seconds: int = Field(
+        900, ge=60, le=3600, description="Per-execution timeout"
+    )
+    builtin_judges: List[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="MLflow built-in judges to grade with, by catalog id (see "
+        "GET /prompt-optimization/judges/builtin). They use the run's judge "
+        "model and run on demand; nothing is registered.",
+    )
+    labels: Optional[CrewLabelsPayload] = Field(
+        None,
+        description="The labels the user confirmed. Saved for the crew when "
+        "they changed, and used by the judges that need labels.",
+    )
+
+
+class BuiltinJudgeInfo(BaseModel):
+    """One selectable MLflow built-in judge."""
+
+    id: str = Field(..., description="The mlflow.genai.scorers class name")
+    label: str
+    description: str
+    role: Literal["gate", "graded"] = Field(
+        ...,
+        description="gate: a 'no' zeroes the judge score; graded: the yes/no "
+        "verdict joins the judge score's weighted mean",
+    )
+    weight: float = Field(..., description="Weight of a graded verdict")
+    needs_labels: bool = Field(..., description="Needs labels on the row")
+    label_fields: List[str] = Field(
+        default_factory=list,
+        description="Expectation fields it reads; any one present counts",
+    )
+    available: bool = Field(
+        ..., description="Whether the installed MLflow provides this judge"
+    )
+
+
+class BuiltinJudgeList(BaseModel):
+    judges: List[BuiltinJudgeInfo]
+
+
+class PromptOptimizationStartResponse(BaseModel):
+    """Acknowledgement that an optimization run started in the background."""
+
+    run_id: str = Field(..., description="Identifier to poll for status")
+    status: str = Field(..., description="Initial run status")
+    dataset_size: int = Field(
+        ..., description="Number of training examples the run will use"
+    )
+    skipped_judges: List[str] = Field(
+        default_factory=list,
+        description="Selected judges left out of the run, with why "
+        "(e.g. 'Correctness skipped: not labelled')",
+    )
+
+
+class PromptOptimizationRunStatus(BaseModel):
+    """Status/result of an optimization run."""
+
+    run_id: str
+    template_name: str
+    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    dataset_size: int = 0
+    model: Optional[str] = None
+    judge_model: Optional[str] = Field(
+        None,
+        description="Model that graded correctness. Equal to `model` means the "
+        "run judged itself (self-preference) — read its scores with suspicion.",
+    )
+    reflection_model: Optional[str] = Field(
+        None, description="Model GEPA used to mutate the prompt"
+    )
+    initial_score: Optional[float] = Field(None, description="Baseline template score")
+    final_score: Optional[float] = Field(None, description="Optimized template score")
+    baseline_template: Optional[str] = Field(
+        None, description="Template text the run started from"
+    )
+    optimized_template: Optional[str] = Field(
+        None, description="Proposed template (present when status=completed)"
+    )
+    error: Optional[str] = None
+    applied: bool = Field(
+        False, description="Whether the proposal was applied as a group override"
+    )
+    applied_at: Optional[datetime] = Field(
+        None, description="When the proposal was applied"
+    )
+    applied_by: Optional[str] = Field(None, description="Who applied the proposal")
+    revertible: bool = Field(
+        False,
+        description="Whether the apply can be undone — true while the "
+        "before-image taken at apply time is still on the run",
+    )
+    created_at: Optional[datetime] = None
+    kind: Optional[str] = Field(
+        None, description="'template' (seeded meta-prompt) or 'crew' (saved crew)"
+    )
+    crew_id: Optional[str] = Field(None, description="Crew id for crew runs")
+    baseline_fields: Optional[Dict[str, str]] = Field(
+        None, description="Crew runs: per-field baseline texts (agent.<id>.<field>)"
+    )
+    optimized_fields: Optional[Dict[str, str]] = Field(
+        None, description="Crew runs: per-field proposed texts"
+    )
+    executions_used: Optional[int] = Field(
+        None, description="Crew runs: crew executions spent so far"
+    )
+    execution_cap: Optional[int] = Field(
+        None, description="Crew runs: hard cap on crew executions"
+    )
+    human_feedback_count: Optional[int] = Field(
+        None,
+        description="Crew runs: human grades/expectations steering this run",
+    )
+    candidates_tried: Optional[int] = Field(
+        None,
+        description="Crew runs: distinct candidate prompt sets actually executed",
+    )
+
+
+class PromptOptimizationRunList(BaseModel):
+    """Recent optimization runs for the caller's group."""
+
+    runs: List[PromptOptimizationRunStatus]
+
+
+class PromptOptimizationApplyResponse(BaseModel):
+    """Result of applying a completed run's proposed template."""
+
+    run_id: str
+    template_name: str
+    applied: bool
+
+
+class PromptOptimizationRevertResponse(BaseModel):
+    """Result of reverting an applied run back to its before-image."""
+
+    run_id: str
+    template_name: str
+    applied: bool = Field(False, description="Always false after a revert")
+    reverted: bool = True
+    restored: int = Field(
+        0, description="Entities (crew) or templates restored from the before-image"
+    )

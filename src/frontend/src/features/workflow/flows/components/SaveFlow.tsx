@@ -1,0 +1,404 @@
+import { useShallow } from 'zustand/react/shallow';
+import { uniqueBy } from '../../../../shared/lib/collections';
+import React, { useState, useRef, useEffect } from 'react';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
+import { FlowService } from '../../../../api/workflow/FlowService';
+import axios from 'axios';
+import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCatalog';
+import { Edge, Node } from 'reactflow';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
+import { useUnmountSafeTimeout } from '../../../../hooks/global/useUnmountSafeTimeout';
+import { buildFlowConfiguration } from '../../../../utils/flowConfigBuilder';
+import { declaredStateForTab } from '../../../../store/flowState';
+
+interface SaveFlowProps {
+  nodes: Node[];
+  edges: Edge[];
+  trigger: React.ReactElement;
+  disabled?: boolean;
+}
+
+const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = false }) => {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [autoSave, setAutoSave] = useState(false);
+  const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
+  // Cleared on unmount: a bare setTimeout here outlived the component (and,
+  // in tests, the jsdom window), which failed CI after every test had passed.
+  const scheduleTimeout = useUnmountSafeTimeout();
+
+  const { activeCanvasId, updateCanvasFlowInfo } = useBuilderCanvasStore(useShallow(state => ({
+    activeCanvasId: state.activeCanvasId,
+    updateCanvasFlowInfo: state.updateCanvasFlowInfo,
+  })));
+
+  // Listen for the custom event to open the save flow dialog
+  useEffect(() => {
+    const handleOpenSaveFlowDialog = (event: Event) => {
+      if (disabled) return;
+      const detail = (event as CustomEvent).detail;
+      if (detail?.suggestedName) {
+        pendingSave.current = detail;
+        setName(detail.suggestedName);
+        setAutoSave(true);
+      } else {
+        setOpen(true);
+      }
+    };
+
+    const handleUpdateExistingFlow = async (event: Event) => {
+      if (disabled) return;
+
+      const customEvent = event as CustomEvent;
+      const { tabId, flowId } = customEvent.detail;
+
+      // Perform the update directly without showing the dialog
+      try {
+        console.log('SaveFlow: Updating existing flow', { tabId, flowId });
+
+        const tab = useBuilderCanvasStore.getState().getCanvas(tabId);
+        if (!tab) {
+          console.error('SaveFlow: Tab not found for update', tabId);
+          return;
+        }
+
+        setIsSaving(true);
+
+        // CRITICAL: Save the FLOW canvas data (flowNodes/flowEdges), NOT the crew
+        // canvas data (nodes/edges). Reading tab.nodes here routed crew content into
+        // the flow catalog (or saved an empty flow), so the flow never landed.
+        const tabFlowNodes = tab.flowNodes || [];
+        const tabFlowEdges = tab.flowEdges || [];
+
+        // Remove duplicate nodes before processing
+        const uniqueNodes = uniqueBy(tabFlowNodes, node => node.id);
+
+        console.log('SaveFlow: Deduplicated nodes for update:', {
+          originalCount: tabFlowNodes.length,
+          uniqueCount: uniqueNodes.length,
+          duplicatesRemoved: tabFlowNodes.length - uniqueNodes.length
+        });
+
+        // Remove duplicate edges before saving
+        const uniqueEdges = uniqueBy(tabFlowEdges, edge => `${edge.source}-${edge.target}`);
+
+        // Filter edges to only include those that reference existing nodes
+        const nodeIds = new Set(uniqueNodes.map(n => n.id));
+        const validEdges = uniqueEdges.filter(edge =>
+          nodeIds.has(edge.source) && nodeIds.has(edge.target)
+        );
+
+        // Build flowConfig from nodes and edges
+        // The declared half — reducers and the conversational flag — which the
+        // canvas cannot express and derivation therefore cannot recover.
+        const flowConfig = buildFlowConfiguration(
+          uniqueNodes,
+          validEdges,
+          tab.savedFlowName || tab.name,
+          declaredStateForTab(tabId),
+        );
+
+        // Get crew_id - first try tab's savedCrewId, then try CrewNodes
+        let crew_id = tab.savedCrewId || '';
+        if (!crew_id) {
+          const crewNode = uniqueNodes.find(node => node.type === 'crewNode');
+          if (crewNode?.data?.crewId) {
+            crew_id = String(crewNode.data.crewId);
+            console.log('SaveFlow: Update using crew_id from CrewNode:', crew_id);
+          }
+        }
+
+        console.log('SaveFlow: About to update flow with data:', {
+          flowId,
+          name: tab.savedFlowName || tab.name,
+          crew_id,
+          nodes: uniqueNodes.length,
+          totalEdges: uniqueEdges.length,
+          validEdges: validEdges.length,
+          removedEdges: uniqueEdges.length - validEdges.length,
+          listenersCount: flowConfig.listeners.length,
+          actionsCount: flowConfig.actions.length
+        });
+
+        // Use the current tab's nodes and edges for update
+        const updatedFlow = await FlowService.updateFlow(flowId, {
+          name: tab.savedFlowName || tab.name,
+          crew_id,
+          nodes: uniqueNodes,
+          edges: validEdges,
+          flowConfig  // Include flowConfig with listeners, actions, and tasks
+        });
+
+        console.log('SaveFlow: Update successful', updatedFlow);
+        customEvent.detail.onSaved?.({ name: updatedFlow.name });
+
+        // Update the tab's flow info and mark as clean
+        const { updateCanvasFlowInfo, markCanvasClean } = useBuilderCanvasStore.getState();
+        updateCanvasFlowInfo(tabId, updatedFlow.id, updatedFlow.name);
+        markCanvasClean(tabId);
+
+        // Dispatch completion event
+        scheduleTimeout(() => {
+          const completeEvent = new CustomEvent('updateFlowComplete', {
+            detail: { flowId: updatedFlow.id, flowName: updatedFlow.name }
+          });
+          window.dispatchEvent(completeEvent);
+        }, 100);
+
+      } catch (error) {
+        console.error('SaveFlow: Update failed', error);
+        customEvent.detail.onError?.(error);
+        // Could show an error notification here
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    window.addEventListener('openSaveFlowDialog', handleOpenSaveFlowDialog);
+    window.addEventListener('updateExistingFlow', handleUpdateExistingFlow);
+
+    return () => {
+      window.removeEventListener('openSaveFlowDialog', handleOpenSaveFlowDialog);
+      window.removeEventListener('updateExistingFlow', handleUpdateExistingFlow);
+    };
+  }, [disabled, scheduleTimeout]);
+
+  // Auto-save when name is set programmatically (via slash command)
+  useEffect(() => {
+    if (autoSave && name) {
+      setAutoSave(false);
+      handleSave();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSave, name]);
+
+  const handleClickOpen = () => {
+    if (disabled) return;
+    setOpen(true);
+  };
+
+  const handleClose = () => {
+    console.log('SaveFlow: handleClose called', {
+      currentOpen: open,
+      flowName: name,
+      hasError: !!error
+    });
+    setOpen(false);
+    setName('');
+    setError('');
+  };
+
+  // Handle Enter key press in the name input
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleSave();
+    }
+  };
+
+  const handleSave = async (e?: React.FormEvent) => {
+    console.log('SaveFlow: handleSave called', {
+      event: e?.type,
+      dialogOpen: open,
+      flowName: name,
+      hasError: !!error
+    });
+
+    if (e) {
+      e.preventDefault();
+    }
+
+    if (!name.trim()) {
+      setError('Flow name is required');
+      return;
+    }
+
+    // Prevent multiple saves while one is in progress
+    if (isSaving) {
+      console.log('SaveFlow: Save already in progress, ignoring request');
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      console.log('SaveFlow: Attempting to save flow', {
+        name: name,
+        nodes: nodes.length,
+        edges: edges.length
+      });
+
+      // Remove duplicate nodes before processing
+      const uniqueNodes = uniqueBy(nodes, node => node.id);
+
+      console.log('SaveFlow: Deduplicated nodes:', {
+        originalCount: nodes.length,
+        uniqueCount: uniqueNodes.length,
+        duplicatesRemoved: nodes.length - uniqueNodes.length
+      });
+
+      // Remove duplicate edges before saving
+      const uniqueEdges = uniqueBy(edges, edge => `${edge.source}-${edge.target}`);
+
+      // Filter edges to only include those that reference existing nodes
+      const nodeIds = new Set(uniqueNodes.map(n => n.id));
+      const validEdges = uniqueEdges.filter(edge =>
+        nodeIds.has(edge.source) && nodeIds.has(edge.target)
+      );
+
+      console.log('SaveFlow: Filtered edges', {
+        totalEdges: uniqueEdges.length,
+        validEdges: validEdges.length,
+        removedEdges: uniqueEdges.length - validEdges.length
+      });
+
+      // Get active tab to get crew_id - use getActiveCanvas() for latest state
+      // This ensures we read the current activeCanvasId from store state, not the potentially stale hook value
+      const activeTab = useBuilderCanvasStore.getState().getActiveCanvas();
+      let crew_id = activeTab?.savedCrewId || '';
+
+      // If no savedCrewId on tab, try to get crew_id from CrewNodes in the flow
+      if (!crew_id) {
+        const crewNode = uniqueNodes.find(node => node.type === 'crewNode');
+        if (crewNode?.data?.crewId) {
+          crew_id = String(crewNode.data.crewId);
+          console.log('SaveFlow: Using crew_id from CrewNode:', crew_id);
+        }
+      }
+
+      // Log debug info to help diagnose issues
+      console.log('SaveFlow: crew_id resolution:', {
+        savedCrewId: activeTab?.savedCrewId,
+        activeCanvasId: activeTab?.id,
+        crew_id,
+        crewNodeCount: uniqueNodes.filter(n => n.type === 'crewNode').length
+      });
+
+      if (!crew_id) {
+        setError('Please save the crew first before saving the flow');
+        pendingSave.current?.onError?.(new Error('Please save the crew first before saving the flow'));
+        pendingSave.current = null;
+        setIsSaving(false);
+        return;
+      }
+
+      // Build flowConfig from nodes and edges
+      const flowConfig = buildFlowConfiguration(
+        uniqueNodes,
+        validEdges,
+        name,
+        declaredStateForTab(activeCanvasId),
+      );
+
+      console.log('SaveFlow: Built flowConfig:', {
+        listenersCount: flowConfig.listeners.length,
+        actionsCount: flowConfig.actions.length,
+        startingPointsCount: flowConfig.startingPoints.length
+      });
+
+      const savedFlow = await FlowService.saveFlow({
+        name,
+        crew_id,
+        nodes: uniqueNodes,
+        edges: validEdges,
+        flowConfig  // Include flowConfig with listeners, actions, and tasks
+      });
+
+      console.log('SaveFlow: Save successful, closing dialog', savedFlow);
+      pendingSave.current?.onSaved?.({ name: savedFlow.name || name });
+      pendingSave.current = null;
+
+      // Update the tab's flow info
+      if (activeCanvasId && savedFlow.id) {
+        updateCanvasFlowInfo(activeCanvasId, savedFlow.id, name);
+      }
+
+      // Close dialog and reset state
+      handleClose();
+
+      // Wait for dialog to fully close before dispatching event
+      scheduleTimeout(() => {
+        console.log('SaveFlow: Dispatching saveFlowComplete event');
+        const event = new CustomEvent('saveFlowComplete', {
+          detail: { flowId: savedFlow.id, flowName: name }
+        });
+        window.dispatchEvent(event);
+      }, 100);
+    } catch (error) {
+      console.error('SaveFlow: Save failed', error);
+      pendingSave.current?.onError?.(error);
+      pendingSave.current = null;
+      if (axios.isAxiosError(error) && error.response?.data) {
+        const errorData = error.response.data;
+        let errorMessage = 'Failed to save flow';
+
+        if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        } else if (errorData.detail && Array.isArray(errorData.detail)) {
+          errorMessage = errorData.detail[0]?.msg || errorData.detail[0] || 'Validation error';
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        }
+
+        setError(errorMessage);
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: errorMessage } }));
+      } else {
+        const fallbackMessage = error instanceof Error ? error.message : 'Failed to save flow';
+        setError(fallbackMessage);
+        window.dispatchEvent(new CustomEvent('saveError', { detail: { message: fallbackMessage } }));
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <>
+      {React.cloneElement(trigger, { onClick: handleClickOpen, disabled })}
+      <Dialog
+        open={open}
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+        component="form"
+        onSubmit={handleSave}
+      >
+        <DialogTitle>Save Flow</DialogTitle>
+        <DialogContent>
+          <TextField
+            inputRef={nameInputRef}
+            margin="dense"
+            label="Flow Name"
+            type="text"
+            fullWidth
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            error={!!error}
+            helperText={error}
+            onKeyDown={handleKeyDown}
+            autoFocus
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClose}>Cancel</Button>
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            disabled={isSaving}
+          >
+            {isSaving ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+};
+
+export default SaveFlow;

@@ -1,0 +1,407 @@
+"""Parent-process MLflow tracing setup.
+
+The dispatcher (intent) and the crew/agent/task generation services all run in
+the FastAPI **parent** process — not the crew-execution subprocess. This module
+configures MLflow so their traces land in the **same** Unity Catalog experiment
+as crew-execution traces (``<base>-uc``), written to the ``<prefix>_otel_*``
+Delta tables via ``DatabricksUCTableSpanExporter`` (``log_spans`` -> SQL
+warehouse, never the localhost OTLP sidecar).
+
+Correctness mirrors the subprocess fix in ``mlflow_setup.py``:
+
+1. Bind the dedicated ``-uc`` experiment (never the base name a legacy/managed
+   trace may have poisoned — MLflow permanently refuses to link a UC Trace
+   Destination to an experiment that already contains traces).
+2. Do **NOT** pin the destination to ``Databricks(experiment_id)`` when UC is
+   active: that resolves to an ``MlflowExperimentLocation`` and makes MLflow skip
+   UC auto-resolution, routing spans to managed (artifact) storage.
+3. Enable autolog so spans flow through MLflow's own tracer to the UC exporter.
+
+Auth uses the Databricks Apps SPN (``DATABRICKS_CLIENT_ID`` /
+``DATABRICKS_CLIENT_SECRET`` / ``DATABRICKS_HOST``) — never a PAT in production.
+"""
+
+import asyncio
+import logging
+import os
+import time
+from typing import Any, Optional
+
+from src.core.databricks_app import is_databricks_app
+
+logger = logging.getLogger(__name__)
+
+try:  # mirror dispatcher's guarded import
+    import mlflow as _mlflow
+
+    _HAS_MLFLOW = True
+except Exception:  # pragma: no cover - mlflow always present in prod
+    _mlflow = None  # type: ignore[assignment]  # optional-import sentinel
+    _HAS_MLFLOW = False
+
+
+# ---------------------------------------------------------------------------
+# Setup memoization.
+#
+# The full setup costs 2 DB reads + an SPN OAuth mint + an ``mlflow.set_experiment``
+# HTTP roundtrip, and it used to run on EVERY dispatcher message and every
+# agent/task/crew generation call (a research generation repeated it ~7 times).
+# MLflow binding is process-global, so we memoize per group with a TTL and track
+# which group currently OWNS the global binding — a different group's dispatch
+# re-binds, identical repeats are free. The lock also serializes setups, which
+# removes the concurrent-dispatch race on the DATABRICKS_TOKEN/HOST env swap
+# inside ``_setup_sync``.
+# ---------------------------------------------------------------------------
+_SETUP_TTL_SECONDS = 300.0
+_FAILURE_TTL_SECONDS = 60.0
+_setup_lock = asyncio.Lock()
+# Group whose config currently owns the process-global MLflow binding.
+_bound_group_key: Optional[str] = None
+_bound_expires_at: float = 0.0
+# Groups whose setup resolved to "off" (disabled workspace or failed setup).
+_off_cache: dict = {}  # group_key -> expires_at
+_hosted_destinations: dict = {}
+
+
+def _group_cache_key(group_context: Any) -> str:
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    return str(group_id) if group_id else "_default_"
+
+
+def invalidate_parent_mlflow_cache() -> None:
+    """Drop the memoized setup state so the next call re-runs the full setup.
+
+    Call after mutating MLflow enablement or the Databricks config — otherwise
+    changes take up to ``_SETUP_TTL_SECONDS`` to apply to parent-process tracing.
+    """
+    global _bound_group_key, _bound_expires_at
+    _bound_group_key = None
+    _bound_expires_at = 0.0
+    _off_cache.clear()
+    _hosted_destinations.clear()
+
+
+def owns_process_binding(group_context: object) -> bool:
+    """Whether the process-wide MLflow binding is this group's, right now.
+
+    Off Databricks Apps nothing here is context-local: ``set_experiment`` and
+    the destination belong to the whole process, and another group's setup
+    re-points them (on a worker thread, while it holds the lock). A trace's
+    experiment is fixed when its root span starts, so a caller that must never
+    write into another group's experiment checks this in the same synchronous
+    step that opens the root — no ``await`` in between.
+    """
+    ours = _bound_group_key == _group_cache_key(group_context)
+    return ours and not _setup_lock.locked()
+
+
+def set_mlflow_tracing(enabled: bool) -> None:
+    """Hard-toggle MLflow tracing to match the setup outcome.
+
+    Importing mlflow (litellm/crewai integrations) can leave a trace exporter
+    armed even when setup decides tracing is off — every parent LLM call then
+    attempts a doomed export and logs 'experiment_id is missing'. Disable
+    explicitly when setup is skipped/fails, re-enable on success.
+    """
+    if not _HAS_MLFLOW:
+        return
+    if is_databricks_app() and not enabled:
+        from src.services.mlflow.trace_context import bind_destination
+
+        bind_destination(None)
+        # Disabling a teamspace must not switch off concurrent teams globally.
+        return
+    try:
+        if enabled:
+            _mlflow.tracing.enable()
+        else:
+            _mlflow.tracing.disable()
+    except Exception:
+        pass
+
+
+def set_root_span_outputs(span: Any, result: Any) -> None:
+    """Best-effort set outputs on a root trace span so the trace's Response is
+    populated (otherwise it shows ``null``). Normalizes Pydantic models /
+    objects with ``model_dump``/``dict`` to plain dicts so MLflow can render them.
+    """
+    if span is None or not hasattr(span, "set_outputs"):
+        return
+    try:
+        out = result
+        if hasattr(result, "model_dump") and callable(result.model_dump):
+            out = result.model_dump()
+        elif hasattr(result, "dict") and callable(getattr(result, "dict")):
+            try:
+                out = result.dict()
+            except Exception:
+                out = result
+        span.set_outputs(out)
+    except Exception:
+        pass
+
+
+def _setup_sync(
+    exp_name: str,
+    uc_catalog: Optional[str],
+    uc_schema: Optional[str],
+    warehouse_id: Optional[str],
+    label: str,
+) -> object:
+    """Blocking MLflow configuration — run via ``asyncio.to_thread``."""
+    import mlflow
+
+    host = os.environ.get("DATABRICKS_HOST", "")
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "")
+    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
+
+    # Neutral wording: the Apps proxy redacts lines containing SECRET/TOKEN.
+    logger.info(
+        "[%s] MLflow auth env — host=%s, spn_id=%s, spn_cred=%s",
+        label,
+        "yes" if host else "no",
+        "yes" if client_id else "no",
+        "yes" if client_secret else "no",
+    )
+
+    # SPN credentials are required — never fall back to a PAT in production.
+    if not (host and client_id and client_secret):
+        logger.warning("[%s] SPN credentials required for MLflow — skipping", label)
+        return False
+
+    workspace_url = host.rstrip("/")
+    auth_method = None
+    try:
+        from databricks.sdk import WorkspaceClient as _WC
+
+        # auth_type names the credentials passed, so neither a PAT in the env
+        # nor a DATABRICKS_AUTH_TYPE pinned by a concurrent MLflow window can
+        # redirect this client — and nothing is popped from the process env
+        # (a pop here raced every other thread; issue #8).
+        w = _WC(
+            host=host,
+            client_id=client_id,
+            client_secret=client_secret,
+            auth_type="oauth-m2m",
+        )
+        headers = w.config.authenticate()
+
+        auth_header = headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            # The SP credentials work. Do NOT export the minted bearer as
+            # DATABRICKS_TOKEN: the process environment is shared by every
+            # workspace (and inherited by children), a static bearer expires
+            # within the hour, and with oauth-m2m pinned the SDK mints and
+            # refreshes its own token from the client credentials anyway.
+            if not workspace_url.startswith("http"):
+                workspace_url = f"https://{workspace_url}"
+            os.environ["DATABRICKS_HOST"] = workspace_url
+            os.environ.setdefault("DATABRICKS_AUTH_TYPE", "oauth-m2m")
+            auth_method = "service_principal"
+            logger.info("[%s] SPN credential set", label)
+        else:
+            logger.warning("[%s] Unexpected auth header format", label)
+    except Exception as spn_err:
+        logger.warning(
+            "[%s] SPN extraction failed: %s: %s",
+            label,
+            type(spn_err).__name__,
+            spn_err,
+        )
+
+    if not auth_method:
+        logger.warning("[%s] SPN credential extraction failed — MLflow disabled", label)
+        return False
+
+    mlflow.set_tracking_uri("databricks")
+
+    from src.services.mlflow.mlflow_setup import (
+        _build_uc_trace_location,
+        uc_experiment_name,
+    )
+    from src.services.mlflow.trace_storage import log_trace_storage, select_experiment
+
+    if warehouse_id:
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
+
+    trace_location = _build_uc_trace_location(
+        uc_catalog,
+        uc_schema,
+        warehouse_id,
+        logger,
+        **({"experiment_name": exp_name} if is_databricks_app() else {}),
+    )
+    uc_active = trace_location is not None
+
+    if uc_active:
+        # Dedicated UC-only experiment, shared with crew-execution traces.
+        exp_name = uc_experiment_name(exp_name)
+        exp = select_experiment(mlflow, exp_name, trace_location)
+        log_trace_storage(logger, label, exp)
+    else:
+        exp = mlflow.set_experiment(exp_name)
+        logger.info("[%s] MLflow experiment set (managed): %s", label, exp_name)
+
+    # Ensure the OTel SDK is enabled or MLflow traces won't record.
+    if os.environ.get("OTEL_SDK_DISABLED", "").lower() in ("", "true", "1"):
+        os.environ["OTEL_SDK_DISABLED"] = "false"
+
+    try:
+        if uc_active:
+            # Do NOT pin Databricks(experiment_id): MLflow auto-resolves the
+            # experiment's UnityCatalog location and installs the UC span
+            # processor. Pinning it would route spans to managed storage.
+            logger.info(
+                "[%s] UC trace storage: destination auto-resolves to experiment %s "
+                "(Databricks experiment-id destination intentionally NOT set)",
+                label,
+                getattr(exp, "experiment_id", "?"),
+            )
+        else:
+            from mlflow.tracing.destination import Databricks as _Dest
+
+            mlflow.tracing.set_destination(
+                # mlflow's stub types the legacy Databricks destination out.
+                _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))  # type: ignore[arg-type]  # stub gap
+            )
+        mlflow.tracing.enable()
+    except Exception as te:
+        logger.info("[%s] MLflow tracing destination not set: %s", label, te)
+
+    # LiteLLM autolog: child spans nest under the parent root span (the
+    # generation/dispatcher start_root_trace), flowing through MLflow's tracer.
+    try:
+        mlflow.litellm.autolog(log_traces=False)
+        logger.info("[%s] MLflow LiteLLM autolog enabled (spans only)", label)
+    except Exception as ae:
+        logger.info("[%s] MLflow LiteLLM autolog not available: %s", label, ae)
+
+    if is_databricks_app():
+        return getattr(exp, "trace_location", None) or trace_location
+    return True
+
+
+async def configure_parent_mlflow_tracing(
+    session: Any,
+    group_context: Any = None,
+    *,
+    label: str = "Parent",
+) -> bool:
+    """Configure MLflow tracing for a parent-process operation.
+
+    Makes the caller's traces land in the same UC experiment as crew execution.
+    Returns True when tracing is ready (caller should then wrap its work in
+    ``start_root_trace``); False when MLflow is disabled or setup failed.
+
+    Memoized per group with a TTL (see module header): repeat calls for the
+    group that already owns the process-global binding skip the DB reads, the
+    SPN OAuth mint and the ``set_experiment`` roundtrip entirely.
+    """
+    global _bound_group_key, _bound_expires_at
+
+    group_key = _group_cache_key(group_context)
+    now = time.monotonic()
+
+    # Fast paths — no lock needed for reads of these monotonic caches.
+    if _off_cache.get(group_key, 0.0) > now:
+        set_mlflow_tracing(False)
+        return False
+    if _bound_group_key == group_key and _bound_expires_at > now:
+        if is_databricks_app():
+            from src.services.mlflow.trace_context import bind_destination
+
+            bind_destination(_hosted_destinations.get(group_key))
+        set_mlflow_tracing(True)
+        return True
+
+    async with _setup_lock:
+        # Re-check under the lock: a concurrent call may have just set up.
+        now = time.monotonic()
+        if _off_cache.get(group_key, 0.0) > now:
+            set_mlflow_tracing(False)
+            return False
+        if _bound_group_key == group_key and _bound_expires_at > now:
+            if is_databricks_app():
+                from src.services.mlflow.trace_context import bind_destination
+
+                bind_destination(_hosted_destinations.get(group_key))
+            set_mlflow_tracing(True)
+            return True
+
+        try:
+            from src.services.mlflow.service import MLflowService
+
+            group_id = (
+                getattr(group_context, "primary_group_id", None)
+                if group_context
+                else None
+            )
+            svc = MLflowService(session, group_id=group_id)
+            if not await svc.is_enabled():
+                logger.info(
+                    "[%s] MLflow disabled for this workspace; skipping tracing", label
+                )
+                _off_cache[group_key] = time.monotonic() + _SETUP_TTL_SECONDS
+                set_mlflow_tracing(False)
+                return False
+
+            # Resolve experiment + UC config in the async context (avoids nesting an
+            # event loop inside the to_thread setup). Use the SINGLE authority
+            # (MLflowService.configured_crew_traces_experiment) so the tracer
+            # writes to the SAME experiment GEPA/judges/eval/config resolve — it
+            # reads mlflowconfig.experiment_name (the field Configuration.tsx
+            # saves) and applies the -uc suffix. The legacy
+            # databricksconfig.mlflow_experiment_name is deliberately NOT read
+            # here: reading it produced a SECOND experiment
+            # (kasal-crew-execution-traces-uc) that disagreed with the configured
+            # per-teamspace name, so traces landed where nothing else looked.
+            exp_name = await svc.configured_crew_traces_experiment()
+            uc_catalog = uc_schema = warehouse_id = None
+            try:
+                from src.services.databricks.workspace.service import DatabricksService
+
+                db_config = await DatabricksService(
+                    session, group_id=group_id
+                ).get_databricks_config()
+                if db_config:
+                    uc_catalog = getattr(db_config, "catalog", None)
+                    # schema field is `db_schema` (aliased "schema"); reading
+                    # "schema" returns BaseModel.schema (a method) -> MLflow error.
+                    uc_schema = getattr(db_config, "db_schema", None)
+                    warehouse_id = getattr(db_config, "warehouse_id", None)
+            except Exception as cfg_err:
+                logger.info(
+                    "[%s] Could not fetch MLflow config: %s; using default",
+                    label,
+                    cfg_err,
+                )
+
+            setup_ok = await asyncio.to_thread(
+                _setup_sync, exp_name, uc_catalog, uc_schema, warehouse_id, label
+            )
+            if not setup_ok:
+                # Missing SPN creds etc. — likely persistent; back off briefly
+                # instead of re-minting OAuth on every message.
+                _off_cache[group_key] = time.monotonic() + _FAILURE_TTL_SECONDS
+                set_mlflow_tracing(False)
+                return False
+
+            logger.info("[%s] MLflow tracing configured (experiment + autolog)", label)
+            _bound_group_key = group_key
+            if is_databricks_app():
+                from src.services.mlflow.trace_context import bind_destination
+
+                _hosted_destinations.clear()
+                _hosted_destinations[group_key] = setup_ok
+                bind_destination(setup_ok)
+            _bound_expires_at = time.monotonic() + _SETUP_TTL_SECONDS
+            _off_cache.pop(group_key, None)
+            set_mlflow_tracing(True)
+            return True
+        except Exception as e:
+            logger.warning("[%s] MLflow setup skipped: %s", label, e)
+            _off_cache[group_key] = time.monotonic() + _FAILURE_TTL_SECONDS
+            set_mlflow_tracing(False)
+            return False

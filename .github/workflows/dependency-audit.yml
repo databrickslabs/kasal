@@ -1,0 +1,109 @@
+name: Dependency Audit
+
+# Security supply-chain checks:
+#   1. lockfile-hygiene  — fail if committed lockfiles reference an internal
+#      package proxy (must use public registries; the proxy is local-dev-only).
+#   2. python-cve        — uv lock drift + pip-audit CVE scan.
+#   3. npm-cve           — npm lockfile consistency + npm audit.
+#
+# The hygiene guard runs on every PR (cheap). The CVE/drift jobs run weekly and
+# on every pull request, even when its changes are outside lockfiles.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile-hygiene:
+    name: Lockfile hygiene (no internal proxy URLs)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Reject internal proxy hosts in committed lockfiles
+        run: |
+          set -euo pipefail
+          # Internal proxies are local-dev-only and must never be committed.
+          # Committed lockfiles must reference public registries so the repo is
+          # portable and the Databricks Apps build (no VPN) can install. Both the
+          # legacy *.dev hosts and the current *.cloud hosts (pypi-proxy.cloud,
+          # npm-proxy.cloud, pypi-pytorch-proxy, pypi-nvidia-proxy) are matched.
+          patterns='(npm|pypi|pypi-pytorch|pypi-nvidia)-proxy\.(dev|cloud)\.databricks\.com'
+          files="src/backend/uv.lock src/frontend/package-lock.json"
+          found=0
+          for f in $files; do
+            if [ -f "$f" ] && grep -nE "$patterns" "$f"; then
+              echo "::error file=$f::Internal package-proxy URL found in committed lockfile. Regenerate against the public registry."
+              found=1
+            fi
+          done
+          if [ "$found" -ne 0 ]; then
+            exit 1
+          fi
+          echo "OK: no internal proxy URLs in committed lockfiles."
+
+  python-cve:
+    name: Python deps — lock drift + CVE audit
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+      - name: Lockfile is in sync with pyproject (no drift)
+        run: uv lock --check
+      - name: CVE audit (pip-audit over the locked deps)
+        run: |
+          set -euo pipefail
+          uv export --frozen --no-emit-project --no-dev --format requirements-txt > /tmp/reqs.txt
+          # --ignore-vuln is reserved for advisories with NO fixed release —
+          # nothing to upgrade to. Re-check on the weekly run and drop each id
+          # the moment upstream ships a fix.
+          #   chromadb 1.x  (CVE-2026-45830/45831/45833, PYSEC-2026-311): no
+          #     patched version published.
+          #   diskcache     (PYSEC-2026-2447): unmaintained, no fix released.
+          # Exposure and mitigations: src/docs/VALIDATION_AND_SECURITY.md.
+          uvx pip-audit -r /tmp/reqs.txt \
+            --ignore-vuln CVE-2026-45830 \
+            --ignore-vuln CVE-2026-45831 \
+            --ignore-vuln CVE-2026-45833 \
+            --ignore-vuln PYSEC-2026-311 \
+            --ignore-vuln PYSEC-2026-2447
+
+  npm-cve:
+    name: Frontend deps — lock consistency + npm audit
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+      - name: Lockfile consistency (npm ci installs strictly from the lock)
+        run: npm ci
+      - name: CVE audit (fail on high/critical)
+        run: npm audit --audit-level=high
+        # image-size is overridden with a local stub (src/frontend/stubs/) —
+        # pptxgenjs only uses it in Node builds (browser field maps it to
+        # `false`) and no fixed upstream release exists. Remove the override
+        # when upstream ships a fix.

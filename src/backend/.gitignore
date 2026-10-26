@@ -1,0 +1,84 @@
+# ANCHOR RUNTIME-ARTIFACT DIRECTORY RULES WITH A LEADING SLASH.
+#
+# `logs/` (no leading slash) matches a directory called `logs` at ANY depth, so
+# it silently swallowed the SOURCE package `src/services/execution/logs/`.
+# Three files there — including its `__init__.py` — were never committed: git
+# status shows nothing, because that is exactly what ignoring means. A fresh
+# clone lost the package and 144 tests failed on an import error that read like
+# test rot. `/logs/` matches only src/backend/logs/, which is what was meant.
+#
+# The same mistake is already recorded below for `lib/`. If you add a rule for a
+# generated directory, anchor it.
+
+# Logs
+/logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+# Anchored, for the reason at the top of this file. Unanchored, `lib/` matched
+# the export template's REAL frontend source dirs (shadcn utils, markdown
+# renderer, deck themes) and had to be undone with four negation lines — which
+# then rotted silently when the refactor moved the template out of
+# src/engines/, leaving a new file there swallowable all over again. A venv's
+# lib/ is at the root; anchoring says so and needs no exceptions.
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.env
+.venv
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+*.sqlite3
+*.db
+
+# Alembic
+alembic/versions/
+
+# Local development
+.DS_Store
+.coverage
+htmlcov/
+.pytest_cache/
+
+# CrewAI unified cognitive memory stores (per-crew local LanceDB) — never commit
+# user data. Matches the CREWAI_STORAGE_DIR naming that
+# CrewMemoryService.setup_storage_directory emits.
+kasal_default_*/
+kasal_databricks_*/
+kasal_lakebase_*/
+**/memories.lance/
+**/memories.lance/**
+
+# import-linter graph cache
+.import_linter_cache/
+
+# Everything a test run writes — logs, memory, scratch DBs.
+# The pollution guard in tests/conftest.py asserts nothing lands outside this.
+tests/.artifacts/

@@ -1,0 +1,174 @@
+"""
+Execution Cleanup Service.
+
+This service handles cleanup of orphaned/stale job executions
+that may occur when the service is restarted while jobs are running.
+
+Every read here goes through ``get_smart_db_session`` rather than the raw
+``async_session_factory``. Both tables it touches — ``executionhistory`` and
+``execution_trace`` — live in Lakebase when Lakebase is enabled, and the raw
+factory is a SNAPSHOT: it points at Lakebase only if ``activate_lakebase()`` ran
+in THIS process, which happens at boot or in a subprocess but NEVER on a runtime
+``/lakebase/enable``. Enable without restarting and this service reads a database
+the crew subprocesses are not writing to.
+
+That failure is silent and it inverts the service's purpose: the startup sweep
+would find no stale jobs to clean, and ``recover_completed_jobs`` — which exists
+to catch a crew that finished while its status write failed — would find no
+completion traces and leave every such run stuck at RUNNING forever.
+"""
+
+import json
+import logging
+from typing import Optional
+
+from src.db.database_router import get_smart_db_session
+from src.models.execution_status import ExecutionStatus
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.repositories.execution_repository import ExecutionRepository
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
+from src.services.execution.finalization import (
+    pending_execution_ids,
+    retry_pending_outcomes,
+)
+from src.services.execution.status import ExecutionStatusService
+
+logger = logging.getLogger(__name__)
+
+#: A light-agent run writes its ``response_run`` span, then composes a UI
+#: surface (bounded at 240s) and writes its status. A span older than this with
+#: the run still RUNNING means the status write never landed.
+LIGHT_AGENT_GRACE_SECONDS = 360
+
+
+class ExecutionCleanupService:
+    """Simple cleanup service for orphaned jobs."""
+
+    @staticmethod
+    async def cleanup_stale_jobs_on_startup() -> int:
+        """
+        On startup, mark any RUNNING/PREPARING/PENDING jobs as CANCELLED.
+        Since the service just started, these jobs can't actually be running.
+
+        Returns:
+            Number of jobs cleaned up
+        """
+        try:
+            active_statuses = [
+                ExecutionStatus.PENDING.value,
+                ExecutionStatus.PREPARING.value,
+                ExecutionStatus.RUNNING.value,
+            ]
+
+            cleaned_count = 0
+
+            async for db in get_smart_db_session():
+                repo = ExecutionRepository(db)
+
+                # Get all "active" jobs - they can't be truly active since we just started
+                stale_jobs, _ = await repo.get_execution_history(
+                    limit=1000,
+                    offset=0,
+                    status_filter=active_statuses,
+                    system_level=True,  # System-level cleanup needs access to all executions
+                )
+
+            # Process jobs outside the session context to avoid nested sessions
+            for job in stale_jobs:
+                logger.info(
+                    f"Cleaning up stale job on startup: {job.job_id} (was {job.status})"
+                )
+
+                success = await ExecutionStatusService.update_status(
+                    job_id=job.job_id,
+                    status=ExecutionStatus.CANCELLED.value,
+                    message="Job cancelled - service was restarted while job was running",
+                )
+
+                if success:
+                    cleaned_count += 1
+                else:
+                    logger.error(f"Failed to clean up stale job: {job.job_id}")
+
+            if cleaned_count > 0:
+                logger.info(f"Cleaned up {cleaned_count} stale jobs on startup")
+            else:
+                logger.info("No stale jobs found on startup")
+
+            return cleaned_count
+
+        except Exception as e:
+            logger.error(f"Error during startup job cleanup: {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    async def cleanup_zombie_jobs() -> int:
+        """
+        Called every 2 minutes. For each RUNNING job, check whether a
+        crew_completed trace exists — if it does the crew finished but its
+        status update silently failed, so mark it COMPLETED and populate the
+        result. A light-agent (chat) run ends with a ``response_run`` span
+        instead; one older than the compose budget with the run still RUNNING
+        is the same failure. Jobs with no completion trace are still genuinely
+        running and are left untouched.
+
+        Returns number of jobs recovered.
+        """
+        known_outcomes = pending_execution_ids()
+        recovered = await retry_pending_outcomes()
+        try:
+            async for db in get_smart_db_session():
+                history_repo = ExecutionHistoryRepository(db)
+                running_job_ids = await history_repo.get_job_ids_by_statuses(
+                    ["RUNNING"]
+                )
+
+            for job_id in running_job_ids:
+                if job_id in known_outcomes:
+                    continue  # Never replace a known failed outcome with a trace inference.
+                # Check whether the crew actually completed
+                message = "CrewAI execution completed successfully"
+                async for db in get_smart_db_session():
+                    trace_repo = ExecutionTraceRepository(db)
+                    found, output = await trace_repo.has_completed_trace(
+                        job_id, "crew_completed"
+                    )
+                    if not found:
+                        found, output = await trace_repo.has_completed_trace(
+                            job_id,
+                            "response_run",
+                            min_age_seconds=LIGHT_AGENT_GRACE_SECONDS,
+                        )
+                        message = "Light agent execution completed"
+
+                if not found:
+                    continue  # No completion trace → still running, leave it
+
+                # Crew finished but status update failed — recover it
+                final_result: Optional[str] = None
+                if output:
+                    raw = output
+                    if isinstance(raw, dict):
+                        final_result = raw.get("content")
+                    else:
+                        try:
+                            final_result = json.loads(raw).get("content", raw)
+                        except Exception:
+                            final_result = str(raw)
+
+                updated = await ExecutionStatusService.update_status(
+                    job_id=job_id,
+                    status=ExecutionStatus.COMPLETED.value,
+                    message=message,
+                    result=final_result,
+                )
+                if updated:
+                    logger.info(
+                        f"[ZombieCleanup] Recovered stale job {job_id} → COMPLETED"
+                    )
+                    recovered += 1
+
+        except Exception as e:
+            logger.error(f"[ZombieCleanup] Error: {e}", exc_info=True)
+
+        return recovered

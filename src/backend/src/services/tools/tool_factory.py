@@ -1,0 +1,2122 @@
+import asyncio
+import logging
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, TypeVar, Union
+
+from src.services.tools.a2a_agent_tool import A2AAgentTool
+from src.services.tools.async_bridge import run_async_with_context
+from src.services.tools.base import BaseTool
+
+# Import only the CrewAI tools we're keeping
+from src.services.tools.image_generation import ImageGenerationTool
+
+# Optional tool classes (None when their module failed to import) — see optional_tools.
+from src.services.tools.optional_tools import (  # tests patch these names here
+    AgentBricksTool,
+    ConfigGeneratorTool,
+    DatabricksDashboardCreatorTool,
+    DatabricksJobsTool,
+    DatabricksKnowledgeSearchTool,
+    DaxToSqlTranslatorTool,
+    GenieSpaceGeneratorTool,
+    GenieTool,
+    GmailTool,
+    MCPTool,
+    MeasureConversionPipelineTool,
+    MetricViewDeployerTool,
+    MetricViewValidatorTool,
+    MqueryConversionPipelineTool,
+    PbiMeasureAllocatorTool,
+    PBIVisualUCMVMapperTool,
+    PerplexitySearchTool,
+    PipelineConfigGeneratorTool,
+    PowerBIAnalysisTool,
+    PowerBIConnectorTool,
+    PowerBIDaxExecutorTool,
+    PowerBIFieldParametersCalculationGroupsTool,
+    PowerBIHierarchiesTool,
+    PowerBIMetadataReducerTool,
+    PowerBIRelationshipsTool,
+    PowerBIReportReferencesTool,
+    PowerBISemanticModelDaxTool,
+    PowerBISemanticModelFetcherTool,
+    UCMetricViewGeneratorTool,
+    UCMVGenieConfigGeneratorTool,
+)
+from src.services.tools.scrape_website import ScrapeWebsiteTool
+from src.services.tools.serper_search import SerperDevTool
+from src.services.tools.tool_policies import (
+    merge_tool_config_override,
+    stamp_tool_policies,
+)
+
+# SECURITY: mask decrypted secrets (PATs, client_secret, api_key, password,
+# access_token, ...) before they are written to logs / the volume log sink.
+from src.utils.sensitive_data_utils import mask_sensitive_fields
+
+# Setup logger
+logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+# What create_tool returns: a tool, a list of tools (MCP / A2A fan-out), the
+# ``(True, [])`` MCPTool marker, or None when nothing could be built.
+ToolBuildResult = Optional[Union[BaseTool, list, Tuple[bool, list]]]
+# A registered tool class, as the factory calls it. MCPTool is registered only as
+# a marker and never instantiated through this.
+_ToolCtor = Callable[..., BaseTool]
+
+# Tools built through the generic branch of ``create_tool`` that need a provider
+# key. The key is read from the workspace's ApiKeysService and passed as
+# ``api_key`` — never through os.environ, which every workspace shares.
+_TOOL_API_KEY_NAMES: Dict[str, str] = {
+    "Image Generation Tool": "OPENAI_API_KEY",
+}
+
+# Import request-scoped session helper
+from src.schemas.tool import (  # noqa: E402 - import follows module initialization
+    ToolResponse,
+)
+from src.utils.encryption_utils import (  # noqa: E402 - import follows module initialization
+    EncryptionUtils,
+)
+
+
+class ToolFactory:
+    def __init__(
+        self,
+        config: Any,
+        api_keys_service: Optional[Any] = None,
+        user_token: Optional[str] = None,
+    ) -> None:
+        """
+        Initialize the tool factory with configuration
+
+        Args:
+            config: Configuration dictionary for the factory
+            api_keys_service: Optional ApiKeysService for retrieving API keys
+            user_token: User access token for OAuth authentication
+        """
+        self.config = config
+        self.api_keys_service = api_keys_service
+        self.user_token = user_token
+        # Store tools by both ID and title for easy lookup
+        self._available_tools: Dict[str, ToolResponse] = {}
+        self._tool_implementations: Dict[str, Any] = {}
+
+        # Map tool names to their implementations - ONLY THE TOOLS WE'RE KEEPING
+        self._tool_implementations = {
+            "PerplexityTool": PerplexitySearchTool,
+            "Image Generation Tool": ImageGenerationTool,
+            "SerperDevTool": SerperDevTool,
+            "ScrapeWebsiteTool": ScrapeWebsiteTool,
+            "GenieTool": GenieTool,
+            "AgentBricksTool": AgentBricksTool,
+            "DatabricksJobsTool": DatabricksJobsTool,
+            "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
+            "Gmail": GmailTool,
+            "GmailTool": GmailTool,  # alias used when referenced by class name
+            # A2A remote-agent delegation. Registered under BOTH the seeded
+            # title and the class name because the lookup below is by title and
+            # returns None for anything missing — a branch further down cannot
+            # rescue a tool the map does not know.
+            "Remote Agent": A2AAgentTool,
+            "A2AAgentTool": A2AAgentTool,
+            "Power BI Comprehensive Analysis Tool": PowerBIAnalysisTool,  # New display name
+            "PowerBIAnalysisTool": PowerBIAnalysisTool,  # Keep old name for backward compatibility
+        }
+
+        # Add MCPTool if it was successfully imported
+        if MCPTool is not None:
+            self._tool_implementations["MCPTool"] = MCPTool
+
+        # Add converter tools if successfully imported
+        if PowerBIConnectorTool is not None:
+            self._tool_implementations["PowerBIConnectorTool"] = PowerBIConnectorTool
+        if MeasureConversionPipelineTool is not None:
+            self._tool_implementations["Measure Conversion Pipeline"] = (
+                MeasureConversionPipelineTool
+            )
+        if MqueryConversionPipelineTool is not None:
+            self._tool_implementations["M-Query Conversion Pipeline"] = (
+                MqueryConversionPipelineTool
+            )
+        if PowerBIRelationshipsTool is not None:
+            self._tool_implementations["Power BI Relationships Tool"] = (
+                PowerBIRelationshipsTool
+            )
+        if PowerBIHierarchiesTool is not None:
+            self._tool_implementations["Power BI Hierarchies Tool"] = (
+                PowerBIHierarchiesTool
+            )
+        if PowerBIFieldParametersCalculationGroupsTool is not None:
+            self._tool_implementations[
+                "Power BI Field Parameters & Calculation Groups Tool"
+            ] = PowerBIFieldParametersCalculationGroupsTool
+        if PowerBIReportReferencesTool is not None:
+            self._tool_implementations["Power BI Report References Tool"] = (
+                PowerBIReportReferencesTool
+            )
+        if PowerBISemanticModelFetcherTool is not None:
+            self._tool_implementations["Power BI Semantic Model Fetcher"] = (
+                PowerBISemanticModelFetcherTool
+            )
+        if PowerBISemanticModelDaxTool is not None:
+            self._tool_implementations["Power BI Semantic Model DAX Generator"] = (
+                PowerBISemanticModelDaxTool
+            )
+        if PowerBIMetadataReducerTool is not None:
+            self._tool_implementations["Power BI Metadata Reducer"] = (
+                PowerBIMetadataReducerTool
+            )
+        if PowerBIDaxExecutorTool is not None:
+            self._tool_implementations["Power BI DAX Executor"] = PowerBIDaxExecutorTool
+
+        # UC Metric View tools
+        if DaxToSqlTranslatorTool is not None:
+            self._tool_implementations["DAX to SQL Translator"] = DaxToSqlTranslatorTool
+        if UCMetricViewGeneratorTool is not None:
+            self._tool_implementations["UC Metric View Generator"] = (
+                UCMetricViewGeneratorTool
+            )
+        if PbiMeasureAllocatorTool is not None:
+            self._tool_implementations["PBI Measure Allocator"] = (
+                PbiMeasureAllocatorTool
+            )
+        if MetricViewDeployerTool is not None:
+            self._tool_implementations["Metric View Deployer"] = MetricViewDeployerTool
+        if MetricViewValidatorTool is not None:
+            self._tool_implementations["Metric View Validator"] = (
+                MetricViewValidatorTool
+            )
+        try:  # imported here so a failed import needs no None-typed module name
+            from .ucmv_reevaluation_tool import UCMVReevaluationTool
+
+            self._tool_implementations["UCMV Re-evaluation"] = UCMVReevaluationTool
+        except ImportError as e:
+            logging.warning(f"Could not import UCMVReevaluationTool: {e}")
+        if ConfigGeneratorTool is not None:
+            self._tool_implementations["Config Generator"] = ConfigGeneratorTool
+        if PipelineConfigGeneratorTool is not None:
+            self._tool_implementations["Pipeline Config Generator"] = (
+                PipelineConfigGeneratorTool
+            )
+        if GenieSpaceGeneratorTool is not None:
+            self._tool_implementations["Genie Space Generator"] = (
+                GenieSpaceGeneratorTool
+            )
+        if UCMVGenieConfigGeneratorTool is not None:
+            self._tool_implementations["UCMV Genie Space Config Generator"] = (
+                UCMVGenieConfigGeneratorTool
+            )
+        if PBIVisualUCMVMapperTool is not None:
+            self._tool_implementations["PBI Visual-UCMV Mapper"] = (
+                PBIVisualUCMVMapperTool
+            )
+        if DatabricksDashboardCreatorTool is not None:
+            self._tool_implementations["Databricks Dashboard Creator"] = (
+                DatabricksDashboardCreatorTool
+            )
+
+        # Initialize _initialized flag
+        self._initialized = False
+
+    async def _validate_databricks_auth(self) -> tuple[bool, str]:
+        """
+        Validate that Databricks authentication is properly configured.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        try:
+            from src.utils.databricks_auth import get_auth_context
+
+            # Check for user token (OBO authentication)
+            if self.user_token:
+                logger.info(
+                    "[AUTH VALIDATION] User token available for OBO authentication"
+                )
+                return (True, "OBO authentication available")
+
+            # Check for unified auth
+            try:
+                auth = await get_auth_context()
+                if auth and (auth.token or auth.workspace_url):
+                    logger.info("[AUTH VALIDATION] Unified auth context available")
+                    return (True, "Unified authentication available")
+            except Exception as e:
+                logger.debug(f"[AUTH VALIDATION] Unified auth not available: {e}")
+
+            # Check for Databricks config in database
+            try:
+                from src.services.databricks.workspace.config_provider import (
+                    DatabricksConfigProvider,
+                )
+
+                group_id = (
+                    self.config.get("group_id", "default")
+                    if isinstance(self.config, dict)
+                    else "default"
+                )
+
+                # Via the provider, which takes group_id as a real argument. The
+                # hand-rolled version here called
+                # get_databricks_config(group_id=...) — a method that takes NO
+                # arguments — so it raised TypeError, the enclosing `try` swallowed
+                # it, and this check reported "no Databricks config found" for
+                # every workspace.
+                config = await DatabricksConfigProvider.get(group_id=group_id)
+
+                if config and config.workspace_url:
+                    # Check if we have any auth method configured
+                    has_auth = bool(
+                        config.api_key or config.client_id or config.oauth_enabled
+                    )
+                    if has_auth:
+                        logger.info(
+                            f"[AUTH VALIDATION] Databricks config found for group {group_id}"
+                        )
+                        return (True, "Database configuration available")
+                    else:
+                        logger.warning(
+                            "[AUTH VALIDATION] Databricks config exists but no auth method configured"
+                        )
+                        return (
+                            False,
+                            "No authentication method configured in database",
+                        )
+                else:
+                    logger.warning(
+                        f"[AUTH VALIDATION] No Databricks config found for group {group_id}"
+                    )
+                    return (
+                        False,
+                        f"No Databricks configuration for group {group_id}",
+                    )
+
+            except Exception as e:
+                logger.debug(f"[AUTH VALIDATION] Database config check failed: {e}")
+
+            # No authentication method available
+            error_msg = (
+                "No Databricks authentication method available. "
+                "Configure one of: user token (OBO), API key, or OAuth credentials"
+            )
+            logger.error(f"[AUTH VALIDATION] {error_msg}")
+            return (False, error_msg)
+
+        except Exception as e:
+            logger.error(
+                f"[AUTH VALIDATION] Error during validation: {e}", exc_info=True
+            )
+            return (False, f"Authentication validation error: {str(e)}")
+
+    @classmethod
+    async def create(
+        cls,
+        config: Any,
+        api_keys_service: Optional[Any] = None,
+        user_token: Optional[str] = None,
+    ) -> "ToolFactory":
+        """
+        Async factory method to create and initialize a ToolFactory instance.
+
+        Args:
+            config: Configuration dictionary for the factory
+            api_keys_service: Optional ApiKeysService for retrieving API keys
+            user_token: User access token for OAuth authentication
+
+        Returns:
+            Initialized ToolFactory instance
+        """
+        instance = cls(config, api_keys_service, user_token)
+        await instance.initialize()
+        return instance
+
+    async def initialize(self) -> None:
+        """Initialize the tool factory asynchronously"""
+        if not self._initialized:
+            try:
+                await self._load_available_tools_async()
+
+                # API keys are NOT pre-loaded into os.environ: the process
+                # environment is shared by every workspace a request serves, so a
+                # key written there leaks across tenants. Each tool that needs a
+                # key receives it explicitly at construction (see _get_api_key).
+
+                self._initialized = True
+            except Exception as e:
+                logger.error(f"Error during async initialization: {e}")
+                raise
+
+    def _sync_load_available_tools(self) -> None:
+        """
+        Synchronous method to load available tools
+        This uses a new event loop - DO NOT CALL from inside an async context
+        """
+        try:
+            # Check if we're already in an event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're here, we're already in an event loop
+                logger.warning(
+                    "Already in event loop, using a workaround to load tools"
+                )
+                # Create a new thread to run a new event loop
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        self._run_in_new_loop, self._load_available_tools_async
+                    )
+                    future.result()
+            except RuntimeError:
+                # No running event loop, safe to create a new one
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._load_available_tools_async())
+                finally:
+                    loop.close()
+        except Exception as e:
+            logger.error(f"Error in _sync_load_available_tools: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+
+    async def _load_available_tools_async(self) -> None:
+        """Load all available tools from the service asynchronously"""
+        try:
+            # Get services using session factory
+            from src.db.session import routed_scoped_session
+            from src.services.tools.tool_service import ToolService
+            from src.utils.user_context import GroupContext
+
+            async with routed_scoped_session() as session:
+                # Create tool service with session
+                tool_service = ToolService(session)
+
+                # Group-aware: prefer loading tools for the current group if provided in config
+                group_id = None
+                try:
+                    group_id = (
+                        self.config.get("group_id")
+                        if isinstance(self.config, dict)
+                        else None
+                    )
+                except Exception:
+                    group_id = None
+
+                if group_id:
+                    group_context = GroupContext(group_ids=[group_id])
+                    tools_response = await tool_service.get_enabled_tools_for_group(
+                        group_context
+                    )
+                else:
+                    tools_response = await tool_service.get_all_tools()
+                tools = tools_response.tools
+
+                # Store tools by both title and ID
+                self._available_tools = {}
+                for tool in tools:
+                    self._available_tools[tool.title] = tool
+                    self._available_tools[str(tool.id)] = (
+                        tool  # Convert ID to string since it might come as string from config
+                    )
+
+                logger.info(
+                    f"Loaded {len(tools)} tools from service (group_id={group_id})"
+                )
+                logger.debug(f"Available tools: {[f'{t.id}:{t.title}' for t in tools]}")
+        except Exception as e:
+            logger.error(f"Error loading available tools: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+
+    def get_tool_info(self, tool_identifier: Union[str, int]) -> Optional[ToolResponse]:
+        """
+        Get tool information by ID or title
+
+        Args:
+            tool_identifier: Either the tool's ID (int or str) or title (str)
+
+        Returns:
+            Tool object if found, None otherwise
+        """
+        # Convert integer IDs to strings for dictionary lookup
+        if isinstance(tool_identifier, int):
+            tool_identifier = str(tool_identifier)
+
+        tool = self._available_tools.get(tool_identifier)
+
+        if tool:
+            logger.info(
+                f"Found tool: ID={getattr(tool, 'id', 'N/A')}, title={getattr(tool, 'title', 'N/A')}"
+            )
+        else:
+            logger.warning(
+                f"Tool '{tool_identifier}' not found in available tools. Available IDs and titles are: {list(self._available_tools.keys())}"
+            )
+
+        return tool
+
+    async def _get_api_key_async(self, key_name: str) -> Optional[str]:
+        """Get an API key asynchronously through the service"""
+        try:
+            if self.api_keys_service:
+                # Use the provided API keys service properly through its methods
+                try:
+                    api_key = await self.api_keys_service.find_by_name(key_name)
+                    if api_key and api_key.encrypted_value:
+                        # Decrypt the value
+                        decrypted_value = EncryptionUtils.decrypt_value(
+                            api_key.encrypted_value
+                        )
+
+                        logger.info(f"Using {key_name} from service directly")
+                        return decrypted_value
+                    else:
+                        logger.warning(f"{key_name} not found via service")
+                        return None
+                except Exception as e:
+                    logger.error(
+                        f"Error with existing API keys service for {key_name}: {str(e)}"
+                    )
+                    # Fall through to the alternative method
+
+            # Fallback to creating a new API keys service instance on its own
+            # session. Import here to avoid circular imports.
+            #
+            # _smart, NOT _with_fresh_engine: the latter pins the operation to the
+            # LOCAL engine (it imports nullpool_engine from db.session directly),
+            # with no is_lakebase_enabled() check and no way to reach Lakebase. On
+            # a Lakebase deployment this read therefore ran against a database
+            # holding no apikey rows and reported the key as missing — the tool
+            # then failed with "Perplexity API key is required. Please configure
+            # it in the API Keys settings." for a key that WAS configured
+            # (verified: the row was in Lakebase, saved 10s before the run).
+            # _smart honours the router and falls back to this same local engine
+            # when Lakebase is off, so local/SQLite behaviour is unchanged.
+            from src.utils.asyncio_utils import execute_db_operation_smart
+
+            # Get group_id from config or api_keys_service
+            group_id = None
+            try:
+                group_id = (
+                    self.config.get("group_id")
+                    if isinstance(self.config, dict)
+                    else None
+                )
+            except Exception:
+                pass
+
+            # If not in config, try to get from api_keys_service
+            if not group_id and self.api_keys_service:
+                group_id = getattr(self.api_keys_service, "group_id", None)
+
+            async def _get_key_on_own_session(session: Any) -> Optional[str]:
+                from src.services.settings.api_keys import ApiKeysService
+
+                # SECURITY: Create service with group_id for multi-tenant isolation
+                api_keys_service = ApiKeysService(session, group_id=group_id)
+                api_key = await api_keys_service.find_by_name(key_name)
+
+                if api_key and api_key.encrypted_value:
+                    # Decrypt the value
+                    return EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                return None
+
+            # Own session (router-selected) to avoid transaction conflicts
+            own_session_value = await execute_db_operation_smart(
+                _get_key_on_own_session
+            )
+
+            if own_session_value:
+                logger.info(f"Using {key_name} from isolated database operation")
+                return own_session_value
+            else:
+                logger.warning(f"{key_name} not found via isolated database operation")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting {key_name} from service: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return None
+
+    def _get_api_key(self, key_name: str) -> Optional[str]:
+        """
+        Get an API key through the service layer synchronously
+        Only use this method when not in an async context
+        """
+        try:
+            # Check if we're already in an event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're here, we're already in an event loop
+                logger.warning(
+                    "Already in event loop, creating new thread for API key retrieval"
+                )
+                # Create a new thread to run a new event loop
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        self._run_in_new_loop, self._get_api_key_async, key_name
+                    )
+                    return future.result()
+            except RuntimeError:
+                # No running event loop, safe to create a new one
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(self._get_api_key_async(key_name))
+                finally:
+                    loop.close()
+        except Exception as e:
+            logger.error(f"Error getting {key_name} from service: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            # Don't halt execution completely if the API key retrieval fails
+            logger.warning(f"Continuing without {key_name}")
+            return None
+
+    def _run_in_new_loop(
+        self, async_func: Callable[..., Awaitable[_T]], *args: Any, **kwargs: Any
+    ) -> _T:
+        """Run an async function in a new event loop in a separate thread"""
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(async_func(*args, **kwargs))
+        finally:
+            loop.close()
+
+    def create_tool(
+        self,
+        tool_identifier: Union[str, int],
+        result_as_answer: bool = False,
+        tool_config_override: Optional[Dict[str, Any]] = None,
+    ) -> ToolBuildResult:
+        """
+        Create a tool instance based on its identifier.
+
+        Args:
+            tool_identifier: Either the tool's ID (int or str) or title (str)
+            result_as_answer: Whether the tool's result should be treated as the final answer
+            tool_config_override: Optional configuration overrides for this specific tool instance
+
+        Returns:
+            Tool instance if successfully created, None otherwise
+        """
+        # _create_tool_impl pops the policy keys out of the merged config (they
+        # must not reach `tool_class(**tool_config)`) and stashes them here;
+        # stamp them on the instance(s) so the engine hooks read one attribute
+        # regardless of which branch built the tool.
+        self._pending_policies: Dict[str, Dict[str, Any]] = {}
+        result = self._create_tool_impl(
+            tool_identifier, result_as_answer, tool_config_override
+        )
+        stamp_tool_policies(result, getattr(self, "_pending_policies", {}))
+        return result
+
+    def _group_ids_for_tools(self) -> list:
+        """Which workspaces' configuration this factory may read.
+
+        Prefers the live request context over the config dict: the config is a
+        snapshot taken when a run was queued, and a tool built later must not
+        reach into a workspace on the strength of a stale value.
+        """
+        try:
+            from src.utils.user_context import UserContext
+
+            group_context = UserContext.get_group_context()
+            if group_context and group_context.group_ids:
+                return list(group_context.group_ids)
+        except Exception:  # noqa: BLE001
+            pass
+
+        group_id = (self.config or {}).get("group_id")
+        return [group_id] if group_id else []
+
+    def _create_tool_impl(
+        self,
+        tool_identifier: Union[str, int],
+        result_as_answer: bool = False,
+        tool_config_override: Optional[Dict[str, Any]] = None,
+    ) -> ToolBuildResult:
+        # Get tool info from our cached tools obtained from the service
+        tool_info = self.get_tool_info(tool_identifier)
+        if not tool_info:
+            logger.error(
+                f"Tool '{tool_identifier}' not found. Please ensure the tool is registered."
+            )
+            return None
+
+        # Log found tool details
+        tool_id = getattr(tool_info, "id", None)
+        tool_title = getattr(tool_info, "title", None)
+        logger.info(f"Creating tool with ID={tool_id}, title={tool_title}")
+
+        # Look up the implementation class based on the tool's title
+        if not hasattr(self, "_tool_implementations") or not self._tool_implementations:
+            logger.error("Tool implementations dictionary not initialized")
+            return None
+
+        tool_name = tool_info.title
+        tool_class: Optional[_ToolCtor] = self._tool_implementations.get(tool_name)
+
+        if not tool_class:
+            logger.warning(f"No implementation found for tool '{tool_name}'")
+            return None
+
+        try:
+            # Get base tool config from tool info
+            base_config = (
+                tool_info.config
+                if hasattr(tool_info, "config") and tool_info.config is not None
+                else {}
+            )
+
+            # The override (agent/task/run tool_configs) wins the merge, minus the
+            # keys it may not set and any teamspace credential for an endpoint it
+            # moved (tool_policies). Policies are popped here and stamped by
+            # `create_tool`. Every branch below sees only the cleaned override.
+            tool_config_override, tool_config, self._pending_policies = (
+                merge_tool_config_override(tool_name, base_config, tool_config_override)
+            )
+
+            # Log what we're merging — MASK sensitive fields (client_secret, tokens,
+            # passwords) so they never land in crew.log / flow.log in cleartext.
+            logger.info(
+                f"[ToolFactory] {tool_name} - base_config from tool_info: {mask_sensitive_fields(base_config)}"
+            )
+            logger.info(
+                f"[ToolFactory] {tool_name} - tool_config_override received: {mask_sensitive_fields(tool_config_override or {})}"
+            )
+
+            # Inject execution inputs if available in the main config (for dynamic parameter resolution)
+            # Handle both direct inputs and nested inputs structure
+            execution_inputs = None
+            if hasattr(self, "config") and self.config:
+                # Check for nested inputs structure: config['inputs']['inputs']
+                if "inputs" in self.config and isinstance(self.config["inputs"], dict):
+                    if "inputs" in self.config["inputs"]:
+                        execution_inputs = self.config["inputs"]["inputs"]
+                        logger.info(
+                            f"[ToolFactory] Found nested execution_inputs for {tool_name}: {list(execution_inputs.keys())}"
+                        )
+                    else:
+                        # Fallback: try direct inputs (might contain agents_yaml, tasks_yaml, etc.)
+                        # Filter out non-user inputs. 'planning' is LEGACY-ONLY here:
+                        # Kasal no longer models planning, but payloads saved before
+                        # its removal can still carry the key, and it must not be
+                        # treated as a user input for parameter resolution.
+                        user_inputs = {
+                            k: v
+                            for k, v in self.config["inputs"].items()
+                            if k
+                            not in [
+                                "agents_yaml",
+                                "tasks_yaml",
+                                "planning",
+                                "model",
+                                "execution_type",
+                                "schema_detection_enabled",
+                                "process",
+                                "run_name",
+                            ]
+                        }
+                        if user_inputs:
+                            execution_inputs = user_inputs
+                            logger.info(
+                                f"[ToolFactory] Found direct execution_inputs for {tool_name}: {list(execution_inputs.keys())}"
+                            )
+
+                if execution_inputs:
+                    tool_config["execution_inputs"] = execution_inputs
+                    # Log keys only (don't log sensitive values like client_secret)
+                    logger.info(
+                        f"[ToolFactory] ✓ Injected execution_inputs into {tool_name} with keys: {list(execution_inputs.keys())}"
+                    )
+
+                    # RESOLVE PLACEHOLDERS: Replace {placeholder} with actual values from execution_inputs
+                    import re
+
+                    resolved_count = 0
+                    for key, value in list(tool_config.items()):
+                        if isinstance(value, str) and "{" in value:
+                            placeholders = re.findall(r"\{(\w+)\}", value)
+                            if placeholders:
+                                resolved_value = value
+                                for placeholder in placeholders:
+                                    if placeholder in execution_inputs:
+                                        replacement = str(execution_inputs[placeholder])
+                                        resolved_value = resolved_value.replace(
+                                            f"{{{placeholder}}}", replacement
+                                        )
+                                        # Log resolution (mask sensitive values)
+                                        if (
+                                            "secret" in key.lower()
+                                            or "password" in key.lower()
+                                            or "token" in key.lower()
+                                        ):
+                                            logger.info(
+                                                f"[ToolFactory RESOLVE] {key}: {{{placeholder}}} → [REDACTED]"
+                                            )
+                                        else:
+                                            logger.info(
+                                                f"[ToolFactory RESOLVE] {key}: {{{placeholder}}} → {replacement}"
+                                            )
+                                        resolved_count += 1
+                                tool_config[key] = resolved_value
+
+                    if resolved_count > 0:
+                        logger.info(
+                            f"[ToolFactory] ✓ Resolved {resolved_count} placeholders in {tool_name} config"
+                        )
+
+                    # Inject key execution inputs (user_question, context enrichment such as
+                    # active_filters/business_mappings) into tool_config when absent, so tools
+                    # like the DAX Generator get them without relying on the LLM agent.
+                    _empty_values: tuple = (None, {}, [], "")
+                    for input_key in [
+                        "user_question",
+                        "active_filters",
+                        "business_mappings",
+                        "field_synonyms",
+                        "visible_tables",
+                        "conversation_history",
+                        "context_knowledge",
+                        "reference_dax",
+                    ]:
+                        if input_key in execution_inputs and (
+                            input_key not in tool_config
+                            or tool_config.get(input_key) in _empty_values
+                        ):
+                            tool_config[input_key] = execution_inputs[input_key]
+                            logger.info(
+                                f"[ToolFactory] Injected '{input_key}' from execution_inputs "
+                                f"into {tool_name} config"
+                            )
+
+                    # Remove execution_inputs from tool_config after placeholder resolution
+                    # Tool constructors don't accept this key and will raise TypeError
+                    tool_config.pop("execution_inputs", None)
+
+            # Parse JSON strings for PowerBI context enrichment fields (DAX Generator + Analysis Tool)
+            if "Power BI" in tool_name and (
+                "Analysis" in tool_name or "DAX" in tool_name
+            ):
+                import json
+
+                json_fields = [
+                    "business_mappings",
+                    "field_synonyms",
+                    "active_filters",
+                    "visible_tables",
+                    "conversation_history",
+                ]
+                for field in json_fields:
+                    if field in tool_config and isinstance(tool_config[field], str):
+                        try:
+                            # Try to parse the JSON string
+                            tool_config[field] = json.loads(tool_config[field])
+                            logger.info(
+                                f"[ToolFactory] Parsed {field} JSON string into dict/list"
+                            )
+                        except json.JSONDecodeError as e:
+                            logger.warning(
+                                f"[ToolFactory] Failed to parse {field} as JSON: {e}. Keeping as string."
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"[ToolFactory] Unexpected error parsing {field}: {e}"
+                            )
+
+            logger.info(
+                f"[ToolFactory] {tool_name} config (after merge): {mask_sensitive_fields(tool_config)}"
+            )
+
+            # For critical tools, verify override was applied
+            if tool_config_override and tool_name == "Measure Conversion Pipeline":
+                logger.info(
+                    f"[ToolFactory] {tool_name} - Verifying override was applied:"
+                )
+                for key in [
+                    "inbound_connector",
+                    "outbound_format",
+                    "powerbi_semantic_model_id",
+                    "powerbi_group_id",
+                ]:
+                    if key in tool_config_override:
+                        base_val = base_config.get(key, "NOT IN BASE")
+                        override_val = tool_config_override.get(key, "NOT IN OVERRIDE")
+                        merged_val = tool_config.get(key, "NOT IN MERGED")
+                        logger.info(
+                            f"[ToolFactory]   {key}: base='{base_val}' → override='{override_val}' → merged='{merged_val}'"
+                        )
+
+            # Verify override for Power BI Field Parameters tool
+            if tool_name == "Power BI Field Parameters & Calculation Groups Tool":
+                logger.info(f"[ToolFactory] {tool_name} - Verifying config:")
+                for key in [
+                    "workspace_id",
+                    "dataset_id",
+                    "tenant_id",
+                    "client_id",
+                    "client_secret",
+                    "mode",
+                ]:
+                    base_val = base_config.get(key, "NOT IN BASE")
+                    override_val = (tool_config_override or {}).get(
+                        key, "NOT IN OVERRIDE"
+                    )
+                    merged_val = tool_config.get(key, "NOT IN MERGED")
+                    # Mask secrets
+                    if "secret" in key.lower():
+                        base_val = (
+                            "***"
+                            if base_val and base_val != "NOT IN BASE"
+                            else base_val
+                        )
+                        override_val = (
+                            "***"
+                            if override_val and override_val != "NOT IN OVERRIDE"
+                            else override_val
+                        )
+                        merged_val = (
+                            "***"
+                            if merged_val and merged_val != "NOT IN MERGED"
+                            else merged_val
+                        )
+                    logger.info(
+                        f"[ToolFactory]   {key}: base='{base_val}' → override='{override_val}' → merged='{merged_val}'"
+                    )
+
+            # Handle specific tool types
+            if tool_name == "PerplexityTool":
+                # Use parameters directly from tool config
+                api_key = tool_config.get("api_key", "")
+
+                # The key comes from THIS workspace's ApiKeysService, never the
+                # process environment (shared by every tenant).
+                final_api_key = api_key or self._get_api_key("PERPLEXITY_API_KEY")
+
+                # Add api key to config and create with all parameters from config
+                tool_config_with_key = {**tool_config}
+                if final_api_key:
+                    # Use 'api_key' as that's what PerplexitySearchTool expects
+                    tool_config_with_key["api_key"] = final_api_key
+                    # Remove 'perplexity_api_key' if it exists to avoid unexpected keyword arg error
+                    if "perplexity_api_key" in tool_config_with_key:
+                        del tool_config_with_key["perplexity_api_key"]
+
+                # Add result_as_answer to tool configuration
+                tool_config_with_key["result_as_answer"] = result_as_answer
+
+                logger.info(
+                    f"Creating PerplexityTool with config: {mask_sensitive_fields(tool_config_with_key)}"
+                )
+                return tool_class(**tool_config_with_key)
+
+            elif tool_name == "SerperDevTool":
+                # Log the incoming tool config for SerperDevTool
+                logger.info(
+                    f"SerperDevTool - incoming tool_config: {mask_sensitive_fields(tool_config)}"
+                )
+
+                # Map frontend 'endpoint_type' to SerperDevTool's 'search_type' parameter
+                if "endpoint_type" in tool_config and "search_type" not in tool_config:
+                    endpoint_type = tool_config["endpoint_type"]
+                    # Only map if it's a supported type (search or news)
+                    if endpoint_type in ["search", "news"]:
+                        tool_config["search_type"] = endpoint_type
+                        logger.info(
+                            f"SerperDevTool - Mapped endpoint_type '{endpoint_type}' to search_type"
+                        )
+                    else:
+                        logger.warning(
+                            f"SerperDevTool - Unsupported endpoint_type '{endpoint_type}', defaulting to 'search'"
+                        )
+                        tool_config["search_type"] = "search"
+
+                # Get API key from tool config
+                api_key = tool_config.get("serper_api_key", "")
+
+                # The key comes from THIS workspace's ApiKeysService, never the
+                # process environment (shared by every tenant).
+                final_api_key = api_key or self._get_api_key("SERPER_API_KEY")
+
+                # Add api key to config and create with all parameters from config
+                tool_config_with_key = {**tool_config}
+                if final_api_key:
+                    tool_config_with_key["api_key"] = final_api_key
+
+                # Remove frontend-specific fields that SerperDevTool doesn't recognize
+                fields_to_remove = ["endpoint_type", "search_url", "serper_api_key"]
+                for field in fields_to_remove:
+                    tool_config_with_key.pop(field, None)
+
+                # Add result_as_answer to tool configuration
+                tool_config_with_key["result_as_answer"] = result_as_answer
+
+                # Log the final config being passed to SerperDevTool
+                logger.info(
+                    f"SerperDevTool - final tool_config_with_key: {mask_sensitive_fields(tool_config_with_key)}"
+                )
+                logger.info(
+                    f"SerperDevTool - search_type in config: {tool_config_with_key.get('search_type', 'NOT SET')}"
+                )
+
+                return tool_class(**tool_config_with_key)
+
+            elif tool_name == "DatabricksJobsTool":
+                # Create a copy of the config (same pattern as other Databricks tools)
+                databricks_jobs_config = {**tool_config}
+
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get("user_token") or self.user_token
+
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info("Extracted user token for DatabricksJobsTool")
+                        else:
+                            logger.warning(
+                                "No user token found in context for DatabricksJobsTool"
+                            )
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
+
+                # CRITICAL: Extract group_id from config for PAT authentication
+                # This is essential for tools running in CrewAI threads where UserContext is unavailable
+                group_id = None
+                if isinstance(self.config, dict):
+                    group_id = self.config.get("group_id")
+                    if group_id:
+                        logger.info(
+                            f"Extracted group_id from factory config for DatabricksJobsTool: {group_id}"
+                        )
+                    else:
+                        logger.warning(
+                            "No group_id in factory config - PAT authentication may fail for DatabricksJobsTool"
+                        )
+
+                # NOTE: Databricks Jobs API does NOT support OBO (on-behalf-of) authentication scopes.
+                # Even when a user_token is available, PAT must be used for Jobs API calls.
+                # Reference: https://docs.databricks.com/en/dev-tools/databricks-apps/auth.html
+                api_key = databricks_jobs_config.get("DATABRICKS_API_KEY", "")
+                databricks_api_key = None
+
+                # Try to get API key from unified auth
+                try:
+                    from src.utils.databricks_auth import get_auth_context
+
+                    try:
+                        asyncio.get_running_loop()
+                        import concurrent.futures
+
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            auth = pool.submit(
+                                self._run_in_new_loop, get_auth_context
+                            ).result()
+                    except RuntimeError:
+                        auth = asyncio.run(get_auth_context())
+                    databricks_api_key = auth.token if auth else None
+                except Exception as e:
+                    logger.debug(
+                        f"Unified auth not available for DatabricksJobsTool: {e}"
+                    )
+
+                # If not found via unified auth, fetch from ApiKeysService
+                if not databricks_api_key and not api_key:
+                    if self.api_keys_service is not None:
+                        logger.info(
+                            "Using ApiKeysService to get DATABRICKS_API_KEY for DatabricksJobsTool"
+                        )
+                        db_api_key = None
+                        try:
+                            asyncio.get_running_loop()
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                db_api_key = pool.submit(
+                                    self._run_in_new_loop,
+                                    self._get_api_key_async,
+                                    "DATABRICKS_API_KEY",
+                                ).result()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            try:
+                                asyncio.set_event_loop(loop)
+                                db_api_key = loop.run_until_complete(
+                                    self._get_api_key_async("DATABRICKS_API_KEY")
+                                )
+                            finally:
+                                loop.close()
+                        if db_api_key:
+                            databricks_api_key = db_api_key
+                            logger.info(
+                                "Retrieved DATABRICKS_API_KEY for DatabricksJobsTool from ApiKeysService"
+                            )
+                    else:
+                        logger.warning(
+                            "No ApiKeysService available - DatabricksJobsTool PAT lookup may fail"
+                        )
+
+                final_api_key = api_key or databricks_api_key
+                if final_api_key:
+                    databricks_jobs_config["DATABRICKS_API_KEY"] = final_api_key
+                    logger.info(
+                        "Injected DATABRICKS_API_KEY into DatabricksJobsTool config"
+                    )
+
+                # Get DATABRICKS_HOST from tool_config or environment
+                databricks_host = tool_config.get("DATABRICKS_HOST")
+
+                # If DATABRICKS_HOST is not in tool_config, try to get it from unified auth
+                if not databricks_host:
+                    # Use unified authentication
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(
+                                    self._run_in_new_loop, get_auth_context
+                                ).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_host = auth.workspace_url if auth else None
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
+                        databricks_host = None
+
+                    # If not in environment, try to get from DatabricksService
+                    if not databricks_host:
+                        try:
+                            from src.services.databricks.workspace.config_provider import (
+                                DatabricksConfigProvider,
+                            )
+
+                            async def get_databricks_config() -> Optional[str]:
+                                config = await DatabricksConfigProvider.get()
+                                if config and config.workspace_url:
+                                    workspace_url = str(config.workspace_url).rstrip(
+                                        "/"
+                                    )
+                                    if not workspace_url.startswith("https://"):
+                                        workspace_url = f"https://{workspace_url}"
+                                    return workspace_url
+                                return None
+
+                            # Execute the async function
+                            try:
+                                # Check if we're in an async context
+                                asyncio.get_running_loop()
+                                # Use ThreadPoolExecutor to call async method from sync context
+                                import concurrent.futures
+
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    databricks_host = pool.submit(
+                                        self._run_in_new_loop, get_databricks_config
+                                    ).result()
+                            except RuntimeError:
+                                # Not in async context
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    asyncio.set_event_loop(loop)
+                                    databricks_host = loop.run_until_complete(
+                                        get_databricks_config()
+                                    )
+                                finally:
+                                    loop.close()
+
+                            if databricks_host:
+                                logger.info(
+                                    f"Retrieved DATABRICKS_HOST from DatabricksService: {databricks_host}"
+                                )
+                                # Add to the tool config copy
+                                databricks_jobs_config["DATABRICKS_HOST"] = (
+                                    databricks_host
+                                )
+                            else:
+                                logger.warning(
+                                    "Could not retrieve DATABRICKS_HOST from DatabricksService"
+                                )
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error getting DATABRICKS_HOST from service: {e}"
+                            )
+
+                # Create the tool with the same pattern as other Databricks tools
+                logger.info(
+                    f"Creating DatabricksJobsTool with tool_config: {mask_sensitive_fields(databricks_jobs_config)}"
+                )
+                return tool_class(
+                    databricks_host=databricks_host,
+                    tool_config=databricks_jobs_config,
+                    user_token=user_token,
+                    group_id=group_id,
+                    result_as_answer=result_as_answer,
+                )
+
+            # NOTE: DatabricksKnowledgeSearchTool is handled later in the method (see line ~1190)
+            # This block was a duplicate and has been removed to avoid confusion
+
+            elif tool_name == "GenieTool":
+                # Get tool ID if any
+                tool_id = tool_config.get("tool_id", None)
+
+                # Log the raw tool_config to debug spaceId issue
+                logger.info(
+                    f"GenieTool raw tool_config: {mask_sensitive_fields(tool_config)}"
+                )
+                logger.info(
+                    f"GenieTool tool_config_override: {mask_sensitive_fields(tool_config_override or {})}"
+                )
+
+                # Create a copy of the config
+                genie_tool_config = {**tool_config}
+
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get("user_token") or self.user_token
+
+                # CRITICAL: Extract group_id from config for PAT authentication fallback
+                # This is essential for tools running in CrewAI threads where UserContext is unavailable
+                group_id = None
+                if isinstance(self.config, dict):
+                    group_id = self.config.get("group_id")
+                    if group_id:
+                        logger.info(
+                            f"Extracted group_id from factory config for GenieTool: {group_id}"
+                        )
+                    else:
+                        logger.warning(
+                            "No group_id in factory config - PAT authentication may fail"
+                        )
+
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info("Extracted user token for GenieTool OBO")
+                        else:
+                            logger.warning(
+                                "No user token found in context for GenieTool"
+                            )
+                            # Also check if group context has a token
+                            group_context = UserContext.get_group_context()
+                            if group_context and group_context.access_token:
+                                user_token = group_context.access_token
+                                logger.info("Found user token in group context")
+                            else:
+                                logger.warning("No user token in group context either")
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
+                        import traceback
+
+                        logger.error(traceback.format_exc())
+
+                # Check if we should use OAuth authentication (Databricks Apps environment)
+                use_oauth = bool(user_token)
+
+                # If we don't have a user token, try traditional API key approach
+                if not use_oauth:
+                    # Get API key from tool config
+                    api_key = tool_config.get("api_key", "")
+
+                    # Get API key from unified auth
+                    databricks_api_key = None
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(
+                                    self._run_in_new_loop, get_auth_context
+                                ).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_api_key = auth.token if auth else None
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
+
+                    # If not found in environment, try to get it from the service
+                    if not databricks_api_key and not api_key:
+                        # Use the API keys service if provided, otherwise use the normal methods
+                        if self.api_keys_service is not None:
+                            logger.info(
+                                "Using ApiKeysService to get DATABRICKS_API_KEY"
+                            )
+                            try:
+                                # Check if we're in an async context
+                                asyncio.get_running_loop()
+                                # Use ThreadPoolExecutor to call async method from sync context
+                                import concurrent.futures
+
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    db_api_key = pool.submit(
+                                        self._run_in_new_loop,
+                                        self._get_api_key_async,
+                                        "DATABRICKS_API_KEY",
+                                    ).result()
+                            except RuntimeError:
+                                # Not in async context
+                                loop = asyncio.new_event_loop()
+                                try:
+                                    asyncio.set_event_loop(loop)
+                                    db_api_key = loop.run_until_complete(
+                                        self._get_api_key_async("DATABRICKS_API_KEY")
+                                    )
+                                finally:
+                                    loop.close()
+                        else:
+                            # Fallback to original method
+                            logger.warning("DATABRICKS_API_KEY not found via service")
+                            try:
+                                # Check if we're already in an event loop
+                                asyncio.get_running_loop()
+                                # We're in an async context, use ThreadPoolExecutor
+                                import concurrent.futures
+
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    db_api_key = pool.submit(
+                                        self._run_in_new_loop,
+                                        self._get_api_key_async,
+                                        "DATABRICKS_API_KEY",
+                                    ).result()
+                            except RuntimeError:
+                                # We're not in an async context, use direct method
+                                db_api_key = self._get_api_key("DATABRICKS_API_KEY")
+
+                            if db_api_key:
+                                # NOTE: Do NOT set os.environ["DATABRICKS_API_KEY"] as it causes race conditions
+                                # The API key is passed directly to tool config below instead
+                                databricks_api_key = db_api_key
+
+                    # Use tool configuration or environment
+                    final_api_key = api_key or databricks_api_key
+
+                    # Add api key to config
+                    if final_api_key:
+                        genie_tool_config["DATABRICKS_API_KEY"] = final_api_key
+
+                # DATABRICKS_HOST - check config first, then environment variable
+                if "DATABRICKS_HOST" in tool_config:
+                    genie_tool_config["DATABRICKS_HOST"] = tool_config[
+                        "DATABRICKS_HOST"
+                    ]
+                    logger.info(
+                        f"Using DATABRICKS_HOST from config: {tool_config['DATABRICKS_HOST']}"
+                    )
+                else:
+                    # Try to get from unified auth
+                    try:
+                        from src.utils.databricks_auth import get_auth_context
+
+                        # Check if we're in an async context
+                        try:
+                            asyncio.get_running_loop()
+                            # We're in an event loop, use thread pool
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                auth = pool.submit(
+                                    self._run_in_new_loop, get_auth_context
+                                ).result()
+                        except RuntimeError:
+                            # No running event loop, safe to use asyncio.run
+                            auth = asyncio.run(get_auth_context())
+                        databricks_host = auth.workspace_url if auth else None
+                        if databricks_host:
+                            genie_tool_config["DATABRICKS_HOST"] = databricks_host
+                            logger.info(
+                                f"Using DATABRICKS_HOST from unified auth: {databricks_host}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Unified auth not available: {e}")
+                        databricks_host = None
+                    else:
+                        logger.info(
+                            "DATABRICKS_HOST not in config or environment - GenieTool will auto-detect if in Databricks Apps"
+                        )
+
+                # Check for spaceId in tool_config_override first (task/agent specific), then in base tool_config
+                if tool_config_override and "spaceId" in tool_config_override:
+                    genie_tool_config["spaceId"] = tool_config_override["spaceId"]
+                    logger.info(
+                        f"Using spaceId from tool_config_override: {tool_config_override['spaceId']}"
+                    )
+                elif tool_config_override and "space_id" in tool_config_override:
+                    # Also check for space_id with underscore
+                    genie_tool_config["spaceId"] = tool_config_override["space_id"]
+                    logger.info(
+                        f"Using space_id (underscore) from tool_config_override: {tool_config_override['space_id']}"
+                    )
+                elif "spaceId" in tool_config:
+                    genie_tool_config["spaceId"] = tool_config["spaceId"]
+                    logger.info(
+                        f"Using spaceId from base tool_config: {tool_config['spaceId']}"
+                    )
+                elif "space_id" in tool_config:
+                    # Also check for space_id with underscore in base config
+                    genie_tool_config["spaceId"] = tool_config["space_id"]
+                    logger.info(
+                        f"Using space_id (underscore) from base tool_config: {tool_config['space_id']}"
+                    )
+                else:
+                    logger.warning(
+                        "No spaceId or space_id found in tool_config_override or base tool_config"
+                    )
+                    logger.warning(f"tool_config keys: {list(tool_config.keys())}")
+                    logger.warning(
+                        f"tool_config_override keys: {list(tool_config_override.keys()) if tool_config_override else 'None'}"
+                    )
+                # No default spaceId - must be configured in agent/task
+
+                # Create the GenieTool instance
+                try:
+                    logger.info(
+                        f"Creating GenieTool with config, OBO: {bool(user_token)}, group_id: {group_id}"
+                    )
+                    logger.info(
+                        f"GenieTool config being passed: {mask_sensitive_fields(genie_tool_config)}"
+                    )
+                    return tool_class(
+                        tool_config=genie_tool_config,
+                        tool_id=tool_id,
+                        token_required=False,
+                        user_token=user_token,
+                        group_id=group_id,  # CRITICAL: Pass group_id for PAT authentication
+                        result_as_answer=result_as_answer,
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating GenieTool: {e}")
+                    return None
+
+            elif tool_name in ("Gmail", "GmailTool"):
+                # Gmail via the UC connections proxy. STRICTLY OBO: the proxy
+                # resolves the Google account from the calling identity, and
+                # Kasal's PAT/SPN credentials are group-SHARED — a fallback
+                # would map every caller in a group to one mailbox. The tool
+                # refuses to run without the per-user OBO token.
+                tool_id = tool_config.get("tool_id", None)
+                gmail_config = {**tool_config, **(tool_config_override or {})}
+                from src.utils.user_context import UserContext
+
+                gmail_context = UserContext.get_group_context()
+                personal_group_id = getattr(
+                    getattr(gmail_context, "current_user", None),
+                    "personal_group_id",
+                    None,
+                )
+
+                user_token = tool_config.get("user_token") or self.user_token
+                group_id = (
+                    self.config.get("group_id")
+                    if isinstance(self.config, dict)
+                    else None
+                )
+                user_email = (
+                    self.config.get("user_email")
+                    if isinstance(self.config, dict)
+                    else None
+                )
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+
+                        user_token = UserContext.get_user_token()
+                        if not user_token:
+                            group_context = UserContext.get_group_context()
+                            if group_context and group_context.access_token:
+                                user_token = group_context.access_token
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not extract user token from context for Gmail: {e}"
+                        )
+
+                try:
+                    return tool_class(
+                        tool_config=gmail_config,
+                        personal_group_id=personal_group_id,
+                        tool_id=tool_id,
+                        user_token=user_token,
+                        group_id=group_id,
+                        user_email=user_email,
+                        result_as_answer=result_as_answer,
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating Gmail tool: {e}")
+                    return None
+
+            elif tool_name == "AgentBricksTool":
+                # Get tool ID if any
+                tool_id = tool_config.get("tool_id", None)
+
+                # Log the raw tool_config to debug endpointName issue
+                logger.info(
+                    f"AgentBricksTool raw tool_config: {mask_sensitive_fields(tool_config)}"
+                )
+                logger.info(
+                    f"AgentBricksTool tool_config_override: {mask_sensitive_fields(tool_config_override or {})}"
+                )
+
+                # Create a copy of the config
+                agentbricks_tool_config = {**tool_config}
+
+                # Try to get user token from multiple sources for OAuth/OBO authentication
+                user_token = tool_config.get("user_token") or self.user_token
+
+                # CRITICAL: Extract group_id from config for PAT authentication fallback
+                # This is essential for tools running in CrewAI threads where UserContext is unavailable
+                group_id = None
+                if isinstance(self.config, dict):
+                    group_id = self.config.get("group_id")
+                    if group_id:
+                        logger.info(
+                            f"Extracted group_id from factory config for AgentBricksTool: {group_id}"
+                        )
+                    else:
+                        logger.warning(
+                            "No group_id in factory config - PAT authentication may fail"
+                        )
+
+                # If no user token in config or factory, try to get from context
+                if not user_token:
+                    try:
+                        from src.utils.user_context import UserContext
+
+                        user_token = UserContext.get_user_token()
+                        if user_token:
+                            logger.info("Extracted user token for AgentBricksTool OBO")
+                        else:
+                            logger.warning(
+                                "No user token found in context for AgentBricksTool"
+                            )
+                            # Also check if group context has a token
+                            group_context = UserContext.get_group_context()
+                            if group_context and group_context.access_token:
+                                user_token = group_context.access_token
+                                logger.info("Found user token in group context")
+                            else:
+                                logger.warning("No user token in group context either")
+                    except Exception as e:
+                        logger.error(f"Could not extract user token from context: {e}")
+                        import traceback
+
+                        logger.error(traceback.format_exc())
+
+                # Check for endpointName in tool_config_override first (task/agent specific), then in base tool_config
+                if tool_config_override and "endpointName" in tool_config_override:
+                    agentbricks_tool_config["endpointName"] = tool_config_override[
+                        "endpointName"
+                    ]
+                    logger.info(
+                        f"Using endpointName from tool_config_override: {tool_config_override['endpointName']}"
+                    )
+                elif tool_config_override and "endpoint_name" in tool_config_override:
+                    # Also check for endpoint_name with underscore
+                    agentbricks_tool_config["endpointName"] = tool_config_override[
+                        "endpoint_name"
+                    ]
+                    logger.info(
+                        f"Using endpoint_name (underscore) from tool_config_override: {tool_config_override['endpoint_name']}"
+                    )
+                elif "endpointName" in tool_config:
+                    agentbricks_tool_config["endpointName"] = tool_config[
+                        "endpointName"
+                    ]
+                    logger.info(
+                        f"Using endpointName from base tool_config: {tool_config['endpointName']}"
+                    )
+                elif "endpoint_name" in tool_config:
+                    # Also check for endpoint_name with underscore in base config
+                    agentbricks_tool_config["endpointName"] = tool_config[
+                        "endpoint_name"
+                    ]
+                    logger.info(
+                        f"Using endpoint_name (underscore) from base tool_config: {tool_config['endpoint_name']}"
+                    )
+                else:
+                    logger.warning(
+                        "No endpointName or endpoint_name found in tool_config_override or base tool_config"
+                    )
+                    logger.warning(f"tool_config keys: {list(tool_config.keys())}")
+                    logger.warning(
+                        f"tool_config_override keys: {list(tool_config_override.keys()) if tool_config_override else 'None'}"
+                    )
+                # No default endpointName - must be configured in agent/task
+
+                # Create the AgentBricksTool instance
+                try:
+                    logger.info(
+                        f"Creating AgentBricksTool with config, OBO: {bool(user_token)}, group_id: {group_id}"
+                    )
+                    logger.info(
+                        f"AgentBricksTool config being passed: {mask_sensitive_fields(agentbricks_tool_config)}"
+                    )
+                    return tool_class(
+                        tool_config=agentbricks_tool_config,
+                        tool_id=tool_id,
+                        token_required=False,
+                        user_token=user_token,
+                        group_id=group_id,  # CRITICAL: Pass group_id for PAT authentication
+                        result_as_answer=result_as_answer,
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating AgentBricksTool: {e}")
+                    return None
+
+            elif tool_name == "DatabricksKnowledgeSearchTool":
+                # Create the tool with group_id and user_token
+                # NOTE: We do NOT pass execution_id as it prevents searching across all knowledge documents
+                # The tool should search ALL documents for the group, not just current execution
+
+                # Validate Databricks authentication before creating tool
+                try:
+                    # Check if we're in an async context
+                    try:
+                        asyncio.get_running_loop()
+                        # We're in an event loop, use thread pool
+                        import concurrent.futures
+
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            auth_valid, auth_message = pool.submit(
+                                self._run_in_new_loop, self._validate_databricks_auth
+                            ).result()
+                    except RuntimeError:
+                        # No running event loop, safe to use asyncio.run
+                        loop = asyncio.new_event_loop()
+                        try:
+                            asyncio.set_event_loop(loop)
+                            auth_valid, auth_message = loop.run_until_complete(
+                                self._validate_databricks_auth()
+                            )
+                        finally:
+                            loop.close()
+
+                    if not auth_valid:
+                        logger.warning(
+                            f"[TOOL_FACTORY] Databricks authentication validation failed: {auth_message}"
+                        )
+                        logger.warning(
+                            "[TOOL_FACTORY] Proceeding with tool creation - authentication may be available through environment variables or fallback methods"
+                        )
+                    else:
+                        logger.info(
+                            f"[TOOL_FACTORY] Databricks authentication validated: {auth_message}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"[TOOL_FACTORY] Error validating Databricks auth: {e}",
+                        exc_info=True,
+                    )
+                    logger.warning(
+                        "[TOOL_FACTORY] Proceeding with tool creation despite validation error"
+                    )
+
+                # Tool-specific config first (file_paths, agent_id from task
+                # tool_configs), then the run's identity, which no config replaces.
+                tool_args = {
+                    **(tool_config if isinstance(tool_config, dict) else {}),
+                    "group_id": self.config.get("group_id", "default"),
+                    # DO NOT PASS execution_id - we want to search all documents!
+                    "user_token": self.user_token,
+                    # Per-user isolation where the engine sets user_email (crew runs);
+                    # chat and flow leave it unset and search the whole group.
+                    "user_email": self.config.get("user_email"),
+                }
+                # Keys only: tool_args carries the user's token (audit H6/N4).
+                logger.debug(
+                    "[TOOL_FACTORY] DatabricksKnowledgeSearchTool args: %s",
+                    sorted(tool_args),
+                )
+
+                if DatabricksKnowledgeSearchTool is None:  # its module failed to import
+                    return None
+                return DatabricksKnowledgeSearchTool(**tool_args)
+
+            elif tool_name == "Power BI Comprehensive Analysis Tool":
+                # Create Power BI Comprehensive Analysis Tool with Power BI and LLM configuration
+                # This tool converts business questions into DAX queries and executes them with intelligent self-correction
+                tool_args = {}
+
+                try:
+                    # Extract PowerBI config from tool_config (merged base + override)
+                    if tool_config and isinstance(tool_config, dict):
+                        # Power BI Configuration
+                        tool_args["workspace_id"] = tool_config.get("workspace_id")
+                        tool_args["dataset_id"] = tool_config.get("dataset_id")
+                        tool_args["report_id"] = tool_config.get(
+                            "report_id"
+                        )  # Optional: for auto-extracting default filters
+
+                        # Service Principal Authentication
+                        tool_args["tenant_id"] = tool_config.get("tenant_id")
+                        tool_args["client_id"] = tool_config.get("client_id")
+                        tool_args["client_secret"] = tool_config.get("client_secret")
+
+                        # Service Account Authentication
+                        tool_args["username"] = tool_config.get("username")
+                        tool_args["password"] = tool_config.get("password")
+                        tool_args["auth_method"] = tool_config.get("auth_method")
+
+                        # OAuth Authentication (alternative)
+                        tool_args["access_token"] = tool_config.get("access_token")
+
+                        # LLM Configuration for DAX generation
+                        tool_args["llm_workspace_url"] = tool_config.get(
+                            "llm_workspace_url"
+                        )
+                        tool_args["llm_token"] = tool_config.get("llm_token")
+                        tool_args["llm_model"] = tool_config.get(
+                            "llm_model", "databricks-claude-sonnet-4-5"
+                        )
+
+                        # Options
+                        tool_args["include_visual_references"] = tool_config.get(
+                            "include_visual_references", True
+                        )
+                        tool_args["skip_system_tables"] = tool_config.get(
+                            "skip_system_tables", True
+                        )
+                        tool_args["output_format"] = tool_config.get(
+                            "output_format", "markdown"
+                        )
+                        tool_args["enable_info_columns"] = tool_config.get(
+                            "enable_info_columns", False
+                        )
+                        tool_args["max_dax_retries"] = tool_config.get(
+                            "max_dax_retries", 5
+                        )
+
+                        # User Question (pre-configured question from frontend)
+                        tool_args["user_question"] = tool_config.get("user_question")
+
+                        # Context Enrichment Parameters (Microsoft Copilot-style)
+                        tool_args["business_mappings"] = tool_config.get(
+                            "business_mappings"
+                        )
+                        tool_args["field_synonyms"] = tool_config.get("field_synonyms")
+                        tool_args["active_filters"] = tool_config.get("active_filters")
+                        tool_args["session_id"] = tool_config.get("session_id")
+                        tool_args["visible_tables"] = tool_config.get("visible_tables")
+                        tool_args["conversation_history"] = tool_config.get(
+                            "conversation_history"
+                        )
+
+                    # Filter out None values
+                    tool_args = {k: v for k, v in tool_args.items() if v is not None}
+
+                except Exception as e:
+                    logger.error(f"Error extracting PowerBI Analysis config: {e}")
+                    tool_args = {}
+
+                logger.info(
+                    f"Creating Power BI Comprehensive Analysis Tool with workspace_id: {tool_args.get('workspace_id')}, "
+                    f"dataset_id: {tool_args.get('dataset_id')}, "
+                    f"tenant_id: {'***' if tool_args.get('tenant_id') else None}, "
+                    f"has_access_token: {bool(tool_args.get('access_token'))}, "
+                    f"llm_configured: {bool(tool_args.get('llm_workspace_url'))}, "
+                    f"user_question: {tool_args.get('user_question', 'NOT SET')}"
+                )
+
+                # Log context enrichment parameters
+                business_mappings = tool_args.get("business_mappings")
+                field_synonyms = tool_args.get("field_synonyms")
+                active_filters = tool_args.get("active_filters")
+                logger.info("[TOOL_FACTORY] Context enrichment parameters:")
+                logger.info(
+                    f"[TOOL_FACTORY]   business_mappings: type={type(business_mappings).__name__}, value={str(business_mappings)[:100] if business_mappings else 'None'}"
+                )
+                logger.info(
+                    f"[TOOL_FACTORY]   field_synonyms: type={type(field_synonyms).__name__}, value={str(field_synonyms)[:100] if field_synonyms else 'None'}"
+                )
+                logger.info(
+                    f"[TOOL_FACTORY]   active_filters: type={type(active_filters).__name__}, value={str(active_filters)[:100] if active_filters else 'None'}"
+                )
+
+                return tool_class(**tool_args)
+
+            elif tool_name in ("A2AAgentTool", "Remote Agent"):
+                # One entry can produce several tools (one per attached remote),
+                # so this returns a list. Built in a sibling module because this
+                # file is already far past the size ceiling.
+                from src.services.tools.a2a_tool_builder import build_a2a_tools
+
+                group_ids = self._group_ids_for_tools()
+                return run_async_with_context(
+                    build_a2a_tools(
+                        tool_config=tool_config,
+                        user_token=self.user_token,
+                        group_ids=group_ids,
+                        result_as_answer=result_as_answer,
+                    ),
+                    timeout=60,
+                )
+
+            elif tool_name == "MCPTool":
+                # MCPTool is a marker that signals MCP integration should be used.
+                # Actual MCP tools are created by MCPIntegration.create_mcp_tools_for_task
+                # in task_adapter.py using tool_configs.MCP_SERVERS — before this code runs.
+                # Return (True, []) so task_adapter treats this as an MCP marker (no-op).
+                logger.info(
+                    "MCPTool selected - MCP tools are managed by MCPIntegration via tool_configs.MCP_SERVERS"
+                )
+                return (True, [])
+
+            # Power BI Connector Tool
+            elif tool_name == "PowerBIConnectorTool":
+                # PowerBIConnectorTool accepts configuration directly
+                tool_config["result_as_answer"] = result_as_answer
+                logger.info(f"PowerBIConnectorTool config keys: {sorted(tool_config)}")
+                return tool_class(**tool_config)
+
+            # Universal Measure Conversion Pipeline
+            elif tool_name == "Measure Conversion Pipeline":
+                # MeasureConversionPipelineTool accepts configuration directly
+                tool_config["result_as_answer"] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(
+                    "[ToolFactory] Creating Measure Conversion Pipeline with merged config"
+                )
+                logger.info(
+                    f"[ToolFactory]   - inbound_connector: {tool_config.get('inbound_connector', 'NOT SET')}"
+                )
+                logger.info(
+                    f"[ToolFactory]   - outbound_format: {tool_config.get('outbound_format', 'NOT SET')}"
+                )
+                logger.info(
+                    f"[ToolFactory]   - powerbi_semantic_model_id: {tool_config.get('powerbi_semantic_model_id', 'NOT SET')[:30] if tool_config.get('powerbi_semantic_model_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - powerbi_group_id: {tool_config.get('powerbi_group_id', 'NOT SET')[:30] if tool_config.get('powerbi_group_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - powerbi_client_id: {tool_config.get('powerbi_client_id', 'NOT SET')[:20] if tool_config.get('powerbi_client_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - powerbi_tenant_id: {tool_config.get('powerbi_tenant_id', 'NOT SET')[:20] if tool_config.get('powerbi_tenant_id') else 'NOT SET'}..."
+                )
+
+                # Verify that Service Principal credentials are present before creating the tool
+                has_powerbi_creds = bool(
+                    tool_config.get("powerbi_semantic_model_id")
+                    and tool_config.get("powerbi_group_id")
+                    and tool_config.get("powerbi_client_id")
+                    and tool_config.get("powerbi_tenant_id")
+                    and tool_config.get("powerbi_client_secret")
+                )
+                logger.info(
+                    f"[ToolFactory]   - Power BI Service Principal credentials present: {has_powerbi_creds}"
+                )
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(
+                        "[ToolFactory] ✓ Successfully created Measure Conversion Pipeline tool instance"
+                    )
+                    return tool_instance
+                except Exception as e:
+                    logger.error(
+                        f"[ToolFactory] ✗ Failed to create Measure Conversion Pipeline: {e}"
+                    )
+                    import traceback
+
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # M-Query Conversion Pipeline
+            elif tool_name == "M-Query Conversion Pipeline":
+                # MqueryConversionPipelineTool accepts configuration directly
+                tool_config["result_as_answer"] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(
+                    "[ToolFactory] Creating M-Query Conversion Pipeline with merged config"
+                )
+                logger.info(
+                    f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}"
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}"
+                )
+
+                # Verify that Service Principal credentials are present before creating the tool
+                has_admin_api_creds = bool(
+                    tool_config.get("workspace_id")
+                    and tool_config.get("client_id")
+                    and tool_config.get("tenant_id")
+                    and tool_config.get("client_secret")
+                )
+                logger.info(
+                    f"[ToolFactory]   - Power BI Admin API credentials present: {has_admin_api_creds}"
+                )
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(
+                        "[ToolFactory] ✓ Successfully created M-Query Conversion Pipeline tool instance"
+                    )
+                    return tool_instance
+                except Exception as e:
+                    logger.error(
+                        f"[ToolFactory] ✗ Failed to create M-Query Conversion Pipeline: {e}"
+                    )
+                    import traceback
+
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # Power BI Relationships Tool
+            elif tool_name == "Power BI Relationships Tool":
+                # PowerBIRelationshipsTool accepts configuration directly
+                tool_config["result_as_answer"] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(
+                    "[ToolFactory] Creating Power BI Relationships Tool with merged config"
+                )
+                logger.info(
+                    f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}"
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}"
+                )
+
+                # Verify that Service Principal credentials are present
+                has_sp_creds = bool(
+                    tool_config.get("workspace_id")
+                    and tool_config.get("dataset_id")
+                    and tool_config.get("client_id")
+                    and tool_config.get("tenant_id")
+                    and tool_config.get("client_secret")
+                )
+                logger.info(
+                    f"[ToolFactory]   - Service Principal credentials present: {has_sp_creds}"
+                )
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(
+                        "[ToolFactory] ✓ Successfully created Power BI Relationships Tool instance"
+                    )
+                    return tool_instance
+                except Exception as e:
+                    logger.error(
+                        f"[ToolFactory] ✗ Failed to create Power BI Relationships Tool: {e}"
+                    )
+                    import traceback
+
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # Power BI Hierarchies Tool
+            elif tool_name == "Power BI Hierarchies Tool":
+                # PowerBIHierarchiesTool accepts configuration directly
+                tool_config["result_as_answer"] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(
+                    "[ToolFactory] Creating Power BI Hierarchies Tool with merged config"
+                )
+                logger.info(
+                    f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}"
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}"
+                )
+
+                # Verify that Service Principal credentials are present
+                has_sp_creds = bool(
+                    tool_config.get("workspace_id")
+                    and tool_config.get("dataset_id")
+                    and tool_config.get("client_id")
+                    and tool_config.get("tenant_id")
+                    and tool_config.get("client_secret")
+                )
+                logger.info(
+                    f"[ToolFactory]   - Service Principal credentials present: {has_sp_creds}"
+                )
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(
+                        "[ToolFactory] ✓ Successfully created Power BI Hierarchies Tool instance"
+                    )
+                    return tool_instance
+                except Exception as e:
+                    logger.error(
+                        f"[ToolFactory] ✗ Failed to create Power BI Hierarchies Tool: {e}"
+                    )
+                    import traceback
+
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # Power BI Field Parameters & Calculation Groups Tool
+            elif tool_name == "Power BI Field Parameters & Calculation Groups Tool":
+                # Tool accepts configuration directly
+                tool_config["result_as_answer"] = result_as_answer
+
+                # Enhanced logging to track tool configuration
+                logger.info(
+                    "[ToolFactory] Creating Power BI Field Parameters & Calculation Groups Tool with merged config"
+                )
+                logger.info(
+                    f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - dataset_id: {tool_config.get('dataset_id', 'NOT SET')[:30] if tool_config.get('dataset_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - tenant_id: {tool_config.get('tenant_id', 'NOT SET')[:20] if tool_config.get('tenant_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - client_id: {tool_config.get('client_id', 'NOT SET')[:20] if tool_config.get('client_id') else 'NOT SET'}..."
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_catalog: {tool_config.get('target_catalog', 'NOT SET')}"
+                )
+                logger.info(
+                    f"[ToolFactory]   - target_schema: {tool_config.get('target_schema', 'NOT SET')}"
+                )
+
+                # Verify that Service Principal credentials are present
+                has_sp_creds = bool(
+                    tool_config.get("workspace_id")
+                    and tool_config.get("dataset_id")
+                    and tool_config.get("client_id")
+                    and tool_config.get("tenant_id")
+                    and tool_config.get("client_secret")
+                )
+                logger.info(
+                    f"[ToolFactory]   - Service Principal credentials present: {has_sp_creds}"
+                )
+
+                # Create the tool with the merged configuration
+                try:
+                    tool_instance = tool_class(**tool_config)
+                    logger.info(
+                        "[ToolFactory] ✓ Successfully created Power BI Field Parameters & Calculation Groups Tool instance"
+                    )
+                    return tool_instance
+                except Exception as e:
+                    logger.error(
+                        f"[ToolFactory] ✗ Failed to create Power BI Field Parameters & Calculation Groups Tool: {e}"
+                    )
+                    import traceback
+
+                    logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
+                    raise
+
+            # For all other tools (ScrapeWebsiteTool, ImageGenerationTool, DAX Generator, etc.)
+            else:
+                # A tool that needs a provider key gets THIS workspace's key,
+                # passed explicitly, never through the shared process env.
+                key_name = _TOOL_API_KEY_NAMES.get(tool_name)
+                if key_name:
+                    tool_config = dict(tool_config or {})
+                    if not tool_config.get("api_key"):
+                        tool_config["api_key"] = self._get_api_key(key_name)
+                # Check if the config has any data
+                if tool_config and isinstance(tool_config, dict):
+                    # Prefer result_as_answer from DB/merged config over the parameter default
+                    tool_config["result_as_answer"] = (
+                        result_as_answer or tool_config.get("result_as_answer", False)
+                    )
+
+                    # Create the tool with the config as kwargs
+                    logger.info(
+                        f"Creating {tool_name} with config parameters: {list(tool_config.keys())}"
+                    )
+                    return tool_class(**tool_config)
+                else:
+                    # Create with default parameters if no config
+                    logger.info(
+                        f"Creating {tool_name} with default parameters and result_as_answer={result_as_answer}"
+                    )
+                    return tool_class(result_as_answer=result_as_answer)
+
+        except Exception as e:
+            logger.error(f"Error creating tool '{tool_name}': {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return None
+
+    def cleanup(self) -> None:
+        """
+        Clean up resources used by the factory
+        """
+        logger.info("Cleaning up tool factory resources")
+
+    def __del__(self) -> None:
+        """Cleanup resources when the object is garbage collected"""
+        self.cleanup()

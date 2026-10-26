@@ -1,0 +1,127 @@
+"""
+Callable wrapper class for factory-built guardrails.
+
+Gives the guardrail callable a stable class identity (instead of a closure),
+which the engine uses for a readable guardrail label in events/trace rows
+(Task._guardrail_label reads the wrapper's inner guardrail type).
+"""
+
+import datetime
+import os
+import traceback
+from pathlib import Path
+from typing import Any, cast
+
+from src.core.logger import LoggerManager
+from src.services.guardrails.base_guardrail import BaseGuardrail
+
+
+class GuardrailWrapper:
+    """
+    A callable wrapper for BaseGuardrail instances.
+
+    Wraps a BaseGuardrail so the engine sees a stable class (not a closure):
+    Task._guardrail_label resolves the inner guardrail's type name for the
+    LLMGuardrail*Event trace rows, and logging stays per-task.
+
+    Attributes:
+        guardrail: The BaseGuardrail instance to wrap
+        task_key: The task identifier for logging
+        logger: Logger instance for guardrail operations
+        log_dir: Directory for debug log files
+    """
+
+    def __init__(self, guardrail: BaseGuardrail, task_key: str):
+        """
+        Initialize the guardrail wrapper.
+
+        Args:
+            guardrail: The BaseGuardrail instance to wrap
+            task_key: The task identifier for logging purposes
+        """
+        self.guardrail = guardrail
+        self.task_key = task_key
+        self.logger = LoggerManager.get_instance().guardrails
+
+        # Get log directory from the logger manager
+        logger_manager = LoggerManager.get_instance()
+        # LoggerManager sets _log_dir at startup, before any task can run.
+        self.log_dir = cast(Path, logger_manager._log_dir)
+        os.makedirs(self.log_dir, exist_ok=True)
+
+    def __call__(self, output: Any) -> tuple[bool, str]:
+        """
+        Validate task output with the wrapped guardrail.
+
+        This method is called by the engine's guardrail mechanism. It must return
+        a tuple of (bool, str) where:
+        - (True, output) indicates validation passed
+        - (False, feedback) indicates validation failed with feedback message
+
+        Args:
+            output: The task output to validate
+
+        Returns:
+            A tuple of (success: bool, result_or_feedback: str)
+        """
+        # Write to debug log
+        with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
+            f.write(f"\n\n{'='*50}\n")
+            f.write(
+                f"VALIDATION CALLBACK CALLED at {datetime.datetime.now().isoformat()}\n"
+            )
+            f.write(f"Task: {self.task_key}\n")
+            f.write(f"Output type: {type(output)}\n")
+            f.write(f"Output: {str(output)[:1000]}\n")
+            f.write(f"{'='*50}\n")
+
+        self.logger.info("=" * 80)
+        self.logger.info(f"VALIDATING TASK {self.task_key} OUTPUT WITH GUARDRAIL")
+        self.logger.info("=" * 80)
+        self.logger.info(f"Task output type: {type(output)}")
+        self.logger.info(f"Task output: {output}")
+
+        # Call the guardrail's validate method
+        try:
+            result = self.guardrail.validate(output)
+
+            if result.get("valid", False):
+                self.logger.info(
+                    f"Task {self.task_key} output passed guardrail validation"
+                )
+                self.logger.info(f"Validation result: {result}")
+                # Write to debug log
+                with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
+                    f.write("Validation PASSED\n")
+
+                # Return a tuple indicating success (True, output)
+                return (True, output)
+            else:
+                # If validation fails, return a tuple for the engine's guardrail loop
+                feedback = result.get(
+                    "feedback", "Output does not meet requirements. Please try again."
+                )
+                self.logger.warning(
+                    f"Task {self.task_key} output failed guardrail validation"
+                )
+                self.logger.warning(f"Validation feedback: {feedback}")
+                self.logger.info(f"Full validation result: {result}")
+                # Write to debug log
+                with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
+                    f.write(f"Validation FAILED: {feedback}\n")
+
+                # Return a tuple indicating failure (False, error_message)
+                return (False, feedback)
+        except Exception as e:
+            self.logger.error(f"Exception during guardrail validation: {str(e)}")
+            self.logger.error(f"Stack trace: {traceback.format_exc()}")
+            # Write to debug log
+            with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
+                f.write(f"Validation ERROR: {str(e)}\n")
+
+            # Return a tuple indicating failure (False, error_message)
+            return (False, f"Validation error: {str(e)}")
+
+    def __repr__(self) -> str:
+        """Return a string representation of the wrapper."""
+        return f"GuardrailWrapper(task={self.task_key}, guardrail={type(self.guardrail).__name__})"

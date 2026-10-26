@@ -1,0 +1,488 @@
+"""
+API router for crew export and deployment operations.
+"""
+
+import io
+import logging
+import zipfile
+from typing import Annotated, Any, Dict
+
+from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
+
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
+from src.schemas.crew_export import (
+    AppDeploymentRequest,
+    AppDeploymentResponse,
+    AppDeploymentStatusResponse,
+    CrewExportRequest,
+    CrewExportResponse,
+    DeploymentRequest,
+    DeploymentResponse,
+    ExportFormat,
+    LakebaseInstancesResponse,
+)
+from src.services.deployment.app import CrewAppDeploymentService
+from src.services.deployment.crew import CrewDeploymentService
+from src.services.deployment.crew_export import CrewExportService
+
+router = APIRouter(
+    prefix="/crews",
+    tags=["crews-export"],
+    responses={404: {"description": "Not found"}},
+)
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
+async def get_export_service(session: SessionDep) -> CrewExportService:
+    """
+    Dependency provider for CrewExportService.
+
+    Creates service with properly injected session following the pattern:
+    Router → Service → Repository → DB
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        CrewExportService instance with injected session
+    """
+    return CrewExportService(session=session)
+
+
+async def get_deployment_service(session: SessionDep) -> CrewDeploymentService:
+    """
+    Dependency provider for CrewDeploymentService.
+
+    Args:
+        session: Database session from FastAPI DI
+
+    Returns:
+        CrewDeploymentService instance with injected session
+    """
+    return CrewDeploymentService(session=session)
+
+
+async def get_app_deployment_service(session: SessionDep) -> CrewAppDeploymentService:
+    """Dependency provider for CrewAppDeploymentService (Databricks Apps deploy)."""
+    return CrewAppDeploymentService(session=session)
+
+
+# Type aliases for cleaner function signatures
+ExportServiceDep = Annotated[CrewExportService, Depends(get_export_service)]
+DeploymentServiceDep = Annotated[CrewDeploymentService, Depends(get_deployment_service)]
+AppDeploymentServiceDep = Annotated[
+    CrewAppDeploymentService, Depends(get_app_deployment_service)
+]
+
+
+@router.post(
+    "/{crew_id}/export",
+    response_model=CrewExportResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def export_crew(
+    crew_id: str,
+    request: CrewExportRequest,
+    service: ExportServiceDep,
+    group_context: GroupContextDep,
+) -> CrewExportResponse:
+    """
+    Export crew as a deployable Databricks App.
+    Only Editors and Admins can export crews.
+
+    **Export Formats:**
+    - `databricks_app`: Complete Databricks App project (downloaded as .zip)
+
+    The `python_project` and `databricks_notebook` formats were retired: both
+    generated projects from a template kept in agreement with the runtime by
+    hand, so an exported crew could behave differently from the one you tested.
+    Requesting either returns **410 Gone** with a message naming the replacement
+    — they remain valid enum values precisely so the answer can say that, rather
+    than a bare validation error.
+
+    **Options:**
+    - `include_custom_tools`: Include custom tool implementations (default: true)
+    - `include_comments`: Add explanatory comments (default: true)
+    - `model_override`: Override default LLM model for all agents (optional)
+    - `runtime`: `kasal` or `crewai` — which agent runtime the bundle ships.
+      Defaults to the workspace's configured harness.
+
+    Args:
+        crew_id: ID of the crew to export
+        request: Export configuration
+        service: Export service injected by dependency
+        group_context: Group context from headers
+
+    Returns:
+        Export result with files and metadata
+    """
+    # Log the export request options for debugging
+    logger.info(
+        f"Export request for crew {crew_id}: format={request.export_format}, options={request.options}"
+    )
+
+    # Check permissions - only editors and admins can export
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can export crews")
+
+    # Validate group context
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        result = await service.export_crew(
+            crew_id=crew_id,
+            export_format=request.export_format,
+            options=request.options,
+            group_context=group_context,
+        )
+
+        # Add download URL
+        # The runtime rides along, or following this URL would hand back a
+        # bundle for a DIFFERENT runtime than the one just exported — the two
+        # differ in their dependencies, so it is not a cosmetic mismatch.
+        download_url = (
+            f"/api/crews/{crew_id}/export/download?format={request.export_format}"
+        )
+        if result.get("metadata", {}).get("bundle_runtime"):
+            download_url += f"&runtime={result['metadata']['bundle_runtime']}"
+        result["download_url"] = download_url
+
+        return CrewExportResponse(**result)
+
+    except ValueError as e:
+        logger.error(f"Crew not found: {e}")
+        raise NotFoundError(str(e))
+
+
+@router.get("/{crew_id}/export/download")
+async def download_export(
+    crew_id: str,
+    service: ExportServiceDep,
+    group_context: GroupContextDep,
+    format: ExportFormat = Query(..., description="Export format"),
+    include_custom_tools: bool = Query(
+        True, description="Include custom tool implementations"
+    ),
+    include_comments: bool = Query(True, description="Add explanatory comments"),
+    model_override: str = Query(None, description="Override LLM model"),
+    include_static_frontend: bool = Query(
+        True, description="Include static frontend (databricks_app only)"
+    ),
+    include_obo_auth: bool = Query(
+        True, description="Include OBO authentication (databricks_app only)"
+    ),
+    runtime: str = Query(
+        None, description="Agent runtime for the app: 'kasal' or 'crewai'"
+    ),
+) -> StreamingResponse:
+    """
+    Download exported crew as file.
+    Only Editors and Admins can download exports.
+
+    **Returns:**
+    - Databricks App: .zip archive containing the deployable project
+
+    **Usage:**
+    1. Call /export endpoint to generate export
+    2. Use the download_url from response to download file
+    3. Extract the .zip and follow README.md
+
+    Args:
+        crew_id: ID of the crew to download
+        service: Export service injected by dependency
+        group_context: Group context from headers
+        format: Export format (only `databricks_app`)
+
+    Returns:
+        File download (zip)
+    """
+    # Check permissions
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can download exports")
+
+    # Validate group context
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        # Create options from query parameters
+        from src.schemas.crew_export import ExportOptions
+
+        export_options = ExportOptions(
+            include_custom_tools=include_custom_tools,
+            include_comments=include_comments,
+            model_override=model_override if model_override else None,
+            include_static_frontend=include_static_frontend,
+            include_obo_auth=include_obo_auth,
+            runtime=runtime if runtime else None,
+        )
+
+        logger.info(f"Download request with options: {export_options}")
+
+        # Generate export
+        result = await service.export_crew(
+            crew_id=crew_id,
+            export_format=format,
+            options=export_options,
+            group_context=group_context,
+        )
+
+        crew_name = result["crew_name"]
+        sanitized_name = crew_name.lower().replace(" ", "_")
+
+        # ``databricks_app`` is the only format the ExportFormat enum accepts, so
+        # anything else has already failed validation before reaching here.
+        zip_buffer = io.BytesIO()
+        prefix = f"{sanitized_name}_app"
+
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for file_info in result["files"]:
+                zip_file.writestr(f"{prefix}/{file_info['path']}", file_info["content"])
+
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{prefix}.zip"'},
+        )
+
+    except ValueError as e:
+        logger.error(f"Crew not found: {e}")
+        raise NotFoundError(str(e))
+
+
+@router.post(
+    "/{crew_id}/deploy-app",
+    response_model=AppDeploymentResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def deploy_crew_app(
+    crew_id: str,
+    request: AppDeploymentRequest,
+    service: AppDeploymentServiceDep,
+    group_context: GroupContextDep,
+) -> AppDeploymentResponse:
+    """
+    Deploy a crew as a Databricks App, directly from the UI.
+
+    Generates the Databricks-App project (same as the export), creates/updates
+    the app, uploads the project, deploys it, and starts it. The deploy runs in
+    the background — poll `/{crew_id}/deploy-app/status?deployment_id=...` for
+    progress and the app URL.
+
+    Only editors and admins can deploy. Deploy is PAT-only for now: it
+    authenticates with a workspace Personal Access Token, not OBO/OAuth (whose
+    token is not granted the `apps` scope).
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can deploy crews")
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        return await service.start_deployment(
+            crew_id=crew_id,
+            config=request.config,
+            group_context=group_context,
+        )
+    except PermissionError as e:
+        raise ForbiddenError(str(e))
+    except ValueError as e:
+        logger.error(f"Crew not found: {e}")
+        raise NotFoundError(str(e))
+
+
+@router.get(
+    "/{crew_id}/deploy-app/status",
+    response_model=AppDeploymentStatusResponse,
+)
+async def get_app_deployment_status(
+    crew_id: str,
+    service: AppDeploymentServiceDep,
+    group_context: GroupContextDep,
+    deployment_id: str = Query(..., description="Deployment id returned by deploy-app"),
+) -> AppDeploymentStatusResponse:
+    """Return the status of an in-flight or completed Databricks Apps deployment."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can check deployment status")
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    result = service.get_owned_status(deployment_id, crew_id, group_context)
+    if result is None:
+        raise NotFoundError(f"Deployment {deployment_id} not found")
+    return result
+
+
+@router.get(
+    "/deploy-app/lakebase-instances",
+    response_model=LakebaseInstancesResponse,
+)
+async def list_lakebase_instances(
+    service: AppDeploymentServiceDep,
+    group_context: GroupContextDep,
+) -> LakebaseInstancesResponse:
+    """List the workspace's Lakebase instances for the deploy screen.
+
+    Lets the user pick an existing Lakebase instance to attach to the app (or
+    choose to create a new one). Only editors and admins may list them.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can list Lakebase instances")
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        instances = await service.list_lakebase_instances(group_context=group_context)
+        return LakebaseInstancesResponse(instances=instances)
+    except PermissionError as e:
+        raise ForbiddenError(str(e))
+
+
+@router.post(
+    "/{crew_id}/deploy",
+    response_model=DeploymentResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def deploy_crew(
+    crew_id: str,
+    request: DeploymentRequest,
+    service: DeploymentServiceDep,
+    group_context: GroupContextDep,
+) -> DeploymentResponse:
+    """
+    Deploy crew to Databricks Model Serving endpoint.
+    Only Admins can deploy crews.
+
+    **Deployment Process:**
+    1. Wraps crew as MLflow PyFunc model
+    2. Logs model to MLflow with dependencies
+    3. Registers in Unity Catalog (if configured)
+    4. Creates/updates Model Serving endpoint
+    5. Returns endpoint URL for invocations
+
+    **Configuration:**
+    - `model_name`: Name for the registered model (required)
+    - `endpoint_name`: Name for serving endpoint (defaults to model_name)
+    - `workload_size`: Small, Medium, or Large (default: Small)
+    - `scale_to_zero_enabled`: Enable auto-scaling to zero (default: true)
+    - `unity_catalog_model`: Register in Unity Catalog (default: true)
+    - `catalog_name`: Unity Catalog name (required if unity_catalog_model=true)
+    - `schema_name`: Unity Catalog schema (required if unity_catalog_model=true)
+
+    Args:
+        crew_id: ID of the crew to deploy
+        request: Deployment configuration
+        service: Deployment service injected by dependency
+        group_context: Group context from headers
+
+    Returns:
+        Deployment result with endpoint details
+    """
+    # Check permissions - only admins can deploy
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can deploy crews to Model Serving")
+
+    # Validate group context
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    try:
+        result = await service.deploy_to_model_serving(
+            crew_id=crew_id, config=request.config, group_context=group_context
+        )
+
+        return result
+
+    except ValueError as e:
+        logger.error(f"Crew not found: {e}")
+        raise NotFoundError(str(e))
+
+
+@router.get("/{crew_id}/deployment/status")
+async def get_deployment_status(
+    crew_id: str,
+    group_context: GroupContextDep,
+    service: DeploymentServiceDep,
+    endpoint_name: str = Query(..., description="Model serving endpoint name"),
+) -> Dict[str, Any]:
+    """
+    Get status of a deployed endpoint.
+    Only Editors and Admins can check deployment status, and only of an endpoint
+    that serves this crew, which must belong to the caller's group.
+
+    **Returns:**
+    - Endpoint state (READY, NOT_READY, etc.)
+    - Configuration details
+    - Ready/target replica counts
+    - Last update timestamp
+
+    **States:**
+    - `READY`: Endpoint is ready for serving
+    - `NOT_READY`: Endpoint is starting up
+    - `UPDATE_IN_PROGRESS`: Endpoint configuration is being updated
+    - `UPDATE_FAILED`: Update failed
+
+    Args:
+        crew_id: ID of the crew
+        group_context: Group context from headers
+        service: Deployment service injected by dependency
+        endpoint_name: Name of the serving endpoint
+
+    Returns:
+        Endpoint status information
+    """
+    # Check permissions
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can check deployment status")
+
+    # Validate group context
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    # Read with the app's credential: only this group's deployment of this
+    # crew is shown (raises NotFoundError otherwise).
+    return await service.get_endpoint_status(crew_id, endpoint_name, group_context)
+
+
+@router.delete("/{crew_id}/deployment/{endpoint_name}")
+async def delete_deployment(
+    crew_id: str,
+    endpoint_name: str,
+    group_context: GroupContextDep,
+    service: DeploymentServiceDep,
+) -> Dict[str, str]:
+    """
+    Delete a Model Serving endpoint.
+    Only Admins can delete deployments, and only an endpoint that serves this
+    crew, which must belong to the caller's group.
+
+    **Warning:** This operation is irreversible. The endpoint will be permanently deleted.
+
+    Args:
+        crew_id: ID of the crew
+        endpoint_name: Name of the serving endpoint to delete
+        group_context: Group context from headers
+        service: Deployment service injected by dependency
+
+    Returns:
+        Confirmation message
+    """
+    # Check permissions - only admins can delete deployments
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can delete deployments")
+
+    # Validate group context
+    if not group_context or not group_context.is_valid():
+        raise BadRequestError("No valid group context provided")
+
+    # The delete runs with the app's credential: refuse any endpoint that is
+    # not this group's deployment of this crew (raises NotFoundError).
+    return await service.delete_endpoint(crew_id, endpoint_name, group_context)

@@ -1,0 +1,340 @@
+"""
+CrewAI Flow Service - Interface for flow execution operations.
+
+This is an adapter service that interfaces between the execution_service
+and the flow_runner_service now located in the crewai engine folder.
+"""
+
+import uuid
+from typing import Any, Dict, List, Optional, Union
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import BadRequestError, KasalError
+from src.core.logger import LoggerManager
+
+# SessionLocal removed - use async_session_factory instead
+from src.services.flow_builder.flow_runner_service import FlowRunnerService
+
+# Initialize flow-specific logger
+logger = LoggerManager.get_instance().flow
+
+
+class KasalFlowService:
+    """Service for interfacing with the CrewAI Flow Runner"""
+
+    def __init__(self, session: AsyncSession):
+        """
+        Initialize the service with the caller's database session.
+
+        Args:
+            session: Database session (every caller passes one; the runner's
+                repositories cannot work without it)
+        """
+        self.session = session
+
+    def _get_flow_runner(self) -> FlowRunnerService:
+        """
+        Get a FlowRunnerService instance with appropriate session handling.
+
+        Returns:
+            FlowRunnerService instance
+        """
+        return FlowRunnerService(self.session)
+
+    async def run_flow(
+        self,
+        flow_id: Optional[Union[uuid.UUID, str]] = None,
+        job_id: Optional[str] = None,
+        run_name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        group_context: Any = None,
+        user_token: Optional[str] = None,
+        resume_from_flow_uuid: Optional[str] = None,
+        resume_from_execution_id: Optional[int] = None,
+        resume_from_crew_sequence: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute a flow based on the provided parameters using process isolation.
+
+        Args:
+            flow_id: Optional ID of flow to execute
+            job_id: Job ID for tracking execution
+            run_name: Optional descriptive name for the execution
+            config: Configuration parameters
+            group_context: Group context for multi-tenant isolation
+            user_token: User access token for OAuth authentication
+            resume_from_flow_uuid: CrewAI state.id to resume flow from checkpoint
+            resume_from_execution_id: Execution ID of checkpoint to resume from
+            resume_from_crew_sequence: Crew sequence to resume from (skip crews up to this sequence)
+
+        Returns:
+            Dictionary with execution result
+        """
+        logger.info("=" * 100)
+        logger.info("CREWAI FLOW SERVICE - RECEIVED REQUEST (PROCESS ISOLATION)")
+        logger.info(f"  flow_id: {flow_id}")
+        logger.info(f"  job_id: {job_id}")
+        logger.info(f"  run_name: {run_name}")
+        logger.info(f"  group_id: {getattr(group_context, 'primary_group_id', None)}")
+        logger.info(f"  user_token: {'<present>' if user_token else '<not provided>'}")
+        logger.info(f"  resume_from_flow_uuid: {resume_from_flow_uuid}")
+        logger.info(f"  resume_from_execution_id: {resume_from_execution_id}")
+        logger.info(f"  resume_from_crew_sequence: {resume_from_crew_sequence}")
+        if config:
+            logger.info(f"  config keys: {list(config.keys())}")
+            logger.info(f"  config.nodes: {len(config.get('nodes', []))} nodes")
+            logger.info(f"  config.edges: {len(config.get('edges', []))} edges")
+            if "flow_config" in config:
+                flow_config = config.get("flow_config", {})
+                logger.info(
+                    f"  flow_config.startingPoints: {len(flow_config.get('startingPoints', []))}"
+                )
+                logger.info(
+                    f"  flow_config.listeners: {len(flow_config.get('listeners', []))}"
+                )
+        logger.info("=" * 100)
+
+        # Authorize before naming, engine setup or subprocess side effects.
+        # Repeat the job check at the eventual record update as well.
+        if self.session is not None:
+            from src.services.flow_builder.execution_service import FlowExecutionService
+            from src.services.flow_builder.flow_service import FlowService
+
+            if job_id:
+                await FlowExecutionService(self.session).get_owned_existing_execution(
+                    job_id, getattr(group_context, "primary_group_id", None)
+                )
+            if flow_id:
+                await FlowService(self.session).get_flow_for_execution(
+                    flow_id,
+                    group_context,
+                    allow_unsaved=bool(config and config.get("nodes")),
+                )
+
+        # Generate run_name if not provided
+        if not run_name and config:
+            try:
+                from src.schemas.execution import ExecutionNameGenerationRequest
+                from src.services.execution.naming import ExecutionNameService
+
+                # Extract agents/tasks from nodes for name generation
+                agents_yaml: Dict[str, Any] = {}
+                tasks_yaml: Dict[str, Any] = {}
+                nodes = config.get("nodes", [])
+
+                for node in nodes:
+                    node_type = node.get("type", "").lower()
+                    node_data = node.get("data", {})
+
+                    if node_type == "crewnode":
+                        all_agents = node_data.get(
+                            "allAgents", node_data.get("agents", [])
+                        )
+                        all_tasks = node_data.get(
+                            "allTasks", node_data.get("tasks", [])
+                        )
+
+                        for agent in all_agents:
+                            agent_id = agent.get("id", f"agent_{len(agents_yaml)}")
+                            agents_yaml[agent_id] = {
+                                "role": agent.get("role", agent.get("name", "Agent")),
+                                "goal": agent.get("goal", ""),
+                                "backstory": agent.get("backstory", ""),
+                            }
+
+                        for task in all_tasks:
+                            task_id = task.get("id", f"task_{len(tasks_yaml)}")
+                            tasks_yaml[task_id] = {
+                                "name": task.get(
+                                    "name",
+                                    (
+                                        task.get("description", "Task")[:50]
+                                        if task.get("description")
+                                        else "Task"
+                                    ),
+                                ),
+                                "description": task.get("description", ""),
+                                "expected_output": task.get(
+                                    "expected_output", task.get("expectedOutput", "")
+                                ),
+                            }
+
+                if agents_yaml or tasks_yaml:
+                    name_service = ExecutionNameService.create(self.session)
+                    request = ExecutionNameGenerationRequest(
+                        agents_yaml=agents_yaml,
+                        tasks_yaml=tasks_yaml,
+                        model=config.get("model"),
+                    )
+                    response = await name_service.generate_execution_name(request)
+                    run_name = response.name
+                    logger.info(f"Generated run_name for flow: {run_name}")
+            except Exception as e:
+                logger.warning(f"Failed to generate execution name for flow: {e}")
+
+        try:
+            # Public requests authorize the source before queuing work. The
+            # runner repeats this check for internal/subprocess entry points.
+            if resume_from_flow_uuid and not resume_from_execution_id:
+                raise BadRequestError(detail="A resume source execution is required")
+            if resume_from_execution_id and self.session is not None:
+                from src.services.execution.service import ExecutionService
+                from src.services.flow_builder.resume_authorization import (
+                    get_owned_resume_source,
+                )
+
+                await get_owned_resume_source(
+                    ExecutionService(self.session),
+                    resume_from_execution_id,
+                    getattr(group_context, "group_ids", None),
+                )
+            # Create a UUID for job_id if not provided
+            if not job_id:
+                job_id = str(uuid.uuid4())
+                logger.info(f"Generated job_id: {job_id}")
+
+            # Get the engine. This used to call a SECOND EngineFactory that
+            # cached instances; the two factories have been collapsed into one.
+            # Nothing depended on the cache: the engine object holds only a
+            # _running_jobs dict, and the cancel path in ExecutionService builds
+            # its own fresh KasalEngineService anyway.
+            from src.services.execution.engine_factory import EngineFactory
+
+            engine = await EngineFactory.get_engine(engine_type="kasal")
+
+            if not engine:
+                raise ValueError("Failed to get CrewAI engine")
+
+            # Prepare flow config for engine
+            flow_config = {
+                "flow_id": str(flow_id) if flow_id else None,
+                "run_name": run_name,
+                "nodes": config.get("nodes", []) if config else [],
+                "edges": config.get("edges", []) if config else [],
+                "flow_config": config.get("flow_config", {}) if config else {},
+                "inputs": config.get("inputs", {}) if config else {},
+                "model": config.get("model") if config else None,
+                # Checkpoint resume parameters
+                "resume_from_flow_uuid": resume_from_flow_uuid,
+                "resume_from_execution_id": resume_from_execution_id,
+                "resume_from_crew_sequence": resume_from_crew_sequence,
+                # What makes a run a TURN rather than a fresh start: the
+                # conversation it belongs to, and the line that opened it. The
+                # flow derives its checkpoint lineage from the session, and
+                # chooses which crew the turn needs from the message.
+                #
+                # This dict is a WHITELIST — it rebuilds the config rather than
+                # forwarding it — and both fields were missing from it. They
+                # arrived here intact (the `config keys` line logged above lists
+                # them) and were dropped one hop before the flow could read
+                # them, so every turn restored no state, selected no outcome and
+                # re-ran the whole graph. Anything else a turn needs has to be
+                # added here too; nothing reaches the flow by default.
+                "session_id": config.get("session_id") if config else None,
+                "user_message": config.get("user_message") if config else None,
+            }
+
+            # Add group_context to config if provided
+            if group_context:
+                flow_config["group_context"] = group_context
+                if hasattr(group_context, "primary_group_id"):
+                    flow_config["group_id"] = group_context.primary_group_id
+
+            logger.info(f"[KasalFlowService] Calling engine.run_flow() for {job_id}")
+
+            # Call the engine's run_flow method with process isolation
+            execution_id = await engine.run_flow(
+                execution_id=job_id,
+                flow_config=flow_config,
+                group_context=group_context,
+                user_token=user_token,
+            )
+
+            logger.info(
+                f"[KasalFlowService] Engine.run_flow() returned execution_id: {execution_id}"
+            )
+
+            # Build response message
+            if resume_from_flow_uuid:
+                message = "Flow execution resumed from checkpoint in isolated process"
+            else:
+                message = "Flow execution started in isolated process"
+
+            return {
+                "success": True,
+                "execution_id": execution_id,
+                "job_id": job_id,
+                "message": message,
+                "resumed_from": (
+                    resume_from_execution_id if resume_from_flow_uuid else None
+                ),
+            }
+
+        except KasalError:
+            raise
+        except Exception as e:
+            error_msg = f"Error executing flow: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise KasalError(detail=error_msg)
+
+    async def get_flow_execution(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get details for a specific flow execution.
+
+        Args:
+            execution_id: ID of the flow execution
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, an execution belonging to another group is reported
+                as not found.
+
+        Returns:
+            Dictionary with execution details
+        """
+        try:
+            flow_runner = self._get_flow_runner()
+            return await flow_runner.get_flow_execution(
+                execution_id, group_ids=group_ids
+            )
+        except Exception as e:
+            error_msg = f"Error getting flow execution: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise KasalError(detail=error_msg)
+
+    async def get_flow_executions_by_flow(
+        self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get all executions for a specific flow.
+
+        Args:
+            flow_id: ID of the flow
+            group_ids: Caller's group IDs for multi-tenant isolation. When
+                provided, executions belonging to other groups are excluded.
+
+        Returns:
+            Dictionary with list of executions
+        """
+        try:
+            # Convert string to UUID if needed
+            if isinstance(flow_id, str):
+                try:
+                    flow_id = uuid.UUID(flow_id)
+                except ValueError:
+                    raise BadRequestError(
+                        detail=f"Invalid flow_id format: {flow_id}",
+                    )
+
+            flow_runner = self._get_flow_runner()
+            return await flow_runner.get_flow_executions_by_flow(
+                flow_id, group_ids=group_ids
+            )
+        except KasalError:
+            # Re-raise application errors
+            raise
+        except Exception as e:
+            error_msg = f"Error getting flow executions: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise KasalError(detail=error_msg)
