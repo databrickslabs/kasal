@@ -23,11 +23,13 @@ def _sql_str_literal(value: object) -> str:
     influenceable (a semantic model author controls them) and get interpolated
     into generated SQL that is deployed as a UC Metric View. Without escaping, a
     value like ``x' OR '1'='1`` forges the predicate — and the deployer's
-    dangerous-SQL deny-list does NOT catch quote-breakout. Escape by doubling
-    single quotes (SQL standard) and stripping NULs. Always returns the value
-    wrapped in single quotes.
+    dangerous-SQL deny-list does NOT catch quote-breakout. Escape backslashes
+    first — Databricks SQL processes ``\\`` escapes in string literals, so a
+    value ending in ``\\`` would otherwise turn the closing quote into ``\\'``
+    and let the NEXT value out of the literal — then double single quotes and
+    strip NULs. Always returns the value wrapped in single quotes.
     """
-    s = str(value).replace("\x00", "")
+    s = str(value).replace("\x00", "").replace("\\", "\\\\")
     return "'" + s.replace("'", "''") + "'"
 
 

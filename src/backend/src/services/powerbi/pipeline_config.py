@@ -12,6 +12,7 @@ import re
 import time
 from collections import defaultdict
 from typing import Any, cast
+from urllib.parse import urlparse
 
 __all__ = [
     "get_token",
@@ -99,23 +100,8 @@ def fetch_tmdl_parts(
         if resp.status_code == 200:
             return _definition_parts(resp)
         if resp.status_code == 202:
-            location = resp.headers.get("Location")
-            if not location:
-                return None
-            for _ in range(60):
-                time.sleep(2)
-                poll = requests.get(location, headers=headers, timeout=60)
-                pdata = poll.json()
-                status = pdata.get("status")
-                if status == "Succeeded":
-                    result = requests.get(
-                        location + "/result", headers=headers, timeout=60
-                    )
-                    _check_response(result, "TMDL getDefinition result")
-                    return _definition_parts(result)
-                if status == "Failed":
-                    return None
-            return None
+            result = _fabric_operation_result(resp, headers, 60, "TMDL getDefinition")
+            return _definition_parts(result) if result is not None else None
         # 401/403/404 etc. — Fabric not available for these creds/workspace
         return None
     except Exception:
@@ -294,6 +280,37 @@ def _row_get(row: dict, col: str, default: str = "") -> str:
     if val is None:
         val = row.get(bare)
     return val if val is not None else default
+
+
+def _fabric_operation_result(
+    resp: requests.Response, headers: dict[str, str], poll_timeout: int, label: str
+) -> requests.Response | None:
+    """Follow a Fabric 202 operation to its ``/result``. The poll carries the
+    Fabric token, so ``Location`` must be https on a Fabric host with no userinfo
+    or port — anything else reads as missing. ``None`` on failure or timeout."""
+    location = resp.headers.get("Location") or ""
+    parsed = urlparse(location)
+    host = parsed.hostname or ""
+    if not (
+        parsed.scheme == "https"
+        and host.endswith(".fabric.microsoft.com")
+        and parsed.netloc.lower() == host
+    ):
+        print(f"  {label}: 202 without a trusted Location")
+        return None
+    for attempt in range(60):
+        time.sleep(2)
+        poll = requests.get(location, headers=headers, timeout=poll_timeout).json()
+        if poll.get("status") == "Succeeded":
+            print(f"  {label}: succeeded after {attempt + 1} poll(s)")
+            result = requests.get(location + "/result", headers=headers, timeout=60)
+            _check_response(result, f"{label} result")
+            return result
+        if poll.get("status") == "Failed":
+            print(f"  {label} failed: {poll.get('error', {})}")
+            return None
+    print(f"  {label}: timed out after 120s")
+    return None
 
 
 def _check_response(resp: Any, context: str = "") -> None:
@@ -1587,35 +1604,11 @@ def extract_report_definition(
 
         # Handle 202 Accepted — long-running operation with polling
         if resp.status_code == 202:
-            location = resp.headers.get("Location")
-            if not location:
-                print("  Report definition: 202 but no Location header")
+            headers = _headers(fabric_token)
+            result = _fabric_operation_result(resp, headers, 30, "Report definition")
+            if result is None:
                 return None
-
-            print("  Report definition: polling (202 Accepted)...")
-            for attempt in range(60):
-                time.sleep(2)
-                poll_resp = requests.get(
-                    location, headers=_headers(fabric_token), timeout=30
-                )
-                poll_data = poll_resp.json()
-                status = poll_data.get("status", "")
-                if status == "Succeeded":
-                    print(f"  Report definition: succeeded after {attempt + 1} poll(s)")
-                    result_url = location + "/result"
-                    result_resp = requests.get(
-                        result_url, headers=_headers(fabric_token), timeout=60
-                    )
-                    _check_response(result_resp, "API 4 (Report Definition result)")
-                    data = result_resp.json()
-                    break
-                elif status == "Failed":
-                    error = poll_data.get("error", {})
-                    print(f"  Report definition failed: {error}")
-                    return None
-            else:
-                print("  Report definition: timed out after 120s")
-                return None
+            data = result.json()
         elif resp.status_code == 200:
             data = resp.json()
         else:

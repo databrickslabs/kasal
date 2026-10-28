@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
+from src.utils.sql_backup_format import BackupFormatError, restore_statements
 
 logger = LoggerManager.get_instance().system
 
@@ -807,60 +808,36 @@ class DatabaseBackupRepository:
 
             # Check if it's SQL or JSON format
             if backup_filename.endswith(".sql"):
-                # Execute SQL statements
-                sql_content = backup_content.decode("utf-8")
+                # Only the statement shapes the exporter writes are run (see
+                # utils/sql_backup_format): a file holding anything else is
+                # refused whole, before a single statement executes.
+                try:
+                    statements = restore_statements(backup_content.decode("utf-8"))
+                except (BackupFormatError, UnicodeDecodeError) as exc:
+                    logger.warning("Refusing SQL backup %s: %s", backup_filename, exc)
+                    return {
+                        "success": False,
+                        "error": "Backup file is not a Kasal SQL backup; nothing was restored",
+                    }
 
-                # Split SQL statements and execute them
-                # We need to be careful with statements that contain semicolons in strings
-                statements = []
-                current_statement = []
-                in_string = False
-                escape_next = False
-
-                for line in sql_content.split("\n"):
-                    # Skip comments and empty lines
-                    if line.strip().startswith("--") or not line.strip():
-                        continue
-
-                    current_statement.append(line)
-
-                    # Check if this line ends a statement (ends with ; and not in a string)
-                    for char in line:
-                        if escape_next:
-                            escape_next = False
-                            continue
-                        if char == "\\":
-                            escape_next = True
-                        elif char == "'":
-                            in_string = not in_string
-
-                    if line.rstrip().endswith(";") and not in_string:
-                        statements.append("\n".join(current_statement))
-                        current_statement = []
-
-                # Execute statements
                 restored_names: Set[str] = set()
                 total_rows = 0
-
-                for stmt in statements:
-                    if stmt.strip():
-                        try:
-                            # Track which tables we're working with
-                            if "INSERT INTO" in stmt.upper():
-                                # Extract table name
-                                table_match = (
-                                    stmt.upper()
-                                    .split("INSERT INTO")[1]
-                                    .split("(")[0]
-                                    .strip()
-                                )
-                                restored_names.add(table_match.lower())
-                                total_rows += 1
-
-                            await db_session.execute(text(stmt))
-                        except Exception as stmt_error:
-                            logger.warning(f"Error executing statement: {stmt_error}")
-                            # Continue with other statements
+                for number, stmt in enumerate(statements, start=1):
+                    try:
+                        await db_session.execute(text(stmt.sql))
+                    except Exception:  # noqa: BLE001 — reported, never half-applied
+                        # PostgreSQL aborts the transaction on the first failure, so
+                        # carrying on (as this used to) restored nothing after it
+                        # while still reporting success.
+                        logger.exception("Restore failed at statement %d", number)
+                        await db_session.rollback()
+                        return {
+                            "success": False,
+                            "error": f"Restore failed at statement {number}; rolled back",
+                        }
+                    if stmt.insert_table:
+                        restored_names.add(stmt.insert_table)
+                        total_rows += 1
 
                 await db_session.commit()
 

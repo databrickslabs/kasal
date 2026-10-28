@@ -17,6 +17,17 @@ from ...base.models import KPI
 from .authentication import AadService
 from .dax_parser import DAXExpressionParser
 
+# A Power BI workspace / dataset id as it may appear in a REST path segment.
+# Real ids are GUIDs; what matters is that no "/", "?", "#", "." or "%" gets
+# through, since any of them re-targets the request that carries the token.
+_PATH_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+
+
+def _path_id(value: object, name: str) -> str:
+    if not isinstance(value, str) or not _PATH_ID.fullmatch(value):
+        raise ValueError(f"{name} is not a valid Power BI id: {value!r}")
+    return value
+
 
 class PowerBIConnector(BaseInboundConnector):
     """
@@ -195,7 +206,9 @@ class PowerBIConnector(BaseInboundConnector):
         if not self._connected:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        url = f"{self.API_BASE}/groups/{self.group_id}/datasets/{self.semantic_model_id}/executeQueries"
+        group = _path_id(self.group_id, "group_id")
+        dataset = _path_id(self.semantic_model_id, "semantic_model_id")
+        url = f"{self.API_BASE}/groups/{group}/datasets/{dataset}/executeQueries"
 
         headers = {
             "Authorization": f"Bearer {self._access_token}",

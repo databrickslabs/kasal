@@ -750,8 +750,12 @@ class TestRestorePostgresBackup:
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_restore_postgres_sql_statement_error_continues(self):
-        """restore_postgres_backup continues on individual statement errors."""
+    async def test_restore_postgres_sql_statement_error_rolls_back(self):
+        """A failed statement rolls the restore back and says so.
+
+        It used to log and carry on, reporting success — but PostgreSQL aborts
+        the transaction at the first failure, so nothing after it was restored.
+        """
         repo = make_repo()
 
         sql_content = (
@@ -768,12 +772,16 @@ class TestRestorePostgresBackup:
             side_effect=[MagicMock(), Exception("table not found")]
         )
         session.commit = AsyncMock()
+        session.rollback = AsyncMock()
 
         result = await repo.restore_postgres_backup(
             "cat", "sch", "vol", "backup.sql", session=session
         )
 
-        assert result["success"] is True
+        assert result["success"] is False
+        assert "statement 2" in result["error"]
+        session.rollback.assert_awaited_once()
+        session.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_restore_postgres_json_format(self):

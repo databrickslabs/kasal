@@ -476,9 +476,9 @@ class LakebaseStorageBackend:
             params["categories"] = list(categories)
         if metadata_filter:
             for index, (key, value) in enumerate(metadata_filter.items()):
-                placeholder = f"mf_{index}"
-                where.append(f"metadata->>'{key}' = :{placeholder}")
-                params[placeholder] = str(value)
+                # Key AND value are bound: a key is a caller string too.
+                where.append(f"metadata ->> :mk_{index} = :mf_{index}")
+                params[f"mk_{index}"], params[f"mf_{index}"] = str(key), str(value)
 
         params["query_embedding"] = vector_to_pg(query_embedding)
         params["limit"] = limit
@@ -587,9 +587,9 @@ class LakebaseStorageBackend:
             params["older_than"] = older_than
         if metadata_filter:
             for index, (key, value) in enumerate(metadata_filter.items()):
-                placeholder = f"mf_{index}"
-                where.append(f"metadata->>'{key}' = :{placeholder}")
-                params[placeholder] = str(value)
+                # Key AND value are bound: a key is a caller string too.
+                where.append(f"metadata ->> :mk_{index} = :mf_{index}")
+                params[f"mk_{index}"], params[f"mf_{index}"] = str(key), str(value)
 
         async with self._session() as session:
             sql = text(f"DELETE FROM {self.table_name} WHERE {' AND '.join(where)}")

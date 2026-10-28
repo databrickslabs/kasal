@@ -18,6 +18,10 @@ from src.services.tools.metric_view_utils.row_count_check import (
     build_count_sql,
     diff_counts,
 )
+from src.services.tools.metric_view_utils.sql_guard import (
+    is_read_only_select,
+    sql_value_literal,
+)
 from src.services.tools.mquery_conversion_cache import (
     cache_key,
     get_cached_output,
@@ -1346,6 +1350,11 @@ class MqueryConversionPipelineTool(BaseTool):
         )
 
         for iteration in range(max_iter):
+            # Model-derived or LLM-rewritten SQL is executed below: one
+            # read-only SELECT only, re-checked after every LLM correction.
+            if not is_read_only_select(select_sql):
+                reason = "SQL is not a single read-only SELECT; not executed"
+                return {"table": tname, "status": "skipped", "reason": reason}
             agg_sql = self._build_count_sql(select_sql)
 
             # Log SQL and DAX so progress is visible in crew.log
@@ -1743,35 +1752,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 escaped = []
                 for j, v in enumerate(items):
                     col = columns[j] if j < len(columns) else f"col{j}"
-                    col_type = type_map.get(col, "STRING").upper()
-                    if v is None:
-                        escaped.append("NULL")
-                    elif "BIGINT" in col_type or "INT" in col_type:
-                        try:
-                            escaped.append(str(int(float(str(v)))))
-                        except (ValueError, TypeError):
-                            escaped.append("NULL")
-                    elif (
-                        "DOUBLE" in col_type
-                        or "FLOAT" in col_type
-                        or "DECIMAL" in col_type
-                    ):
-                        try:
-                            escaped.append(str(float(str(v))))
-                        except (ValueError, TypeError):
-                            escaped.append("NULL")
-                    elif "BOOLEAN" in col_type:
-                        escaped.append(
-                            "TRUE"
-                            if str(v).lower() in ("true", "1", "yes")
-                            else "FALSE"
-                        )
-                    elif "DATE" in col_type and "TIME" not in col_type:
-                        escaped.append(f"DATE '{str(v)[:10]}'")
-                    elif "TIMESTAMP" in col_type:
-                        escaped.append(f"TIMESTAMP '{v}'")
-                    else:
-                        escaped.append("'" + str(v).replace("'", "''") + "'")
+                    escaped.append(sql_value_literal(v, type_map.get(col, "STRING")))
                 vals.append(f"({', '.join(escaped)})")
             if vals:
                 insert_sqls.append(

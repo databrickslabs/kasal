@@ -10,6 +10,10 @@ from typing import Any, Dict, Optional
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
 
+# Table names are interpolated into DDL here, and the initialize-tables route
+# takes them from a raw request body: every method validates at the sink.
+from src.services.memory.storage.lakebase_graph import validate_table_name
+
 logger = LoggerManager.get_instance().system
 
 # pgvector ("vector") is NOT a trusted PostgreSQL extension, so CREATE EXTENSION
@@ -114,7 +118,7 @@ class LakebaseMemoryService:
         CrewAI 1.10+ uses a single unified ``Memory`` class over one table.
         Uses HNSW indexes (work on empty tables, no periodic rebuilds needed).
         """
-        tables = {"memory": memory_table}
+        tables = {"memory": validate_table_name(memory_table)}
         results: Dict[str, Any] = {}
 
         try:
@@ -349,8 +353,8 @@ class LakebaseMemoryService:
         group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get row-count statistics for the unified memory table (scoped to the
-        workspace when group_id is given)."""
-        tables = {"memory": memory_table}
+        workspace when group_id is given). The name is interpolated: validated."""
+        tables = {"memory": validate_table_name(memory_table)}
         stats = {}
 
         try:

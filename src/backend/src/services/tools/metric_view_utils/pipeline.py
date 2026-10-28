@@ -24,6 +24,7 @@ from .artifact_cascade import (
     group_by_table,
 )
 from .data_classes import MetricViewSpec, ScanTableInfo, TableInfo, TranslationResult
+from .dax_condition_sql import _sql_in_list
 from .dax_translator import DaxTranslator
 from .join_detector import JoinDetector
 from .m_transform_folder import MTransformFolder
@@ -708,9 +709,10 @@ class MetricViewPipeline:
         join_col = join_col or self.config.get("switch_join_col", "")
         _fs = filter_sets or {}
 
+        # Filter-set values are model/warehouse data deployed as metric-view
+        # SQL: escaped literals, never raw '{v}'.
         def _filter_clause(fs_key: str) -> str:
-            values = _fs[fs_key]
-            quoted = ", ".join(f"'{v}'" for v in values)
+            quoted = _sql_in_list(_fs[fs_key])
             return f"FILTER (WHERE {join_alias}.{join_col} IN ({quoted}))"
 
         # Support raw_expr for pre-built SQL expressions
@@ -735,7 +737,7 @@ class MetricViewPipeline:
         if num_fs is None:
             # Complex expression -- already has filter placeholders
             for fs_key, fs_vals in _fs.items():
-                quoted = ", ".join(f"'{v}'" for v in fs_vals)
+                quoted = _sql_in_list(fs_vals)
                 placeholder = "{" + fs_key.lower() + "}"
                 fc = f"(WHERE {join_alias}.{join_col} IN ({quoted}))"
                 num = num.replace(placeholder, fc)

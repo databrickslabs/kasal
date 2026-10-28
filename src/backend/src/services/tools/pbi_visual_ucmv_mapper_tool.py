@@ -17,51 +17,24 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
 
+# SEC #3: dashboard SQL becomes a stored Lakeview dataset query that runs when
+# the dashboard opens — one read-only SELECT only (shared with the M-Query
+# pipeline, which executes model-derived SQL the same way).
+from src.services.tools.metric_view_utils.sql_guard import (
+    is_read_only_select as _is_safe_select_sql,
+)
+
 if TYPE_CHECKING:
     from src.utils.databricks_auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
 
-def _is_safe_select_sql(sql: str) -> bool:
-    """SEC #3: gate LLM-generated dashboard SQL to a single read-only SELECT.
-
-    The mapper's `sql` is authored by an LLM from attacker-influenceable PBI visual
-    metadata, then stored as a Lakeview dataset query that runs against the
-    warehouse when the dashboard opens. Allow only a lone SELECT/WITH; reject
-    dangerous verbs (DROP/DELETE/…/GRANT/EXEC), stacked statements (`;` before the
-    end), and dollar-quote breakout. Reuses the metric-view deny-list where
-    available. Returns True if the SQL is safe to store.
-    """
-    if not sql or not isinstance(sql, str):
-        return False
-    s = sql.strip().rstrip(";").strip()
-    if not s:
-        return False
-    # Must start with SELECT or WITH (read-only shapes only). NOTE: do NOT reuse
-    # metric_view_utils._check_dangerous_sql here — that deny-list is tuned for
-    # *measure expressions* and flags a leading SELECT as dangerous, so it would
-    # reject every legitimate dataset query.
-    if not re.match(r"^\s*(SELECT|WITH)\b", s, re.IGNORECASE):
-        return False
-    # No stacked statements (any ';' after trailing-strip is a second statement).
-    if ";" in s:
-        return False
-    up = s.upper()
-    # Dollar-quote breakout (the metric-view YAML wraps bodies in $$…$$).
-    if "$$" in s:
-        return False
-    # Block DML/DDL/privilege verbs appearing as whole words anywhere.
-    if re.search(
-        r"\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE|MERGE|GRANT|"
-        r"REVOKE|CREATE|EXEC|EXECUTE|CALL|COPY|MSCK|SET|USE)\b",
-        up,
-    ):
-        return False
-    # Block info-schema / catalog probing via UNION.
-    if re.search(r"\bUNION\b", up) and re.search(r"INFORMATION_SCHEMA|SYSTEM\.", up):
-        return False
-    return True
+def _q(name: str, dotted: bool = False) -> str:
+    """Back-quote an identifier for Spark SQL, escaping embedded backticks, so a
+    model-supplied name cannot leave it. ``dotted`` quotes ``a.b.c`` part by part."""
+    parts = str(name).split(".") if dotted else [str(name)]
+    return ".".join("`" + p.replace("`", "``") + "`" for p in parts)
 
 
 class PBIVisualUCMVMapperSchema(BaseModel):
@@ -458,14 +431,23 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
             measures = default_measures
             dims = default_dims
             sql = None
+            # Names come from metric-view YAML and tool arguments, and the SQL
+            # is stored as a dashboard query: quote them, and gate it exactly
+            # like the LLM path above.
             if view and measures:
+                from_view = _q(view, dotted=True)
                 if v["visual_type"] in ("card", "kpiVisual"):
-                    measure_expr = ", ".join(f"MEASURE({m})" for m in measures[:1])
-                    sql = f"SELECT {measure_expr} FROM {view}"
+                    measure_expr = ", ".join(f"MEASURE({_q(m)})" for m in measures[:1])
+                    sql = f"SELECT {measure_expr} FROM {from_view}"
                 elif dims:
-                    dim_expr = ", ".join(dims)
-                    measure_expr = ", ".join(f"MEASURE({m})" for m in measures)
-                    sql = f"SELECT {dim_expr}, {measure_expr} FROM {view} GROUP BY {dim_expr}"
+                    dim_expr = ", ".join(_q(d) for d in dims)
+                    measure_expr = ", ".join(f"MEASURE({_q(m)})" for m in measures)
+                    sql = f"SELECT {dim_expr}, {measure_expr} FROM {from_view} GROUP BY {dim_expr}"
+            if sql and not _is_safe_select_sql(sql):
+                logger.warning(
+                    "Dropping unsafe fallback dashboard SQL for %s", v["visual_id"]
+                )
+                sql = None
             mappings.append(
                 {
                     "visual_id": v["visual_id"],
