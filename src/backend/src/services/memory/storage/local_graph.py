@@ -280,7 +280,7 @@ class LocalGraphStore:
         pool = max(limit * 4, 20)
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT id, embedding, kind FROM graph_facts f WHERE {where}",
+                f"SELECT id, embedding, kind FROM graph_facts f WHERE {where}",  # literal table; WHERE from _read_where, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
                 params,
             ).fetchall()
             keyword_ids = self._keyword_ids(query_text, pool)
@@ -368,8 +368,8 @@ class LocalGraphStore:
     def _select_facts(self, where: str, params: list[object], tail: str) -> list[Fact]:
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT {_FACT_COLUMNS} FROM graph_facts f "
-                f"JOIN graph_entities e ON e.id = f.subject_id WHERE {where} {tail}",
+                f"SELECT {_FACT_COLUMNS} FROM graph_facts f "  # constant columns, literal table — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                f"JOIN graph_entities e ON e.id = f.subject_id WHERE {where} {tail}",  # callers pass fixed WHERE text and int LIMIT; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 params,
             ).fetchall()
         return [self._row_to_fact(row) for row in rows]
@@ -420,7 +420,7 @@ class LocalGraphStore:
         """The user's standing preferences and instructions, newest first."""
         where, params = self._read_where()
         return self._select_facts(
-            f"{where} AND f.kind = ?",
+            f"{where} AND f.kind = ?",  # _read_where text plus a literal filter; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
             [*params, FACT_PROCEDURAL],
             f"ORDER BY f.created_at DESC LIMIT {int(limit)}",
         )

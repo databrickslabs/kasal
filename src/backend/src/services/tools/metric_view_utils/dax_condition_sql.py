@@ -202,7 +202,8 @@ class DaxConditionMixin:
             return None, f"Untranslatable FILTER condition: {condition}"
         col = match["column"]
         if cond_sql:
-            return f"{agg}(source.{col}) FILTER (WHERE {cond_sql})", ""
+            sql = f"{agg}(source.{col}) FILTER (WHERE {cond_sql})"  # col is \w+; condition built from escaped literals — nosemgrep: tmp.databricks.sql-injection.fstring-where
+            return sql, ""
         return f"{agg}(source.{col})", ""
 
     def _dax_condition_to_sql(self, condition: str, table_key: str) -> str:

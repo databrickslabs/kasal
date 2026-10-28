@@ -97,7 +97,7 @@ def compile_groups(groups: list[RouteConditionGroup], schema: dict[str, Any]) ->
             arguments = ", ".join(
                 f"{name}={term.value!r}" for name, term in zip(names, group.terms)
             )
-            expression = f"where({group.subject!r}, {arguments})"
+            expression = f"where({group.subject!r}, {arguments})"  # Python expression run by safe_eval, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
         else:
             terms = []
             for term in group.terms:

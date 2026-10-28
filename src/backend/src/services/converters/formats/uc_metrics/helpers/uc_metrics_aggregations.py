@@ -4,11 +4,28 @@ Provides Spark SQL aggregation support for Unity Catalog Metrics Store
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ....base.models import KPI
 
 logger = logging.getLogger(__name__)
+
+# KPI formulas and filter conditions are interpolated into metric-view SQL that
+# is deployed and executed. They must stay expressions: no statement separator,
+# comment, dollar-quote or subquery (a SELECT could read another table under the
+# deployer's identity). Checked outside string literals, so 'a; b' is fine.
+# FROM alone is allowed: EXTRACT(YEAR FROM d) and TRIM(BOTH ' ' FROM c) are
+# expressions.
+_STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.|'')*'")
+_NOT_AN_EXPRESSION = re.compile(r";|--|/\*|\*/|\$\$|\bSELECT\b", re.IGNORECASE)
+
+
+def require_safe_expression(expr: str, what: str = "expression") -> str:
+    """``expr`` when it is a plain SQL expression; raises ``ValueError`` otherwise."""
+    if _NOT_AN_EXPRESSION.search(_STRING_LITERAL.sub("''", expr or "")):
+        raise ValueError(f"Unsafe {what} in KPI definition: {expr!r}")
+    return expr
 
 
 class UCMetricsAggregationBuilder:
@@ -34,7 +51,7 @@ class UCMetricsAggregationBuilder:
         aggregation_type = (
             kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
         )
-        formula = kpi.formula or "1"
+        formula = require_safe_expression(kpi.formula or "1", "formula")
 
         # Map aggregation types to UC metrics expressions
         if aggregation_type == "SUM":
@@ -86,6 +103,7 @@ class UCMetricsAggregationBuilder:
         exceptions = getattr(kpi, "exceptions", None)
         if exceptions:
             formula = self.apply_exceptions_to_formula(formula, exceptions)
+        formula = require_safe_expression(formula, "formula")
 
         # Build base aggregation
         if aggregation_type == "SUM":
@@ -113,7 +131,8 @@ class UCMetricsAggregationBuilder:
 
         # Add FILTER clause if there are specific filters
         if specific_filters:
-            filtered_expr = f"{base_expr} FILTER (WHERE {specific_filters})"
+            require_safe_expression(specific_filters, "filter")
+            filtered_expr = f"{base_expr} FILTER (WHERE {specific_filters})"  # filter passed require_safe_expression — nosemgrep: tmp.databricks.sql-injection.fstring-where
         else:
             filtered_expr = base_expr
 

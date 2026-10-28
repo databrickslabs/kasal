@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Optional, Type
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
+from src.services.tools.metric_view_utils.sql_guard import is_read_only_select
 
 if TYPE_CHECKING:
     from src.utils.databricks_auth import AuthContext
@@ -338,8 +339,18 @@ class DatabricksDashboardCreatorTool(BaseTool):
     def _build_dataset(
         self, view_name: str, sql: Optional[str], dataset_name: str
     ) -> dict:
-        """Build a Lakeview dataset entry."""
-        query_sql = sql or f"SELECT * FROM {view_name} LIMIT 1000"
+        """Build a Lakeview dataset entry.
+
+        The query is stored and runs whenever the dashboard opens, and the
+        mappings can come straight from agent input: only a single read-only
+        SELECT is kept, and the default query back-quotes the view name.
+        """
+        if sql and not is_read_only_select(sql):
+            logger.warning("Dropping non-read-only dataset SQL for %s", view_name)
+            sql = None
+        view = ".".join("`" + p.replace("`", "``") + "`" for p in view_name.split("."))
+        default_sql = f"SELECT * FROM {view} LIMIT 1000"  # view back-quoted above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+        query_sql = sql or default_sql
         display = view_name.split(".")[-1].replace("_", " ").title()
         return {
             "name": dataset_name,
@@ -452,7 +463,7 @@ class DatabricksDashboardCreatorTool(BaseTool):
         """Make an HTTP request and return (status_code, json_body)."""
         import requests as _requests
 
-        resp = _requests.request(
+        resp = _requests.request(  # host allow-listed in _run before any call — nosemgrep: tmp.databricks.ssrf.requests-user-url
             method, url, json=payload, headers=headers, timeout=timeout
         )
         try:

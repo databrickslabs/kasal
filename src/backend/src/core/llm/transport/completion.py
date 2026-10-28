@@ -101,7 +101,7 @@ _RoundAnswer = str | list[dict[str, Any]]
 #: Sent when no API key was resolved (keyless local vLLM/KAT, or a workspace
 #: with none configured). Explicit so the OpenAI SDK never falls back to
 #: OPENAI_API_KEY in the shared process environment.
-NO_API_KEY = "no-key-configured"
+NO_API_KEY = "no-key-configured"  # placeholder that keeps the SDK off env keys — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
 _TOOLS_REJECT_REASONING_EFFORT_RE = re.compile(r"(?:^|/)gpt-5\.6")
 

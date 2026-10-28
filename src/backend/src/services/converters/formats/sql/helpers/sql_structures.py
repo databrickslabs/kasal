@@ -800,7 +800,7 @@ class SQLStructureExpander:
         sql_expr = sql_measure.sql_expression
 
         # Build complete custom SQL
-        custom_sql = f"SELECT {sql_expr.replace('FROM `FactSales`', f'FROM {from_clause}{subquery_where}')} AS {self._quote_identifier(measure_alias)}"
+        custom_sql = f"SELECT {sql_expr.replace('FROM `FactSales`', f'FROM {from_clause}{subquery_where}')} AS {self._quote_identifier(measure_alias)}"  # generated SQL text returned to the caller, identifiers quoted — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
         # Create query with custom SQL
         query = SQLQuery(
@@ -913,11 +913,11 @@ class SQLStructureExpander:
                 )
 
                 # Build individual query
-                select_part = f"SELECT '{alias}' AS measure_name, {measure.to_sql_expression()} AS measure_value"
+                select_part = f"SELECT {self._quote_literal(alias)} AS measure_name, {measure.to_sql_expression()} AS measure_value"  # generated SQL text returned to the caller, alias escaped — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 from_part = f"FROM {from_clause}"
 
                 if processed_filters:
-                    where_part = f"WHERE {' AND '.join(processed_filters)}"
+                    where_part = f"WHERE {' AND '.join(processed_filters)}"  # generated SQL text returned to the caller — nosemgrep: tmp.databricks.sql-injection.fstring-where
                     query_part = f"{select_part} {from_part} {where_part}"
                 else:
                     query_part = f"{select_part} {from_part}"
@@ -1045,8 +1045,15 @@ class SQLStructureExpander:
         return result
 
     def _quote_identifier(self, identifier: str) -> str:
-        """Quote identifier according to SQL dialect"""
+        """Quote identifier according to SQL dialect, doubling the quote char so
+        a model-supplied name (measure, table, schema) cannot leave it."""
+        q = "`" if self.dialect == SQLDialect.DATABRICKS else '"'
+        return q + str(identifier).replace(q, q + q) + q
+
+    def _quote_literal(self, value: str) -> str:
+        """Single-quoted string literal. Databricks SQL also processes backslash
+        escapes, so those are escaped first there."""
+        text = str(value)
         if self.dialect == SQLDialect.DATABRICKS:
-            return f"`{identifier}`"
-        else:  # STANDARD
-            return f'"{identifier}"'
+            text = text.replace("\\", "\\\\")
+        return "'" + text.replace("'", "''") + "'"

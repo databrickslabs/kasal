@@ -268,7 +268,7 @@ class LakebaseGraphStore:
             current = (
                 await session.execute(
                     sql(
-                        f"SELECT id, object_key, metadata FROM {self.facts} "
+                        f"SELECT id, object_key, metadata FROM {self.facts} "  # table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
                         "WHERE group_id = :group_id AND subject_id = :subject_id "
                         "AND relation = :relation AND valid_to IS NULL"
                     ),
@@ -298,7 +298,7 @@ class LakebaseGraphStore:
                 )
             inserted = await session.execute(
                 sql(
-                    f"INSERT INTO {self.facts} (id, group_id, session_id, "
+                    f"INSERT INTO {self.facts} (id, group_id, session_id, "  # table validated in __init__; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                     "subject_id, relation, object_id, object, object_key, "
                     "statement, embedding, source, metadata, kind) VALUES (:id, "
                     ":group_id, :session_id, :subject_id, :relation, :object_id, "
@@ -351,7 +351,7 @@ class LakebaseGraphStore:
         }
         await session.execute(
             sql(
-                f"INSERT INTO {self.entities} (id, group_id, name, name_key, type) "
+                f"INSERT INTO {self.entities} (id, group_id, name, name_key, type) "  # table validated in __init__; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                 "VALUES (:id, :group_id, :name, :name_key, :type) "
                 "ON CONFLICT (group_id, name_key) DO NOTHING"
             ),
@@ -360,7 +360,7 @@ class LakebaseGraphStore:
         row = (
             await session.execute(
                 sql(
-                    f"SELECT id FROM {self.entities} "
+                    f"SELECT id FROM {self.entities} "  # table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     "WHERE group_id = :group_id AND name_key = :name_key"
                 ),
                 params,
@@ -395,7 +395,7 @@ class LakebaseGraphStore:
                     sql(
                         "SELECT f.id, 1.0 - (f.embedding <=> "
                         "CAST(:query_embedding AS vector)) AS similarity, f.kind "
-                        f"FROM {self.facts} f WHERE {where} "
+                        f"FROM {self.facts} f WHERE {where} "  # validated table; WHERE from _read_where, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                         "AND f.embedding IS NOT NULL "
                         "ORDER BY f.embedding <=> CAST(:query_embedding AS vector) "
                         "LIMIT :pool"
@@ -442,7 +442,7 @@ class LakebaseGraphStore:
         rows = (
             await session.execute(
                 sql(
-                    f"SELECT f.id FROM {self.facts} f WHERE {where} "
+                    f"SELECT f.id FROM {self.facts} f WHERE {where} "  # validated table; WHERE from _read_where, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
                     "AND f.tsv @@ to_tsquery('simple', :tsquery) "
                     "ORDER BY ts_rank_cd(f.tsv, to_tsquery('simple', :tsquery)) DESC "
                     "LIMIT :pool"
@@ -478,9 +478,9 @@ class LakebaseGraphStore:
         rows = (
             await session.execute(
                 sql(
-                    f"SELECT {_FACT_COLUMNS} FROM {self.facts} f "
+                    f"SELECT {_FACT_COLUMNS} FROM {self.facts} f "  # constant columns; table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     f"JOIN {self.entities} e ON e.id = f.subject_id "
-                    f"WHERE f.group_id = :tenant AND {where} {tail}"
+                    f"WHERE f.group_id = :tenant AND {where} {tail}"  # callers pass fixed WHERE/ORDER text; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 ),
                 {**params, "tenant": self.group_id},
             )
@@ -528,7 +528,7 @@ class LakebaseGraphStore:
         async with self._session() as session:
             return await self._select_facts(
                 session,
-                f"{where} AND f.kind = :procedural",
+                f"{where} AND f.kind = :procedural",  # _read_where text plus a literal filter; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 {**params, "procedural": FACT_PROCEDURAL, "n": int(limit)},
                 "ORDER BY f.created_at DESC LIMIT :n",
             )
@@ -538,7 +538,7 @@ class LakebaseGraphStore:
             rows = (
                 await session.execute(
                     sql(
-                        f"SELECT id, name, type FROM {self.entities} "
+                        f"SELECT id, name, type FROM {self.entities} "  # table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
                         "WHERE group_id = :group_id ORDER BY name LIMIT :n"
                     ),
                     {"group_id": self.group_id, "n": int(limit)},
@@ -562,7 +562,7 @@ class LakebaseGraphStore:
         async with self._session() as session:
             result = await session.execute(
                 sql(
-                    f"SELECT COUNT(*) FROM {self.facts} "
+                    f"SELECT COUNT(*) FROM {self.facts} "  # table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     "WHERE group_id = :group_id AND valid_to IS NULL"
                 ),
                 {"group_id": self.group_id},
@@ -573,7 +573,9 @@ class LakebaseGraphStore:
         async with self._session() as session:
             for table in (self.facts, self.entities):
                 await session.execute(
-                    sql(f"DELETE FROM {table} WHERE group_id = :group_id"),
+                    sql(
+                        f"DELETE FROM {table} WHERE group_id = :group_id"  # table is self.facts/self.entities, validated; group bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+                    ),
                     {"group_id": self.group_id},
                 )
 

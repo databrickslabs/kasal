@@ -81,7 +81,7 @@ class AadService:
     # Valid authentication methods
     AUTH_METHOD_SERVICE_PRINCIPAL = "service_principal"
     AUTH_METHOD_SERVICE_ACCOUNT = "service_account"
-    AUTH_METHOD_TOKEN = "token"
+    AUTH_METHOD_TOKEN = "token"  # auth-method label, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
     def __init__(
         self,

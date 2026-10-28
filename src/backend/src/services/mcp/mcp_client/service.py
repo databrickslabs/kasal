@@ -120,7 +120,7 @@ class MCPService:
                 continue
             resp = MCPServerResponse.model_validate(server)
             resp.enabled = effective_enabled
-            resp.api_key = ""  # do not include in list
+            resp.api_key = ""  # do not include in list; blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(resp)
         return MCPServerListResponse(
             servers=server_responses, count=len(server_responses)
@@ -142,7 +142,7 @@ class MCPService:
         for server in servers:
             server_response = MCPServerResponse.model_validate(server)
             # Don't include API key in list response
-            server_response.api_key = ""
+            server_response.api_key = ""  # blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(server_response)
 
         return MCPServerListResponse(servers=server_responses, count=len(servers))
@@ -163,7 +163,7 @@ class MCPService:
         for server in servers:
             server_response = MCPServerResponse.model_validate(server)
             # Don't include API key in list response
-            server_response.api_key = ""
+            server_response.api_key = ""  # blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(server_response)
 
         return MCPServerListResponse(servers=server_responses, count=len(servers))
@@ -263,7 +263,7 @@ class MCPService:
         if server is None:
             raise NotFoundError(detail="MCP server not found")
         resp = MCPServerResponse.model_validate(server)
-        resp.api_key = ""
+        resp.api_key = ""  # blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
         resp.has_api_key = bool(getattr(server, "encrypted_api_key", None))
         return resp
 
@@ -346,7 +346,7 @@ class MCPService:
         server_responses: List[MCPServerResponse] = []
         for server in servers:
             resp = MCPServerResponse.model_validate(server)
-            resp.api_key = ""  # never include in list responses
+            resp.api_key = ""  # never include in list responses; blanks the key out of the response — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             server_responses.append(resp)
         return MCPServerListResponse(
             servers=server_responses, count=len(server_responses)

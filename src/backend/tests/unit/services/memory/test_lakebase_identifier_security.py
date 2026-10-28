@@ -54,3 +54,12 @@ class TestMetadataFilterKeysAreBound:
         )
         assert key not in sql
         assert params["mk_0"] == key
+
+
+class TestTableNameValidatorIsAFullMatch:
+    def test_a_trailing_newline_is_refused(self):
+        from src.services.memory.storage.lakebase import _validate_table_name
+
+        with pytest.raises(ValueError):
+            _validate_table_name("crew_memory\n")
+        assert _validate_table_name("crew_memory") == "crew_memory"

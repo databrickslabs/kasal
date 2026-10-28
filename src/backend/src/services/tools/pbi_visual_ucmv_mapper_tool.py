@@ -438,11 +438,11 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
                 from_view = _q(view, dotted=True)
                 if v["visual_type"] in ("card", "kpiVisual"):
                     measure_expr = ", ".join(f"MEASURE({_q(m)})" for m in measures[:1])
-                    sql = f"SELECT {measure_expr} FROM {from_view}"
+                    sql = f"SELECT {measure_expr} FROM {from_view}"  # names back-quoted; gated read-only below — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 elif dims:
                     dim_expr = ", ".join(_q(d) for d in dims)
                     measure_expr = ", ".join(f"MEASURE({_q(m)})" for m in measures)
-                    sql = f"SELECT {dim_expr}, {measure_expr} FROM {from_view} GROUP BY {dim_expr}"
+                    sql = f"SELECT {dim_expr}, {measure_expr} FROM {from_view} GROUP BY {dim_expr}"  # names back-quoted; gated read-only below — nosemgrep: tmp.databricks.sql-injection.fstring-select
             if sql and not _is_safe_select_sql(sql):
                 logger.warning(
                     "Dropping unsafe fallback dashboard SQL for %s", v["visual_id"]

@@ -1366,8 +1366,8 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "target": set_key,
                     "status": "filled",
                     "value": values,
-                    "detail": f"SELECT DISTINCT {value_col} FROM {source_table} "
-                    f"WHERE {flag_col}=1 ({len(values)} values)",
+                    "detail": f"SELECT DISTINCT {value_col} FROM {source_table} "  # report text; the query ran via select_distinct — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    f"WHERE {flag_col}=1 ({len(values)} values)",  # report text — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 }
             )
         return log
@@ -1463,7 +1463,7 @@ class PipelineConfigGeneratorTool(BaseTool):
             }
             if src and not str(src).startswith("TODO"):
                 res = await uc_query.run_query(
-                    f"SELECT COUNT(*) AS n FROM {uc_query._quote_ident(src)}",
+                    f"SELECT COUNT(*) AS n FROM {uc_query._quote_ident(src)}",  # identifier validated and quoted — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     _resolved=resolved,
                 )
                 if res.get("success") and res.get("rows"):

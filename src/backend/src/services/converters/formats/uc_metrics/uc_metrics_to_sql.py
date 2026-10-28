@@ -194,7 +194,7 @@ class UCMetricsToSqlTranspiler:
         sql_parts.append(f"-- {measure_name}")
 
         # SELECT clause
-        sql_parts.append(f"SELECT {select_expr} as {measure_name}")
+        sql_parts.append(f"SELECT {select_expr} as {measure_name}")  # fmt: skip # standalone SQL text returned to the caller, never executed — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
         # FROM clause (if source table is provided)
         if source_table:
@@ -202,7 +202,7 @@ class UCMetricsToSqlTranspiler:
 
         # WHERE clause (if filter is provided)
         if common_filter:
-            sql_parts.append(f"WHERE {common_filter}")
+            sql_parts.append(f"WHERE {common_filter}")  # fmt: skip # standalone SQL text returned to the caller, never executed — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
         # Combine and return
         sql = "\n".join(sql_parts) + ";"

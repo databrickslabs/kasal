@@ -30,7 +30,8 @@ def is_read_only_select(sql: str) -> bool:
     s = sql.strip().rstrip(";").strip()
     if not s:
         return False
-    if not re.match(r"^\s*(SELECT|WITH)\b", s, re.IGNORECASE):
+    # A subquery body arrives as "(SELECT …)" — the leading parens are allowed.
+    if not re.match(r"^[\s(]*(SELECT|WITH)\b", s, re.IGNORECASE):
         return False
     # Any ';' left after the trailing strip starts a second statement.
     if ";" in s:

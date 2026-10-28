@@ -12,6 +12,13 @@ from .utils import col_to_readable
 logger = logging.getLogger(__name__)
 
 _RE_SAFE_ALIAS = re.compile(r"^[a-zA-Z_]\w*$")
+# A dedup ORDER BY from config: columns, each optionally ASC / DESC.
+_RE_SAFE_ORDER_BY = re.compile(
+    r"^[A-Za-z_][\w.]*(?:\s+(?:ASC|DESC))?(?:\s*,\s*[A-Za-z_][\w.]*(?:\s+(?:ASC|DESC))?)*$",
+    re.IGNORECASE,
+)
+# A KBI code becomes both a string literal and part of a column alias.
+_RE_SAFE_KBI_CODE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def _sanitize_alias(alias: str) -> str:
@@ -19,6 +26,45 @@ def _sanitize_alias(alias: str) -> str:
     if not _RE_SAFE_ALIAS.match(alias):
         raise ValueError(f"Invalid SQL alias: {alias}")
     return alias
+
+
+def _safe_identifiers(*names: object) -> bool:
+    """Whether every config name is a plain identifier — they reach the
+    executed pivot SQL unquoted."""
+    return all(_RE_SAFE_ALIAS.match(str(n)) for n in names)
+
+
+def _pivot_kbi_codes(
+    fact_name: str, pivot_col: str, measures: list[dict], fj: dict
+) -> set[str]:
+    """KBI codes the measures' DAX filters ``fact[pivot_col]`` on, else the
+    fact join's configured ``kbi_codes``. Each becomes a string literal AND part
+    of a column alias, so config codes are kept only when ``[A-Za-z0-9_]+`` —
+    the same shape the DAX extraction can produce."""
+    kbi_codes: set[str] = set()
+    kbi_pattern = re.compile(
+        rf"\b{re.escape(fact_name)}\[{re.escape(pivot_col)}\]\s*"
+        rf'(?:=\s*"([A-Z0-9]+)"|in\s*\{{([^}}]+)\}})',
+        re.IGNORECASE,
+    )
+    for m_entry in measures:
+        for hit in kbi_pattern.finditer(m_entry.get("dax_expression", "")):
+            if hit.group(1):
+                kbi_codes.add(hit.group(1))
+            elif hit.group(2):
+                kbi_codes.update(re.findall(r"[A-Z0-9]+", hit.group(2)))
+    if not kbi_codes:
+        config_codes = [
+            c for c in fj.get("kbi_codes", []) if _RE_SAFE_KBI_CODE.match(str(c))
+        ]
+        if config_codes:
+            kbi_codes.update(config_codes)
+            logger.info(
+                "Using %d kbi_codes from fact_join_map config for %s",
+                len(config_codes),
+                fact_name,
+            )
+    return kbi_codes
 
 
 class JoinDetector:
@@ -182,8 +228,12 @@ class JoinDetector:
         if s.startswith("("):
             return source  # already a subquery — don't double-wrap
         order_by = jk.get("dedup_order_by") or dim_key
+        # Both come from config and reach the executed view source unquoted.
+        if not (_RE_SAFE_ALIAS.match(dim_key) and _RE_SAFE_ORDER_BY.match(order_by)):
+            logger.warning("[JOIN] unsafe dedup key/order for %s — not deduped", source)
+            return source
         return (
-            f"(SELECT * FROM {source} "
+            f"(SELECT * FROM {source} "  # identifiers validated above; source from the join map — nosemgrep: tmp.databricks.sql-injection.fstring-select
             f"QUALIFY ROW_NUMBER() OVER "
             f"(PARTITION BY {dim_key} ORDER BY {order_by}) = 1)"
         )
@@ -286,28 +336,10 @@ class JoinDetector:
                 _col_map = fj.get("column_map", {})
                 phys_value_col = _col_map.get(value_col, value_col)
                 grain_cols = fj.get("grain", [])
-                kbi_codes: set[str] = set()
-                _kbi_pattern = re.compile(
-                    rf"\b{re.escape(fact_name)}\[{re.escape(pivot_col)}\]\s*"
-                    rf'(?:=\s*"([A-Z0-9]+)"|in\s*\{{([^}}]+)\}})',
-                    re.IGNORECASE,
-                )
-                for m_entry in measures:
-                    for hit in _kbi_pattern.finditer(m_entry.get("dax_expression", "")):
-                        if hit.group(1):
-                            kbi_codes.add(hit.group(1))
-                        elif hit.group(2):
-                            kbi_codes.update(re.findall(r"[A-Z0-9]+", hit.group(2)))
-
-                # Fallback: use kbi_codes from config if DAX extraction found none
-                if not kbi_codes:
-                    config_codes = fj.get("kbi_codes", [])
-                    if config_codes:
-                        kbi_codes.update(config_codes)
-                        logger.info(
-                            f"[{fact_table_key}] Using {len(config_codes)} kbi_codes from "
-                            f"fact_join_map config for {fact_name}"
-                        )
+                if not _safe_identifiers(pivot_col, phys_value_col, *grain_cols):
+                    logger.warning("[JOIN] unsafe pivot identifiers for %s", fact_name)
+                    continue
+                kbi_codes = _pivot_kbi_codes(fact_name, pivot_col, measures, fj)
 
                 if kbi_codes:
                     pivot_kbi_map = {code: f"sc_{code.lower()}" for code in kbi_codes}
@@ -339,7 +371,7 @@ class JoinDetector:
                             for code in sorted(kbi_codes)
                         )
                         union_arm_sql = (
-                            f"SELECT {key_expr}, {grain_str},\n    {pivot_select}\n"
+                            f"SELECT {key_expr}, {grain_str},\n    {pivot_select}\n"  # identifiers/codes validated; key_expr is pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-select
                             f"FROM {source_table}\n"
                             f"{where_clause}\n"
                             f"GROUP BY {grain_str}"
@@ -361,7 +393,7 @@ class JoinDetector:
                         continue
 
                     join_source = (
-                        f"SELECT {grain_str},\n    {pivot_select}\n"
+                        f"SELECT {grain_str},\n    {pivot_select}\n"  # identifiers and KBI codes validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
                         f"FROM {source_table}\n"
                         f"{where_clause}\n"
                         f"GROUP BY {grain_str}"

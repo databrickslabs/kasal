@@ -333,7 +333,7 @@ def _compile_steps(source_m: str, steps: list[MStep]) -> str | None:
     if not fqn or select_clause is None:
         return None
     fqn_quoted = ".".join(_quote_sql_ident(p) for p in fqn.split("."))
-    return f"SELECT {select_clause} FROM {fqn_quoted}"
+    return f"SELECT {select_clause} FROM {fqn_quoted}"  # columns and FQN parts all back-quoted — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
 
 def _resolve_through_reference(

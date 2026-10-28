@@ -1161,7 +1161,7 @@ class PowerBIReportReferencesTool(BaseTool):
                                 from_clause = pq.get("From", [])
                                 select_clause = pq.get("Select", [])
                                 logger.info(
-                                    f"[_extract_visual_references] prototypeQuery.From: {len(from_clause)} items, Select: {len(select_clause)} items"
+                                    f"[_extract_visual_references] prototypeQuery.From: {len(from_clause)} items, Select: {len(select_clause)} items"  # log text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-select
                                 )
                                 if from_clause:
                                     logger.info(
@@ -1169,7 +1169,7 @@ class PowerBIReportReferencesTool(BaseTool):
                                     )
                                 if select_clause:
                                     logger.info(
-                                        f"[_extract_visual_references] First Select item: {select_clause[0] if select_clause else 'none'}"
+                                        f"[_extract_visual_references] First Select item: {select_clause[0] if select_clause else 'none'}"  # log text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-select
                                     )
                         # Log projections structure
                         if "projections" in sv:

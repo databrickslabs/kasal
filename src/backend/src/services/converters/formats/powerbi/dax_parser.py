@@ -416,7 +416,7 @@ class DAXExpressionParser:
                 elif tokens and tokens[-1].type == "table":
                     is_measure = False
 
-                token_type = "measure" if is_measure else "column"
+                token_type = ("measure" if is_measure else "column")  # fmt: skip # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 tokens.append(
                     DaxToken(
                         type=token_type,
@@ -488,13 +488,13 @@ class DAXExpressionParser:
 
                 # Check if it's a function
                 if word_upper in FUNCTIONS:
-                    token_type = "function"
+                    token_type = "function"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 # Check if it's followed by '[' (table name)
                 elif new_i < len(expr) and expr[new_i : new_i + 1].strip() == "[":
-                    token_type = "table"
+                    token_type = "table"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 # Check if it's a known measure name
                 elif word in measures_list:
-                    token_type = "measure"
+                    token_type = "measure"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 # Check if it looks like an interval keyword
                 elif word_upper in [
                     "DAY",
@@ -508,11 +508,11 @@ class DAXExpressionParser:
                 ]:
                     # Check context - if in DATEDIFF, it's an interval
                     if self._is_interval_context(tokens, current_group):
-                        token_type = "interval"
+                        token_type = "interval"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                     else:
-                        token_type = "function"
+                        token_type = "function"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
                 else:
-                    token_type = "word"
+                    token_type = "word"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
                 tokens.append(
                     DaxToken(
@@ -724,7 +724,7 @@ class DAXExpressionParser:
         # Mark all tokens in comparison groups
         for token in tokens:
             if token.group in comparison_groups:
-                token.group_type = "comparison"
+                token.group_type = "comparison"  # DAX lexer token kind, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
     def _extract_aggregation(self, expression: str) -> str:
         """Extract aggregation type from expression."""

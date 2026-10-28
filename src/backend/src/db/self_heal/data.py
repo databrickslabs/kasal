@@ -42,7 +42,7 @@ async def _disable_bi_specialist_crew_memory(conn: AsyncConnection) -> None:
                 continue  # table/columns not present yet (fresh DB handled by seed)
         await conn.exec_driver_sql(
             f"UPDATE {table} SET memory = {false_val} "
-            f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"
+            f"WHERE group_id = 'bi-specialist' AND memory = {true_val}"  # table from a literal tuple; boolean literal from dialect — nosemgrep: tmp.databricks.sql-injection.fstring-where
         )
     logger.info("Ensured bi-specialist crews/agents have memory disabled")
 
@@ -88,7 +88,7 @@ async def _heal_engine_config_names(conn: AsyncConnection) -> None:
     keys = "', '".join(_LEGACY_ENGINE_CONFIG_KEYS)
     res = await conn.exec_driver_sql(
         "UPDATE engineconfig SET engine_name = 'kasal' "
-        f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"
+        f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"  # keys from the module constant _LEGACY_ENGINE_CONFIG_KEYS — nosemgrep: tmp.databricks.sql-injection.fstring-where
     )
     renamed = getattr(res, "rowcount", 0) or 0
     if renamed > 0:

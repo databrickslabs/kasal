@@ -479,12 +479,12 @@ class MinimumNumberGuardrail(BaseGuardrail):
         )
         json_matches = re.search(json_pattern, text)
         if json_matches:
-            logger.info(f"Found JSON-like match: {json_matches.group(0)}")
+            logger.info("Found JSON-like match: %s", json_matches.group(0))
             try:
                 value = json_matches.group(1)
                 return int(value) if value.isdigit() else float(value)
             except (ValueError, IndexError) as e:
-                logger.warning(f"Error converting JSON-like match to number: {e}")
+                logger.warning("Error converting JSON-like match to number: %s", e)
 
         # If the field is count-related, look for items/results count statements
         if any(

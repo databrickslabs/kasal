@@ -175,9 +175,9 @@ class FlowRepository(BaseRepository[Flow]):
         if execution_ids:
             for table, col in (("execution_trace", "run_id"), ("errortrace", "run_id")):
                 result = await self.session.execute(
-                    text(f"DELETE FROM {table} WHERE {col} IN :ids").bindparams(
-                        bindparam("ids", expanding=True)
-                    ),
+                    text(
+                        f"DELETE FROM {table} WHERE {col} IN :ids"  # table/col from a literal tuple; ids bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+                    ).bindparams(bindparam("ids", expanding=True)),
                     {"ids": execution_ids},
                 )
                 logger.info(
@@ -191,9 +191,9 @@ class FlowRepository(BaseRepository[Flow]):
                 ("llm_usage_billing", "execution_id"),
             ):
                 result = await self.session.execute(
-                    text(f"DELETE FROM {table} WHERE {col} IN :jids").bindparams(
-                        bindparam("jids", expanding=True)
-                    ),
+                    text(
+                        f"DELETE FROM {table} WHERE {col} IN :jids"  # table/col from a literal tuple; ids bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+                    ).bindparams(bindparam("jids", expanding=True)),
                     {"jids": job_ids},
                 )
                 logger.info(

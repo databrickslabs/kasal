@@ -13,6 +13,7 @@ from typing import Any
 
 from .data_classes import MetricViewSpec, TableInfo, TranslationResult
 from .dependency_graph import build_dependency_graph
+from .join_detector import _sanitize_alias
 from .m_transform_folder import MTransformFolder
 from .pbi_parameter_resolver import PbiParameterResolver
 from .sql_post_processor import SqlPostProcessor
@@ -967,7 +968,7 @@ def process_table(
         kbi_col = fj_cfg.get("pivot_col", "kbi_col")
 
         _filter_start = re.compile(
-            rf"SUM\({re.escape(alias)}\.{re.escape(val_col)}\)\s*FILTER\s*\(WHERE\s+"
+            rf"SUM\({re.escape(alias)}\.{re.escape(val_col)}\)\s*FILTER\s*\(WHERE\s+"  # a regex over generated SQL, every part re.escape'd — nosemgrep: tmp.databricks.sql-injection.fstring-where
             rf"{re.escape(alias)}\.{re.escape(kbi_col)}\s*"
             rf"(?:=\s*\'(\w+)\'|IN\s*\(([^)]+)\))",
             re.IGNORECASE,
@@ -1289,17 +1290,15 @@ def process_table(
             excl_filter = ua.get("_primary_exclude_filter", "")
             pivot_map = ua.get("_pivot_kbi_map", {})
 
-            wrapped = (
-                f"SELECT *, {null_cols}\n" f"FROM (\n{source_sql}\n) _primary_source"
-            )
+            wrapped = f"SELECT *, {null_cols}\nFROM (\n{source_sql}\n) _primary_source"  # pivot aliases from validated KBI codes — nosemgrep: tmp.databricks.sql-injection.fstring-select
             if excl_filter:
                 wrapped += f"\nWHERE {excl_filter}"
 
             agg_nulls = ", ".join(
-                f"CAST(NULL AS DOUBLE) AS {c['name']}"
+                f"CAST(NULL AS DOUBLE) AS {_sanitize_alias(c['name'])}"
                 for c in table_info.aggregate_columns
             )
-            union_arm = f"SELECT *, {agg_nulls}\n" f"FROM (\n{arm_sql}\n) _union_arm"
+            union_arm = f"SELECT *, {agg_nulls}\nFROM (\n{arm_sql}\n) _union_arm"  # aggregate names validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
             source_sql = f"{wrapped}\nUNION ALL\n{union_arm}"
 
             existing_dim_names = {d["name"] for d in dimensions}
@@ -1327,14 +1326,14 @@ def process_table(
             co012_alias = f"_co012_{ej_embed['name']}"
 
             max_selects = ", ".join(
-                f"MAX({co012_alias}.{src_col}) AS {tgt_col}"
+                f"MAX({co012_alias}.{_sanitize_alias(src_col)}) AS {_sanitize_alias(tgt_col)}"
                 for src_col, tgt_col in embed_cols.items()
             )
             on_clause = " AND ".join(
-                f"_inner.{k} = {co012_alias}.{k}" for k in join_keys
+                f"_inner.{_sanitize_alias(k)} = {co012_alias}.{k}" for k in join_keys
             )
             source_sql = (
-                f"SELECT _inner.*, {max_selects}\n"
+                f"SELECT _inner.*, {max_selects}\n"  # embed columns and join keys validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 f"FROM (\n{source_sql}\n) _inner\n"
                 f"LEFT JOIN (\n{inline_sql}\n) {co012_alias}\n"
                 f"  ON {on_clause}\n"
@@ -1362,7 +1361,7 @@ def process_table(
         fj_cfg = ej_emb.get("_fact_join_config", {})
         col_map = fj_cfg.get("column_map", {})
         _embed_filter_pat = re.compile(
-            rf"\s*FILTER\s*\(WHERE\s+{re.escape(alias_e)}\.[^)]+\)",
+            rf"\s*FILTER\s*\(WHERE\s+{re.escape(alias_e)}\.[^)]+\)",  # a regex over generated SQL, alias re.escape'd — nosemgrep: tmp.databricks.sql-injection.fstring-where
             re.IGNORECASE,
         )
         for src_col, tgt_col in embed_cols.items():

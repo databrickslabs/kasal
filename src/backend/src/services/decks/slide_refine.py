@@ -70,7 +70,7 @@ def run_name(mode: str, instruction: str, position: str) -> str:
         what = what[: _MAX_RUN_NAME - 1].rstrip() + "…"
     head = "New slide" if mode == "add" else "Slide refine"
     where = f" (slide {position})" if position else ""
-    return f"{head}{where}: {what}" if what else f"{head}{where}"
+    return f"{head}{where}: {what}" if what else f"{head}{where}"  # fmt: skip  # display text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
 
 class SlideRefineService:
@@ -209,13 +209,13 @@ def _user_message(
     where = f" (slide {position})" if position else ""
     if mode == "add":
         return (
-            f"MODE: add a new slide{where}\n\n"
+            f"MODE: add a new slide{where}\n\n"  # prompt text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
             f"WHAT THE NEW SLIDE SHOULD COVER:\n{instruction or 'a slide that fits naturally between its neighbours'}\n\n"
             f"THE SLIDE BEFORE IT:\n{before or '(none — this will be the first slide)'}\n\n"
             f"THE SLIDE AFTER IT:\n{after or '(none — this will be the last slide)'}\n"
         )
     return (
-        f"MODE: revise one slide{where}\n\n"
+        f"MODE: revise one slide{where}\n\n"  # prompt text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
         f"INSTRUCTION:\n{instruction}\n\n"
         f"SLIDE TO REVISE:\n{slide}\n\n"
         f"REFERENCE SLIDE (design to match):\n{reference or '(none — keep the slide’s own design)'}\n"

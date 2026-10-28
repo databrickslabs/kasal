@@ -184,7 +184,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                     await self.session.refresh(trace)
             except Exception as refresh_err:
                 logger.debug(
-                    f"Refresh after trace insert failed (non-fatal): {refresh_err}"
+                    "Refresh after trace insert failed (non-fatal): %s", refresh_err
                 )
             return trace
         except SQLAlchemyError as e:

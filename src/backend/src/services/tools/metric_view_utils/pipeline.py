@@ -26,7 +26,7 @@ from .artifact_cascade import (
 from .data_classes import MetricViewSpec, ScanTableInfo, TableInfo, TranslationResult
 from .dax_condition_sql import _sql_in_list
 from .dax_translator import DaxTranslator
-from .join_detector import JoinDetector
+from .join_detector import JoinDetector, _sanitize_alias
 from .m_transform_folder import MTransformFolder
 from .metadata_generator import MetadataGenerator
 from .pbi_parameter_resolver import PbiParameterResolver
@@ -708,12 +708,16 @@ class MetricViewPipeline:
         join_alias = join_alias or self.config.get("switch_join_alias", "")
         join_col = join_col or self.config.get("switch_join_col", "")
         _fs = filter_sets or {}
+        if _fs:  # config identifiers reach the deployed SQL unquoted
+            join_alias, join_col = _sanitize_alias(join_alias), _sanitize_alias(
+                join_col
+            )
 
         # Filter-set values are model/warehouse data deployed as metric-view
         # SQL: escaped literals, never raw '{v}'.
         def _filter_clause(fs_key: str) -> str:
             quoted = _sql_in_list(_fs[fs_key])
-            return f"FILTER (WHERE {join_alias}.{join_col} IN ({quoted}))"
+            return f"FILTER (WHERE {join_alias}.{join_col} IN ({quoted}))"  # identifiers validated, values escaped — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
         # Support raw_expr for pre-built SQL expressions
         if "raw_expr" in defn:
@@ -739,7 +743,7 @@ class MetricViewPipeline:
             for fs_key, fs_vals in _fs.items():
                 quoted = _sql_in_list(fs_vals)
                 placeholder = "{" + fs_key.lower() + "}"
-                fc = f"(WHERE {join_alias}.{join_col} IN ({quoted}))"
+                fc = f"(WHERE {join_alias}.{join_col} IN ({quoted}))"  # identifiers validated, values escaped — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 num = num.replace(placeholder, fc)
             num_expr = num
         else:

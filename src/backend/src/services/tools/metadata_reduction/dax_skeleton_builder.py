@@ -272,7 +272,7 @@ class DaxSkeletonBuilder:
             can_skip_llm=can_skip,
             open_placeholders=placeholders,
             strategy_notes=[
-                f'Filtered measure: [{base}] WHERE {filter_col} = "{filter_val}"'
+                f'Filtered measure: [{base}] WHERE {filter_col} = "{filter_val}"'  # human-readable DAX note, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
             ],
         )
 
@@ -359,7 +359,8 @@ class DaxSkeletonBuilder:
                 measure_lines.append(
                     f'    "{label}", CALCULATE([{base}], {fc} = "{fv}")'
                 )
-                notes.append(f'[{label}] = [{base}] WHERE {fc}="{fv}"')
+                note = f'[{label}] = [{base}] WHERE {fc}="{fv}"'  # human-readable DAX note, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
+                notes.append(note)
             else:
                 measure_lines.append(f'    "{label}", [{m.get("name", "")}]')
 

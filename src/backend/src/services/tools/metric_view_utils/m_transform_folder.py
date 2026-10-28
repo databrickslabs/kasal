@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from .data_classes import MStep
+from .dax_condition_sql import _sql_str_literal
 
 
 class MTransformFolder:
@@ -268,7 +269,7 @@ class MTransformFolder:
         result += ",\n".join(formatted_cols)
         if where_fmt:
             first_line, *rest_lines = where_fmt.split("\n")
-            result += f"\nFROM {table_name} WHERE {first_line}"
+            result += f"\nFROM {table_name} WHERE {first_line}"  # re-lays out SQL it was given; deployed only via the metric-view deployer's SQL check — nosemgrep: tmp.databricks.sql-injection.fstring-where
             for rl in rest_lines:
                 result += f"\n  {rl}"
         else:
@@ -584,8 +585,10 @@ class MTransformFolder:
                     col = m.group(1)
                     prefix = m.group(2)
                     replacement = m.group(3)
+                    # M text inside SQL quotes: escaped literals, never raw '{v}'.
                     col_exprs[col] = (
-                        f"CASE WHEN {col} LIKE '{prefix}%' THEN '{replacement}' ELSE {col} END"
+                        f"CASE WHEN {col} LIKE {_sql_str_literal(prefix + '%')} "  # literals escaped — nosemgrep: tmp.databricks.sql-injection.fstring-like
+                        f"THEN {_sql_str_literal(replacement)} ELSE {col} END"
                     )
 
         for col in remove_set:
@@ -627,7 +630,7 @@ class MTransformFolder:
         if where_conditions:
             where_clause = "\nWHERE " + " AND ".join(where_conditions)
 
-        return f"SELECT\n{select_clause}\nFROM (\n{base_sql}\n) _src{where_clause}"
+        return f"SELECT\n{select_clause}\nFROM (\n{base_sql}\n) _src{where_clause}"  # composes built parts; deployed only via the metric-view deployer's SQL check — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
     def _apply_where_only(self, base_sql: str, where_conditions: list) -> str:
         """Append WHERE conditions to existing SQL."""

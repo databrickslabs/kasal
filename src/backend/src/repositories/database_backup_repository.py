@@ -49,9 +49,20 @@ class DatabaseBackupRepository:
         Raises:
             ValueError: If the identifier contains unsafe characters
         """
-        if not name or not cls._SAFE_IDENTIFIER_RE.match(name):
+        if not name or not cls._SAFE_IDENTIFIER_RE.fullmatch(name):
             raise ValueError(f"Invalid SQL {kind}: {name!r}")
         return name
+
+    @classmethod
+    def _column_names(cls, pragma_rows: List[tuple]) -> List[str]:
+        """Column names from ``PRAGMA table_info`` rows, each validated.
+
+        On restore they come from the uploaded file, so they are checked before
+        the target table is cleared: a hostile name skips that table intact.
+        """
+        return [
+            cls._validate_identifier(str(row[1]), "column name") for row in pragma_rows
+        ]
 
     @staticmethod
     def dialect_name(session: AsyncSession) -> str:
@@ -239,6 +250,8 @@ class DatabaseBackupRepository:
                 )
                 columns = [(row[0], row[1]) for row in col_result.fetchall()]
                 column_names = [col[0] for col in columns]
+                for col_name in column_names:
+                    self._validate_identifier(col_name, "column name")
 
                 # Disable triggers and constraints for this table
                 sql_content.append(f"ALTER TABLE {table} DISABLE TRIGGER ALL;")
@@ -246,7 +259,11 @@ class DatabaseBackupRepository:
                 sql_content.append("")
 
                 # Get table data (table name validated above)
-                result = await db_session.execute(text(f"SELECT * FROM {table}"))
+                result = await db_session.execute(
+                    text(
+                        f"SELECT * FROM {table}"  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    )
+                )
                 rows = result.fetchall()
 
                 if rows:
@@ -273,7 +290,7 @@ class DatabaseBackupRepository:
                                 escaped_value = str(value).replace("'", "''")
                                 values.append(f"'{escaped_value}'")
 
-                        insert_stmt = f"INSERT INTO {table} ({', '.join(column_names)}) VALUES ({', '.join(values)});"
+                        insert_stmt = f"INSERT INTO {table} ({', '.join(column_names)}) VALUES ({', '.join(values)});"  # dump text; identifiers validated, values quote-doubled — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                         sql_content.append(insert_stmt)
 
                     total_rows += len(rows)
@@ -428,14 +445,20 @@ class DatabaseBackupRepository:
                 cursor.execute(create_table_sql)
 
                 # Get data from PostgreSQL
-                result = await session.execute(text(f"SELECT * FROM {table_name}"))
+                result = await session.execute(
+                    text(
+                        f"SELECT * FROM {table_name}"  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    )
+                )
                 rows = result.fetchall()
 
                 if rows:
                     # Prepare column names for insertion
                     col_names = [col[0] for col in columns]
+                    for col_name in col_names:
+                        self._validate_identifier(col_name, "column name")
                     placeholders = ", ".join(["?" for _ in col_names])
-                    insert_sql = f"INSERT INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders})"
+                    insert_sql = f"INSERT INTO {table_name} ({', '.join(col_names)}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
 
                     # Convert and insert rows
                     for row in rows:
@@ -656,14 +679,14 @@ class DatabaseBackupRepository:
                         # Get column names from backup table
                         backup_cursor.execute(f"PRAGMA table_info({table_name})")
                         columns_info = backup_cursor.fetchall()
-                        column_names = [col[1] for col in columns_info]
+                        column_names = self._column_names(columns_info)
 
                         # Clear existing data in target table
                         target_cursor.execute(f"DELETE FROM {table_name}")
                         logger.info(f"[IMPORT]   Cleared {table_name} table")
 
                         # Get all data from backup table
-                        backup_cursor.execute(f"SELECT * FROM {table_name}")
+                        backup_cursor.execute(f"SELECT * FROM {table_name}")  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select  # fmt: skip
                         rows = backup_cursor.fetchall()
 
                         if rows:
@@ -675,7 +698,7 @@ class DatabaseBackupRepository:
 
                                 # Insert rows, but update admin user's UUID
                                 placeholders = ",".join(["?" for _ in column_names])
-                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
 
                                 admin_email = current_admin_info["email"]
                                 admin_uuid = current_admin_info["id"]
@@ -707,7 +730,7 @@ class DatabaseBackupRepository:
                             else:
                                 # Regular table - insert all rows
                                 placeholders = ",".join(["?" for _ in column_names])
-                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"
+                                insert_sql = f"INSERT INTO {table_name} ({','.join(column_names)}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                                 target_cursor.executemany(insert_sql, rows)
 
                             logger.info(
@@ -877,7 +900,7 @@ class DatabaseBackupRepository:
                             self._validate_identifier(col_name, "column name")
                         columns = ", ".join(row_data.keys())
                         placeholders = ", ".join([f":{k}" for k in row_data.keys()])
-                        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+                        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"  # identifiers validated; values bound — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                         await db_session.execute(text(insert_query), row_data)
 
                     restored_tables.append(f"{table_name} ({len(rows)} rows)")
@@ -1156,7 +1179,9 @@ class DatabaseBackupRepository:
                 table_info = {}
                 for table in tables:
                     self._validate_identifier(table, "table name")
-                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    cursor.execute(
+                        f"SELECT COUNT(*) FROM {table}"  # table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    )
                     count = cursor.fetchone()[0]
                     table_info[table] = count
 
@@ -1218,7 +1243,9 @@ class DatabaseBackupRepository:
                 for table in tables:
                     self._validate_identifier(table, "table name")
                     result = await db_session.execute(
-                        text(f"SELECT COUNT(*) FROM {target_schema}.{table}")
+                        text(
+                            f"SELECT COUNT(*) FROM {target_schema}.{table}"  # literal schema, validated table — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                        )
                     )
                     count = result.scalar()
                     table_info[table] = count

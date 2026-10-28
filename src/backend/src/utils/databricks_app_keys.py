@@ -26,7 +26,7 @@ from src.utils.encryption_utils import EncryptionUtils
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
 
-_SECRET_KEY = "encryption-material-v1"
+_SECRET_KEY = "encryption-material-v1"  # secret-scope key name; the value is read at runtime — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
 
 def _scope_name() -> str:

@@ -223,7 +223,7 @@ class PowerBIConnector(BaseInboundConnector):
         self.logger.info(
             f"Executing DAX query against dataset {self.semantic_model_id}"
         )
-        response = requests.post(url, headers=headers, json=body, timeout=60)
+        response = requests.post(url, headers=headers, json=body, timeout=60)  # fmt: skip # constant API_BASE host; ids pass _path_id — nosemgrep: tmp.databricks.ssrf.requests-user-url
 
         if response.status_code == 200:
             results = response.json().get("results", [])

@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import re
 
+from .dax_condition_sql import _sql_str_literal
+
 # Grouped-virtual-table builders + an outer iterator over them = multi-stage aggregation.
 _GROUPERS = re.compile(
     r"\b(SUMMARIZE|SUMMARIZECOLUMNS|GROUPBY|ADDCOLUMNS|CURRENTGROUP)\b", re.I
@@ -138,10 +140,13 @@ def draft_source_view(
 
     facts = _facts_in(dax)
     if len(facts) > 1:  # cross-fact → UNION source view
-        arms = "\n  UNION ALL\n".join(
-            f"  SELECT /* aligned shared keys */ *, '{f}' AS _src FROM {f}"
-            for f in sorted(facts)
-        )
+
+        # DAX table names may hold spaces or "\": escape the tag, quote the table.
+        def _arm(fact: str) -> str:
+            table = "`" + fact.replace("`", "``") + "`"
+            return f"  SELECT /* aligned shared keys */ *, {_sql_str_literal(fact)} AS _src FROM {table}"  # review draft; name escaped and quoted — nosemgrep: tmp.databricks.sql-injection.fstring-select
+
+        arms = "\n  UNION ALL\n".join(_arm(fact) for fact in sorted(facts))
         return (
             f"{label}-- Cross-fact: spans {', '.join(sorted(facts))}. UC metric views are single-source,\n"
             f"-- so UNION the facts here (align columns, tag _src), then express the measure as\n"

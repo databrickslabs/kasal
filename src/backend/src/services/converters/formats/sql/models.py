@@ -88,7 +88,7 @@ class SQLQuery(BaseModel):
         # SELECT clause with proper formatting
         if self.select_clause:
             if len(self.select_clause) == 1:
-                lines.append(f"SELECT {self.select_clause[0]}")
+                lines.append(f"SELECT {self.select_clause[0]}")  # fmt: skip # SQLQuery pretty-printer: joins pre-built clauses into returned text, never executed — nosemgrep: tmp.databricks.sql-injection.fstring-select
             else:
                 lines.append("SELECT")
                 for i, col in enumerate(self.select_clause):
@@ -155,7 +155,7 @@ class SQLQuery(BaseModel):
 
         # SELECT
         if self.select_clause:
-            sql_parts.append(f"SELECT {', '.join(self.select_clause)}")
+            sql_parts.append(f"SELECT {', '.join(self.select_clause)}")  # fmt: skip # SQLQuery pretty-printer: joins pre-built clauses into returned text, never executed — nosemgrep: tmp.databricks.sql-injection.fstring-select
         else:
             sql_parts.append("SELECT *")
 
@@ -170,7 +170,7 @@ class SQLQuery(BaseModel):
         # WHERE
         if self.where_clause:
             where_conditions = " AND ".join(self.where_clause)
-            sql_parts.append(f"WHERE {where_conditions}")
+            sql_parts.append(f"WHERE {where_conditions}")  # fmt: skip # SQLQuery pretty-printer: joins pre-built clauses into returned text, never executed — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
         # GROUP BY
         if self.group_by_clause:

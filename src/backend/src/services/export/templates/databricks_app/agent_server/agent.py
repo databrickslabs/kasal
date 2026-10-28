@@ -185,7 +185,7 @@ if _experiment_name and _trace_catalog and _trace_schema and _trace_warehouse:
         print(
             f"Could not create UC-backed experiment ({e}). The app's service "
             f"principal likely needs USE CATALOG/SCHEMA + CREATE TABLE + MODIFY + "
-            f"SELECT on {_trace_catalog}.{_trace_schema}."
+            f"SELECT on {_trace_catalog}.{_trace_schema}."  # printed diagnostic text, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-select
         )
 if not _traces_configured and _experiment_name:
     try:

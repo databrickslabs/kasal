@@ -342,7 +342,7 @@ class EmbedderConfigBuilder:
 
                         headers.update(get_user_agent_header(KasalProduct.EMBEDDING))
 
-                        response = requests.post(
+                        response = requests.post(  # host from the auth context or a write-validated workspace URL — nosemgrep: tmp.databricks.ssrf.requests-user-url
                             endpoint_url, headers=headers, json=payload, timeout=30
                         )
                         if response.status_code == 200:

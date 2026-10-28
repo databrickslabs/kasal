@@ -44,7 +44,7 @@ _SET = re.compile(
 _TRIGGERS = re.compile(rf"ALTER TABLE ({_IDENT}) (?:DISABLE|ENABLE) TRIGGER ALL", re.I)
 _DELETE = re.compile(rf"DELETE FROM ({_IDENT})", re.I)
 _INSERT = re.compile(
-    rf"INSERT INTO ({_IDENT}) \(({_IDENT}(?:, {_IDENT})*)\) VALUES \((.*)\)",
+    rf"INSERT INTO ({_IDENT}) \(({_IDENT}(?:, {_IDENT})*)\) VALUES \((.*)\)",  # a regex of the restore allow-list, not SQL — nosemgrep: tmp.databricks.sql-injection.fstring-insert
     re.I | re.S,
 )
 _VALUE = re.compile(

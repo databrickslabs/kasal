@@ -62,6 +62,12 @@ def _quote_sql_column(name: str) -> str:
     return "`" + str(name).replace("`", "``") + "`"
 
 
+def _safe_target(prefix: str, table: str) -> str:
+    """``catalog.schema.table``: config prefix validated, table name coerced."""
+    parts = [_validate_sql_identifier(p, "catalog/schema") for p in prefix.split(".")]
+    return ".".join([*parts, _sanitize_sql_identifier(table)])
+
+
 # Spark SQL column types permitted in generated DDL. Anything else (e.g. an
 # LLM-hallucinated/injected "type") falls back to STRING so a type token cannot
 # carry extra clauses (e.g. "STRING) LOCATION 'abfss://evil' --").
@@ -1483,8 +1489,6 @@ class MqueryConversionPipelineTool(BaseTool):
         Fixes the max() bug in the old approach which found the LAST ' AS '
         in the SQL body (e.g. 'fiscyear AS Year') instead of the CREATE VIEW boundary.
         """
-        import re as _re
-
         stripped = sql.strip()
         upper = stripped.upper()
 
@@ -1499,10 +1503,10 @@ class MqueryConversionPipelineTool(BaseTool):
         # CREATE VIEW ... AS <body>
         if "CREATE" in upper and "VIEW" in upper:
             # Match up to and including the AS keyword at the end of the view header
-            m = _re.search(
+            m = _ident_re.search(
                 r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s+AS\s*",
                 stripped,
-                _re.IGNORECASE,
+                _ident_re.IGNORECASE,
             )
             if m:
                 body = stripped[m.end() :].strip()
@@ -1511,15 +1515,15 @@ class MqueryConversionPipelineTool(BaseTool):
                     return body
                 # Body starts with column list (LLM forgot SELECT keyword) — add it
                 if "FROM" in body.upper():
-                    return f"SELECT {body}"
+                    return f"SELECT {body}"  # model/LLM SQL; run only after the read-only gate — nosemgrep: tmp.databricks.sql-injection.fstring-select
                 return body
 
         # No CREATE VIEW wrapper but column list present (LLM skipped SELECT)
         if "FROM" in upper and not upper.startswith("SELECT"):
-            return f"SELECT {stripped}"
+            return f"SELECT {stripped}"  # model/LLM SQL; run only after the read-only gate — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
-        target = f"{config.get('target_catalog','main')}.{config.get('target_schema','default')}.{table_name}"
-        return f"SELECT * FROM {target}"
+        prefix = f"{config.get('target_catalog','main')}.{config.get('target_schema','default')}"
+        return f"SELECT * FROM {_safe_target(prefix, table_name)}"  # the validated table the rows were loaded into — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
     def _diff_counts(self, sql_res: Dict, dax_res: Dict) -> Optional[str]:
         """None if counts match; else a diff, or an ``unverified:`` reason."""
@@ -1616,16 +1620,9 @@ class MqueryConversionPipelineTool(BaseTool):
 
         # Clean PBI column names: "[Table].[Column]" → "Column"
         clean_cols = [c.split("].[")[-1].rstrip("]").lstrip("[") for c in columns]
-        # SECURITY: coerce the attacker-controllable table name to a strict SQL
-        # identifier (it is interpolated UNQUOTED into CREATE TABLE/INSERT), and
-        # validate the config-supplied catalog.schema prefix. Prevents identifier
-        # breakout / SQL injection on the warehouse.
-        safe_name = _sanitize_sql_identifier(tname)
-        safe_prefix = ".".join(
-            _validate_sql_identifier(part, "catalog/schema")
-            for part in str(target_prefix).split(".")
-        )
-        full_target = f"{safe_prefix}.{safe_name}"
+        # SECURITY: the (attacker-controllable) table name and the config prefix
+        # are interpolated UNQUOTED into CREATE TABLE / INSERT — see _safe_target.
+        full_target = _safe_target(str(target_prefix), tname)
 
         # 2. Ask LLM to generate CREATE TABLE + INSERT based on the actual data
         create_sql, insert_sqls = await self._llm_generate_insert_sql(
@@ -1659,7 +1656,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 total += ins.count("),(") + 1
             else:
                 logger.warning(
-                    f"[Validation] Batch insert error for {tname}: {ir['error']}"
+                    "[Validation] Batch insert error for %s: %s", tname, ir["error"]
                 )
 
         return {
@@ -1756,7 +1753,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 vals.append(f"({', '.join(escaped)})")
             if vals:
                 insert_sqls.append(
-                    f"INSERT INTO {full_target} ({col_list}) VALUES {', '.join(vals)}"
+                    f"INSERT INTO {full_target} ({col_list}) VALUES {', '.join(vals)}"  # target validated, columns quoted, values via sql_value_literal — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                 )
 
         return create_sql, insert_sqls
@@ -2011,7 +2008,7 @@ class MqueryConversionPipelineTool(BaseTool):
                 if r.get("sql"):
                     preview = r["sql"][:400] + ("..." if len(r["sql"]) > 400 else "")
                     lines.append(
-                        f"\n**Generated SQL (CREATE TABLE + INSERT):**\n```sql\n{preview}\n```"
+                        f"\n**Generated SQL (CREATE TABLE + INSERT):**\n```sql\n{preview}\n```"  # markdown report text for the user — nosemgrep: tmp.databricks.sql-injection.fstring-insert
                     )
                 lines.append("")
 

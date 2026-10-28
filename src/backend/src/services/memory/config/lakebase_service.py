@@ -381,7 +381,9 @@ class LakebaseMemoryService:
                         if exists:
                             where, gparams = self._group_where(group_id)
                             count_result = await session.execute(
-                                text(f"SELECT COUNT(*) FROM {table_name} {where}"),
+                                text(
+                                    f"SELECT COUNT(*) FROM {table_name} {where}"  # table validated (validate_table_name); fixed WHERE, bound params — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
+                                ),
                                 gparams,
                             )
                             row_count = count_result.scalar() or 0
@@ -475,7 +477,9 @@ class LakebaseMemoryService:
 
                 # Get total count (scoped to the workspace)
                 count_result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {table_name} {where}"),
+                    text(
+                        f"SELECT COUNT(*) FROM {table_name} {where}"  # table in allowed_tables; fixed WHERE, bound params — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
+                    ),
                     gparams,
                 )
                 total = count_result.scalar() or 0

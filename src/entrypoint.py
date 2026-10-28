@@ -114,7 +114,7 @@ def _database_environment(
         else:
             # Local-dev default (postgres/postgres on localhost), assembled so
             # secret scanners don't flag a literal credential-bearing DSN.
-            default_user = default_password = "postgres"
+            default_user = default_password = "postgres"  # fmt: skip  # local-dev default, localhost only — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             url = f"postgresql://{default_user}:{default_password}@localhost:5432/kasal"
         url = _async_postgres_url(url)
         return {
@@ -520,7 +520,7 @@ def run_app():
         if args.reload:
             # Uvicorn can only reload an import string: it re-imports the app
             # in a fresh worker process on every change.
-            uvicorn.run(
+            uvicorn.run(  # reload only with --reload (dev) — nosemgrep: tmp.databricks.config.uvicorn-reload
                 "entrypoint:build_app",
                 factory=True,
                 host=host,

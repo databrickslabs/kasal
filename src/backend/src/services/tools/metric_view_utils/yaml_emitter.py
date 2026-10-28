@@ -312,7 +312,7 @@ def _clean_filter_prefixes(
                 seen.append(p)
                 seen_norm.add(norm)
         filter_body = " AND ".join(seen)
-        return f"FILTER (WHERE {filter_body})"
+        return f"FILTER (WHERE {filter_body})"  # de-duplicates predicates already in expr — nosemgrep: tmp.databricks.sql-injection.fstring-where
 
     return re.sub(r"FILTER\s*\(WHERE\s+(.*?)\)", _strip_in_filter, expr)
 

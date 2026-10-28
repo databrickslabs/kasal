@@ -126,7 +126,9 @@ class MetricViewDeployerTool(BaseTool):
             "on_wait_timeout": "CONTINUE",
         }
 
-        resp = _requests.post(url, json=payload, headers=headers, timeout=60)
+        resp = _requests.post(  # host checked by is_trusted_databricks_host in _run — nosemgrep: tmp.databricks.ssrf.requests-user-url
+            url, json=payload, headers=headers, timeout=60
+        )
         if resp.status_code not in (200, 201):
             return {
                 "success": False,
@@ -142,7 +144,9 @@ class MetricViewDeployerTool(BaseTool):
         polls = 0
         while state in ("RUNNING", "PENDING") and polls < 60:
             time.sleep(2)
-            pr = _requests.get(f"{url}/{statement_id}", headers=headers, timeout=30)
+            pr = _requests.get(  # same trusted host; statement_id from the API — nosemgrep: tmp.databricks.ssrf.requests-user-url
+                f"{url}/{statement_id}", headers=headers, timeout=30
+            )
             data = pr.json()
             state = data.get("status", {}).get("state", "")
             polls += 1

@@ -83,7 +83,7 @@ class ReasoningStyle(str, Enum):
     """How this model is ASKED to think."""
 
     #: `thinking: {"type": "enabled", "budget_tokens": N}` — a token budget.
-    TOKEN_BUDGET = "token_budget"
+    TOKEN_BUDGET = "token_budget"  # reasoning-style name, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
     #: `thinking: {"type": "adaptive"}` + `output_config: {"effort": ...}`. The
     #: model decides depth; effort steers it. Rejects a budget.
     ADAPTIVE_EFFORT = "adaptive_effort"

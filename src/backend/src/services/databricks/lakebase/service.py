@@ -1667,9 +1667,8 @@ class LakebaseService(BaseService):
                         try:
                             safe_schema = _validate_identifier(schema, "schema name")
                             safe_table = _validate_identifier(table, "table name")
-                            count_result = await conn.execute(
-                                text(f"SELECT COUNT(*) FROM {safe_schema}.{safe_table}")
-                            )
+                            count_sql = f"SELECT COUNT(*) FROM {safe_schema}.{safe_table}"  # schema/table validated above — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                            count_result = await conn.execute(text(count_sql))
                             count = count_result.scalar()
                             tables_info.append(
                                 {"schema": schema, "table": table, "row_count": count}

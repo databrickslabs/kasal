@@ -279,7 +279,7 @@ async def resync_postgres_sequences() -> None:
                     floor = TOOL_ID_FLOOR if table_name == "tools" else 1
                     await session.execute(
                         sa_text(
-                            f"SELECT setval('{seq_name}', GREATEST(COALESCE((SELECT MAX(id) FROM \"{table_name}\"), 0) + 1, {int(floor)}), false)"
+                            f"SELECT setval('{seq_name}', GREATEST(COALESCE((SELECT MAX(id) FROM \"{table_name}\"), 0) + 1, {int(floor)}), false)"  # names matched safe_id_re, floor is int() — nosemgrep: tmp.databricks.sql-injection.fstring-select
                         )
                     )
                 except Exception:

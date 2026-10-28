@@ -54,6 +54,8 @@ TAG_CREW = "kasal_crew"
 KIND = "judge"
 #: Prompts per search page; judges number in the tens, not thousands.
 PAGE_SIZE = 200
+#: A Unity Catalog catalog or schema name as it may appear in a search filter.
+_UC_NAME = re.compile(r"[A-Za-z0-9_-]+")
 #: Header of the guideline block MemAlign folds into a judge's instructions.
 GUIDELINES_HEADER = "Distilled Guidelines"
 MEMORY_HEADER = "\n\n<!-- kasal-memalign-v1 -->\n"
@@ -201,8 +203,13 @@ class JudgeRegistry:
     def _search_filter(self) -> str:
         if self._uc_schema:
             catalog, schema = self._uc_schema.split(".", 1)
+            # Both go inside quoted literals of the MLflow filter string, and the
+            # schema is read off a registry prompt name: refuse anything that
+            # could close the quote.
+            if not (_UC_NAME.fullmatch(catalog) and _UC_NAME.fullmatch(schema)):
+                raise ValueError(f"Invalid Unity Catalog schema: {self._uc_schema!r}")
             return f"catalog = '{catalog}' AND schema = '{schema}'"
-        return f"name LIKE '{PROMPT_PREFIX}%'"
+        return f"name LIKE '{PROMPT_PREFIX}%'"  # module constant — nosemgrep: tmp.databricks.sql-injection.fstring-like
 
     def _prompt_names(self) -> Iterator[str]:
         token = None

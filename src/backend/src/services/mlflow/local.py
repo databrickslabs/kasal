@@ -76,6 +76,10 @@ def validate_local_tracking_uri(raw: str) -> str:
       redirected traces to a host of their choosing.
     * **No credentials in the URL.** ``user:pass@`` would be stored in the
       database and shown back in the Configuration form.
+    * **Another host is never an internal address.** The backend itself GETs
+      the server (``experiment_id``), so a private, link-local or
+      cloud-metadata destination would be a server-side request into the
+      deployment's own network.
     """
     value = raw.strip().rstrip("/")
     parsed = urlparse(value)
@@ -98,6 +102,15 @@ def validate_local_tracking_uri(raw: str) -> str:
             "Plain http is only allowed for a server on this machine "
             "(localhost, 127.0.0.1 or ::1); use https for any other host"
         )
+    if not _is_loopback(host):
+        from src.utils.url_security import UnsafeUrlError, check_url_structure
+
+        try:
+            check_url_structure(value)
+        except UnsafeUrlError as exc:
+            raise ValueError(
+                f"The local MLflow server must not be an internal address: {exc}"
+            ) from exc
     return value
 
 
@@ -201,7 +214,7 @@ def experiment_id(uri: str, name: str, timeout: float = REACHABILITY_TIMEOUT) ->
     query = urllib.parse.urlencode({"experiment_name": name})
     url = f"{uri.rstrip('/')}/api/2.0/mlflow/experiments/get-by-name?{query}"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with urllib.request.urlopen(url, timeout=timeout) as response:  # fmt: skip  # uri passed validate_local_tracking_uri on write and read — nosemgrep: tmp.databricks.ssrf.requests-user-url
             payload = json.loads(response.read().decode("utf-8"))
         return str(payload.get("experiment", {}).get("experiment_id", "") or "")
     except urllib.error.HTTPError as exc:

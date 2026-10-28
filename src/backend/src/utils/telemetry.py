@@ -35,7 +35,7 @@ class KasalProduct:
     MCP = "mcp"
     LAKEBASE = "lakebase"
     MLFLOW = "mlflow"
-    SECRET = "secret"
+    SECRET = "secret"  # product tag — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
     # LLM call types (for distinguishing agent vs guardrail vs generation calls)
     AGENT = "agent"
@@ -296,7 +296,7 @@ def send_logfood_telemetry_sync(
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", 0)
 
-        response = requests.get(telemetry_url, headers=telemetry_headers, timeout=5)
+        response = requests.get(telemetry_url, headers=telemetry_headers, timeout=5)  # fmt: skip  # the run's own workspace host — nosemgrep: tmp.databricks.ssrf.requests-user-url
 
         if response.status_code == 200:
             logger.info(

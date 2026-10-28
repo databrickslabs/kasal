@@ -60,7 +60,7 @@ async def _pg_columns(conn: AsyncConnection, table: str) -> set[str]:
     """
     res = await conn.exec_driver_sql(
         "SELECT attname FROM pg_attribute "
-        f"WHERE attrelid = to_regclass('{table}') AND attnum > 0 AND NOT attisdropped"
+        f"WHERE attrelid = to_regclass('{table}') AND attnum > 0 AND NOT attisdropped"  # table is a heal-step literal or model metadata name — nosemgrep: tmp.databricks.sql-injection.fstring-where
     )
     return {row[0] for row in res.fetchall()}
 
@@ -80,7 +80,7 @@ async def _index_exists(conn: AsyncConnection, table: str, name: str) -> bool:
     else:
         sql = (
             "SELECT 1 FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid "
-            f"WHERE x.indrelid = to_regclass('{table}') AND i.relname = '{name}'"
+            f"WHERE x.indrelid = to_regclass('{table}') AND i.relname = '{name}'"  # table/index names are heal-step literals — nosemgrep: tmp.databricks.sql-injection.fstring-where
         )
     res = await conn.exec_driver_sql(sql)
     return res.fetchone() is not None

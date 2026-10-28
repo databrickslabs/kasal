@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "sqlite")
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"  # fmt: skip  # local-dev default for a localhost Postgres — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
     POSTGRES_DB: str = "kasal"
     POSTGRES_PORT: str = "5432"
 

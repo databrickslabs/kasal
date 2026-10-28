@@ -59,7 +59,8 @@ class MCPServerBase(BaseModel):
 class MCPServerCreate(MCPServerBase):
     """Schema for creating a new MCP server"""
 
-    api_key: str = Field(
+    # Empty default, not a credential: the real key arrives per request, encrypted.
+    api_key: str = Field(  # nosemgrep: tmp.databricks.auth.hardcoded-password-default
         default="",
         description="API key for authentication (will be encrypted). Not required for databricks_spn auth.",
     )

@@ -13,6 +13,25 @@ Supports multiple authentication methods:
 import logging
 from typing import Dict, Optional
 
+from src.utils.url_security import (
+    UnsafeUrlError,
+    check_url_structure,
+    is_trusted_databricks_host,
+)
+
+
+def require_databricks_workspace(url: str) -> str:
+    """``url`` when it is an https Databricks workspace URL; raises otherwise.
+
+    Every request to the workspace carries a credential (a client secret, a PAT
+    or an OAuth token), so a caller-supplied ``workspace_url`` must never be able
+    to aim one at another host.
+    """
+    check_url_structure(url)
+    if not is_trusted_databricks_host(url):
+        raise UnsafeUrlError(f"Not a Databricks workspace URL: {url}")
+    return url
+
 
 class DatabricksAuthService:
     """
@@ -166,13 +185,15 @@ class DatabricksAuthService:
             )
 
         try:
-            # Databricks OAuth token endpoint
-            token_url = f"{self.workspace_url}/oidc/v1/token"
+            # Databricks OAuth token endpoint — the client secret is sent to it.
+            token_url = (
+                f"{require_databricks_workspace(self.workspace_url)}/oidc/v1/token"
+            )
 
             self.logger.info(f"Acquiring token for workspace: {self.workspace_url}")
 
             # Request access token using client credentials grant
-            response = requests.post(
+            response = requests.post(  # workspace_url passed require_databricks_workspace — nosemgrep: tmp.databricks.ssrf.requests-user-url
                 token_url,
                 data={
                     "grant_type": "client_credentials",

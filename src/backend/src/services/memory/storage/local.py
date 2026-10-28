@@ -331,7 +331,7 @@ class LocalStorageBackend:
             with self._lock:
                 placeholders = ",".join("?" * len(record_ids))
                 cursor = self._conn.execute(
-                    f"DELETE FROM memories WHERE id IN ({placeholders})",
+                    f"DELETE FROM memories WHERE id IN ({placeholders})",  # literal table; ? placeholders, ids bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                     record_ids,
                 )
                 self._conn.commit()
@@ -342,7 +342,8 @@ class LocalStorageBackend:
             params.append(older_than.isoformat())
         with self._lock:
             cursor = self._conn.execute(
-                f"DELETE FROM memories WHERE {' AND '.join(clauses)}", params
+                f"DELETE FROM memories WHERE {' AND '.join(clauses)}",  # literal table; fixed clauses, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+                params,
             )
             self._conn.commit()
         return cursor.rowcount

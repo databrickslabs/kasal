@@ -126,7 +126,7 @@ class EmbeddingQueueService:
                 await session.commit()
                 logger.info(f"Batch inserted {len(batch)} embeddings")
         except Exception as e:
-            logger.error(f"Failed to batch insert embeddings: {e}")
+            logger.error("Failed to batch insert embeddings: %s", e)
             # On failure, try individual inserts with retry
             for item in batch:
                 await self._insert_with_retry(item)
@@ -163,7 +163,9 @@ class EmbeddingQueueService:
                     await asyncio.sleep(wait_time)
                 else:
                     logger.error(
-                        f"Failed to insert embedding after {max_retries} attempts: {e}"
+                        "Failed to insert embedding after %d attempts: %s",
+                        max_retries,
+                        e,
                     )
 
 

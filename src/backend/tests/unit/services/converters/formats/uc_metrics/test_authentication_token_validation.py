@@ -30,19 +30,20 @@ class TestDatabricksAuthServiceBasics:
 
     def test_init_with_api_key(self):
         service = DatabricksAuthService(
-            workspace_url="https://example.com", api_key="dapiABCDEF"
+            workspace_url="https://example.cloud.databricks.com", api_key="dapiABCDEF"
         )
         assert service.api_key == "dapiABCDEF"
 
     def test_init_with_access_token(self):
         service = DatabricksAuthService(
-            workspace_url="https://example.com", access_token="eyJ.test.token"
+            workspace_url="https://example.cloud.databricks.com",
+            access_token="eyJ.test.token",
         )
         assert service._access_token == "eyJ.test.token"
 
     def test_init_with_service_principal(self):
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="client123",
             client_secret="secret456",
         )
@@ -50,14 +51,16 @@ class TestDatabricksAuthServiceBasics:
         assert service.client_secret == "secret456"
 
     def test_init_creates_default_logger(self):
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         assert service.logger is not None
 
     def test_init_with_custom_logger(self):
 
         mock_logger = Mock()
         service = DatabricksAuthService(
-            workspace_url="https://example.com", logger=mock_logger
+            workspace_url="https://example.cloud.databricks.com", logger=mock_logger
         )
         assert service.logger == mock_logger
 
@@ -68,7 +71,7 @@ class TestGetAccessToken:
     def test_priority_access_token_first(self):
         """Priority 1: pre-obtained OAuth token"""
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             access_token="oauth_token",
             api_key="dapiXYZ",  # should be ignored
         )
@@ -78,7 +81,7 @@ class TestGetAccessToken:
     def test_priority_api_key_second(self):
         """Priority 2: PAT when no OAuth token"""
         service = DatabricksAuthService(
-            workspace_url="https://example.com", api_key="dapiPAT123"
+            workspace_url="https://example.cloud.databricks.com", api_key="dapiPAT123"
         )
         token = service.get_access_token()
         assert token == "dapiPAT123"
@@ -92,7 +95,7 @@ class TestGetAccessToken:
         mock_post.return_value = mock_response
 
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="sp_client",
             client_secret="sp_secret",
         )
@@ -101,14 +104,16 @@ class TestGetAccessToken:
 
     def test_no_credentials_raises_value_error(self):
         """Priority 5: no credentials -> ValueError"""
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         with pytest.raises(ValueError, match="No credentials available"):
             service.get_access_token()
 
     def test_database_raises_not_implemented(self):
         """Priority 4: use_database -> NotImplementedError"""
         service = DatabricksAuthService(
-            workspace_url="https://example.com", use_database=True
+            workspace_url="https://example.cloud.databricks.com", use_database=True
         )
         with pytest.raises(NotImplementedError):
             service.get_access_token()
@@ -125,7 +130,7 @@ class TestAcquireTokenWithServicePrincipal:
         mock_post.return_value = mock_response
 
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="client",
             client_secret="secret",
         )
@@ -140,7 +145,7 @@ class TestAcquireTokenWithServicePrincipal:
         mock_post.return_value = mock_response
 
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="client",
             client_secret="secret",
         )
@@ -149,7 +154,7 @@ class TestAcquireTokenWithServicePrincipal:
 
     def test_incomplete_credentials_raises(self):
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="only_client",
             # Missing client_secret
         )
@@ -166,7 +171,7 @@ class TestAcquireTokenWithServicePrincipal:
         mock_post.side_effect = rq.exceptions.RequestException("Connection error")
 
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="client",
             client_secret="secret",
         )
@@ -182,7 +187,7 @@ class TestAcquireTokenWithServicePrincipal:
         mock_post.return_value = mock_response
 
         service = DatabricksAuthService(
-            workspace_url="https://example.com",
+            workspace_url="https://example.cloud.databricks.com",
             client_id="default_client",
             client_secret="default_secret",
         )
@@ -196,7 +201,9 @@ class TestGetCredentialsFromDatabase:
     """Line 203-231: _get_credentials_from_database"""
 
     def test_raises_not_implemented(self):
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         with pytest.raises(
             NotImplementedError, match="Database credential storage not yet implemented"
         ):
@@ -209,40 +216,52 @@ class TestValidateToken:
     def test_valid_dapi_token(self):
         """Lines 254-256: PAT starting with 'dapi' is valid if length > 10"""
         service = DatabricksAuthService(
-            workspace_url="https://example.com", api_key="dapiABCDEFGHIJKLMNOP"
+            workspace_url="https://example.cloud.databricks.com",
+            api_key="dapiABCDEFGHIJKLMNOP",
         )
         assert service.validate_token("dapiABCDEFGHIJKLMNOP") is True
 
     def test_dapi_token_too_short(self):
         """Length check for PAT tokens"""
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         assert service.validate_token("dapiABC") is False
 
     def test_valid_jwt_token(self):
         """Lines 259-261: JWT token with 3 parts"""
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         assert service.validate_token("header.payload.signature") is True
 
     def test_invalid_non_jwt_non_pat(self):
         """Lines 262-263: not a PAT and not a JWT"""
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         assert service.validate_token("not_a_valid_token") is False
 
     def test_no_token_returns_false(self):
         """Line 248-249: no token returns False"""
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         assert service.validate_token() is False
 
     def test_uses_internal_token_when_no_arg(self):
         """Line 246: uses _access_token or api_key when no arg"""
         service = DatabricksAuthService(
-            workspace_url="https://example.com", api_key="dapiABCDEFGHIJKLMNOP"
+            workspace_url="https://example.cloud.databricks.com",
+            api_key="dapiABCDEFGHIJKLMNOP",
         )
         # validate_token() with no arg uses self.api_key
         assert service.validate_token() is True
 
     def test_none_token_returns_false(self):
-        service = DatabricksAuthService(workspace_url="https://example.com")
+        service = DatabricksAuthService(
+            workspace_url="https://example.cloud.databricks.com"
+        )
         assert service.validate_token(None) is False
 
 
@@ -251,7 +270,8 @@ class TestGetHeaders:
 
     def test_get_headers_returns_authorization(self):
         service = DatabricksAuthService(
-            workspace_url="https://example.com", api_key="dapiTEST12345678"
+            workspace_url="https://example.cloud.databricks.com",
+            api_key="dapiTEST12345678",
         )
         headers = service.get_headers()
         assert "Authorization" in headers
@@ -260,7 +280,8 @@ class TestGetHeaders:
 
     def test_get_headers_with_access_token(self):
         service = DatabricksAuthService(
-            workspace_url="https://example.com", access_token="eyJ.oauth.token"
+            workspace_url="https://example.cloud.databricks.com",
+            access_token="eyJ.oauth.token",
         )
         headers = service.get_headers()
         assert "Bearer eyJ.oauth.token" == headers["Authorization"]

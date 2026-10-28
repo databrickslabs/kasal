@@ -54,7 +54,7 @@ _SAFE_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_table_name(name: str) -> str:
-    if not name or not _SAFE_TABLE_NAME.match(str(name)):
+    if not name or not _SAFE_TABLE_NAME.fullmatch(str(name)):
         raise ValueError(f"Invalid memory table name: {name!r}")
     return name
 
@@ -219,7 +219,7 @@ class LakebaseStorageBackend:
                 # Workspace-wide read: fetch by id within the workspace,
                 # regardless of which crew wrote it.
                 sql = text(
-                    f"SELECT {_RECORD_COLUMNS} "
+                    f"SELECT {_RECORD_COLUMNS} "  # constant column list — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     f"FROM {self.table_name} "
                     f"WHERE id = :id AND group_id = :group_id"
                 )
@@ -248,9 +248,9 @@ class LakebaseStorageBackend:
                 params["scope_prefix"] = f"{scope_prefix}%"
             async with self._session() as session:
                 sql = text(
-                    f"SELECT {_RECORD_COLUMNS} "
+                    f"SELECT {_RECORD_COLUMNS} "  # constant column list — nosemgrep: tmp.databricks.sql-injection.fstring-select
                     f"FROM {self.table_name} "
-                    f"WHERE {' AND '.join(where)} "
+                    f"WHERE {' AND '.join(where)} "  # fixed tenant WHERE fragments, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                     f"ORDER BY created_at DESC "
                     f"LIMIT :limit OFFSET :offset"
                 )
@@ -272,8 +272,8 @@ class LakebaseStorageBackend:
             params["scope"] = scope
             async with self._session() as session:
                 sql = text(
-                    f"SELECT metadata, created_at FROM {self.table_name} "
-                    f"WHERE {' AND '.join(where)}"
+                    f"SELECT metadata, created_at FROM {self.table_name} "  # table validated in __init__ — nosemgrep: tmp.databricks.sql-injection.fstring-select
+                    f"WHERE {' AND '.join(where)}"  # fixed tenant WHERE fragments, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 )
                 result = await session.execute(sql, params)
                 rows = result.fetchall()
@@ -314,7 +314,7 @@ class LakebaseStorageBackend:
                 params["scope_prefix"] = f"{scope_prefix}%"
             async with self._session() as session:
                 sql = text(
-                    f"SELECT metadata FROM {self.table_name} WHERE {' AND '.join(where)}"
+                    f"SELECT metadata FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
                 )
                 result = await session.execute(sql, params)
                 counts: dict[str, int] = {}
@@ -338,7 +338,7 @@ class LakebaseStorageBackend:
                 params["scope_prefix"] = f"{scope_prefix}%"
             async with self._session() as session:
                 sql = text(
-                    f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}"
+                    f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select,tmp.databricks.sql-injection.fstring-where
                 )
                 result = await session.execute(sql, params)
                 return int(result.scalar() or 0)
@@ -592,7 +592,9 @@ class LakebaseStorageBackend:
                 params[f"mk_{index}"], params[f"mf_{index}"] = str(key), str(value)
 
         async with self._session() as session:
-            sql = text(f"DELETE FROM {self.table_name} WHERE {' AND '.join(where)}")
+            sql = text(
+                f"DELETE FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+            )
             result = await session.execute(sql, params)
             return int(getattr(result, "rowcount", 0) or 0)
 
@@ -668,7 +670,7 @@ class LakebaseStorageBackend:
         async with self._session() as session:
             sql = text(
                 f"SELECT DISTINCT metadata->>'scope' AS scope "
-                f"FROM {self.table_name} WHERE {' AND '.join(where)}"
+                f"FROM {self.table_name} WHERE {' AND '.join(where)}"  # table validated in __init__; fixed tenant WHERE, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
             )
             result = await session.execute(sql, params)
             children: set[str] = set()

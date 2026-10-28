@@ -1030,7 +1030,7 @@ class DaxTranslator(DaxConditionMixin):
         ):
             p = parts[0]
             alias, col_map = self._resolve_table_alias(p["table"], table_key)
-            physical_col = col_map.get(p["column"], p["column"])
+            physical_col = _sanitize_alias(col_map.get(p["column"], p["column"]))
             filter_parts = []
             filter_sql = self._build_filter_clause(p, table_key, dax)
             if filter_sql:
@@ -1041,7 +1041,7 @@ class DaxTranslator(DaxConditionMixin):
             self._extend_with_implicit_filters(filter_parts, alias)
             combined = " AND ".join(filter_parts) if filter_parts else None
             if combined:
-                return f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})", ""
+                return f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})", ""  # identifiers validated; filters escaped or pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where  # fmt: skip
             return f"SUM({alias}.{physical_col})", ""
         var_map = {}
         for p in parts:
@@ -1049,7 +1049,7 @@ class DaxTranslator(DaxConditionMixin):
             if var_name is None:
                 continue
             alias, col_map = self._resolve_table_alias(p["table"], table_key)
-            physical_col = col_map.get(p["column"], p["column"])
+            physical_col = _sanitize_alias(col_map.get(p["column"], p["column"]))
             filter_parts = []
             filter_sql = self._build_filter_clause(p, table_key, dax)
             if filter_sql:
@@ -1060,7 +1060,7 @@ class DaxTranslator(DaxConditionMixin):
             combined = " AND ".join(filter_parts) if filter_parts else None
             if combined:
                 var_map[var_name] = (
-                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})"
+                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined})"  # identifiers validated; filters escaped or pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 )
             else:
                 var_map[var_name] = f"SUM({alias}.{physical_col})"
@@ -1081,7 +1081,7 @@ class DaxTranslator(DaxConditionMixin):
         var_map: dict[str, str] = {}
         for p in parts:
             alias, col_map = self._resolve_table_alias(p["table"], table_key)
-            physical_col = col_map.get(p["column"], p["column"])
+            physical_col = _sanitize_alias(col_map.get(p["column"], p["column"]))
             filter_parts = []
             inner_filter = self._build_filter_clause(p, table_key, dax)
             if inner_filter:
@@ -1104,7 +1104,7 @@ class DaxTranslator(DaxConditionMixin):
             combined_filter = " AND ".join(filter_parts) if filter_parts else None
             if combined_filter:
                 var_map[p["var"]] = (
-                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined_filter})"
+                    f"SUM({alias}.{physical_col}) FILTER (WHERE {combined_filter})"  # identifiers validated; filters escaped or pipeline-config SQL — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 )
             else:
                 var_map[p["var"]] = f"SUM({alias}.{physical_col})"
@@ -1463,7 +1463,7 @@ class DaxTranslator(DaxConditionMixin):
         base_filters = list(resolution.get("base_filters", []))
         all_filters = base_filters + extra_filters
         if all_filters:
-            return f"{base_expr} FILTER (WHERE {' AND '.join(all_filters)})"
+            return f"{base_expr} FILTER (WHERE {' AND '.join(all_filters)})"  # joins resolved predicates (escaped literals) — nosemgrep: tmp.databricks.sql-injection.fstring-where
         return base_expr
 
     @staticmethod
@@ -1495,9 +1495,9 @@ class DaxTranslator(DaxConditionMixin):
                 base: str = resolution["base_expr"]
                 filters = resolution.get("base_filters", [])
                 if filters:
-                    return f"{base} FILTER (WHERE {' AND '.join(filters)})"
+                    return f"{base} FILTER (WHERE {' AND '.join(filters)})"  # joins resolved predicates (escaped literals) — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 return base
-            return f"1 /* UNRESOLVED: [{ref_name}] */"
+            return f"1 /* UNRESOLVED: [{ref_name.replace('*/', '* /').replace('/*', '/ *')}] */"
 
         sql = re.sub(r"(?<!\w)\[([^\]]+)\]", _resolve_ref, sql)
         for _ in range(5):

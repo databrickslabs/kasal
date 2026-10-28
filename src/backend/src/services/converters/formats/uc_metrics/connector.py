@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Self
 
 import requests
 
-from .authentication import DatabricksAuthService
+from .authentication import DatabricksAuthService, require_databricks_workspace
 
 
 class DatabricksConnector:
@@ -105,11 +105,13 @@ class DatabricksConnector:
             bool: True if connection is valid and authenticated
         """
         try:
+            # The request carries the workspace credential: Databricks hosts only.
+            workspace = require_databricks_workspace(self.workspace_url)
             headers = self.auth_service.get_headers()
 
             # Test connection with workspace info endpoint
-            response = requests.get(
-                f"{self.workspace_url}/api/2.0/workspace/get-status",
+            response = requests.get(  # workspace passed require_databricks_workspace — nosemgrep: tmp.databricks.ssrf.requests-user-url
+                f"{workspace}/api/2.0/workspace/get-status",
                 headers=headers,
                 params={"path": "/"},
             )

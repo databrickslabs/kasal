@@ -8,7 +8,10 @@ from typing import Any, Dict, List, Optional, Set, cast
 
 from ...base.models import KPI, KPIDefinition
 from ...common.transformers.formula import KBIDependencyResolver, KbiFormulaParser
-from .helpers.uc_metrics_aggregations import UCMetricsAggregationBuilder
+from .helpers.uc_metrics_aggregations import (
+    UCMetricsAggregationBuilder,
+    require_safe_expression,
+)
 from .helpers.uc_metrics_context import UCBaseKBIContext, UCKBIContextCache
 
 logger = logging.getLogger(__name__)
@@ -427,7 +430,7 @@ class UCMetricsGenerator:
             aggregation_type = (
                 kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
             )
-            formula = kpi.formula or "1"
+            formula = require_safe_expression(kpi.formula or "1", "formula")
             display_sign = getattr(kpi, "display_sign", 1)
 
             # Build base aggregation
@@ -446,8 +449,10 @@ class UCMetricsGenerator:
 
             # Add FILTER clause if there are KBI-specific filters
             if kbi_specific_filters:
-                filter_conditions = " AND ".join(kbi_specific_filters)
-                measure_expr = f"{base_expr} FILTER (\n            WHERE {filter_conditions}\n          )"
+                filter_conditions = require_safe_expression(
+                    " AND ".join(kbi_specific_filters), "filter"
+                )
+                measure_expr = f"{base_expr} FILTER (\n            WHERE {filter_conditions}\n          )"  # filter passed require_safe_expression — nosemgrep: tmp.databricks.sql-injection.fstring-where
             else:
                 measure_expr = base_expr
 

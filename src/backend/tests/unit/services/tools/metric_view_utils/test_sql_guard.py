@@ -48,6 +48,11 @@ class TestReadOnlySelect:
         assert is_read_only_select("SELECT a FROM t")
         assert is_read_only_select("WITH x AS (SELECT 1) SELECT * FROM x;")
 
+    def test_allows_a_parenthesized_subquery_body(self):
+        # _extract_select_body returns a subquery body as-is: "(SELECT …)".
+        assert is_read_only_select("(SELECT a FROM t) UNION ALL (SELECT a FROM u)")
+        assert not is_read_only_select("(DELETE FROM t)")
+
     def test_refuses_writes_stacks_and_breakouts(self):
         for sql in ("DELETE FROM t", "SELECT 1; DROP TABLE t", "SELECT $$x$$", ""):
             assert not is_read_only_select(sql)

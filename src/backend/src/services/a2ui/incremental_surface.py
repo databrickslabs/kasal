@@ -32,7 +32,7 @@ class IncrementalSurfaceParser:
         self._state = "preamble"
         self._key = ""
         self._token: list[str] = []
-        self._token_kind = ""
+        self._token_kind = ""  # JSON tokenizer state, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
         self._depth = 0
         self._quoted = False
         self._escaped = False
@@ -132,6 +132,6 @@ class IncrementalSurfaceParser:
         self._quoted = char == '"'
         self._escaped = False
         self._depth = 1 if char in "[{" else 0
-        self._token_kind = (
+        self._token_kind = (  # JSON tokenizer state, not a credential — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
             "string" if self._quoted else "container" if self._depth else "primitive"
         )

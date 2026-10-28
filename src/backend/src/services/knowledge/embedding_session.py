@@ -103,8 +103,9 @@ async def ensure_lakebase_doc_table(session: AsyncSession) -> None:
     result = await session.execute(
         text(
             "SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{_KNOWLEDGE_TABLE}'"
-        )
+            "WHERE table_name = :table_name"
+        ),
+        {"table_name": _KNOWLEDGE_TABLE},
     )
     existing = {row[0] for row in result.fetchall()}
 

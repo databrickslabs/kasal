@@ -143,7 +143,7 @@ class TestEnsureLakebaseDocTable:
             ("source",),
         ]  # missing pgvector cols
 
-        async def _execute(stmt):
+        async def _execute(stmt, params=None):
             s = str(stmt)
             if "information_schema" in s:
                 return select_result

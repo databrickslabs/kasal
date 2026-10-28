@@ -20,7 +20,7 @@ class DecisionConfigResponse(BaseModel):
     # ``api_key_configured`` is about that credential: for Databricks, whether
     # the workspace's host and token resolve.
     connection: str = "jev"
-    api_key_name: str | None = "JEV_API_KEY"
+    api_key_name: str | None = "JEV_API_KEY"  # fmt: skip  # env var name, not a value — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
 
 class DecisionRecommendationRequest(BaseModel):

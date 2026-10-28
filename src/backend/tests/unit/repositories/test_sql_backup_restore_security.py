@@ -115,3 +115,56 @@ class TestRestore:
         assert "statement 6" in result["error"]
         session.rollback.assert_awaited_once()
         session.commit.assert_not_called()
+
+
+class TestIdentifierValidator:
+    def test_a_trailing_newline_is_not_an_identifier(self):
+        """``re.match`` with ``$`` admitted ``"agents\\n"``; fullmatch does not."""
+        with pytest.raises(ValueError):
+            DatabaseBackupRepository._validate_identifier("agents\n")
+        assert DatabaseBackupRepository._validate_identifier("agents") == "agents"
+
+
+class TestSqliteRestoreColumnNames:
+    """Column names of an uploaded ``.db`` were interpolated unchecked, and the
+    target table was cleared before the INSERT that then failed."""
+
+    HOSTILE = "x) VALUES (1); DROP TABLE agents; --"
+
+    def _restore(self, tmp_path, backup_columns):
+        import sqlite3
+
+        backup = tmp_path / "backup.db"
+        conn = sqlite3.connect(backup)
+        conn.execute(f"CREATE TABLE agents ({backup_columns})")
+        conn.execute("INSERT INTO agents VALUES (1, 'b')")
+        conn.commit()
+        conn.close()
+        target = tmp_path / "target.db"
+        conn = sqlite3.connect(target)
+        conn.execute("CREATE TABLE agents (id INTEGER, name TEXT)")
+        conn.execute("INSERT INTO agents VALUES (7, 'kept')")
+        conn.commit()
+        conn.close()
+
+        repo = DatabaseBackupRepository(MagicMock())
+        repo.volume_repo = MagicMock()
+        repo.volume_repo.download_file_from_volume = AsyncMock(
+            return_value={"success": True, "content": backup.read_bytes()}
+        )
+        asyncio.run(
+            repo.restore_sqlite_backup(
+                "cat", "sch", "vol", "backup.db", str(target), False
+            )
+        )
+        conn = sqlite3.connect(target)
+        rows = conn.execute("SELECT id, name FROM agents ORDER BY id").fetchall()
+        conn.close()
+        return rows
+
+    def test_a_hostile_column_skips_the_table_and_leaves_it_intact(self, tmp_path):
+        rows = self._restore(tmp_path, f'id INTEGER, "{self.HOSTILE}" TEXT')
+        assert rows == [(7, "kept")]
+
+    def test_plain_columns_still_restore(self, tmp_path):
+        assert self._restore(tmp_path, "id INTEGER, name TEXT") == [(1, "b")]

@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 # Header names, as sent. Starlette header lookups are case-insensitive.
 FORWARDED_EMAIL = "X-Forwarded-Email"
 FORWARDED_USER = "X-Forwarded-User"
-FORWARDED_ACCESS_TOKEN = "X-Forwarded-Access-Token"
+FORWARDED_ACCESS_TOKEN = "X-Forwarded-Access-Token"  # header name — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 AUTH_REQUEST_EMAIL = "X-Auth-Request-Email"
 AUTH_REQUEST_USER = "X-Auth-Request-User"
-AUTH_REQUEST_ACCESS_TOKEN = "X-Auth-Request-Access-Token"
+AUTH_REQUEST_ACCESS_TOKEN = "X-Auth-Request-Access-Token"  # header name — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
 
 #: The header family Databricks Apps never sets, as it appears in an ASGI scope.
 _UNTRUSTED_IN_APPS_PREFIX = b"x-auth-request-"

@@ -1114,7 +1114,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 expr = res["base_expr"]
                 filters = res.get("base_filters") or []
                 if filters:
-                    expr = f"{expr} FILTER (WHERE {' AND '.join(filters)})"
+                    expr = f"{expr} FILTER (WHERE {' AND '.join(filters)})"  # joins resolved predicates (escaped literals) — nosemgrep: tmp.databricks.sql-injection.fstring-where
                 measures_out.append(
                     {
                         "name": _to_snake(mname),
@@ -1673,7 +1673,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                 "serializerSettings": {"includeNulls": True},
             }
 
-            resp = req_lib.post(url, headers=headers, json=payload, timeout=60)
+            resp = req_lib.post(url, headers=headers, json=payload, timeout=60)  # ids UUID-checked, host allow-listed by _validate_pbi_inputs — nosemgrep: tmp.databricks.ssrf.requests-user-url  # fmt: skip
             if resp.status_code == 200:
                 raw = resp.json()
                 rows = (

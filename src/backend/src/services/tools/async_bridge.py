@@ -248,5 +248,5 @@ def workspace_llm_credentials(
             assert_host_is_configured_workspace(workspace_url, (auth_url,))
         except ForbiddenError:
             logger.warning("Configured LLM workspace is not this run's; no token sent")
-            auth_token = ""
+            auth_token = ""  # clears the token on a workspace mismatch — nosemgrep: tmp.databricks.auth.hardcoded-secret-assignment
     return workspace_url or auth_url, token or auth_token

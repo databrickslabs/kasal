@@ -41,9 +41,11 @@ async def _browse_lakebase_records(
     from sqlalchemy import text
 
     from src.db.lakebase_session import get_lakebase_session
+    from src.services.memory.storage.lakebase_graph import validate_table_name
 
     instance_name = getattr(lakebase_cfg, "instance_name", None)
-    table_name = lakebase_cfg.memory_table
+    # Interpolated below: the configured name must be a plain identifier.
+    table_name = validate_table_name(lakebase_cfg.memory_table)
     where = ["group_id = :group_id"]
     params: Dict[str, Any] = {
         "group_id": group_id,
@@ -58,12 +60,14 @@ async def _browse_lakebase_records(
     async with get_lakebase_session(
         instance_name=instance_name, group_id=group_id
     ) as session:
-        count_sql = text(f"SELECT COUNT(*) FROM {table_name} WHERE {where_clause}")
+        count_sql = text(
+            f"SELECT COUNT(*) FROM {table_name} WHERE {where_clause}"  # table name validated above, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-select, tmp.databricks.sql-injection.fstring-where
+        )
         total = int((await session.execute(count_sql, params)).scalar() or 0)
         sql = text(
             f"SELECT id, content, metadata, created_at, updated_at, agent, score "
             f"FROM {table_name} "
-            f"WHERE {where_clause} "
+            f"WHERE {where_clause} "  # fixed fragments, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
             f"ORDER BY created_at DESC "
             f"LIMIT :limit OFFSET :offset"
         )
@@ -252,9 +256,11 @@ async def _delete_lakebase_records(
     from sqlalchemy import text
 
     from src.db.lakebase_session import get_lakebase_session
+    from src.services.memory.storage.lakebase_graph import validate_table_name
 
     instance_name = getattr(lakebase_cfg, "instance_name", None)
-    table_name = lakebase_cfg.memory_table
+    # Interpolated below: the configured name must be a plain identifier.
+    table_name = validate_table_name(lakebase_cfg.memory_table)
     where = ["group_id = :group_id"]
     params: Dict[str, Any] = {"group_id": group_id}
     if scope:
@@ -264,7 +270,9 @@ async def _delete_lakebase_records(
     async with get_lakebase_session(
         instance_name=instance_name, group_id=group_id
     ) as session:
-        sql = text(f"DELETE FROM {table_name} WHERE {' AND '.join(where)}")
+        sql = text(
+            f"DELETE FROM {table_name} WHERE {' AND '.join(where)}"  # table name validated above, values bound — nosemgrep: tmp.databricks.sql-injection.fstring-where
+        )
         result = await session.execute(sql, params)
         return int(getattr(result, "rowcount", 0) or 0)
 

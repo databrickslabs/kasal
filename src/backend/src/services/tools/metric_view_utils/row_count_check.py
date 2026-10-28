@@ -25,7 +25,7 @@ def build_count_sql(select_sql: str) -> str:
     """
     stripped = select_sql.strip()
     if not stripped.upper().startswith("WITH"):
-        return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"
+        return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"  # wraps SQL its one caller gated read-only — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
     # Find the last top-level SELECT (depth 0 — not inside any parentheses)
     depth = 0
@@ -41,7 +41,7 @@ def build_count_sql(select_sql: str) -> str:
 
     if last_top_select == -1:
         # Fallback: can't parse, try wrapping as-is
-        return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"
+        return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"  # wraps SQL its one caller gated read-only — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
     cte_part = stripped[:last_top_select]
     final_select = stripped[last_top_select:].strip()
@@ -50,7 +50,7 @@ def build_count_sql(select_sql: str) -> str:
         r"\s+ORDER\s+BY\s+.*$", "", final_select, flags=re.IGNORECASE | re.DOTALL
     )
     final_select = re.sub(r"\s+LIMIT\s+\S+.*$", "", final_select, flags=re.IGNORECASE)
-    return f"{cte_part}SELECT COUNT(*) AS _cnt FROM ({final_select.strip()}) _cnt_agg"
+    return f"{cte_part}SELECT COUNT(*) AS _cnt FROM ({final_select.strip()}) _cnt_agg"  # wraps SQL its one caller gated read-only — nosemgrep: tmp.databricks.sql-injection.fstring-select
 
 
 def diff_counts(sql_res: dict, dax_res: dict) -> str | None:
