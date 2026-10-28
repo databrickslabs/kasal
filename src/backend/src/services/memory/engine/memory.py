@@ -8,7 +8,7 @@ through the ``StorageBackend``, and emits the ``MemorySave*`` events that
 become the run's "Memory Write" trace rows. ``save_hooks`` receive the records
 that landed.
 
-``recall`` is one search with a score floor — plus, per the Memory Tuning
+``recall`` is one search with a similarity floor — plus, per the Memory Tuning
 knobs declared as fields below, distillation of a long query and exploration
 of alternatives (``recall_planner``). ``mode="raw"`` is the plain search.
 
@@ -242,20 +242,21 @@ class InMemoryStorage(StorageBackend):
             }
 
 
-# Fused-score floor (semantic + keyword + recency + importance, see
-# LocalStorageBackend.search) below which a recall returns nothing. 0.75 was
-# calibrated against live data with the Databricks embedder (see recall()).
-# Ollama's nomic-embed-text compresses the cosine scale: measured live, a run's
-# own previous task output scored 0.72 raw / 0.68 fused against the task
-# description that produced it, while unrelated records sat at 0.58-0.63 raw /
-# <=0.60 fused — so its floor sits between those clusters. Providers not listed
-# keep the calibrated default.
-DEFAULT_RECALL_MIN_SCORE = 0.75
-RECALL_MIN_SCORE_BY_EMBEDDER: dict[str, float] = {"ollama": 0.62}
+# Similarity floor below which a recall returns nothing: the COSINE of query and
+# record, applied by the backend before ranking — not the blended score. It was
+# the blend (0.75), and recency in the blend dropped every memory a few days
+# old, so teamspace memory could not reach an earlier session. Live chat turns,
+# Databricks embedder (2026-10-28): related questions median 0.71, unrelated
+# p95 0.59, off-topic probes <= 0.49; at 0.60 recall found a related memory for
+# 17 of 22 questions, where the 0.75 blend found none. Ollama's nomic-embed-text
+# compresses the scale (unrelated records 0.58-0.63 raw), so its floor sits
+# above that band. Providers not listed keep the calibrated default.
+DEFAULT_RECALL_MIN_SCORE = 0.60
+RECALL_MIN_SCORE_BY_EMBEDDER: dict[str, float] = {"ollama": 0.64}
 
 
 def default_recall_min_score(embedder_provider: str | None = None) -> float:
-    """Blended-score floor for a recall that passes no threshold.
+    """Similarity (cosine) floor for a recall that passes no threshold.
 
     The floor for ``embedder_provider``, else the calibrated default. A
     teamspace's explicit
@@ -303,7 +304,7 @@ class Memory(MemoryHygiene):
     recall_min_score: float | None = Field(
         default=None,
         description=(
-            "Fused-score floor for recalls that pass no threshold. Set by "
+            "Cosine-similarity floor for recalls that pass no threshold. Set by "
             "CrewMemoryService from the teamspace's Memory Tuning or the "
             "resolved embedder's default; None falls back to "
             "default_recall_min_score()."
@@ -637,14 +638,12 @@ class Memory(MemoryHygiene):
         # Nearest-neighbour search always returns SOMETHING — nearest is not
         # near. Without a floor, a query about a topic the store has never seen
         # returns the k least-unrelated records, and callers inject them as
-        # context. Knowledge search stops the same failure with the same rule
-        # (services/knowledge/search_guard.py: configured_min_score) — this is
-        # that stopping rule for memory (measured live: "genie ontology" over
-        # a news-only store recalled 18 news records at blended scores
-        # 0.56-0.74, and the model wove "Lebanon news" into the diagram).
-        # Related recalls in the same store scored 0.77-0.91, so the default
-        # floor sits between the two clusters. Callers may pass an explicit
-        # threshold — 0.0 disables.
+        # context (measured live: "genie ontology" over a news-only store
+        # recalled 18 news records and the model wove "Lebanon news" into the
+        # diagram). Knowledge search stops the same failure with the same rule
+        # (services/knowledge/search_guard.py: configured_min_score). The
+        # threshold is a cosine floor the backend applies before ranking — see
+        # DEFAULT_RECALL_MIN_SCORE. Callers may pass one; 0.0 disables.
         if score_threshold is None:
             score_threshold = (
                 self.recall_min_score

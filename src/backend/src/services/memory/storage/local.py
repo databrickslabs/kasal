@@ -209,6 +209,7 @@ class LocalStorageBackend:
         limit: int = 10,
         min_score: float = 0.0,
         query_text: str | None = None,
+        min_semantic: float = 0.0,
     ) -> list[tuple[MemoryRecord, float]]:
         """Blended score = semantic + keyword-overlap + recency + importance
         (same fused-scoring shape as the Lakebase backend, numpy-local).
@@ -216,6 +217,9 @@ class LocalStorageBackend:
         Mirrors the two ``kind``-driven policies exactly: superseded records are
         excluded, and the recency decay applies to EPISODIC records only — a
         current fact does not get less true with age.
+
+        ``min_semantic`` is the recall floor; it raises the semantic gate, so
+        only relevance decides what is returned and the blend only ranks it.
         """
         if limit == 0:
             return []
@@ -233,6 +237,7 @@ class LocalStorageBackend:
         wanted_categories = set(categories or [])
         now = datetime.now(timezone.utc)
         half_life_seconds = self.RECENCY_HALF_LIFE_DAYS * 86400.0
+        semantic_gate = max(self.RELEVANCE_THRESHOLD, float(min_semantic or 0.0))
         for row in rows:
             record = self._row_to_record(row)
             if not record.is_current:
@@ -249,8 +254,10 @@ class LocalStorageBackend:
                 semantic = (
                     float(np.dot(query_vec, vector) / denom) if denom > 0 else 0.0
                 )
-                if semantic < self.RELEVANCE_THRESHOLD:
+                if semantic < semantic_gate:
                     continue  # unrelated — never rescued by recency/importance
+            elif min_semantic:
+                continue  # unscored: no similarity to clear the floor with
             else:
                 semantic = 0.0
             keyword = 0.0

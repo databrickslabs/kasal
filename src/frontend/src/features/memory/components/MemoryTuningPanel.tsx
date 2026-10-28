@@ -93,10 +93,11 @@ const TUNING_SLIDERS: SliderSpec[] = [
     max: 1,
     step: 0.01,
     help:
-      'Blended score (similarity + keyword + recency + importance) below which a recall ' +
-      'returns nothing. Left untouched it follows the embedder in use: 0.75 with the ' +
-      'Databricks embedder, 0.62 with the local Ollama fallback. Lower it if reads come ' +
-      'back empty for memories you know are there.',
+      'Similarity (cosine) below which a memory is not recalled. Recency and importance ' +
+      'only rank what passes it, so an old memory is never dropped for its age. Left ' +
+      'untouched it follows the embedder in use: 0.60 with the Databricks embedder, 0.64 ' +
+      'with the local Ollama fallback. Lower it if reads come back empty for memories you ' +
+      'know are there.',
   },
   {
     key: 'confidence_threshold_high',

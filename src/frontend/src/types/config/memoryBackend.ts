@@ -30,8 +30,9 @@ export interface MemoryTuningConfig {
   /** Minimum semantic similarity for a memory to be recalled at all (default 0.35). */
   relevance_threshold?: number;
   /**
-   * Blended-score floor below which a recall returns nothing. Unset = the
-   * embedder's own default (0.75 Databricks, 0.62 local Ollama fallback).
+   * Similarity (cosine) floor below which a memory is not recalled; recency and
+   * importance only rank what passes it. Unset = the embedder's own default
+   * (0.60 Databricks, 0.64 local Ollama fallback).
    */
   recall_min_score?: number;
 
@@ -181,7 +182,7 @@ export const MEMORY_TUNING_DEFAULTS: Required<
   importance_weight: 0.1,
   recency_half_life_days: 30,
   relevance_threshold: 0.35,
-  recall_min_score: 0.75,
+  recall_min_score: 0.6,
   consolidation_threshold: 0.85,
   consolidation_limit: 5,
   default_importance: 0.5,

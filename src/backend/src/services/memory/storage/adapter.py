@@ -9,7 +9,8 @@ that mismatch in one place:
 
 * embeds the query (with a small LRU cache — repeated asks cost nothing),
 * maps kwarg names (``scope`` → ``scope_prefix``, ``score_threshold`` →
-  ``min_score``),
+  ``min_semantic`` — the recall floor is a cosine floor, so recency and
+  importance never gate a record; ``min_score`` for a backend without one),
 * unwraps ``(record, score)`` tuples into records (score kept in metadata),
 * normalizes ``save`` to return the saved records (backends return ``None``),
 * maps the record-id oriented ``update``/``delete`` onto the filter-oriented
@@ -166,13 +167,13 @@ class EngineStorageAdapter(StorageBackend):
         self._query_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._cache_lock = threading.Lock()
         # Hybrid backends (Lakebase/local) accept the raw query text for
-        # keyword scoring; older ones (Databricks VS) don't — detect once.
+        # keyword scoring and a similarity floor; older ones don't — detect once.
         try:
-            self._backend_takes_query_text = (
-                "query_text" in inspect.signature(backend.search).parameters
-            )
+            params = set(inspect.signature(backend.search).parameters)
         except (TypeError, ValueError):
-            self._backend_takes_query_text = False
+            params = set()
+        self._backend_takes_query_text = "query_text" in params
+        self._backend_takes_min_semantic = "min_semantic" in params
         # scope → (expires_at_monotonic, has_records). Lets recall skip the
         # embedding round-trip entirely on scopes with no memories yet.
         self._scope_probe_cache: dict[str, tuple[float, bool]] = {}
@@ -264,12 +265,14 @@ class EngineStorageAdapter(StorageBackend):
         vector = self._embed_query(query)
         if vector is None:
             return []
+        floor = score_threshold if score_threshold is not None else 0.0
         search_kwargs: dict[str, Any] = dict(
-            query_embedding=vector,
-            scope_prefix=scope,
-            limit=limit,
-            min_score=score_threshold if score_threshold is not None else 0.0,
+            query_embedding=vector, scope_prefix=scope, limit=limit
         )
+        if self._backend_takes_min_semantic:
+            search_kwargs["min_semantic"] = floor
+        else:
+            search_kwargs["min_score"] = floor
         if self._backend_takes_query_text:
             search_kwargs["query_text"] = query
         raw = self._backend.search(**search_kwargs)

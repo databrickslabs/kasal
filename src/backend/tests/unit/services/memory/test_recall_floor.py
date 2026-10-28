@@ -1,12 +1,10 @@
-"""The recall floor — teamspace tuning → deployment env → embedder default.
+"""The recall floor — teamspace tuning → embedder default.
 
-Why it exists: the 0.75 floor was calibrated with the Databricks embedder. On a
-workstation the embedder falls back to Ollama's nomic-embed-text, whose cosine
-scale is compressed — a crew's own previous task output scored 0.68 fused
-against the task description that produced it, and every Memory Read came back
-``[]`` over a store holding exactly the right record. The floor is now chosen
-where the embedder is known (CrewMemoryService), so chat, agent builder and
-flow builder — on either harness — apply the same one.
+The floor is a COSINE floor (0.60 Databricks, 0.64 Ollama's compressed
+nomic-embed-text scale), chosen where the embedder is known (CrewMemoryService),
+so chat, agent builder and flow builder — on either harness — apply the same
+one. Cross-session regressions for the floor's meaning live in
+``test_recall_floor_similarity.py``.
 """
 
 from unittest.mock import MagicMock
@@ -39,18 +37,18 @@ def _memory_kwargs(tuning=None, custom_embedder=None, crew_embedder=None):
 
 class TestDefaultFloor:
     def test_calibrated_default_without_an_embedder_hint(self):
-        assert default_recall_min_score() == 0.75
-        assert default_recall_min_score("databricks") == 0.75
+        assert default_recall_min_score() == 0.60
+        assert default_recall_min_score("databricks") == 0.60
 
     def test_ollama_gets_the_compressed_scale_floor(self):
-        assert default_recall_min_score("ollama") == 0.62
-        assert default_recall_min_score("Ollama") == 0.62
+        assert default_recall_min_score("ollama") == 0.64
+        assert default_recall_min_score("Ollama") == 0.64
 
     def test_the_environment_is_not_read(self, monkeypatch):
         """KASAL_MEMORY_RECALL_MIN_SCORE is gone: Memory Tuning sets the floor."""
         monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.5")
-        assert default_recall_min_score("ollama") == 0.62
-        assert default_recall_min_score() == 0.75
+        assert default_recall_min_score("ollama") == 0.64
+        assert default_recall_min_score() == 0.60
 
 
 class TestEmbedderProvider:
@@ -74,15 +72,15 @@ class TestBuildMemoryKwargsFloor:
     """Every path builds Memory through _build_memory_kwargs, so this IS the
     rule for chat, agent builder and flow builder alike."""
 
-    def test_ollama_fallback_run_gets_0_62(self):
-        assert _memory_kwargs(crew_embedder=OLLAMA)["recall_min_score"] == 0.62
+    def test_ollama_fallback_run_gets_0_64(self):
+        assert _memory_kwargs(crew_embedder=OLLAMA)["recall_min_score"] == 0.64
 
-    def test_databricks_run_keeps_0_75(self):
+    def test_databricks_run_gets_0_60(self):
         kwargs = _memory_kwargs(custom_embedder=lambda texts: [[0.0]])
-        assert kwargs["recall_min_score"] == 0.75
+        assert kwargs["recall_min_score"] == 0.60
 
-    def test_no_embedder_keeps_0_75(self):
-        assert _memory_kwargs()["recall_min_score"] == 0.75
+    def test_no_embedder_gets_0_60(self):
+        assert _memory_kwargs()["recall_min_score"] == 0.60
 
     def test_teamspace_tuning_wins_over_the_embedder_default(self):
         tuning = MemoryTuningConfig(recall_min_score=0.5)
@@ -118,7 +116,7 @@ class TestBuildMemoryKwargsFloor:
         storage.search.return_value = []
         memory = Memory(storage=storage, **kwargs)
         memory.recall("q")
-        assert storage.search.call_args.kwargs["score_threshold"] == 0.62
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.64
 
 
 class TestMemoryRecallUsesTheConfiguredFloor:
@@ -142,4 +140,4 @@ class TestMemoryRecallUsesTheConfiguredFloor:
     def test_unset_falls_back_to_the_calibrated_default(self):
         memory, storage = self._memory()
         memory.recall("q")
-        assert storage.search.call_args.kwargs["score_threshold"] == 0.75
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.60

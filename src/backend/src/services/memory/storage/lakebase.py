@@ -177,6 +177,7 @@ class LakebaseStorageBackend:
         limit: int = 10,
         min_score: float = 0.0,
         query_text: str | None = None,
+        min_semantic: float = 0.0,
     ) -> list[tuple[MemoryRecord, float]]:
         return self._run_sync(
             self.asearch(
@@ -187,6 +188,7 @@ class LakebaseStorageBackend:
                 limit=limit,
                 min_score=min_score,
                 query_text=query_text,
+                min_semantic=min_semantic,
             )
         )
 
@@ -436,8 +438,13 @@ class LakebaseStorageBackend:
         limit: int = 10,
         min_score: float = 0.0,
         query_text: str | None = None,
+        min_semantic: float = 0.0,
     ) -> list[tuple[MemoryRecord, float]]:
         """Hybrid-scored search: semantic + keyword + recency + importance.
+
+        ``min_semantic`` is the recall floor. It raises the cosine gate the
+        outer query applies, so relevance alone decides what is returned and
+        the blend only ranks it — an old memory is never gated out for its age.
 
         Two stages so the pgvector HNSW index stays in play: the inner query
         pulls the top candidates by pure vector distance (index-accelerated),
@@ -478,7 +485,9 @@ class LakebaseStorageBackend:
         # Re-rank pool: enough candidates that keyword/recency can promote a
         # non-top-cosine hit, small enough that the outer pass is negligible.
         params["candidate_limit"] = max(limit * 5, 25)
-        params["relevance_threshold"] = float(self.relevance_threshold)
+        params["relevance_threshold"] = max(
+            float(self.relevance_threshold), float(min_semantic or 0.0)
+        )
         params["half_life_days"] = float(self.recency_half_life_days)
         params["w_semantic"] = float(self.semantic_weight)
         params["w_recency"] = float(self.recency_weight)

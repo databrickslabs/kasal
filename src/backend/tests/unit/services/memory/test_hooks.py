@@ -322,7 +322,7 @@ class TestRecallDefaultFloor:
     def test_default_floor_is_calibrated(self):
         memory, storage = self._memory()
         memory.recall("q")
-        assert storage.search.call_args.kwargs["score_threshold"] == 0.75
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.60
 
     def test_explicit_zero_disables_the_floor(self):
         memory, storage = self._memory()

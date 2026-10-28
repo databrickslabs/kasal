@@ -108,7 +108,7 @@ score = 0.60 * semantic       cosine similarity
 
 Two rules matter more than the weights:
 
-- **A semantic gate is applied before blending.** Recency and importance rank among *relevant* candidates; they never lift an unrelated memory into the context.
+- **A semantic gate is applied before blending, and it is the only gate.** Whether a memory is recalled at all is decided by cosine similarity alone: the relevance threshold, raised to the recall score floor. Recency, keyword and importance rank among the *relevant* candidates; they never lift an unrelated memory into the context, and they never drop a relevant one. That second half is what makes teamspace memory reach across sessions: a memory from an earlier session is older, and when the floor was applied to the blend, the recency decay pushed every such memory below it.
 - **Recency decays episodic records only.** Semantic and procedural records take the full recency term, so age never pushes a current fact out of the recall budget. A thirty-day half-life suits "what happened in run 47" and would be wrong for "the user prefers Databricks SQL".
 
 On Lakebase the query runs in two stages so the HNSW index stays in play: an inner query pulls the nearest candidates by vector distance, and an outer query re-ranks that small set with the blended score. Every record in the teamspace competes in the first stage.
@@ -131,9 +131,15 @@ The block opens with a header instructing the model to weigh the content as back
 | Importance weight | 0.10 | How strongly recall favors the classifier's importance score |
 | Relevance threshold | 0.35 | Minimum semantic similarity to be recalled at all, applied before blending |
 | Recency half-life (days) | 30 | Days for the recency term to halve |
-| Recall score floor | 0.75 · 0.62 with the Ollama embedder | Blended score below which a recall returns nothing — the stopping rule that keeps "nearest" from meaning "near" |
+| Recall score floor | 0.60 · 0.64 with the Ollama embedder | Cosine similarity below which a memory is not recalled — the stopping rule that keeps "nearest" from meaning "near". Applied before blending, so age and importance never decide it |
 
-The recall score floor takes a different route: `CrewMemoryService._build_memory_kwargs` sets `Memory.recall_min_score`, and it does so where the embedder is known, because the floor depends on it. 0.75 was calibrated with the Databricks embedder; the local Ollama fallback (`nomic-embed-text`) compresses the cosine scale — a run's own previous task output scores about 0.68 blended against the task description that produced it, unrelated records at most 0.60 — so on Ollama the default is 0.62. Precedence: the teamspace's panel value, then the embedder default.
+The recall score floor takes a different route: `CrewMemoryService._build_memory_kwargs` sets `Memory.recall_min_score`, and it does so where the embedder is known, because the floor depends on it. The storage backend applies it as its semantic gate (`min_semantic`), the same cosine on local SQLite and Lakebase.
+
+0.60 was calibrated on 28 Oct 2026 with the Databricks embedder (`databricks-gte-large-en`), on 25 chat questions scored against 20 stored turns. Related question-to-turn pairs had a median cosine of 0.71, unrelated pairs a 95th percentile of 0.59, and off-topic probes ("how do I bake sourdough bread?") reached at most 0.49. At 0.60, with the relative cliff and the six-snippet budget, recall surfaced a related memory for 17 of 22 questions and nothing for the off-topic ones. The previous floor, 0.75 on the blended score, surfaced a related memory for none of them. The local Ollama fallback (`nomic-embed-text`) compresses the cosine scale, with unrelated records measured at 0.58–0.63, so its floor sits above that band at 0.64. Precedence: the teamspace's panel value, then the embedder default.
+
+A value a teamspace saved before this change was a blended score and is now read as a cosine. A saved 0.75 is a much stricter floor than it was; clear it to return to the default.
+
+Short questions about a stated fact match their turn weakly on this embedder: "what is my name?" scored 0.50 against "User: My name is …", no higher than an unrelated question scored against the same turn. No fixed floor separates those, so personal facts are the case a turn-shaped memory record recalls worst; graph memory, which stores the extracted fact rather than the turn, is the better fit for them.
 
 **Recall depth** — declared fields of the engine's `Memory`, implemented in `engine/recall_planner.py` and applied by `Memory.recall(mode="auto")`, which is what Chat, Agent Builder and Flow Builder all call through `build_memory_preamble` / `make_memory_context_provider` (`run/recall.py`), on either harness:
 

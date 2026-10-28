@@ -82,9 +82,11 @@ class MemoryTuningConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Blended-score floor below which a recall returns nothing. Left "
-            "unset, the floor follows the embedder in use: 0.75 with the "
-            "Databricks embedder, 0.62 with the local Ollama fallback."
+            "Similarity (cosine) floor below which a memory is not recalled. "
+            "Recency and importance only rank what passes it, so an old "
+            "memory is never dropped for its age. Left unset, the floor "
+            "follows the embedder in use: 0.60 with the Databricks embedder, "
+            "0.64 with the local Ollama fallback."
         ),
     )
 
